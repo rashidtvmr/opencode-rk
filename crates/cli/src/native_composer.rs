@@ -37,6 +37,30 @@ pub const MAX_PASTE_BYTES: usize = 32 * 1024;
 /// Max total draft bytes retained (32 KiB).
 pub const MAX_DRAFT_BYTES: usize = 32 * 1024;
 
+/// Detached submission snapshot. Backend admission never owns the next draft.
+/// Mirrors upstream prompt/index.tsx's synchronous reset and conditional restore.
+#[derive(Clone, Debug)]
+pub struct SubmittedDraft {
+    pub text: String,
+    cursor: usize,
+}
+
+impl SubmittedDraft {
+    pub fn capture(draft: &mut String, cursor: &mut usize) -> Self {
+        normalize_cursor(draft, cursor);
+        let captured = Self { text: std::mem::take(draft), cursor: *cursor };
+        *cursor = 0;
+        captured
+    }
+
+    /// Rejected admission restores only an empty composer, never newer typing.
+    pub fn restore(self, draft: &mut String, cursor: &mut usize) -> bool {
+        if !draft.is_empty() { return false; }
+        replace_draft_with_cursor(draft, cursor, self.text, self.cursor);
+        true
+    }
+}
+
 /// Clear only the exact draft acknowledged by the backend. Edits made while
 /// admission is in flight belong to the user and must survive that ACK.
 pub fn acknowledge_submitted_draft(captured: &str, draft: &mut String) -> bool {
@@ -106,6 +130,25 @@ pub fn replace_draft_with_cursor(draft: &mut String, cursor: &mut usize, replace
 #[cfg(test)]
 mod native_submission_ack_tests {
     use super::acknowledge_submitted_draft;
+    #[test]
+    fn submission_snapshot_isolates_fast_next_command_and_rejection_recovery() {
+        let mut draft = "first café".to_owned();
+        let mut cursor = draft.len();
+        let submitted = super::SubmittedDraft::capture(&mut draft, &mut cursor);
+        assert!(draft.is_empty());
+        assert_eq!(cursor, 0);
+        draft.push_str("/new"); cursor = draft.len();
+        assert_eq!(submitted.text, "first café");
+        assert!(!submitted.restore(&mut draft, &mut cursor));
+        assert_eq!(draft, "/new", "a rejected old submission never replaces new input");
+        assert_eq!(cursor, 4);
+
+        draft = "recover 界".to_owned(); cursor = 3;
+        let submitted = super::SubmittedDraft::capture(&mut draft, &mut cursor);
+        assert!(submitted.restore(&mut draft, &mut cursor));
+        assert_eq!(draft, "recover 界");
+        assert_eq!(cursor, 3, "rejection restores the captured insertion position");
+    }
     #[test]
     fn native_backend_ack_consumes_only_the_captured_unicode_draft() {
         let mut draft = "change café 世界".to_owned();

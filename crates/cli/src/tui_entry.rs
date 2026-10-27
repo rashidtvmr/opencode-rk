@@ -3334,7 +3334,7 @@ fn native_loop(
     // current busy flag, transcript or live snapshot.
     let mut worker: Option<crate::native_view::OwnedWorker<native_turn::TurnWorker>> = None;
     let mut compact_worker: Option<NativeCompactWorker> = None;
-    let mut pending_submission: Option<String> = None;
+    let mut pending_submission: Option<crate::native_composer::SubmittedDraft> = None;
     let mut binding_generation: u64 = 0;
     // History pagination is deliberately separate from turn/completion
     // workers: one bounded request at a time, and every result carries the
@@ -4001,10 +4001,9 @@ fn native_loop(
                         native_turn::Event::User { text: accepted_text } => {
                             transcript.begin_reasoning_turn();
                             if let Some(captured) = pending_submission.take() {
-                                crate::native_composer::acknowledge_submitted_draft_with_cursor(
-                                    &captured, &mut draft, &mut draft_cursor,
-                                );
-                                let captured = accepted_text.unwrap_or(captured);
+                                // The old draft was detached at launch. Even
+                                // identical newly typed text belongs to the user.
+                                let captured = accepted_text.unwrap_or(captured.text);
                                 transcript.append(
                                     format!("you: {captured}"),
                                     ChatMessage::text(ChatRole::User, captured),
@@ -4091,7 +4090,10 @@ fn native_loop(
                             );
                         }
                         native_turn::Event::Error(error) => {
-                            pending_submission = None;
+                            if let Some(captured) = pending_submission.take() {
+                                captured.restore(&mut draft, &mut draft_cursor);
+                                completion.sync(&draft);
+                            }
                             partial.clear();
                             remove_partial(&mut transcript);
                             settled = true;
@@ -4117,7 +4119,12 @@ fn native_loop(
         }
         if worker_finished {
             worker = None;
-            pending_submission = None;
+            if let Some(captured) = pending_submission.take() {
+                if binding_active {
+                    captured.restore(&mut draft, &mut draft_cursor);
+                    completion.sync(&draft);
+                }
+            }
             if binding_active {
                 if let Some(current) = live.as_ref() {
                     match fetch_snapshot(&current.origin, Some(&current.session_id), auth) {
@@ -7512,7 +7519,11 @@ fn native_loop(
                                     })
                             }
                             .map(|next| {
-                                pending_submission = Some(text.clone());
+                                pending_submission = Some(crate::native_composer::SubmittedDraft::capture(
+                                    &mut draft, &mut draft_cursor,
+                                ));
+                                completion.sync(&draft);
+                                needs_paint = true;
                                 // Capture the binding identity this
                                 // worker is launched under: events only
                                 // apply while both still match.
@@ -7546,8 +7557,8 @@ fn native_loop(
                             );
                         }
                 }
-                // Admission ACK consumes the captured draft. A transport,
-                // provider, offline or model-selection failure leaves it intact.
+                // Launch detaches the submitted draft before the next input.
+                // Rejected admission restores it only if no newer draft exists.
                 utf8.reset();
             }
             b if b >= 0x20 && b != b'\t' => {
