@@ -51,7 +51,7 @@ mod measured_context_regression {
         let rows = view.render(120, 30);
         assert!(rows.iter().any(|row| row == "context: used=150 window=unreported"));
         let sidebar = view.render_sidebar(120, 30).join("\n");
-        assert!(sidebar.contains("150 tokens · last request"));
+        assert!(sidebar.contains("150 tokens"));
         assert!(!sidebar.contains("0%"));
 
         view.set_context_window(Some(200_000));
@@ -219,6 +219,40 @@ pub struct StatusView {
     sidebar_offset: usize,
 }
 
+#[cfg(test)]
+mod conditional_sidebar_tests {
+    use super::StatusView;
+
+    #[test]
+    fn unobserved_sidebar_omits_empty_plugin_sections_and_diagnostic_placeholders() {
+        let view = StatusView::default();
+        assert!(view.render_sidebar(38, 30).iter().all(|row| row.trim().is_empty()));
+    }
+
+    #[test]
+    fn confirmed_empty_sidebar_keeps_title_but_omits_uuid_and_empty_todo_section() {
+        let mut view = StatusView::default();
+        let id = opencode_rk_contracts::SessionId::new().to_string();
+        view.set_session_binding(Some(id.clone()), Some("Confirmed title".into()), Some(0));
+        view.apply_todos(&serde_json::json!({"todos":[]})).unwrap();
+        let text = view.render_sidebar(80, 30).join("\n");
+        assert!(text.contains("Confirmed title"));
+        assert!(!text.contains(&id));
+        for absent in ["Context", "Todo", "MCP", "messages", "Unavailable", "No todos"] {
+            assert!(!text.contains(absent), "unexpected sidebar label: {absent}");
+        }
+    }
+
+    #[test]
+    fn measured_sidebar_context_has_only_source_token_and_percent_rows() {
+        let mut view = StatusView::default();
+        view.set_context(Some(12345), Some(100000));
+        let rows = view.render_sidebar(80, 30);
+        let visible = rows.iter().map(|row| row.trim()).filter(|row| !row.is_empty()).collect::<Vec<_>>();
+        assert_eq!(visible, ["Context", "12,345 tokens", "12% used"]);
+    }
+}
+
 struct SidebarRow {
     line: crate::native_ui_style::Line,
     mcp_index: Option<usize>,
@@ -272,31 +306,30 @@ impl StatusView {
         let mut rows = vec![(String::new(), Role::Description, None)];
         if let Some(title) = self.session_title() {
             rows.push((title.to_owned(), Role::Heading, None));
-        }
-        if let Some(id) = self.session_id() {
-            rows.push((id.to_owned(), Role::Description, None));
-        }
-        rows.push((String::new(), Role::Description, None));
-        rows.push(("Context".to_owned(), Role::Heading, None));
-        if let Some((used, window)) = self.context {
-            rows.push((format!("{used} tokens · last request"), Role::Item, None));
-            match window {
-                Some(window) => rows.push((format!("{} / {} tokens · {}%",used,window,used.saturating_mul(100)/window),Role::Description, None)),
-                None => rows.push(("Model capacity not reported".into(),Role::Description, None)),
-            }
-        } else if self.usage.is_some() {
-            rows.push(("Context limit unavailable".into(),Role::Description, None));
-        } else {
-            rows.push(("Provider usage not reported yet".into(),Role::Description, None));
-        }
-        if let Some((input,output,cached,reasoning))=self.usage {
-            let subset=|tokens:Option<u64>| tokens.map(|n|n.to_string()).unwrap_or_else(||"unreported".into());
-            rows.push((format!("Input {input} · Output {output}"),Role::Item, None));
-            rows.push((format!("Cached {} · Reasoning {}",subset(cached),subset(reasoning)),Role::Description, None));
-        }
-        rows.push((format!("{} messages",self.session_message_count.map(|n|n.to_string()).unwrap_or_else(||"?".into())),Role::Description, None));
-        if !self.mcp.is_empty() {
             rows.push((String::new(), Role::Description, None));
+        }
+        if let Some((used, window)) = self.context {
+            if rows.last().is_some_and(|(text, _, _)| !text.is_empty()) {
+                rows.push((String::new(), Role::Description, None));
+            }
+            rows.push(("Context".to_owned(), Role::Heading, None));
+            let digits = used.to_string();
+            let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
+            for (index, digit) in digits.chars().enumerate() {
+                if index > 0 && (digits.len() - index) % 3 == 0 { grouped.push(','); }
+                grouped.push(digit);
+            }
+            rows.push((format!("{grouped} tokens"), Role::Description, None));
+            if let Some(window) = window.filter(|window| *window > 0) {
+                // Match contextUsage's Math.round without overflowing u64.
+                let percent = (u128::from(used) * 100 + u128::from(window) / 2) / u128::from(window);
+                rows.push((format!("{percent}% used"), Role::Description, None));
+            }
+        }
+        if !self.mcp.is_empty() {
+            if rows.last().is_some_and(|(text, _, _)| !text.is_empty()) {
+                rows.push((String::new(), Role::Description, None));
+            }
             rows.push(("MCP".to_owned(), Role::Heading, None));
             for (index, entry) in self.mcp.iter().enumerate() {
                 let inclusion = match entry.included {
@@ -307,31 +340,25 @@ impl StatusView {
                 rows.push((format!("• {} {}{inclusion}", entry.name, entry.status.as_str()), Role::Item, Some(index)));
             }
         }
-        rows.push((String::new(), Role::Description, None));
-        rows.push(("Todos".to_owned(), Role::Heading, None));
         match &self.todos {
-            None => rows.push(("Loading/Unavailable".to_owned(), Role::Description, None)),
-            Some(todos) if todos.is_empty() => rows.push(("No todos".to_owned(), Role::Description, None)),
+            None => {},
+            Some(todos) if todos.is_empty() => {},
             Some(todos) => {
+                if rows.last().is_some_and(|(text, _, _)| !text.is_empty()) {
+                    rows.push((String::new(), Role::Description, None));
+                }
+                rows.push(("Todo".to_owned(), Role::Heading, None));
                 for todo in todos {
-                    let status = match &todo.status {
-                        opencode_rk_sessions::TodoStatus::Pending => "pending",
-                        opencode_rk_sessions::TodoStatus::InProgress => "in progress",
-                        opencode_rk_sessions::TodoStatus::Completed => "done",
-                        opencode_rk_sessions::TodoStatus::Cancelled => "cancelled",
-                    };
-                    let priority = match &todo.priority {
-                        opencode_rk_sessions::TodoPriority::High => "high",
-                        opencode_rk_sessions::TodoPriority::Medium => "medium",
-                        opencode_rk_sessions::TodoPriority::Low => "low",
+                    let marker = match &todo.status {
+                        opencode_rk_sessions::TodoStatus::Pending => "[ ]",
+                        opencode_rk_sessions::TodoStatus::InProgress => "[•]",
+                        opencode_rk_sessions::TodoStatus::Completed => "[✓]",
+                        opencode_rk_sessions::TodoStatus::Cancelled => "[-]",
                     };
                     let content = display(Some(&todo.content));
-                    rows.push((format!("[{status}] [{priority}] {content}"), Role::Item, None));
+                    rows.push((format!("{marker} {content}"), Role::Description, None));
                 }
             }
-        }
-        if let Some(reason) = &self.todos_stale {
-            rows.push((format!("snapshot stale ({reason})"), Role::Description, None));
         }
         let maximum = rows.len().min(MAX_ROWS).saturating_sub(height);
         rows.into_iter()
@@ -1098,8 +1125,9 @@ mod tests {
         let mut view = StatusView::default();
         view.set_usage(120, 30, Some(40), Some(10), Some(200000));
         let rows = view.render_sidebar(120, 30);
-        assert!(rows.iter().any(|r| r.contains("Input 120 · Output 30")));
-        assert!(rows.iter().any(|r| r.contains("Cached 40 · Reasoning 10")));
+        assert!(rows.iter().any(|r| r == "Context"));
+        assert!(rows.iter().any(|r| r == "150 tokens"));
+        assert!(!rows.iter().any(|r| r.contains("Input") || r.contains("Cached") || r.contains("Reasoning")));
         let rows = view.render(120, 30);
         assert!(rows.iter().any(|r| *r == "context: used=150 window=200000"));
         // Unreported subsets: honest `unreported`, never 0; the measured
@@ -1108,29 +1136,28 @@ mod tests {
         let mut view = StatusView::default();
         view.set_usage(10, 4, None, None, None);
         let rows = view.render_sidebar(120, 30);
-        assert!(rows
-            .iter()
-            .any(|r| r.contains("Cached unreported · Reasoning unreported")));
+        assert!(rows.iter().any(|r| r == "14 tokens"));
+        assert!(!rows.iter().any(|r| r.contains("unreported")));
         let rows = view.render(120, 30);
         assert!(rows.iter().any(|r| *r == "context: used=14 window=unreported"));
         // Explicit provider zero is a real report, distinct from missing.
         let mut view = StatusView::default();
         view.set_usage(10, 4, Some(0), Some(0), None);
         let rows = view.render_sidebar(120, 30);
-        assert!(rows.iter().any(|r| r.contains("Cached 0 · Reasoning 0")));
+        assert!(rows.iter().any(|r| r == "14 tokens"));
+        assert!(!rows.iter().any(|r| r.contains("Cached") || r.contains("Reasoning")));
         let rows = view.render(120, 30);
         assert!(rows.iter().any(|r| *r == "context: used=14 window=unreported"));
     }
 
     #[test]
-    fn known_usage_with_unknown_context_limit_has_explicit_capacity_caption() {
+    fn known_usage_with_unknown_context_limit_omits_capacity_placeholder() {
         let mut view = StatusView::default();
         view.set_usage(120, 30, None, None, None);
         let rows = view.render_sidebar(120, 30);
-        // Measured total stays visible; only the capacity caption is honest.
-        assert!(rows.iter().any(|row| row.contains("150 tokens · last request")));
-        assert!(rows.iter().any(|row| row.contains("Model capacity not reported")));
-        assert!(rows.iter().any(|row| row.contains("Input 120 · Output 30")));
+        assert!(rows.iter().any(|row| row == "Context"));
+        assert!(rows.iter().any(|row| row == "150 tokens"));
+        assert!(!rows.iter().any(|row| row.contains("capacity") || row.contains("Input") || row.contains("Output")));
         assert!(!rows.iter().any(|row| row.contains("window=0") || row.contains("0%")));
     }
 
@@ -1164,7 +1191,7 @@ mod tests {
     fn absent_usage_and_context_limit_remains_unreported() {
         let view = StatusView::default();
         let rows = view.render_sidebar(120, 30);
-        assert!(rows.iter().any(|row| row.contains("Provider usage not reported yet")));
+        assert!(!rows.iter().any(|row| row == "Context" || row.contains("unreported")));
         assert!(!rows.iter().any(|row| row.contains("Input 0") || row.contains("Output 0")));
     }
 
@@ -1204,9 +1231,9 @@ mod tests {
         assert!(!rows.iter().any(|r| r == "context: Unavailable"));
         // Only the capacity caption is unknown; no invented limit appears.
         let sidebar = view.render_sidebar(120, 30);
-        assert!(sidebar
-            .iter()
-            .any(|r| r.contains("Model capacity not reported")));
+        assert!(sidebar.iter().any(|r| r == "Context"));
+        assert!(sidebar.iter().any(|r| r == "150 tokens"));
+        assert!(!sidebar.iter().any(|r| r.contains("capacity") || r.contains("unreported")));
         assert!(!sidebar.iter().any(|r| r.contains('%')));
         // A later confirmed limit upgrades the same measured total.
         view.set_context_window(Some(200000));
@@ -1295,7 +1322,10 @@ mod tests {
         let row = visible.iter().position(|line| line.contains(&last)).expect("last MCP server must be reachable");
         assert_eq!(view.mcp_sidebar_hit(38, 8, row), Some((last.as_str(), false)));
         view.scroll_sidebar(isize::MIN, 8);
-        assert!(view.render_sidebar(38, 8).join("\n").contains("Context"));
+        let first = view.render_sidebar(38, 8);
+        assert!(first.iter().any(|row| row == "MCP"));
+        let row = first.iter().position(|line| line.contains("server-00")).expect("first MCP server must remain reachable");
+        assert_eq!(view.mcp_sidebar_hit(38, 8, row), Some(("server-00", true)));
     }
 
     #[test]
@@ -1358,8 +1388,9 @@ mod tests {
         let z = rows.iter().position(|row| row.contains("Inspect persisted payload")).unwrap();
         let a = rows.iter().position(|row| row.contains("Keep declared order")).unwrap();
         assert!(z < a);
-        assert!(rows[z].contains("progress") && rows[z].contains("high"));
-        assert!(rows[a].contains("completed") || rows[a].contains("done"));
+        assert!(rows[z].starts_with("[•] "));
+        assert!(rows[a].starts_with("[✓] "));
+        assert!(!rows[z].contains("[high]"));
         let previous = view.todos().unwrap().to_vec();
         for invalid in [json!({"todos":null}), json!({"todos":[],"extra":true}),
             json!({"todos":[{"id":"x","content":"Bad status","status":"invented","priority":"low"}]})] {
@@ -1369,7 +1400,7 @@ mod tests {
         view.set_session_binding(Some(SessionId::new().to_string()), Some("Another session".into()), Some(0));
         assert!(view.todos().is_none());
         view.apply_todos(&json!({"todos":[]})).unwrap();
-        assert!(view.render_sidebar(38, 30).join("\n").contains("No todos"));
+        assert!(!view.render_sidebar(38, 30).iter().any(|row| row == "Todo" || row.contains("No todos")));
     }
 
     #[test]
@@ -1380,7 +1411,8 @@ mod tests {
         }]})).unwrap();
         let rows = view.render_sidebar(38, 30);
         let line = rows.iter().find(|row| row.contains("Readable task")).expect("task content must remain visible regardless of ID length");
-        assert!(line.contains("pending"));
+        assert!(line.starts_with("[ ] "));
+        assert!(!line.contains(&"i".repeat(128)));
     }
 
     #[test]
@@ -1843,10 +1875,9 @@ mod tests {
     }
 }
     #[test]
-    fn sidebar_reports_unobserved_todos_without_claiming_an_empty_collection() {
+    fn sidebar_hides_unobserved_todos_without_claiming_an_empty_collection() {
         let view = StatusView::default();
         let rows = view.render_sidebar(38, 30);
-        let heading = rows.iter().position(|row| row == "Todos").expect("session sidebar must expose persisted todos");
-        assert!(rows[heading + 1].contains("Unavailable"));
-        assert!(!rows[heading + 1].contains("No todos"));
+        assert!(!rows.iter().any(|row| row == "Todo" || row == "Todos"));
+        assert!(!rows.iter().any(|row| row.contains("Unavailable") || row.contains("No todos")));
     }
