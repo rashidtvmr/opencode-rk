@@ -491,6 +491,31 @@ impl NavigationState {
         self.home = true;
     }
 
+    /// The explicit Home route fact for horizontal tab painting: upstream
+    /// `route.data.type === "home"` drives newTab() (context/session-tabs.tsx
+    /// newTab createMemo: `if (route.data.type === "home") return true`).
+    #[must_use]
+    pub fn is_home(&self) -> bool {
+        self.home
+    }
+
+    /// Source-backed close(None) target while on Home: upstream selects the
+    /// history-previous session, falling back to the last remaining tab
+    /// (context/session-tabs.tsx close(): `previous.sessionID ??
+    /// state().tabs.at(-1)?.sessionID`). The canonical model has no per-strip
+    /// history, so the retained focused tab before `enter_home` is the
+    /// previous fact, and the final tab is the fallback; without any tab the
+    /// route stays Home (upstream navigates only `if (route.data.type ===
+    /// "home" && session)`).
+    #[must_use]
+    pub fn home_dispatch_target(&self) -> Option<SessionRef> {
+        if !self.home || self.tabs.is_empty() {
+            return None;
+        }
+        let index = self.active.min(self.tabs.len() - 1);
+        Some(self.tabs[index].session.clone())
+    }
+
     /// Open tab count.
     #[must_use]
     pub fn tab_len(&self) -> usize {
@@ -1238,4 +1263,26 @@ mod tests {
         assert_eq!(nav.title(&archived), Some("reobserved"));
     }
 
+
+    #[test]
+    fn home_dispatch_uses_retained_facts_only_and_stays_home_without_tabs() {
+        let mut nav = NavigationState::default();
+        assert_eq!(home_side(nav.home_dispatch_target()), None, "Home with no tabs has no target and the route stays Home");
+        nav.open(s("retained"));
+        nav.open(s("other"));
+        nav.enter_home();
+        assert!(nav.is_home(), "enter_home is the explicit route fact");
+        // Canonical close(None) mapping: the retained focused tab is the
+        // previous-session fact; upstream per-tab move history is not modeled
+        // here and stays an explicit documented gap.
+        assert_eq!(home_side(nav.home_dispatch_target()), Some(s("other")));
+        nav.switch(&s("retained"));
+        nav.enter_home();
+        assert_eq!(home_side(nav.home_dispatch_target()), Some(s("retained")));
+    }
+
+    fn home_side(target: Option<SessionRef>) -> Option<SessionRef> {
+        // Identity-only seam so the assertion messages above stay readable.
+        target
+    }
 }

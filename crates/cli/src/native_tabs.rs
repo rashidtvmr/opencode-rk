@@ -30,6 +30,10 @@ impl TabReservation {
     pub const CONTENT_PREFERRED_WIDTH: u16 = 64;
     pub const ADD_TAB_WIDTH: u16 = 3;
 
+    /// Upstream packages/tui/src/context/session-tabs-model.ts:8
+    /// `NEW_SESSION_TAB_TITLE = "New session"`.
+    pub const HOME_TITLE: &str = "New session";
+
     /// Port of upstream `sessionTabsFitVertically` at the pinned revision.
     /// Horizontal and vertical offsets of the reserved content area.
     #[must_use]
@@ -138,11 +142,54 @@ pub struct TabAction {
     pub session: SessionRef,
     pub close: bool,
 }
+/// Stable horizontal-strip identity. Home is a real pseudo-tab, never a miss
+/// reinterpreted as the active session; `NewControl` is the separate idle
+/// add affordance (upstream `showPlus`, mutually exclusive with Home).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum HorizontalTarget {
+    Session(SessionRef),
+    Home,
+    NewControl,
+}
+
+/// Middle-meaning split, source-backed upstream session-tabs.tsx middle press:
+/// `tabs.close(tab === NEW_SESSION_TAB ? undefined : tab.sessionID)`.
+/// `close(undefined)` on Home navigates to the previous focused session or the
+/// last remaining tab (context/session-tabs.tsx close(): `previous.sessionID
+/// ?? state().tabs.at(-1)?.sessionID`), and stays Home with none. The
+/// standalone plus has no parent tab, so its middle press is inert.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum HorizontalMiddleAction {
+    CloseSession(SessionRef),
+    CloseHomeNavigatePrevious,
+    Inert,
+}
+
+/// Pure identity mapping shared by the live input loop and tests.
+#[must_use]
+pub fn middle_action(target: &HorizontalTarget) -> HorizontalMiddleAction {
+    match target {
+        HorizontalTarget::Session(id) => HorizontalMiddleAction::CloseSession(id.clone()),
+        HorizontalTarget::Home => HorizontalMiddleAction::CloseHomeNavigatePrevious,
+        HorizontalTarget::NewControl => HorizontalMiddleAction::Inert,
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TabStrip {
     /// Painted add-session control, independent of session hit rectangles.
     pub add_rect: Option<TabRect>,
+    /// Promoted Home pseudo-tab slot (upstream NEW_SESSION_TAB): a full
+    /// adaptive-width member with its own identity, never a session miss.
+    pub home_rect: Option<TabRect>,
+    /// Composed paint row aligned to `home_rect`.
+    pub home_row: Option<String>,
+    /// Structural close child of the Home slot (right=1,width=1), which the
+    /// upstream also renders for NEW_SESSION_TAB.
+    pub home_close_rect: Option<TabRect>,
+    /// Pointer-over-Home fact for this frame: gates the close glyph, exactly
+    /// like `hovered` gates session close glyphs.
+    home_hovered: bool,
     pub orientation: TabOrientation,
     pub available_width: u16,
     pub rows: Vec<String>,
@@ -184,6 +231,18 @@ impl TabStrip {
             rect.y = rect.y.saturating_add(y);
         }
         if let Some(rect) = &mut self.add_rect {
+            rect.x = rect.x.saturating_add(x);
+            rect.y = rect.y.saturating_add(y);
+        }
+        // The promoted Home slot is a paint+hit member exactly like add: both
+        // its slot rect and its hovered close child must follow the viewport
+        // origin or Home becomes unhittable and unpaintable after translation
+        // (home_row is metric-aligned text, so only the rects move).
+        if let Some(rect) = &mut self.home_rect {
+            rect.x = rect.x.saturating_add(x);
+            rect.y = rect.y.saturating_add(y);
+        }
+        if let Some(rect) = &mut self.home_close_rect {
             rect.x = rect.x.saturating_add(x);
             rect.y = rect.y.saturating_add(y);
         }
@@ -250,11 +309,36 @@ impl TabStrip {
         hovered: Option<&SessionRef>,
         show_add: bool,
     ) -> Self {
+        Self::render_with_hover_add_home(inputs, orientation, width, height, scroll, hovered, show_add, false, false)
+    }
+
+    /// Full horizontal geometry including the promoted Home slot. `home_hovered`
+    /// is the caller's pointer-over-Home fact; the close glyph paints only then,
+    /// exactly like the per-tab close children. Placing Home in the layout is
+    /// source-backed: upstream appends NEW_SESSION_TAB to items() and lets
+    /// adaptiveSessionTabLayout + activeID() (= NEW_SESSION_TAB) solve it as a
+    /// full adaptive-width member.
+    #[must_use]
+    pub fn render_with_hover_add_home(
+        inputs: &[TabInput],
+        orientation: TabOrientation,
+        width: u16,
+        height: u16,
+        scroll: usize,
+        hovered: Option<&SessionRef>,
+        mut show_add: bool,
+        home_active: bool,
+        home_hovered: bool,
+    ) -> Self {
         let mut out = Self {
             orientation,
-            add_rect: None,
             available_width: width,
+            add_rect: None,
+            home_rect: None,
+            home_row: None,
+            home_close_rect: None,
             rows: Vec::new(),
+            home_hovered: false,
             overflow_rects: Vec::new(),
             rects: Vec::new(),
             close_rects: Vec::new(),
@@ -268,18 +352,29 @@ impl TabStrip {
             return out;
         }
         let horizontal = matches!(orientation, TabOrientation::Horizontal);
+        // Upstream showPlus() = Boolean(tabs.add) && !newTab(): the idle plus
+        // and the promoted Home slot are mutually exclusive states of one
+        // control. The vertical rail keeps its own New row untouched.
+        let home_active = home_active && horizontal;
+        if home_active {
+            show_add = false;
+        }
+        let items_len = inputs.len() + usize::from(home_active);
         let available = if horizontal && show_add {
             width.saturating_sub(TabReservation::ADD_TAB_WIDTH)
         } else {
-            match orientation { TabOrientation::Horizontal => width, TabOrientation::Vertical => height }
+            match orientation {
+                TabOrientation::Horizontal => width,
+                TabOrientation::Vertical => height,
+            }
         };
-        let active = inputs.iter().position(|tab| tab.flags.active);
-        // The adaptive model governs the horizontal SessionTabs strip.  A
-        // rail is a one-row-per-tab list: its extent is height, while its
-        // cell width remains the complete rail width.
-        let layout_available = available;
+        let layout_active = if home_active {
+            items_len.checked_sub(1)
+        } else {
+            inputs.iter().position(|tab| tab.flags.active)
+        };
         let solved = if horizontal {
-            adaptive_layout(inputs.len(), active, usize::from(layout_available), scroll)
+            adaptive_layout(items_len, layout_active, usize::from(available), scroll)
         } else {
             let start = scroll.min(inputs.len());
             let count = inputs.len().saturating_sub(start).min(usize::from(height));
@@ -294,84 +389,113 @@ impl TabStrip {
         out.scroll = solved.start;
         out.overflow_before = solved.before > 0;
         out.overflow_after = solved.after > 0;
-        let visible = &inputs[solved.start..solved.start + solved.count];
+        let home_visible = home_active && solved.start + solved.count > inputs.len();
+        let visible_sessions =
+            (solved.count - usize::from(home_visible)).min(inputs.len().saturating_sub(solved.start));
         let before_cells = if solved.before > 0 {
             overflow_width(solved.before)
         } else {
             0
         };
-        // Keep tiny viewports in bounds.  Normal terminals have room for both
-        // markers; when they do not, the tab children still cannot escape the
-        // viewport (the upstream box layout has the same one-cell minimum).
+        // Keep tiny viewports in bounds the same way the box layout does upstream.
         let marker_left = before_cells.min(usize::from(available));
         let mut x_or_y = marker_left as u16;
-        for (position, input) in visible.iter().enumerate() {
-            let label = format_label(input);
-            let item_width = if horizontal {
-                solved.widths[position] as u16
-            } else {
-                width
-            };
-            let (x, y, w, h) = if horizontal {
-                (x_or_y, 0, item_width, height.min(1))
-            } else {
-                (0, x_or_y, width, 1)
-            };
-            let rect = TabRect {
-                x,
-                y,
-                width: w,
-                height: h,
-            };
-            let close = if w >= 2 {
-                Some(TabRect {
-                    x: x + w - 2,
-                    y,
-                    width: 1,
-                    height: h,
-                })
-            } else {
-                None
-            };
-            let label_width = if close.is_some() { w - 2 } else { w };
-            // This is the same structure as SessionTabs: title, then an
-            // absolute right=1,width=1 close child, then its trailing gap.
-            let rendered = if close.is_some() {
-                let mut row = fit(&label, label_width);
-                row.push_str(if hovered == Some(&input.session) {
-                    "✕ "
-                } else {
-                    "  "
-                });
-                row
-            } else {
-                fit(&label, w)
-            };
-            out.rows.push(rendered);
-            out.rects.push((input.session.clone(), rect));
-            if let Some(close) = close {
-                out.close_rects.push((input.session.clone(), close));
-            }
-            x_or_y = x_or_y.saturating_add(if horizontal { item_width } else { 1 });
-        }
-        let after_cells = if solved.after > 0 { overflow_width(solved.after) } else { 0 };
+        let gauge = if horizontal {
+            usize::from(number_width(items_len)) + 1
+        } else {
+            0
+        };
         if horizontal {
-            for (count, x, cells, label) in [
-                (solved.before, 0, marker_left as u16, format!("‹{}", solved.before)),
-                (solved.after, x_or_y, after_cells.min(usize::from(available.saturating_sub(x_or_y))) as u16,
-                    format!(" {}›", solved.after)),
+            for (position, input) in inputs[solved.start..solved.start + visible_sessions].iter().enumerate() {
+                let slot_width = solved.widths[position] as u16;
+                let slot = TabRect { x: x_or_y, y: 0, width: slot_width, height: height.min(1) };
+                let close = if slot_width >= 2 {
+                    Some(TabRect {
+                        x: slot.x + slot_width - 2,
+                        y: slot.y,
+                        width: 1,
+                        height: slot.height,
+                    })
+                } else {
+                    None
+                };
+                out.rows.push(horizontal_row(input, slot_width, gauge, hovered == Some(&input.session)));
+                out.rects.push((input.session.clone(), slot));
+                if let Some(close) = close {
+                    out.close_rects.push((input.session.clone(), close));
+                }
+                x_or_y = x_or_y.saturating_add(slot_width);
+            }
+            if home_visible {
+                // The promoted Home slot is the final entry of the solved window.
+                let slot_width = solved.widths[solved.count - 1] as u16;
+                let slot = TabRect { x: x_or_y, y: 0, width: slot_width, height: height.min(1) };
+                out.home_row = Some(horizontal_row_home(slot_width, gauge, home_hovered));
+                out.home_rect = Some(slot);
+                if slot_width >= 2 {
+                    out.home_close_rect = Some(TabRect {
+                        x: slot.x + slot_width - 2,
+                        y: 0,
+                        width: 1,
+                        height: slot.height,
+                    });
+                }
+                x_or_y = x_or_y.saturating_add(slot_width);
+            }
+        } else {
+            for input in inputs[solved.start..solved.start + solved.count].iter() {
+                let label = format_label(input);
+                let rect = TabRect { x: 0, y: x_or_y, width, height: 1 };
+                let close = if width >= 2 {
+                    Some(TabRect { x: width - 2, y: rect.y, width: 1, height: 1 })
+                } else {
+                    None
+                };
+                let label_width = if close.is_some() { width - 2 } else { width };
+                let rendered = if close.is_some() {
+                    let mut row = fit(&label, label_width);
+                    row.push_str(if hovered == Some(&input.session) { "\u{2715} " } else { "  " });
+                    row
+                } else {
+                    fit(&label, width)
+                };
+                out.rows.push(rendered);
+                out.rects.push((input.session.clone(), rect));
+                if let Some(close) = close {
+                    out.close_rects.push((input.session.clone(), close));
+                }
+                x_or_y = x_or_y.saturating_add(1);
+            }
+        }
+        if horizontal {
+            let after_cells = if solved.after > 0 { overflow_width(solved.after) } else { 0 };
+            for (count, x, cells_width, label) in [
+                (solved.before, 0u16, marker_left as u16, format!("\u{2039}{}", solved.before)),
+                (
+                    solved.after,
+                    x_or_y,
+                    after_cells.min(usize::from(available.saturating_sub(x_or_y))) as u16,
+                    format!(" {}\u{203a}", solved.after),
+                ),
             ] {
-                if count > 0 && cells > 0 {
-                    out.rows.push(fit(&label, cells));
-                    out.overflow_rects.push(TabRect { x, y: 0, width: cells, height: 1 });
+                if count > 0 && cells_width > 0 {
+                    out.rows.push(fit(&label, cells_width));
+                    out.overflow_rects.push(TabRect { x, y: 0, width: cells_width, height: 1 });
                 }
             }
         }
         if horizontal && show_add {
-            let x = usize::from(x_or_y).saturating_add(after_cells).min(usize::from(available)) as u16;
-            out.add_rect = Some(TabRect { x, y: 0,
-                width: TabReservation::ADD_TAB_WIDTH.min(width.saturating_sub(x)), height: 1 });
+            let x = usize::from(x_or_y)
+                .saturating_add(if solved.after > 0 { overflow_width(solved.after) } else { 0 })
+                .min(usize::from(available)) as u16;
+            out.add_rect = Some(TabRect {
+                x,
+                y: 0,
+                width: TabReservation::ADD_TAB_WIDTH.min(width.saturating_sub(x)),
+                height: 1,
+            });
         }
+        out.home_hovered = home_hovered && out.home_rect.is_some();
         out.visible_close_session = out
             .hovered
             .as_ref()
@@ -380,7 +504,25 @@ impl TabStrip {
         out
     }
 
-    /// Return the one close child visible in this frame, if any.
+    /// The Home close child rectangle stays structural for hit testing; glyph
+    /// visibility is the caller's pointer-over-Home fact (home_hovered), the
+    /// same gate session close children keep via `hovered`.
+    #[must_use]
+    pub fn home_close_visible_rect(&self) -> Option<TabRect> {
+        self.home_close_rect.filter(|_| self.home_hovered)
+    }
+
+    #[must_use]
+    pub fn home_close_hit(&self, x: u16, y: u16) -> bool {
+        self.home_close_rect.is_some_and(|rect| rect.contains(x, y))
+    }
+
+    #[must_use]
+    pub fn home_hit(&self, x: u16, y: u16) -> bool {
+        self.home_rect.is_some_and(|rect| rect.contains(x, y))
+    }
+
+
     #[must_use]
     pub fn visible_close_rect(&self) -> Option<TabRect> {
         let session = self.visible_close_session.as_ref()?;
@@ -442,6 +584,23 @@ impl TabStrip {
     /// Hit test the dedicated horizontal add-session control.
     pub fn add_hit(&self, x: u16, y: u16) -> bool {
         self.add_rect.is_some_and(|rect| rect.contains(x, y))
+    }
+
+    /// Resolve horizontal targets explicitly. Session identity comes from the
+    /// painted rect map only; Home and the idle plus are separate targets; a
+    /// miss is None and never falls back to the active session.
+    #[must_use]
+    pub fn horizontal_target(&self, x: u16, y: u16) -> Option<HorizontalTarget> {
+        if let Some((id, rect)) = self.rects.iter().find(|(_, rect)| rect.contains(x, y)) {
+            return Some(HorizontalTarget::Session(id.clone()));
+        }
+        if self.home_hit(x, y) {
+            return Some(HorizontalTarget::Home);
+        }
+        if self.add_hit(x, y) {
+            return Some(HorizontalTarget::NewControl);
+        }
+        None
     }
 }
 
@@ -571,22 +730,95 @@ fn adaptive_layout(
     }
 }
 
+/// Upstream `config.tabs.indicators` defaults to "status"
+/// (packages/tui/src/config/index.tsx:336), so the number column paints the
+/// static status glyph: attention permission "!"; question "?" (kind not
+/// representable in canonical Attention facts yet); busy ->
+/// TAB_SPINNERS.dots frames[0] (session-tabs.tsx:57-60, spinner-frames.ts:1);
+/// the promoted Home tab always labels "+"; everything else idleLabel "".
+/// Unread markers need an unread fact the canonical model does not carry
+/// (TAB_UNREAD_MARKERS["small-dot"] = "\u{2022}"); logged as a known gap.
+#[must_use]
+pub fn indicator_label(flags: &TabFlags, is_home: bool) -> &'static str {
+    if is_home {
+        return "+";
+    }
+    if flags.needs_attention {
+        return "!";
+    }
+    if flags.busy {
+        return "\u{280b}";
+    }
+    ""
+}
+
+/// `Math.max(2, String(items().length).length)` for the number column.
+#[must_use]
+pub fn number_width(items: usize) -> u16 {
+    2u16.max(items.to_string().len() as u16)
+}
+
 fn format_label(input: &TabInput) -> String {
-    let mut suffix = String::new();
-    if input.flags.active {
-        suffix.push('•');
-    }
-    if input.flags.busy {
-        suffix.push('⟳');
-    }
-    if input.flags.needs_attention {
-        suffix.push('!');
-    }
-    if suffix.is_empty() {
-        input.title.clone()
+    // Upstream status renders in its own indicator column (TabIndicator) with
+    // separate colors instead of mutating the title text. Titles stay pure;
+    // the horizontal composer paints status via indicator_label().
+    input.title.clone()
+}
+
+/// One horizontal session row: number/indicator column (numberWidth+1 cells
+/// with the status glyph right-aligned before a 1-cell pad, TabIndicator
+/// box width = numberWidth + 1, justifyContent flex-end), then the title
+/// region spanning to the strip edge; the hovered close child paints its
+/// glyph over the title's second-to-last cell (position absolute right=1
+/// width=1), shrinking the title by two as upstream hoveredTitleWidth does.
+fn horizontal_row(input: &TabInput, slot_width: u16, gauge: usize, hovered: bool) -> String {
+    let glyph = indicator_label(&input.flags, false);
+    horizontal_composed_row(glyph, &input.title, slot_width, gauge, hovered)
+}
+
+/// The promoted Home row: "+" indicator glyph and the upstream
+/// NEW_SESSION_TAB_TITLE text, with the same gauge/title/close geometry.
+fn horizontal_row_home(slot_width: u16, gauge: usize, hovered: bool) -> String {
+    horizontal_composed_row("+", TabReservation::HOME_TITLE, slot_width, gauge, hovered)
+}
+
+fn horizontal_composed_row(glyph: &str, title: &str, slot_width: u16, gauge: usize, hovered: bool) -> String {
+    let w = usize::from(slot_width);
+    // The gauge never eats the whole slot: at least one title cell remains and
+    // the close cell stays overlay-able, mirroring upstream MIN width 8.
+    let col = gauge.min(w.saturating_sub(2)).max(if w >= 3 { 1 } else { w });
+    if hovered && w >= col + 2 {
+        // title cells shrink by two; close glyph lands at w-2; final cell pads.
+        let title_cells = w - col - 2;
+        let mut row = format_indicator_column(glyph, col);
+        row.push_str(&fit(title, title_cells as u16));
+        row.push_str("\u{2715} ");
+        row
     } else {
-        format!("{} {}", input.title, suffix)
+        let title_cells = w - col;
+        let mut row = format_indicator_column(glyph, col);
+        row.push_str(&fit(title, title_cells as u16));
+        row
     }
+}
+
+fn format_indicator_column(glyph: &str, col: usize) -> String {
+    if col == 0 || glyph.is_empty() {
+        return " ".repeat(col);
+    }
+    let glyph_cells = display_width(glyph);
+    let cell_count = glyph_cells.min(col.saturating_sub(1));
+    if cell_count == 0 {
+        // A 1-cell indicator column cannot hold glyph AND pad without breaking
+        // display_width(row) == slot width (review D1, upstream TabIndicator
+        // keeps its own column width). Emit spaces so the composed row
+        // conserves the slot; the glyph reappears as the slot widens.
+        return " ".repeat(col);
+    }
+    let mut row = " ".repeat(col - cell_count - 1);
+    row.push_str(glyph);
+    row.push(' ');
+    row
 }
 
 fn display_width(s: &str) -> usize {
@@ -986,6 +1218,234 @@ mod tests {
             if strip.overflow_before {
                 assert!(strip.hit(0, 0).is_none());
             }
+        }
+    }
+    #[test]
+    fn horizontal_title_is_pure_and_status_goes_to_the_indicator_column() {
+        let mut tab = input("a", "Draft");
+        tab.flags = TabFlags { active: true, busy: true, needs_attention: true };
+        assert_eq!(format_label(&tab), "Draft");
+        assert_eq!(indicator_label(&tab.flags, false), "!");
+        tab.flags.needs_attention = false;
+        assert_eq!(indicator_label(&tab.flags, false), "\u{280b}", "busy paints the dots spinner frame 0");
+        tab.flags.busy = false;
+        assert_eq!(indicator_label(&tab.flags, false), "", "idle status column is blank in status mode");
+        assert_eq!(indicator_label(&tab.flags, true), "+", "promoted Home always labels +");
+        assert_eq!(number_width(9), 2);
+        assert_eq!(number_width(10), 2);
+        assert_eq!(number_width(123), 3);
+    }
+
+    #[test]
+    fn home_slot_is_a_full_adaptive_member_with_plus_and_title() {
+        // items = 2 sessions + Home(active, last): adaptive_layout(3, Some(2), 40)
+        // solves [9, 9, 22] with the active (Home) slot last, per the upstream
+        // allocation exercise in adaptive_layout_matches_upstream_allocation_vectors.
+        let tabs = vec![input("a", "alpha"), input("b", "beta")];
+        let strip =
+            TabStrip::render_with_hover_add_home(&tabs, TabOrientation::Horizontal, 40, 1, 0, None, true, true, false);
+        let home = strip.home_rect.expect("promoted Home slot");
+        assert_eq!(strip.add_rect, None, "plus and promoted Home are mutually exclusive");
+        assert_eq!((home.x, home.width), (18, 22), "adaptive widths [9,9,22] with Home last and active");
+        assert_eq!(strip.rects.len(), 2, "session identity map stays session-only");
+        let row = strip.home_row.as_ref().expect("home paint row");
+        assert!(row.contains('+'), "indicator glyph + right-aligned in the number column");
+        assert!(row.contains("New session"), "upstream NEW_SESSION_TAB_TITLE paints as the title text");
+        assert!(!row.contains('\u{2715}'), "no close glyph without home_hovered");
+        assert_eq!(display_width(&row), usize::from(home.width), "row fills exactly the home slot");
+        assert!(row.starts_with(" + "), "gauge layout: pad, plus, pad");
+        assert_eq!(strip.home_close_rect.map(|r| (r.x, r.width)), Some((home.x + home.width - 2, 1)));
+        assert_eq!(strip.horizontal_target(home.x + 1, 0), Some(HorizontalTarget::Home));
+        assert_eq!(strip.horizontal_target(home.x + home.width - 2, 0), Some(HorizontalTarget::Home));
+        assert_eq!(
+            middle_action(&strip.horizontal_target(home.x, 0).unwrap()),
+            HorizontalMiddleAction::CloseHomeNavigatePrevious
+        );
+        assert_eq!(strip.horizontal_target(39, 0), Some(HorizontalTarget::Home)); // last in-slot cell
+        assert_eq!(strip.horizontal_target(40, 0), None, "first cell past the slot is a miss");
+    }
+
+    #[test]
+    fn home_close_glyph_tracks_home_hover_and_hit_geometry() {
+        let tabs = vec![input("a", "alpha")];
+        let strip =
+            TabStrip::render_with_hover_add_home(&tabs, TabOrientation::Horizontal, 40, 1, 0, None, true, true, true);
+        let home = strip.home_rect.expect("home slot");
+        let close = strip.home_close_visible_rect().expect("hovered home paints its close child");
+        assert_eq!(close, strip.home_close_rect.unwrap());
+        assert_eq!(close.x, home.x + home.width - 2);
+        assert!(strip.home_close_hit(close.x, 0));
+        assert!(strip.home_row.as_ref().expect("row").contains('\u{2715}'));
+        // Only the hovered slot shows a close glyph; the session row stays clean.
+        assert!(!strip.rows[0].contains('\u{2715}'), "session row without hover has no close glyph");
+        let (ref id, rect) = strip.rects[0];
+        let (_, crect) = strip.close_rects[0];
+        assert_eq!(crect.x, rect.x + rect.width - 2);
+        assert_eq!(strip.hit(crect.x, 0).map(|h| h.session.clone()), Some(id.clone()));
+    }
+
+    #[test]
+    fn idle_plus_control_keeps_upstream_plus_geometry_when_not_on_home() {
+        let strip =
+            TabStrip::render_with_hover_and_add(&[input("a", "alpha")], TabOrientation::Horizontal, 20, 1, 0, None, true);
+        let add = strip.add_rect.expect("idle plus exists off Home");
+        assert!(strip.add_hit(add.x + 1, 0));
+        assert_eq!(strip.horizontal_target(add.x + 1, 0), Some(HorizontalTarget::NewControl));
+        assert_eq!(middle_action(&HorizontalTarget::NewControl), HorizontalMiddleAction::Inert);
+        assert!(strip.home_rect.is_none());
+    }
+
+    #[test]
+    fn translated_strip_keeps_home_identity_and_close_geometry() {
+        let tabs = vec![input("a", "alpha")];
+        let strip =
+            TabStrip::render_with_hover_add_home(&tabs, TabOrientation::Horizontal, 40, 1, 0, None, true, true, false);
+        let (hx, hcx) = (strip.home_rect.unwrap(), strip.home_close_rect.unwrap());
+        let shifted = strip.translated(7, 3);
+        let shome = shifted.home_rect.unwrap();
+        assert_eq!((shome.x, shome.y), (hx.x + 7, hx.y + 3));
+        assert_eq!(shifted.horizontal_target(hx.x + 7, 3), Some(HorizontalTarget::Home));
+        assert_eq!(shifted.home_close_rect.unwrap().x, hcx.x + 7);
+    }
+
+    #[test]
+    fn home_projection_is_half_open_and_translated_hits_match_paint() {
+        let tabs = vec![input("a", "alpha")];
+        let strip =
+            TabStrip::render_with_hover_add_home(&tabs, TabOrientation::Horizontal, 40, 1, 0, None, true, true, true);
+        let home = strip.home_rect.expect("promoted Home slot");
+        // Upstream slot of width 22 covers half-open cells 18 through 39:
+        // final cell is a Home hit and the first cell past the slot is a miss.
+        assert_eq!(
+            strip.horizontal_target(home.x + home.width - 1, 0),
+            Some(HorizontalTarget::Home),
+            "last slot cell is inside the Home geometry"
+        );
+        assert_eq!(strip.horizontal_target(home.x + home.width, 0), None, "first cell past the slot is a miss");
+        // Paint and hit projections stay coincident after translation.
+        let shifted = strip.translated(5, 2);
+        let shome = shifted.home_rect.expect("translated Home slot");
+        assert_eq!((shome.x, shome.y), (home.x + 5, home.y + 2));
+        assert_eq!(
+            shifted.horizontal_target(home.x + home.width - 1, 2),
+            Some(HorizontalTarget::Home)
+        );
+        assert_eq!(shifted.horizontal_target(home.x + home.width + 5, 2), None);
+        let sclose = shifted.home_close_visible_rect().expect("translated hovered close child");
+        assert_eq!(sclose.x, home.x + home.width - 2 + 5);
+        assert!(shifted.home_close_hit(sclose.x, 2), "close child stays hittable at its painted cell");
+    }
+    #[test]
+    fn narrow_indicator_slots_conserve_row_width_for_busy_attention_and_home() {
+        // All fixtures compose through the production row writer with
+        // col == 1 and a non-empty 1-cell status glyph (review defect D1
+        // regime); conservation binds the ALLOCATED geometry, never the
+        // viewport parameter.
+        let mut busy = input("b", "job");
+        busy.flags = TabFlags { active: false, busy: true, needs_attention: false };
+        let mut attention = input("attn", "perm");
+        attention.flags = TabFlags { active: false, busy: false, needs_attention: true };
+
+        // (A) PRODUCTION allocated-3 rows: upstream adaptiveSessionTabLayout
+        // vector (9, active=None, scroll=1) -> widths [3], pinned in
+        // adaptive_layout_matches_upstream_allocation_vectors. The middle tab
+        // is the visible one and carries the status flag.
+        for tab in [&busy, &attention] {
+            let tabs = vec![input("a", "perm"), tab.clone(), input("c", "third")];
+            let strip = TabStrip::render_with_hover_add_home(
+                &tabs, TabOrientation::Horizontal, 9, 1, 1, None, false, false, false,
+            );
+            let rect = strip
+                .rects
+                .iter()
+                .find(|(id, _)| id == &tab.session)
+                .expect("production narrow slot")
+                .1;
+            assert_eq!((rect.x, rect.width), (3, 3), "upstream (9,None,1): 3-cell marker + 3-cell slot");
+            assert!(strip.overflow_before && strip.overflow_after);
+            // D1: the whole composed row fills exactly the ALLOCATED slot even
+            // when the status glyph ("!" or busy dots frame 0) shares the
+            // 1-cell indicator column with its mandatory pad.
+            assert_eq!(
+                display_width(&strip.rows[0]),
+                usize::from(rect.width),
+                "status row conserves the allocated 3-cell slot for glyph {:?}",
+                indicator_label(&tab.flags, false)
+            );
+            assert_eq!(
+                display_width(&strip.rows[0]) + overflow_width(1) + overflow_width(1),
+                9,
+                "full strip conservation: marker + row + marker"
+            );
+        }
+
+        // Optional strength add (review 5D): hovered allocated-3 row is the
+        // extra RED anchor (pre-clamp it composes 4 cells).
+        {
+            let tabs = vec![input("a", "perm"), busy.clone(), input("c", "third")];
+            let hovered = Some(&busy.session);
+            let strip = TabStrip::render_with_hover_add_home(
+                &tabs, TabOrientation::Horizontal, 9, 1, 1, hovered, false, false, false,
+            );
+            let rect = strip.rects.iter().find(|(id, _)| id == &busy.session).expect("hovered narrow slot").1;
+            assert_eq!((rect.x, rect.width), (3, 3));
+            assert_eq!(
+                display_width(&strip.rows[0]),
+                usize::from(rect.width),
+                "hovered status row conserves the allocated 3-cell slot"
+            );
+            assert_eq!(
+                strip.rows[0].chars().nth(usize::from(rect.width) - 2),
+                Some('\u{2715}'),
+                "close glyph lands at rect.width-2 on the hovered narrow row"
+            );
+        }
+
+        // (B) DEGENERATE allocated-1 exercise (explicit fixture label): the 3
+        // cell plus reservation consumes the whole 3-cell viewport
+        // (available = 0 -> the solver's 1-cell floor). The label component is
+        // degenerate, not the app. Bind AND pin the allocation.
+        for tab in [&busy, &attention] {
+            let strip = TabStrip::render_with_hover_add_home(
+                std::slice::from_ref(tab),
+                TabOrientation::Horizontal,
+                3,
+                1,
+                0,
+                None,
+                true,
+                false,
+                false,
+            );
+            let rect = strip.rects.iter().find(|(id, _)| id == &tab.session).expect("floor slot").1;
+            assert_eq!(rect.width, 1, "fixture: plus reservation leaves the solver's 1-cell floor");
+            assert_eq!(
+                display_width(&strip.rows[0]),
+                usize::from(rect.width),
+                "conservation at allocated 1 for glyph {:?}",
+                indicator_label(&tab.flags, false)
+            );
+        }
+
+        // (C) PROMOTED HOME on the empty strip: home_active suppresses the
+        // plus, so viewport == slot IS the production allocation at 1 and 3.
+        // Geometry pins stay; conservation binds home.width.
+        for width in [1u16, 3u16] {
+            let home_strip = TabStrip::render_with_hover_add_home(
+                &[],
+                TabOrientation::Horizontal,
+                width,
+                1,
+                0,
+                None,
+                true,
+                true,
+                false,
+            );
+            let home = home_strip.home_rect.expect("promoted Home slot");
+            assert_eq!(home.width, width, "empty-strip Home pivot allocates the full viewport");
+            let row = home_strip.home_row.as_ref().expect("home paint row");
+            assert_eq!(display_width(row), usize::from(home.width), "Home row conserves its allocated slot at {width}");
         }
     }
 }

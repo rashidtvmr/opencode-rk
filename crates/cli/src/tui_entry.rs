@@ -2288,6 +2288,11 @@ fn tab_menu_target_at(navigation: &crate::native_navigation::NavigationState, ta
     }
     let tabs=tabs?;
     if let Some(hit)=tabs.hit(x,y) { return navigation.tabs().iter().any(|tab| tab.session==hit.session).then(|| crate::native_tab_context_menu::MenuTarget::Session { title:navigation.title(&hit.session).unwrap_or(&hit.session.0).to_owned(), session:hit.session, can_add:true }); }
+    // Promoted Home slot owns its menu target directly: upstream NEW_SESSION_TAB
+    // has no session identity, so resolving to the active session would invent a
+    // target. The New menu with recently_closed:None keeps the empty-Home reopen
+    // omission truthful (no invented recent history is offered).
+    if tabs.home_hit(x,y) { return Some(crate::native_tab_context_menu::MenuTarget::New { recently_closed:None }); }
     tabs.add_rect.filter(|r| x>=r.x && x<r.x.saturating_add(r.width) && y>=r.y && y<r.y.saturating_add(r.height)).map(|_| crate::native_tab_context_menu::MenuTarget::New { recently_closed:None })
 }
 
@@ -2966,6 +2971,17 @@ fn native_paint(
                 renderer.fill_rect(u32::from(rect.x), u32::from(rect.y), u32::from(rect.width).min(cols - u32::from(rect.x)), u32::from(rect.height).min(rows - u32::from(rect.y)), bg)?;
                 let label = if rect.width < 3 { "+" } else { " + " };
                 renderer.draw_text_styled(u32::from(rect.x), u32::from(rect.y), label, accent, Some(bg), 0)?;
+            }
+        }
+        // Promoted Home slot: fill + composed row; its close glyph paints from
+        // the row itself only while home_hovered was true at render time, and
+        // the slot is always filled even when no row could compose.
+        if let Some(rect) = tabs.home_rect {
+            if rect.x < cols as u16 && rect.y < rows as u16 {
+                renderer.fill_rect(u32::from(rect.x), u32::from(rect.y), u32::from(rect.width).min(cols - u32::from(rect.x)), u32::from(rect.height).min(rows - u32::from(rect.y)), bg)?;
+                if let Some(row) = tabs.home_row.as_deref() {
+                    renderer.draw_text_styled(u32::from(rect.x), u32::from(rect.y), row, fg, Some(bg), 0)?;
+                }
             }
         }
     }
@@ -4202,6 +4218,11 @@ fn native_loop(
     // Press capture binds the click to a stable tab and painted rect.
     let mut tab_press: Option<(crate::native_navigation::SessionRef, crate::native_tabs::TabRect, bool, TabOrientation)> = None;
     let mut add_press: Option<(crate::native_tabs::TabRect, TabOrientation)> = None;
+    // Promoted Home slot state: pointer-over fact drives the close glyph, a
+    // captured press (body or close child) absorbs the click so it can never
+    // leak into composer/send regions while already on Home.
+    let mut home_press: Option<(crate::native_tabs::TabRect, TabOrientation, bool)> = None;
+    let mut tab_home_hovered = false;
     let mut context_menu: Option<crate::native_tab_context_menu::TabContextMenu> = None;
     let mut rename_input: Option<(crate::native_navigation::SessionRef, String)> = None;
     let mut rename_error: Option<String> = None;
@@ -5498,18 +5519,26 @@ fn native_loop(
         if tab_viewport != Some(viewport) {
             context_menu = None;
             tab_hovered = None;
+            tab_home_hovered = false;
+            home_press = None;
             tab_viewport = Some(viewport);
         }
         if dialog_open || help_open || view.command_palette_open() || permission_editor.open
             || appearance.open || children_panel.open
         {
             tab_hovered = None;
+            tab_home_hovered = false;
             tab_press = None;
             add_press = None;
+            home_press = None;
         }
         view.set_tab_reservation(tab_reservation);
         let tab_inputs = TabStrip::from_navigation(&navigation, &[]);
-        let frame_tabs = TabStrip::render_with_hover_and_add(
+        // Upstream promoted NEW_SESSION_TAB: on the Home route the strip's last
+        // item is the Home slot (adaptive member, active) and the idle plus is
+        // suppressed; home_hovered gates its close glyph like session tabs.
+        let home_active = effective_orientation == TabOrientation::Horizontal && navigation.is_home();
+        let frame_tabs = TabStrip::render_with_hover_add_home(
             &tab_inputs,
             effective_orientation,
             match effective_orientation {
@@ -5523,6 +5552,8 @@ fn native_loop(
             rendered_tabs.as_ref().map_or(0, |tabs| tabs.scroll),
             tab_hovered.as_ref(),
             matches!(effective_orientation, TabOrientation::Horizontal),
+            home_active,
+            home_active && tab_home_hovered,
         );
         let frame_rail = if effective_orientation == TabOrientation::Vertical {
             let rail_inputs = rail_inputs_for_navigation(&navigation, &tab_inputs);
@@ -6146,9 +6177,14 @@ fn native_loop(
                     continue;
                 }
                 if kind==5 && modifiers==0 && !view.dialogs.intercepts_input() && !permission_editor.open && !appearance.open && !children_panel.open && !help_open && !view.command_palette_open() && matches!(dialog,native_setup::Dialog::None) && import_dialog.as_ref().is_none_or(|i|!i.is_open()) && !page_open {
-                    if let Some(target)=tab_menu_target_at(&navigation,rendered_tabs.as_ref(),rendered_rail.as_ref(),effective_orientation==TabOrientation::Vertical,x,y) { let menu=crate::native_tab_context_menu::TabContextMenu::new(x,y,target); if menu.is_open() && !menu.items().is_empty(){context_menu=Some(menu);} tab_press=None;add_press=None;tab_hovered=None;needs_paint=true;continue; }
+                    if let Some(target)=tab_menu_target_at(&navigation,rendered_tabs.as_ref(),rendered_rail.as_ref(),effective_orientation==TabOrientation::Vertical,x,y) { let menu=crate::native_tab_context_menu::TabContextMenu::new(x,y,target); if menu.is_open() && !menu.items().is_empty(){context_menu=Some(menu);} tab_press=None;add_press=None;tab_hovered=None;home_press=None;tab_home_hovered=false;needs_paint=true;continue; }
                 }
-                if kind != 0 && kind != 2 && kind != 7 { tab_press = None; add_press = None; }
+                if kind != 0 && kind != 2 && kind != 7 {
+                    tab_press = None;
+                    add_press = None;
+                    home_press = None;
+                    tab_home_hovered = false;
+                }
                 if !view.dialogs.intercepts_input() && !permission_editor.open && !appearance.open && !children_panel.open
                     && !help_open && !view.command_palette_open() && matches!(dialog, native_setup::Dialog::None)
                     && modifiers == 0
@@ -6159,6 +6195,11 @@ fn native_loop(
                         } else {
                             rendered_tabs.as_ref().and_then(|tabs| tabs.hit(x, y)).map(|hit| hit.session)
                         };
+                        // Home pseudo-tab hover is identity-free and tracked beside
+                        // the session hover fact; session hover wins the glyph.
+                        tab_home_hovered = effective_orientation == TabOrientation::Horizontal
+                            && tab_hovered.is_none()
+                            && rendered_tabs.as_ref().is_some_and(|tabs| tabs.home_hit(x, y));
                         needs_paint = true;
                         continue;
                     }
@@ -6167,9 +6208,12 @@ fn native_loop(
                         // and 1652-1657 fire tabs.close(tab.sessionID) on onMouseDown).
                         // Only the tab under the pointer closes; middle release (kind 9)
                         // and middle drag (kind 10) are ignored. New-tab region / miss is
-                        // inert (matches upstream `+` add-slot). NO fallback to active on
-                        // miss — Home horizontal NEW_SESSION_TAB close(undefined) is a
-                        // separate layout parity gap, wired by the horizontal owner.
+                        // inert — an EXPLICIT DIVERGENCE: upstream's plus fires
+                        // tabs.add?.() on any non-right RELEASE (session-tabs.tsx
+                        // 1784-1790, pressing arms addPressed at 1774-1782); oc2
+                        // deliberately keeps the standalone plus middle-inert. NO
+                        // fallback to active on miss (Home close(undefined) is wired
+                        // below by the horizontal Home arm).
                         let middle_session = if effective_orientation == TabOrientation::Vertical {
                             rendered_rail.as_ref().and_then(|rail| match rail.hit(x, y) {
                                 Some(crate::native_tab_rail::RailHit::Session(id)) => Some(id),
@@ -6189,6 +6233,30 @@ fn native_loop(
                                 Err(error) => append_transcript(&mut transcript, format!("error: close tab: {error}")),
                             }
                             needs_paint = true;
+                        } else if effective_orientation == TabOrientation::Horizontal {
+                            // Horizontal NEW_SESSION_TAB middle press = upstream
+                            // tabs.close(undefined) fired on press: navigate to the
+                            // retained focused session or the last remaining tab; no
+                            // session close ever runs from the Home slot. The
+                            // standalone plus slot stays DIVERGENTLY inert on middle
+                            // (upstream would add a session on middle release;
+                            // session-tabs.tsx 1784-1790) — contracted oc2 behavior.
+                            if let Some(tabs) = rendered_tabs.as_ref() {
+                                if tabs.home_hit(x, y) {
+                                    if let Some(target) = navigation.home_dispatch_target() {
+                                        let scroll = view.chat_scroll_offset();
+                                        match select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &target, selected.as_ref().map(|m| m.qualified()), scroll) {
+                                            Ok(result) => {
+                                                apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route, &mut compact_worker);
+                                                completion.sync(&draft);
+                                                history_pending = false; history_active = None; history_navigation_request = None; blocked_history_scroll = None; history_tail_refresh_pending = false; history_browsing = false;
+                                            }
+                                            Err(error) => append_transcript(&mut transcript, format!("error: select tab: {error}")),
+                                        }
+                                    }
+                                    needs_paint = true;
+                                }
+                            }
                         }
                         continue;
                     }
@@ -6219,11 +6287,23 @@ fn native_loop(
                                     });
                                     tab_press = Some((session, *rect, close, effective_orientation));
                                 }
+                            } else if tabs.home_hit(x, y) {
+                                // Upstream NEW_SESSION_TAB mousedown stopPropagates for
+                                // every button; absorb the press so it can never leak
+                                // into composer/send handling while already on Home.
+                                let close_child = tabs
+                                    .home_close_visible_rect()
+                                    .is_some_and(|close| x >= close.x && y >= close.y
+                                        && x < close.x.saturating_add(close.width)
+                                        && y < close.y.saturating_add(close.height));
+                                if let Some(rect) = tabs.home_rect {
+                                    home_press = Some((rect, effective_orientation, close_child));
+                                }
                             } else if let Some(rect) = tabs.add_rect.filter(|rect| x >= rect.x && y >= rect.y && x < rect.x.saturating_add(rect.width) && y < rect.y.saturating_add(rect.height)) {
                                 add_press = Some((rect, effective_orientation));
                             }
                         }
-                        if tab_press.is_some() || add_press.is_some() {
+                        if tab_press.is_some() || add_press.is_some() || home_press.is_some() {
                             continue;
                         }
                     }
@@ -6309,6 +6389,36 @@ fn native_loop(
                                 view.set_chat_scroll_offset(0);
                                 needs_paint = true;
                             }
+                            continue;
+                        }
+                        if let Some((rect, pressed_orientation, pressed_close)) = home_press.take() {
+                            // Upstream NEW_SESSION_TAB release: select(NEW_SESSION_TAB)
+                            // early-returns on a body release; the close child (left
+                            // button on the hovered glyph) fires close(undefined). Both
+                            // stay absorbed so composer/send regions never observe it.
+                            let still_home = pressed_orientation == effective_orientation
+                                && rendered_tabs
+                                    .as_ref()
+                                    .and_then(|tabs| tabs.home_rect)
+                                    .is_some_and(|current| current == rect)
+                                && (!pressed_close
+                                    || rendered_tabs
+                                        .as_ref()
+                                        .is_some_and(|tabs| tabs.home_close_hit(x, y)));
+                            if still_home && pressed_close {
+                                if let Some(target) = navigation.home_dispatch_target() {
+                                    let scroll = view.chat_scroll_offset();
+                                    match select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &target, selected.as_ref().map(|m| m.qualified()), scroll) {
+                                        Ok(result) => {
+                                            apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route, &mut compact_worker);
+                                            completion.sync(&draft);
+                                            history_pending = false; history_active = None; history_navigation_request = None; blocked_history_scroll = None; history_tail_refresh_pending = false; history_browsing = false;
+                                        }
+                                        Err(error) => append_transcript(&mut transcript, format!("error: select tab: {error}")),
+                                    }
+                                }
+                            }
+                            needs_paint = true;
                             continue;
                         }
                     }
