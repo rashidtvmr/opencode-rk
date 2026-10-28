@@ -64,7 +64,8 @@ describe('WEB-010 structured composer', () => {
     expect(editor.innerHTML).not.toContain('img')
 
     await user.click(screen.getByRole('button', { name: 'Commands and mentions' }))
-    expect(screen.getByText('Slash commands · native endpoint unavailable').closest('[aria-disabled="true"]')).not.toBeNull()
+    expect(screen.getByRole('listbox', { name: 'Slash commands' })).not.toBeNull()
+    expect(screen.getByText(/No matching configured commands reported by the daemon/)).not.toBeNull()
   })
 
   it('shows a real stop control while a native turn is running', () => {

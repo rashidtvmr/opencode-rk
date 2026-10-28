@@ -1,0 +1,12 @@
+Original files backed up before exit-command-payload correction (ETX \x03 -> /quit).
+These are the canonical frozen test files from tests/e2e/, copied verbatim.
+No product code, no canonical writes, no execution.
+
+Original sha256 hashes (preserve original bytes):
+1148311f85a63484aad53ea0173a697155bd38817f9e8bf31ebd21ab5e18f292  native_provider_setup.py
+cae3e2320e4ee246cfc17f7c2600743d649ccd73a8d458b6f6f8549494ba8d1f  native_stream_tool.py
+5711392a90f6881637a176f63cb46c8845a5d1f4ccd9fa846481e378376ed322  native_second_client.py
+
+Patch scope: replace ONLY the client-shutdown exit-command payload \x03 (ETX / Ctrl-C)
+with /quit\r (the product's native_process_exit_route). All persisted-history,
+request-count, permission, and terminal-restoration assertions are preserved.

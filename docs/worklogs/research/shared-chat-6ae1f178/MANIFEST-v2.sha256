@@ -1,0 +1,17 @@
+# SHA256 Manifest — v2 gap-closure artifacts
+# Generated: 2026-10-28 by @xkiro-mimo-v2-6-flash
+# Session: ses_e7d5fe66bffeKqPiz4k1qdHadM
+# Originals preserved unchanged; v2 files are corrected revisions.
+
+# Original artifacts (unchanged)
+b90231f26859c2e9699407475515cf40ef5b87db4b28afd64f2cd55d9f100e4a  chat-transcript-6ae1f178.md
+6a13f329cc9205fa71d09489bca590d89ecb522ed0a5984b65bafd82ef91ac8e  COVERAGE.md
+cb7f359ed713500bf7c1892d05e6530c5d9cd9937af59bddb1b7706873800426  USER-INSTRUCTIONS.md
+
+# v2 corrected artifacts
+ee62384e243ebf20b68b775a97433da26a59b2d1b65310b5d0c0c9f1135b8c42  chat-transcript-6ae1f178-v2.md
+8240a1ba94939bd49d69fcc56e9292fe2a48f8ea404c135112f6a98ebc4c5488  COVERAGE-v2.md
+f17cdb7eed43ee774caad2596012cb03aa5b0b18f3943d1085a68532070629cd  USER-INSTRUCTIONS-v2.md
+
+# Supporting files
+6302c89ed051f092d917b5d5342231033ff23987c3fe1f5e58d450e49a8c43ea  PROGRESS.md

@@ -1,0 +1,85 @@
+--- a/crates/cli/src/native_input_decoder.rs
++++ b/crates/cli/src/native_input_decoder.rs
+@@ -410,9 +410,11 @@
+             return;
+         } // release is not text; repeat has the same printable press value
+         if modifier == 1 {
++            // Only the private-use horizontal-cursor codepoints are protocol keys.
++            // Every other Shift codepoint falls through to the scalar/private-use
++            // guard, the modifier-0 check, and ordinary UTF-8 byte emission.
+             match codepoint {
+-                57350 => self.emit(InputEvent::ArrowLeft),
+-                57351 => self.emit(InputEvent::ArrowRight),
++                57350 => { self.emit(InputEvent::ArrowLeft); return; }
++                57351 => { self.emit(InputEvent::ArrowRight); return; }
+                 _ => {}
+             }
+-            return;
+         }
+         if (0xE000..=0xF8FF).contains(&codepoint) || codepoint > 0x10FFFF {
+             return;
+@@ -498,6 +510,62 @@
+         assert_eq!(decoder.pop(), None);
+     }
+ 
+     #[test]
++    fn kitty_shift_printable_codepoint_emits_utf8_bytes() {
++        let mut decoder = TerminalInputDecoder::default();
++        let now = Instant::now();
++        // ESC[99;1u : codepoint 99 ('c') with Shift modifier must emit the byte 'c'.
++        // Before the fix the unconditional return in the Shift arrow branch dropped it.
++        for byte in b"\x1b[99;1u" { decoder.push(*byte, now); }
++        assert_eq!(decoder.pop(), Some(InputEvent::Byte(b'c')));
++        assert_eq!(decoder.pop(), None);
++    }
++
++    #[test]
++    fn kitty_shift_nonascii_codepoint_emits_utf8_bytes() {
++        let mut decoder = TerminalInputDecoder::default();
++        let now = Instant::now();
++        // ESC[233;1u : codepoint 233 (u00e9) with Shift modifier must emit UTF-8 c3 a9.
++        for byte in b"\x1b[233;1u" { decoder.push(*byte, now); }
++        assert_eq!(decoder.pop(), Some(InputEvent::Byte(0xc3)));
++        assert_eq!(decoder.pop(), Some(InputEvent::Byte(0xa9)));
++        assert_eq!(decoder.pop(), None);
++    }
++
++    #[test]
++    fn kitty_shift_repeat_event_is_inert() {
++        let mut decoder = TerminalInputDecoder::default();
++        let now = Instant::now();
++        // event_type 2 (repeat) with a printable codepoint is not text.
++        for byte in b"\x1b[99;1:2u" { decoder.push(*byte, now); }
++        assert_eq!(decoder.pop(), None);
++    }
++
++    #[test]
++    fn kitty_shift_release_event_is_inert() {
++        let mut decoder = TerminalInputDecoder::default();
++        let now = Instant::now();
++        // event_type 3 (release) with a printable codepoint is not text.
++        for byte in b"\x1b[99;1:3u" { decoder.push(*byte, now); }
++        assert_eq!(decoder.pop(), None);
++    }
++
++    #[test]
++    fn kitty_unmodified_printable_codepoint_is_inert() {
++        let mut decoder = TerminalInputDecoder::default();
++        let now = Instant::now();
++        // modifier 0 with a non-arrow key does not enter the Shift branch.
++        for byte in b"\x1b[99;0u" { decoder.push(*byte, now); }
++        assert_eq!(decoder.pop(), None);
++    }
++
++    #[test]
++    fn existing_horizontal_keys_remain_preserved() {
++        let mut decoder = TerminalInputDecoder::default();
++        let now = Instant::now();
++        for byte in b"\x1b[D\x1b[1C\x1bOD\x1bOC" { decoder.push(*byte, now); }
++        assert_eq!(decoder.pop(), Some(InputEvent::ArrowLeft));
++        assert_eq!(decoder.pop(), Some(InputEvent::ArrowRight));
++        assert_eq!(decoder.pop(), Some(InputEvent::ArrowLeft));
++        assert_eq!(decoder.pop(), Some(InputEvent::ArrowRight));
++        assert_eq!(decoder.pop(), None);
++    }
+ }

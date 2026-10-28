@@ -1,0 +1,24 @@
+timestamp=2026-10-25T21:30:03Z
+base=12018b66653c1d6edfa60479ccbc949d6f898886
+2e2fc0d20d4ccbfdccd2185bfc0222317dba83f4293d38f6baff995178bfb4b9  /private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/tabs-v5-final/tabs-runtime-v5-closure.patch
+5ae9cd83791ab33488de4e8f5d554cd28dce1ce8fd3fd0e4b71d6ce22b2d6754  /private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/tabs-v5-final/crates/cli/src/main.rs
+0df16509c5fca0343702060c628a6e1667b310c2ce78a8076042d2fd3316d452  /private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/tabs-v5-final/crates/cli/src/native_tabs.rs
+ec606c6e253600276ace08c3b3b4d75777d3063156184585d30bf879c17de52d  /private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/tabs-v5-final/crates/cli/src/native_navigation.rs
+e2e222d79570e599bc19decbc67141d91afd2479adda987e8ea64b48a4ac7837  /private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/tabs-v5-final/crates/cli/src/native_ui_preferences.rs
+79edd18602de2cf52622f2a5561f1c368caceabc1b1105ef7e033357c872771d  /private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/tabs-v5-final/crates/cli/src/native_view.rs
+c85c8647ee86e67b5c9a59b84897d1a5bb91744825c1e86c0e74c8f8eff46aa6  /private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/tabs-v5-final/crates/cli/src/tui_entry.rs
+paths
+M	crates/cli/src/main.rs
+M	crates/cli/src/native_navigation.rs
+A	crates/cli/src/native_tabs.rs
+M	crates/cli/src/native_ui_preferences.rs
+M	crates/cli/src/native_view.rs
+M	crates/cli/src/tui_entry.rs
+stat
+ crates/cli/src/main.rs                  |    2 +
+ crates/cli/src/native_navigation.rs     |  283 ++
+ crates/cli/src/native_tabs.rs           |  838 ++++++
+ crates/cli/src/native_ui_preferences.rs |   17 +-
+ crates/cli/src/native_view.rs           | 1381 ++++++++--
+ crates/cli/src/tui_entry.rs             | 4427 ++++++++++++++++++++++++-------
+ 6 files changed, 5808 insertions(+), 1140 deletions(-)

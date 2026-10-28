@@ -1,0 +1,2848 @@
+{
+  "schema_version": 1,
+  "references": [
+    {
+      "repository": "opencode",
+      "commit": "1097e2668b1e08ad63bdf0b1c4860b9bc01e420c",
+      "path": "packages/tui/src/component/tab-pulse.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/1097e2668b1e08ad63bdf0b1c4860b9bc01e420c/packages/tui/src/component/tab-pulse.tsx#L645-L683",
+      "type": "blob",
+      "sha256": "22cfb9f15f2a8d1d3c6f7b1791cbee4e91901acabdf37a79f27aa3372d7e3139",
+      "line_count": 861,
+      "cited_lines": [
+        645,
+        683
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "1097e2668b1e08ad63bdf0b1c4860b9bc01e420c",
+      "path": "packages/tui/test/prompt/part.test.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/1097e2668b1e08ad63bdf0b1c4860b9bc01e420c/packages/tui/test/prompt/part.test.ts#L25-L40",
+      "type": "blob",
+      "sha256": "b62c2feb395ce8a74a351d3ad67733da6abb8db12ef0f7769223832959184648",
+      "line_count": 40,
+      "cited_lines": [
+        25,
+        40
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": ".opencode/skills/tui-tests/SKILL.md",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/.opencode/skills/tui-tests/SKILL.md",
+      "type": "blob",
+      "sha256": "a972296db48b6e1a852b494b7b2ee8b749745cbd09e6d269556237162087e301",
+      "line_count": 82
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "package.json",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/package.json",
+      "type": "blob",
+      "sha256": "1767628e91b25f3b730c39edf67069a4575ff2d5509b0e494fa95ec6b693e246",
+      "line_count": 191
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "package.json",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/package.json#L50-L65",
+      "type": "blob",
+      "sha256": "1767628e91b25f3b730c39edf67069a4575ff2d5509b0e494fa95ec6b693e246",
+      "line_count": 191,
+      "cited_lines": [
+        50,
+        65
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "package.json",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/package.json#L58-L60",
+      "type": "blob",
+      "sha256": "1767628e91b25f3b730c39edf67069a4575ff2d5509b0e494fa95ec6b693e246",
+      "line_count": 191,
+      "cited_lines": [
+        58,
+        60
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/client/src/solid/usage.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/client/src/solid/usage.ts#L3-L22",
+      "type": "blob",
+      "sha256": "98674c01426cf654e0c211fe00e59a57ddfe0783bd494582b6e222599b5c07a7",
+      "line_count": 22,
+      "cited_lines": [
+        3,
+        22
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/latex/src/markdown.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/latex/src/markdown.ts#L27-L119",
+      "type": "blob",
+      "sha256": "5df7312be28849526680cd637591e153d7d8e98b10316bf5b41fd1ad10b82177",
+      "line_count": 120,
+      "cited_lines": [
+        27,
+        119
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/merman/src/markdown.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/merman/src/markdown.ts#L43-L336",
+      "type": "blob",
+      "sha256": "c359c45a057e5774f0d0ff9e7cb913b50ddc08999670751c3b361642bfee642d",
+      "line_count": 336,
+      "cited_lines": [
+        43,
+        336
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/theme/src/tui/expand.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/theme/src/tui/expand.ts#L26-L101",
+      "type": "blob",
+      "sha256": "792e463f12577b841217d66f798941795df41a1dd77fc101897fec430e70047a",
+      "line_count": 105,
+      "cited_lines": [
+        26,
+        101
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/theme/src/tui/resolve.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/theme/src/tui/resolve.ts#L55-L290",
+      "type": "blob",
+      "sha256": "d70c4fbe59cfd551dc5e9eaf050f1e470d918d2641e03a7c83eb2b54b6043b44",
+      "line_count": 291,
+      "cited_lines": [
+        55,
+        290
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/theme/src/tui/schema.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/theme/src/tui/schema.ts#L3-L25",
+      "type": "blob",
+      "sha256": "ed81448c34c8e1eb04921f5c7c34650ff56f1d0dd99a5fe164f73f358d68fdeb",
+      "line_count": 304,
+      "cited_lines": [
+        3,
+        25
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/theme/src/tui/select.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/theme/src/tui/select.ts#L8-L24",
+      "type": "blob",
+      "sha256": "9ddc24b4e03043457355320a2dbea5c5e891838593b3496ff5f3eb7b0f1ea1e3",
+      "line_count": 25,
+      "cited_lines": [
+        8,
+        24
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/theme/src/tui/syntax.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/theme/src/tui/syntax.ts#L4-L95",
+      "type": "blob",
+      "sha256": "e95345e346ca5fad5a4d00f85a5d8f95ce8c5902c28c9c5925cd9544424f0941",
+      "line_count": 95,
+      "cited_lines": [
+        4,
+        95
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/package.json",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/package.json#L1-L5",
+      "type": "blob",
+      "sha256": "d250e870f1666bda980c81ffa8ca1658c2b163e4ee02e15c8a451bbc216cda15",
+      "line_count": 80,
+      "cited_lines": [
+        1,
+        5
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/app.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/app.tsx#L1376-L1400",
+      "type": "blob",
+      "sha256": "b97ebed0dea62f1eda897ddde4268b0d30caf271bff74f04c5dc11fe4345faf3",
+      "line_count": 1483,
+      "cited_lines": [
+        1376,
+        1400
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/app.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/app.tsx#L1402-L1481",
+      "type": "blob",
+      "sha256": "b97ebed0dea62f1eda897ddde4268b0d30caf271bff74f04c5dc11fe4345faf3",
+      "line_count": 1483,
+      "cited_lines": [
+        1402,
+        1481
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/app.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/app.tsx#L249-L290",
+      "type": "blob",
+      "sha256": "b97ebed0dea62f1eda897ddde4268b0d30caf271bff74f04c5dc11fe4345faf3",
+      "line_count": 1483,
+      "cited_lines": [
+        249,
+        290
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/app.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/app.tsx#L538-L623",
+      "type": "blob",
+      "sha256": "b97ebed0dea62f1eda897ddde4268b0d30caf271bff74f04c5dc11fe4345faf3",
+      "line_count": 1483,
+      "cited_lines": [
+        538,
+        623
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/app.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/app.tsx#L584-L609",
+      "type": "blob",
+      "sha256": "b97ebed0dea62f1eda897ddde4268b0d30caf271bff74f04c5dc11fe4345faf3",
+      "line_count": 1483,
+      "cited_lines": [
+        584,
+        609
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/command-palette.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/command-palette.tsx#L14-L74",
+      "type": "blob",
+      "sha256": "61fb73798ad39822e1a7a950b086a10f1540a67621f49a81a64e13fc10b29224",
+      "line_count": 74,
+      "cited_lines": [
+        14,
+        74
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-agent.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-agent.tsx#L6-L33",
+      "type": "blob",
+      "sha256": "2b92bdfd1eda18dbd0792404182fb46598722edb77dfe15b3218fce41296f68b",
+      "line_count": 33,
+      "cited_lines": [
+        6,
+        33
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-config.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-config.tsx#L27-L482",
+      "type": "blob",
+      "sha256": "8f924e4313a31ce0fea1dd9fba0a23da574aa2542b258df6c78988e6b91b9efd",
+      "line_count": 482,
+      "cited_lines": [
+        27,
+        482
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-error-details.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-error-details.tsx#L17-L130",
+      "type": "blob",
+      "sha256": "2f13e65ec50961f967e4b809663e9c77c0aa8d8217159e03012c8c86711065d4",
+      "line_count": 130,
+      "cited_lines": [
+        17,
+        130
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-experiments.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-experiments.tsx#L17-L28",
+      "type": "blob",
+      "sha256": "a379288a9e8678204ee114deffbf855d49d2afdea9a359b9ac7a24edf8ff88cc",
+      "line_count": 97,
+      "cited_lines": [
+        17,
+        28
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-experiments.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-experiments.tsx#L17-L97",
+      "type": "blob",
+      "sha256": "a379288a9e8678204ee114deffbf855d49d2afdea9a359b9ac7a24edf8ff88cc",
+      "line_count": 97,
+      "cited_lines": [
+        17,
+        97
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-integration.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-integration.tsx#L69-L938",
+      "type": "blob",
+      "sha256": "1b602be726fd4f7e36030081dd88b1c6f9ed021a23f6b679d16c64fe9b20207e",
+      "line_count": 1286,
+      "cited_lines": [
+        69,
+        938
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-mcp.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-mcp.tsx#L20-L177",
+      "type": "blob",
+      "sha256": "6a05dfa26984be7f981abbddb1787a8f33c8c9d3cbbd8bc1d0c94b9ee7cac084",
+      "line_count": 177,
+      "cited_lines": [
+        20,
+        177
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-model-free.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-model-free.tsx#L10-L77",
+      "type": "blob",
+      "sha256": "75a7ec729a2c433935f65d66ece18abe1b7b000701acf2b8cc6d65acef6cde63",
+      "line_count": 77,
+      "cited_lines": [
+        10,
+        77
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-model.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-model.tsx",
+      "type": "blob",
+      "sha256": "6b6a2fec4ce250d73bbc811256aa1f961be68b5a2e430a779589979cac35d848",
+      "line_count": 253
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-model.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-model.tsx#L19-L253",
+      "type": "blob",
+      "sha256": "6b6a2fec4ce250d73bbc811256aa1f961be68b5a2e430a779589979cac35d848",
+      "line_count": 253,
+      "cited_lines": [
+        19,
+        253
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-open.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-open.tsx#L27-L485",
+      "type": "blob",
+      "sha256": "1d76a2ccd02a284f30384bd5c281bdfb9056fa0fca10b196694299adda1ef737",
+      "line_count": 508,
+      "cited_lines": [
+        27,
+        485
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-session-list.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-session-list.tsx#L27-L325",
+      "type": "blob",
+      "sha256": "59ab9fc64376729fd6082a3e10f4daceb5b8e38b111150fa8c10d4c1570acf80",
+      "line_count": 325,
+      "cited_lines": [
+        27,
+        325
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-session-rename.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-session-rename.tsx#L7-L37",
+      "type": "blob",
+      "sha256": "de7dce643acd59d34d8f8b4d86a2f797ecd8e49edb4cf893312a1a1bcaf69603",
+      "line_count": 37,
+      "cited_lines": [
+        7,
+        37
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-stash.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-stash.tsx#L9-L90",
+      "type": "blob",
+      "sha256": "cb17705de41f24f8cbbb151b8d98f138b8a1eb3a0af0fc7cedd9740faec24ba9",
+      "line_count": 90,
+      "cited_lines": [
+        9,
+        90
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-status.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-status.tsx#L6-L50",
+      "type": "blob",
+      "sha256": "e4e35fc6175c1ccd2e0feb8e0a56aa83d40d5209eaf9fd777b9badf1ed910ffd",
+      "line_count": 50,
+      "cited_lines": [
+        6,
+        50
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-theme-list.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-theme-list.tsx#L7-L55",
+      "type": "blob",
+      "sha256": "3c584b07fbb67ddde48eafc491f362b70f4bdcc77aa811b29aa977b27a2a804b",
+      "line_count": 55,
+      "cited_lines": [
+        7,
+        55
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-variant.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-variant.tsx#L7-L43",
+      "type": "blob",
+      "sha256": "7902c3f6b436b8aaf282adf7a0e4b9b13256905a35ef32f8536ec99647e09e6b",
+      "line_count": 43,
+      "cited_lines": [
+        7,
+        43
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-workspace-file-changes.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-workspace-file-changes.tsx#L19-L187",
+      "type": "blob",
+      "sha256": "5e1aea8b411085db41bd62e21d1ac36ee743ec75d6ab122852cc909d627608b6",
+      "line_count": 187,
+      "cited_lines": [
+        19,
+        187
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-workspaces.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-workspaces.tsx#L39-L405",
+      "type": "blob",
+      "sha256": "779687917d9e5b25924602c2c20a1e8683090ad7da0e6ddb087ca73ba952c4d6",
+      "line_count": 412,
+      "cited_lines": [
+        39,
+        405
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/dialog-worktree-name.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-worktree-name.tsx#L6-L40",
+      "type": "blob",
+      "sha256": "337c25cab0bb92463d80480ca56a9cc2b43eb2b44381ffd90b8206831e897757",
+      "line_count": 40,
+      "cited_lines": [
+        6,
+        40
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/error-component.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/error-component.tsx#L10-L218",
+      "type": "blob",
+      "sha256": "8aa5523154028e3b666b727f13d300a1294a05c6dd13b3fb905f16f6ac807924",
+      "line_count": 258,
+      "cited_lines": [
+        10,
+        218
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/migration-overlay.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/migration-overlay.tsx#L11-L73",
+      "type": "blob",
+      "sha256": "6a8e74d42d76da00d7b4fa49cf9409a4aa5ce0c4cbc5dcda937e27909b5f8d7a",
+      "line_count": 73,
+      "cited_lines": [
+        11,
+        73
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/model-options.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/model-options.tsx#L6-L120",
+      "type": "blob",
+      "sha256": "b084103bdd7e818bef32f50d49a9385052f5f3081ce3cec72197c3d696a7cf0a",
+      "line_count": 121,
+      "cited_lines": [
+        6,
+        120
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/patch-diff.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/patch-diff.tsx#L23-L201",
+      "type": "blob",
+      "sha256": "c4ae06b6376d5b194e93d482b1dce3e319f4110b05062c40febe2d3954b54005",
+      "line_count": 211,
+      "cited_lines": [
+        23,
+        201
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/prompt/autocomplete.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/autocomplete.tsx#L407-L504",
+      "type": "blob",
+      "sha256": "84fe175cef157a3d720ba25ef1a0a2ad179a74fd349ca4bb587d6d8bd0206fec",
+      "line_count": 960,
+      "cited_lines": [
+        407,
+        504
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/prompt/autocomplete.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/autocomplete.tsx#L660-L960",
+      "type": "blob",
+      "sha256": "84fe175cef157a3d720ba25ef1a0a2ad179a74fd349ca4bb587d6d8bd0206fec",
+      "line_count": 960,
+      "cited_lines": [
+        660,
+        960
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/prompt/autocomplete.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/autocomplete.tsx#L93-L132",
+      "type": "blob",
+      "sha256": "84fe175cef157a3d720ba25ef1a0a2ad179a74fd349ca4bb587d6d8bd0206fec",
+      "line_count": 960,
+      "cited_lines": [
+        93,
+        132
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/prompt/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1097-L1404",
+      "type": "blob",
+      "sha256": "ed903af4b3504afc3aed73f6fc6afe13a1cc1a1059a4c4ad623a1ea74ebd107c",
+      "line_count": 2035,
+      "cited_lines": [
+        1097,
+        1404
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/prompt/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1406-L1535",
+      "type": "blob",
+      "sha256": "ed903af4b3504afc3aed73f6fc6afe13a1cc1a1059a4c4ad623a1ea74ebd107c",
+      "line_count": 2035,
+      "cited_lines": [
+        1406,
+        1535
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/prompt/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1537-L1672",
+      "type": "blob",
+      "sha256": "ed903af4b3504afc3aed73f6fc6afe13a1cc1a1059a4c4ad623a1ea74ebd107c",
+      "line_count": 2035,
+      "cited_lines": [
+        1537,
+        1672
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/prompt/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1674-L1698",
+      "type": "blob",
+      "sha256": "ed903af4b3504afc3aed73f6fc6afe13a1cc1a1059a4c4ad623a1ea74ebd107c",
+      "line_count": 2035,
+      "cited_lines": [
+        1674,
+        1698
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/prompt/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1674-L1983",
+      "type": "blob",
+      "sha256": "ed903af4b3504afc3aed73f6fc6afe13a1cc1a1059a4c4ad623a1ea74ebd107c",
+      "line_count": 2035,
+      "cited_lines": [
+        1674,
+        1983
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/prompt/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1767-L1854",
+      "type": "blob",
+      "sha256": "ed903af4b3504afc3aed73f6fc6afe13a1cc1a1059a4c4ad623a1ea74ebd107c",
+      "line_count": 2035,
+      "cited_lines": [
+        1767,
+        1854
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/prompt/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L372-L406",
+      "type": "blob",
+      "sha256": "ed903af4b3504afc3aed73f6fc6afe13a1cc1a1059a4c4ad623a1ea74ebd107c",
+      "line_count": 2035,
+      "cited_lines": [
+        372,
+        406
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/prompt/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L419-L548",
+      "type": "blob",
+      "sha256": "ed903af4b3504afc3aed73f6fc6afe13a1cc1a1059a4c4ad623a1ea74ebd107c",
+      "line_count": 2035,
+      "cited_lines": [
+        419,
+        548
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/prompt/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L707-L761",
+      "type": "blob",
+      "sha256": "ed903af4b3504afc3aed73f6fc6afe13a1cc1a1059a4c4ad623a1ea74ebd107c",
+      "line_count": 2035,
+      "cited_lines": [
+        707,
+        761
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/prompt/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L764-L939",
+      "type": "blob",
+      "sha256": "ed903af4b3504afc3aed73f6fc6afe13a1cc1a1059a4c4ad623a1ea74ebd107c",
+      "line_count": 2035,
+      "cited_lines": [
+        764,
+        939
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/prompt/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L963-L1095",
+      "type": "blob",
+      "sha256": "ed903af4b3504afc3aed73f6fc6afe13a1cc1a1059a4c4ad623a1ea74ebd107c",
+      "line_count": 2035,
+      "cited_lines": [
+        963,
+        1095
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/prompt/metadata.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/metadata.tsx#L8-L167",
+      "type": "blob",
+      "sha256": "efa788e8b536cdb98284d56aa0fe1d2d1c635a2c8baf7e47b5698412fe8c1559",
+      "line_count": 167,
+      "cited_lines": [
+        8,
+        167
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/reconnecting.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/reconnecting.tsx#L5-L40",
+      "type": "blob",
+      "sha256": "ba96695bb0fda0b231df7bc60cbcdbb02eed779bf0a35ba4993c165e54a782d8",
+      "line_count": 40,
+      "cited_lines": [
+        5,
+        40
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/session-frame.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/session-frame.tsx#L29-L408",
+      "type": "blob",
+      "sha256": "f837a54eafdf3f3286707046b0dc3905899303d0f32767ff834480e2a72af910",
+      "line_count": 408,
+      "cited_lines": [
+        29,
+        408
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/session-tabs-rail.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/session-tabs-rail.tsx#L8-L94",
+      "type": "blob",
+      "sha256": "2dc711ed32fb4a13b6445f5cecadc560f714d830ccb7beb144fdf721ede39359",
+      "line_count": 94,
+      "cited_lines": [
+        8,
+        94
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/session-tabs.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/session-tabs.tsx#L1286-L1801",
+      "type": "blob",
+      "sha256": "77ab8fe6c064e0d7edcfb628bc9741400de513c31a35b0aff53fc7dfbd72bdaf",
+      "line_count": 1801,
+      "cited_lines": [
+        1286,
+        1801
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/session-tabs.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/session-tabs.tsx#L1560-L1573",
+      "type": "blob",
+      "sha256": "77ab8fe6c064e0d7edcfb628bc9741400de513c31a35b0aff53fc7dfbd72bdaf",
+      "line_count": 1801,
+      "cited_lines": [
+        1560,
+        1573
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/session-tabs.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/session-tabs.tsx#L542-L1284",
+      "type": "blob",
+      "sha256": "77ab8fe6c064e0d7edcfb628bc9741400de513c31a35b0aff53fc7dfbd72bdaf",
+      "line_count": 1801,
+      "cited_lines": [
+        542,
+        1284
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/session-tabs.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/session-tabs.tsx#L57-L502",
+      "type": "blob",
+      "sha256": "77ab8fe6c064e0d7edcfb628bc9741400de513c31a35b0aff53fc7dfbd72bdaf",
+      "line_count": 1801,
+      "cited_lines": [
+        57,
+        502
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/shimmer-text.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/shimmer-text.tsx#L11-L43",
+      "type": "blob",
+      "sha256": "8396958abccc272d8cedeccad96c8fd90f83af009cf4cad7948c8cfa21acdcda",
+      "line_count": 59,
+      "cited_lines": [
+        11,
+        43
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/spinner-renderable.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/spinner-renderable.ts#L32-L145",
+      "type": "blob",
+      "sha256": "8613c856375269827cd7aba530a2ecbeafc525737859a638d505f87e0c8ca8b2",
+      "line_count": 158,
+      "cited_lines": [
+        32,
+        145
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/spinner.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/spinner.tsx#L12-L50",
+      "type": "blob",
+      "sha256": "9b0d52f2808af75e77530c685a0c087b6a24765996648b9704237673d20728ee",
+      "line_count": 50,
+      "cited_lines": [
+        12,
+        50
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/startup-loading.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/startup-loading.tsx#L5-L63",
+      "type": "blob",
+      "sha256": "8c21f16e5eb056b0e09cb0595df0121fdadaee79183e55bbe83fc4088d960046",
+      "line_count": 63,
+      "cited_lines": [
+        5,
+        63
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/tab-pulse.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/tab-pulse.tsx#L32-L121",
+      "type": "blob",
+      "sha256": "02f2518861115296e7c7dd8f280b5c0f640f5286e904681f6b0cbaa88f265d92",
+      "line_count": 817,
+      "cited_lines": [
+        32,
+        121
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/tab-pulse.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/tab-pulse.tsx#L421-L455",
+      "type": "blob",
+      "sha256": "02f2518861115296e7c7dd8f280b5c0f640f5286e904681f6b0cbaa88f265d92",
+      "line_count": 817,
+      "cited_lines": [
+        421,
+        455
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/tab-pulse.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/tab-pulse.tsx#L632-L637",
+      "type": "blob",
+      "sha256": "02f2518861115296e7c7dd8f280b5c0f640f5286e904681f6b0cbaa88f265d92",
+      "line_count": 817,
+      "cited_lines": [
+        632,
+        637
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/todo-item.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/todo-item.tsx#L5-L27",
+      "type": "blob",
+      "sha256": "700d441e471f9b4758dfcc310564ed18e1458503287c2f6c6288e3990d84efac",
+      "line_count": 27,
+      "cited_lines": [
+        5,
+        27
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/usage.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/usage.tsx#L57-L64",
+      "type": "blob",
+      "sha256": "67613b62d8b371a054a0333c525f80b842ca9690a7d835872f27d579db43d7d7",
+      "line_count": 304,
+      "cited_lines": [
+        57,
+        64
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/component/usage.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/usage.tsx#L87-L245",
+      "type": "blob",
+      "sha256": "67613b62d8b371a054a0333c525f80b842ca9690a7d835872f27d579db43d7d7",
+      "line_count": 304,
+      "cited_lines": [
+        87,
+        245
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/config/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/config/index.tsx#L185-L203",
+      "type": "blob",
+      "sha256": "0839b3908fb1a1fdb594589ab3a32c78a7b8fb9433974e0e6578e27e5369e031",
+      "line_count": 393,
+      "cited_lines": [
+        185,
+        203
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/config/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/config/index.tsx#L290-L338",
+      "type": "blob",
+      "sha256": "0839b3908fb1a1fdb594589ab3a32c78a7b8fb9433974e0e6578e27e5369e031",
+      "line_count": 393,
+      "cited_lines": [
+        290,
+        338
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/config/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/config/index.tsx#L317-L323",
+      "type": "blob",
+      "sha256": "0839b3908fb1a1fdb594589ab3a32c78a7b8fb9433974e0e6578e27e5369e031",
+      "line_count": 393,
+      "cited_lines": [
+        317,
+        323
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/config/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/config/index.tsx#L60-L67",
+      "type": "blob",
+      "sha256": "0839b3908fb1a1fdb594589ab3a32c78a7b8fb9433974e0e6578e27e5369e031",
+      "line_count": 393,
+      "cited_lines": [
+        60,
+        67
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/config/keybind.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/config/keybind.ts#L128-L280",
+      "type": "blob",
+      "sha256": "49c8a69149811fee3bf57e1f9104f885d20910c594cae8ba3e99f14c8f454fd8",
+      "line_count": 361,
+      "cited_lines": [
+        128,
+        280
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/config/keybind.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/config/keybind.ts#L152-L161",
+      "type": "blob",
+      "sha256": "49c8a69149811fee3bf57e1f9104f885d20910c594cae8ba3e99f14c8f454fd8",
+      "line_count": 361,
+      "cited_lines": [
+        152,
+        161
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/config/keybind.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/config/keybind.ts#L261-L283",
+      "type": "blob",
+      "sha256": "49c8a69149811fee3bf57e1f9104f885d20910c594cae8ba3e99f14c8f454fd8",
+      "line_count": 361,
+      "cited_lines": [
+        261,
+        283
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/config/keybind.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/config/keybind.ts#L96-L120",
+      "type": "blob",
+      "sha256": "49c8a69149811fee3bf57e1f9104f885d20910c594cae8ba3e99f14c8f454fd8",
+      "line_count": 361,
+      "cited_lines": [
+        96,
+        120
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/context/local.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/local.tsx#L398-L414",
+      "type": "blob",
+      "sha256": "46bfae0c9020d6f423e2cca2c4637130e6ba67676127f885a3d7fca09db0ebfd",
+      "line_count": 615,
+      "cited_lines": [
+        398,
+        414
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/context/local.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/local.tsx#L58-L135",
+      "type": "blob",
+      "sha256": "46bfae0c9020d6f423e2cca2c4637130e6ba67676127f885a3d7fca09db0ebfd",
+      "line_count": 615,
+      "cited_lines": [
+        58,
+        135
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/context/panel.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/panel.tsx#L11-L42",
+      "type": "blob",
+      "sha256": "7355db20f5e184af5ceb2999fda9a47f1e37f0d944eb299313a449b39521ff0a",
+      "line_count": 59,
+      "cited_lines": [
+        11,
+        42
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/context/session-tabs-model.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/session-tabs-model.ts#L1-L261",
+      "type": "blob",
+      "sha256": "062f0310afece8e9dbf50eb4c3e215aa750a880a18fe1fec354c2fd147e9929c",
+      "line_count": 261,
+      "cited_lines": [
+        1,
+        261
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/context/session-tabs.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/session-tabs.tsx#L35-L498",
+      "type": "blob",
+      "sha256": "92f06faba49b7e49e8c6043bb4c56281602f3452b8faaca033368445f355a7a3",
+      "line_count": 498,
+      "cited_lines": [
+        35,
+        498
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/context/theme.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/theme.tsx#L113-L428",
+      "type": "blob",
+      "sha256": "68ae1475d2b0e686b89daf067f6c7438c475ab0d71ef7758787f9cf729dad0a2",
+      "line_count": 428,
+      "cited_lines": [
+        113,
+        428
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/context/thinking.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/thinking.ts#L1-L20",
+      "type": "blob",
+      "sha256": "352fc0e17f68a1c04c722d12b7b18e6df04224aae50be5d43d99c51c77acdace",
+      "line_count": 20,
+      "cited_lines": [
+        1,
+        20
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/feature-plugins/home/footer.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/home/footer.tsx#L7-L116",
+      "type": "blob",
+      "sha256": "5b1b6b7635608a4fc7c0fac23889fa7afcb8bc47f6791b15328b8006d7051102",
+      "line_count": 116,
+      "cited_lines": [
+        7,
+        116
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/feature-plugins/prompt/footer.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/prompt/footer.tsx#L14-L156",
+      "type": "blob",
+      "sha256": "9cd1bb5b59106c9676c85bd0bdcaa1be5bbcd142abbd5938b42f13239e65dfd7",
+      "line_count": 156,
+      "cited_lines": [
+        14,
+        156
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/feature-plugins/sidebar/context.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/sidebar/context.tsx#L10-L52",
+      "type": "blob",
+      "sha256": "3d654fbab1bd104a6cf4c4431b32e5367803613ccda7ced4c251adf9b39b37d0",
+      "line_count": 52,
+      "cited_lines": [
+        10,
+        52
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/feature-plugins/sidebar/footer.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/sidebar/footer.tsx#L9-L126",
+      "type": "blob",
+      "sha256": "918f637c390ea5eeaafd7cfc1a6451e0b622f70a4eaec960b14c784fec63ce85",
+      "line_count": 126,
+      "cited_lines": [
+        9,
+        126
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/feature-plugins/sidebar/limit.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/sidebar/limit.tsx#L7-L47",
+      "type": "blob",
+      "sha256": "8dfb9aef9b77b3c34037e3e5bc7dcf4e4fadcca9d4db923e13949af032265699",
+      "line_count": 47,
+      "cited_lines": [
+        7,
+        47
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/feature-plugins/sidebar/mcp.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/sidebar/mcp.tsx#L5-L103",
+      "type": "blob",
+      "sha256": "912929d010590a62d2a6a3354b15f64512bab53dc683a7d9dabe53e62b2282f4",
+      "line_count": 103,
+      "cited_lines": [
+        5,
+        103
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/feature-plugins/sidebar/todo.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/sidebar/todo.tsx#L6-L58",
+      "type": "blob",
+      "sha256": "da64e50931e8c4120842256a91021b3a158939e834cd8357d32f85ba10335a97",
+      "line_count": 58,
+      "cited_lines": [
+        6,
+        58
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/feature-plugins/system/diff-viewer-file-menu.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/diff-viewer-file-menu.tsx#L7-L87",
+      "type": "blob",
+      "sha256": "ee2e5d4313a53034e564c8b99453f1396ce2dea767c9c11238af6c713769f71f",
+      "line_count": 87,
+      "cited_lines": [
+        7,
+        87
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/feature-plugins/system/diff-viewer-file-tree.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/diff-viewer-file-tree.tsx#L30-L274",
+      "type": "blob",
+      "sha256": "12454c157c5747e4a4827a34b186e5aba723affdd663d4d209fdc296fd6f55b2",
+      "line_count": 274,
+      "cited_lines": [
+        30,
+        274
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/feature-plugins/system/diff-viewer.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/diff-viewer.tsx#L306-L1189",
+      "type": "blob",
+      "sha256": "191d9ac880164ec7ff8231a5a65d84190fb8dc897c6c5c8e73142f08c042849a",
+      "line_count": 1380,
+      "cited_lines": [
+        306,
+        1189
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/feature-plugins/system/diff-viewer.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/diff-viewer.tsx#L44-L53",
+      "type": "blob",
+      "sha256": "191d9ac880164ec7ff8231a5a65d84190fb8dc897c6c5c8e73142f08c042849a",
+      "line_count": 1380,
+      "cited_lines": [
+        44,
+        53
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/feature-plugins/system/diff-viewer.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/diff-viewer.tsx#L44-L55",
+      "type": "blob",
+      "sha256": "191d9ac880164ec7ff8231a5a65d84190fb8dc897c6c5c8e73142f08c042849a",
+      "line_count": 1380,
+      "cited_lines": [
+        44,
+        55
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/feature-plugins/system/plugins.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/plugins.tsx#L26-L267",
+      "type": "blob",
+      "sha256": "c2a18a6d272aa3cc4dd4863a443ba865887a4a24dd273d0e6508b5a7c95ffb3a",
+      "line_count": 353,
+      "cited_lines": [
+        26,
+        267
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/plugin/builtins.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/plugin/builtins.ts#L1-L35",
+      "type": "blob",
+      "sha256": "b338c145642bc0c432c6f77057b768485b6008f22e7ab8a6da7829841b598274",
+      "line_count": 35,
+      "cited_lines": [
+        1,
+        35
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/plugin/builtins.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/plugin/builtins.ts#L14-L34",
+      "type": "blob",
+      "sha256": "b338c145642bc0c432c6f77057b768485b6008f22e7ab8a6da7829841b598274",
+      "line_count": 35,
+      "cited_lines": [
+        14,
+        34
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/plugin/markdown.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/plugin/markdown.ts#L1-L18",
+      "type": "blob",
+      "sha256": "d8698524836ef5674ff4388adb2304384f1563984c833772d082f41b5be9afbd",
+      "line_count": 18,
+      "cited_lines": [
+        1,
+        18
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/prompt/display.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/prompt/display.ts#L1-L41",
+      "type": "blob",
+      "sha256": "e1b3844737dd77373539d47c65274d34e0f9863f02100dbcd4c8be181bc1e8dc",
+      "line_count": 41,
+      "cited_lines": [
+        1,
+        41
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/prompt/part.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/prompt/part.ts#L4-L27",
+      "type": "blob",
+      "sha256": "5f410ea382bc49a6824bb8fa7dded53a2c35f4cb28b00ef6b9afd5d4a04814c2",
+      "line_count": 27,
+      "cited_lines": [
+        4,
+        27
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/home.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/home.tsx#L81-L176",
+      "type": "blob",
+      "sha256": "f1c6ae4c353549f5afe57b81ebe807562c5a3ba3539f568e4632b509c3da7ccb",
+      "line_count": 176,
+      "cited_lines": [
+        81,
+        176
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/composer/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/composer/index.tsx#L21-L157",
+      "type": "blob",
+      "sha256": "35e8ecdf2cc8191e3aeef910ae1d0b6d4366d0d851ff2acb59c01f7502089228",
+      "line_count": 157,
+      "cited_lines": [
+        21,
+        157
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/composer/shell-tab.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/composer/shell-tab.tsx#L12-L149",
+      "type": "blob",
+      "sha256": "fca99ee56d99c711cf832c77f4dfdb9c5b96067a1a2b98061bde2410c785b002",
+      "line_count": 149,
+      "cited_lines": [
+        12,
+        149
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/composer/subagents-tab.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/composer/subagents-tab.tsx#L26-L259",
+      "type": "blob",
+      "sha256": "fcc1b5356956812ffac5f8d8c0b35027753ba5f5ee8d2edcbe043e3fc57c5a41",
+      "line_count": 259,
+      "cited_lines": [
+        26,
+        259
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/composer/terminals-tab.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/composer/terminals-tab.tsx#L9-L114",
+      "type": "blob",
+      "sha256": "9517c37b13bde545445be6ba4fee1978fbbf64c2fa555dd4675835390a9bd730",
+      "line_count": 114,
+      "cited_lines": [
+        9,
+        114
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/dialog-execute.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/dialog-execute.tsx#L28-L279",
+      "type": "blob",
+      "sha256": "000e2dae52f4b5e43a04b974aaf73acd2c565858889852aba2859522afd59be9",
+      "line_count": 279,
+      "cited_lines": [
+        28,
+        279
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/dialog-message.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/dialog-message.tsx#L13-L93",
+      "type": "blob",
+      "sha256": "6aa3492e68d9a558092e4080fbb0cc563d5a5ddb7532df6c7302511e5658cb80",
+      "line_count": 93,
+      "cited_lines": [
+        13,
+        93
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/form.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/form.tsx#L59-L1175",
+      "type": "blob",
+      "sha256": "6cc681dd3896c21bbf8e352dd9d0106cd3fc1a24a9a00c33e8e3da2b83a745f1",
+      "line_count": 1175,
+      "cited_lines": [
+        59,
+        1175
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/group-view.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/group-view.tsx#L63-L403",
+      "type": "blob",
+      "sha256": "582e2c2e8ac22c7b7e2b08b4ff03c7f99131110a3240b355b6992971680cf9eb",
+      "line_count": 421,
+      "cited_lines": [
+        63,
+        403
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/grouping/session.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/grouping/session.ts#L14-L175",
+      "type": "blob",
+      "sha256": "701765c52dbccd3649bfd00dfc95abe38d11f94f5f8bf54d6c5a6b7f41fe7b18",
+      "line_count": 184,
+      "cited_lines": [
+        14,
+        175
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L1510-L1680",
+      "type": "blob",
+      "sha256": "ffe8e0c814495685a831812adb1f384b9b4a03c78e40db162edceed3d8bd8dc9",
+      "line_count": 3825,
+      "cited_lines": [
+        1510,
+        1680
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L1527-L1537",
+      "type": "blob",
+      "sha256": "ffe8e0c814495685a831812adb1f384b9b4a03c78e40db162edceed3d8bd8dc9",
+      "line_count": 3825,
+      "cited_lines": [
+        1527,
+        1537
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L1590-L1658",
+      "type": "blob",
+      "sha256": "ffe8e0c814495685a831812adb1f384b9b4a03c78e40db162edceed3d8bd8dc9",
+      "line_count": 3825,
+      "cited_lines": [
+        1590,
+        1658
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L1673-L2070",
+      "type": "blob",
+      "sha256": "ffe8e0c814495685a831812adb1f384b9b4a03c78e40db162edceed3d8bd8dc9",
+      "line_count": 3825,
+      "cited_lines": [
+        1673,
+        2070
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L2103-L2158",
+      "type": "blob",
+      "sha256": "ffe8e0c814495685a831812adb1f384b9b4a03c78e40db162edceed3d8bd8dc9",
+      "line_count": 3825,
+      "cited_lines": [
+        2103,
+        2158
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L2171-L2569",
+      "type": "blob",
+      "sha256": "ffe8e0c814495685a831812adb1f384b9b4a03c78e40db162edceed3d8bd8dc9",
+      "line_count": 3825,
+      "cited_lines": [
+        2171,
+        2569
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L2253-L2515",
+      "type": "blob",
+      "sha256": "ffe8e0c814495685a831812adb1f384b9b4a03c78e40db162edceed3d8bd8dc9",
+      "line_count": 3825,
+      "cited_lines": [
+        2253,
+        2515
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L242-L253",
+      "type": "blob",
+      "sha256": "ffe8e0c814495685a831812adb1f384b9b4a03c78e40db162edceed3d8bd8dc9",
+      "line_count": 3825,
+      "cited_lines": [
+        242,
+        253
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L2485-L2515",
+      "type": "blob",
+      "sha256": "ffe8e0c814495685a831812adb1f384b9b4a03c78e40db162edceed3d8bd8dc9",
+      "line_count": 3825,
+      "cited_lines": [
+        2485,
+        2515
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L2545-L2569",
+      "type": "blob",
+      "sha256": "ffe8e0c814495685a831812adb1f384b9b4a03c78e40db162edceed3d8bd8dc9",
+      "line_count": 3825,
+      "cited_lines": [
+        2545,
+        2569
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L255-L260",
+      "type": "blob",
+      "sha256": "ffe8e0c814495685a831812adb1f384b9b4a03c78e40db162edceed3d8bd8dc9",
+      "line_count": 3825,
+      "cited_lines": [
+        255,
+        260
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L2655-L2725",
+      "type": "blob",
+      "sha256": "ffe8e0c814495685a831812adb1f384b9b4a03c78e40db162edceed3d8bd8dc9",
+      "line_count": 3825,
+      "cited_lines": [
+        2655,
+        2725
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L2736-L2979",
+      "type": "blob",
+      "sha256": "ffe8e0c814495685a831812adb1f384b9b4a03c78e40db162edceed3d8bd8dc9",
+      "line_count": 3825,
+      "cited_lines": [
+        2736,
+        2979
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L2982-L3288",
+      "type": "blob",
+      "sha256": "ffe8e0c814495685a831812adb1f384b9b4a03c78e40db162edceed3d8bd8dc9",
+      "line_count": 3825,
+      "cited_lines": [
+        2982,
+        3288
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L3291-L3446",
+      "type": "blob",
+      "sha256": "ffe8e0c814495685a831812adb1f384b9b4a03c78e40db162edceed3d8bd8dc9",
+      "line_count": 3825,
+      "cited_lines": [
+        3291,
+        3446
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L3448-L3825",
+      "type": "blob",
+      "sha256": "ffe8e0c814495685a831812adb1f384b9b4a03c78e40db162edceed3d8bd8dc9",
+      "line_count": 3825,
+      "cited_lines": [
+        3448,
+        3825
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/message-parts.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/message-parts.tsx#L202-L295",
+      "type": "blob",
+      "sha256": "bd4bc2bc2763191d907b2c18aecdbcec8087bc40ceb8cbf939443b98472b9d1f",
+      "line_count": 295,
+      "cited_lines": [
+        202,
+        295
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/message-parts.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/message-parts.tsx#L43-L199",
+      "type": "blob",
+      "sha256": "bd4bc2bc2763191d907b2c18aecdbcec8087bc40ceb8cbf939443b98472b9d1f",
+      "line_count": 295,
+      "cited_lines": [
+        43,
+        199
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/permission.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/permission.tsx#L113-L622",
+      "type": "blob",
+      "sha256": "6e620c56e73f8222a2da43392ada1d1af2346a9871b13e536fd47ad3d3964495",
+      "line_count": 622,
+      "cited_lines": [
+        113,
+        622
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/rows.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/rows.ts#L27-L185",
+      "type": "blob",
+      "sha256": "160d3f62fd59c40004b3a892dc19d7f8d3a7584bae061da79f9600394d7ebeb6",
+      "line_count": 538,
+      "cited_lines": [
+        27,
+        185
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/rows.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/rows.ts#L427-L482",
+      "type": "blob",
+      "sha256": "160d3f62fd59c40004b3a892dc19d7f8d3a7584bae061da79f9600394d7ebeb6",
+      "line_count": 538,
+      "cited_lines": [
+        427,
+        482
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/sidebar.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/sidebar.tsx#L13-L80",
+      "type": "blob",
+      "sha256": "5ec43052331af28a187826571e27864ccfe77f0c8956d58f3bd8cb10251d5450",
+      "line_count": 80,
+      "cited_lines": [
+        13,
+        80
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/sidebar.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/sidebar.tsx#L50-L70",
+      "type": "blob",
+      "sha256": "5ec43052331af28a187826571e27864ccfe77f0c8956d58f3bd8cb10251d5450",
+      "line_count": 80,
+      "cited_lines": [
+        50,
+        70
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/routes/session/thinking-syntax.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/thinking-syntax.ts#L1-L8",
+      "type": "blob",
+      "sha256": "4b1a9ad03cd0ad89c62199c2165b8815c3bdca06988537a4cdf18a8401cccc2c",
+      "line_count": 8,
+      "cited_lines": [
+        1,
+        8
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/theme/assets/v2/opencode.json",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/theme/assets/v2/opencode.json#L1-L387",
+      "type": "blob",
+      "sha256": "2673cbe2e68c6eb8ae5477f6f06fd1676331084385017acbd3f367107bebe9f1",
+      "line_count": 387,
+      "cited_lines": [
+        1,
+        387
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/theme/assets/v2/opencode2.json",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/theme/assets/v2/opencode2.json#L1-L391",
+      "type": "blob",
+      "sha256": "64006dd33f7bac9661854ae62894381c87bddb57b1fa9925cf24eb1535656e68",
+      "line_count": 391,
+      "cited_lines": [
+        1,
+        391
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/theme/component.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/theme/component.ts#L5-L48",
+      "type": "blob",
+      "sha256": "7251075cd702bd7480b364a4c1d6c5c0def3e78e0bf37623e1965ed707879bc4",
+      "line_count": 51,
+      "cited_lines": [
+        5,
+        48
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/theme/discovery.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/theme/discovery.ts#L4-L21",
+      "type": "blob",
+      "sha256": "570af3ba033a9e16cb5d29e923c0bd69b53a9a4c93f84d39bab69291d00370a3",
+      "line_count": 21,
+      "cited_lines": [
+        4,
+        21
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/theme/index.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/theme/index.ts#L20-L46",
+      "type": "blob",
+      "sha256": "3f9bf6a74a5e42902ed24fd8492b3fe544a6e893ef234bc02b6677e3652ac86e",
+      "line_count": 102,
+      "cited_lines": [
+        20,
+        46
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/theme/index.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/theme/index.ts#L20-L88",
+      "type": "blob",
+      "sha256": "3f9bf6a74a5e42902ed24fd8492b3fe544a6e893ef234bc02b6677e3652ac86e",
+      "line_count": 102,
+      "cited_lines": [
+        20,
+        88
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/theme/system.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/theme/system.ts#L4-L144",
+      "type": "blob",
+      "sha256": "f304c5536923e7d508b8b0af4e5310197a21a71a3f536d79b91ca4afd00f9cc2",
+      "line_count": 144,
+      "cited_lines": [
+        4,
+        144
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/border.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/border.ts#L1-L21",
+      "type": "blob",
+      "sha256": "8a2867b9548186004305e4947dcdaa006cdc1d8d808a9bc2c55678a043c937ed",
+      "line_count": 21,
+      "cited_lines": [
+        1,
+        21
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/border.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/border.ts#L15-L21",
+      "type": "blob",
+      "sha256": "8a2867b9548186004305e4947dcdaa006cdc1d8d808a9bc2c55678a043c937ed",
+      "line_count": 21,
+      "cited_lines": [
+        15,
+        21
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/dialog-alert.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/dialog-alert.tsx#L11-L51",
+      "type": "blob",
+      "sha256": "0db90481134735480d0fc1326ec7ec6f4ed5573905a9fc653846e2efbc230d46",
+      "line_count": 51,
+      "cited_lines": [
+        11,
+        51
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/dialog-confirm.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/dialog-confirm.tsx#L20-L104",
+      "type": "blob",
+      "sha256": "b7be4f539b3739e6f3cb7803d7a15bcd4a91ff2dd0ea26576de17edd104031c4",
+      "line_count": 104,
+      "cited_lines": [
+        20,
+        104
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/dialog-help.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/dialog-help.tsx#L5-L40",
+      "type": "blob",
+      "sha256": "1544d2e79819b67994b251cff7ac4fe12fc4b7fcd0ea864a603158dbbd4fc221",
+      "line_count": 40,
+      "cited_lines": [
+        5,
+        40
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/dialog-prompt.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/dialog-prompt.tsx#L34-L184",
+      "type": "blob",
+      "sha256": "e556c8d24c2af7fbf69e8365d8d618b116c3ad8320d98ad6f9126f5173aa679e",
+      "line_count": 184,
+      "cited_lines": [
+        34,
+        184
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/dialog-select.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/dialog-select.tsx#L125-L993",
+      "type": "blob",
+      "sha256": "86f43fa17785e1b935fb3d484eba9f079f5252b77adeae40b260d920370a3052",
+      "line_count": 993,
+      "cited_lines": [
+        125,
+        993
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/dialog-select.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/dialog-select.tsx#L660-L769",
+      "type": "blob",
+      "sha256": "86f43fa17785e1b935fb3d484eba9f079f5252b77adeae40b260d920370a3052",
+      "line_count": 993,
+      "cited_lines": [
+        660,
+        769
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/dialog-select.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/dialog-select.tsx#L883-L953",
+      "type": "blob",
+      "sha256": "86f43fa17785e1b935fb3d484eba9f079f5252b77adeae40b260d920370a3052",
+      "line_count": 993,
+      "cited_lines": [
+        883,
+        953
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/dialog.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/dialog.tsx#L24-L483",
+      "type": "blob",
+      "sha256": "33cc6de6fc6107a14f266177ca2d288dd69e3ce9e8f0aa205ce3918cc046f690",
+      "line_count": 492,
+      "cited_lines": [
+        24,
+        483
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/dialog.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/dialog.tsx#L92-L303",
+      "type": "blob",
+      "sha256": "33cc6de6fc6107a14f266177ca2d288dd69e3ce9e8f0aa205ce3918cc046f690",
+      "line_count": 492,
+      "cited_lines": [
+        92,
+        303
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/file-path.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/file-path.tsx#L14-L112",
+      "type": "blob",
+      "sha256": "cd6060d6f09d8a59b5faa291b1843be3a584cc8750f3ff42137bbd1f829cddb4",
+      "line_count": 112,
+      "cited_lines": [
+        14,
+        112
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/layout.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/layout.ts#L1-L26",
+      "type": "blob",
+      "sha256": "f46ae53cd6eb15fd250d4091af4a4a8942b0e9a03837f4dd216599bf139e25fc",
+      "line_count": 26,
+      "cited_lines": [
+        1,
+        26
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/pane-resize-handle.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/pane-resize-handle.tsx#L4-L33",
+      "type": "blob",
+      "sha256": "e12605dedf490a59b249261fd159371ab720c1bb5d1f2354876107a309cf3ecc",
+      "line_count": 33,
+      "cited_lines": [
+        4,
+        33
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/pane-resize.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/pane-resize.ts#L4-L76",
+      "type": "blob",
+      "sha256": "80524b19518d0453b69220c2e9f7856b33d0fcb460827a98d9076d6c25218aec",
+      "line_count": 76,
+      "cited_lines": [
+        4,
+        76
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/select-controller.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/select-controller.ts#L1-L11",
+      "type": "blob",
+      "sha256": "b96c04d8eb20825a573c2bca378f6f78418bd51992730e1022bc756a37311940",
+      "line_count": 45,
+      "cited_lines": [
+        1,
+        11
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/spinner.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/spinner.ts#L246-L368",
+      "type": "blob",
+      "sha256": "d20ea2ca5f0ac1ceb60dbc05fbddc4fab581fc4477133be1afdd1a0b0f7eb7a1",
+      "line_count": 368,
+      "cited_lines": [
+        246,
+        368
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/toast.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/toast.tsx#L20-L196",
+      "type": "blob",
+      "sha256": "787d1537a1ff55bc40078ada1412f0e583fa64fc94e57907f0775ce08ba0402f",
+      "line_count": 214,
+      "cited_lines": [
+        20,
+        196
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/working-directory-actions.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/working-directory-actions.tsx#L9-L65",
+      "type": "blob",
+      "sha256": "da06c2f0b709324fa478bb1215eb5635d6fc94e3045174ecdb9d378184ed8186",
+      "line_count": 66,
+      "cited_lines": [
+        9,
+        65
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/ui/working-directory-actions.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/working-directory-actions.tsx#L9-L66",
+      "type": "blob",
+      "sha256": "da06c2f0b709324fa478bb1215eb5635d6fc94e3045174ecdb9d378184ed8186",
+      "line_count": 66,
+      "cited_lines": [
+        9,
+        66
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/util/collapse-tool-output.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/collapse-tool-output.ts#L4-L95",
+      "type": "blob",
+      "sha256": "593aa5c4325991af7382d4635ea8bdcd2021a00727298a251fe556620a9f0e19",
+      "line_count": 95,
+      "cited_lines": [
+        4,
+        95
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/util/locale.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/locale.ts#L19-L27",
+      "type": "blob",
+      "sha256": "b769b19566b74f38aade0b59f46956113c49a6e09dce7b906a0e329eced603ae",
+      "line_count": 99,
+      "cited_lines": [
+        19,
+        27
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/util/permission.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/permission.ts#L23-L188",
+      "type": "blob",
+      "sha256": "a4fb89dd307c297fb75f62b549c834739e086c7548296ae17f915a11f44a70f5",
+      "line_count": 188,
+      "cited_lines": [
+        23,
+        188
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/util/scroll.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/scroll.ts#L10-L29",
+      "type": "blob",
+      "sha256": "01f408307627b9c61378463a281724405f84d5c5b0797661170d24c80342c5d7",
+      "line_count": 29,
+      "cited_lines": [
+        10,
+        29
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/util/selection.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/selection.ts#L34-L103",
+      "type": "blob",
+      "sha256": "d718400ec6fc5d5ae5843b8c52f6fcfb40da0465ce6585abfbaeac85e2951b7d",
+      "line_count": 103,
+      "cited_lines": [
+        34,
+        103
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/util/session.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/session.ts#L10-L44",
+      "type": "blob",
+      "sha256": "515ece1b418732b0dfe64338845f9e310fdcf6130651f2ae3f99526f1008ede9",
+      "line_count": 66,
+      "cited_lines": [
+        10,
+        44
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/util/session.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/session.ts#L46-L66",
+      "type": "blob",
+      "sha256": "515ece1b418732b0dfe64338845f9e310fdcf6130651f2ae3f99526f1008ede9",
+      "line_count": 66,
+      "cited_lines": [
+        46,
+        66
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/util/signal.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/signal.ts#L20-L49",
+      "type": "blob",
+      "sha256": "dd65f6ddcb6c26bcddbcaa8b56db79dbca76aa9dcfdb55b616e762f5cbad84f9",
+      "line_count": 49,
+      "cited_lines": [
+        20,
+        49
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/util/string-width.bun.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/string-width.bun.ts#L1",
+      "type": "blob",
+      "sha256": "09e45ecb3f3e3e4b87439eb939b148d92ba971007c0a760707dcb0736133d622",
+      "line_count": 1,
+      "cited_lines": [
+        1,
+        1
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/util/string-width.node.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/string-width.node.ts#L1-L26",
+      "type": "blob",
+      "sha256": "03d27cce3ff9b9be528a328497ddefba635ced5fea0ffca97c59eb396c492876",
+      "line_count": 26,
+      "cited_lines": [
+        1,
+        26
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/util/todo.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/todo.ts#L25-L43",
+      "type": "blob",
+      "sha256": "72314546a440b6c1a156390de3a92c6cc60575cc22e85d323e08ba146ea738dc",
+      "line_count": 43,
+      "cited_lines": [
+        25,
+        43
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/src/util/tool-display.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/tool-display.ts#L1-L68",
+      "type": "blob",
+      "sha256": "07d3a0cf620b437a0da227e5870f379f531d40042ca72e607487e6ed8028b9c3",
+      "line_count": 70,
+      "cited_lines": [
+        1,
+        68
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/test/component/session-tabs-mouse.test.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/test/component/session-tabs-mouse.test.tsx#L13-L216",
+      "type": "blob",
+      "sha256": "d2c5f58cb8b6a36eb04e890244a005e8d76272cf3faa364af257e79172f58c7c",
+      "line_count": 216,
+      "cited_lines": [
+        13,
+        216
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/test/component/session-tabs-rail.test.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/test/component/session-tabs-rail.test.tsx#L118-L121",
+      "type": "blob",
+      "sha256": "d0c0d21b6b1a4391088aa9f8440785a5ca4c47a71b3c769a5a0b5702cf14bfa9",
+      "line_count": 125,
+      "cited_lines": [
+        118,
+        121
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/test/component/session-tabs-rail.test.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/test/component/session-tabs-rail.test.tsx#L17-L125",
+      "type": "blob",
+      "sha256": "d0c0d21b6b1a4391088aa9f8440785a5ca4c47a71b3c769a5a0b5702cf14bfa9",
+      "line_count": 125,
+      "cited_lines": [
+        17,
+        125
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/test/context/session-tabs-model.test.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/test/context/session-tabs-model.test.ts#L246-L333",
+      "type": "blob",
+      "sha256": "dbf4e520a781059b973ab93e49f10464e06c691fa802f37a5aa2201867f4cb61",
+      "line_count": 333,
+      "cited_lines": [
+        246,
+        333
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/test/context/session-tabs.test.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/test/context/session-tabs.test.tsx#L356-L374",
+      "type": "blob",
+      "sha256": "87a98adc2f1e91405e51a2ecf1d32f225186fc8c644158a3cf9b68795991bb17",
+      "line_count": 851,
+      "cited_lines": [
+        356,
+        374
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/test/context/theme.test.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/test/context/theme.test.tsx#L12-L67",
+      "type": "blob",
+      "sha256": "104024f0853ac5d74e32dce9ceb9c7d16dee1b0028570b49a2f9998909c5d940",
+      "line_count": 67,
+      "cited_lines": [
+        12,
+        67
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/test/prompt-offset.test.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/test/prompt-offset.test.tsx#L11-L58",
+      "type": "blob",
+      "sha256": "273d0b0bdc45dce1e663594dda8c5befdf9f4edb03a0e3cd12244a726ff70d24",
+      "line_count": 58,
+      "cited_lines": [
+        11,
+        58
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/test/theme/v2/component.test.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/test/theme/v2/component.test.ts#L8-L87",
+      "type": "blob",
+      "sha256": "301986154a9a86f74a4aa6974023ccf1e10f1acfc57aeab4eafc6879a7e19f06",
+      "line_count": 87,
+      "cited_lines": [
+        8,
+        87
+      ]
+    },
+    {
+      "repository": "opencode",
+      "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "path": "packages/tui/test/theme/v2/resolve.test.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/test/theme/v2/resolve.test.ts#L203-L222",
+      "type": "blob",
+      "sha256": "55192822398077718dbae37c52fce1e5f61e9070a841983fa5d68ee40e25169a",
+      "line_count": 389,
+      "cited_lines": [
+        203,
+        222
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/core/src/NativeSession.ts",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/core/src/NativeSession.ts#L760-L812",
+      "type": "blob",
+      "sha256": "8c49abfddcbcc1db4c80a852e27ee60dc9ffc52c08e82b47f63f66314899b6b6",
+      "line_count": 916,
+      "cited_lines": [
+        760,
+        812
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/core/src/lib/stdin-parser.ts",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/core/src/lib/stdin-parser.ts#L1-L100",
+      "type": "blob",
+      "sha256": "0af1a1e3a8d8824a380a02bbbbc37b8fa5f9c4cf984f0a4b08b81d6b1a87dee7",
+      "line_count": 2074,
+      "cited_lines": [
+        1,
+        100
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/core/src/lib/tree-sitter/client.ts",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/core/src/lib/tree-sitter/client.ts#L40-L147",
+      "type": "blob",
+      "sha256": "aa4b27a1ca85b7f12b1be4899e940c46b62a1be1d9b421ebc7de428e2e17809b",
+      "line_count": 858,
+      "cited_lines": [
+        40,
+        147
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/core/src/lib/tree-sitter/parser.worker.ts",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/core/src/lib/tree-sitter/parser.worker.ts#L1-L45",
+      "type": "blob",
+      "sha256": "ea83f6c1cde55d8ac1bbdce7d6252d420cddbd7c848a66765e918fb39a9666bd",
+      "line_count": 1120,
+      "cited_lines": [
+        1,
+        45
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/core/src/renderables/Code.ts",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/core/src/renderables/Code.ts#L47-L170",
+      "type": "blob",
+      "sha256": "ee09354b76c5418a4a1b24106f6324eca84fad35528e2298c6ac6a10cca60b4b",
+      "line_count": 652,
+      "cited_lines": [
+        47,
+        170
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/core/src/renderables/Diff.ts",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/core/src/renderables/Diff.ts#L1-L120",
+      "type": "blob",
+      "sha256": "b922f8dd12466b6eab588d95b3cd92a6ca443e64f2c05808d9d71d1ef6373c09",
+      "line_count": 1361,
+      "cited_lines": [
+        1,
+        120
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/core/src/renderables/Markdown.ts",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/core/src/renderables/Markdown.ts#L1-L165",
+      "type": "blob",
+      "sha256": "f1487184371f54bc86c50af9eb3b2419b00ec32dc797e824045c8333be3e1501",
+      "line_count": 2402,
+      "cited_lines": [
+        1,
+        165
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/core/src/renderables/ScrollBox.ts",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/core/src/renderables/ScrollBox.ts#L510-L712",
+      "type": "blob",
+      "sha256": "bdf99b8f1bc1c0883e5888e1d801c9b495c78014d137bf1e325932820601c018",
+      "line_count": 894,
+      "cited_lines": [
+        510,
+        712
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/core/src/renderables/__tests__/Markdown.test.ts",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/core/src/renderables/__tests__/Markdown.test.ts#L1553-L1639",
+      "type": "blob",
+      "sha256": "e405fe3fa40cb33f9cba21da0e7c562788e788f626250b49263a51093614ac25",
+      "line_count": 4960,
+      "cited_lines": [
+        1553,
+        1639
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/core/src/renderables/__tests__/Markdown.test.ts",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/core/src/renderables/__tests__/Markdown.test.ts#L3842-L3876",
+      "type": "blob",
+      "sha256": "e405fe3fa40cb33f9cba21da0e7c562788e788f626250b49263a51093614ac25",
+      "line_count": 4960,
+      "cited_lines": [
+        3842,
+        3876
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/core/src/renderables/__tests__/Markdown.test.ts",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/core/src/renderables/__tests__/Markdown.test.ts#L4170-L4203",
+      "type": "blob",
+      "sha256": "e405fe3fa40cb33f9cba21da0e7c562788e788f626250b49263a51093614ac25",
+      "line_count": 4960,
+      "cited_lines": [
+        4170,
+        4203
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/core/src/renderables/markdown-parser.ts",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/core/src/renderables/markdown-parser.ts#L1-L79",
+      "type": "blob",
+      "sha256": "4a751f8dd381172ae99ad5eb86decac3ba56c7719e1aa8067f78e034fe5effc8",
+      "line_count": 79,
+      "cited_lines": [
+        1,
+        79
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/core/src/renderer.ts",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/core/src/renderer.ts#L3420-L3488",
+      "type": "blob",
+      "sha256": "4ba8aed4c9a060f61712b8c4d881bbc8775304c9c56d9a94223aa096aeb54760",
+      "line_count": 5594,
+      "cited_lines": [
+        3420,
+        3488
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/core/src/tests/renderer.native-scene-markdown.test.ts",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/core/src/tests/renderer.native-scene-markdown.test.ts#L16-L100",
+      "type": "blob",
+      "sha256": "556141a3b42146f38f32fa5fd62a158816631715aa75bb6ae29af29a93d0c966",
+      "line_count": 100,
+      "cited_lines": [
+        16,
+        100
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/core/src/tests/renderer.native-scene-scroll-lifecycle.test.ts",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/core/src/tests/renderer.native-scene-scroll-lifecycle.test.ts#L49-L128",
+      "type": "blob",
+      "sha256": "ba479a1f7a7a11f91f1c5e103b639e3da17845fbb278e6076829cde59db028b6",
+      "line_count": 155,
+      "cited_lines": [
+        49,
+        128
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/core/src/tests/yoga-callback-boundary.test.ts",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/core/src/tests/yoga-callback-boundary.test.ts#L1-L22",
+      "type": "blob",
+      "sha256": "a7400d694f195091e01bc40684cd12df5ad465fd90a31dc7d8b86566521e1d53",
+      "line_count": 22,
+      "cited_lines": [
+        1,
+        22
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/native/README.md",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/native/README.md#L1-L75",
+      "type": "blob",
+      "sha256": "92e5b9945d895de444c590d59d3bd8f627c6354741b34ba30749da27a266a837",
+      "line_count": 77,
+      "cited_lines": [
+        1,
+        75
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/native/build.zig",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/native/build.zig#L377-L392",
+      "type": "blob",
+      "sha256": "2689dfbfb8595012a2dbd07e71493be7f7c3ed94170387647fe555d1d0be25cc",
+      "line_count": 882,
+      "cited_lines": [
+        377,
+        392
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/native/include/opentui.h",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/native/include/opentui.h#L10-L105",
+      "type": "blob",
+      "sha256": "52190da4b586b7544d7970fe9e4e49da243f540f38b26e8419d95bc721d5e9f3",
+      "line_count": 2899,
+      "cited_lines": [
+        10,
+        105
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/native/include/opentui.h",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/native/include/opentui.h#L532-L627",
+      "type": "blob",
+      "sha256": "52190da4b586b7544d7970fe9e4e49da243f540f38b26e8419d95bc721d5e9f3",
+      "line_count": 2899,
+      "cited_lines": [
+        532,
+        627
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/native/src/context-abi.zig",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/native/src/context-abi.zig#L35-L101",
+      "type": "blob",
+      "sha256": "6ab946ea6b3a938b97e6ca1c691cc6848c5372a335e2930d6dd6087e81126b3c",
+      "line_count": 4963,
+      "cited_lines": [
+        35,
+        101
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/native/src/native-renderable.zig",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/native/src/native-renderable.zig#L8-L100",
+      "type": "blob",
+      "sha256": "b80520edbbb012a85c5daeacb4a4667d42344310c5449894e659e6aec65ee60c",
+      "line_count": 172,
+      "cited_lines": [
+        8,
+        100
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/native/src/scene.zig",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/native/src/scene.zig#L1096-L1106",
+      "type": "blob",
+      "sha256": "d5d0755db09314a8ae4af62dd22f56805f45e9e9b1a63598bbb92670fb4774ba",
+      "line_count": 1893,
+      "cited_lines": [
+        1096,
+        1106
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/native/src/scene.zig",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/native/src/scene.zig#L1543-L1668",
+      "type": "blob",
+      "sha256": "d5d0755db09314a8ae4af62dd22f56805f45e9e9b1a63598bbb92670fb4774ba",
+      "line_count": 1893,
+      "cited_lines": [
+        1543,
+        1668
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/native/src/split-scrollback.zig",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/native/src/split-scrollback.zig#L1-L87",
+      "type": "blob",
+      "sha256": "39e428355e754eba8d0aa21ae01c91899870306af080938ba80245c5ccd66f9a",
+      "line_count": 88,
+      "cited_lines": [
+        1,
+        87
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/native/src/tests/context_test.zig",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/native/src/tests/context_test.zig#L57-L120",
+      "type": "blob",
+      "sha256": "cc9d5a76d9476b62bd23200ad928d7b553e71fd49d1152ae79f90189bca5d460",
+      "line_count": 661,
+      "cited_lines": [
+        57,
+        120
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/solid/src/reconciler.ts",
+      "url": "https://github.com/anomalyco/opentui/blob/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/solid/src/reconciler.ts#L29-L290",
+      "type": "blob",
+      "sha256": "8dac8c18c6a8998f5372e52a6a3e014a14b12e3e1b72b8369cf093940a3b6798",
+      "line_count": 466,
+      "cited_lines": [
+        29,
+        290
+      ]
+    },
+    {
+      "repository": "opentui",
+      "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+      "path": "packages/core",
+      "url": "https://github.com/anomalyco/opentui/tree/8d6065a3e60039d16c6ee697692dcfbc46d3c786/packages/core",
+      "type": "tree"
+    }
+  ],
+  "validation_errors": []
+}

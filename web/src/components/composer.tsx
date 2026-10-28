@@ -16,7 +16,6 @@ import {
   Plus,
   SlidersHorizontal,
   Square,
-  Search,
   X,
   Wrench,
 } from 'lucide-react'
@@ -39,6 +38,8 @@ import {
 import {
   modelKey,
   modelLabel,
+  type AgentMention,
+  type ConfiguredCommand,
   type DraftAttachment,
   type ModelSummary,
   type WebCapabilities,
@@ -72,6 +73,8 @@ interface ComposerProps {
   attachmentsAvailable?: boolean
   attachmentUnavailableReason?: string
   capabilities?: WebCapabilities | null
+  commands?: ConfiguredCommand[]
+  agents?: AgentMention[]
   models: ModelSummary[]
   selectedModel: string
   onModelChange: (model: string) => void
@@ -182,6 +185,8 @@ export function Composer({
   attachmentsAvailable = true,
   attachmentUnavailableReason,
   capabilities = null,
+  commands = [],
+  agents = [],
   models,
   selectedModel,
   onModelChange,
@@ -198,6 +203,53 @@ export function Composer({
   const [draftError, setDraftError] = useState('')
   const [effort, setEffort] = useState<ReasoningEffort>('high')
   const [submitting, setSubmitting] = useState(false)
+  const [palette, setPalette] = useState<'commands' | 'agents' | null>(null)
+  const [suggestionIndex, setSuggestionIndex] = useState(0)
+
+  const commandTrigger = /(?:^|\n)\/([\w-]*)$/.exec(draftText)
+  const mentionTrigger = /(?:^|\s)@([\w-]*)$/.exec(draftText)
+  const activePalette = palette ?? (mentionTrigger ? 'agents' : commandTrigger ? 'commands' : null)
+  const suggestionQuery = palette ? '' : activePalette === 'agents' ? mentionTrigger?.[1] ?? '' : commandTrigger?.[1] ?? ''
+  const suggestions = activePalette === 'commands'
+    ? commands.filter((item) => item.name.toLowerCase().includes(suggestionQuery.toLowerCase())).slice(0, 12)
+        .map((item) => ({ key: `/${item.name}`, description: item.description }))
+    : activePalette === 'agents'
+      ? agents.filter((item) => item.name.toLowerCase().includes(suggestionQuery.toLowerCase())).slice(0, 12)
+          .map((item) => ({ key: `@${item.name}`, description: item.description }))
+      : []
+
+  /** Replace just the trigger text in the current text node, preserving rich/code blocks. */
+  const acceptSuggestion = (key: string) => {
+    const editor = editorRef.current
+    if (!editor) return
+    editor.focus()
+    const selection = window.getSelection()
+    const anchor = selection?.anchorNode
+    const offset = selection?.anchorOffset ?? 0
+    if (anchor?.nodeType === Node.TEXT_NODE && editor.contains(anchor)) {
+      const before = (anchor.textContent ?? '').slice(0, offset)
+      const token = /([@/][\w-]*)$/.exec(before)
+      if (token && token[1][0] === key[0]) {
+        const range = document.createRange()
+        range.setStart(anchor, offset - token[1].length)
+        range.setEnd(anchor, offset)
+        range.deleteContents()
+        const inserted = document.createTextNode(`${key} `)
+        range.insertNode(inserted)
+        range.setStartAfter(inserted)
+        range.collapse(true)
+        selection?.removeAllRanges()
+        selection?.addRange(range)
+      } else {
+        editor.append(document.createTextNode(`${key} `))
+      }
+    } else {
+      editor.append(document.createTextNode(`${key} `))
+    }
+    setPalette(null)
+    setSuggestionIndex(0)
+    syncDraft()
+  }
 
   const modelItems = useMemo(
     () =>
@@ -267,6 +319,23 @@ export function Composer({
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (activePalette && !event.nativeEvent.isComposing) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setPalette(null)
+        return
+      }
+      if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && suggestions.length > 0) {
+        event.preventDefault()
+        setSuggestionIndex((current) => (current + (event.key === 'ArrowDown' ? 1 : -1) + suggestions.length) % suggestions.length)
+        return
+      }
+      if (event.key === 'Enter' && !event.shiftKey && suggestions.length > 0) {
+        event.preventDefault()
+        acceptSuggestion(suggestions[Math.min(suggestionIndex, suggestions.length - 1)].key)
+        return
+      }
+    }
     if (
       event.key === 'Enter' &&
       !event.shiftKey &&
@@ -348,6 +417,7 @@ export function Composer({
         aria-multiline="true"
         aria-busy={submitting || running || undefined}
         aria-describedby="composer-help composer-draft-status"
+        aria-autocomplete={activePalette ? 'list' : undefined}
         contentEditable={!disabled && !running}
         suppressContentEditableWarning
         data-placeholder={disabled ? 'Select or create a chat to start' : 'Ask anything'}
@@ -355,6 +425,28 @@ export function Composer({
         onKeyDown={onKeyDown}
         onPaste={onPaste}
       />
+
+      {activePalette && !running && !disabled ? (
+        <div id="composer-suggestions" className="codex-suggestions" role="listbox" aria-label={activePalette === 'agents' ? 'Agent mentions' : 'Slash commands'}>
+          <p className="codex-suggestions-label">{activePalette === 'agents' ? 'Mention an agent' : 'Configured commands'}</p>
+          {suggestions.length ? suggestions.map((item, index) => (
+            <button
+              type="button"
+              key={item.key}
+              role="option"
+              aria-selected={index === suggestionIndex}
+              className="codex-suggestion"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => acceptSuggestion(item.key)}
+            >
+              <strong>{item.key}</strong>
+              <span>{item.description || 'No description'}</span>
+            </button>
+          )) : (
+            <p className="codex-suggestions-empty">No matching {activePalette === 'agents' ? 'agents' : 'configured commands'} reported by the daemon.</p>
+          )}
+        </div>
+      ) : null}
 
       {attachments.length > 0 ? (
         <div className="codex-attachment-area">
@@ -449,32 +541,17 @@ export function Composer({
             </DropdownMenu>
           </DropdownMenuTrigger>
 
-          <DropdownMenuTrigger>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="codex-composer-icon-button"
-              aria-label="Commands and mentions"
-              isDisabled={disabled || running}
-            >
-              <Command aria-hidden="true" />
-            </Button>
-            <DropdownMenu placement="top start" className="w-72" isNonModal>
-              <DropdownMenuLabel>Structured capabilities</DropdownMenuLabel>
-              <DropdownMenuItem isDisabled>Slash commands · native endpoint unavailable</DropdownMenuItem>
-              <DropdownMenuItem isDisabled>Mentions · native endpoint unavailable</DropdownMenuItem>
-              <DropdownMenuItem isDisabled>Queue / steer · native endpoint unavailable</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem isDisabled>
-                <Search aria-hidden="true" />
-                Search · {capabilities?.search.reason ?? 'capability discovery unavailable'}
-              </DropdownMenuItem>
-              <DropdownMenuItem isDisabled>
-                <Search aria-hidden="true" />
-                Deep research · {capabilities?.deep_research.reason ?? 'capability discovery unavailable'}
-              </DropdownMenuItem>
-            </DropdownMenu>
-          </DropdownMenuTrigger>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="codex-composer-icon-button"
+            aria-label="Commands and mentions"
+            aria-expanded={Boolean(activePalette)}
+            isDisabled={disabled || running}
+            onPress={() => { setPalette((current) => current === 'commands' ? 'agents' : 'commands'); setSuggestionIndex(0); editorRef.current?.focus() }}
+          >
+            <Command aria-hidden="true" />
+          </Button>
 
           <Select
             selectedKey={selectedModel || null}

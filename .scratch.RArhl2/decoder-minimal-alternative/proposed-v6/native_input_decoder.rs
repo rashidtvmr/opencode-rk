@@ -1,0 +1,716 @@
+//! Bounded framing for raw terminal input.
+//!
+//! Terminal escape sequences are a protocol, not composer text.  This decoder
+//! retains fixed-size keyboard prefixes and at most one 32 KiB paste body.
+//! Only a complete, valid UTF-8 paste becomes an atomic event; rejected frames
+//! are consumed through their closing marker without leaking keyboard events.
+//! OSC and other terminal reply strings are discarded with constant-size state
+//! through their terminator, including replies split across input reads.
+//! The caller's four-byte UTF-8 decoder still handles ordinary input.
+
+use std::time::{Duration, Instant};
+
+pub(crate) const ESCAPE_GRACE: Duration = Duration::from_millis(150);
+pub(crate) const MAX_PASTE_BYTES: usize = 32 * 1024;
+const PASTE_FRAME_TIMEOUT: Duration = Duration::from_secs(5);
+const CONTROL_STRING_TIMEOUT: Duration = Duration::from_secs(5);
+const PASTE_END: &[u8] = b"\x1b[201~";
+const MAX_SEQUENCE: usize = 32;
+const MAX_EVENTS: usize = 8;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum InputEvent {
+    Byte(u8),
+    Escape,
+    ArrowUp,
+    ArrowDown,
+    ArrowLeft,
+    ArrowRight,
+    Paste(String),
+    Mouse { x: u16, y: u16, kind: u8, modifiers: u8 },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum State {
+    Ground,
+    Escape,
+    Csi,
+    Ss3,
+    DiscardCsi,
+    DiscardSs3,
+    ControlString {
+        bell_terminated: bool,
+        escape: bool,
+        abandoned: bool,
+    },
+    Paste,
+    DiscardPaste,
+    AbandonedPaste,
+}
+
+#[derive(Debug)]
+pub(crate) struct TerminalInputDecoder {
+    state: State,
+    sequence: [u8; MAX_SEQUENCE],
+    len: usize,
+    deadline: Option<Instant>,
+    paste: Vec<u8>,
+    paste_end_len: usize,
+    paste_deadline: Option<Instant>,
+    string_deadline: Option<Instant>,
+    events: [Option<InputEvent>; MAX_EVENTS],
+    head: usize,
+    count: usize,
+}
+
+impl Default for TerminalInputDecoder {
+    fn default() -> Self {
+        Self {
+            state: State::Ground,
+            sequence: [0; MAX_SEQUENCE],
+            len: 0,
+            deadline: None,
+            paste: Vec::new(),
+            paste_end_len: 0,
+            paste_deadline: None,
+            string_deadline: None,
+            events: std::array::from_fn(|_| None),
+            head: 0,
+            count: 0,
+        }
+    }
+}
+
+impl TerminalInputDecoder {
+    pub(crate) fn has_event(&self) -> bool {
+        self.count != 0
+    }
+
+    pub(crate) fn next_deadline(&self) -> Option<Instant> {
+        self.deadline
+    }
+
+    pub(crate) fn pop(&mut self) -> Option<InputEvent> {
+        if self.count == 0 {
+            return None;
+        }
+        let event = self.events[self.head].take();
+        self.head = (self.head + 1) % MAX_EVENTS;
+        self.count -= 1;
+        event
+    }
+
+    pub(crate) fn push(&mut self, byte: u8, now: Instant) {
+        self.expire(now);
+        // Ctrl-C/Ctrl-D must remain immediate even while a hostile sequence is
+        // incomplete, but inside paste framing they are literal payload bytes.
+        if matches!(byte, 3 | 4)
+            && !matches!(
+                self.state,
+                State::Paste | State::DiscardPaste | State::AbandonedPaste
+            )
+        {
+            self.reset();
+            self.emit(InputEvent::Byte(byte));
+            return;
+        }
+        match self.state {
+            State::Ground => {
+                if byte == 0x1b {
+                    self.state = State::Escape;
+                    self.deadline = Some(now + ESCAPE_GRACE);
+                } else {
+                    self.emit(InputEvent::Byte(byte));
+                }
+            }
+            State::Escape => match byte {
+                b'[' => self.begin(State::Csi, now),
+                b'O' => self.begin(State::Ss3, now),
+                b']' => self.begin_control_string(true, now),
+                b'P' | b'_' | b'^' | b'X' => self.begin_control_string(false, now),
+                0x1b => self.deadline = Some(now + ESCAPE_GRACE),
+                _ => {
+                    self.emit(InputEvent::Escape);
+                    self.reset();
+                    self.push(byte, now);
+                }
+            },
+            State::Csi | State::Ss3 => self.sequence_byte(byte, now),
+            State::ControlString {
+                bell_terminated,
+                escape,
+                abandoned,
+            } => {
+                if (bell_terminated && byte == 0x07) || (escape && byte == b'\\') {
+                    self.reset();
+                } else {
+                    self.state = State::ControlString {
+                        bell_terminated,
+                        escape: byte == 0x1b,
+                        abandoned,
+                    };
+                    self.deadline = if abandoned {
+                        (byte == 0x1b).then(|| now + ESCAPE_GRACE)
+                    } else {
+                        self.string_deadline.map(|end| end.min(now + ESCAPE_GRACE))
+                    };
+                }
+            }
+            State::Paste | State::DiscardPaste | State::AbandonedPaste => {
+                self.paste_byte(byte, now)
+            }
+            State::DiscardCsi | State::DiscardSs3 => {
+                if (0x40..=0x7e).contains(&byte) {
+                    self.reset();
+                } else if byte == 0x1b {
+                    self.state = State::Escape;
+                    self.deadline = Some(now + ESCAPE_GRACE);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn expire(&mut self, now: Instant) {
+        if self.deadline.is_some_and(|deadline| now >= deadline) {
+            if let State::ControlString {
+                bell_terminated,
+                escape,
+                abandoned,
+            } = self.state
+            {
+                if abandoned && escape {
+                    self.reset();
+                    self.emit(InputEvent::Escape);
+                } else {
+                    // An idle or overlong reply is abandoned, not converted
+                    // into text. A new quiet ESC provides explicit recovery,
+                    // as for an abandoned paste. A late ST can still close it.
+                    self.state = State::ControlString {
+                        bell_terminated,
+                        escape,
+                        abandoned: true,
+                    };
+                    self.deadline = None;
+                    self.string_deadline = None;
+                }
+                return;
+            }
+            if self.state == State::Paste {
+                self.discard_paste();
+                self.state = State::AbandonedPaste;
+                return;
+            }
+            // Only a bare ESC has an ambiguous user meaning.  A timed-out
+            // CSI/SS3 (including an overflow discard state) is protocol
+            // garbage and must not clear the composer or synthesize Escape.
+            // After an abandoned paste, a fresh, quiet standalone ESC allows
+            // explicit recovery. Oversized frames never use this escape hatch.
+            if self.state == State::Escape
+                || (self.state == State::AbandonedPaste && self.paste_end_len == 1)
+            {
+                self.reset();
+                self.emit(InputEvent::Escape);
+            } else {
+                self.state = match self.state {
+                    State::Csi => State::DiscardCsi,
+                    State::Ss3 => State::DiscardSs3,
+                    State::DiscardCsi => State::DiscardCsi,
+                    State::DiscardSs3 => State::DiscardSs3,
+                    State::Paste | State::DiscardPaste | State::AbandonedPaste => self.state,
+                    State::ControlString { .. } => self.state,
+                    State::Ground | State::Escape => State::Ground,
+                };
+                self.len = 0;
+                self.deadline = None;
+            }
+        }
+    }
+
+    fn begin(&mut self, state: State, now: Instant) {
+        self.state = state;
+        self.len = 0;
+        self.deadline = Some(now + ESCAPE_GRACE);
+    }
+
+    fn begin_control_string(&mut self, bell_terminated: bool, now: Instant) {
+        self.reset();
+        self.state = State::ControlString {
+            bell_terminated,
+            escape: false,
+            abandoned: false,
+        };
+        self.string_deadline = Some(now + CONTROL_STRING_TIMEOUT);
+        self.deadline = Some(now + ESCAPE_GRACE);
+        // Retain no payload. Timing out abandons framing without releasing a
+        // late reply tail into the composer. Ctrl-C/Ctrl-D keep exit priority.
+    }
+
+    fn sequence_byte(&mut self, byte: u8, now: Instant) {
+        self.deadline = Some(now + ESCAPE_GRACE);
+        if (0x40..=0x7e).contains(&byte) {
+            if self.state == State::Csi && byte == b'~' && &self.sequence[..self.len] == b"200" {
+                self.begin_paste(now);
+                return;
+            }
+            // Decode only unmodified keyboard arrows. Other CSI reports and
+            // modifier/intermediate forms remain protocol, never typed text.
+            if matches!(byte, b'A' | b'B' | b'C' | b'D')
+                && (self.len == 0
+                    || (self.state == State::Csi && &self.sequence[..self.len] == b"1"))
+            {
+                self.emit(if byte == b'A' {
+                    InputEvent::ArrowUp
+                } else if byte == b'B' {
+                    InputEvent::ArrowDown
+                } else if byte == b'C' {
+                    InputEvent::ArrowRight
+                } else {
+                    InputEvent::ArrowLeft
+                });
+            } else if self.state == State::Csi && byte == b'u' {
+                self.decode_kitty();
+            } else if self.state == State::Csi
+                && matches!(byte, b'M' | b'm')
+                && self.sequence.first() == Some(&b'<')
+            {
+                if let Some(event) = decode_mouse(&self.sequence[..self.len], byte) {
+                    self.emit(event);
+                }
+            }
+            self.reset();
+        } else if byte == 0x1b {
+            self.state = State::Escape;
+            self.len = 0;
+        } else if self.len < MAX_SEQUENCE {
+            // CSI parameter/intermediate bytes are printable protocol bytes;
+            // other controls are malformed and enter fail-closed discard.
+            if byte < 0x20 {
+                self.state = if self.state == State::Csi {
+                    State::DiscardCsi
+                } else {
+                    State::DiscardSs3
+                };
+                self.deadline = None;
+            } else {
+                self.sequence[self.len] = byte;
+                self.len += 1;
+            }
+        } else {
+            self.state = if self.state == State::Csi {
+                State::DiscardCsi
+            } else {
+                State::DiscardSs3
+            };
+            self.len = 0;
+            self.deadline = None;
+        }
+    }
+
+    fn begin_paste(&mut self, now: Instant) {
+        self.state = State::Paste;
+        self.len = 0;
+        self.paste = Vec::with_capacity(MAX_PASTE_BYTES);
+        self.paste_end_len = 0;
+        self.paste_deadline = Some(now + PASTE_FRAME_TIMEOUT);
+        self.deadline = Some(now + ESCAPE_GRACE);
+    }
+
+    fn paste_byte(&mut self, byte: u8, now: Instant) {
+        if self.state == State::Paste {
+            // Bound both idle time and total frame lifetime: repeated bytes
+            // cannot keep an incomplete frame alive indefinitely.
+            self.deadline = self.paste_deadline.map(|end| end.min(now + ESCAPE_GRACE));
+        }
+        if byte == PASTE_END[self.paste_end_len] {
+            self.paste_end_len += 1;
+            if self.paste_end_len == PASTE_END.len() {
+                let body = std::mem::take(&mut self.paste);
+                let complete = self.state == State::Paste;
+                self.reset();
+                if complete {
+                    // Reject invalid UTF-8 as a whole. Normalize only after
+                    // framing, so CR/LF can never reach keyboard dispatch.
+                    if let Ok(text) = String::from_utf8(body) {
+                        self.emit(InputEvent::Paste(
+                            text.replace("\r\n", "\n").replace('\r', "\n"),
+                        ));
+                    }
+                }
+                return;
+            }
+        } else {
+            // The retained marker prefix is literal body if it fails to
+            // match. The marker has no overlapping prefix except a new ESC.
+            self.append_paste(&PASTE_END[..self.paste_end_len]);
+            self.paste_end_len = 0;
+            if byte == 0x1b {
+                self.paste_end_len = 1;
+            } else {
+                self.append_paste(&[byte]);
+            }
+        }
+        if self.state == State::AbandonedPaste {
+            self.deadline = (self.paste_end_len == 1).then(|| now + ESCAPE_GRACE);
+        }
+    }
+
+    fn append_paste(&mut self, bytes: &[u8]) {
+        if self.state != State::Paste {
+            return;
+        }
+        if self
+            .paste
+            .len()
+            .checked_add(bytes.len())
+            .is_some_and(|len| len <= MAX_PASTE_BYTES)
+        {
+            self.paste.extend_from_slice(bytes);
+        } else {
+            self.discard_paste();
+        }
+    }
+
+    fn discard_paste(&mut self) {
+        self.state = State::DiscardPaste;
+        self.paste = Vec::new();
+        self.paste_deadline = None;
+        self.deadline = None;
+        // Keep marker progress while consuming the rest of a rejected frame.
+    }
+
+    fn decode_kitty(&mut self) {
+        // Kitty keyboard: codepoint;mod[:event]u.  The event field is after
+        // the colon, not a third semicolon-separated parameter.  A missing
+        // event means press (the frozen c fixture is CSI 99;1u).
+        let mut split = self.sequence[..self.len].splitn(2, |byte| *byte == b';');
+        let Some(codepoint) = parse_number(split.next().unwrap_or_default()) else {
+            return;
+        };
+        let Some(modifiers) = split.next() else {
+            return;
+        };
+        let (modifier, event_type) = match modifiers.iter().position(|byte| *byte == b':') {
+            Some(index) => {
+                let Some(modifier) = parse_number(&modifiers[..index]) else {
+                    return;
+                };
+                let Some(event) = parse_number(&modifiers[index + 1..]) else {
+                    return;
+                };
+                (modifier, event)
+            }
+            None => {
+                let Some(modifier) = parse_number(modifiers) else {
+                    return;
+                };
+                (modifier, 1)
+            }
+        };
+        if !matches!(event_type, 1 | 2) {
+            return;
+        } // release is not text; repeat has the same printable press value
+        if modifier == 1 {
+            // Only the private-use horizontal-cursor codepoints are protocol keys.
+            // Every other Shift codepoint falls through to the scalar/private-use
+            // guard, the modifier-0 check, and ordinary UTF-8 byte emission.
+            match codepoint {
+                57350 => { self.emit(InputEvent::ArrowLeft); return; }
+                57351 => { self.emit(InputEvent::ArrowRight); return; }
+                _ => {}
+            }
+        }
+        if (0xE000..=0xF8FF).contains(&codepoint) || codepoint > 0x10FFFF {
+            return;
+        }
+        let Some(character) = char::from_u32(codepoint) else {
+            return;
+        };
+        if modifier == 0 {
+            return;
+        }
+        let modifier_bits = modifier - 1;
+        // Only the explicit Ctrl-letter mapping is text-safe.  In particular,
+        // never turn modified punctuation into arbitrary C0 controls.
+        const SHIFT: u32 = 0b001;
+        const CTRL: u32 = 0b100;
+        const CAPS_LOCK: u32 = 0b1_000_000;
+        const NUM_LOCK: u32 = 0b10_000_000;
+        let harmless_locks = CAPS_LOCK | NUM_LOCK;
+        if modifier_bits & CTRL != 0
+            && character.is_ascii_alphabetic()
+            && modifier_bits & !(CTRL | SHIFT | harmless_locks) == 0
+        {
+            self.emit(InputEvent::Byte(
+                character.to_ascii_uppercase() as u8 & 0x1f,
+            ));
+        } else if modifier_bits & !(SHIFT | harmless_locks) == 0 {
+            let character =
+                if character.is_ascii_alphabetic() && (modifier_bits & (SHIFT | CAPS_LOCK)) != 0 {
+                    character.to_ascii_uppercase()
+                } else {
+                    character
+                };
+            let mut bytes = [0u8; 4];
+            for &byte in character.encode_utf8(&mut bytes).as_bytes() {
+                self.emit(InputEvent::Byte(byte));
+            }
+        }
+    }
+
+    fn emit(&mut self, event: InputEvent) {
+        if self.count == MAX_EVENTS {
+            return;
+        }
+        let tail = (self.head + self.count) % MAX_EVENTS;
+        self.events[tail] = Some(event);
+        self.count += 1;
+    }
+
+    fn reset(&mut self) {
+        self.state = State::Ground;
+        self.len = 0;
+        self.deadline = None;
+        self.paste.clear();
+        self.paste_end_len = 0;
+        self.paste_deadline = None;
+        self.string_deadline = None;
+    }
+}
+
+#[cfg(test)]
+mod horizontal_cursor_regressions {
+    use super::*;
+
+    #[test]
+    fn unmodified_horizontal_cursor_sequences_are_events_not_draft_bytes() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[D\x1b[1C\x1bOD\x1bOC" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::ArrowLeft));
+        assert_eq!(decoder.pop(), Some(InputEvent::ArrowRight));
+        assert_eq!(decoder.pop(), Some(InputEvent::ArrowLeft));
+        assert_eq!(decoder.pop(), Some(InputEvent::ArrowRight));
+        assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn kitty_plain_horizontal_cursor_private_keys_decode_but_modified_stays_inert() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[57350;1u\x1b[57351;1u\x1b[57350;5u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::ArrowLeft));
+        assert_eq!(decoder.pop(), Some(InputEvent::ArrowRight));
+        assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn kitty_shift_printable_codepoint_emits_utf8_bytes() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        // ESC[99;1u : codepoint 99 ('c') with Shift modifier must emit the byte 'c'.
+        // Before the fix the unconditional return in the Shift arrow branch dropped it.
+        for byte in b"\x1b[99;1u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::Byte(b'c')));
+        assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn kitty_shift_nonascii_codepoint_emits_utf8_bytes() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        // ESC[233;1u : codepoint 233 ('é') with Shift modifier must emit UTF-8 c3 a9.
+        for byte in b"\x1b[233;1u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::Byte(0xc3)));
+        assert_eq!(decoder.pop(), Some(InputEvent::Byte(0xa9)));
+        assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn kitty_shift_repeat_event_is_inert() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        // event_type 2 (repeat) with a printable codepoint is not text.
+        for byte in b"\x1b[99;1:2u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn kitty_shift_release_event_is_inert() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        // event_type 3 (release) with a printable codepoint is not text.
+        for byte in b"\x1b[99;1:3u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn kitty_unmodified_printable_codepoint_is_inert() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        // modifier 0 with a non-arrow key does not enter the Shift branch and must
+        // not emit via the kitty keyboard path.
+        for byte in b"\x1b[99;0u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn existing_horizontal_keys_remain_preserved() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[D\x1b[1C\x1bOD\x1bOC" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::ArrowLeft));
+        assert_eq!(decoder.pop(), Some(InputEvent::ArrowRight));
+        assert_eq!(decoder.pop(), Some(InputEvent::ArrowLeft));
+        assert_eq!(decoder.pop(), Some(InputEvent::ArrowRight));
+        assert_eq!(decoder.pop(), None);
+    }
+}
+
+fn decode_mouse(sequence: &[u8], end: u8) -> Option<InputEvent> {
+    let parameters = sequence.strip_prefix(b"<")?;
+    let mut fields = parameters.split(|byte| *byte == b';');
+    let button = parse_number(fields.next()?)?;
+    let x = u16::try_from(parse_number(fields.next()?)?.checked_sub(1)?).ok()?;
+    let y = u16::try_from(parse_number(fields.next()?)?.checked_sub(1)?).ok()?;
+    if fields.next().is_some() {
+        return None;
+    }
+    let modifiers = (button & 28) as u8;
+    let kind = match (button & !28, end) {
+        (0, b'M') => 0,
+        (32, b'M') => 1,
+        (35, b'M') => 7,
+        (0 | 3, b'm') => 2,
+        (64, b'M') => 3,
+        (65, b'M') => 4,
+        (2, b'M') => 5,
+        (2, b'm') => 6,
+        _ => return None,
+    };
+    Some(InputEvent::Mouse { x, y, kind, modifiers })
+}
+
+fn parse_number(bytes: &[u8]) -> Option<u32> {
+    if bytes.is_empty() {
+        return None;
+    }
+    let mut value = 0u32;
+    for byte in bytes {
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+        value = value
+            .checked_mul(10)
+            .and_then(|value| value.checked_add((byte - b'0') as u32))?;
+    }
+    Some(value)
+}
+
+#[cfg(test)]
+mod mouse_protocol_tests {
+    use super::*;
+    #[test]
+    fn sgr_hover_is_a_pointer_event_without_inserting_composer_bytes() {
+        let mut decoder = TerminalInputDecoder::default();
+        for byte in b"\x1b[<35;43;8M" {
+            decoder.push(*byte, Instant::now());
+        }
+        assert_eq!(decoder.pop(), Some(InputEvent::Mouse { x: 42, y: 7, kind: 7, modifiers: 0 }));
+        assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn sgr_modified_hover_retains_modifiers_and_never_becomes_a_click() {
+        for modifiers in [4, 8, 16, 28] {
+            let sequence = format!("\x1b[<{};2;3M", 35 + modifiers);
+            let mut decoder = TerminalInputDecoder::default();
+            for byte in sequence.bytes() { decoder.push(byte, Instant::now()); }
+            assert_eq!(decoder.pop(), Some(InputEvent::Mouse { x: 1, y: 2, kind: 7, modifiers: modifiers as u8 }));
+            assert_eq!(decoder.pop(), None);
+        }
+    }
+
+    #[test]
+    fn malformed_hover_and_unsupported_release_do_not_emit_clicks() {
+        for sequence in [b"\x1b[<35;0;2M".as_slice(), b"\x1b[<35;1;0M", b"\x1b[<35;2;3m", b"\x1b[<35;2;3;4M"] {
+            let mut decoder = TerminalInputDecoder::default();
+            for byte in sequence { decoder.push(*byte, Instant::now()); }
+            assert_eq!(decoder.pop(), None);
+        }
+    }
+
+    #[test]
+    fn sgr_drag_press_and_release_are_real_events_not_draft_bytes() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[<0;3;5M\x1b[<32;9;5M\x1b[<0;9;5m" {
+            decoder.push(*byte, now);
+        }
+        assert_eq!(
+            decoder.pop(),
+            Some(InputEvent::Mouse {
+                x: 2,
+                y: 4,
+                kind: 0,
+                modifiers: 0
+            })
+        );
+        assert_eq!(
+            decoder.pop(),
+            Some(InputEvent::Mouse {
+                x: 8,
+                y: 4,
+                kind: 1,
+                modifiers: 0
+            })
+        );
+        assert_eq!(
+            decoder.pop(),
+            Some(InputEvent::Mouse {
+                x: 8,
+                y: 4,
+                kind: 2,
+                modifiers: 0
+            })
+        );
+        assert_eq!(decoder.pop(), None);
+    }
+    #[test]
+    fn malformed_mouse_coordinates_are_discarded_without_input_leak() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for frame in [
+            b"\x1b[<0;0;4M".as_slice(),
+            b"\x1b[<0;99999999999999999999;4M",
+            b"\x1b[<0;2;3;4M",
+        ] {
+            for byte in frame {
+                decoder.push(*byte, now);
+            }
+        }
+        assert_eq!(decoder.pop(), None);
+        decoder.push(b'a', now);
+        assert_eq!(decoder.pop(), Some(InputEvent::Byte(b'a')));
+    }
+
+    #[test]
+    fn sgr_mouse_preserves_modifier_bits_and_never_maps_right_click_to_left() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[<10;4;2M\x1b[<2;4;2M\x1b[<2;4;2m" {
+            decoder.push(*byte, now);
+        }
+        assert_eq!(
+            decoder.pop(),
+            Some(InputEvent::Mouse { x: 3, y: 1, kind: 5, modifiers: 8 })
+        );
+        assert_eq!(
+            decoder.pop(),
+            Some(InputEvent::Mouse { x: 3, y: 1, kind: 5, modifiers: 0 })
+        );
+        assert_eq!(
+            decoder.pop(),
+            Some(InputEvent::Mouse { x: 3, y: 1, kind: 6, modifiers: 0 })
+        );
+    }
+}

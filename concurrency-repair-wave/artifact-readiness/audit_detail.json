@@ -1,0 +1,463 @@
+{
+  "present": [
+    {
+      "task": "tab-create-contract",
+      "session_id": "ses_e870e69f3ffeFuLM5f8Ub8ylAh",
+      "route": "vyce-deepseek-v41",
+      "on_disk_dir": "tab-create-contract",
+      "files": [
+        {
+          "name": "scratchpad.md",
+          "sha256": "e6cb150000eac03f870321c60a8155a8b551e6530c65cfe20b5d9a5bab30ae26",
+          "size": 971
+        }
+      ],
+      "subdirs": []
+    },
+    {
+      "task": "tab-decoder",
+      "session_id": "ses_e870e4269ffeNmgxXWSmKR5XuO",
+      "route": "vyce-deepseek-v41",
+      "on_disk_dir": "tab-decoder",
+      "files": [
+        {
+          "name": "native_input_decoder.rs",
+          "sha256": "934a631c40bc44e7178c0ae120209dc543b315228121d448b4ac392778a27a71",
+          "size": 28644
+        },
+        {
+          "name": "scratchpad.md",
+          "sha256": "2ee4ce71001ee3dac60b09761e3c208d560f39ee0aebaa9d48779fe712603fa0",
+          "size": 2912
+        }
+      ],
+      "subdirs": [
+        "minimal-printable-fix"
+      ]
+    },
+    {
+      "task": "tab-runtime-v3",
+      "session_id": "ses_e870abb06ffeQhyWpGLMylwsF5",
+      "route": "vyce-deepseek-v41",
+      "on_disk_dir": "tab-runtime-v3",
+      "files": [
+        {
+          "name": "tui_entry.rs",
+          "sha256": "dc31169242a0273f9b54670d6c98ccc6e790432c4ce7867c0db0959a349bf190",
+          "size": 466611
+        },
+        {
+          "name": "scratchpad.md",
+          "sha256": "d8b467f68b9cea6854388356d409bb97ac5cd3b2e22a7a0683283a83b903fcb5",
+          "size": 1480
+        }
+      ],
+      "subdirs": []
+    },
+    {
+      "task": "tab-controls-v2",
+      "session_id": "ses_e870d8873ffexGGbOlI8WCaOsD",
+      "route": "vyce-deepseek-v41",
+      "on_disk_dir": "tab-controls-v2",
+      "files": [
+        {
+          "name": "native_tabs.rs",
+          "sha256": "7c41532d8135c28cd8ac670a9ab25435c5ed61d51c82b0e8c201c9cdb74f5fbd",
+          "size": 44367
+        },
+        {
+          "name": "native_tabs.diff",
+          "sha256": "77265842edbcf7c3d5be6c130a7a53bc31a9835fb8ec80d3e1e6d5a266145ae0",
+          "size": 16326
+        },
+        {
+          "name": "scratchpad.md",
+          "sha256": "291f6e079d0ff96dd7f3ebc146177abc7747f8ef1b25b19427972fad9ff23c1b",
+          "size": 3244
+        },
+        {
+          "name": "native_tabs.rs.bak7c41532",
+          "sha256": "7c41532d8135c28cd8ac670a9ab25435c5ed61d51c82b0e8c201c9cdb74f5fbd",
+          "size": 44367
+        }
+      ],
+      "subdirs": []
+    },
+    {
+      "task": "tab-rail-v2",
+      "session_id": "ses_e870de567ffeihvvEiCXrN3WUB",
+      "route": "vyce-deepseek-v41",
+      "on_disk_dir": "tab-rail-v2",
+      "files": [
+        {
+          "name": "native_tab_rail.rs",
+          "sha256": "76fb9332a3e49a66b75a12f0112aa8e17c9904849bd92f64f5b8bae800580139",
+          "size": 13939
+        },
+        {
+          "name": "SCRATCHPAD.md",
+          "sha256": "d66e4ef07bcb564bcd3ed0d4c79248a95a4dc1f82f9b43372912fc59fbcae69d",
+          "size": 3769
+        }
+      ],
+      "subdirs": []
+    },
+    {
+      "task": "add-tab-fixture-v2",
+      "session_id": "ses_e870c8d4effeapRnvIP1VzRUbE",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "add-tab-fixture-v2",
+      "files": [
+        {
+          "name": "native_add_tab_control_fixture.py",
+          "sha256": "00e62b8fef926451520f574d7880bad8cae23856a8e81190ded6977026efefe4",
+          "size": 17313
+        },
+        {
+          "name": "scratchpad.md",
+          "sha256": "04d1ffa8ae54840ab2cbdb551cd785d673825e83658c3d295c9c7fc7a276d0c5",
+          "size": 3468
+        }
+      ],
+      "subdirs": []
+    },
+    {
+      "task": "horizontal-fixture-v2",
+      "session_id": "ses_e8704f08effedByQgkqJHlCHRC",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "horizontal-fixture-v2",
+      "files": [
+        {
+          "name": "native_horizontal_tabs_v2.py",
+          "sha256": "ff76d9c60bb74d9ce599846547ceef3e84dd7d00b953b083e6d888cdb3860e2a",
+          "size": 24944
+        },
+        {
+          "name": "scratchpad.md",
+          "sha256": "5a1389c2725e0d93717d21ae411903d77d7e01e7f59563ae31dea75e2e4e0b0e",
+          "size": 2884
+        }
+      ],
+      "subdirs": []
+    },
+    {
+      "task": "title-projection-v2",
+      "session_id": "ses_e870a3009ffeOUYcEEXfNWXU2n",
+      "route": "vyce-deepseek-v41",
+      "on_disk_dir": "title-projection-v2",
+      "files": [
+        {
+          "name": "wiring.diff",
+          "sha256": "407e121cc1d1ab53512d4f4d0ad7b95120902e9f0c89848832133e94edaf61bd",
+          "size": 2116
+        },
+        {
+          "name": "scratchpad.md",
+          "sha256": "407c333ffd1917f59b743452d6d2106b7498f4128b35beca81830d232b7d9f94",
+          "size": 2384
+        },
+        {
+          "name": "native_navigation.patch",
+          "sha256": "8451a5b4bb5912bac3c6992d388a9ce9296c8a2b41d6b6b90fc4f58bcd316374",
+          "size": 6711
+        },
+        {
+          "name": "native_navigation.rs",
+          "sha256": "9b5498335cad7c45e2d540dd8864ec4e5f13ec55bdaa84ed55b3a373f12f9f48",
+          "size": 43380
+        }
+      ],
+      "subdirs": []
+    },
+    {
+      "task": "history-state-review",
+      "session_id": "ses_e86fdb7a9ffe4xnyWvZD7joior",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "history-state-review",
+      "files": [
+        {
+          "name": "verdict.json",
+          "sha256": "922e75711268040babdc0a39de7b5792e64f904962b4ce218005ce63512aa3ac",
+          "size": 1507
+        },
+        {
+          "name": "scratchpad.md",
+          "sha256": "afad2f283cb660cce44d273c00ab6597d6ad9a8fe015bd304aec81c5fa89333c",
+          "size": 4423
+        }
+      ],
+      "subdirs": []
+    },
+    {
+      "task": "inbox-review",
+      "session_id": "ses_e86fd8ea5ffe0jwRgahu5d5oER",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "inbox-review",
+      "files": [
+        {
+          "name": "VERDICT.md",
+          "sha256": "dd801a67f328f0cff4575193dd825839e24fd4a4f57671e5255152984dbea5d4",
+          "size": 2989
+        },
+        {
+          "name": "scratchpad.md",
+          "sha256": "4b7d60941f67cf86f486e8d068568e1a2c2239140c8c1f7f2afc278839ad1d06",
+          "size": 6593
+        }
+      ],
+      "subdirs": []
+    },
+    {
+      "task": "skill-reader-v2",
+      "session_id": "ses_e870c06e4ffeyekcGFqAoDug4I",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "skill-reader-v2",
+      "files": [
+        {
+          "name": "skill_source_reader.rs",
+          "sha256": "7d8fe4146ff05af170f80a9bcec4d8689bdea59a1ad8c1964058c4e55c89f617",
+          "size": 12414
+        },
+        {
+          "name": "scratchpad.md",
+          "sha256": "fbaadb771a4d7496f86644d992148b81049ce324d1c34ad40412c28d32d8b977",
+          "size": 1591
+        }
+      ],
+      "subdirs": []
+    },
+    {
+      "task": "theme-fixture-v4",
+      "session_id": "ses_e870c6b63ffezg80BpnhcP1MOS",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "theme-fixture-v4",
+      "files": [
+        {
+          "name": "theme_journey_fixture.py",
+          "sha256": "58abb9148c86a0b04362864c3c1d8e7523505c3317cb589922f6644203bffeb1",
+          "size": 15212
+        },
+        {
+          "name": "SCRATCHPAD.md",
+          "sha256": "2cfa12901385f586478f092b82b0c3d3e326a36716c2aca037430b6f3a09e24f",
+          "size": 2272
+        }
+      ],
+      "subdirs": []
+    },
+    {
+      "task": "oauth-preservation-v2",
+      "session_id": "ses_e870ba70effecfZqQeucw3l9DP",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "oauth-preservation-v2",
+      "files": [
+        {
+          "name": "manifest.md",
+          "sha256": "0ec427da06c52126dc6ebde5c0c4b5199ee0d49201099b66ccce399406c7e751",
+          "size": 1417
+        },
+        {
+          "name": "oauth_request_runtime.rs",
+          "sha256": "fc27fbe046e12f5ed1f3f73992a78175d3969ac7ad77fefc792e557b38c90c10",
+          "size": 20789
+        }
+      ],
+      "subdirs": []
+    },
+    {
+      "task": "permission-runner",
+      "session_id": "ses_e870498dbffedfL6r4eKvfAg4s",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "permission-runner",
+      "files": [
+        {
+          "name": "absence.log",
+          "sha256": "a2e00371b73ede82a0aa00742e0044775c5838a60d21c5e876273475629081cb",
+          "size": 158
+        },
+        {
+          "name": "records.jsonl",
+          "sha256": "a81add6b03ec9e1d4113ee804591b717bed4eeafa7c0f8055f4ab64373af3dc7",
+          "size": 15410
+        },
+        {
+          "name": "summarize.rb",
+          "sha256": "af795ccfda7d4c5feaf399a57243814cd123b885e4c0131470f895a4ab00f120",
+          "size": 937
+        },
+        {
+          "name": "native_permission_producer.rb",
+          "sha256": "af7f8b4ed95a512412141390d4e118d2cba07d324d6cd80d2e7cf6310c97630d",
+          "size": 3978
+        },
+        {
+          "name": "validator.log",
+          "sha256": "9ed730f5c59cf04fcc973e5173becf6ae304193b795d4928dba38834c0fe6757",
+          "size": 3131
+        }
+      ],
+      "subdirs": []
+    },
+    {
+      "task": "child-journey-v2",
+      "session_id": "ses_e8704c526ffe7a93QlMPFt1C2x",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "child-journey-v2",
+      "files": [
+        {
+          "name": "scratchpad.md",
+          "sha256": "7d5991e0c2c841ea5436c720d2da135904307c3bd34f0b791578f79b48ee20de",
+          "size": 4451
+        },
+        {
+          "name": "child_route_pty_journey.rb",
+          "sha256": "dd0648a20cfe558a4fc055ac34a05db8bcbfe12fa6eeadb8f83ee01a2baaf90e",
+          "size": 20976
+        }
+      ],
+      "subdirs": []
+    },
+    {
+      "task": "keybind-config-review",
+      "session_id": "ses_e86fc29cbffeJV2B4um3W21FjU",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "keybind-config-review",
+      "files": [
+        {
+          "name": "verdict.md",
+          "sha256": "701c3fb407029e0ad0dc32ca5b5203b438bf70cd471918d852677d96f366d3f6",
+          "size": 2176
+        },
+        {
+          "name": "scratchpad.md",
+          "sha256": "fff0bfdc7bfbd123cd1278bc6949690b02f0b818e955dea3f6e27de465229795",
+          "size": 3575
+        }
+      ],
+      "subdirs": []
+    },
+    {
+      "task": "catalog-filter-v2",
+      "session_id": "ses_e87041ec6fferuZ4MAKH3XU5Xm",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "catalog-filter-v2",
+      "files": [
+        {
+          "name": "server_hunk_proposal.md",
+          "sha256": "5e286b3c76fb1258ad4f023e8d2dd47e038ac8cab8511077eb907303884bca58",
+          "size": 3126
+        },
+        {
+          "name": "scratchpad.md",
+          "sha256": "e97fcaeb8fcadd0686059a8ab894fd607061f912bf73db58cefb11bf95d73c7f",
+          "size": 5755
+        },
+        {
+          "name": "catalog_lib_rs_tests.rs",
+          "sha256": "703ba02456eb40dda14c33041107f8b520f78fdf60a8fe920f89cc6762baa027",
+          "size": 13951
+        },
+        {
+          "name": "catalog_lib_rs.txt",
+          "sha256": "aa25336e8696f5629279b2bd56eb289561b2537f181a81f7f0acb826ea5485b4",
+          "size": 13994
+        }
+      ],
+      "subdirs": []
+    },
+    {
+      "task": "vertical-v19-review",
+      "session_id": "ses_e870cc554ffeJSX1zr6YzEqtWe",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "vertical-v19-review",
+      "files": [
+        {
+          "name": "review.md.bak",
+          "sha256": "3f9e7b158b297bff6bbc0d4a3276b7eea59dfe01e5d587215e720cd256da9ba5",
+          "size": 4180
+        },
+        {
+          "name": "review.md",
+          "sha256": "f19adcf88b677be4ccb09ca48916be51233d375d5d9dcc7711657732d147b1a2",
+          "size": 4273
+        }
+      ],
+      "subdirs": []
+    },
+    {
+      "task": "api-info",
+      "session_id": "ses_e8724d034ffe2wu5dDTNJd6QsC",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "api-info-replacement",
+      "files": [
+        {
+          "name": "hash-manifest.sha256",
+          "sha256": "cb57f8a68556db58f1fc0efd708a14cb30b0e8762ec76f5f6f7d0c32efeecea7",
+          "size": 778
+        },
+        {
+          "name": "scratchpad.md.prior",
+          "sha256": "208b8b465dc04e065dd38c1ef217eb602a014bb1bb882fe918d80af0ee301657",
+          "size": 2502
+        },
+        {
+          "name": "scratchpad.md",
+          "sha256": "81258736ecee18d1234da24ef3d38a585c8c31f331e50ae7425cdfb9db0d63f0",
+          "size": 5782
+        },
+        {
+          "name": "materialized.diff",
+          "sha256": "d06293dd6d0fb981e84e04e4e1aac5a91fee02568348be93f28549d6b0332868",
+          "size": 23000
+        }
+      ],
+      "subdirs": [
+        "files"
+      ]
+    },
+    {
+      "task": "shell-v4",
+      "session_id": "ses_e877e26d7ffeQmw2kgmecFLvN3",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "shell-v4-replacement",
+      "files": [
+        {
+          "name": "PATCH_BCD.diff",
+          "sha256": "c32d0b09362b5700d19d4724cf5673a87485d63587dec09587672862e5833412",
+          "size": 5843
+        },
+        {
+          "name": "PATCH.diff",
+          "sha256": "8c2b353dd2256ad3663e1440f932874fa6807a926fea6f396e0e44f97d8e0524",
+          "size": 14373
+        },
+        {
+          "name": "SCRATCHPAD.md",
+          "sha256": "e9f767741eb4925aa1f98a8150418411e1d59a5abbf394686b78ec553f456b38",
+          "size": 5202
+        }
+      ],
+      "subdirs": []
+    }
+  ],
+  "missing": [
+    {
+      "task": "catalog-refresh",
+      "session_id": "ses_e870ed5d3ffe31l0OFAxytaPsN",
+      "route": "vyce-deepseek-v41",
+      "reason": "no_dir"
+    },
+    {
+      "task": "credential-review",
+      "session_id": "ses_e86fd5902ffe10QmJH1vdW0bRa",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "reason": "no_dir"
+    },
+    {
+      "task": "skill-v5-review",
+      "session_id": "ses_e87083439ffeS3kptNEqReCrZr",
+      "route": "vyce-deepseek-v41",
+      "reason": "no_dir"
+    }
+  ]
+}

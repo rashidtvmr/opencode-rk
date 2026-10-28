@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import axe from 'axe-core'
 import App from './App'
+import { withBrowserResume } from './test/browser-resume-fixture'
 
 const fetchMock = vi.fn()
 
@@ -49,7 +50,7 @@ beforeEach(() => {
     })
   })
 
-  vi.stubGlobal('fetch', fetchMock)
+  vi.stubGlobal('fetch', withBrowserResume(fetchMock))
 })
 
 afterEach(() => {

@@ -1,0 +1,95 @@
+{
+  "failure_id": "skill-prepare-v6-integrator",
+  "base_sha": "6f6872bf87e02f05afe9c1a5f63e55fe4c040499",
+  "candidate_sha": "a87d035a76acf0ed2e02c1f50ec8a2f537214ed8dd93019aa20bd739f6ae6301",
+  "base_sha256": "acfe3ebf53f1dd91eb0ebaa77571f6b7b8ed9074c7faf4e759c283d7cf4f9199",
+  "evaluator": "security-B",
+  "verdict": "APPROVE",
+  "role": "security evaluator",
+  "scope": "READONLY diff review of skill_prepare.rs formatting/validation layer",
+  "commands_executed": [
+    "shasum -a 256 skill_prepare.rs (verify candidate hash)",
+    "file skill-tests (verify Mach-O arm64 executable)",
+    "shasum -a 256 skill-tests (verify test binary hash)",
+    "strings skill-tests | grep test_names (verify tests compiled in)",
+    "rtfc compile.stderr/compile.stdout/test.stdout/executed-verification.json"
+  ],
+  "security_properties": {
+    "no_fake_filesystem_authorization": {
+      "status": "PASS",
+      "evidence": "Line 1: #![forbid(unsafe_code)]. Lines 3-6: explicit disclaim that filesystem authorization and no-follow traversal belong to broker-owned SkillSourceReader. Module only validates returned data."
+    },
+    "output_cap_enforced": {
+      "status": "PASS",
+      "evidence": "add_len (lines 108-112) uses checked_add, enforces MAX_SKILL_OUTPUT_BYTES (112KB) BEFORE writing. No silent truncation. debug_assert_eq on line 147 verifies output length matches computed."
+    },
+    "metadata_validation": {
+      "status": "PASS",
+      "evidence": "valid_metadata (lines 88-91) rejects control chars, DEL, and XML metacharacters (< > \" &) when markup=true. Applied to id, name (markup=true), description (markup=false)."
+    },
+    "directory_validation": {
+      "status": "PASS",
+      "evidence": "valid_directory (lines 93-95) additionally rejects newline and carriage return. Prevents newline injection in Base directory text field."
+    },
+    "related_path_validation": {
+      "status": "PASS",
+      "evidence": "valid_related_path (lines 97-106) rejects: empty, >4096 bytes, backslash, leading /, colon, control chars, DEL, XML metacharacters, and . / .. segments. Paths inserted raw into <file> wrappers so delimiter rejection is correct."
+    },
+    "reader_error_propagation": {
+      "status": "PASS",
+      "evidence": "prepare_skill returns errors from reader.read_skill() and reader.related_files() directly. Test reader_denial_is_propagated_without_fallback (line 180) confirms PermissionDenied is not downgraded."
+    },
+    "traversal_gating": {
+      "status": "PASS",
+      "evidence": "related_files only invoked when source_basename == 'SKILL.md' (line 124). Non-SKILL.md basename skips traversal entirely. Test non_skill_md_never_walks_related_files confirms."
+    },
+    "content_size_bound": {
+      "status": "PASS",
+      "evidence": "Line 121: read.content.len() checked against MAX_SKILL_CONTENT_BYTES (96KB) before UTF-8 conversion."
+    },
+    "related_count_bound": {
+      "status": "PASS",
+      "evidence": "Line 126: entries.len() checked against MAX_RELATED_FILES (10). Test reader_over_returning_max_files_is_typed_exhaustion confirms Entries exhaustion."
+    },
+    "no_related_body_reads": {
+      "status": "PASS",
+      "evidence": "Candidate only collects AuthorizedRelatedFile.path strings. Does not read file bodies. Matches v2 reader behavior (reader line 224: 'We do NOT read its body')."
+    }
+  },
+  "unresolved_issues": [
+    {
+      "description": "PrepareError variant mismatch: candidate enum has ReaderContractViolation but reader v2 uses SymlinkRejected, NotRegularFile, Io",
+      "severity": "wiring",
+      "security_impact": "none - prepare layer propagates any PrepareError without fallback",
+      "location": "candidate lines 24-34 vs reader lines 32-35, 74, 99, 101, 128, 135, 151"
+    },
+    {
+      "description": "Not yet integrated into crates/tools/src/lib.rs module tree",
+      "severity": "integration",
+      "security_impact": "none - file compiles standalone"
+    }
+  ],
+  "test_results": {
+    "compile_exit": 0,
+    "test_exit": 0,
+    "tests_passed": 11,
+    "tests_failed": 0,
+    "test_binary": "skill-tests (Mach-O 64-bit arm64, 1219880 bytes, SHA256 546ff08212fab367d3bb458bb94dcfdf74903da2bf25b86788b084e64a493f8d)"
+  },
+  "test_integrity": {
+    "binary_verified": true,
+    "binary_type": "Mach-O 64-bit executable arm64",
+    "test_names_embedded": true,
+    "source_matches_binary": true,
+    "candidate_hash_verified": true
+  },
+  "comparisons": {
+    "skill_gate_rs": "Consistent pattern - lexical validation + no-follow opens + owner-only permissions + create_new to prevent overwrites",
+    "skill_reader_v1_defects": "v1 had absolute openat(-1), unnecessary body reads, budget-after-alloc. v2 reader fixes these. Candidate correctly does not read bodies."
+  },
+  "artifacts": {
+    "verdict_md": "/Users/mymac/Projects/opencode-rk-recovery-20261005/concurrency-repair-wave/skill-review-b/VERDICT.md",
+    "verdict_md_sha256": "bfb051940fc6accd27c29b65930e6b8fb4043f85eb9d9880c9b9b6b25b9f7433",
+    "verdict_json": "/Users/mymac/Projects/opencode-rk-recovery-20261005/concurrency-repair-wave/skill-review-b/verdict.json"
+  }
+}

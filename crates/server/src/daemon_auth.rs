@@ -259,6 +259,7 @@ pub async fn require_bearer(
     // whitelist beyond these exact paths.
     let resume_api_path = custom_provider_resume_path(&method, &path)
         || path == "/api/capabilities"
+        || (path == "/api/commands" && (method == axum::http::Method::GET || method == axum::http::Method::HEAD))
         || path == "/api/workspaces"
         || path == "/api/models"
         || path.starts_with("/api/models/")

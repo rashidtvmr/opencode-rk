@@ -96,6 +96,66 @@ export interface WebCapabilities {
   artifacts: { available: boolean; reason: string }
 }
 
+/** Inventory is discovered from the authenticated daemon, never a hardcoded UI menu. */
+export interface ConfiguredCommand {
+  name: string
+  description: string
+  agent: string | null
+  model: string | null
+}
+
+export interface AgentMention {
+  name: string
+  description: string
+  read_only: boolean
+}
+
+export interface CommandInventory {
+  commands: ConfiguredCommand[]
+  agents: AgentMention[]
+}
+
+export interface SubagentSnapshot {
+  session_id: string
+  parent_id: string
+  description: string
+  agent: string
+  model: string
+  state: string
+  output_tail: string
+  error: string | null
+  read_only: boolean
+  has_tool_calls: boolean
+  generation: number
+  auto_retry_attempts: number
+  manual_retries: number
+  pending_followups: number
+  awaiting_permission: boolean
+}
+
+function normalizeSubagent(value: unknown): SubagentSnapshot | null {
+  if (!value || typeof value !== 'object') return null
+  const raw = value as Record<string, unknown>
+  if (typeof raw.session_id !== 'string' || typeof raw.parent_id !== 'string') return null
+  return {
+    session_id: raw.session_id,
+    parent_id: raw.parent_id,
+    description: typeof raw.description === 'string' ? raw.description : '',
+    agent: typeof raw.agent === 'string' ? raw.agent : '',
+    model: typeof raw.model === 'string' ? raw.model : '',
+    state: typeof raw.state === 'string' ? raw.state : 'unknown',
+    output_tail: typeof raw.output_tail === 'string' ? raw.output_tail.slice(-8192) : '',
+    error: typeof raw.error === 'string' ? raw.error : null,
+    read_only: raw.read_only === true,
+    has_tool_calls: raw.has_tool_calls === true,
+    generation: typeof raw.generation === 'number' ? raw.generation : 0,
+    auto_retry_attempts: typeof raw.auto_retry_attempts === 'number' ? raw.auto_retry_attempts : 0,
+    manual_retries: typeof raw.manual_retries === 'number' ? raw.manual_retries : 0,
+    pending_followups: typeof raw.pending_followups === 'number' ? raw.pending_followups : 0,
+    awaiting_permission: raw.awaiting_permission === true,
+  }
+}
+
 export interface WorkspaceSummary {
   id: string
   label: string
@@ -1183,20 +1243,30 @@ export async function runTurnStream(
   reasoningEffort: string,
   handlers: TurnStreamHandlers = {},
   signal?: AbortSignal,
+  configuredCommand?: { name: string; arguments: string },
+  mentionedAgent?: string,
 ): Promise<TurnResult> {
-  const path = `/api/sessions/${encodeURIComponent(id)}/turns/stream`
+  const path = configuredCommand
+    ? `/api/sessions/${encodeURIComponent(id)}/command`
+    : mentionedAgent
+      ? `/api/sessions/${encodeURIComponent(id)}/agent/stream`
+    : `/api/sessions/${encodeURIComponent(id)}/turns/stream`
   const response = await authenticatedFetch(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      text,
-      model,
-      reasoning_effort: reasoningEffort,
-    }),
+    body: JSON.stringify(configuredCommand
+      ? { command: configuredCommand.name, arguments: configuredCommand.arguments, model }
+      : mentionedAgent
+        ? { agent: mentionedAgent, text, model, reasoning_effort: reasoningEffort }
+        : { text, model, reasoning_effort: reasoningEffort }),
     signal,
   })
 
   if (response.status === 404) {
+    // A configured command must never silently fall back to a normal LLM turn.
+    if (configuredCommand || mentionedAgent) {
+      throw new ApiError(404, `Requested ${configuredCommand ? 'command' : 'agent'} route is unavailable on this daemon`)
+    }
     const turn = await runTurn(id, text, model, reasoningEffort, signal)
     handlers.onUserMessage?.(turn.userMessage)
     if (turn.assistantMessage) handlers.onAssistantMessage?.(turn.assistantMessage)
@@ -1272,6 +1342,92 @@ export async function runTurnStream(
     assistantMessage: state.assistantMessage,
     executed: true,
   }
+}
+
+export function runConfiguredCommandStream(
+  sessionId: string,
+  command: string,
+  argumentsText: string,
+  model: string,
+  handlers: TurnStreamHandlers = {},
+  signal?: AbortSignal,
+): Promise<TurnResult> {
+  if (!/^[^\s/\u0000-\u001f]{1,128}$/.test(command)) {
+    return Promise.reject(new Error('Invalid slash command'))
+  }
+  return runTurnStream(sessionId, `/${command} ${argumentsText}`.trim(), model, 'high', handlers, signal, {
+    name: command,
+    arguments: argumentsText,
+  })
+}
+
+export function runMentionedAgentStream(
+  sessionId: string,
+  agent: string,
+  text: string,
+  model: string,
+  reasoningEffort: string,
+  handlers: TurnStreamHandlers = {},
+  signal?: AbortSignal,
+): Promise<TurnResult> {
+  if (!/^[^\s@\u0000-\u001f]{1,128}$/.test(agent)) {
+    return Promise.reject(new Error('Invalid agent mention'))
+  }
+  return runTurnStream(sessionId, text, model, reasoningEffort, handlers, signal, undefined, agent)
+}
+
+export async function listCommandInventory(signal?: AbortSignal): Promise<CommandInventory> {
+  const payload = await request<{ commands?: unknown; agents?: unknown }>('/api/commands', { signal })
+  if (!Array.isArray(payload.commands) || !Array.isArray(payload.agents)) {
+    throw new Error('Server returned an invalid command inventory')
+  }
+  const commands = payload.commands.flatMap((value): ConfiguredCommand[] => {
+    if (!value || typeof value !== 'object') return []
+    const entry = value as Record<string, unknown>
+    if (typeof entry.name !== 'string' || !/^[^\s/\u0000-\u001f]{1,128}$/.test(entry.name)) return []
+    return [{ name: entry.name, description: typeof entry.description === 'string' ? entry.description : '',
+      agent: typeof entry.agent === 'string' ? entry.agent : null,
+      model: typeof entry.model === 'string' ? entry.model : null }]
+  })
+  const agents = payload.agents.flatMap((value): AgentMention[] => {
+    if (!value || typeof value !== 'object') return []
+    const entry = value as Record<string, unknown>
+    if (typeof entry.name !== 'string' || !/^[^\s@\u0000-\u001f]{1,128}$/.test(entry.name)) return []
+    return [{ name: entry.name, description: typeof entry.description === 'string' ? entry.description : '',
+      read_only: entry.read_only === true }]
+  })
+  return { commands, agents }
+}
+
+export async function listSubagents(parentId: string, signal?: AbortSignal): Promise<{
+  children: SubagentSnapshot[]
+  registryScope: string
+}> {
+  const payload = await request<{ children?: unknown; registry_scope?: unknown }>(
+    `/api/sessions/${encodeURIComponent(parentId)}/children`, { signal },
+  )
+  if (!Array.isArray(payload.children)) throw new Error('Server returned an invalid subagent list')
+  return {
+    children: payload.children.map(normalizeSubagent).filter((item): item is SubagentSnapshot => item !== null),
+    registryScope: typeof payload.registry_scope === 'string' ? payload.registry_scope : '',
+  }
+}
+
+export async function updateSubagent(
+  parentId: string,
+  childId: string,
+  action: 'stop' | 'retry' | 'continue',
+  text?: string,
+): Promise<SubagentSnapshot> {
+  const payload = await request<unknown>(
+    `/api/sessions/${encodeURIComponent(parentId)}/children/${encodeURIComponent(childId)}/${action}`,
+    { method: 'POST', body: JSON.stringify(action === 'continue' ? { text } : {}) },
+  )
+  const result = normalizeSubagent(payload)
+  if (!result || result.session_id !== childId || result.parent_id !== parentId) {
+    throw new Error('Server returned an invalid subagent update')
+  }
+  return result
 }
 
 export async function listModels() {

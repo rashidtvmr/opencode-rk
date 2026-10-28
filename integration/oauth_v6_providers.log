@@ -1,0 +1,193 @@
+warning: crates/cli/Cargo.toml: file `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/oauth-v6-validate/crates/cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `oc2`
+  * `bin` target `opencode-rk`
+warning: `opencode-rk-cli` (manifest) generated 1 warning
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling syn v3.0.5
+   Compiling libc v0.2.189
+   Compiling syn v2.0.119
+   Compiling synstructure v0.13.2
+   Compiling zerofrom-derive v0.1.7
+   Compiling zerofrom v0.1.8
+   Compiling yoke-derive v0.8.2
+   Compiling stable_deref_trait v1.2.1
+   Compiling yoke v0.8.3
+   Compiling zerovec-derive v0.11.6
+   Compiling zerovec v0.11.8
+   Compiling displaydoc v0.2.7
+   Compiling itoa v1.0.18
+   Compiling cfg-if v1.0.4
+   Compiling errno v0.3.14
+   Compiling bytes v1.12.1
+   Compiling pin-project-lite v0.2.17
+   Compiling futures-core v0.3.34
+   Compiling find-msvc-tools v0.1.12
+   Compiling serde_core v1.0.229
+   Compiling shlex v2.0.1
+   Compiling cc v1.4.6
+   Compiling tinystr v0.8.4
+   Compiling writeable v0.6.4
+   Compiling litemap v0.8.3
+   Compiling smallvec v1.16.1
+   Compiling icu_locale_core v2.3.0
+   Compiling ring v0.17.14
+   Compiling signal-hook-registry v1.4.8
+   Compiling zerotrie v0.2.5
+   Compiling potential_utf v0.1.6
+   Compiling socket2 v0.6.5
+   Compiling mio v1.2.3
+   Compiling tokio-macros v2.7.2
+   Compiling icu_properties_data v2.3.0
+   Compiling once_cell v1.21.4
+   Compiling icu_normalizer_data v2.3.0
+   Compiling utf8_iter v1.0.4
+   Compiling icu_collections v2.3.0
+   Compiling tokio v1.53.1
+   Compiling icu_provider v2.3.1
+   Compiling http v1.5.0
+   Compiling percent-encoding v2.3.2
+   Compiling serde v1.0.229
+   Compiling zeroize v1.9.0
+   Compiling rustls-pki-types v1.15.1
+   Compiling http-body v1.1.0
+   Compiling getrandom v0.2.17
+   Compiling serde_derive v1.0.229
+   Compiling futures-task v0.3.34
+   Compiling autocfg v1.5.1
+   Compiling httparse v1.10.1
+   Compiling getrandom v0.4.3
+   Compiling zmij v1.0.23
+   Compiling slab v0.4.12
+   Compiling untrusted v0.9.0
+   Compiling futures-util v0.3.34
+   Compiling num-traits v0.2.19
+   Compiling icu_normalizer v2.3.0
+   Compiling icu_properties v2.3.0
+   Compiling tower-service v0.3.3
+   Compiling serde_json v1.0.151
+   Compiling try-lock v0.2.5
+   Compiling rustls v0.23.44
+   Compiling want v0.3.1
+   Compiling idna_adapter v1.2.2
+   Compiling rustls-webpki v0.103.15
+   Compiling form_urlencoded v1.2.2
+   Compiling tracing-core v0.1.36
+   Compiling futures-channel v0.3.34
+   Compiling core-foundation-sys v0.8.7
+   Compiling memchr v2.8.3
+   Compiling bitflags v2.13.2
+   Compiling atomic-waker v1.1.2
+   Compiling subtle v2.6.1
+   Compiling thiserror v2.0.20
+   Compiling hyper v1.11.1
+   Compiling iana-time-zone v0.1.65
+   Compiling tracing v0.1.44
+   Compiling idna v1.1.0
+   Compiling sync_wrapper v1.0.2
+   Compiling thiserror-impl v2.0.20
+   Compiling tower-layer v0.3.3
+   Compiling ipnet v2.12.2
+   Compiling base64 v0.22.1
+   Compiling hyper-util v0.1.20
+   Compiling tower v0.5.3
+   Compiling url v2.5.8
+   Compiling chrono v0.4.45
+   Compiling tokio-rustls v0.26.5
+   Compiling uuid v1.26.1
+   Compiling webpki-roots v1.0.9
+   Compiling rustix v1.1.4
+   Compiling ryu v1.0.23
+   Compiling serde_urlencoded v0.7.1
+   Compiling hyper-rustls v0.27.9
+   Compiling opencode-rk-contracts v0.1.0-alpha.1 (/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/oauth-v6-validate/crates/contracts)
+   Compiling tower-http v0.6.11
+   Compiling http-body-util v0.1.5
+   Compiling log v0.4.34
+   Compiling reqwest v0.12.28
+   Compiling opencode-rk-security v0.1.0-alpha.1 (/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/oauth-v6-validate/crates/security)
+   Compiling fastrand v2.5.0
+   Compiling tempfile v3.27.0
+   Compiling opencode-rk-providers v0.1.0-alpha.1 (/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/oauth-v6-validate/crates/providers)
+warning: unused import: `Mutex as TokioMutex`
+ --> crates/providers/tests/oauth_request_runtime.rs:6:82
+  |
+6 | use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener, sync::{oneshot, Mutex as TokioMutex}, time::{sleep, timeout, Duratio...
+  |                                                                                  ^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: calls to `std::mem::drop` with a value that implements `Copy` does nothing
+   --> crates/providers/tests/oauth_request_runtime.rs:104:5
+    |
+104 |     drop(refresh_addr);
+    |     ^^^^^------------^
+    |          |
+    |          argument has type `std::net::SocketAddr`
+    |
+    = note: `#[warn(dropping_copy_types)]` on by default
+help: use `let _ = ...` to ignore the expression or result
+    |
+104 -     drop(refresh_addr);
+104 +     let _ = refresh_addr;
+    |
+
+warning: `opencode-rk-providers` (test "oauth_request_runtime") generated 2 warnings (run `cargo fix --test "oauth_request_runtime" -p opencode-rk-providers` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 31.74s
+     Running tests/oauth_request_runtime.rs (target/debug/deps/oauth_request_runtime-ec1b95bf74ec0c47)
+
+running 6 tests
+test concurrent_expired_calls_use_one_refresh_and_both_rotated_access_tokens ... ok
+test expired_oauth_refreshes_and_dispatches_rotated_access_with_account_header ... ok
+test failed_refresh_returns_oauth_error_without_model_dispatch_or_api_fallback ... ok
+test non_expired_oauth_does_not_refresh_and_api_behavior_has_no_account_header ... ok
+test oauth_credential_is_used_by_compact_and_stream_dispatch ... ok
+test zero_expiry_openai_refreshes_and_dispatches_rotated_usage_response ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.58s
+
+     Running tests/responses_request_retry.rs (target/debug/deps/responses_request_retry-9e211a5c40c5b565)
+
+running 8 tests
+test buffered_create_retries_transient_then_succeeds ... ok
+test dropped_caller_future_stops_backoff_and_http ... ok
+test failure_after_2xx_headers_is_a_stream_error_never_retried ... ok
+test nonstreaming_usage_api_preserves_inclusive_input_and_unknown_subsets ... ok
+test retry_after_is_honored_then_capped ... ok
+test terminal_400_is_never_retried ... ok
+test transient_429_then_503_then_200_retries_bounded_with_identical_payload ... ok
+test transient_exhaustion_reports_attempt_count ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.86s
+
+     Running tests/responses_usage.rs (target/debug/deps/responses_usage-e160e057e244bab6)
+
+running 13 tests
+test buffered_completed_reports_usage_and_missing_usage_stays_none ... ok
+test buffered_incomplete_reports_usage_and_suppresses_partial_tool_calls ... ok
+test duplicate_completed_event_cannot_overwrite_usage ... ok
+test explicit_zero_subsets_stay_reported_zeros ... ok
+test integral_float_counts_and_subset_details_parse ... ok
+test missing_null_and_malformed_subsets_stay_unknown_not_zero ... ok
+test openai_responses_inclusive_input_does_not_double_count_cache_subset ... ok
+test provider_counts_pass_through_verbatim_even_when_inconsistent ... ok
+test required_counts_missing_malformed_or_fractional_withhold_whole_usage ... ok
+test stream_completed_reports_usage_verbatim ... ok
+test stream_incomplete_reports_usage_with_stop_reason ... ok
+test terminal_events_without_usage_stay_unreported_not_zero ... ok
+test usage_is_per_turn_and_tool_loop_payload_preserves_call_output_pairs ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/zero_expiry_metadata.rs (target/debug/deps/zero_expiry_metadata-a47fb60e3555c145)
+
+running 5 tests
+test non_zero_expiry_still_rejected_when_invalid ... ok
+test zero_expiry_file_mode_is_private ... ok
+test zero_expiry_preserves_existing_api_keys_and_oauth ... ok
+test zero_expiry_roundtrips_with_copilot_metadata ... ok
+test zero_expiry_update_replaces_only_target_preserving_metadata ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+

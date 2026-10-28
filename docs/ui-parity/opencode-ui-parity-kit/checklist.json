@@ -1,0 +1,3594 @@
+{
+  "schema_version": 1,
+  "meaning": "All items are Rust acceptance obligations, not completed work. Upstream evidence is separate.",
+  "counts": {
+    "PAR": 24,
+    "LAY": 20,
+    "TAB": 24,
+    "SIDE": 15,
+    "THEME": 18,
+    "CP": 42,
+    "MSG": 10,
+    "MD": 9,
+    "TOOL": 12,
+    "DIFF": 5,
+    "MEDIA": 1,
+    "FORM": 8,
+    "STATE": 4,
+    "DIALOG": 20,
+    "FFI": 11
+  },
+  "items": [
+    {
+      "id": "PAR-01",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Record selected product, renderer, runtime and theme pins for every golden; reject mixed-version captures.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 144,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "PAR-02",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Inventory actual Rust bridge/component APIs and map them to the capability table; no guessed existing/missing statuses.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 145,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "PAR-03",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Capture the real upstream and Rust production components using identical deterministic fixture data.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 146,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "PAR-04",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Compare text, positions, styles, clipping, cursor and hit targets; text-only equality is insufficient.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 147,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "PAR-05",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Preserve wide-cell continuation and grapheme semantics in canonical frame serialization.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 148,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "PAR-06",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Record exact baseline terminal/font environment for pixel captures and isolate terminal-specific cases.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 149,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "PAR-07",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Require event traces as well as frames for navigation, queue/steer, permissions, forms and input submission.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 150,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "PAR-08",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Freeze time and use explicit checkpoints for every motion effect and deadline.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 151,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "PAR-09",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Await asynchronous syntax completion; do not bless blank transient code blocks as goldens.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 152,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "PAR-10",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Exercise streaming→complete, complete→final-content, resync, backfill and stale async-result orders.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 153,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "transcript-lifecycle-resize",
+        "transcript-lifecycle-backfill",
+        "transcript-lifecycle-reconnect",
+        "transcript-lifecycle-tab_switch",
+        "transcript-lifecycle-group_expand",
+        "transcript-lifecycle-late_highlight_after_destroy"
+      ]
+    },
+    {
+      "id": "PAR-11",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Preserve node identity during in-place updates; preserve logical IDs, saved group expansion and semantic scroll anchors across keyed session remounts and tab switches.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 154,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "transcript-lifecycle-resize",
+        "transcript-lifecycle-backfill",
+        "transcript-lifecycle-reconnect",
+        "transcript-lifecycle-tab_switch",
+        "transcript-lifecycle-group_expand",
+        "transcript-lifecycle-late_highlight_after_destroy"
+      ]
+    },
+    {
+      "id": "PAR-12",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Match upstream keymap scope, priority and reachability in popups, docks, modals and focused side panels; suppress background actions only where upstream suppresses them, while retaining intentionally global commands.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 155,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "bottom-priority-permission",
+        "bottom-priority-form",
+        "bottom-priority-missing_location",
+        "bottom-priority-child_with_form",
+        "bottom-priority-queue",
+        "bottom-priority-dock_and_permission"
+      ]
+    },
+    {
+      "id": "PAR-13",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Verify there are no duplicate sends or unintended tool actions from pointer release/drag selection.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 156,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "PAR-14",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Test narrow/short terminals and every exact predicate boundary, not only one 160-column screenshot.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 157,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "PAR-15",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Resolve full light/dark/transparent/stateful theme values, preserving hue provenance.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 158,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "PAR-16",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Separate baseline, optional configuration, experimental design and approved extension fixtures.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 159,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "PAR-17",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Keep selected-pin bugs and deliberate fixes explicit; do not silently merge v2.2.0 behavior.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 160,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "PAR-18",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Verify teardown cancels timers, rejects late workers, releases resources once and restores terminal state.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 161,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "transcript-lifecycle-resize",
+        "transcript-lifecycle-backfill",
+        "transcript-lifecycle-reconnect",
+        "transcript-lifecycle-tab_switch",
+        "transcript-lifecycle-group_expand",
+        "transcript-lifecycle-late_highlight_after_destroy",
+        "bridge-highlight_after_destroy",
+        "bridge-teardown_focus"
+      ]
+    },
+    {
+      "id": "PAR-19",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Use mounted/rendered work counts for large transcript/diff bounds; preserve visible geometry.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 162,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "large-patch"
+      ]
+    },
+    {
+      "id": "PAR-20",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Run negative controls that prove one-cell, color, threshold and duplicate-action regressions fail.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 163,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "PAR-21",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Preserve existing semantic tests; investigate source disagreements before changing expected output.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 164,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "PAR-22",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Attach source/fixture hashes, exact test commands, failures and installed captures to the final Rust SHA.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 165,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "PAR-23",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Keep all Rust parity statuses unverified until executed against the real integrated Rust build.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 166,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "PAR-24",
+      "area": "8. Cross-cutting acceptance checklist",
+      "requirement": "Complete bridge-source inspection after correcting the duplicate Secure Tunnel ID routing problem.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-implementation.md",
+      "source_report_line": 167,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "LAY-01",
+      "area": "Page and pane fixtures",
+      "requirement": "Root fills terminal at 80×24,120×40,160×48,200×60 without unintended overflow.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 185,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "page-80x24-dark",
+        "page-80x24-light",
+        "page-120x40-dark",
+        "page-120x40-light",
+        "page-160x48-dark",
+        "page-160x48-light",
+        "page-200x60-dark",
+        "page-200x60-light"
+      ]
+    },
+    {
+      "id": "LAY-02",
+      "area": "Page and pane fixtures",
+      "requirement": "Width 43/44 switches route horizontal inset 1→2; prompt/footer remain within viewport.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 186,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "prompt-width-43",
+        "prompt-width-44"
+      ]
+    },
+    {
+      "id": "LAY-03",
+      "area": "Page and pane fixtures",
+      "requirement": "Default vertical rail at 105→horizontal,106→vertical; width 60 rail at 123→horizontal,124→vertical.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 187,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "vertical-fit-rail42-width105",
+        "vertical-fit-rail42-width106",
+        "vertical-fit-rail60-width123",
+        "vertical-fit-rail60-width124",
+        "vertical-fit-rail5-width68",
+        "vertical-fit-rail5-width69"
+      ]
+    },
+    {
+      "id": "LAY-04",
+      "area": "Page and pane fixtures",
+      "requirement": "Resizing rail respects 5/72/min-content 44; compact transition exactly 11/12.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 188,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "rail-compact-11",
+        "rail-compact-12"
+      ]
+    },
+    {
+      "id": "LAY-05",
+      "area": "Page and pane fixtures",
+      "requirement": "Width 68/69 with width 5 rail crosses vertical eligibility correctly.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 189,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "vertical-fit-rail42-width105",
+        "vertical-fit-rail42-width106",
+        "vertical-fit-rail60-width123",
+        "vertical-fit-rail60-width124",
+        "vertical-fit-rail5-width68",
+        "vertical-fit-rail5-width69"
+      ]
+    },
+    {
+      "id": "LAY-06",
+      "area": "Page and pane fixtures",
+      "requirement": "No-left-rail width 120 has no auto sidebar;121 shows fixed 42 sidebar.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 190,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "sidebar-horizontal-120",
+        "sidebar-horizontal-121"
+      ]
+    },
+    {
+      "id": "LAY-07",
+      "area": "Page and pane fixtures",
+      "requirement": "Width 162/163 with default vertical rail crosses auto-right-sidebar threshold.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 191,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "sidebar-vertical-162",
+        "sidebar-vertical-163"
+      ]
+    },
+    {
+      "id": "LAY-08",
+      "area": "Page and pane fixtures",
+      "requirement": "Manual narrow sidebar overlays rather than shrinks transcript; Escape/Ctrl+C closes.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 192,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "sidebar-overlay"
+      ]
+    },
+    {
+      "id": "LAY-09",
+      "area": "Page and pane fixtures",
+      "requirement": "Child session suppresses information sidebar, including manually requested state.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 193,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "child-sidebar"
+      ]
+    },
+    {
+      "id": "LAY-10",
+      "area": "Page and pane fixtures",
+      "requirement": "Panel width 107/108 switches fullscreen/docked; tabs hide only while panel full screen.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 194,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "plugin-panel-107",
+        "plugin-panel-108"
+      ]
+    },
+    {
+      "id": "LAY-11",
+      "area": "Page and pane fixtures",
+      "requirement": "Sidebar/terminal/plugin panel precedence matches source; one right pane at a time.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 195,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "LAY-12",
+      "area": "Page and pane fixtures",
+      "requirement": "Pane focus guard cannot pass Enter/click into a permission prompt; transcript wheel remains usable.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 196,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "plugin-panel-107",
+        "plugin-panel-108"
+      ]
+    },
+    {
+      "id": "LAY-13",
+      "area": "Page and pane fixtures",
+      "requirement": "Resize handle 2-cell target,1-cell highlight, drag beyond bounds, release persistence, double-click reset 300 ms.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 197,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "LAY-14",
+      "area": "Page and pane fixtures",
+      "requirement": "Transcript and sidebar scroll independently; title and footer remain pinned.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 198,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "LAY-15",
+      "area": "Page and pane fixtures",
+      "requirement": "One reserved row below transcript remains present when jump action is absent.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 199,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "LAY-16",
+      "area": "Page and pane fixtures",
+      "requirement": "Scrollbar show/hide reserves expected cells; sidebar absolute scrollbar does not reflow headings.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 200,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "LAY-17",
+      "area": "Page and pane fixtures",
+      "requirement": "Switching tabs/restoring after reflow preserves semantic anchor and screen Y; child anchor independent.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 201,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "LAY-18",
+      "area": "Page and pane fixtures",
+      "requirement": "Home prompt max-width 75, logo spacing, balanced spacers and footer gates match at short/wide sizes.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 202,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "LAY-19",
+      "area": "Page and pane fixtures",
+      "requirement": "Home global form disables prompt and appears at expected bottom inset/z-order.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 203,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "LAY-20",
+      "area": "Page and pane fixtures",
+      "requirement": "Width 44/64/80 and height 13/14/15/16 correctly gate home footer/actions/version/padding.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 204,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "TAB-01",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Port all adaptive layout numerical examples and sticky overflow-window tests.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 208,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "tab-allocation-7-3-76",
+        "tab-allocation-5-4-54",
+        "tab-allocation-3-1-100",
+        "tab-allocation-4-1-100",
+        "tab-allocation-5-2-100",
+        "tab-allocation-1-0-100"
+      ]
+    },
+    {
+      "id": "TAB-02",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Idle plus consumes 3 cells; active draft replaces it without duplication.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 209,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "TAB-03",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Status/number switches never shift title start cell; include 100+ tabs to grow number width.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 210,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "tab-state-idle",
+        "tab-state-busy",
+        "tab-state-permission",
+        "tab-state-question",
+        "tab-state-unread",
+        "tab-state-error_unread",
+        "tab-state-renaming"
+      ]
+    },
+    {
+      "id": "TAB-04",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Busy→permission/question uses !/? and pauses busy spinner; numbers mode stays numeric.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 211,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "tab-state-idle",
+        "tab-state-busy",
+        "tab-state-permission",
+        "tab-state-question",
+        "tab-state-unread",
+        "tab-state-error_unread",
+        "tab-state-renaming"
+      ]
+    },
+    {
+      "id": "TAB-05",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Root status includes child busy/attention, excludes child-only unread; permission outranks question.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 212,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "tab-state-idle",
+        "tab-state-busy",
+        "tab-state-permission",
+        "tab-state-question",
+        "tab-state-unread",
+        "tab-state-error_unread",
+        "tab-state-renaming",
+        "family-1",
+        "family-2",
+        "family-4"
+      ]
+    },
+    {
+      "id": "TAB-06",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Background user enqueue increments flash even when already busy; synthetic parked entries don't mark busy.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 213,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "TAB-07",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Selected/hovered/dragged/unread/error/renaming colors and text attributes match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 214,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "tab-state-idle",
+        "tab-state-busy",
+        "tab-state-permission",
+        "tab-state-question",
+        "tab-state-unread",
+        "tab-state-error_unread",
+        "tab-state-renaming"
+      ]
+    },
+    {
+      "id": "TAB-08",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Four-cell title fade and grapheme-aware width handle CJK, emoji ZWJ, combining accents, Tamil, and long paths.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 215,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "marquee-0",
+        "marquee-599",
+        "marquee-600",
+        "marquee-680"
+      ]
+    },
+    {
+      "id": "TAB-09",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Marquee waits 600 ms, advances 80 ms, stops after one cycle, resets on leave/fit.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 216,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "marquee-0",
+        "marquee-599",
+        "marquee-600",
+        "marquee-680"
+      ]
+    },
+    {
+      "id": "TAB-10",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Expanded entries 2 rows+gap 1; compact entries 1+gap 1; detail project/worktree rules match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 217,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "rail-compact-11",
+        "rail-compact-12"
+      ]
+    },
+    {
+      "id": "TAB-11",
+      "area": "Tab fixtures and interactions",
+      "requirement": "5-column compact golden: search row 1, items 3/5/7, plus 9, transcript column 5; half-block colors correct.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 218,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "rail-compact-11",
+        "rail-compact-12"
+      ]
+    },
+    {
+      "id": "TAB-12",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Compact tooltip 4 rows/max 54 cols, clamp on bottom edge, hide while dragging/menu.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 219,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "TAB-13",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Click/middle-close/right-menu/hover-close each match; hidden close cell never closes.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 220,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "tab-mouse-sequence"
+      ]
+    },
+    {
+      "id": "TAB-14",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Transcript selection release over plus/search/close does not trigger action.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 221,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "tab-mouse-sequence"
+      ]
+    },
+    {
+      "id": "TAB-15",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Drag reorder preview persists once and suppresses synthetic release activation.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 222,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "tab-mouse-sequence"
+      ]
+    },
+    {
+      "id": "TAB-16",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Horizontal repeated close retains pointer's close cell through overflow change; leave/5s releases.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 223,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "tab-mouse-sequence"
+      ]
+    },
+    {
+      "id": "TAB-17",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Active tab reveal happens after new layout and respects viewport during long vertical lists.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 224,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "TAB-18",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Context menu placement, entries, hover, outside dismissal and up-to 10 recent list match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 225,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "TAB-19",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Close-active chooses MRU then right/left fallback; close-background keeps active; reopen original position.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 226,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "TAB-20",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Tab order/scope survive restart; recent-closed/history remain in-memory by design.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 227,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "TAB-21",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Focus-confirmed view acknowledgement and retry 250 ms→5s reproduce unread transition.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 228,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "TAB-22",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Async/shared-store mutations cannot resurrect a closed tab or alternate title fallbacks.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 229,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "TAB-23",
+      "area": "Tab fixtures and interactions",
+      "requirement": "All default and customized tab/sidebar/focus shortcuts dispatch same commands.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 230,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "TAB-24",
+      "area": "Tab fixtures and interactions",
+      "requirement": "Reduced-animation state preserves statuses/attention and dims pending title; deterministic clock captures full-motion phases.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 231,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "SIDE-01",
+      "area": "Sidebar fixtures",
+      "requirement": "Width 42, outer padding 2/2/1/1, title inset, body gap 1, pinned footer and absolute scrollbar match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 235,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "page-80x24-dark",
+        "page-80x24-light",
+        "page-120x40-dark",
+        "page-120x40-light",
+        "page-160x48-dark",
+        "page-160x48-light",
+        "page-200x60-dark",
+        "page-200x60-light"
+      ]
+    },
+    {
+      "id": "SIDE-02",
+      "area": "Sidebar fixtures",
+      "requirement": "Visible default section order Context→Limit→MCP→Todo; hidden contributions leave no artificial blank section.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 236,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "page-80x24-dark",
+        "page-80x24-light",
+        "page-120x40-dark",
+        "page-120x40-light",
+        "page-160x48-dark",
+        "page-160x48-light",
+        "page-200x60-dark",
+        "page-200x60-light"
+      ]
+    },
+    {
+      "id": "SIDE-03",
+      "area": "Sidebar fixtures",
+      "requirement": "No usage/no cost hides Context; cost-only, tokens-only, unknown-model-limit, revert and cached-token cases match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 237,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "usage-0",
+        "usage-999",
+        "usage-1000",
+        "usage-999949",
+        "usage-999950",
+        "usage-boundary-completed_compaction",
+        "usage-boundary-reverted",
+        "usage-boundary-unknown_revert",
+        "usage-boundary-missing_model_limit",
+        "usage-boundary-live_selected_model_differs"
+      ]
+    },
+    {
+      "id": "SIDE-04",
+      "area": "Sidebar fixtures",
+      "requirement": "Usage percentage includes correct five token classes and uses last eligible assistant's model.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 238,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "usage-0",
+        "usage-999",
+        "usage-1000",
+        "usage-999949",
+        "usage-999950",
+        "usage-boundary-completed_compaction",
+        "usage-boundary-reverted",
+        "usage-boundary-unknown_revert",
+        "usage-boundary-missing_model_limit",
+        "usage-boundary-live_selected_model_differs"
+      ]
+    },
+    {
+      "id": "SIDE-05",
+      "area": "Sidebar fixtures",
+      "requirement": "Limit hidden/unlimited/positive/reached/out states and text colors match separately from context.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 239,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "SIDE-06",
+      "area": "Sidebar fixtures",
+      "requirement": "MCP 0/1/2/3 servers trigger correct section/disclosure behavior; collapsed active/error counts correct.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 240,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "mcp-count-0",
+        "mcp-count-1",
+        "mcp-count-2",
+        "mcp-count-3"
+      ]
+    },
+    {
+      "id": "SIDE-07",
+      "area": "Sidebar fixtures",
+      "requirement": "MCP pending/connected/disabled/failed/needs_auth map to exact label/dot/name/status styles.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 241,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "mcp-count-0",
+        "mcp-count-1",
+        "mcp-count-2",
+        "mcp-count-3"
+      ]
+    },
+    {
+      "id": "SIDE-08",
+      "area": "Sidebar fixtures",
+      "requirement": "Long MCP name truncates before fixed status; row click selects server and failed details.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 242,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "SIDE-09",
+      "area": "Sidebar fixtures",
+      "requirement": "MCP heading expanded state persists; no invented row hover treatment.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 243,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "SIDE-10",
+      "area": "Sidebar fixtures",
+      "requirement": "Todo takes latest completed list before revert, wraps body, renders markers/styles and remaining count.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 244,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "SIDE-11",
+      "area": "Sidebar fixtures",
+      "requirement": "MCP/Todo <=2 remain visible even if persisted collapsed from an earlier larger list.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 245,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "mcp-count-0",
+        "mcp-count-1",
+        "mcp-count-2",
+        "mcp-count-3"
+      ]
+    },
+    {
+      "id": "SIDE-12",
+      "area": "Sidebar fixtures",
+      "requirement": "Onboarding at height 21/22, integrations loading/connected/disconnected, dismissed/undismissed matches.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 246,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "SIDE-13",
+      "area": "Sidebar fixtures",
+      "requirement": "Footer path max 38, branch suffix, UNIX/Windows/UNC/CJK/emoji basename truncation matches.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 247,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "SIDE-14",
+      "area": "Sidebar fixtures",
+      "requirement": "Footer hover/copy/open/workspaces actions match; text selection prevents opening menu.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 248,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "SIDE-15",
+      "area": "Sidebar fixtures",
+      "requirement": "LSP/changed-files additions are labeled extension fixtures, never silently counted as project-pinned v2 default parity.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-layout.md",
+      "source_report_line": 249,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "THEME-01",
+      "area": "7. Acceptance checklist and test entry points",
+      "requirement": "Resolve every default dark/light token from native JSON; compare RGBA and provenance.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-theme-runtime.md",
+      "source_report_line": 101,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "theme-combinations-dark",
+        "theme-combinations-light"
+      ]
+    },
+    {
+      "id": "THEME-02",
+      "area": "7. Acceptance checklist and test entry points",
+      "requirement": "Golden surface colors match the table, including prompt's neutral 700→600 operation.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-theme-runtime.md",
+      "source_report_line": 102,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "page-80x24-dark",
+        "page-80x24-light",
+        "page-120x40-dark",
+        "page-120x40-light",
+        "page-160x48-dark",
+        "page-160x48-light",
+        "page-200x60-dark",
+        "page-200x60-light"
+      ]
+    },
+    {
+      "id": "THEME-03",
+      "area": "7. Acceptance checklist and test entry points",
+      "requirement": "Equal RGB at different steps remains distinct; literal same-RGB colors do not shift.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-theme-runtime.md",
+      "source_report_line": 103,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "theme-combinations-dark",
+        "theme-combinations-light"
+      ]
+    },
+    {
+      "id": "THEME-04",
+      "area": "7. Acceptance checklist and test entry points",
+      "requirement": "Step clamping, negative/fractional/nonfinite amounts match resolver behavior.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-theme-runtime.md",
+      "source_report_line": 104,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "THEME-05",
+      "area": "7. Acceptance checklist and test entry points",
+      "requirement": "All simultaneous state combinations follow disabled→pressed→focused→selected→hovered.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-theme-runtime.md",
+      "source_report_line": 105,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "theme-combinations-dark",
+        "theme-combinations-light"
+      ]
+    },
+    {
+      "id": "THEME-06",
+      "area": "7. Acceptance checklist and test entry points",
+      "requirement": "Dialog surface is absolute/reactive and resolves references inside its overrides.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-theme-runtime.md",
+      "source_report_line": 106,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "THEME-07",
+      "area": "7. Acceptance checklist and test entry points",
+      "requirement": "Transparent action states preserve underlying cells; compare alpha as well as RGB.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-theme-runtime.md",
+      "source_report_line": 107,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "theme-combinations-dark",
+        "theme-combinations-light"
+      ]
+    },
+    {
+      "id": "THEME-08",
+      "area": "7. Acceptance checklist and test entry points",
+      "requirement": "Syntax scopes, font attributes, Markdown styles, extmarks, and categorical ordering match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-theme-runtime.md",
+      "source_report_line": 108,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "THEME-09",
+      "area": "7. Acceptance checklist and test entry points",
+      "requirement": "Diff content/gutter/span/hunk colors remain distinct in unified and split presentations.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-theme-runtime.md",
+      "source_report_line": 109,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "THEME-10",
+      "area": "7. Acceptance checklist and test entry points",
+      "requirement": "Default/new-designs × opencode/opencode2 combinations are separately covered.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-theme-runtime.md",
+      "source_report_line": 110,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "theme-combinations-dark",
+        "theme-combinations-light"
+      ]
+    },
+    {
+      "id": "THEME-11",
+      "area": "7. Acceptance checklist and test entry points",
+      "requirement": "Missing/invalid/custom/V1/one-mode sources take the exact fallback/migration path.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-theme-runtime.md",
+      "source_report_line": 111,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "THEME-12",
+      "area": "7. Acceptance checklist and test entry points",
+      "requirement": "Picker preview/cancel and locked/system mode changes preserve the intended preferences.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-theme-runtime.md",
+      "source_report_line": 112,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "THEME-13",
+      "area": "7. Acceptance checklist and test entry points",
+      "requirement": "System cold-start/cache/palette-reply transitions do not block first paint; alpha 0 remains alpha 0.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-theme-runtime.md",
+      "source_report_line": 113,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "THEME-14",
+      "area": "7. Acceptance checklist and test entry points",
+      "requirement": "Replacing syntax styles during streaming cannot free a resource before renderer idle.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-theme-runtime.md",
+      "source_report_line": 114,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "THEME-15",
+      "area": "7. Acceptance checklist and test entry points",
+      "requirement": "Cursor shape/blink/default/disabled/focus states match, independently of prompt background.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-theme-runtime.md",
+      "source_report_line": 115,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "THEME-16",
+      "area": "7. Acceptance checklist and test entry points",
+      "requirement": "Selection copy/Escape/Ctrl+C behavior and actual selected-cell painting match native renderer.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-theme-runtime.md",
+      "source_report_line": 116,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "THEME-17",
+      "area": "7. Acceptance checklist and test entry points",
+      "requirement": "CJK, combining accents, Tamil, emoji ZWJ/VS16, tabs and control characters preserve cursor/extmark positions.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-theme-runtime.md",
+      "source_report_line": 117,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "input-ascii",
+        "input-tamil",
+        "input-cjk",
+        "input-combining",
+        "input-emoji_zwj",
+        "input-tab_mention",
+        "input-ime_commit"
+      ]
+    },
+    {
+      "id": "THEME-18",
+      "area": "7. Acceptance checklist and test entry points",
+      "requirement": "Geometry, styles, clipping and pointer hit testing use the same measured cell widths.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-theme-runtime.md",
+      "source_report_line": 118,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "CP-01",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Separate editable Prompt from auxiliary Composer.",
+      "acceptance_detail": "Render each in the same parent slot and confirm replacement, not duplication. C01/C07/C10.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 274,
+      "source_reference_ids": [
+        "C01",
+        "C07",
+        "C10"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1674-L1983",
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/composer/index.tsx#L21-L157",
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L1590-L1658"
+      ],
+      "fixture_ids": []
+    },
+    {
+      "id": "CP-02",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match left-only border and separate half-block bottom lip.",
+      "acceptance_detail": "Cell+style snapshot proves `┃`, `╹`, `▀`, with transparent variant using spaces. C01/C17.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 275,
+      "source_reference_ids": [
+        "C01",
+        "C17"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1674-L1983",
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/spinner.ts#L246-L368"
+      ],
+      "fixture_ids": [
+        "page-80x24-dark",
+        "page-80x24-light",
+        "page-120x40-dark",
+        "page-120x40-light",
+        "page-160x48-dark",
+        "page-160x48-light",
+        "page-200x60-dark",
+        "page-200x60-light"
+      ]
+    },
+    {
+      "id": "CP-03",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match raised prompt surface through theme transformation.",
+      "acceptance_detail": "Compare foreground/background RGBA on blank padding cells in dark/light/custom/transparent modes. C01/C03.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 276,
+      "source_reference_ids": [
+        "C01",
+        "C03"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1674-L1983",
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1537-L1672"
+      ],
+      "fixture_ids": [
+        "page-80x24-dark",
+        "page-80x24-light",
+        "page-120x40-dark",
+        "page-120x40-light",
+        "page-160x48-dark",
+        "page-160x48-light",
+        "page-200x60-dark",
+        "page-200x60-light"
+      ]
+    },
+    {
+      "id": "CP-04",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match padding and editor height rules.",
+      "acceptance_detail": "Widths 43/44 and heights 12/24/40; editor grows then scrolls; footer stays outside input. C01.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 277,
+      "source_reference_ids": [
+        "C01"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1674-L1983"
+      ],
+      "fixture_ids": [
+        "page-80x24-dark",
+        "page-80x24-light",
+        "page-120x40-dark",
+        "page-120x40-light",
+        "page-160x48-dark",
+        "page-160x48-light",
+        "page-200x60-dark",
+        "page-200x60-light",
+        "prompt-width-43",
+        "prompt-width-44"
+      ]
+    },
+    {
+      "id": "CP-05",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Place agent, model, provider, variant below textarea in exact order.",
+      "acceptance_detail": "Assert coordinates and individual style spans, including no dot between model/provider. C02.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 278,
+      "source_reference_ids": [
+        "C02"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/metadata.tsx#L8-L167"
+      ],
+      "fixture_ids": [
+        "page-80x24-dark",
+        "page-80x24-light",
+        "page-120x40-dark",
+        "page-120x40-light",
+        "page-160x48-dark",
+        "page-160x48-light",
+        "page-200x60-dark",
+        "page-200x60-light",
+        "prompt-width-43",
+        "prompt-width-44"
+      ]
+    },
+    {
+      "id": "CP-06",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Port metadata candidate fitting exactly.",
+      "acceptance_detail": "Fixtures for long provider chain, long model, auto, variant, low limit, wide Unicode, and parent narrower than terminal. C02.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 279,
+      "source_reference_ids": [
+        "C02"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/metadata.tsx#L8-L167"
+      ],
+      "fixture_ids": [
+        "prompt-width-43",
+        "prompt-width-44"
+      ]
+    },
+    {
+      "id": "CP-07",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Preserve data-driven agent selection and colors.",
+      "acceptance_detail": "Custom agent, hidden agent, subagent-only agent, explicit color, palette wrap. C18.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 280,
+      "source_reference_ids": [
+        "C18"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/local.tsx#L58-L135"
+      ],
+      "fixture_ids": []
+    },
+    {
+      "id": "CP-08",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Preserve display during catalog reload.",
+      "acceptance_detail": "Delayed location catalog retains old labels but prevents unavailable-model submission. C03/C12.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 281,
+      "source_reference_ids": [
+        "C03",
+        "C12"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1537-L1672",
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1097-L1404"
+      ],
+      "fixture_ids": []
+    },
+    {
+      "id": "CP-09",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Render initial reveal and muted/shell border states.",
+      "acceptance_detail": "Fixed-clock frames at start/intermediate/end; no replay after tab remount. C03/C17.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 282,
+      "source_reference_ids": [
+        "C03",
+        "C17"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1537-L1672",
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/spinner.ts#L246-L368"
+      ],
+      "fixture_ids": []
+    },
+    {
+      "id": "CP-10",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Register built-in right-footer contribution.",
+      "acceptance_detail": "Full app fixture, not Prompt in isolation, includes usage/cost/hints. C04.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 283,
+      "source_reference_ids": [
+        "C04"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/prompt/footer.tsx#L14-L156"
+      ],
+      "fixture_ids": [
+        "page-80x24-dark",
+        "page-80x24-light",
+        "page-120x40-dark",
+        "page-120x40-light",
+        "page-160x48-dark",
+        "page-160x48-light",
+        "page-200x60-dark",
+        "page-200x60-light"
+      ]
+    },
+    {
+      "id": "CP-11",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Make running state replace idle directory.",
+      "acceptance_detail": "Idle→running→idle snapshots assert mutually exclusive labels and exact geometry. C01/C03.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 284,
+      "source_reference_ids": [
+        "C01",
+        "C03"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1674-L1983",
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1537-L1672"
+      ],
+      "fixture_ids": [
+        "footer-state-idle",
+        "footer-state-running",
+        "footer-state-worktree_move",
+        "footer-state-new_worktree",
+        "footer-state-shell_mode"
+      ]
+    },
+    {
+      "id": "CP-12",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Port eight-cell scanner and reduced animation mode.",
+      "acceptance_detail": "Deterministic sample across movement/holds, frame 0 through 53, 40-ms steps; static `[⋯]` fixture. C17.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 285,
+      "source_reference_ids": [
+        "C17"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/spinner.ts#L246-L368"
+      ],
+      "fixture_ids": [
+        "prompt-scanner-0",
+        "prompt-scanner-40",
+        "prompt-scanner-320",
+        "prompt-scanner-680",
+        "prompt-scanner-1200",
+        "prompt-scanner-2120"
+      ]
+    },
+    {
+      "id": "CP-13",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match interrupt arming, expiration, color flash, and detail suppression.",
+      "acceptance_detail": "First/second Escape, 4999/5000 ms, widths 79/80, autocomplete and shell interception. C11/C03.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 286,
+      "source_reference_ids": [
+        "C03",
+        "C11"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1537-L1672",
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L419-L548"
+      ],
+      "fixture_ids": [
+        "interrupt-armed-79",
+        "interrupt-armed-80"
+      ]
+    },
+    {
+      "id": "CP-14",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match directory/branch formatting, truncation, hover, actions.",
+      "acceptance_detail": "Home abbreviation, branch suffix, long path, selected text suppressing click, action menu. C03/C06.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 287,
+      "source_reference_ids": [
+        "C03",
+        "C06"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1537-L1672",
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/working-directory-actions.tsx#L9-L65"
+      ],
+      "fixture_ids": [
+        "footer-state-idle",
+        "footer-state-running",
+        "footer-state-worktree_move",
+        "footer-state-new_worktree",
+        "footer-state-shell_mode"
+      ]
+    },
+    {
+      "id": "CP-15",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Keep editor-file slot distinct.",
+      "acceptance_detail": "Directory plus pending/attached editor file in one rail, with overflow and pending accent. C01.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 288,
+      "source_reference_ids": [
+        "C01"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1674-L1983"
+      ],
+      "fixture_ids": []
+    },
+    {
+      "id": "CP-16",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Count family activity and shell records with actual upstream semantics.",
+      "acceptance_detail": "Nested siblings, current child, inactive child, shell record status transition; compare source projection. C04.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 289,
+      "source_reference_ids": [
+        "C04"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/prompt/footer.tsx#L14-L156"
+      ],
+      "fixture_ids": [
+        "family-1",
+        "family-2",
+        "family-4"
+      ]
+    },
+    {
+      "id": "CP-17",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match context usage arithmetic and boundaries.",
+      "acceptance_detail": "All five token categories; compaction; revert; unknown boundary; missing model limit; zero tokens. C05.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 290,
+      "source_reference_ids": [
+        "C05"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/session.ts#L46-L66"
+      ],
+      "fixture_ids": [
+        "usage-0",
+        "usage-999",
+        "usage-1000",
+        "usage-999949",
+        "usage-999950",
+        "usage-boundary-completed_compaction",
+        "usage-boundary-reverted",
+        "usage-boundary-unknown_revert",
+        "usage-boundary-missing_model_limit",
+        "usage-boundary-live_selected_model_differs"
+      ]
+    },
+    {
+      "id": "CP-18",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match number/currency formatting.",
+      "acceptance_detail": "999, 1000, 999949, 999950; known/unknown context limit; zero and positive cost. C05.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 291,
+      "source_reference_ids": [
+        "C05"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/session.ts#L46-L66"
+      ],
+      "fixture_ids": [
+        "usage-0",
+        "usage-999",
+        "usage-1000",
+        "usage-999949",
+        "usage-999950",
+        "usage-boundary-completed_compaction",
+        "usage-boundary-reverted",
+        "usage-boundary-unknown_revert",
+        "usage-boundary-missing_model_limit",
+        "usage-boundary-live_selected_model_differs"
+      ]
+    },
+    {
+      "id": "CP-19",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match footer priority and fitting.",
+      "acceptance_detail": "Long labels; width 43/44; usage+shortcut fit/fail boundaries; live status plus metrics; showDetails false. C04.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 292,
+      "source_reference_ids": [
+        "C04"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/prompt/footer.tsx#L14-L156"
+      ],
+      "fixture_ids": [
+        "footer-state-idle",
+        "footer-state-running",
+        "footer-state-worktree_move",
+        "footer-state-new_worktree",
+        "footer-state-shell_mode"
+      ]
+    },
+    {
+      "id": "CP-20",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match footer hover and disabled hint styling.",
+      "acceptance_detail": "Pointer enter/leave and focus moving to a side panel, preserving shortcut identity. C04.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 293,
+      "source_reference_ids": [
+        "C04"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/prompt/footer.tsx#L14-L156"
+      ],
+      "fixture_ids": []
+    },
+    {
+      "id": "CP-21",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match queue dock dimensions and hover.",
+      "acceptance_detail": "Zero/one/multiple prompts, multiline first prompt flattened, long text truncation, click opens queue management. C10.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 294,
+      "source_reference_ids": [
+        "C10"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L1590-L1658"
+      ],
+      "fixture_ids": [
+        "bottom-priority-permission",
+        "bottom-priority-form",
+        "bottom-priority-missing_location",
+        "bottom-priority-child_with_form",
+        "bottom-priority-queue",
+        "bottom-priority-dock_and_permission"
+      ]
+    },
+    {
+      "id": "CP-22",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Enforce dock/permission/form/location/prompt precedence.",
+      "acceptance_detail": "Every priority combination; child session plus form; closing child dock navigates parent. C10.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 295,
+      "source_reference_ids": [
+        "C10"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L1590-L1658"
+      ],
+      "fixture_ids": [
+        "bottom-priority-permission",
+        "bottom-priority-form",
+        "bottom-priority-missing_location",
+        "bottom-priority-child_with_form",
+        "bottom-priority-queue",
+        "bottom-priority-dock_and_permission"
+      ]
+    },
+    {
+      "id": "CP-23",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match auxiliary dock tabs, geometry, and active styles.",
+      "acceptance_detail": "One/two/three registered tabs, left/right wrap, Escape/Ctrl+C, hint layout. C07.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 296,
+      "source_reference_ids": [
+        "C07"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/composer/index.tsx#L21-L157"
+      ],
+      "fixture_ids": [
+        "dock-subagents",
+        "dock-shell",
+        "dock-terminals"
+      ]
+    },
+    {
+      "id": "CP-24",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match subagent hierarchy, activity filter, and selection lifecycle.",
+      "acceptance_detail": "Nested family, inactive toggle, route remount, deletion, current hidden by filter, more than five rows. C08.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 297,
+      "source_reference_ids": [
+        "C08"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/composer/subagents-tab.tsx#L26-L259"
+      ],
+      "fixture_ids": [
+        "family-1",
+        "family-2",
+        "family-4",
+        "dock-subagents",
+        "dock-shell",
+        "dock-terminals"
+      ]
+    },
+    {
+      "id": "CP-25",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Render subagent Running text accurately.",
+      "acceptance_detail": "No invented progress percentage/spinner in that list; running/idle row captures. C08.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 298,
+      "source_reference_ids": [
+        "C08"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/composer/subagents-tab.tsx#L26-L259"
+      ],
+      "fixture_ids": []
+    },
+    {
+      "id": "CP-26",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match shell list and output actions.",
+      "acceptance_detail": "Multiline command renders one row; running-only filter; selected removal; configured and disabled keys. C09.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 299,
+      "source_reference_ids": [
+        "C09"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/composer/shell-tab.tsx#L12-L149"
+      ],
+      "fixture_ids": [
+        "dock-subagents",
+        "dock-shell",
+        "dock-terminals"
+      ]
+    },
+    {
+      "id": "CP-27",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match terminal list with New terminal row.",
+      "acceptance_detail": "Foreground-process/title fallback, visible versus focused row, select/create failure and toast. C09.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 300,
+      "source_reference_ids": [
+        "C09"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/composer/shell-tab.tsx#L12-L149"
+      ],
+      "fixture_ids": [
+        "dock-subagents",
+        "dock-shell",
+        "dock-terminals"
+      ]
+    },
+    {
+      "id": "CP-28",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Respect v2 keymap defaults and layers.",
+      "acceptance_detail": "Shift+Tab cycles agent; Tab completes; Enter sends once; configured disablement has no component fallback. C16.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 301,
+      "source_reference_ids": [
+        "C16"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/config/keybind.ts#L128-L280"
+      ],
+      "fixture_ids": []
+    },
+    {
+      "id": "CP-29",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Preserve dialog focus through prompt remount.",
+      "acceptance_detail": "Open model dialog, update slot/catalog, type; text must enter dialog, not background prompt. C13.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 302,
+      "source_reference_ids": [
+        "C13"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L707-L761"
+      ],
+      "fixture_ids": []
+    },
+    {
+      "id": "CP-30",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match shell entry/exit and multiline history edges.",
+      "acceptance_detail": "`!` at offset zero vs middle; Escape/Backspace/Ctrl+C; history restores full parts/mode/cursor. C11.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 303,
+      "source_reference_ids": [
+        "C11"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L419-L548"
+      ],
+      "fixture_ids": []
+    },
+    {
+      "id": "CP-31",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Preserve IME and duplicate-submit behavior.",
+      "acceptance_detail": "Compose final Korean character; race native Enter and command dispatch; assert exactly one submitted prompt. C12.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 304,
+      "source_reference_ids": [
+        "C12"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1097-L1404"
+      ],
+      "fixture_ids": [
+        "input-ascii",
+        "input-tamil",
+        "input-cjk",
+        "input-combining",
+        "input-emoji_zwj",
+        "input-tab_mention",
+        "input-ime_commit"
+      ]
+    },
+    {
+      "id": "CP-32",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Preserve synchronous snapshot/clear and conditional error restoration.",
+      "acceptance_detail": "Type during in-flight send; fail request; assert new draft survives and old text only returns if field empty. C12.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 305,
+      "source_reference_ids": [
+        "C12"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1097-L1404"
+      ],
+      "fixture_ids": []
+    },
+    {
+      "id": "CP-33",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match queue vs steer and blank-Enter promotion.",
+      "acceptance_detail": "Running/idle, nonempty/empty input, forbidden queue types, agent/model changed before promotion. C12/C10.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 306,
+      "source_reference_ids": [
+        "C10",
+        "C12"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx#L1590-L1658",
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1097-L1404"
+      ],
+      "fixture_ids": []
+    },
+    {
+      "id": "CP-34",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Preserve per-tab draft ownership and explicit stash.",
+      "acceptance_detail": "Switch A→B→A with distinct text, cursor, attachment spans; pop/list stash, clear significant draft to history. C13/C14.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 307,
+      "source_reference_ids": [
+        "C13",
+        "C14"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L707-L761",
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1406-L1535"
+      ],
+      "fixture_ids": []
+    },
+    {
+      "id": "CP-35",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Implement tracked input parts through edits.",
+      "acceptance_detail": "Reordered/duplicate/prefix mentions; deletion; expanded paste shifting mentions; mentionless attachment retention. C13.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 308,
+      "source_reference_ids": [
+        "C13"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L707-L761"
+      ],
+      "fixture_ids": [
+        "input-ascii",
+        "input-tamil",
+        "input-cjk",
+        "input-combining",
+        "input-emoji_zwj",
+        "input-tab_mention",
+        "input-ime_commit"
+      ]
+    },
+    {
+      "id": "CP-36",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match paste normalization and folding boundaries.",
+      "acceptance_detail": "2/3 lines, 150/151 characters, CR/CRLF, escape sequences, full-paste setting, repeat paste expansion. C14.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 309,
+      "source_reference_ids": [
+        "C14"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1406-L1535"
+      ],
+      "fixture_ids": [
+        "paste-2lines-150chars",
+        "paste-3lines-150chars",
+        "paste-2lines-151chars"
+      ]
+    },
+    {
+      "id": "CP-37",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Serialize asynchronous paste safely.",
+      "acceptance_detail": "Paste resolves after tab switch, mode switch, typing, disabled focus, or unmount; no stale insertion. C14.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 310,
+      "source_reference_ids": [
+        "C14"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1406-L1535"
+      ],
+      "fixture_ids": [
+        "paste-2lines-150chars",
+        "paste-3lines-150chars",
+        "paste-2lines-151chars"
+      ]
+    },
+    {
+      "id": "CP-38",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match optional image previews and failure states.",
+      "acceptance_detail": "0/1/3/4 images; terminal heights 12/24/40; decode failure; overflow click. C01/C14.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 311,
+      "source_reference_ids": [
+        "C01",
+        "C14"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1674-L1983",
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1406-L1535"
+      ],
+      "fixture_ids": []
+    },
+    {
+      "id": "CP-39",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Position autocomplete above actual prompt anchor.",
+      "acceptance_detail": "Resize, long prompt growth, sidebar toggle, near-top prompt, ten-plus candidates, short terminal. C15.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 312,
+      "source_reference_ids": [
+        "C15"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/autocomplete.tsx#L660-L960"
+      ],
+      "fixture_ids": []
+    },
+    {
+      "id": "CP-40",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Match autocomplete styles and routing.",
+      "acceptance_detail": "Keyboard vs hover selection, directory expansion, kind label, destructive confirmation, searching/error/empty. C15/C16.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 313,
+      "source_reference_ids": [
+        "C15",
+        "C16"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/autocomplete.tsx#L660-L960",
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/config/keybind.ts#L128-L280"
+      ],
+      "fixture_ids": []
+    },
+    {
+      "id": "CP-41",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Use renderer-compatible offsets and cell widths.",
+      "acceptance_detail": "Tamil, CJK, combining accents, emoji ZWJ, tabs, wide chars, surrogate differences; no UTF-8 byte-offset assumptions. C13–C15 and existing display tests.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 314,
+      "source_reference_ids": [
+        "C13",
+        "C15"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L707-L761",
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/autocomplete.tsx#L660-L960"
+      ],
+      "fixture_ids": [
+        "input-ascii",
+        "input-tamil",
+        "input-cjk",
+        "input-combining",
+        "input-emoji_zwj",
+        "input-tab_mention",
+        "input-ime_commit"
+      ]
+    },
+    {
+      "id": "CP-42",
+      "area": "Source-backed implementation checklist with acceptance tests",
+      "requirement": "Preserve same-surface styling during streaming and retry.",
+      "acceptance_detail": "Network retry message remains in transcript; prompt busy/idle state independently correct. C20/C01.",
+      "status": "unverified_rust",
+      "source_report": "audit-composer.md",
+      "source_report_line": 315,
+      "source_reference_ids": [
+        "C01",
+        "C20"
+      ],
+      "source_urls": [
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx#L1674-L1983",
+        "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/usage.tsx#L57-L64"
+      ],
+      "fixture_ids": []
+    },
+    {
+      "id": "MSG-001",
+      "area": "Transcript and messages",
+      "requirement": "Default medium transcript groups thoughts and exploration, leaves questions standalone, and preserves one-row outer spacing without double gaps in nested groups.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 223,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "MSG-002",
+      "area": "Transcript and messages",
+      "requirement": "Low/medium/high and thinking show/hide reproduce correct default disclosures; changing one session does not corrupt another session's saved expansion.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 224,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "MSG-003",
+      "area": "Transcript and messages",
+      "requirement": "Pending permission tool remains visible outside collapsed groups; a same part/call ID reused in another message does not hide the wrong row.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 225,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "MSG-004",
+      "area": "Transcript and messages",
+      "requirement": "Expand/collapse, backfill, reconnect, tab switch, and width resize preserve stable anchors, selected content, and expansion. No jump to the transcript bottom when the user is reading history.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 226,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "transcript-lifecycle-resize",
+        "transcript-lifecycle-backfill",
+        "transcript-lifecycle-reconnect",
+        "transcript-lifecycle-tab_switch",
+        "transcript-lifecycle-group_expand",
+        "transcript-lifecycle-late_highlight_after_destroy"
+      ]
+    },
+    {
+      "id": "MSG-005",
+      "area": "Transcript and messages",
+      "requirement": "User card content, one-cell `┃` border, agent/pending border colors, padding, hover transform, chips, and image gap match cell-for-cell.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 227,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "MSG-006",
+      "area": "Transcript and messages",
+      "requirement": "Text drag selection never opens message actions, group disclosure, tool details, or a child session on mouse-up.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 228,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "MSG-007",
+      "area": "Transcript and messages",
+      "requirement": "Message action menu correctly restores prompt on revert, copies message text, forks by current message ID, and tolerates a resync while open.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 229,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "MSG-008",
+      "area": "Transcript and messages",
+      "requirement": "Footer behavior at widths 27/28/35/36 is correct; agent/model/duration/TPS/interrupted states match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 230,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "MSG-010",
+      "area": "Transcript and messages",
+      "requirement": "Duration and throughput cover legacy input boundaries and marker-era turns with steers, model switches, missing stream timestamps, and an absent assistant anchor; tool duration is excluded from throughput.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 231,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "MSG-009",
+      "area": "Transcript and messages",
+      "requirement": "Queue dock, pending-steer actions, revert card, location/model/agent notices, and child completion notices match in each state.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 232,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "MD-001",
+      "area": "Markdown and highlighting",
+      "requirement": "Paragraphs, headings, bold, italic, strikethrough, inline code, blockquotes, ordered/unordered lists, nested lists, links, rules, fences, and grid tables match upstream cells and colors.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 236,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "markdown-paragraphs",
+        "markdown-headings_styles_links",
+        "markdown-nested_lists",
+        "markdown-table"
+      ]
+    },
+    {
+      "id": "MD-002",
+      "area": "Markdown and highlighting",
+      "requirement": "Unfinished fence, unfinished inline formatting, split Unicode/grapheme input, blank/whitespace chunks, and completion arriving before/after final content preserve all text.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 237,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "markdown-unfinished_fence"
+      ]
+    },
+    {
+      "id": "MD-003",
+      "area": "Markdown and highlighting",
+      "requirement": "Both final-content/completion event orders finish a streamed fence with exactly its complete content and one block; no stale initial text and no duplicate block.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 238,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "markdown-unfinished_fence",
+        "markdown-split_final_content",
+        "transcript-lifecycle-resize",
+        "transcript-lifecycle-backfill",
+        "transcript-lifecycle-reconnect",
+        "transcript-lifecycle-tab_switch",
+        "transcript-lifecycle-group_expand",
+        "transcript-lifecycle-late_highlight_after_destroy"
+      ]
+    },
+    {
+      "id": "MD-004",
+      "area": "Markdown and highlighting",
+      "requirement": "Rendered/source toggle reproduces concealment and preserves selection/scroll anchors. Reflow on narrow width does not corrupt code/table geometry.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 239,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "markdown-table",
+        "markdown-source_mode"
+      ]
+    },
+    {
+      "id": "MD-005",
+      "area": "Markdown and highlighting",
+      "requirement": "Theme switch recolors existing syntax and Markdown without losing text; reasoning uses muted foreground while retaining noncolor syntax attributes.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 240,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "markdown-theme_switch_mid_stream"
+      ]
+    },
+    {
+      "id": "MD-006",
+      "area": "Markdown and highlighting",
+      "requirement": "Valid bold first-block thinking titles become summary metadata; ordinary initial bold prose does not. Redacted-only reasoning renders nothing.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 241,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "MD-007",
+      "area": "Markdown and highlighting",
+      "requirement": "Unrelated plugin toggle preserves Markdown block identity; changed/removed fence handler updates existing blocks.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 242,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "markdown-unsupported_fence"
+      ]
+    },
+    {
+      "id": "MD-008",
+      "area": "Markdown and highlighting",
+      "requirement": "Each supported Mermaid kind, wide horizontal drag, streaming partial syntax, invalid syntax, oversized canvas, and fallback preserve geometry and source.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 243,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "markdown-mermaid"
+      ]
+    },
+    {
+      "id": "MD-009",
+      "area": "Markdown and highlighting",
+      "requirement": "LaTeX/math fences retain last good partial layout only when source extends it; unsupported syntax falls back; long formulas scroll horizontally and do not steal vertical transcript scroll.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 244,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "markdown-latex"
+      ]
+    },
+    {
+      "id": "TOOL-001",
+      "area": "Tools and subagents",
+      "requirement": "All 14 specialized names plus unknown/plugin/MCP fallback dispatch correctly; legacy names map to shell/subagent/patch.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 248,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "tool-shell",
+        "tool-glob",
+        "tool-read",
+        "tool-grep",
+        "tool-webfetch",
+        "tool-websearch",
+        "tool-write",
+        "tool-edit",
+        "tool-subagent",
+        "tool-execute",
+        "tool-patch",
+        "tool-todowrite",
+        "tool-question",
+        "tool-skill",
+        "tool-bash",
+        "tool-task",
+        "tool-apply_patch",
+        "tool-mcp__fixture",
+        "tool-unknown_plugin"
+      ]
+    },
+    {
+      "id": "TOOL-002",
+      "area": "Tools and subagents",
+      "requirement": "Streaming/running/completed/error/denied/permission-needed each have correct label, icon, spinner, color, strikethrough, and click behavior.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 249,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "tool-shell",
+        "tool-glob",
+        "tool-read",
+        "tool-grep",
+        "tool-webfetch",
+        "tool-websearch",
+        "tool-write",
+        "tool-edit",
+        "tool-subagent",
+        "tool-execute",
+        "tool-patch",
+        "tool-todowrite",
+        "tool-question",
+        "tool-skill",
+        "tool-bash",
+        "tool-task",
+        "tool-apply_patch",
+        "tool-mcp__fixture",
+        "tool-unknown_plugin"
+      ]
+    },
+    {
+      "id": "TOOL-003",
+      "area": "Tools and subagents",
+      "requirement": "Wrapped labels start after fixed 2-cell icon column; expanded error text aligns to the label; Background badge wraps as one padded item at narrow widths.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 250,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "TOOL-004",
+      "area": "Tools and subagents",
+      "requirement": "Primitive generic arguments flatten to one line; nested JSON is only in expanded view; ANSI output does not leak escape sequences.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 251,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "TOOL-005",
+      "area": "Tools and subagents",
+      "requirement": "Shell command/output share a 10-line collapsed budget; command max 2 visual rows; output tail and earlier-line label stay correct for wide glyphs and multiline commands.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 252,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "TOOL-006",
+      "area": "Tools and subagents",
+      "requirement": "Background shell collapses without needless polling, live expansion updates at the correct cadence, completion drains output, large output is bounded, moved sessions retain original process location.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 253,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "TOOL-007",
+      "area": "Tools and subagents",
+      "requirement": "New subagent, continued subagent, running child after tool completion, completed, error, cancelled, and detached Background badge all match without invented percentage progress.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 254,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "subagent-new_running",
+        "subagent-continued_running",
+        "subagent-tool_done_child_running",
+        "subagent-completed",
+        "subagent-failed",
+        "subagent-cancelled"
+      ]
+    },
+    {
+      "id": "TOOL-008",
+      "area": "Tools and subagents",
+      "requirement": "Subagent explicit model override and variant display match; missing override adds no model label; click follows the correct child session.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 255,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "subagent-new_running",
+        "subagent-continued_running",
+        "subagent-tool_done_child_running",
+        "subagent-completed",
+        "subagent-failed",
+        "subagent-cancelled"
+      ]
+    },
+    {
+      "id": "TOOL-009",
+      "area": "Tools and subagents",
+      "requirement": "Execute root and metadata child rows update independently; metadata runtime error changes root color even when transport state is completed.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 256,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "execute-metadata"
+      ]
+    },
+    {
+      "id": "TOOL-010",
+      "area": "Tools and subagents",
+      "requirement": "Execute child expansion reveals structured arguments; root/details action is distinct; success output stays out of inline preview; runtime errors show exactly the bounded preview.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 257,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "execute-metadata"
+      ]
+    },
+    {
+      "id": "TOOL-011",
+      "area": "Tools and subagents",
+      "requirement": "Execute dialog live status, TypeScript/JSON syntax, matching gutters, wrapped continuation line numbers, output/logs, copy actions, and scroll keys match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 258,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "execute-metadata"
+      ]
+    },
+    {
+      "id": "TOOL-012",
+      "area": "Tools and subagents",
+      "requirement": "Read range and loaded-instruction rows, Glob/Grep counts, WebFetch/Search/provider names, skill names, todos, and question-result blocks match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 259,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "tool-shell",
+        "tool-glob",
+        "tool-read",
+        "tool-grep",
+        "tool-webfetch",
+        "tool-websearch",
+        "tool-write",
+        "tool-edit",
+        "tool-subagent",
+        "tool-execute",
+        "tool-patch",
+        "tool-todowrite",
+        "tool-question",
+        "tool-skill",
+        "tool-bash",
+        "tool-task",
+        "tool-apply_patch",
+        "tool-mcp__fixture",
+        "tool-unknown_plugin"
+      ]
+    },
+    {
+      "id": "DIFF-001",
+      "area": "Diffs and media",
+      "requirement": "Inline auto split at content widths 120/121; permission auto split at terminal widths 120/121; dedicated viewer split availability at patch-pane widths 99/100.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 263,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "diff-inline-120",
+        "diff-inline-121",
+        "diff-permission-120",
+        "diff-permission-121",
+        "diff-viewer-99",
+        "diff-viewer-100"
+      ]
+    },
+    {
+      "id": "DIFF-002",
+      "area": "Diffs and media",
+      "requirement": "Add/edit/delete/move, multiple hunks, long paths, 3-to-4-digit line numbers, wrap/source mode, and syntax colors align with all diff background/gutter roles.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 264,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "diff-inline-120",
+        "diff-inline-121",
+        "diff-permission-120",
+        "diff-permission-121",
+        "diff-viewer-99",
+        "diff-viewer-100"
+      ]
+    },
+    {
+      "id": "DIFF-003",
+      "area": "Diffs and media",
+      "requirement": "Added-file virtualization only in eligible scroll-aware context; crossing 3,000 lines/chunk boundaries preserves source highlighting and exact placeholder heights.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 265,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "large-patch"
+      ]
+    },
+    {
+      "id": "DIFF-004",
+      "area": "Diffs and media",
+      "requirement": "Deleted-file count and applied-resource fallback appear without fabricated diff content; malformed wire metadata is filtered without a crash.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 266,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "DIFF-005",
+      "area": "Diffs and media",
+      "requirement": "Only valid severity-1 diagnostics render, maximum 3, with normalized path and 1-based positions.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 267,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "MEDIA-001",
+      "area": "Diffs and media",
+      "requirement": "Image preview off/on, 0/1/3/4 images, failed image, short/tall terminals, user/tool previews, and gallery click all match, including no click bubbling.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 268,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "FORM-001",
+      "area": "Permission, forms, timing, and recovery",
+      "requirement": "Permission once/always/reject variants; missing save rules omit always; changing selected option changes the body; nested rejection reason is correctly scoped.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 272,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "permission-layout-79",
+        "permission-layout-80"
+      ]
+    },
+    {
+      "id": "FORM-002",
+      "area": "Permission, forms, timing, and recovery",
+      "requirement": "Permission width 79/80, normal/fullscreen, Escape minimize/reject, ctrl-c clear/cancel, and edit-diff body preserve geometry and focus.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 273,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "permission-layout-79",
+        "permission-layout-80"
+      ]
+    },
+    {
+      "id": "FORM-003",
+      "area": "Permission, forms, timing, and recovery",
+      "requirement": "Text/number/integer/boolean/single/multi/external/conditional/default fields, validation, review, and draft restoration behave identically.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 274,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "form-text",
+        "form-number",
+        "form-boolean",
+        "form-single",
+        "form-multi",
+        "form-custom",
+        "form-external",
+        "form-conditional",
+        "form-review",
+        "form-stale"
+      ]
+    },
+    {
+      "id": "FORM-004",
+      "area": "Permission, forms, timing, and recovery",
+      "requirement": "Narrow field fallback replaces tabs at the exact fit boundary; 24-character tab labels, checkbox width 4, description insets 3/7, and textarea height 1–6 are verified.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 275,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "form-text",
+        "form-number",
+        "form-boolean",
+        "form-single",
+        "form-multi",
+        "form-custom",
+        "form-external",
+        "form-conditional",
+        "form-review",
+        "form-stale"
+      ]
+    },
+    {
+      "id": "FORM-005",
+      "area": "Permission, forms, timing, and recovery",
+      "requirement": "Paste into selected custom choice opens editing without submit; paste into active editor inserts at cursor; burst typing is not lost; up leaves the editor only from first visual line.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 276,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "form-text",
+        "form-number",
+        "form-boolean",
+        "form-single",
+        "form-multi",
+        "form-custom",
+        "form-external",
+        "form-conditional",
+        "form-review",
+        "form-stale"
+      ]
+    },
+    {
+      "id": "FORM-006",
+      "area": "Permission, forms, timing, and recovery",
+      "requirement": "Space toggles multiselect but not single choice; optional empty multiselect omits the answer; validation waits until the matching submit point.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 277,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "form-text",
+        "form-number",
+        "form-boolean",
+        "form-single",
+        "form-multi",
+        "form-custom",
+        "form-external",
+        "form-conditional",
+        "form-review",
+        "form-stale"
+      ]
+    },
+    {
+      "id": "FORM-007",
+      "area": "Permission, forms, timing, and recovery",
+      "requirement": "External URL is not acknowledged by merely opening/copying; review errors/progress count external acknowledgement; wrapped review only offers scroll when needed.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 278,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "form-text",
+        "form-number",
+        "form-boolean",
+        "form-single",
+        "form-multi",
+        "form-custom",
+        "form-external",
+        "form-conditional",
+        "form-review",
+        "form-stale"
+      ]
+    },
+    {
+      "id": "FORM-008",
+      "area": "Permission, forms, timing, and recovery",
+      "requirement": "Terminal/stale/revalidation-failed forms restore composer focus and drafts; keyboard scope does not leak actions into the underlying transcript.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 279,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "form-text",
+        "form-number",
+        "form-boolean",
+        "form-single",
+        "form-multi",
+        "form-custom",
+        "form-external",
+        "form-conditional",
+        "form-review",
+        "form-stale"
+      ]
+    },
+    {
+      "id": "STATE-001",
+      "area": "Permission, forms, timing, and recovery",
+      "requirement": "Spinner clock at 0/79/80/160 ms, animations off, visibility/culling, frame-list change, destroy, and parent background composition match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 280,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "STATE-002",
+      "area": "Permission, forms, timing, and recovery",
+      "requirement": "Compaction queued/running/completed/provider-native/failed/cancelled and summary streaming match; request usage is not mislabeled as new context size.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 281,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "STATE-003",
+      "area": "Permission, forms, timing, and recovery",
+      "requirement": "Retry countdown with zero/past/future deadline, ordinary error, interruption, free limit, and optional token diagnostics match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 282,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "STATE-004",
+      "area": "Permission, forms, timing, and recovery",
+      "requirement": "Background hint is absent before 3 seconds and appears for the same eligible long-running work, then disappears on completion/replacement.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-messages.md",
+      "source_report_line": 283,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "DIALOG-01",
+      "area": "7. Acceptance checklist",
+      "requirement": "Medium/large/xlarge width, terminal−2 cap, quarter-height and centered placements match at odd/even sizes.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 90,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "dialog-medium-terminal59",
+        "dialog-medium-terminal120",
+        "dialog-large-terminal59",
+        "dialog-large-terminal120",
+        "dialog-xlarge-terminal59",
+        "dialog-xlarge-terminal120"
+      ]
+    },
+    {
+      "id": "DIALOG-02",
+      "area": "7. Acceptance checklist",
+      "requirement": "Shared shell, layout gaps, list row padding, footer bands and 59/60-column responsive behavior match both experiment states.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 91,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "dialog-medium-terminal59",
+        "dialog-medium-terminal120",
+        "dialog-large-terminal59",
+        "dialog-large-terminal120",
+        "dialog-xlarge-terminal59",
+        "dialog-xlarge-terminal120"
+      ]
+    },
+    {
+      "id": "DIALOG-03",
+      "area": "7. Acceptance checklist",
+      "requirement": "Modal replacement does not remount on reactive updates; close restores only a surviving original focus target.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 92,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "DIALOG-04",
+      "area": "7. Acceptance checklist",
+      "requirement": "Escape/Ctrl+C/selection/editor clearing/backdrop release dispatch in source order.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 93,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "DIALOG-05",
+      "area": "7. Acceptance checklist",
+      "requirement": "List viewport at heights 23/24/25/40, category gaps/details/empty states match; document extreme-height behavior.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 94,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "dialog-list-height-23",
+        "dialog-list-height-24",
+        "dialog-list-height-25",
+        "dialog-list-height-40"
+      ]
+    },
+    {
+      "id": "DIALOG-06",
+      "area": "7. Acceptance checklist",
+      "requirement": "Search weighting, custom search, flattening and disabled-option removal match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 95,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "dialog-list-height-23",
+        "dialog-list-height-24",
+        "dialog-list-height-25",
+        "dialog-list-height-40"
+      ]
+    },
+    {
+      "id": "DIALOG-07",
+      "area": "7. Acceptance checklist",
+      "requirement": "Current/active/gutter distinctions, truncation, fixed footer and dynamic option replacement match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 96,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "dialog-list-height-23",
+        "dialog-list-height-24",
+        "dialog-list-height-25",
+        "dialog-list-height-40"
+      ]
+    },
+    {
+      "id": "DIALOG-08",
+      "area": "7. Acceptance checklist",
+      "requirement": "Page movement is ten options; wrap endpoints, section navigation, locked state and pointer behavior match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 97,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "dialog-list-height-23",
+        "dialog-list-height-24",
+        "dialog-list-height-25",
+        "dialog-list-height-40"
+      ]
+    },
+    {
+      "id": "DIALOG-09",
+      "area": "7. Acceptance checklist",
+      "requirement": "Experiment-only ellipsis/detail reservation/search-in-title/markers remain independently gated.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 98,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "DIALOG-10",
+      "area": "7. Acceptance checklist",
+      "requirement": "Prompt busy/focus/submission priority and each confirmation keyboard/button variant match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 99,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "DIALOG-11",
+      "area": "7. Acceptance checklist",
+      "requirement": "Command suggestions/settings search and customized shortcut hints remain coherent.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 100,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "picker-commands"
+      ]
+    },
+    {
+      "id": "DIALOG-12",
+      "area": "7. Acceptance checklist",
+      "requirement": "Model/provider/variant transitions, favorites/recents/free state and limit details match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 101,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "picker-models"
+      ]
+    },
+    {
+      "id": "DIALOG-13",
+      "area": "7. Acceptance checklist",
+      "requirement": "Session debounce, stale response handling, scope persistence, rename and armed deletion match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 102,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "picker-sessions"
+      ]
+    },
+    {
+      "id": "DIALOG-14",
+      "area": "7. Acceptance checklist",
+      "requirement": "Open/worktree drill-down preserves query/selection and late loads cannot resurrect deleted/moved entries.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 103,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "picker-open"
+      ]
+    },
+    {
+      "id": "DIALOG-15",
+      "area": "7. Acceptance checklist",
+      "requirement": "MCP errors/auth/pending and integration account/method/form/progress/cancel states have separate fixtures.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 104,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "picker-mcp",
+        "picker-integration"
+      ]
+    },
+    {
+      "id": "DIALOG-16",
+      "area": "7. Acceptance checklist",
+      "requirement": "Settings numerical limits, save lock, experiments empty state and theme preview/cancel match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 105,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "picker-settings"
+      ]
+    },
+    {
+      "id": "DIALOG-17",
+      "area": "7. Acceptance checklist",
+      "requirement": "Stash consume/delete and worktree loading/refresh/removal/file-change confirmations match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 106,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "picker-stash",
+        "picker-workspaces"
+      ]
+    },
+    {
+      "id": "DIALOG-18",
+      "area": "7. Acceptance checklist",
+      "requirement": "Diff 87/88 full-layout and 99/100 patch-split boundaries, sticky headers, review collapse and file menu match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 107,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "DIALOG-19",
+      "area": "7. Acceptance checklist",
+      "requirement": "Startup/reconnect/migration timers and overlapping layers match using a deterministic clock.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 108,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "overlay-startup-499",
+        "overlay-startup-500",
+        "overlay-startup-3499",
+        "overlay-startup-3500",
+        "overlay-reconnect-999",
+        "overlay-reconnect-1000",
+        "overlay-reconnect-4999",
+        "overlay-reconnect-5000",
+        "overlay-migration-999",
+        "overlay-migration-1000",
+        "overlay-migration-2000",
+        "overlay-toast-0",
+        "overlay-toast-4999",
+        "overlay-toast-5000"
+      ]
+    },
+    {
+      "id": "DIALOG-20",
+      "area": "7. Acceptance checklist",
+      "requirement": "Toast replace/queue/pause/resume/action ordering and crash/error-details controls match.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-dialogs-overlays.md",
+      "source_report_line": 109,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "overlay-startup-499",
+        "overlay-startup-500",
+        "overlay-startup-3499",
+        "overlay-startup-3500",
+        "overlay-reconnect-999",
+        "overlay-reconnect-1000",
+        "overlay-reconnect-4999",
+        "overlay-reconnect-5000",
+        "overlay-migration-999",
+        "overlay-migration-1000",
+        "overlay-migration-2000",
+        "overlay-toast-0",
+        "overlay-toast-4999",
+        "overlay-toast-5000"
+      ]
+    },
+    {
+      "id": "FFI-01",
+      "area": "Capability checklist",
+      "requirement": "The selected library binary, header, generated layouts and captured baseline all identify the exact OpenTUI commit.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-opentui-boundary.md",
+      "source_report_line": 85,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "bridge-handle_generation"
+      ]
+    },
+    {
+      "id": "FFI-02",
+      "area": "Capability checklist",
+      "requirement": "Rust bindings expose native scene creation, ordered moves, destruction, styles, measurement, clip/viewport configuration, focus, text views and editors.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-opentui-boundary.md",
+      "source_report_line": 86,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "bridge-scene_move"
+      ]
+    },
+    {
+      "id": "FFI-03",
+      "area": "Capability checklist",
+      "requirement": "Owned resources, shared resources, borrows, stale generations and failed construction have explicit lifetime behavior.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-opentui-boundary.md",
+      "source_report_line": 87,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "bridge-handle_generation",
+        "bridge-owner_thread"
+      ]
+    },
+    {
+      "id": "FFI-04",
+      "area": "Capability checklist",
+      "requirement": "Host hook/frame requests, backpressure, output failure and shutdown are implemented and tested as state transitions.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-opentui-boundary.md",
+      "source_report_line": 88,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "bridge-output_backpressure"
+      ]
+    },
+    {
+      "id": "FFI-05",
+      "area": "Capability checklist",
+      "requirement": "Wrapped measurement uses native text views or has demonstrated equivalent Unicode/cell results.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-opentui-boundary.md",
+      "source_report_line": 89,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "FFI-06",
+      "area": "Capability checklist",
+      "requirement": "Markdown reuses stable blocks and handles streaming changes without blank frames or raw-marker flashes.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-opentui-boundary.md",
+      "source_report_line": 90,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "FFI-07",
+      "area": "Capability checklist",
+      "requirement": "Highlighting preserves grammar/query behavior, semantic colors, concealment, links and source mappings; late results cannot update replaced/destroyed views.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-opentui-boundary.md",
+      "source_report_line": 91,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "bridge-highlight_after_destroy"
+      ]
+    },
+    {
+      "id": "FFI-08",
+      "area": "Capability checklist",
+      "requirement": "Diff parsing, line numbers, gutters, selection and resize behavior match the reference component.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-opentui-boundary.md",
+      "source_report_line": 92,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "FFI-09",
+      "area": "Capability checklist",
+      "requirement": "Scroll position, stick-to-bottom, manual detachment, resize, wheel acceleration, Shift-wheel and drag selection are independently verified.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-opentui-boundary.md",
+      "source_report_line": 93,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "FFI-10",
+      "area": "Capability checklist",
+      "requirement": "Raw input or the chosen typed-input adapter preserves paste, modifiers, terminal protocols, mouse movement and capability responses.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-opentui-boundary.md",
+      "source_report_line": 94,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": []
+    },
+    {
+      "id": "FFI-11",
+      "area": "Capability checklist",
+      "requirement": "Component replacement removes old handlers, focus restores correctly and keyed moves preserve component state.",
+      "acceptance_detail": null,
+      "status": "unverified_rust",
+      "source_report": "audit-opentui-boundary.md",
+      "source_report_line": 95,
+      "source_reference_ids": [],
+      "source_urls": [],
+      "fixture_ids": [
+        "bridge-scene_move",
+        "bridge-teardown_focus"
+      ]
+    }
+  ]
+}

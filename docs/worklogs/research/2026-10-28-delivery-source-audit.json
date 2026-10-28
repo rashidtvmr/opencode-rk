@@ -1,0 +1,151 @@
+{
+  "audit_head": "92b216d04e5e71370247105e7cf119dce0b23f1f",
+  "source_directory": "/Users/mymac/Projects/.oc2-delivery-dynamic-20261028-78571fd6/source",
+  "source_is_git_repository": false,
+  "source_file_count": 19,
+  "source_lines": 3177,
+  "all_repo_bytes_identical": true,
+  "history_query": "git log --all --oneline -- tools/continuous_delivery.py docs/CONTINUOUS_DELIVERY.md tools/delivery config/delivery-workflow.json tests/delivery",
+  "history_query_found_commits": false,
+  "files": [
+    {
+      "path": "config/delivery-tasks.example.json",
+      "sha256": "81d028a0a3d9063a50d752a45dd7b13262728bb11e687402b5f16877ddebb590",
+      "lines": 22,
+      "tracked_at_audit": false
+    },
+    {
+      "path": "config/delivery-workflow.json",
+      "sha256": "6f71836d93528c34a395e5001e0451e1050d983e91db5e1f679b2a0aba6fc1f6",
+      "lines": 129,
+      "tracked_at_audit": false
+    },
+    {
+      "path": "docs/CONTINUOUS_DELIVERY.md",
+      "sha256": "b5d3c1237c827ec52f7693c961f88a02fff1484502ba9397d8e5f3ec0199289b",
+      "lines": 197,
+      "tracked_at_audit": false
+    },
+    {
+      "path": "tests/delivery/fixtures/agent.py",
+      "sha256": "852938c41f6e7125bd6759aff118a99369dab5af6e8e94bf1157208abb3fd67c",
+      "lines": 27,
+      "tracked_at_audit": false
+    },
+    {
+      "path": "tests/delivery/test_engine.py",
+      "sha256": "117f39e8ca7ba8f592c2fc8872833ed3b2f064a52e880380e07eb7b0a18b3037",
+      "lines": 149,
+      "tracked_at_audit": false
+    },
+    {
+      "path": "tests/delivery/test_fleet.py",
+      "sha256": "86396083c1041d237d6a7bbcc58e3aa8f36435cf2263c15e3fe14437a9e5b6c0",
+      "lines": 61,
+      "tracked_at_audit": false
+    },
+    {
+      "path": "tests/delivery/test_hardening.py",
+      "sha256": "ff554b8d97db674c1d5a353a8b317bb6e9ef1f1b5c04376879a524204efbd29e",
+      "lines": 244,
+      "tracked_at_audit": false
+    },
+    {
+      "path": "tests/delivery/test_invariants.py",
+      "sha256": "43635eaf90f0ff3ed674277625d2720cc352a684cca4119485e60e938a9ad2af",
+      "lines": 212,
+      "tracked_at_audit": false
+    },
+    {
+      "path": "tests/delivery/test_recovery.py",
+      "sha256": "d2a0af4cf07ec3485fc86a811192dbc2a934506a47a6e2264be20db35114516f",
+      "lines": 153,
+      "tracked_at_audit": false
+    },
+    {
+      "path": "tools/continuous_delivery.py",
+      "sha256": "c8744da04ec2e29f17c4da7ca20abe6d1941d5a5f33bf428809e47b1f4857788",
+      "lines": 84,
+      "tracked_at_audit": false
+    },
+    {
+      "path": "tools/delivery/__init__.py",
+      "sha256": "45c87bb2be71b4fe585831a98f0d7bc355805847bc110645668ad586c0a654e7",
+      "lines": 1,
+      "tracked_at_audit": false
+    },
+    {
+      "path": "tools/delivery/cleanup.py",
+      "sha256": "3b87537fc57b038eb3013b07152e3ac669cdb2b9cc6cabaab3bac6dfa8717f53",
+      "lines": 55,
+      "tracked_at_audit": false
+    },
+    {
+      "path": "tools/delivery/engine.py",
+      "sha256": "b455c9b7136353a5e1d6cea07fd4fb38330db91828063b3a29f07fc993772813",
+      "lines": 427,
+      "tracked_at_audit": false
+    },
+    {
+      "path": "tools/delivery/jobs.py",
+      "sha256": "61a56a894505405a5527fcd3acdf1858cafdbacd572ceff44668778bbb1ff5c9",
+      "lines": 453,
+      "tracked_at_audit": false
+    },
+    {
+      "path": "tools/delivery/model.py",
+      "sha256": "10a4d1d5ac04c64ffa67ef61e06036f372f70ceb03fd0ce5f93a9cf27670f8cc",
+      "lines": 173,
+      "tracked_at_audit": false
+    },
+    {
+      "path": "tools/delivery/process_guard.py",
+      "sha256": "a77376ccd6cf5e3ea2c715c91ed57601a0ed7cf3cf86c7c482c151718ddda387",
+      "lines": 54,
+      "tracked_at_audit": false
+    },
+    {
+      "path": "tools/delivery/runtime.py",
+      "sha256": "ea68fce73e7ff15ab3f234df26844b2576876f7881b380c80ab8c26a367d532a",
+      "lines": 420,
+      "tracked_at_audit": false
+    },
+    {
+      "path": "tools/delivery/store.py",
+      "sha256": "c91936aca71c8b9a06aea043e0533bd782e6caba27bca3cb96f482c52fa0edd7",
+      "lines": 287,
+      "tracked_at_audit": false
+    },
+    {
+      "path": "tools/dynamic_agent_allocator.py",
+      "sha256": "12f07fe1c397f9c0f8e5b349ff189c8762ca7597c363a67047e12840018aed15",
+      "lines": 29,
+      "tracked_at_audit": false
+    }
+  ],
+  "recent_commit_name_status": {
+    "e14ddcb1": [
+      "M\tcrates/cli/src/main.rs",
+      "A\tcrates/cli/src/native_assistant_facts.rs",
+      "M\tcrates/cli/src/native_chat_history.rs",
+      "M\tcrates/cli/src/native_chat_projection.rs",
+      "A\tcrates/cli/src/native_footer.rs",
+      "M\tcrates/cli/src/native_turn.rs",
+      "M\tcrates/cli/src/native_view_chat.rs",
+      "M\tcrates/cli/src/tui_entry.rs"
+    ],
+    "75c46fda": [
+      "M\tcrates/server/src/lib.rs",
+      "M\tcrates/server/src/run_owner.rs",
+      "A\tcrates/server/tests/live_session_snapshot.rs"
+    ],
+    "92b216d0": [
+      "M\tcrates/cli/src/native_navigation.rs",
+      "M\tcrates/cli/src/native_tabs.rs",
+      "M\tcrates/cli/src/tui_entry.rs"
+    ]
+  },
+  "preservation": "no dirty work deleted/stashed/reset; no controller activated",
+  "chat_investigation_session": "ses_e7d5fe66bffeKqPiz4k1qdHadM",
+  "chat_coverage": "pending investigator evidence"
+}

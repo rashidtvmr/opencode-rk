@@ -1,0 +1,1193 @@
+warning: crates/cli/Cargo.toml: file `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/composer-v2-validate/crates/cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `oc2`
+  * `bin` target `opencode-rk`
+warning: `opencode-rk-cli` (manifest) generated 1 warning
+warning: variable does not need to be mutable
+    --> crates/storage/src/lib.rs:1861:13
+     |
+1861 |         let mut actual: Vec<String> = statement
+     |             ----^^^^^^
+     |             |
+     |             help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> crates/storage/src/lib.rs:1864:13
+     |
+1864 |         let mut expected: Vec<String> = columns.iter().map(|s| (*s).to_owned()).collect();
+     |             ----^^^^^^^^
+     |             |
+     |             help: remove this `mut`
+
+warning: `opencode-rk-storage` (lib) generated 2 warnings (run `cargo fix --lib -p opencode-rk-storage` to apply 2 suggestions)
+warning: variable does not need to be mutable
+   --> crates/server/src/task_children.rs:373:92
+    |
+373 |     let GenerationClaim { generation: mut generation_id, chain_id: _chain_id, mut stopped, mut finished } = claim;
+    |                                                                                            ----^^^^^^^^
+    |                                                                                            |
+    |                                                                                            help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `finished`
+   --> crates/server/src/task_children.rs:373:92
+    |
+373 |     let GenerationClaim { generation: mut generation_id, chain_id: _chain_id, mut stopped, mut finished } = claim;
+    |                                                                                            ^^^^^^^^^^^^ help: try ignoring the field: `finished: _`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `foreground_claim` is never read
+   --> crates/server/src/task_children.rs:858:32
+    |
+858 |     let mut foreground_claim = None;
+    |                                ^^^^ this value is reassigned later and never used
+...
+862 |         foreground_claim = Some(restart(state.clone(), children.clone(), events.clone(), child.clone(), prompt, false, false)?);
+    |         ---------------- `foreground_claim` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `state` is never read
+    --> crates/server/src/lib.rs:2993:45
+     |
+2993 | ...                   Err(_) => { state.stage = TurnStreamStage::Done; return None; }
+     |                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+
+warning: value assigned to `state` is never read
+    --> crates/server/src/lib.rs:3034:29
+     |
+3034 | ...                   state.stage = TurnStreamStage::Done;
+     |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+
+warning: value assigned to `state` is never read
+    --> crates/server/src/lib.rs:3016:29
+     |
+3016 | ...                   state.stage = TurnStreamStage::Done;
+     |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+
+warning: field `message` is never read
+   --> crates/server/src/lib.rs:574:5
+    |
+571 | struct PermissionReplyBody {
+    |        ------------------- field in this struct
+...
+574 |     message: Option<String>,
+    |     ^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: methods `claim_generation`, `current_control`, `current_chain`, and `cancel_generation` are never used
+   --> crates/server/src/task_children.rs:98:8
+    |
+ 73 | impl Child {
+    | ---------- methods in this implementation
+...
+ 98 |     fn claim_generation(&self, manual_retry: bool) -> Result<(u32, watch::Receiver<bool>, watch::Sender<bool>), ApiFailure> {
+    |        ^^^^^^^^^^^^^^^^
+...
+106 |     fn current_control(&self) -> (u32, watch::Sender<bool>, watch::Receiver<bool>) {
+    |        ^^^^^^^^^^^^^^^
+...
+110 |     fn current_chain(&self) -> (u64, watch::Receiver<bool>) {
+    |        ^^^^^^^^^^^^^
+...
+139 |     fn cancel_generation(&self, generation: u32) {
+    |        ^^^^^^^^^^^^^^^^^
+
+warning: function `spawn` is never used
+   --> crates/server/src/task_children.rs:366:4
+    |
+366 | fn spawn(state: AppState, children: Children, events: event_bus::EventBus, child: Arc<Child>, prompt: String, replay: bool) -> Resu...
+    |    ^^^^^
+
+warning: `opencode-rk-server` (lib) generated 9 warnings (run `cargo fix --lib -p opencode-rk-server` to apply 2 suggestions)
+warning: unused import: `sync::mpsc as std_mpsc`
+  --> crates/cli/src/tui_entry.rs:95:5
+   |
+95 |     sync::mpsc as std_mpsc,
+   |     ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: use of deprecated method `native_view::NativeView::set_loading`: pass the authoritative busy value to render instead
+    --> crates/cli/src/native_view.rs:2476:14
+     |
+2476 |         view.set_loading(true); // deprecated no-op: frame argument is authority
+     |              ^^^^^^^^^^^
+     |
+     = note: `#[warn(deprecated)]` on by default
+
+warning: value assigned to `line_len` is never read
+   --> crates/cli/src/native_transcript.rs:508:21
+    |
+508 |                     line_len = wlen;
+    |                     ^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `panel`
+    --> crates/cli/src/tui_entry.rs:1343:13
+     |
+1343 |         let panel = Rgba::new(9, 9, 9, 255);
+     |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_panel`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `generation`
+    --> crates/cli/src/tui_entry.rs:3765:25
+     |
+3765 |                     let generation = binding_generation;
+     |                         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_generation`
+
+warning: unused variable: `generation`
+    --> crates/cli/src/tui_entry.rs:3791:25
+     |
+3791 |                     let generation = binding_generation;
+     |                         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_generation`
+
+warning: unused variable: `generation`
+    --> crates/cli/src/tui_entry.rs:3821:21
+     |
+3821 |                 let generation = binding_generation;
+     |                     ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_generation`
+
+warning: unused variable: `generation`
+    --> crates/cli/src/tui_entry.rs:3844:25
+     |
+3844 |                     let generation = binding_generation;
+     |                         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_generation`
+
+warning: unused variable: `gesture_blocked`
+    --> crates/cli/src/tui_entry.rs:4717:22
+     |
+4717 |                  let gesture_blocked = view.chat_at_tail();
+     |                      ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_gesture_blocked`
+
+warning: value assigned to `provider_id` is never read
+    --> crates/cli/src/tui_entry.rs:2856:27
+     |
+2856 |     let mut provider_id = "openai".to_owned();
+     |                           ^^^^^^^^^^^^^^^^^^^ this value is reassigned later and never used
+...
+5742 |                                 provider_id = row.0.clone();
+     |                                 ----------- `provider_id` is overwritten here before the previous value is read
+
+warning: value assigned to `cached_advance` is never read
+    --> crates/cli/src/tui_entry.rs:5310:30
+     |
+5310 | ...                   cached_advance = true;
+     |                       ^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+
+warning: unused variable: `keep`
+   --> crates/cli/src/native_appearance.rs:738:13
+    |
+738 |         let keep = editor.style.clone();
+    |             ^^^^ help: if this is intentional, prefix it with an underscore: `_keep`
+
+warning: unused variable: `cursor`
+   --> crates/cli/src/native_chat_projection.rs:446:17
+    |
+446 |             let cursor = &cursors[page];
+    |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_cursor`
+
+warning: value assigned to `line_len` is never read
+   --> crates/cli/src/native_timeline.rs:277:21
+    |
+277 |                     line_len = wlen;
+    |                     ^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: value assigned to `line_len` is never read
+   --> crates/cli/src/native_transcript.rs:508:21
+    |
+508 |                     line_len = wlen;
+    |                     ^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: variable does not need to be mutable
+    --> crates/cli/src/native_view.rs:1455:13
+     |
+1455 |         let mut center = if !is_chat {
+     |             ----^^^^^^
+     |             |
+     |             help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> crates/cli/src/native_view.rs:3460:13
+     |
+3460 |         let mut draft = "unsent chat draft".to_owned();
+     |             ----^^^^^
+     |             |
+     |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> crates/cli/src/native_view_chat.rs:1398:13
+     |
+1398 |         let mut view = ChatView::new();
+     |             ----^^^^
+     |             |
+     |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> crates/cli/src/native_view_chat.rs:1446:13
+     |
+1446 |         let mut view = ChatView::new();
+     |             ----^^^^
+     |             |
+     |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> crates/cli/src/native_view_chat.rs:1997:13
+     |
+1997 |         let mut view = ChatView::new();
+     |             ----^^^^
+     |             |
+     |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> crates/cli/src/native_view_chat.rs:2080:13
+     |
+2080 |         let mut view = ChatView::new();
+     |             ----^^^^
+     |             |
+     |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> crates/cli/src/native_view_chat.rs:2171:13
+     |
+2171 |         let mut view = ChatView::new();
+     |             ----^^^^
+     |             |
+     |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> crates/cli/src/native_view_chat.rs:2230:13
+     |
+2230 |         let mut view = ChatView::new();
+     |             ----^^^^
+     |             |
+     |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> crates/cli/src/native_view_chat.rs:2247:13
+     |
+2247 |         let mut view = ChatView::new();
+     |             ----^^^^
+     |             |
+     |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> crates/cli/src/native_view_chat.rs:2373:13
+     |
+2373 |         let mut view = ChatView::new();
+     |             ----^^^^
+     |             |
+     |             help: remove this `mut`
+
+warning: method `is_empty` is never used
+  --> crates/cli/src/composer.rs:60:12
+   |
+38 | impl AppComposer {
+   | ---------------- method in this implementation
+...
+60 |     pub fn is_empty(&self) -> bool {
+   |            ^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `render_context_detail` is never used
+    --> crates/cli/src/tui_entry.rs:1024:4
+     |
+1024 | fn render_context_detail(sources: Vec<SourceUsage>) -> String {
+     |    ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `persist_submit` is never used
+    --> crates/cli/src/tui_entry.rs:1053:4
+     |
+1053 | fn persist_submit(snapshot: &LiveSnapshot, text: &str, auth: Option<&str>) -> Result<(), String> {
+     |    ^^^^^^^^^^^^^^
+
+warning: function `interactive_loop` is never used
+    --> crates/cli/src/tui_entry.rs:1070:4
+     |
+1070 | fn interactive_loop(
+     |    ^^^^^^^^^^^^^^^^
+
+warning: function `run` is never used
+    --> crates/cli/src/tui_entry.rs:6822:8
+     |
+6822 | pub fn run(args: TuiArgs) -> Result<(), Box<dyn std::error::Error>> {
+     |        ^^^
+
+warning: method `dropped_bytes` is never used
+   --> crates/cli/src/native_transcript.rs:157:12
+    |
+ 81 | impl StreamAccumulator {
+    | ---------------------- method in this implementation
+...
+157 |     pub fn dropped_bytes(&self) -> u64 {
+    |            ^^^^^^^^^^^^^
+
+warning: methods `marker`, `is_empty`, `dropped`, and `window` are never used
+   --> crates/cli/src/native_transcript.rs:338:12
+    |
+300 | impl Transcript {
+    | --------------- methods in this implementation
+...
+338 |     pub fn marker(&self) -> Option<u64> {
+    |            ^^^^^^
+...
+354 |     pub fn is_empty(&self) -> bool {
+    |            ^^^^^^^^
+...
+358 |     pub fn dropped(&self) -> u64 {
+    |            ^^^^^^^
+...
+364 |     pub fn window(&self, offset: usize, limit: usize) -> &[TranscriptLine] {
+    |            ^^^^^^
+
+warning: function `is_owner_startup` is never used
+   --> crates/cli/src/app_start.rs:328:8
+    |
+328 | pub fn is_owner_startup(plan: &DefaultLaunch) -> bool {
+    |        ^^^^^^^^^^^^^^^^
+
+warning: function `needs_setup` is never used
+   --> crates/cli/src/app_start.rs:337:8
+    |
+337 | pub fn needs_setup(plan: &DefaultLaunch) -> bool {
+    |        ^^^^^^^^^^^
+
+warning: method `close` is never used
+  --> crates/cli/src/chat.rs:81:12
+   |
+80 | impl DaemonLease {
+   | ---------------- method in this implementation
+81 |     pub fn close(mut self) {
+   |            ^^^^^
+
+warning: function `pid_alive` is never used
+   --> crates/cli/src/daemon_client.rs:198:8
+    |
+198 | pub fn pid_alive(pid: u32) -> bool {
+    |        ^^^^^^^^^
+
+warning: constant `LOG_ROTATION_CONTRACT` is never used
+  --> crates/cli/src/diagnostics.rs:29:11
+   |
+29 | pub const LOG_ROTATION_CONTRACT: &str =
+   |           ^^^^^^^^^^^^^^^^^^^^^
+
+warning: variants `Unconfigured` and `Error` are never constructed
+  --> crates/cli/src/diagnostics.rs:44:5
+   |
+42 | pub enum ProbeStatus {
+   |          ----------- variants in this enum
+43 |     Ok,
+44 |     Unconfigured,
+   |     ^^^^^^^^^^^^
+45 |     Disabled,
+46 |     Error,
+   |     ^^^^^
+   |
+   = note: `ProbeStatus` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: method `is_healthy` is never used
+  --> crates/cli/src/diagnostics.rs:93:12
+   |
+62 | impl CapabilityProbe {
+   | -------------------- method in this implementation
+...
+93 |     pub fn is_healthy(&self) -> bool {
+   |            ^^^^^^^^^^
+
+warning: methods `nodes` and `edges` are never used
+  --> crates/cli/src/graph.rs:73:12
+   |
+66 | impl Graph {
+   | ---------- methods in this implementation
+...
+73 |     pub fn nodes(&self) -> &[Node] {
+   |            ^^^^^
+...
+78 |     pub fn edges(&self) -> &[Edge] {
+   |            ^^^^^
+
+warning: method `triple` is never used
+   --> crates/cli/src/install_commands.rs:141:18
+    |
+138 | impl InstallPlatform {
+    | -------------------- method in this implementation
+...
+141 |     pub const fn triple(self) -> &'static str {
+    |                  ^^^^^^
+
+warning: method `is_visible` is never used
+   --> crates/cli/src/native_app.rs:155:18
+    |
+129 | impl Rect {
+    | --------- method in this implementation
+...
+155 |     pub const fn is_visible(self) -> bool {
+    |                  ^^^^^^^^^^
+
+warning: method `focus_visible` is never used
+   --> crates/cli/src/native_app.rs:248:18
+    |
+172 | impl ShellLayout {
+    | ---------------- method in this implementation
+...
+248 |     pub const fn focus_visible(self, focus: Focus) -> bool {
+    |                  ^^^^^^^^^^^^^
+
+warning: method `rendered_frames` is never used
+   --> crates/cli/src/native_app.rs:329:18
+    |
+292 | impl FrameScheduler {
+    | ------------------- method in this implementation
+...
+329 |     pub const fn rendered_frames(&self) -> u64 {
+    |                  ^^^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+   --> crates/cli/src/native_app.rs:393:18
+    |
+356 | impl NativeApp {
+    | -------------- methods in this implementation
+...
+393 |     pub const fn scheduler(&self) -> &FrameScheduler {
+    |                  ^^^^^^^^^
+...
+426 |     pub fn cycle_focus_prev(&mut self) {
+    |            ^^^^^^^^^^^^^^^^
+...
+471 |     pub fn mark_empty(&mut self) {
+    |            ^^^^^^^^^^
+...
+476 |     pub fn mark_loading(&mut self) {
+    |            ^^^^^^^^^^^^
+...
+482 |     pub fn mark_error(&mut self) {
+    |            ^^^^^^^^^^
+...
+495 |     pub fn retry(&mut self) -> bool {
+    |            ^^^^^
+...
+506 |     pub fn dismiss(&mut self) -> bool {
+    |            ^^^^^^^
+...
+516 |     pub const fn accepts_input(&self) -> bool {
+    |                  ^^^^^^^^^^^^^
+...
+521 |     pub const fn can_edit_composer(&self) -> bool {
+    |                  ^^^^^^^^^^^^^^^^^
+...
+526 |     pub const fn must_badge_stale(&self) -> bool {
+    |                  ^^^^^^^^^^^^^^^^
+...
+531 |     pub const fn data_badge(&self) -> &'static str {
+    |                  ^^^^^^^^^^
+...
+540 |     pub const fn is_focus_visible(&self) -> bool {
+    |                  ^^^^^^^^^^^^^^^^
+...
+545 |     pub const fn needs_render(&self) -> bool {
+    |                  ^^^^^^^^^^^^
+...
+550 |     pub const fn pending_frames(&self) -> u32 {
+    |                  ^^^^^^^^^^^^^^
+...
+555 |     pub const fn pending_view(&self) -> Option<AppView> {
+    |                  ^^^^^^^^^^^^
+...
+560 |     pub fn flush_pending_view(&mut self) -> bool {
+    |            ^^^^^^^^^^^^^^^^^^
+...
+570 |     pub fn mark_dirty(&mut self) {
+    |            ^^^^^^^^^^
+
+warning: methods `compact_option_cells` and `pointer_controls` are never used
+   --> crates/cli/src/native_appearance.rs:173:8
+    |
+ 22 | impl AppearanceEditor {
+    | --------------------- methods in this implementation
+...
+173 |     fn compact_option_cells(&self, content_width: u16, row: u16) -> u16 {
+    |        ^^^^^^^^^^^^^^^^^^^^
+...
+358 |     pub fn pointer_controls(&mut self, x: u16, y: u16, kind: u8, content_x: u16, content_y: u16, content_width: u16) -> bool {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: field `summary` is never read
+  --> crates/cli/src/native_approvals.rs:72:9
+   |
+70 | pub struct ApprovalRequest {
+   |            --------------- field in this struct
+71 |     pub digest: OperationDigest,
+72 |     pub summary: String,
+   |         ^^^^^^^
+   |
+   = note: `ApprovalRequest` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: method `current` is never used
+   --> crates/cli/src/native_approvals.rs:188:12
+    |
+156 | impl ApprovalBoard {
+    | ------------------ method in this implementation
+...
+188 |     pub fn current(&self) -> Option<&ApprovalRequest> {
+    |            ^^^^^^^
+
+warning: constant `IOS_SQUIRCLE_APPROXIMATION` is never used
+  --> crates/cli/src/native_box_style.rs:39:11
+   |
+39 | pub const IOS_SQUIRCLE_APPROXIMATION: &str =
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `normalized_radius` is never used
+   --> crates/cli/src/native_box_style.rs:390:12
+    |
+262 | impl EffectiveBox {
+    | ----------------- method in this implementation
+...
+390 |     pub fn normalized_radius(self) -> f32 {
+    |            ^^^^^^^^^^^^^^^^^
+
+warning: method `corner_glyphs` is never used
+   --> crates/cli/src/native_box_style.rs:763:12
+    |
+712 | impl BoxAppearance {
+    | ------------------ method in this implementation
+...
+763 |     pub fn corner_glyphs(&self, id: BoxId) -> CornerGlyphs {
+    |            ^^^^^^^^^^^^^
+
+warning: enum `RadiusKey` is never used
+    --> crates/cli/src/native_box_style.rs:1171:10
+     |
+1171 | pub enum RadiusKey {
+     |          ^^^^^^^^^
+
+warning: function `radius_after_key` is never used
+    --> crates/cli/src/native_box_style.rs:1197:8
+     |
+1197 | pub fn radius_after_key(radius: u8, key: RadiusKey) -> u8 {
+     |        ^^^^^^^^^^^^^^^^
+
+warning: struct `RadiusControl` is never constructed
+    --> crates/cli/src/native_box_style.rs:1209:12
+     |
+1209 | pub struct RadiusControl {
+     |            ^^^^^^^^^^^^^
+
+warning: associated items `new`, `radius`, `pointer`, and `key` are never used
+    --> crates/cli/src/native_box_style.rs:1215:18
+     |
+1213 | impl RadiusControl {
+     | ------------------ associated items in this implementation
+1214 |     /// Create a control, clamping the initial radius.
+1215 |     pub const fn new(radius: u8) -> Self {
+     |                  ^^^
+...
+1226 |     pub const fn radius(self) -> u8 {
+     |                  ^^^^^^
+...
+1231 |     pub fn pointer(&mut self, track_width: u16, x: i32) {
+     |            ^^^^^^^
+...
+1236 |     pub fn key(&mut self, key: RadiusKey) {
+     |            ^^^
+
+warning: methods `has_newer_recovery`, `adjacent_newer_rendered_rows`, `adjacent_newer_messages`, `oldest_id`, `recover_adjacent_newer`, and `load_newer` are never used
+   --> crates/cli/src/native_chat_projection.rs:591:12
+    |
+568 | impl NativeHistoryWindow {
+    | ------------------------ methods in this implementation
+...
+591 |     pub fn has_newer_recovery(&self) -> bool { !self.tail_page.is_empty() && self.tail_before.is_some() }
+    |            ^^^^^^^^^^^^^^^^^^
+...
+597 |     pub fn adjacent_newer_rendered_rows(&self, width: usize) -> usize {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+604 |     pub fn adjacent_newer_messages(&self) -> Option<Vec<crate::native_view_chat::ChatMessage>> {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^
+...
+613 |     pub fn oldest_id(&self) -> Option<&str> { self.messages.first()?.get("id").and_then(Value::as_str) }
+    |            ^^^^^^^^^
+...
+697 |     pub fn recover_adjacent_newer<F>(&mut self, oldest_id: &str, mut fetch: F) -> Result<bool, String>
+    |            ^^^^^^^^^^^^^^^^^^^^^^
+...
+783 |     pub fn load_newer<F>(&mut self, fetch: F) -> Result<bool, String>
+    |            ^^^^^^^^^^
+
+warning: multiple variants are never constructed
+   --> crates/cli/src/native_composer.rs:183:5
+    |
+179 | pub enum Key {
+    |          --- variants in this enum
+...
+183 |     Char(char),
+    |     ^^^^
+184 |     Backspace,
+    |     ^^^^^^^^^
+185 |     Delete,
+    |     ^^^^^^
+186 |     Left,
+    |     ^^^^
+187 |     Right,
+    |     ^^^^^
+188 |     Up,
+    |     ^^
+189 |     Down,
+    |     ^^^^
+190 |     Home,
+191 |     End,
+    |     ^^^
+    |
+    = note: `Key` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: methods `is_empty` and `clear` are never used
+   --> crates/cli/src/native_composer.rs:319:12
+    |
+276 | impl EditBuffer {
+    | --------------- methods in this implementation
+...
+319 |     pub fn is_empty(&self) -> bool {
+    |            ^^^^^^^^
+...
+514 |     pub fn clear(&mut self) {
+    |            ^^^^^
+
+warning: methods `keymap` and `set_keymap` are never used
+   --> crates/cli/src/native_composer.rs:573:12
+    |
+556 | impl Composer {
+    | ------------- methods in this implementation
+...
+573 |     pub fn keymap(&self) -> SubmitKeymap {
+    |            ^^^^^^
+...
+577 |     pub fn set_keymap(&mut self, keymap: SubmitKeymap) {
+    |            ^^^^^^^^^^
+
+warning: method `composer` is never used
+   --> crates/cli/src/native_composer.rs:818:12
+    |
+809 | impl ComposerPage {
+    | ----------------- method in this implementation
+...
+818 |     pub fn composer(&self) -> &Composer {
+    |            ^^^^^^^^
+
+warning: method `accept_value` is never used
+   --> crates/cli/src/native_completion.rs:106:12
+    |
+ 20 | impl Completion {
+    | --------------- method in this implementation
+...
+106 |     pub fn accept_value(&mut self, draft: &mut String, value: &str, limit: usize) -> bool {
+    |            ^^^^^^^^^^^^
+
+warning: method `sources` is never used
+  --> crates/cli/src/native_memory.rs:30:19
+   |
+25 | impl Memory {
+   | ----------- method in this implementation
+...
+30 |     pub(crate) fn sources(&self) -> &[Source] {
+   |                   ^^^^^^^
+
+warning: struct `Size` is never constructed
+  --> crates/cli/src/native_layout.rs:22:12
+   |
+22 | pub struct Size {
+   |            ^^^^
+
+warning: variant `Idle` is never constructed
+   --> crates/cli/src/native_navigation.rs:184:5
+    |
+180 | pub enum WorkState {
+    |          --------- variant in this enum
+...
+184 |     Idle,
+    |     ^^^^
+    |
+    = note: `WorkState` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: variants `ForkSession` and `OpenModelPicker` are never constructed
+  --> crates/cli/src/native_palette.rs:40:5
+   |
+37 | pub enum CommandAction {
+   |          ------------- variants in this enum
+...
+40 |     ForkSession,
+   |     ^^^^^^^^^^^
+41 |     OpenSettings,
+42 |     OpenModelPicker,
+   |     ^^^^^^^^^^^^^^^
+   |
+   = note: `CommandAction` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: method `is_empty` is never used
+   --> crates/cli/src/native_palette.rs:513:12
+    |
+489 | impl Palette {
+    | ------------ method in this implementation
+...
+513 |     pub fn is_empty(&self) -> bool {
+    |            ^^^^^^^^
+
+warning: multiple methods are never used
+   --> crates/cli/src/native_shell.rs:138:12
+    |
+120 | impl ShellPages {
+    | --------------- methods in this implementation
+...
+138 |     pub fn paint_timeline(
+    |            ^^^^^^^^^^^^^^
+...
+180 |     pub fn scroll_transcript_down(&mut self, delta: usize) {
+    |            ^^^^^^^^^^^^^^^^^^^^^^
+...
+184 |     pub fn scroll_composer_up(&mut self, delta: usize) {
+    |            ^^^^^^^^^^^^^^^^^^
+...
+188 |     pub fn scroll_composer_down(&mut self, delta: usize) {
+    |            ^^^^^^^^^^^^^^^^^^^^
+...
+192 |     pub fn scroll_sidebar_up(&mut self, delta: usize) {
+    |            ^^^^^^^^^^^^^^^^^
+...
+196 |     pub fn scroll_sidebar_down(&mut self, delta: usize) {
+    |            ^^^^^^^^^^^^^^^^^^^
+...
+204 |     pub fn clear_composer(&mut self) {
+    |            ^^^^^^^^^^^^^^
+...
+208 |     pub fn clear_sidebar(&mut self) {
+    |            ^^^^^^^^^^^^^
+...
+218 |     pub fn composer_len(&self) -> usize {
+    |            ^^^^^^^^^^^^
+...
+223 |     pub fn sidebar_len(&self) -> usize {
+    |            ^^^^^^^^^^^
+
+warning: variants `Reasoning`, `CacheRead`, and `CacheWrite` are never constructed
+  --> crates/cli/src/native_status.rs:33:5
+   |
+30 | pub enum UsageEvent {
+   |          ---------- variants in this enum
+...
+33 |     Reasoning { tokens: u64 },
+   |     ^^^^^^^^^
+34 |     CacheRead { tokens: u64 },
+   |     ^^^^^^^^^
+35 |     CacheWrite { tokens: u64 },
+   |     ^^^^^^^^^^
+   |
+   = note: `UsageEvent` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: fields `source` and `bytes` are never read
+  --> crates/cli/src/native_status.rs:71:9
+   |
+69 | pub struct ContextEntry {
+   |            ------------ fields in this struct
+70 |     pub label: String,
+71 |     pub source: String,
+   |         ^^^^^^
+72 |     pub bytes: u64,
+   |         ^^^^^
+   |
+   = note: `ContextEntry` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: variant `Failed` is never constructed
+  --> crates/cli/src/native_status.rs:95:5
+   |
+92 | pub enum McpState {
+   |          -------- variant in this enum
+...
+95 |     Failed,
+   |     ^^^^^^
+   |
+   = note: `McpState` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: variant `Online` is never constructed
+   --> crates/cli/src/native_status.rs:115:5
+    |
+114 | pub enum Connectivity {
+    |          ------------ variant in this enum
+115 |     Online,
+    |     ^^^^^^
+    |
+    = note: `Connectivity` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: method `usage_observed` is never used
+   --> crates/cli/src/native_status.rs:173:12
+    |
+133 | impl StatusBoard {
+    | ---------------- method in this implementation
+...
+173 |     pub fn usage_observed(&self) -> bool {
+    |            ^^^^^^^^^^^^^^
+
+warning: associated function `new` is never used
+  --> crates/cli/src/native_theme.rs:37:18
+   |
+35 | impl Rgba {
+   | --------- associated function in this implementation
+36 |     #[must_use]
+37 |     pub const fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
+   |                  ^^^
+
+warning: variant `Failed` is never constructed
+  --> crates/cli/src/native_timeline.rs:39:5
+   |
+36 | pub enum ToolState {
+   |          --------- variant in this enum
+...
+39 |     Failed,
+   |     ^^^^^^
+   |
+   = note: `ToolState` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: associated function `persist_theme` is never used
+   --> crates/cli/src/native_ui_preferences.rs:183:12
+    |
+ 42 | impl UiPreferences {
+    | ------------------ associated function in this implementation
+...
+183 |     pub fn persist_theme(state_path: &Path, theme: Option<&str>) -> Result<(), String> {
+    |            ^^^^^^^^^^^^^
+
+warning: field `dest` is never read
+  --> crates/cli/src/native_config_import.rs:79:9
+   |
+78 | pub struct ApplyReport {
+   |            ----------- field in this struct
+79 |     pub dest: PathBuf,
+   |         ^^^^
+   |
+   = note: `ApplyReport` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: function `source_bytes_unchanged` is never used
+   --> crates/cli/src/native_config_import.rs:322:8
+    |
+322 | pub fn source_bytes_unchanged(
+    |        ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `redacted_preview`, `conflicts`, `error`, and `selected` are never used
+   --> crates/cli/src/native_import_dialog.rs:148:12
+    |
+ 75 | impl ImportDialog {
+    | ----------------- methods in this implementation
+...
+148 |     pub fn redacted_preview(&self) -> Option<&Value> {
+    |            ^^^^^^^^^^^^^^^^
+...
+153 |     pub fn conflicts(&self) -> &[String] {
+    |            ^^^^^^^^^
+...
+158 |     pub fn error(&self) -> Option<&str> {
+    |            ^^^^^
+...
+163 |     pub fn selected(&self) -> usize {
+    |            ^^^^^^^^
+
+warning: field `xdg_config_home` is never read
+  --> crates/cli/src/native_import_sources.rs:65:9
+   |
+63 | pub struct EnvSnapshot {
+   |            ----------- field in this struct
+64 |     pub home: Option<PathBuf>,
+65 |     pub xdg_config_home: Option<PathBuf>,
+   |         ^^^^^^^^^^^^^^^
+   |
+   = note: `EnvSnapshot` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: multiple methods are never used
+    --> crates/cli/src/native_view.rs:560:12
+     |
+ 384 | impl NativeView {
+     | --------------- methods in this implementation
+...
+ 560 |     pub fn set_placeholder_index(&mut self, index: usize) {
+     |            ^^^^^^^^^^^^^^^^^^^^^
+...
+ 568 |     pub fn set_composer_agent(&mut self, agent: Option<String>, variant: Option<String>) {
+     |            ^^^^^^^^^^^^^^^^^^
+...
+ 870 |     pub fn compaction(&self) -> &crate::native_compaction_settings::CompactionSettingsView { &self.compaction }
+     |            ^^^^^^^^^^
+ 871 |     pub fn compaction_mut(&mut self) -> &mut crate::native_compaction_settings::CompactionSettingsView { &mut self.compaction }
+ 872 |     pub fn load_context(&mut self, body: &str) -> Result<(), String> { self.context.load_response(body) }
+     |            ^^^^^^^^^^^^
+ 873 |     pub fn set_context_error(&mut self, error: &str) { self.context.set_error(error); }
+     |            ^^^^^^^^^^^^^^^^^
+ 874 |     pub fn invalidate_context(&mut self) { self.context.invalidate(); }
+     |            ^^^^^^^^^^^^^^^^^^
+...
+ 877 |     pub fn select_context_step(&mut self, down: bool) { self.context.select_step(down); }
+     |            ^^^^^^^^^^^^^^^^^^^
+ 878 |     pub fn scroll_context_detail(&mut self, down: bool) { self.context.scroll_detail(down); }
+     |            ^^^^^^^^^^^^^^^^^^^^^
+...
+1143 |     pub fn chat_at_scroll_ceiling(&self) -> bool {
+     |            ^^^^^^^^^^^^^^^^^^^^^^
+...
+1167 |     pub fn session_confirm(&mut self, id: &str) {
+     |            ^^^^^^^^^^^^^^^
+...
+1399 |     pub fn chat_message_rows(&self, messages: &[crate::native_view_chat::ChatMessage]) -> usize {
+     |            ^^^^^^^^^^^^^^^^^
+
+warning: function `configured_preset_applies_rounded_corners_and_inner_padding` is never used
+    --> crates/cli/src/native_view.rs:2247:8
+     |
+2247 |     fn configured_preset_applies_rounded_corners_and_inner_padding() {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `transcript_entry_rows` is never used
+  --> crates/cli/src/native_view_chat.rs:83:8
+   |
+83 | pub fn transcript_entry_rows(width: usize, text: &str) -> usize {
+   |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `at_scroll_ceiling` is never used
+   --> crates/cli/src/native_view_chat.rs:136:12
+    |
+112 | impl ChatView {
+    | ------------- method in this implementation
+...
+136 |     pub fn at_scroll_ceiling(&self) -> bool {
+    |            ^^^^^^^^^^^^^^^^^
+
+warning: variant `Text` is never constructed
+   --> crates/cli/src/native_view_chat.rs:530:5
+    |
+524 | pub enum ChatRowClass {
+    |          ------------ variant in this enum
+...
+530 |     Text,
+    |     ^^^^
+    |
+    = note: `ChatRowClass` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: method `styled_message_rows` is never used
+    --> crates/cli/src/native_view_chat.rs:1244:12
+     |
+ 995 | impl ChatView {
+     | ------------- method in this implementation
+...
+1244 |     pub fn styled_message_rows(
+     |            ^^^^^^^^^^^^^^^^^^^
+
+warning: enum `SessionAction` is never used
+  --> crates/cli/src/native_view_sessions.rs:39:10
+   |
+39 | pub enum SessionAction {
+   |          ^^^^^^^^^^^^^
+
+warning: variants `Loading` and `Error` are never constructed
+  --> crates/cli/src/native_view_sessions.rs:51:5
+   |
+48 | pub enum SessionPaneState {
+   |          ---------------- variants in this enum
+...
+51 |     Loading,
+   |     ^^^^^^^
+52 |     Empty,
+53 |     Error(String),
+   |     ^^^^^
+   |
+   = note: `SessionPaneState` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: methods `set_query`, `prune_drafts`, `close_tab`, `row_count`, `pane_state`, and `set_pane_state` are never used
+   --> crates/cli/src/native_view_sessions.rs:215:12
+    |
+ 90 | impl SessionView {
+    | ---------------- methods in this implementation
+...
+215 |     pub fn set_query(&mut self, query: Option<&str>) {
+    |            ^^^^^^^^^
+...
+275 |     pub fn prune_drafts(&mut self) {
+    |            ^^^^^^^^^^^^
+...
+282 |     pub fn close_tab(&mut self) {
+    |            ^^^^^^^^^
+...
+302 |     pub fn row_count(&self) -> usize {
+    |            ^^^^^^^^^
+...
+306 |     pub fn pane_state(&self) -> &SessionPaneState {
+    |            ^^^^^^^^^^
+...
+310 |     pub fn set_pane_state(&mut self, state: SessionPaneState) {
+    |            ^^^^^^^^^^^^^^
+
+warning: variant `Add` is never constructed
+   --> crates/cli/src/native_view_status.rs:115:5
+    |
+114 | pub enum McpIntent {
+    |          --------- variant in this enum
+115 |     Add { name: String },
+    |     ^^^
+    |
+    = note: `McpIntent` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: methods `set_provider`, `set_agent`, `set_context`, `connection`, and `intent_add` are never used
+   --> crates/cli/src/native_view_status.rs:486:12
+    |
+201 | impl StatusView {
+    | --------------- methods in this implementation
+...
+486 |     pub fn set_provider(&mut self, provider: Option<String>) {
+    |            ^^^^^^^^^^^^
+...
+490 |     pub fn set_agent(&mut self, agent: Option<String>) {
+    |            ^^^^^^^^^
+...
+494 |     pub fn set_context(&mut self, used: Option<u64>, window: Option<u64>) {
+    |            ^^^^^^^^^^^
+...
+525 |     pub fn connection(&self) -> Option<bool> {
+    |            ^^^^^^^^^^
+...
+576 |     pub fn intent_add(&self, name: &str) -> Result<McpIntent, String> {
+    |            ^^^^^^^^^^
+
+warning: methods `provider_id` and `model_id` are never used
+   --> crates/cli/src/onboarding.rs:657:12
+    |
+638 | impl CachedSettings {
+    | ------------------- methods in this implementation
+...
+657 |     pub fn provider_id(&self) -> &str {
+    |            ^^^^^^^^^^^
+...
+662 |     pub fn model_id(&self) -> &str {
+    |            ^^^^^^^^
+
+warning: associated function `restored` is never used
+  --> crates/cli/src/shutdown.rs:71:12
+   |
+69 | impl RestoreReceipt {
+   | ------------------- associated function in this implementation
+70 |     /// Receipt for the path where the guard ran the restore closure on drop.
+71 |     pub fn restored(reason: ShutdownReason, suspends: u32) -> Self {
+   |            ^^^^^^^^
+
+warning: method `restore_flag` is never used
+   --> crates/cli/src/terminal_host.rs:238:12
+    |
+221 | impl RawModeGuard {
+    | ----------------- method in this implementation
+...
+238 |     pub fn restore_flag(&self) -> &RestoreFlag {
+    |            ^^^^^^^^^^^^
+
+warning: methods `queued` and `drain` are never used
+   --> crates/cli/src/terminal_host.rs:484:12
+    |
+450 | impl HostLoop {
+    | ------------- methods in this implementation
+...
+484 |     pub fn queued(&self) -> usize {
+    |            ^^^^^^
+...
+516 |     pub fn drain(&mut self) -> Vec<TerminalEvent> {
+    |            ^^^^^
+
+warning: associated function `new` is never used
+  --> crates/cli/src/themes.rs:76:18
+   |
+74 | impl AppThemeChoice {
+   | ------------------- associated function in this implementation
+75 |     #[must_use]
+76 |     pub const fn new(name: AppTheme) -> Self {
+   |                  ^^^
+
+warning: methods `clear_session` and `status_bar` are never used
+  --> crates/cli/src/title.rs:63:12
+   |
+34 | impl AppTitle {
+   | ------------- methods in this implementation
+...
+63 |     pub fn clear_session(&mut self) {
+   |            ^^^^^^^^^^^^^
+...
+85 |     pub fn status_bar(&self, width: usize, dirty: bool) -> String {
+   |            ^^^^^^^^^^
+
+warning: method `is_empty` is never used
+   --> crates/cli/src/tui_paint.rs:151:12
+    |
+106 | impl PaintGrid {
+    | -------------- method in this implementation
+...
+151 |     pub fn is_empty(&self) -> bool {
+    |            ^^^^^^^^
+
+warning: `opencode-rk-cli` (bin "oc2" test) generated 99 warnings (2 duplicates) (run `cargo fix --bin "oc2" -p opencode-rk-cli --tests` to apply 19 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.19s
+     Running unittests src/main.rs (target/debug/deps/oc2-a8f4998817488107)
+
+running 21 tests
+test native_composer::line_cursor_tests::composer_home_end_dispatch_is_line_local ... FAILED
+test native_composer::line_cursor_tests::ctrl_line_home_end_preserve_other_lines_and_unicode_boundaries ... ok
+test native_composer::line_cursor_tests::physical_home_end_remain_buffer_operations_and_ctrl_bindings_are_line_local ... ok
+test native_composer::native_submission_ack_tests::native_backend_ack_consumes_only_the_captured_unicode_draft ... ok
+test native_composer::tests::bracketed_paste_never_submits_or_queues ... ok
+test native_composer::tests::busy_queue_bounded_fifo_at_32 ... ok
+test native_composer::tests::combining_mark_never_orphans_bytes ... ok
+test native_composer::tests::emoji_edit_never_splits_code_point ... ok
+test native_composer::tests::empty_and_oversize_drafts_rejected ... ok
+test native_composer::tests::interrupt_preserves_draft_and_queue ... ok
+test native_composer::tests::keymap_enter_and_ctrlj_mirror ... ok
+test native_composer::tests::multiline_up_down_keeps_char_column ... ok
+test native_composer::tests::oversize_paste_rejected_without_mutation ... ok
+test native_composer::tests::page_adopts_sessions_snapshot_atomically ... ok
+test native_composer::tests::page_lines_bounded_and_char_safe ... ok
+test native_composer::tests::page_renders_draft_queue_and_interrupt_state ... ok
+test native_composer::tests::paste_capped_by_total_draft_budget ... ok
+test native_composer::tests::undo_restores_last_edit ... ok
+test native_composer::tests::unframed_input_is_not_a_paste ... ok
+test native_composer::tests::wide_cjk_and_tamil_edit_safe ... ok
+test native_composer::tests::zwj_emoji_deletes_scalar_by_scalar_without_corruption ... ok
+
+failures:
+
+---- native_composer::line_cursor_tests::composer_home_end_dispatch_is_line_local stdout ----
+
+thread 'native_composer::line_cursor_tests::composer_home_end_dispatch_is_line_local' (3240898) panicked at crates/cli/src/native_composer.rs:776:9:
+assertion `left == right` failed
+  left: ""
+ right: "\n"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    native_composer::line_cursor_tests::composer_home_end_dispatch_is_line_local
+
+test result: FAILED. 20 passed; 1 failed; 0 ignored; 0 measured; 754 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p opencode-rk-cli --bin oc2`

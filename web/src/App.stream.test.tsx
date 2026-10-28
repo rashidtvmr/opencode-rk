@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
+import { withBrowserResume } from './test/browser-resume-fixture'
 
 const SESSION_ID = '0195f36a-2997-7a89-a11a-fc3359b0bd6e'
 const fetchMock = vi.fn()
@@ -95,7 +96,7 @@ beforeEach(() => {
 
     return jsonResponse({ code: 'not_found', message: `${method} ${url}` }, 404)
   })
-  vi.stubGlobal('fetch', fetchMock)
+  vi.stubGlobal('fetch', withBrowserResume(fetchMock))
 })
 
 afterEach(() => {

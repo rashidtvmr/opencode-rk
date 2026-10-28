@@ -2,6 +2,12 @@
 
 Fast local web client for the native Rust singleton daemon.
 
+See [WEB_PARITY_CHECKLIST.md](./WEB_PARITY_CHECKLIST.md) for the current
+implementation audit, verified work, missing pages and release gates. The
+web interface now supports daemon-discovered slash commands, server-owned
+`@agent` turns, live subagent controls, rich tool cards and customizable
+themes/settings. Production parity is still in progress.
+
 Stack: React 19, Vite, TypeScript, Tailwind CSS 4, and **shadcn/ui** using its
 `aria-nova` React Aria component base. `components.json` is the shadcn registry
 configuration and components under `src/components/ui` are generated shadcn

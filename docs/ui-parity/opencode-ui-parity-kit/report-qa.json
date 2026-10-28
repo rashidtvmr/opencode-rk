@@ -1,0 +1,17 @@
+{
+  "desktop": {
+    "width": 1440,
+    "scrollWidth": 1440,
+    "chapters": 9,
+    "checks": 223,
+    "missingAnchors": []
+  },
+  "mobile": {
+    "width": 390,
+    "scrollWidth": 390
+  },
+  "cpFilterCount": 42,
+  "contextSearchCount": 8,
+  "manualCheckResult": "223 of 223 checks shown · 1 manually marked reviewed",
+  "jsErrors": []
+}

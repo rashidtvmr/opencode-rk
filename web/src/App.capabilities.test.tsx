@@ -3,6 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import App from './App'
+import { withBrowserResume } from './test/browser-resume-fixture'
 
 const SESSION_ID = '0195f36a-2997-7a89-a11a-fc3359b0c200'
 const fetchMock = vi.fn()
@@ -57,7 +58,7 @@ beforeEach(() => {
     if (url === `/api/sessions/${SESSION_ID}/fork`) return json({ fork: null })
     return json({ code: 'not_found', message: `${method} ${url}` }, 404)
   })
-  vi.stubGlobal('fetch', fetchMock)
+  vi.stubGlobal('fetch', withBrowserResume(fetchMock))
 })
 
 afterEach(() => {
@@ -78,8 +79,8 @@ describe('WEB-012/013/016 capability gating', () => {
 
     await user.keyboard('{Escape}')
     await user.click(screen.getByRole('button', { name: 'Commands and mentions' }))
-    expect(await screen.findByText('Search · local grep is not a web-search adapter')).not.toBeNull()
-    expect(screen.getByText('Deep research · no native research adapter is installed')).not.toBeNull()
+    expect(await screen.findByRole('listbox', { name: 'Slash commands' })).not.toBeNull()
+    expect(screen.getByText(/No matching configured commands reported by the daemon/)).not.toBeNull()
 
     expect(
       screen.getByRole('button', {

@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import userEvent from '@testing-library/user-event'
 
 import App from './App'
+import { withBrowserResume } from './test/browser-resume-fixture'
 
 const SESSION_ID = '0195f36a-2997-7a89-a11a-fc3359b0c100'
 const ATTACHMENT_ID = '0195f36a-2997-7a89-a11a-fc3359b0c101'
@@ -55,7 +56,7 @@ beforeEach(() => {
     }
     return json({ code: 'not_found', message: `${method} ${url}` }, 404)
   })
-  vi.stubGlobal('fetch', fetchMock)
+  vi.stubGlobal('fetch', withBrowserResume(fetchMock))
 })
 
 afterEach(() => {

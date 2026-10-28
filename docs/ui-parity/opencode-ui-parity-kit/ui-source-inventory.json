@@ -1,0 +1,2390 @@
+{
+  "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+  "description": "Complete TS/TSX file inventory for packages/tui/src. Cited means at least one region was used; indexed does not imply deep audit or runtime verification.",
+  "files": [
+    {
+      "path": "packages/tui/src/app.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/app.tsx",
+      "sha256": "b97ebed0dea62f1eda897ddde4268b0d30caf271bff74f04c5dc11fe4345faf3",
+      "lines": 1483,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/attention-sounds.bun.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/attention-sounds.bun.ts",
+      "sha256": "5b5690f9fabb61d0f62b6848318fbcef67da1ede4b243e784287a5e984f20ef3",
+      "lines": 8,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/attention-sounds.node.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/attention-sounds.node.ts",
+      "sha256": "ed23436c0c6d8e546197b9abe4e593d6bf22e5ac91214d1d50c5f2ceea8ba0e9",
+      "lines": 16,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/attention.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/attention.ts",
+      "sha256": "e6afc7b80e2c6f74577c5eb887827ab83012ebbca157ccb3b98296434324fb70",
+      "lines": 189,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/audio.d.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/audio.d.ts",
+      "sha256": "8f2f3e5630bc0b2e16fc5e33ca39fbe52a55e26619e27268cc1ebe3601c46354",
+      "lines": 9,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/audio.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/audio.ts",
+      "sha256": "f48bdc9266ba512471bd70264207892f455f8683bc259bbc6e24b8a20fe6794f",
+      "lines": 49,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/clipboard.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/clipboard.ts",
+      "sha256": "9f6e4bd731f8f742757aec8302c6b57c8ca5de194504a0e166d86c54fbbcde2f",
+      "lines": 67,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/command-palette.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/command-palette.tsx",
+      "sha256": "61fb73798ad39822e1a7a950b086a10f1540a67621f49a81a64e13fc10b29224",
+      "lines": 74,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/devtools-bar.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/devtools-bar.tsx",
+      "sha256": "d2c22607627a3c48e97c22744ea5d156cc226b3177797c6fd05915541dc517d0",
+      "lines": 611,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-agent.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-agent.tsx",
+      "sha256": "2b92bdfd1eda18dbd0792404182fb46598722edb77dfe15b3218fce41296f68b",
+      "lines": 33,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-config.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-config.tsx",
+      "sha256": "8f924e4313a31ce0fea1dd9fba0a23da574aa2542b258df6c78988e6b91b9efd",
+      "lines": 482,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-debug.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-debug.tsx",
+      "sha256": "09390084d27cccefa4c149797fd1778e2d71d5833a2ecf25d8fb43d7032abe20",
+      "lines": 90,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-error-details.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-error-details.tsx",
+      "sha256": "2f13e65ec50961f967e4b809663e9c77c0aa8d8217159e03012c8c86711065d4",
+      "lines": 130,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-experiments.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-experiments.tsx",
+      "sha256": "a379288a9e8678204ee114deffbf855d49d2afdea9a359b9ac7a24edf8ff88cc",
+      "lines": 97,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-go-upsell.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-go-upsell.tsx",
+      "sha256": "e8f6282b70b07b8db066f82d262df14cc0ffb6a00bba337316a9c216037cddb4",
+      "lines": 461,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-highlights.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-highlights.tsx",
+      "sha256": "864379fa44633c7fc4a5965720ce6c3a2e5b745fa3da6f33872ff639e4a0487b",
+      "lines": 88,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-image-preview.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-image-preview.tsx",
+      "sha256": "a4fa96588e21e7c952ad4fab589508cd4c9e62e8c7e62c1d90822ba292b53ec8",
+      "lines": 85,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-integration.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-integration.tsx",
+      "sha256": "1b602be726fd4f7e36030081dd88b1c6f9ed021a23f6b679d16c64fe9b20207e",
+      "lines": 1286,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-mcp.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-mcp.tsx",
+      "sha256": "6a05dfa26984be7f981abbddb1787a8f33c8c9d3cbbd8bc1d0c94b9ee7cac084",
+      "lines": 177,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-model-free.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-model-free.tsx",
+      "sha256": "75a7ec729a2c433935f65d66ece18abe1b7b000701acf2b8cc6d65acef6cde63",
+      "lines": 77,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-model.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-model.tsx",
+      "sha256": "6b6a2fec4ce250d73bbc811256aa1f961be68b5a2e430a779589979cac35d848",
+      "lines": 253,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-open.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-open.tsx",
+      "sha256": "1d76a2ccd02a284f30384bd5c281bdfb9056fa0fca10b196694299adda1ef737",
+      "lines": 508,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-pair.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-pair.tsx",
+      "sha256": "737ccffb8647e4754f51c79c72027afa1e97d93d2bdfd5a8d7d2a11873cabaa9",
+      "lines": 123,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-session-list.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-session-list.tsx",
+      "sha256": "59ab9fc64376729fd6082a3e10f4daceb5b8e38b111150fa8c10d4c1570acf80",
+      "lines": 325,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-session-rename.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-session-rename.tsx",
+      "sha256": "de7dce643acd59d34d8f8b4d86a2f797ecd8e49edb4cf893312a1a1bcaf69603",
+      "lines": 37,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-shell-output.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-shell-output.tsx",
+      "sha256": "726447a2a72f0bef255a23163eb03f440f2468d579e004410282a983f55316eb",
+      "lines": 156,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-skill.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-skill.tsx",
+      "sha256": "b3d9d377d309eb6efe3772f79157def233fadf75f243482ca646935245676f85",
+      "lines": 93,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-stash.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-stash.tsx",
+      "sha256": "cb17705de41f24f8cbbb151b8d98f138b8a1eb3a0af0fc7cedd9740faec24ba9",
+      "lines": 90,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-status.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-status.tsx",
+      "sha256": "e4e35fc6175c1ccd2e0feb8e0a56aa83d40d5209eaf9fd777b9badf1ed910ffd",
+      "lines": 50,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-theme-list.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-theme-list.tsx",
+      "sha256": "3c584b07fbb67ddde48eafc491f362b70f4bdcc77aa811b29aa977b27a2a804b",
+      "lines": 55,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-update.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-update.tsx",
+      "sha256": "70eac6c2ec7e587ec35ee8682a72aa63f82d3578b7d3b873c8496d5d0bdcdb16",
+      "lines": 171,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-variant.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-variant.tsx",
+      "sha256": "7902c3f6b436b8aaf282adf7a0e4b9b13256905a35ef32f8536ec99647e09e6b",
+      "lines": 43,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-workspace-file-changes.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-workspace-file-changes.tsx",
+      "sha256": "5e1aea8b411085db41bd62e21d1ac36ee743ec75d6ab122852cc909d627608b6",
+      "lines": 187,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-workspaces.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-workspaces.tsx",
+      "sha256": "779687917d9e5b25924602c2c20a1e8683090ad7da0e6ddb087ca73ba952c4d6",
+      "lines": 412,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/dialog-worktree-name.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/dialog-worktree-name.tsx",
+      "sha256": "337c25cab0bb92463d80480ca56a9cc2b43eb2b44381ffd90b8206831e897757",
+      "lines": 40,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/error-component.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/error-component.tsx",
+      "sha256": "8aa5523154028e3b666b727f13d300a1294a05c6dd13b3fb905f16f6ac807924",
+      "lines": 258,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/fade-in-text.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/fade-in-text.tsx",
+      "sha256": "585de001274ce4d4f1cbf7c8583b648e66186d4ebc97c515b0abcffba3935e37",
+      "lines": 104,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/go-upsell-art.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/go-upsell-art.ts",
+      "sha256": "29d791b9c8433ab5ec1324435e40036970d7a2d69024dc51f6e790420340e2fc",
+      "lines": 336,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/logo.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/logo.tsx",
+      "sha256": "7ad79d309f965e74f48cf14c315f4ea4e3387c0235b026b916dece364c1b9680",
+      "lines": 79,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/masked-text.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/masked-text.ts",
+      "sha256": "6a5a367cc00b285f979f8318c9e561106d821f5b1a3c73fc4ac18d7a72987164",
+      "lines": 59,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/migration-overlay.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/migration-overlay.tsx",
+      "sha256": "6a8e74d42d76da00d7b4fa49cf9409a4aa5ce0c4cbc5dcda937e27909b5f8d7a",
+      "lines": 73,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/model-options.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/model-options.tsx",
+      "sha256": "b084103bdd7e818bef32f50d49a9385052f5f3081ce3cec72197c3d696a7cf0a",
+      "lines": 121,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/one-cell-spinner.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/one-cell-spinner.tsx",
+      "sha256": "58c7f67ca240684ec9319596e10abc7f0799486ded1aead85e37b9afc0be32c5",
+      "lines": 76,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/panel-host.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/panel-host.tsx",
+      "sha256": "b9db9896cde6d92f8a3e84477d1ae7f0efc9b135312202dd5ad62cb497e7ee2a",
+      "lines": 64,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/patch-diff.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/patch-diff.tsx",
+      "sha256": "c4ae06b6376d5b194e93d482b1dce3e319f4110b05062c40febe2d3954b54005",
+      "lines": 211,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/plugin-route-missing.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/plugin-route-missing.tsx",
+      "sha256": "1db30eca7104348208009c521a34c81555d18b39919c89062aa8e81e108cafde",
+      "lines": 21,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/prompt/autocomplete.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/autocomplete.tsx",
+      "sha256": "84fe175cef157a3d720ba25ef1a0a2ad179a74fd349ca4bb587d6d8bd0206fec",
+      "lines": 960,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/prompt/draft-stash.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/draft-stash.ts",
+      "sha256": "d61ce2c13ac1345a40f4d8ffdab1c6bb6bd4d1b5ea6ed60e7f7ed49e3cff604b",
+      "lines": 18,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/prompt/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/index.tsx",
+      "sha256": "ed903af4b3504afc3aed73f6fc6afe13a1cc1a1059a4c4ad623a1ea74ebd107c",
+      "lines": 2035,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/prompt/local-attachment.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/local-attachment.ts",
+      "sha256": "2bdf86e76ea6a6e62aaea0e8f3a828c5c5380f37c4bb88d2f8c0567f1ffaebb9",
+      "lines": 176,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/prompt/metadata.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/metadata.tsx",
+      "sha256": "efa788e8b536cdb98284d56aa0fe1d2d1c635a2c8baf7e47b5698412fe8c1559",
+      "lines": 167,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/prompt/move.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/prompt/move.tsx",
+      "sha256": "80c4701f5ed55f151ded7d7aaccca969054abdfad7306d68acdfa8f1c9312537",
+      "lines": 181,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/reconnecting.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/reconnecting.tsx",
+      "sha256": "ba96695bb0fda0b231df7bc60cbcdbb02eed779bf0a35ba4993c165e54a782d8",
+      "lines": 40,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/retry-provider.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/retry-provider.tsx",
+      "sha256": "90d287aa5272832da67d2ff6c7e6f4c5fbd1e54356f8fa2eb49d044f12cbd0d4",
+      "lines": 210,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/session-frame.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/session-frame.tsx",
+      "sha256": "f837a54eafdf3f3286707046b0dc3905899303d0f32767ff834480e2a72af910",
+      "lines": 408,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/session-tabs-rail.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/session-tabs-rail.tsx",
+      "sha256": "2dc711ed32fb4a13b6445f5cecadc560f714d830ccb7beb144fdf721ede39359",
+      "lines": 94,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/session-tabs.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/session-tabs.tsx",
+      "sha256": "77ab8fe6c064e0d7edcfb628bc9741400de513c31a35b0aff53fc7dfbd72bdaf",
+      "lines": 1801,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/shimmer-text.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/shimmer-text.tsx",
+      "sha256": "8396958abccc272d8cedeccad96c8fd90f83af009cf4cad7948c8cfa21acdcda",
+      "lines": 59,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/spinner-frames.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/spinner-frames.ts",
+      "sha256": "1d36cfed1ea60a9dc61de4feda801f9760e142cc3dd4821301949df52858da6e",
+      "lines": 1,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/spinner-renderable.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/spinner-renderable.ts",
+      "sha256": "8613c856375269827cd7aba530a2ecbeafc525737859a638d505f87e0c8ca8b2",
+      "lines": 158,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/spinner.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/spinner.tsx",
+      "sha256": "9b0d52f2808af75e77530c685a0c087b6a24765996648b9704237673d20728ee",
+      "lines": 50,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/startup-loading.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/startup-loading.tsx",
+      "sha256": "8c21f16e5eb056b0e09cb0595df0121fdadaee79183e55bbe83fc4088d960046",
+      "lines": 63,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/tab-pulse.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/tab-pulse.tsx",
+      "sha256": "02f2518861115296e7c7dd8f280b5c0f640f5286e904681f6b0cbaa88f265d92",
+      "lines": 817,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/terminal-pane.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/terminal-pane.tsx",
+      "sha256": "3d96e4c3ad741adbc7287fe8f4e37d34e4095147218bd2eb1aee017ebfb6929c",
+      "lines": 408,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/theme-error-toast.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/theme-error-toast.tsx",
+      "sha256": "be2c7ef6557d6b0d41d00df9cca001db8b7a70d77967f77bed76a744232b9a9b",
+      "lines": 20,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/title-shimmer.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/title-shimmer.tsx",
+      "sha256": "bca5992dbecd88375ae686d166474a2efaf353cbcd26c5f0506ed757462d2a72",
+      "lines": 277,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/component/todo-item.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/todo-item.tsx",
+      "sha256": "700d441e471f9b4758dfcc310564ed18e1458503287c2f6c6288e3990d84efac",
+      "lines": 27,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/usage.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/usage.tsx",
+      "sha256": "67613b62d8b371a054a0333c525f80b842ca9690a7d835872f27d579db43d7d7",
+      "lines": 304,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/component/use-connected.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/component/use-connected.tsx",
+      "sha256": "06c80dc68aefc526f6bd454f38155c5f6db04263a49ba57afbffd0a2f0438166",
+      "lines": 8,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/config/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/config/index.tsx",
+      "sha256": "0839b3908fb1a1fdb594589ab3a32c78a7b8fb9433974e0e6578e27e5369e031",
+      "lines": 393,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/config/keybind.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/config/keybind.ts",
+      "sha256": "49c8a69149811fee3bf57e1f9104f885d20910c594cae8ba3e99f14c8f454fd8",
+      "lines": 361,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/config/new-session-location.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/config/new-session-location.ts",
+      "sha256": "9c484f0f7144b0b6e0d99b0f1c72becbfb5898ef54ea99e23e45f9d04087f67b",
+      "lines": 16,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/config/v1/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/config/v1/index.tsx",
+      "sha256": "59ed830097799bf914676b898ec839a76e09a31610362c782b200385cf682d96",
+      "lines": 149,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/config/v1/keybind.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/config/v1/keybind.ts",
+      "sha256": "332d81db48be34bc842cf661f38a69c9a9d6084215213062c10129bf4d755dc5",
+      "lines": 463,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/args.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/args.tsx",
+      "sha256": "dd9cfc027d0f143fbaf61c20886fbb0dfeb19e63b5af46de284daff4deb53c17",
+      "lines": 31,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/attention.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/attention.tsx",
+      "sha256": "ba48b169a9aa10e3dbb819c4f55037f59c3bb2e2b230c689693f09f1f028ec7f",
+      "lines": 23,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/client-mcp.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/client-mcp.tsx",
+      "sha256": "5e86941397c596e6462860eb7f25fb2f4dce123277584abdcf0834e3c57432c7",
+      "lines": 119,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/client.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/client.tsx",
+      "sha256": "34082935c91fdc782dda23486e34369cfd361e7e0e83bacc8e0084d268b3bb4c",
+      "lines": 69,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/clipboard.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/clipboard.tsx",
+      "sha256": "48e3e43be1665c539c31795b1f86493512fddcd701a687f4284bbbf0f9c02ceb",
+      "lines": 19,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/data.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/data.tsx",
+      "sha256": "e1722ee1982cbd85623756778a424ccd323852f29cc4667d63cf7aa00e47a6ad",
+      "lines": 52,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/editor.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/editor.ts",
+      "sha256": "80305e05875ff65d27743c9f8afb743fc01de5fa2798fbfea24cdad3afcd27fa",
+      "lines": 408,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/epilogue.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/epilogue.tsx",
+      "sha256": "36356e69b163408c965cede9efda1e51f32810fa76e3989f7a6e17e253c7973a",
+      "lines": 14,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/event.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/event.ts",
+      "sha256": "55aba4a91c58af84a68a736d1153f59f657cb7b0367bc14214ff2945125647d9",
+      "lines": 32,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/exit.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/exit.tsx",
+      "sha256": "bae454c521fabda8e6e99daf0e7394e7fd156ecf3d713b8c81a775d5583b06d4",
+      "lines": 8,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/helper.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/helper.tsx",
+      "sha256": "675174ec58b92707f8496187552e7bc396587d19e4348c452543217047ef95c2",
+      "lines": 26,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/interactivity.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/interactivity.tsx",
+      "sha256": "98c93735767b639ea92a75a489e4e670fdc6edc8d0b8d775f5ce9e4932da33c7",
+      "lines": 20,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/keymap.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/keymap.tsx",
+      "sha256": "d81a9a515f73b6e4b5cc15f6aabe06e51ffb5471ebaa133bb25e791356e9f812",
+      "lines": 474,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/local.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/local.tsx",
+      "sha256": "46bfae0c9020d6f423e2cca2c4637130e6ba67676127f885a3d7fca09db0ebfd",
+      "lines": 615,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/context/location.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/location.tsx",
+      "sha256": "e6e23b14face022ca5e066a27373432a7cd4d7d6c1cdd209ddabd5e746481477",
+      "lines": 80,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/log.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/log.tsx",
+      "sha256": "85f3ec339606ea299937fed70729761a2b091f22f1119d3ebfc9f49a97d6e53f",
+      "lines": 24,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/panel.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/panel.tsx",
+      "sha256": "7355db20f5e184af5ceb2999fda9a47f1e37f0d944eb299313a449b39521ff0a",
+      "lines": 59,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/context/path-format.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/path-format.tsx",
+      "sha256": "c62ca107a1850ad5c781f7746d6b037da15aa3302195bd728f7ffcbda0ae8bee",
+      "lines": 12,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/permission.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/permission.tsx",
+      "sha256": "220a18e8104b5c17a167f79086ac67c75f560551748a07b6a1d4d33419749e50",
+      "lines": 18,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/program-status.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/program-status.ts",
+      "sha256": "c07eacff45d626c39246e6eea0a8a834aa5924425e14750b8105911ff9669435",
+      "lines": 94,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/prompt.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/prompt.tsx",
+      "sha256": "ba66f137263b0987c70e644aa50be3ca89cd91295f223cca751b72ddffcb417c",
+      "lines": 18,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/route.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/route.tsx",
+      "sha256": "efeccf3fa2dbd06adaec9642343b16f9f5681e54276a6ed1a1d4ab6811b4de64",
+      "lines": 73,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/runtime.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/runtime.tsx",
+      "sha256": "0cd854cade9c9d46dec58ff3b3de7f22478dcf3ed3de887d028f8554831f8703",
+      "lines": 96,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/session-retention.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/session-retention.ts",
+      "sha256": "8f6dee784fc9599b66aa36163b802991365c703ffe63c1d9b517d234c231d6f7",
+      "lines": 1,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/session-tabs-model.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/session-tabs-model.ts",
+      "sha256": "062f0310afece8e9dbf50eb4c3e215aa750a880a18fe1fec354c2fd147e9929c",
+      "lines": 261,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/context/session-tabs.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/session-tabs.tsx",
+      "sha256": "92f06faba49b7e49e8c6043bb4c56281602f3452b8faaca033368445f355a7a3",
+      "lines": 498,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/context/session-terminals.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/session-terminals.tsx",
+      "sha256": "feea85ffbc862d4d2c54cc472fb0be3d004d3d16a7c6b00d587c29f2d48102d0",
+      "lines": 136,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/storage.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/storage.tsx",
+      "sha256": "37cbcbd1cf5a8d587765c77990217151ed11f8750b004f2223ed38a2ff2a7426",
+      "lines": 150,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/context/theme.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/theme.tsx",
+      "sha256": "68ae1475d2b0e686b89daf067f6c7438c475ab0d71ef7758787f9cf729dad0a2",
+      "lines": 428,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/context/thinking.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/thinking.ts",
+      "sha256": "352fc0e17f68a1c04c722d12b7b18e6df04224aae50be5d43d99c51c77acdace",
+      "lines": 20,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/context/update-notification.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/context/update-notification.tsx",
+      "sha256": "9862ab1b9c4a9951617684ca98f7968ded82b6bef985d8c368fd2865d43e650d",
+      "lines": 158,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/devtools/index.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/devtools/index.ts",
+      "sha256": "cef0edd6ddd9896ae5ab045ffe3d94c5b1d5610624adb2362c34e0c2fe73428a",
+      "lines": 41,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/editor-zed-sqlite.bun.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/editor-zed-sqlite.bun.ts",
+      "sha256": "283e13c05269ce9b7e0c052eedbae7c36bcbbc50c6dc6172c85f625a0da06303",
+      "lines": 1,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/editor-zed-sqlite.node.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/editor-zed-sqlite.node.ts",
+      "sha256": "aa2eda0d2fcf1299d25fff3b6112f0a19831f899d093e7e72e0815a15ceb257c",
+      "lines": 21,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/editor-zed.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/editor-zed.ts",
+      "sha256": "92debc845b3738d697b025843d850ebf300e0737d19bf5e91aceae489368174a",
+      "lines": 277,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/editor.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/editor.ts",
+      "sha256": "8e061823d50ee8f257c38f33ba64cff4fff45ede965b0ff33a3b8a9d2f410944",
+      "lines": 86,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/home/footer.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/home/footer.tsx",
+      "sha256": "5b1b6b7635608a4fc7c0fac23889fa7afcb8bc47f6791b15328b8006d7051102",
+      "lines": 116,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/prompt/btw.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/prompt/btw.tsx",
+      "sha256": "2231cdec1356849aa12aecd26b2d855024af0749e07b652b1279b2154ca63a20",
+      "lines": 189,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/prompt/footer.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/prompt/footer.tsx",
+      "sha256": "9cd1bb5b59106c9676c85bd0bdcaa1be5bbcd142abbd5938b42f13239e65dfd7",
+      "lines": 156,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/sidebar/context.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/sidebar/context.tsx",
+      "sha256": "3d654fbab1bd104a6cf4c4431b32e5367803613ccda7ced4c251adf9b39b37d0",
+      "lines": 52,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/sidebar/footer.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/sidebar/footer.tsx",
+      "sha256": "918f637c390ea5eeaafd7cfc1a6451e0b622f70a4eaec960b14c784fec63ce85",
+      "lines": 126,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/sidebar/limit.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/sidebar/limit.tsx",
+      "sha256": "8dfb9aef9b77b3c34037e3e5bc7dcf4e4fadcca9d4db923e13949af032265699",
+      "lines": 47,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/sidebar/mcp.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/sidebar/mcp.tsx",
+      "sha256": "912929d010590a62d2a6a3354b15f64512bab53dc683a7d9dabe53e62b2282f4",
+      "lines": 103,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/sidebar/todo.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/sidebar/todo.tsx",
+      "sha256": "da64e50931e8c4120842256a91021b3a158939e834cd8357d32f85ba10335a97",
+      "lines": 58,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/diff-viewer-file-menu.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/diff-viewer-file-menu.tsx",
+      "sha256": "ee2e5d4313a53034e564c8b99453f1396ce2dea767c9c11238af6c713769f71f",
+      "lines": 87,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/diff-viewer-file-tree-utils.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/diff-viewer-file-tree-utils.ts",
+      "sha256": "ba15ed4450106940675520b96e047b8858418f162f35c3f87b0e241a76553279",
+      "lines": 174,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/diff-viewer-file-tree.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/diff-viewer-file-tree.tsx",
+      "sha256": "12454c157c5747e4a4827a34b186e5aba723affdd663d4d209fdc296fd6f55b2",
+      "lines": 274,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/diff-viewer-image.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/diff-viewer-image.tsx",
+      "sha256": "3553d48e8708f0d51b8ab4f70c363251075b22173ac18725de0969f7f6a3956c",
+      "lines": 96,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/diff-viewer.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/diff-viewer.tsx",
+      "sha256": "191d9ac880164ec7ff8231a5a65d84190fb8dc897c6c5c8e73142f08c042849a",
+      "lines": 1380,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/notifications.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/notifications.ts",
+      "sha256": "f7ded5fa0dcbcae2c940be28df0092eb19b7617a98f10261a186538646b3b989",
+      "lines": 84,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/plugins.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/plugins.tsx",
+      "sha256": "c2a18a6d272aa3cc4dd4863a443ba865887a4a24dd273d0e6508b5a7c95ffb3a",
+      "lines": 353,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/stats-data.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/stats-data.ts",
+      "sha256": "3232cd3aa2e9c0b04954dd2d3b104cf65ed5fc3700834ce25e0f74c7889f83a0",
+      "lines": 18,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/stats.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/stats.tsx",
+      "sha256": "9cb638355c01a1e30cfd0a58ad5eecbc33ddd11377e5162a7d7b83a07fc70cad",
+      "lines": 217,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/storybook/footer.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/storybook/footer.tsx",
+      "sha256": "3d4ac4e983f48055788b15e28bdd3b6218c2ee324630e0cab55a91bcd7080fcb",
+      "lines": 51,
+      "scope": "developer_story_fixture",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/storybook/highlights.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/storybook/highlights.tsx",
+      "sha256": "b77c7d84c0fde870e240b9ec5d445d69a1d5c98e0eb5d314f7f396dd95cd17ca",
+      "lines": 71,
+      "scope": "developer_story_fixture",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/storybook/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/storybook/index.tsx",
+      "sha256": "f198f8da0a554e12362b3f0737c199d697327e68b73912de16a941488083dcaa",
+      "lines": 153,
+      "scope": "developer_story_fixture",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/storybook/link-clicks.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/storybook/link-clicks.tsx",
+      "sha256": "2239da402673300914769d8c8f3653be178a06599195f31e3f5a87784b003a43",
+      "lines": 125,
+      "scope": "developer_story_fixture",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/storybook/merman-layouts.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/storybook/merman-layouts.tsx",
+      "sha256": "e0455c584458599d5f51d98766b3033be725a77cea6403c9a000a72308b59af5",
+      "lines": 201,
+      "scope": "developer_story_fixture",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/storybook/one-cell-spinner.fixtures.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/storybook/one-cell-spinner.fixtures.ts",
+      "sha256": "e6b7963e85d5909c490e93f1f17f2812afc042073fc91e5d4d93d00309d2c990",
+      "lines": 144,
+      "scope": "developer_story_fixture",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/storybook/one-cell-spinner.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/storybook/one-cell-spinner.tsx",
+      "sha256": "69733809adc5806dba0e8cab6bbc51afd266480e7bdc71ab06f8b059c4180d13",
+      "lines": 293,
+      "scope": "developer_story_fixture",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/storybook/session-location-missing.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/storybook/session-location-missing.tsx",
+      "sha256": "2ab584658cd28a5de18cf49671b5520163b68f486cb9e2323701b902b1c506ca",
+      "lines": 80,
+      "scope": "developer_story_fixture",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/storybook/session-tabs.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/storybook/session-tabs.tsx",
+      "sha256": "8ce285dec6ce5b2f8f40c13b1e5ee653fa7258890a9b1b4b805bf14b224d3285",
+      "lines": 571,
+      "scope": "developer_story_fixture",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/storybook/subcell-spinner.fixtures.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/storybook/subcell-spinner.fixtures.ts",
+      "sha256": "b78f0b82a95e3fb046cf34dbf434b48c1277848e1c32ffd2bcf1dd6c46d42eeb",
+      "lines": 115,
+      "scope": "developer_story_fixture",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/feature-plugins/system/storybook/todo.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/feature-plugins/system/storybook/todo.tsx",
+      "sha256": "0b06b8606a09e691bd487308490e2d6c985a2a59e1fd8ae7949c69d9a5c770f1",
+      "lines": 166,
+      "scope": "developer_story_fixture",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/index.tsx",
+      "sha256": "88f38a1e5370cf41dbfd1dee36520b8136715e30d7a215dee31ddb33f9d30945",
+      "lines": 2,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/logo.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/logo.ts",
+      "sha256": "af64c4af3e3e9fa1110abc6647760c85694a8115c1fa7fe6cbd48b869d1dc5fc",
+      "lines": 9,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/catalog.shared.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/catalog.shared.ts",
+      "sha256": "f4508289e1f3a91042c15453f5614219d8638937a7337a6485fb95fa288eb1fd",
+      "lines": 115,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/demo.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/demo.ts",
+      "sha256": "07d04a208eebb6aa938c0579b4a38c4200e3354aae3af150556d29b02011abff",
+      "lines": 1091,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/entry.body.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/entry.body.ts",
+      "sha256": "217946c560afdb7b912a7feea2d79ba6ffba4e3b1d498b17b9ca5b6e63a9e765",
+      "lines": 242,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/footer.command.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/footer.command.tsx",
+      "sha256": "e0f46dd28ef07bfcb93c2c60b9512ce1a109925cb417c0effbb89a7625bd5239",
+      "lines": 1205,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/footer.form.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/footer.form.tsx",
+      "sha256": "b11aef34636517f3dbf9669ca66fd99a4f4e332f360c49f0128d99d78661c9c4",
+      "lines": 647,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/footer.menu.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/footer.menu.tsx",
+      "sha256": "c4236c0873fcc34826ae3ae4c092e9cfe63c55e7518535ea1a31af0b364f583d",
+      "lines": 313,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/footer.permission.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/footer.permission.tsx",
+      "sha256": "84934a1f6ff6e10e65ae6811ec567b35c6b0ff8c643d1150b2e2449c8734ebd7",
+      "lines": 562,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/footer.prompt.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/footer.prompt.tsx",
+      "sha256": "83482af1ee45e58a423e3a6d66fdb33d1dc4e582bd591395902001e393641583",
+      "lines": 1549,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/footer.subagent.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/footer.subagent.tsx",
+      "sha256": "78362d053f04fbd6a790446aa6c9f73966e4a94ab62b938324d23352a124fd4e",
+      "lines": 267,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/footer.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/footer.ts",
+      "sha256": "121d13f3e48c75c7a3cb3ec414338a92b44fca52cbd4adda77252f10aa712dc9",
+      "lines": 1194,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/footer.view.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/footer.view.tsx",
+      "sha256": "16354d3f69e9b57864f8d3fe9bfe00127208f417319642ed29a6c1c44111c532",
+      "lines": 1041,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/footer.width.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/footer.width.ts",
+      "sha256": "465fda69f12ee46717014bb6e03c5cc5c2fba1b748fd455576ddf28d78d79ad5",
+      "lines": 120,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/form.shared.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/form.shared.ts",
+      "sha256": "98fc678c4517a167b24e24f8a9d0f652797cfb7f7fc9f917ab171f575a7a3062",
+      "lines": 241,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/index.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/index.ts",
+      "sha256": "605cd9f1301cfe21f877a5d2d6b565d80065bbe4864d6811a8df0382cb21aeb8",
+      "lines": 7,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/mono.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/mono.ts",
+      "sha256": "53a9de9f4919f40f02fbac484ee7b2e9f5fec31deee856af3b3a0063faa215ee",
+      "lines": 256,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/permission.shared.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/permission.shared.ts",
+      "sha256": "39e2400721a29b4a419f76cfcc0521cb6bf66e8284abce545169951802b5b4a2",
+      "lines": 199,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/prompt.editor.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/prompt.editor.ts",
+      "sha256": "1933acdcb2fce5b076d2dd386d1ec7153121f867b63ac5c227988df7c93753f7",
+      "lines": 74,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/prompt.shared.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/prompt.shared.ts",
+      "sha256": "c83b35b10f1b7518f21e2b3a808c659be80b79177faee0e0a82dbcc8882c0d8b",
+      "lines": 192,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/runtime.boot.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/runtime.boot.ts",
+      "sha256": "12e3a9d57a55d59d88dc7526353118dfa7d0909765a0c18bb1ebf409f9a67cb0",
+      "lines": 98,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/runtime.lifecycle.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/runtime.lifecycle.ts",
+      "sha256": "d7d265e3d5ae6e93a950b827ac8147e69e3635bfcc78668440a468245607e313",
+      "lines": 395,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/runtime.queue.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/runtime.queue.ts",
+      "sha256": "dd0d0492443e035e2e63198e0ab227c8911196243586663cf5b8e4a432a6253d",
+      "lines": 320,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/runtime.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/runtime.ts",
+      "sha256": "5944f9a4510ef76c3b7addcabc5a02e6bdc1859cc9169996030c2fbb6cd59044",
+      "lines": 1125,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/scrollback.shared.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/scrollback.shared.ts",
+      "sha256": "e7a394f1a4fea4660150655284033a0f46725812d696808604746d5a2ccc93b4",
+      "lines": 82,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/scrollback.surface.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/scrollback.surface.ts",
+      "sha256": "a2f97805010e9e8fa7e607a168a63b326f193b5797ed74abc30d6ed83b10ba1a",
+      "lines": 539,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/scrollback.writer.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/scrollback.writer.tsx",
+      "sha256": "69ac52d89a1fdbf298903608ef44593dcb9f82497b3375e624ecc2aa19c01a9f",
+      "lines": 380,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/session-data.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/session-data.ts",
+      "sha256": "eb4680685bb9407b24482aee2ef4f63eac1aad517e92c093f9c021c3a65a6478",
+      "lines": 13,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/session.shared.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/session.shared.ts",
+      "sha256": "10695f7fe52e1a273001411242f4ca0a88c0d105efbf34bb6ca061b67337528d",
+      "lines": 113,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/splash.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/splash.ts",
+      "sha256": "5085eac12a9790bd634493d9eca6aec6a394ed9a4c66211fbe47c822580752d5",
+      "lines": 307,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/stream-v2.fragment.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/stream-v2.fragment.ts",
+      "sha256": "e9a50e1321e995c3032c8c07913e49212ddf85ec10545fdbb65fb46a331c98aa",
+      "lines": 83,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/stream-v2.image.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/stream-v2.image.ts",
+      "sha256": "e9e53869c1fab24903c08ea8003460c8024f31f3e836d0dd3a79d73c2b7ec071",
+      "lines": 38,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/stream-v2.subagent.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/stream-v2.subagent.ts",
+      "sha256": "49904948a6744e22a3dc933a645e4beeb1236469c6b7c1d6422534ae1f0d9964",
+      "lines": 1140,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/stream-v2.transport.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/stream-v2.transport.ts",
+      "sha256": "2f9c77680b79c3421212dcd4643411d3668fa046eb8d943ced25bdda504f9dc8",
+      "lines": 1916,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/stream.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/stream.ts",
+      "sha256": "faa3ffe823b16cfb3990af143b2abe193c31cead8f11d4ac1a06a4c759c1acef",
+      "lines": 152,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/theme.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/theme.ts",
+      "sha256": "525f6606c62d3926d549f760c0cd229351c1435fdb092776be2cb27d697eedba",
+      "lines": 328,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/tool.public.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/tool.public.ts",
+      "sha256": "6076e5e6a79816082072177a567a14384c959b830b6a750a43d92865c60997b0",
+      "lines": 3,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/tool.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/tool.ts",
+      "sha256": "b69e190c3b8706df82dcf887403d8919f077111705d852d4abeff187eda69e0e",
+      "lines": 1394,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/turn-summary.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/turn-summary.ts",
+      "sha256": "65df32e8af20c4ec28019375e9c7fa22b6c3d76fdbead9518c713f412aba275c",
+      "lines": 21,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/types.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/types.ts",
+      "sha256": "2c6265ce859cc1205f110b4a377b89b926f95f9d792b19f71f0accaa321f918e",
+      "lines": 480,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/variant.shared.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/variant.shared.ts",
+      "sha256": "c1c5ceba7a4500fc6b4939256134f480e2d325b16b643d2c2e3d1616b36226f8",
+      "lines": 58,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/mini/verbosity.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/mini/verbosity.ts",
+      "sha256": "fbf324077f3205231ee14f0a279f814e5dd8a3773cb230a60ed94db2ae8e1cf6",
+      "lines": 84,
+      "scope": "separate_mini_frontend",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/model-preference.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/model-preference.ts",
+      "sha256": "7633afabf8754ca024851af7b8f68a1c41af9c1528f94ac72c304370642d053f",
+      "lines": 183,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/parsers-config.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/parsers-config.ts",
+      "sha256": "ce67b2190e1b2c755853484e914398184703f82fd6c5d4932bb1a7f27734123e",
+      "lines": 386,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/plugin/api.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/plugin/api.tsx",
+      "sha256": "8e836be5f9178a6759dd36d9c68475a02e844ea039e6d1595d73f622bd63dbe5",
+      "lines": 430,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/plugin/builtins.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/plugin/builtins.ts",
+      "sha256": "b338c145642bc0c432c6f77057b768485b6008f22e7ab8a6da7829841b598274",
+      "lines": 35,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/plugin/context.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/plugin/context.tsx",
+      "sha256": "ff9d0c67c2ac50770d921b2c04a1d68576c4698d462f66d59f5de977c4867d1c",
+      "lines": 757,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/plugin/discovery.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/plugin/discovery.ts",
+      "sha256": "f9ac8e13612ccbde75ae9b98dcbdc5dbe3b2545a49503518b0bfd84ab397b082",
+      "lines": 67,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/plugin/markdown.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/plugin/markdown.ts",
+      "sha256": "d8698524836ef5674ff4388adb2304384f1563984c833772d082f41b5be9afbd",
+      "lines": 18,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/plugin/render.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/plugin/render.tsx",
+      "sha256": "bc1a0eb9624a3287239684f67926e651fc5d891d20c96977624c86b181a1a0b1",
+      "lines": 158,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/plugin/runtime-plugin-support.bun.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/plugin/runtime-plugin-support.bun.ts",
+      "sha256": "a6c6ffcb2c35a371100a64cd4e9e0a30997f640a94466e584c4eded4c8c4cb87",
+      "lines": 11,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/plugin/runtime-plugin-support.node.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/plugin/runtime-plugin-support.node.ts",
+      "sha256": "1e3b05c073338aa9d711133f69f2b7d319f8b4f5d5378b59751861e20c6be0b9",
+      "lines": 1,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/plugin/source.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/plugin/source.ts",
+      "sha256": "07db2e0aa28c3e8b9ce94b43c59efde3439744f51a65cc58ea4fab7142e8a4c5",
+      "lines": 1,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/plugin/structure.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/plugin/structure.ts",
+      "sha256": "14513c9decc897c137a3712de389bbb779ddeaac0c7e12c6669838940e52e753",
+      "lines": 159,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/plugin/watch.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/plugin/watch.ts",
+      "sha256": "c526dd71cf41acdd03089677be6189cd8e6166f64c9034c3559cb277f4f4c059",
+      "lines": 113,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/prompt/attachment.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/prompt/attachment.ts",
+      "sha256": "b9a07d882ab4efb8e52146d74dfe6ad35287509b7cc1fb4b2ab35d0e96a6374f",
+      "lines": 96,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/prompt/codec.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/prompt/codec.ts",
+      "sha256": "9b4d71ffc87718effca0ee553bb64ccb2913386b4cabcaf7cc960463bce46059",
+      "lines": 29,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/prompt/content.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/prompt/content.ts",
+      "sha256": "b137442e3d8366940cb41b0d056032b1a5c71ad6ac77c1fb762e4a237dfda678",
+      "lines": 13,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/prompt/directory-completion.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/prompt/directory-completion.ts",
+      "sha256": "6978b638ec95361cd0ad3635f9ecb4fd82bb1b892b6a218a26f40b45d831b342",
+      "lines": 97,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/prompt/directory-recents.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/prompt/directory-recents.ts",
+      "sha256": "17d414db189bd2a886de371e2d6ee5dbc8cdb3d30303d37202de1b4fca57f14e",
+      "lines": 36,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/prompt/display.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/prompt/display.ts",
+      "sha256": "e1b3844737dd77373539d47c65274d34e0f9863f02100dbcd4c8be181bc1e8dc",
+      "lines": 41,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/prompt/frecency.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/prompt/frecency.tsx",
+      "sha256": "f62de7ebb6d7909d0dfc0f59beed39ef12b7d6f0a9208c64a1ca57f06d468782",
+      "lines": 80,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/prompt/history.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/prompt/history.tsx",
+      "sha256": "b28e8b9a898800c020fe864eb7089bd514e8122762feaaa0500e1d2745e1b8ec",
+      "lines": 143,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/prompt/mention.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/prompt/mention.ts",
+      "sha256": "477009b83e4e9ea3cde8930967b44662983c425576fab00c743c17a4db3b5570",
+      "lines": 152,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/prompt/parse.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/prompt/parse.ts",
+      "sha256": "4b686f7d3909c9337fa475ab45fdd56613049c3f93292aa32190e78e20932b40",
+      "lines": 26,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/prompt/part.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/prompt/part.ts",
+      "sha256": "5f410ea382bc49a6824bb8fa7dded53a2c35f4cb28b00ef6b9afd5d4a04814c2",
+      "lines": 27,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/prompt/stash.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/prompt/stash.tsx",
+      "sha256": "86d63ebad231676d5ce7ebaed35d9e9a78f55e3e37fc87f5f29005c88704a6f4",
+      "lines": 93,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/prompt/traits.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/prompt/traits.ts",
+      "sha256": "e31144e7d4631eb6c18ce575ba7091290f86ce3cf08d35ace0d8f9b113101bb7",
+      "lines": 29,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/routes/home.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/home.tsx",
+      "sha256": "f1c6ae4c353549f5afe57b81ebe807562c5a3ba3539f568e4632b509c3da7ccb",
+      "lines": 176,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/routes/session/activity-summary.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/activity-summary.ts",
+      "sha256": "326ca539640e352afe55a111e28811127bd7f09508e4e650624f044ec8221af8",
+      "lines": 101,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/routes/session/anchor-view.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/anchor-view.tsx",
+      "sha256": "585e9c041a2c5f34b69f2a8dbd37083602721b06b3b4ab73b8e3261693b2e6e4",
+      "lines": 53,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/routes/session/anchors.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/anchors.ts",
+      "sha256": "3692697af6fa0d33f849b678354bc0334f7f3a408e430cb763ee9e5837d0bb19",
+      "lines": 85,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/routes/session/composer/context.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/composer/context.ts",
+      "sha256": "556152778779bef43cc6466746d3b8592e9f8d253f7331ff4aa03b301af4d2c5",
+      "lines": 24,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/routes/session/composer/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/composer/index.tsx",
+      "sha256": "35e8ecdf2cc8191e3aeef910ae1d0b6d4366d0d851ff2acb59c01f7502089228",
+      "lines": 157,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/routes/session/composer/shell-tab.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/composer/shell-tab.tsx",
+      "sha256": "fca99ee56d99c711cf832c77f4dfdb9c5b96067a1a2b98061bde2410c785b002",
+      "lines": 149,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/routes/session/composer/subagents-tab.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/composer/subagents-tab.tsx",
+      "sha256": "fcc1b5356956812ffac5f8d8c0b35027753ba5f5ee8d2edcbe043e3fc57c5a41",
+      "lines": 259,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/routes/session/composer/terminals-tab.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/composer/terminals-tab.tsx",
+      "sha256": "9517c37b13bde545445be6ba4fee1978fbbf64c2fa555dd4675835390a9bd730",
+      "lines": 114,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/routes/session/dialog-execute.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/dialog-execute.tsx",
+      "sha256": "000e2dae52f4b5e43a04b974aaf73acd2c565858889852aba2859522afd59be9",
+      "lines": 279,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/routes/session/dialog-fork.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/dialog-fork.tsx",
+      "sha256": "c42f6b98757753ba856d908020995f692b08177431a5f04365df5bbedaac9383",
+      "lines": 85,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/routes/session/dialog-message.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/dialog-message.tsx",
+      "sha256": "6aa3492e68d9a558092e4080fbb0cc563d5a5ddb7532df6c7302511e5658cb80",
+      "lines": 93,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/routes/session/dialog-timeline.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/dialog-timeline.tsx",
+      "sha256": "b34d7371fbc76f9b1f71bfd392322f0cafa074361864e9067668f723a8b01927",
+      "lines": 50,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/routes/session/form.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/form.tsx",
+      "sha256": "6cc681dd3896c21bbf8e352dd9d0106cd3fc1a24a9a00c33e8e3da2b83a745f1",
+      "lines": 1175,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/routes/session/group-view.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/group-view.tsx",
+      "sha256": "582e2c2e8ac22c7b7e2b08b4ff03c7f99131110a3240b355b6992971680cf9eb",
+      "lines": 421,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/routes/session/grouping/session.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/grouping/session.ts",
+      "sha256": "701765c52dbccd3649bfd00dfc95abe38d11f94f5f8bf54d6c5a6b7f41fe7b18",
+      "lines": 184,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/routes/session/grouping/tree.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/grouping/tree.ts",
+      "sha256": "d03a7cdcd2fec3547f3aaa07f93d2cb08241942116618846880b1eb9976c8c29",
+      "lines": 111,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/routes/session/history.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/history.ts",
+      "sha256": "ed586e8a86439dcceaf92f31ebb474cfe45c4ec65d9eb10c071765e38b56b56a",
+      "lines": 61,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/routes/session/index.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/index.tsx",
+      "sha256": "ffe8e0c814495685a831812adb1f384b9b4a03c78e40db162edceed3d8bd8dc9",
+      "lines": 3825,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/routes/session/location-missing.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/location-missing.tsx",
+      "sha256": "d44a8768f466ceaca85a23a6629ebf5f832521a9095925906d91c4b3be1f6ef2",
+      "lines": 81,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/routes/session/message-navigation.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/message-navigation.ts",
+      "sha256": "4d587260bf7564d7a4be5a845445bfd0ff2e4e5a817c189a8850ff881dcdc829",
+      "lines": 48,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/routes/session/message-parts.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/message-parts.tsx",
+      "sha256": "bd4bc2bc2763191d907b2c18aecdbcec8087bc40ceb8cbf939443b98472b9d1f",
+      "lines": 295,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/routes/session/mount-budget.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/mount-budget.ts",
+      "sha256": "e368f2e480d988cf34f79e5cff91ecb6b618b74b912b6626e2bd5e1c066993bb",
+      "lines": 38,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/routes/session/permission.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/permission.tsx",
+      "sha256": "6e620c56e73f8222a2da43392ada1d1af2346a9871b13e536fd47ad3d3964495",
+      "lines": 622,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/routes/session/render-context.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/render-context.tsx",
+      "sha256": "d3310e258706ea85c06e16271e445946d688985cf3a8a28eb477c1cffddb3441",
+      "lines": 44,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/routes/session/rows.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/rows.ts",
+      "sha256": "160d3f62fd59c40004b3a892dc19d7f8d3a7584bae061da79f9600394d7ebeb6",
+      "lines": 538,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/routes/session/sidebar.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/sidebar.tsx",
+      "sha256": "5ec43052331af28a187826571e27864ccfe77f0c8956d58f3bd8cb10251d5450",
+      "lines": 80,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/routes/session/thinking-syntax.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/routes/session/thinking-syntax.ts",
+      "sha256": "4b1a9ad03cd0ad89c62199c2165b8815c3bdca06988537a4cdf18a8401cccc2c",
+      "lines": 8,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/runtime.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/runtime.tsx",
+      "sha256": "d3bb2bdc5b8896f6091e60d5cfe26d713dd528b23d84a2dc5618d8261ada30b6",
+      "lines": 1,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/simulation/semantics.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/simulation/semantics.ts",
+      "sha256": "51be48bf6ac177d47a2663931e947f2c04445e7d9a68b7f96a5eeff831ddcee5",
+      "lines": 12,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/theme/color.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/theme/color.ts",
+      "sha256": "ae177a2c6a7cd554cdea1b960a9c4e1b64fdb42ea929c9464451c88d15022427",
+      "lines": 48,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/theme/component.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/theme/component.ts",
+      "sha256": "7251075cd702bd7480b364a4c1d6c5c0def3e78e0bf37623e1965ed707879bc4",
+      "lines": 51,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/theme/discovery.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/theme/discovery.ts",
+      "sha256": "570af3ba033a9e16cb5d29e923c0bd69b53a9a4c93f84d39bab69291d00370a3",
+      "lines": 21,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/theme/index.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/theme/index.ts",
+      "sha256": "3f9bf6a74a5e42902ed24fd8492b3fe544a6e893ef234bc02b6677e3652ac86e",
+      "lines": 102,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/theme/resolve.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/theme/resolve.ts",
+      "sha256": "310ecc8ae883e39808d21bdd08ca74316238f35252358e7772048aee163e6025",
+      "lines": 53,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/theme/system.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/theme/system.ts",
+      "sha256": "f304c5536923e7d508b8b0af4e5310197a21a71a3f536d79b91ca4afd00f9cc2",
+      "lines": 144,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/theme/v1.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/theme/v1.ts",
+      "sha256": "f5eb8a9af76b18f785ceecc3403596aa83a9a97515713e177ecd250018ce46a7",
+      "lines": 70,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/ui/animation.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/animation.ts",
+      "sha256": "196f62e76eee0ce3d3af3a9be7fdfc110d3e1833619a99a228884446ff3a6d5f",
+      "lines": 235,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/ui/border.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/border.ts",
+      "sha256": "8a2867b9548186004305e4947dcdaa006cdc1d8d808a9bc2c55678a043c937ed",
+      "lines": 21,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/ui/dialog-alert.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/dialog-alert.tsx",
+      "sha256": "0db90481134735480d0fc1326ec7ec6f4ed5573905a9fc653846e2efbc230d46",
+      "lines": 51,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/ui/dialog-confirm.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/dialog-confirm.tsx",
+      "sha256": "b7be4f539b3739e6f3cb7803d7a15bcd4a91ff2dd0ea26576de17edd104031c4",
+      "lines": 104,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/ui/dialog-export-options.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/dialog-export-options.tsx",
+      "sha256": "5bc5b8806084bd80d71d27afba8952b6ab1d2686e89544534e951ca85e8833e1",
+      "lines": 304,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/ui/dialog-export-result.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/dialog-export-result.tsx",
+      "sha256": "b69f3517c165665e128ca39bf27cba7475ba3c26dd7e8a6af976989248f54df3",
+      "lines": 85,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/ui/dialog-help.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/dialog-help.tsx",
+      "sha256": "1544d2e79819b67994b251cff7ac4fe12fc4b7fcd0ea864a603158dbbd4fc221",
+      "lines": 40,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/ui/dialog-prompt.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/dialog-prompt.tsx",
+      "sha256": "e556c8d24c2af7fbf69e8365d8d618b116c3ad8320d98ad6f9126f5173aa679e",
+      "lines": 184,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/ui/dialog-select.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/dialog-select.tsx",
+      "sha256": "86f43fa17785e1b935fb3d484eba9f079f5252b77adeae40b260d920370a3052",
+      "lines": 993,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/ui/dialog.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/dialog.tsx",
+      "sha256": "33cc6de6fc6107a14f266177ca2d288dd69e3ce9e8f0aa205ce3918cc046f690",
+      "lines": 492,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/ui/file-path.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/file-path.tsx",
+      "sha256": "cd6060d6f09d8a59b5faa291b1843be3a584cc8750f3ff42137bbd1f829cddb4",
+      "lines": 112,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/ui/layout.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/layout.ts",
+      "sha256": "f46ae53cd6eb15fd250d4091af4a4a8942b0e9a03837f4dd216599bf139e25fc",
+      "lines": 26,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/ui/link.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/link.tsx",
+      "sha256": "7a736157eac2a292f6d90579d25d3b087a15d2c951ccca9e5f101e3a11e7b4b2",
+      "lines": 47,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/ui/one-cell-motion.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/one-cell-motion.ts",
+      "sha256": "5b7c86681fc1f3516bf1e51f7a9791c6c504ec4339f6d5dd708711e60d4c1900",
+      "lines": 111,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/ui/pane-resize-handle.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/pane-resize-handle.tsx",
+      "sha256": "e12605dedf490a59b249261fd159371ab720c1bb5d1f2354876107a309cf3ecc",
+      "lines": 33,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/ui/pane-resize.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/pane-resize.ts",
+      "sha256": "80524b19518d0453b69220c2e9f7856b33d0fcb460827a98d9076d6c25218aec",
+      "lines": 76,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/ui/select-controller.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/select-controller.ts",
+      "sha256": "b96c04d8eb20825a573c2bca378f6f78418bd51992730e1022bc756a37311940",
+      "lines": 45,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/ui/spinner.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/spinner.ts",
+      "sha256": "d20ea2ca5f0ac1ceb60dbc05fbddc4fab581fc4477133be1afdd1a0b0f7eb7a1",
+      "lines": 368,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/ui/subcell.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/subcell.ts",
+      "sha256": "a1e48be0ba20659453f34824e1d76f8c2a5b65c191ed62917a016bb2a7e3bdde",
+      "lines": 37,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/ui/toast.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/toast.tsx",
+      "sha256": "787d1537a1ff55bc40078ada1412f0e583fa64fc94e57907f0775ce08ba0402f",
+      "lines": 214,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/ui/working-directory-actions.tsx",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/ui/working-directory-actions.tsx",
+      "sha256": "da06c2f0b709324fa478bb1215eb5635d6fc94e3045174ecdb9d378184ed8186",
+      "lines": 66,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/util/collapse-tool-output.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/collapse-tool-output.ts",
+      "sha256": "593aa5c4325991af7382d4635ea8bdcd2021a00727298a251fe556620a9f0e19",
+      "lines": 95,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/util/config-directories.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/config-directories.ts",
+      "sha256": "1f07781505ede057d968b3f684a34a59e0fc74ed45efa9a71c52da77926190f9",
+      "lines": 45,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/connected-provider.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/connected-provider.ts",
+      "sha256": "65f411a388bf1fc34e40cc849729d69de29572300e42deb36e94ead69d4d0d3d",
+      "lines": 5,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/delayed-presence.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/delayed-presence.ts",
+      "sha256": "1da83d4799f6263c35788888e35eda66897fc95d72edadcc440f86e6a05a67ad",
+      "lines": 34,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/diff.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/diff.ts",
+      "sha256": "9dbe8a795abe3ed34f28279cdd12a8b9711de110c8681d034f119b9df8cc5179",
+      "lines": 84,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/error-details.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/error-details.ts",
+      "sha256": "08873a95434cf59b15cd0249b35d07b7b5e9ec7393ccec4d3bb6215a90e93ec2",
+      "lines": 21,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/error.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/error.ts",
+      "sha256": "ee4e4df5691926b0a36f4fad49462bda8fa785a98d17989e407dbf0b157a41dc",
+      "lines": 141,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/filetype.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/filetype.ts",
+      "sha256": "7bca157babab7001fa7468ca6885044d5c5f187b7bc6426352ab59297338ffa3",
+      "lines": 135,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/form.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/form.ts",
+      "sha256": "0c7f5e775338fb7c34eb3528994d748b64524af840d4ead564bf5eaedc95bb16",
+      "lines": 146,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/highlights.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/highlights.ts",
+      "sha256": "a4a2f09a0408d2cc1415d2383638cad8a60c9bb9d92867eef1d5e024d097e0d9",
+      "lines": 51,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/locale.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/locale.ts",
+      "sha256": "b769b19566b74f38aade0b59f46956113c49a6e09dce7b906a0e329eced603ae",
+      "lines": 99,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/util/marquee.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/marquee.ts",
+      "sha256": "30a8a0c9427c032d179c2bc1bf61c3d055089a328a2ea3fa9f28db9351033fa3",
+      "lines": 51,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/model.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/model.ts",
+      "sha256": "2ca3700e602b2031b14d8d329309e2ebb129613543c5b457d59bbbc0b52dcdb4",
+      "lines": 21,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/path-format.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/path-format.ts",
+      "sha256": "857d66645c740450ec8c13799e43bb83a159733d6a2a18250383268cf7af81df",
+      "lines": 37,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/path.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/path.ts",
+      "sha256": "00d5bd312acc8e86015783c1aabb24495d8762536ae02472e37ba9cabd088d07",
+      "lines": 12,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/permission.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/permission.ts",
+      "sha256": "a4fb89dd307c297fb75f62b549c834739e086c7548296ae17f915a11f44a70f5",
+      "lines": 188,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/util/persistence.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/persistence.ts",
+      "sha256": "c050567b1dc90d83795cb2535ae756e99a5e48e0773fe28862d316dfefcdc13f",
+      "lines": 33,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/presentation.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/presentation.ts",
+      "sha256": "fe5d0d96cae8e33ed947942b1df018aa9495297e9713fbb3bc7ede5bf042194e",
+      "lines": 42,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/project.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/project.ts",
+      "sha256": "2a71d2f226955dbf2bf06660380d1509e7223da332e5ca6b7818707392a51276",
+      "lines": 7,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/record.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/record.ts",
+      "sha256": "68d6c4f392f9b69b883ae0d25a09a5048ea552ff4a57d024fbb269e843c1ed7b",
+      "lines": 3,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/renderer.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/renderer.ts",
+      "sha256": "682154084230b5fa9ed29edf0b2e73e7c7acde1f48e27a0acc7d5ede576af61c",
+      "lines": 15,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/scroll.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/scroll.ts",
+      "sha256": "01f408307627b9c61378463a281724405f84d5c5b0797661170d24c80342c5d7",
+      "lines": 29,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/util/selection.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/selection.ts",
+      "sha256": "d718400ec6fc5d5ae5843b8c52f6fcfb40da0465ce6585abfbaeac85e2951b7d",
+      "lines": 103,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/util/session.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/session.ts",
+      "sha256": "515ece1b418732b0dfe64338845f9e310fdcf6130651f2ae3f99526f1008ede9",
+      "lines": 66,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/util/signal.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/signal.ts",
+      "sha256": "dd65f6ddcb6c26bcddbcaa8b56db79dbca76aa9dcfdb55b616e762f5cbad84f9",
+      "lines": 49,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/util/single-flight.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/single-flight.ts",
+      "sha256": "e7a7b7aa90d6afabb0d4a0a73bb35259b88cbe658416da461e13f9c369aefb22",
+      "lines": 12,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/string-width.bun.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/string-width.bun.ts",
+      "sha256": "09e45ecb3f3e3e4b87439eb939b148d92ba971007c0a760707dcb0736133d622",
+      "lines": 1,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/util/string-width.node.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/string-width.node.ts",
+      "sha256": "03d27cce3ff9b9be528a328497ddefba635ced5fea0ffca97c59eb396c492876",
+      "lines": 26,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/util/string-width.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/string-width.ts",
+      "sha256": "e2631117e65fc0757580fffe93f01c96007db311020e5dd8a59b57654b7382c8",
+      "lines": 1,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/system.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/system.ts",
+      "sha256": "6a4e4b10854e40e98f01d08828765f01c0861a357920db34b34f2765ea80aba0",
+      "lines": 23,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/todo.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/todo.ts",
+      "sha256": "72314546a440b6c1a156390de3a92c6cc60575cc22e85d323e08ba146ea738dc",
+      "lines": 43,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/util/tool-display.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/tool-display.ts",
+      "sha256": "07d3a0cf620b437a0da227e5870f379f531d40042ca72e607487e6ed8028b9c3",
+      "lines": 70,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "cited_at_least_one_source_region"
+    },
+    {
+      "path": "packages/tui/src/util/usage-limits.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/usage-limits.ts",
+      "sha256": "e8835e1c53f5ccaf60a64699db190db2509312e8590100b7131679197b30a8f7",
+      "lines": 133,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    },
+    {
+      "path": "packages/tui/src/util/watch.ts",
+      "url": "https://github.com/anomalyco/opencode/blob/450e7b92412c780a7b5a75226bb8d49aaca24e22/packages/tui/src/util/watch.ts",
+      "sha256": "2007dbd4ed08cbe52a95e92de04666354c9ab0392414c0d06302a86e7e8e8e39",
+      "lines": 24,
+      "scope": "full_screen_tui_source",
+      "inspection_evidence": "indexed_not_individually_audited"
+    }
+  ]
+}

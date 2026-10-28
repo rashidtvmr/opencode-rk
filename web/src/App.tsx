@@ -22,9 +22,15 @@ import {
   Search,
   Settings,
   Sparkles,
+  Users,
 } from 'lucide-react'
 
 import { Composer, type ReasoningEffort } from '@/components/composer'
+import { SettingsPanel } from '@/components/settings-panel'
+import { SubagentPanel } from '@/components/subagent-panel'
+import { PersistedToolMessage, ToolTimeline, type ToolExecutionItem } from '@/components/tool-timeline'
+import { MessageMarkdown } from '@/components/message-markdown'
+import { useWebPreferences } from '@/lib/web-preferences'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -44,6 +50,7 @@ import {
   getArtifact,
   getHealth,
   getWebCapabilities,
+  listCommandInventory,
   listAssistantActivity,
   listArtifacts,
   listDraftAttachments,
@@ -57,6 +64,8 @@ import {
   prepareRetryBranch,
   renameSession,
   replyPermission,
+  runConfiguredCommandStream,
+  runMentionedAgentStream,
   runTurnStream,
   saveArtifactVersion,
   uploadDraftAttachment,
@@ -75,6 +84,9 @@ import {
   type WebCapabilities,
   type WorkspaceCatalogState,
   type PermissionRequest,
+  type CommandInventory,
+  type SubagentSnapshot,
+  type TurnStreamHandlers,
 } from '@/lib/api'
 
 type LoadState = 'loading' | 'ready' | 'error'
@@ -184,9 +196,14 @@ function MessageActions({
 }
 
 function App() {
+  const { preferences, setPreferences } = useWebPreferences()
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [models, setModels] = useState<ModelSummary[]>([])
   const [capabilities, setCapabilities] = useState<WebCapabilities | null>(null)
+  const [commandInventory, setCommandInventory] = useState<CommandInventory>({ commands: [], agents: [] })
+  const [showSettings, setShowSettings] = useState(false)
+  const [showSubagents, setShowSubagents] = useState(false)
+  const [liveToolExecutions, setLiveToolExecutions] = useState<ToolExecutionItem[]>([])
   const [workspaceState, setWorkspaceState] = useState<WorkspaceCatalogState>({
     available: false,
     workspaces: [],
@@ -287,8 +304,20 @@ function App() {
   }, [])
 
   useEffect(() => {
+    const controller = new AbortController()
+    listCommandInventory(controller.signal)
+      .then((inventory) => { if (!controller.signal.aborted) setCommandInventory(inventory) })
+      .catch(() => {
+        // Older daemons may not expose /api/commands. Do not block existing chat.
+        if (!controller.signal.aborted) setCommandInventory({ commands: [], agents: [] })
+      })
+    return () => controller.abort()
+  }, [])
+
+  useEffect(() => {
     if (!selectedSessionId) {
       setMessages([])
+      setLiveToolExecutions([])
       setHistoryBefore(null)
       setAssistantActivity({})
       setAttachmentState({ attachments: [], available: true })
@@ -319,6 +348,7 @@ function App() {
 
     const controller = new AbortController()
     setMessages([])
+    setLiveToolExecutions([])
     setHistoryBefore(null)
     setAssistantActivity({})
     setAttachmentState({ attachments: [], available: true })
@@ -585,6 +615,8 @@ function App() {
     reasoningEffort: ReasoningEffort,
     initialMessages?: MessageRecord[],
     initialActivity?: AssistantActivity[],
+    configuredCommand?: { name: string; arguments: string },
+    mentionedAgent?: string,
   ) => {
     if (!selectedModel) {
       setNotice('Choose a model before sending a message.')
@@ -599,6 +631,7 @@ function App() {
     setStreamingAssistantText('')
     setStreamingReasoningSummary('')
     setStreamingToolProgress('')
+    setLiveToolExecutions([])
     const baselineMessages = initialMessages ?? messages
     if (initialMessages) setMessages(initialMessages)
     if (initialActivity) {
@@ -613,12 +646,7 @@ function App() {
     let observedToolEvents = false
 
     try {
-      const turn = await runTurnStream(
-        sessionId,
-        text,
-        selectedModel,
-        reasoningEffort,
-        {
+      const handlers: TurnStreamHandlers = {
           onUserMessage: (message) => {
             if (activeTurnRef.current?.controller !== controller) return
             setMessages((current) =>
@@ -629,11 +657,28 @@ function App() {
             if (activeTurnRef.current?.controller !== controller) return
             observedToolEvents = true
             setStreamingToolProgress(`Running ${toolCall.name}`.slice(0, 160))
+            setLiveToolExecutions((current) => [
+              ...current.filter((item) => item.id !== toolCall.call_id),
+              { id: toolCall.call_id, name: toolCall.name, arguments: toolCall.arguments, state: 'running' },
+            ])
           },
           onToolOutput: (toolOutput: ToolOutput) => {
             if (activeTurnRef.current?.controller !== controller) return
             observedToolEvents = true
             setStreamingToolProgress(`Finished ${toolOutput.name}`.slice(0, 160))
+            setLiveToolExecutions((current) => {
+              const existing = current.find((item) => item.id === toolOutput.call_id)
+              return [
+                ...current.filter((item) => item.id !== toolOutput.call_id),
+                {
+                  id: toolOutput.call_id,
+                  name: toolOutput.name,
+                  arguments: existing?.arguments ?? '',
+                  output: toolOutput.output,
+                  state: 'completed',
+                },
+              ]
+            })
           },
           onReasoningSummaryDelta: (delta) => {
             if (activeTurnRef.current?.controller !== controller) return
@@ -656,9 +701,12 @@ function App() {
               current.some((item) => item.id === message.id) ? current : [...current, message],
             )
           },
-        },
-        controller.signal,
-      )
+        }
+      const turn = configuredCommand
+        ? await runConfiguredCommandStream(sessionId, configuredCommand.name, configuredCommand.arguments, selectedModel, handlers, controller.signal)
+        : mentionedAgent
+          ? await runMentionedAgentStream(sessionId, mentionedAgent, text, selectedModel, reasoningEffort, handlers, controller.signal)
+        : await runTurnStream(sessionId, text, selectedModel, reasoningEffort, handlers, controller.signal)
       if (activeTurnRef.current?.controller !== controller) return false
       if (observedToolEvents) {
         try {
@@ -740,6 +788,26 @@ function App() {
       return false
     }
     setSelectedReasoningEffort(reasoningEffort)
+    const parsedCommand = /^\/([^\s/]+)(?:\s+([\s\S]*))?$/.exec(text.trim())
+    if (parsedCommand) {
+      const name = parsedCommand[1]
+      if (!commandInventory.commands.some((command) => command.name === name)) {
+        setNotice(`Unknown slash command /${name}. Select a configured command from the composer.`)
+        return false
+      }
+      return executeTurnInSession(selectedSessionId, text, reasoningEffort, undefined, undefined, {
+        name, arguments: parsedCommand[2] ?? '',
+      })
+    }
+    const parsedAgent = /^@([\w-]+)(?:\s+[\s\S]+)$/.exec(text.trim())
+    if (parsedAgent) {
+      const agent = parsedAgent[1]
+      if (!commandInventory.agents.some((candidate) => candidate.name === agent)) {
+        setNotice(`Unknown @agent ${agent}. Select one of the daemon's advertised agents.`)
+        return false
+      }
+      return executeTurnInSession(selectedSessionId, text, reasoningEffort, undefined, undefined, undefined, agent)
+    }
     return executeTurnInSession(selectedSessionId, text, reasoningEffort)
   }
 
@@ -1089,10 +1157,10 @@ function App() {
             <Sparkles aria-hidden="true" />
             Models
           </a>
-          <a href="#settings" className="codex-nav-link">
+          <button type="button" onClick={() => setShowSettings(true)} className="codex-nav-link">
             <Settings aria-hidden="true" />
             Settings
-          </a>
+          </button>
         </nav>
 
         <section className="codex-workspace-catalog" aria-label="Workspace catalog">
@@ -1321,7 +1389,7 @@ function App() {
             <span className="codex-header-title">{selectedSession?.title ?? 'New chat'}</span>
           </div>
 
-          <div className="codex-header-actions" id="settings">
+          <div className="codex-header-actions">
             <div className="codex-connection" title={health?.runtime ?? 'Native server'}>
               <span
                 className={`codex-status-dot ${health?.status === 'ok' ? 'codex-status-dot-online' : ''}`}
@@ -1334,6 +1402,7 @@ function App() {
               variant="ghost"
               className="codex-icon-button"
               aria-label="Help"
+              onPress={() => setNotice('Tip: type / for configured commands or @ for agent mentions. Open Settings for shortcuts and daemon capabilities.')}
             >
               <CircleHelp aria-hidden="true" />
             </Button>
@@ -1341,7 +1410,19 @@ function App() {
               size="icon"
               variant="ghost"
               className="codex-icon-button"
+              aria-label="Subagents"
+              aria-expanded={showSubagents}
+              isDisabled={!selectedSessionId}
+              onPress={() => setShowSubagents((current) => !current)}
+            >
+              <Users aria-hidden="true" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="codex-icon-button"
               aria-label="Settings"
+              onPress={() => setShowSettings(true)}
             >
               <Settings aria-hidden="true" />
             </Button>
@@ -1484,14 +1565,18 @@ function App() {
                                   <p>{assistantActivity[message.id].reasoning_summary}</p>
                                 </details>
                               ) : null}
-                              <div className="codex-message-content">
-                                <span className="sr-only">{message.role}: </span>
-                                <span>
-                                  {activeArtifact?.source_message_id === message.id
-                                    ? '(open in artifact editor)'
-                                    : messageText(message)}
-                                </span>
-                              </div>
+                              {message.role === 'tool' ? (
+                                <PersistedToolMessage text={messageText(message)} />
+                              ) : (
+                                <div className="codex-message-content">
+                                  <span className="sr-only">{message.role}: </span>
+                                  <MessageMarkdown text={
+                                    activeArtifact?.source_message_id === message.id
+                                      ? '(open in artifact editor)'
+                                      : messageText(message)
+                                  } />
+                                </div>
+                              )}
                             </>
                           )}
                           <MessageActions
@@ -1512,9 +1597,10 @@ function App() {
                         </div>
                       </li>
                     ))}
-                    {streamingAssistantText || streamingReasoningSummary || streamingToolProgress ? (
+                    {streamingAssistantText || streamingReasoningSummary || streamingToolProgress || liveToolExecutions.length > 0 ? (
                       <li className="codex-message codex-message-row codex-message-assistant">
                         <div className="codex-message-stack">
+                          <ToolTimeline tools={liveToolExecutions} />
                           {streamingReasoningSummary ? (
                             <details className="codex-assistant-activity" open>
                               <summary>Reasoning summary</summary>
@@ -1529,7 +1615,7 @@ function App() {
                           {streamingAssistantText ? (
                             <div className="codex-message-content">
                               <span className="sr-only">assistant: </span>
-                              <span>{streamingAssistantText}</span>
+                              <MessageMarkdown text={streamingAssistantText} />
                             </div>
                           ) : null}
                         </div>
@@ -1687,6 +1773,8 @@ function App() {
               attachmentsAvailable={attachmentState.available}
               attachmentUnavailableReason={attachmentState.reason}
               capabilities={capabilities}
+              commands={commandInventory.commands}
+              agents={commandInventory.agents}
               models={models}
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
@@ -1701,7 +1789,33 @@ function App() {
             </p>
           </div>
         </footer>
+        {showSubagents && selectedSessionId ? (
+          <SubagentPanel
+            sessionId={selectedSessionId}
+            onClose={() => setShowSubagents(false)}
+            onOpenSession={(child: SubagentSnapshot) => {
+              if (activeTurnRef.current?.sessionId === selectedSessionId) {
+                setNotice('Stop the running parent turn before opening a child transcript.')
+                return
+              }
+              setSessions((current) => current.some((session) => session.id === child.session_id)
+                ? current : [...current, { id: child.session_id, title: child.description || child.agent, state: 'active' }])
+              setSelectedSessionId(child.session_id)
+              setShowSubagents(false)
+            }}
+          />
+        ) : null}
       </main>
+      {showSettings ? (
+        <SettingsPanel
+          onClose={() => setShowSettings(false)}
+          preferences={preferences}
+          setPreferences={setPreferences}
+          models={models}
+          capabilities={capabilities}
+          health={health}
+        />
+      ) : null}
     </div>
   )
 }

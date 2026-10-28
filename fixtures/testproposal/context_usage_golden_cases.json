@@ -1,0 +1,237 @@
+{
+  "format": "opencode.context_usage.golden_cases.v1",
+  "purpose": "test-only golden inputs and assertions for Claude Code-style Context Usage layout; not production defaults",
+  "consumer": "context-layout renderer under test; inject each case usage_report and viewport, then compare rendered output to assertions",
+  "shared": {
+    "category_ids": [
+      "system_prompt",
+      "system_tools",
+      "mcp_instructions",
+      "memory_files",
+      "skills",
+      "messages",
+      "free_space"
+    ],
+    "render_assertion_semantics": {
+      "text_contains": "Rendered text contains the exact value.",
+      "text_absent": "Rendered text does not contain the exact value.",
+      "frame_cell_width_at_most": "Each rendered row's terminal display-cell width is at most the integer value.",
+      "grid_cell_count_at_most": "Rendered usage-grid cell count does not exceed the integer value.",
+      "tree_visible_entries_at_most": "Visible tree entries do not exceed the integer value.",
+      "tree_entry_visible": "Rendered tree includes both the exact name and path.",
+      "same_rendered_color": "The grid swatch and legend swatch for one category use the same rendered color."
+    }
+  },
+  "cases": [
+    {
+      "id": "reported-estimates-wide",
+      "viewport": { "width_cells": 120, "height_rows": 32 },
+      "usage_report": {
+        "fixture_only": true,
+        "model": { "provider": "fixture", "id": "vyce-deepseek-v4.1-free-combined", "context_capacity_tokens": 1000000 },
+        "provider_reported_usage": { "tokens": 131600, "provenance": "provider_reported_total" },
+        "category_coverage": "complete_for_six_request_categories",
+        "category_estimates": [
+          { "id": "system_prompt", "estimated_tokens": 1500, "provenance": "assembled_request_estimate" },
+          { "id": "system_tools", "estimated_tokens": 5800, "provenance": "assembled_request_estimate" },
+          { "id": "mcp_instructions", "estimated_tokens": 117, "provenance": "assembled_request_estimate" },
+          { "id": "memory_files", "estimated_tokens": 5700, "provenance": "assembled_request_estimate" },
+          { "id": "skills", "estimated_tokens": 2000, "provenance": "assembled_request_estimate" },
+          { "id": "messages", "estimated_tokens": 116600, "provenance": "assembled_request_estimate" }
+        ],
+        "detail_trees": {
+          "mcp_tools": [{ "name": "fixture-search", "path": "fixture://mcp/fixture-search" }],
+          "memory_files": [{ "name": "CLAUDE.md", "path": "fixture://workspace/CLAUDE.md" }],
+          "skills": [{ "name": "fixture-review", "path": "fixture://skills/fixture-review/SKILL.md" }]
+        }
+      },
+      "expected": {
+        "reported_usage_tokens": 131600,
+        "estimated_category_sum_tokens": 131717,
+        "estimated_minus_reported_tokens": 117,
+        "reported_used_percent_of_capacity": 13.16,
+        "derived_free_space_tokens": 868400,
+        "estimated_category_percent_of_capacity": {
+          "system_prompt": 0.15,
+          "system_tools": 0.58,
+          "mcp_instructions": 0.0117,
+          "memory_files": 0.57,
+          "skills": 0.2,
+          "messages": 11.66
+        },
+        "assertions": [
+          { "op": "text_contains", "value": "Context Usage" },
+          { "op": "text_contains", "value": "Estimated usage by category" },
+          { "op": "text_contains", "value": "131,600" },
+          { "op": "text_contains", "value": "131,717" },
+          { "op": "text_contains", "value": "+117" },
+          { "op": "text_contains", "value": "fixture-search" },
+          { "op": "text_contains", "value": "fixture://mcp/fixture-search" },
+          { "op": "frame_cell_width_at_most", "value": 120 },
+          { "op": "grid_cell_count_at_most", "value": 200 },
+          { "op": "same_rendered_color", "category": "system_prompt" },
+          { "op": "same_rendered_color", "category": "system_tools" },
+          { "op": "same_rendered_color", "category": "mcp_instructions" },
+          { "op": "same_rendered_color", "category": "memory_files" },
+          { "op": "same_rendered_color", "category": "skills" },
+          { "op": "same_rendered_color", "category": "messages" },
+          { "op": "same_rendered_color", "category": "free_space" }
+        ]
+      }
+    },
+    {
+      "id": "same-report-narrow",
+      "viewport": { "width_cells": 44, "height_rows": 24 },
+      "usage_report_ref": "reported-estimates-wide",
+      "expected": {
+        "assertions": [
+          { "op": "text_contains", "value": "Context Usage" },
+          { "op": "text_contains", "value": "131,600" },
+          { "op": "text_contains", "value": "131,717" },
+          { "op": "frame_cell_width_at_most", "value": 44 },
+          { "op": "grid_cell_count_at_most", "value": 200 },
+          { "op": "same_rendered_color", "category": "system_prompt" },
+          { "op": "same_rendered_color", "category": "messages" },
+          { "op": "same_rendered_color", "category": "free_space" }
+        ]
+      }
+    },
+    {
+      "id": "known-usage-unknown-capacity",
+      "viewport": { "width_cells": 80, "height_rows": 24 },
+      "usage_report": {
+        "fixture_only": true,
+        "model": { "provider": "fixture", "id": "fixture-unknown-capacity", "context_capacity_tokens": null },
+        "provider_reported_usage": { "tokens": 131600, "provenance": "provider_reported_total" },
+        "category_coverage": "partial",
+        "category_estimates": [{ "id": "messages", "estimated_tokens": 116600, "provenance": "assembled_request_estimate" }]
+      },
+      "expected": {
+        "reported_usage_tokens": 131600,
+        "capacity_tokens": null,
+        "utilization_percent": null,
+        "free_space_tokens": null,
+        "assertions": [
+          { "op": "text_contains", "value": "131,600" },
+          { "op": "text_contains", "value": "unreported" },
+          { "op": "text_absent", "value": "100%" },
+          { "op": "text_absent", "value": "Free space" }
+        ]
+      }
+    },
+    {
+      "id": "partial-category-coverage",
+      "viewport": { "width_cells": 80, "height_rows": 24 },
+      "usage_report": {
+        "fixture_only": true,
+        "model": { "provider": "fixture", "id": "fixture-partial-coverage", "context_capacity_tokens": 1000000 },
+        "provider_reported_usage": { "tokens": 131600, "provenance": "provider_reported_total" },
+        "category_coverage": "partial",
+        "category_estimates": [
+          { "id": "system_prompt", "estimated_tokens": 1500, "provenance": "assembled_request_estimate" },
+          { "id": "messages", "estimated_tokens": 116600, "provenance": "assembled_request_estimate" }
+        ]
+      },
+      "expected": {
+        "estimated_category_sum_tokens": 118100,
+        "coverage": "partial",
+        "unreported_categories": ["system_tools", "mcp_instructions", "memory_files", "skills"],
+        "assertions": [
+          { "op": "text_contains", "value": "partial" },
+          { "op": "text_contains", "value": "118,100" },
+          { "op": "text_contains", "value": "131,600" },
+          { "op": "text_absent", "value": "complete request total" }
+        ]
+      }
+    },
+    {
+      "id": "explicit-measured-zero",
+      "viewport": { "width_cells": 80, "height_rows": 24 },
+      "usage_report": {
+        "fixture_only": true,
+        "model": { "provider": "fixture", "id": "fixture-zero-category", "context_capacity_tokens": 10000 },
+        "provider_reported_usage": { "tokens": 250, "provenance": "provider_reported_total" },
+        "category_coverage": "complete_for_six_request_categories",
+        "category_estimates": [
+          { "id": "system_prompt", "estimated_tokens": 100, "provenance": "assembled_request_estimate" },
+          { "id": "system_tools", "estimated_tokens": 0, "provenance": "measured_zero" },
+          { "id": "mcp_instructions", "estimated_tokens": 0, "provenance": "measured_zero" },
+          { "id": "memory_files", "estimated_tokens": 0, "provenance": "measured_zero" },
+          { "id": "skills", "estimated_tokens": 0, "provenance": "measured_zero" },
+          { "id": "messages", "estimated_tokens": 150, "provenance": "assembled_request_estimate" }
+        ]
+      },
+      "expected": {
+        "system_tools_tokens": 0,
+        "system_tools_is_reported": true,
+        "assertions": [
+          { "op": "text_contains", "value": "System tools" },
+          { "op": "text_contains", "value": "0" },
+          { "op": "text_absent", "value": "System tools: ?" },
+          { "op": "text_absent", "value": "System tools: -" }
+        ]
+      }
+    },
+    {
+      "id": "capacity-overflow-grid-cap",
+      "viewport": { "width_cells": 120, "height_rows": 32 },
+      "usage_report": {
+        "fixture_only": true,
+        "model": { "provider": "fixture", "id": "fixture-over-capacity", "context_capacity_tokens": 10000 },
+        "provider_reported_usage": { "tokens": 12500, "provenance": "provider_reported_total" },
+        "category_coverage": "partial",
+        "category_estimates": [{ "id": "messages", "estimated_tokens": 12500, "provenance": "assembled_request_estimate" }]
+      },
+      "expected": {
+        "reported_usage_tokens": 12500,
+        "capacity_tokens": 10000,
+        "utilization_percent": 125,
+        "overflow_tokens": 2500,
+        "free_space_tokens": null,
+        "grid_cell_cap": 200,
+        "assertions": [
+          { "op": "text_contains", "value": "12,500" },
+          { "op": "text_contains", "value": "125%" },
+          { "op": "text_contains", "value": "2,500" },
+          { "op": "grid_cell_count_at_most", "value": 200 },
+          { "op": "text_absent", "value": "-2,500" }
+        ]
+      }
+    },
+    {
+      "id": "detail-trees-bounded",
+      "viewport": { "width_cells": 80, "height_rows": 16 },
+      "usage_report": {
+        "fixture_only": true,
+        "model": { "provider": "fixture", "id": "fixture-tree-bounds", "context_capacity_tokens": 100000 },
+        "provider_reported_usage": { "tokens": 5000, "provenance": "provider_reported_total" },
+        "category_coverage": "partial",
+        "category_estimates": [{ "id": "memory_files", "estimated_tokens": 1000, "provenance": "assembled_request_estimate" }],
+        "detail_trees": {
+          "memory_files": [
+            { "name": "CLAUDE.md", "path": "fixture://workspace/CLAUDE.md" },
+            { "name": "project-rules.md", "path": "fixture://workspace/docs/project-rules.md" },
+            { "name": "nested-notes.md", "path": "fixture://workspace/docs/nested/notes.md" },
+            { "name": "extra-1.md", "path": "fixture://workspace/docs/extra-1.md" },
+            { "name": "extra-2.md", "path": "fixture://workspace/docs/extra-2.md" },
+            { "name": "extra-3.md", "path": "fixture://workspace/docs/extra-3.md" },
+            { "name": "extra-4.md", "path": "fixture://workspace/docs/extra-4.md" },
+            { "name": "extra-5.md", "path": "fixture://workspace/docs/extra-5.md" },
+            { "name": "extra-6.md", "path": "fixture://workspace/docs/extra-6.md" },
+            { "name": "extra-7.md", "path": "fixture://workspace/docs/extra-7.md" }
+          ]
+        }
+      },
+      "expected": {
+        "detail_tree_input_entries": 10,
+        "fixture_visible_entry_budget": 4,
+        "assertions": [
+          { "op": "tree_visible_entries_at_most", "value": 4 },
+          { "op": "tree_entry_visible", "name": "CLAUDE.md", "path": "fixture://workspace/CLAUDE.md" },
+          { "op": "tree_entry_visible", "name": "nested-notes.md", "path": "fixture://workspace/docs/nested/notes.md" },
+          { "op": "frame_cell_width_at_most", "value": 80 }
+        ]
+      }
+    }
+  ]
+}

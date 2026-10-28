@@ -1,0 +1,61 @@
+{
+  "checks": [
+    {
+      "package": "core",
+      "version": "0.6.8",
+      "path": "/tmp/opencode-selected-audit/node_modules/.bun/@opentui+core@0.6.8+d25f280c761c3e91/node_modules/@opentui/core",
+      "file_count": 197,
+      "same_content_as_canonical": true
+    },
+    {
+      "package": "core",
+      "version": "0.6.8",
+      "path": "/tmp/opencode-selected-audit/node_modules/.bun/@opentui+core@0.6.8+eff4d38d6a4a2cd9/node_modules/@opentui/core",
+      "file_count": 197,
+      "same_content_as_canonical": true
+    },
+    {
+      "package": "solid",
+      "version": "0.6.8",
+      "path": "/tmp/opencode-selected-audit/node_modules/.bun/@opentui+solid@0.6.8+797076991e0c9baa/node_modules/@opentui/solid",
+      "file_count": 49,
+      "same_content_as_canonical": true
+    },
+    {
+      "package": "solid",
+      "version": "0.6.8",
+      "path": "/tmp/opencode-selected-audit/node_modules/.bun/@opentui+solid@0.6.8+80b887512fe9ffc6/node_modules/@opentui/solid",
+      "file_count": 49,
+      "same_content_as_canonical": true
+    },
+    {
+      "package": "keymap",
+      "version": "0.6.8",
+      "path": "/tmp/opencode-selected-audit/node_modules/.bun/@opentui+keymap@0.6.8+e670c93aeb66b49d/node_modules/@opentui/keymap",
+      "file_count": 94,
+      "same_content_as_canonical": true
+    }
+  ],
+  "adjustments": [
+    {
+      "path": "/tmp/opencode-selected-audit/node_modules/.bun/@opentui+solid@0.6.8+797076991e0c9baa/node_modules/@opentui/core",
+      "previous_link": "../../../@opentui+core@0.6.8+eff4d38d6a4a2cd9/node_modules/@opentui/core",
+      "canonical": "/tmp/opencode-selected-audit/node_modules/.bun/@opentui+core@0.6.8+d25f280c761c3e91/node_modules/@opentui/core"
+    },
+    {
+      "path": "/tmp/opencode-selected-audit/packages/plugin/node_modules/@opentui/solid",
+      "previous_link": "../../../../node_modules/.bun/@opentui+solid@0.6.8+797076991e0c9baa/node_modules/@opentui/solid",
+      "canonical": "/tmp/opencode-selected-audit/node_modules/.bun/@opentui+solid@0.6.8+80b887512fe9ffc6/node_modules/@opentui/solid"
+    },
+    {
+      "path": "/tmp/opencode-selected-audit/packages/plugin/node_modules/@opentui/core",
+      "previous_link": "../../../../node_modules/.bun/@opentui+core@0.6.8+eff4d38d6a4a2cd9/node_modules/@opentui/core",
+      "canonical": "/tmp/opencode-selected-audit/node_modules/.bun/@opentui+core@0.6.8+d25f280c761c3e91/node_modules/@opentui/core"
+    },
+    {
+      "path": "/tmp/opencode-selected-audit/packages/theme/node_modules/@opentui/core",
+      "previous_link": "../../../../node_modules/.bun/@opentui+core@0.6.8+eff4d38d6a4a2cd9/node_modules/@opentui/core",
+      "canonical": "/tmp/opencode-selected-audit/node_modules/.bun/@opentui+core@0.6.8+d25f280c761c3e91/node_modules/@opentui/core"
+    }
+  ]
+}

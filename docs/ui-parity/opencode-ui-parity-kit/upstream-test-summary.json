@@ -1,0 +1,154 @@
+{
+  "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+  "bun": "1.4.4",
+  "opentui": "0.6.8",
+  "passed": 224,
+  "failed": 0,
+  "files": 28,
+  "snapshots": 2,
+  "expect_calls": 1143,
+  "reported_seconds": 29.65,
+  "tracked_checkout_clean": true,
+  "per_file": {
+    "test/command-selection.test.tsx": {
+      "pass": 1,
+      "fail": 0,
+      "ms": 3090.21
+    },
+    "test/session-panel.test.tsx": {
+      "pass": 16,
+      "fail": 0,
+      "ms": 7392.860000000001
+    },
+    "test/panel.test.ts": {
+      "pass": 4,
+      "fail": 0,
+      "ms": 0.29
+    },
+    "test/plugin-markdown.test.tsx": {
+      "pass": 3,
+      "fail": 0,
+      "ms": 167.25
+    },
+    "test/prompt-paste.test.tsx": {
+      "pass": 1,
+      "fail": 0,
+      "ms": 170.14
+    },
+    "test/prompt-shell-failure.test.tsx": {
+      "pass": 1,
+      "fail": 0,
+      "ms": 331.47
+    },
+    "test/session-home.test.tsx": {
+      "pass": 17,
+      "fail": 0,
+      "ms": 9967.849999999999
+    },
+    "test/prompt-offset.test.tsx": {
+      "pass": 2,
+      "fail": 0,
+      "ms": 280.39
+    },
+    "test/markdown-streaming.test.tsx": {
+      "pass": 2,
+      "fail": 0,
+      "ms": 34.99
+    },
+    "test/component/session-tabs-marquee.test.ts": {
+      "pass": 4,
+      "fail": 0,
+      "ms": 1.53
+    },
+    "test/component/session-tabs-mouse.test.tsx": {
+      "pass": 4,
+      "fail": 0,
+      "ms": 469.76
+    },
+    "test/component/tab-pulse.test.tsx": {
+      "pass": 8,
+      "fail": 0,
+      "ms": 661.01
+    },
+    "test/component/session-tabs-rail.test.tsx": {
+      "pass": 1,
+      "fail": 0,
+      "ms": 359.86
+    },
+    "test/component/session-tabs-status.test.tsx": {
+      "pass": 2,
+      "fail": 0,
+      "ms": 875.72
+    },
+    "test/ui/layout.test.ts": {
+      "pass": 3,
+      "fail": 0,
+      "ms": 0.1
+    },
+    "test/context/session-tabs.test.tsx": {
+      "pass": 25,
+      "fail": 0,
+      "ms": 4321.01
+    },
+    "test/context/session-tabs-model.test.ts": {
+      "pass": 33,
+      "fail": 0,
+      "ms": 4.269999999999999
+    },
+    "test/context/local-selection.test.tsx": {
+      "pass": 9,
+      "fail": 0,
+      "ms": 242.51
+    },
+    "test/feature-plugins/sidebar-footer.test.tsx": {
+      "pass": 5,
+      "fail": 0,
+      "ms": 87.66
+    },
+    "test/feature-plugins/sidebar-context.test.tsx": {
+      "pass": 2,
+      "fail": 0,
+      "ms": 8.13
+    },
+    "test/feature-plugins/prompt-footer.test.tsx": {
+      "pass": 2,
+      "fail": 0,
+      "ms": 45.91
+    },
+    "test/util/tool-display.test.ts": {
+      "pass": 11,
+      "fail": 0,
+      "ms": 0.29000000000000004
+    },
+    "test/theme/v2/resolve.test.ts": {
+      "pass": 21,
+      "fail": 0,
+      "ms": 72.83
+    },
+    "test/cli/tui/session-rows.test.ts": {
+      "pass": 25,
+      "fail": 0,
+      "ms": 3.93
+    },
+    "test/cli/tui/collapse-tool-output.test.ts": {
+      "pass": 1,
+      "fail": 0,
+      "ms": 0.16
+    },
+    "test/cli/tui/composer-keymap.test.tsx": {
+      "pass": 7,
+      "fail": 0,
+      "ms": 302.97999999999996
+    },
+    "test/cli/tui/inline-tool-wrap-snapshot.test.tsx": {
+      "pass": 13,
+      "fail": 0,
+      "ms": 26.33
+    },
+    "test/cli/tui/prompt-interrupt-status.test.tsx": {
+      "pass": 1,
+      "fail": 0,
+      "ms": 3.51
+    }
+  }
+}

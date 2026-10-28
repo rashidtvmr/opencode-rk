@@ -1,0 +1,237 @@
+warning: crates/cli/Cargo.toml: file `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/oauth-v6-commit-validate/crates/cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `oc2`
+  * `bin` target `opencode-rk`
+warning: `opencode-rk-cli` (manifest) generated 1 warning
+   Compiling syn v2.0.119
+   Compiling jobserver v0.1.35
+   Compiling cc v1.4.6
+   Compiling serde_core v1.0.229
+   Compiling synstructure v0.13.2
+   Compiling zerofrom-derive v0.1.7
+   Compiling zerofrom v0.1.8
+   Compiling yoke-derive v0.8.2
+   Compiling yoke v0.8.3
+   Compiling zerovec v0.11.8
+   Compiling tokio v1.53.1
+   Compiling serde v1.0.229
+   Compiling pkg-config v0.3.34
+   Compiling serde_json v1.0.151
+   Compiling tinystr v0.8.4
+   Compiling memchr v2.8.3
+   Compiling icu_locale_core v2.3.0
+   Compiling zerotrie v0.2.5
+   Compiling potential_utf v0.1.6
+   Compiling ring v0.17.14
+   Compiling tracing-attributes v0.1.31
+   Compiling futures-macro v0.3.34
+   Compiling slab v0.4.12
+   Compiling futures-task v0.3.34
+   Compiling futures-util v0.3.34
+   Compiling icu_collections v2.3.0
+   Compiling tracing v0.1.44
+   Compiling icu_provider v2.3.1
+   Compiling chrono v0.4.45
+   Compiling uuid v1.26.1
+   Compiling opencode-rk-contracts v0.1.0-alpha.1 (/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/oauth-v6-commit-validate/crates/contracts)
+   Compiling icu_normalizer v2.3.0
+   Compiling icu_properties v2.3.0
+   Compiling zstd-sys v2.1.0+zstd.1.5.7
+   Compiling httpdate v1.0.3
+   Compiling hyper v1.11.1
+   Compiling rustls v0.23.44
+   Compiling idna_adapter v1.2.2
+   Compiling rustls-webpki v0.103.15
+   Compiling vcpkg v0.2.15
+   Compiling hyper-util v0.1.20
+   Compiling libsqlite3-sys v0.38.2
+   Compiling idna v1.1.0
+   Compiling tower v0.5.3
+   Compiling zstd-safe v7.3.0
+   Compiling foldhash v0.2.0
+   Compiling serde_urlencoded v0.7.1
+   Compiling hashbrown v0.17.1
+   Compiling url v2.5.8
+   Compiling tokio-rustls v0.26.5
+   Compiling blake3 v1.8.7
+   Compiling rustix v1.1.4
+   Compiling hyper-rustls v0.27.9
+   Compiling tower-http v0.6.11
+   Compiling hashlink v0.12.2
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling winnow v1.0.4
+   Compiling arrayvec v0.7.8
+   Compiling fallible-iterator v0.3.0
+   Compiling constant_time_eq v0.4.2
+   Compiling rusqlite v0.40.2
+   Compiling toml_parser v1.1.3+spec-1.1.0
+   Compiling reqwest v0.12.28
+   Compiling zstd v0.13.3
+   Compiling opencode-rk-security v0.1.0-alpha.1 (/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/oauth-v6-commit-validate/crates/security)
+   Compiling serde_spanned v1.1.1
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling toml_writer v1.1.2+spec-1.1.0
+   Compiling mime v0.3.17
+   Compiling axum-core v0.5.6
+   Compiling toml v1.1.6+spec-1.1.0
+   Compiling opencode-rk-storage v0.1.0-alpha.1 (/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/oauth-v6-commit-validate/crates/storage)
+warning: variable does not need to be mutable
+    --> crates/storage/src/lib.rs:1861:13
+     |
+1861 |         let mut actual: Vec<String> = statement
+     |             ----^^^^^^
+     |             |
+     |             help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> crates/storage/src/lib.rs:1864:13
+     |
+1864 |         let mut expected: Vec<String> = columns.iter().map(|s| (*s).to_owned()).collect();
+     |             ----^^^^^^^^
+     |             |
+     |             help: remove this `mut`
+
+warning: `opencode-rk-storage` (lib) generated 2 warnings (run `cargo fix --lib -p opencode-rk-storage` to apply 2 suggestions)
+   Compiling serde_path_to_error v0.1.20
+   Compiling include_dir_macros v0.7.4
+   Compiling matchit v0.8.4
+   Compiling futures-sink v0.3.34
+   Compiling tempfile v3.27.0
+   Compiling tokio-util v0.7.19
+   Compiling axum v0.8.9
+   Compiling include_dir v0.7.4
+   Compiling opencode-rk-sessions v0.1.0-alpha.1 (/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/oauth-v6-commit-validate/crates/sessions)
+   Compiling opencode-rk-catalog v0.1.0-alpha.1 (/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/oauth-v6-commit-validate/crates/catalog)
+   Compiling opencode-rk-providers v0.1.0-alpha.1 (/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/oauth-v6-commit-validate/crates/providers)
+   Compiling opencode-rk-tools v0.1.0-alpha.1 (/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/oauth-v6-commit-validate/crates/tools)
+   Compiling opencode-rk-agents v0.1.0-alpha.1 (/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/oauth-v6-commit-validate/crates/agents)
+   Compiling fs2 v0.4.3
+   Compiling opencode-rk-server v0.1.0-alpha.1 (/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/oauth-v6-commit-validate/crates/server)
+warning: variable does not need to be mutable
+   --> crates/server/src/task_children.rs:373:92
+    |
+373 |     let GenerationClaim { generation: mut generation_id, chain_id: _chain_id, mut stopped, mut finished } = claim;
+    |                                                                                            ----^^^^^^^^
+    |                                                                                            |
+    |                                                                                            help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `finished`
+   --> crates/server/src/task_children.rs:373:92
+    |
+373 |     let GenerationClaim { generation: mut generation_id, chain_id: _chain_id, mut stopped, mut finished } = claim;
+    |                                                                                            ^^^^^^^^^^^^ help: try ignoring the field: `finished: _`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `foreground_claim` is never read
+   --> crates/server/src/task_children.rs:858:32
+    |
+858 |     let mut foreground_claim = None;
+    |                                ^^^^ this value is reassigned later and never used
+...
+862 |         foreground_claim = Some(restart(state.clone(), children.clone(), events.clone(), child.clone(), prompt, false, false)?);
+    |         ---------------- `foreground_claim` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `state` is never read
+    --> crates/server/src/lib.rs:2993:45
+     |
+2993 | ...                   Err(_) => { state.stage = TurnStreamStage::Done; return None; }
+     |                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+
+warning: value assigned to `state` is never read
+    --> crates/server/src/lib.rs:3034:29
+     |
+3034 | ...                   state.stage = TurnStreamStage::Done;
+     |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+
+warning: value assigned to `state` is never read
+    --> crates/server/src/lib.rs:3016:29
+     |
+3016 | ...                   state.stage = TurnStreamStage::Done;
+     |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+
+warning: field `message` is never read
+   --> crates/server/src/lib.rs:574:5
+    |
+571 | struct PermissionReplyBody {
+    |        ------------------- field in this struct
+...
+574 |     message: Option<String>,
+    |     ^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: methods `current_control` and `cancel_generation` are never used
+   --> crates/server/src/task_children.rs:106:8
+    |
+ 73 | impl Child {
+    | ---------- methods in this implementation
+...
+106 |     fn current_control(&self) -> (u32, watch::Sender<bool>, watch::Receiver<bool>) {
+    |        ^^^^^^^^^^^^^^^
+...
+139 |     fn cancel_generation(&self, generation: u32) {
+    |        ^^^^^^^^^^^^^^^^^
+
+warning: function `spawn` is never used
+   --> crates/server/src/task_children.rs:366:4
+    |
+366 | fn spawn(state: AppState, children: Children, events: event_bus::EventBus, child: Arc<Child>, prompt: String, replay: bool) -> Resu...
+    |    ^^^^^
+
+warning: unused `axum::Json` that must be used
+   --> crates/server/src/mcp_context.rs:170:9
+    |
+170 | /         crate::mcp_http::add(Extension(registry.clone()), Ok(Json(json!({
+171 | |             "name":"pending-probe", "config":{"type":"local", "command":["/bin/sh",script,marker], "environment":{},"enabled":true}
+172 | |         })))).await.unwrap();
+    | |____________________________^
+    |
+    = note: `#[warn(unused_must_use)]` (part of `#[warn(unused)]`) on by default
+help: use `let _ = ...` to ignore the resulting value
+    |
+170 |         let _ = crate::mcp_http::add(Extension(registry.clone()), Ok(Json(json!({
+    |         +++++++
+
+warning: unused `axum::Json` that must be used
+   --> crates/server/src/mcp_context.rs:173:9
+    |
+173 |         crate::mcp_http::connect(Extension(registry.clone()), Path("pending-probe".into())).await.unwrap();
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: use `let _ = ...` to ignore the resulting value
+    |
+173 |         let _ = crate::mcp_http::connect(Extension(registry.clone()), Path("pending-probe".into())).await.unwrap();
+    |         +++++++
+
+warning: unused `axum::Json` that must be used
+   --> crates/server/src/mcp_context.rs:198:9
+    |
+198 |         crate::mcp_http::disconnect(Extension(registry), Path("pending-probe".into())).await.unwrap();
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: use `let _ = ...` to ignore the resulting value
+    |
+198 |         let _ = crate::mcp_http::disconnect(Extension(registry), Path("pending-probe".into())).await.unwrap();
+    |         +++++++
+
+warning: `opencode-rk-server` (lib test) generated 12 warnings (run `cargo fix --lib -p opencode-rk-server --tests` to apply 2 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 48.39s
+     Running unittests src/lib.rs (target/debug/deps/opencode_rk_server-995b7505c00f66b8)
+
+running 1 test
+test provider_failure_tests::oauth_and_protocol_admission_failures_are_service_unavailable_without_secret_body ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 247 filtered out; finished in 0.00s
+

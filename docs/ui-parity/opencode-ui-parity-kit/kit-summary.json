@@ -1,0 +1,9 @@
+{
+  "checklist_items": 223,
+  "fixture_cases": 196,
+  "immutable_source_urls": 220,
+  "source_inventory_files": 298,
+  "document_word_tokens_approx": 37045,
+  "upstream_tests_passed": 224,
+  "rust_checks_passed": null
+}

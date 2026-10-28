@@ -1,0 +1,219 @@
+{
+  "audit_id": "artifact-readiness-20261026",
+  "canonical_sha": "6f6872bf87e02f05afe9c1a5f63e55fe4c040499",
+  "upstream_sha": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+  "canonical_dir": "/Users/mymac/Projects/opencode-rk-recovery-20261005",
+  "upstream_dir": "/Users/mymac/Projects/tmp/opencode",
+  "source_dir": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/concurrency20/",
+  "observed_at_utc": "2026-10-26T17:00:05.945861+00:00",
+  "roster_total": 23,
+  "on_disk_present": 20,
+  "on_disk_missing": 3,
+  "missing": [
+    {
+      "task": "catalog-refresh",
+      "session_id": "ses_e870ed5d3ffe31l0OFAxytaPsN",
+      "route": "vyce-deepseek-v41",
+      "reason": "no_on_disk_dir"
+    },
+    {
+      "task": "credential-review",
+      "session_id": "ses_e86fd5902ffe10QmJH1vdW0bRa",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "reason": "no_on_disk_dir"
+    },
+    {
+      "task": "skill-v5-review",
+      "session_id": "ses_e87083439ffeS3kptNEqReCrZr",
+      "route": "vyce-deepseek-v41",
+      "reason": "no_on_disk_dir"
+    }
+  ],
+  "all_present_tasks": [
+    {
+      "task": "tab-create-contract",
+      "session_id": "ses_e870e69f3ffeFuLM5f8Ub8ylAh",
+      "route": "vyce-deepseek-v41",
+      "on_disk_dir": "tab-create-contract"
+    },
+    {
+      "task": "tab-decoder",
+      "session_id": "ses_e870e4269ffeNmgxXWSmKR5XuO",
+      "route": "vyce-deepseek-v41",
+      "on_disk_dir": "tab-decoder"
+    },
+    {
+      "task": "tab-runtime-v3",
+      "session_id": "ses_e870abb06ffeQhyWpGLMylwsF5",
+      "route": "vyce-deepseek-v41",
+      "on_disk_dir": "tab-runtime-v3"
+    },
+    {
+      "task": "tab-controls-v2",
+      "session_id": "ses_e870d8873ffexGGbOlI8WCaOsD",
+      "route": "vyce-deepseek-v41",
+      "on_disk_dir": "tab-controls-v2"
+    },
+    {
+      "task": "tab-rail-v2",
+      "session_id": "ses_e870de567ffeihvvEiCXrN3WUB",
+      "route": "vyce-deepseek-v41",
+      "on_disk_dir": "tab-rail-v2"
+    },
+    {
+      "task": "add-tab-fixture-v2",
+      "session_id": "ses_e870c8d4effeapRnvIP1VzRUbE",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "add-tab-fixture-v2"
+    },
+    {
+      "task": "horizontal-fixture-v2",
+      "session_id": "ses_e8704f08effedByQgkqJHlCHRC",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "horizontal-fixture-v2"
+    },
+    {
+      "task": "title-projection-v2",
+      "session_id": "ses_e870a3009ffeOUYcEEXfNWXU2n",
+      "route": "vyce-deepseek-v41",
+      "on_disk_dir": "title-projection-v2"
+    },
+    {
+      "task": "history-state-review",
+      "session_id": "ses_e86fdb7a9ffe4xnyWvZD7joior",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "history-state-review"
+    },
+    {
+      "task": "inbox-review",
+      "session_id": "ses_e86fd8ea5ffe0jwRgahu5d5oER",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "inbox-review"
+    },
+    {
+      "task": "skill-reader-v2",
+      "session_id": "ses_e870c06e4ffeyekcGFqAoDug4I",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "skill-reader-v2"
+    },
+    {
+      "task": "theme-fixture-v4",
+      "session_id": "ses_e870c6b63ffezg80BpnhcP1MOS",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "theme-fixture-v4"
+    },
+    {
+      "task": "oauth-preservation-v2",
+      "session_id": "ses_e870ba70effecfZqQeucw3l9DP",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "oauth-preservation-v2"
+    },
+    {
+      "task": "permission-runner",
+      "session_id": "ses_e870498dbffedfL6r4eKvfAg4s",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "permission-runner"
+    },
+    {
+      "task": "child-journey-v2",
+      "session_id": "ses_e8704c526ffe7a93QlMPFt1C2x",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "child-journey-v2"
+    },
+    {
+      "task": "keybind-config-review",
+      "session_id": "ses_e86fc29cbffeJV2B4um3W21FjU",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "keybind-config-review"
+    },
+    {
+      "task": "catalog-filter-v2",
+      "session_id": "ses_e87041ec6fferuZ4MAKH3XU5Xm",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "catalog-filter-v2"
+    },
+    {
+      "task": "vertical-v19-review",
+      "session_id": "ses_e870cc554ffeJSX1zr6YzEqtWe",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "vertical-v19-review"
+    },
+    {
+      "task": "api-info",
+      "session_id": "ses_e8724d034ffe2wu5dDTNJd6QsC",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "api-info-replacement"
+    },
+    {
+      "task": "shell-v4",
+      "session_id": "ses_e877e26d7ffeQmw2kgmecFLvN3",
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "on_disk_dir": "shell-v4-replacement"
+    }
+  ],
+  "integrate_ready_patches": [
+    {
+      "task": "tab-controls-v2",
+      "file": "native_tabs.diff",
+      "path": "concurrency20/tab-controls-v2/native_tabs.diff",
+      "sha256": "132a3ca145e4100d853859e690a11c4d8a83bda4cf408e56407ff8810a0636d1",
+      "size": 18717,
+      "route": "vyce-deepseek-v41",
+      "session_id": "ses_e870d8873ffexGGbOlI8WCaOsD",
+      "kind": "patch"
+    },
+    {
+      "task": "title-projection-v2",
+      "file": "wiring.diff",
+      "path": "concurrency20/title-projection-v2/wiring.diff",
+      "sha256": "407e121cc1d1ab53512d4f4d0ad7b95120902e9f0c89848832133e94edaf61bd",
+      "size": 2116,
+      "route": "vyce-deepseek-v41",
+      "session_id": "ses_e870a3009ffeOUYcEEXfNWXU2n",
+      "kind": "patch"
+    },
+    {
+      "task": "title-projection-v2",
+      "file": "native_navigation.patch",
+      "path": "concurrency20/title-projection-v2/native_navigation.patch",
+      "sha256": "a722d22487152fb09f2016949c4852074255ddfd46f84831f486d757307c336b",
+      "size": 6712,
+      "route": "vyce-deepseek-v41",
+      "session_id": "ses_e870a3009ffeOUYcEEXfNWXU2n",
+      "kind": "patch"
+    },
+    {
+      "task": "api-info",
+      "file": "materialized.diff",
+      "path": "concurrency20/api-info-replacement/materialized.diff",
+      "sha256": "d06293dd6d0fb981e84e04e4e1aac5a91fee02568348be93f28549d6b0332868",
+      "size": 23000,
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "session_id": "ses_e8724d034ffe2wu5dDTNJd6QsC",
+      "kind": "patch"
+    },
+    {
+      "task": "shell-v4",
+      "file": "PATCH_BCD.diff",
+      "path": "concurrency20/shell-v4-replacement/PATCH_BCD.diff",
+      "sha256": "c32d0b09362b5700d19d4724cf5673a87485d63587dec09587672862e5833412",
+      "size": 5843,
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "session_id": "ses_e877e26d7ffeQmw2kgmecFLvN3",
+      "kind": "patch"
+    },
+    {
+      "task": "shell-v4",
+      "file": "PATCH.diff",
+      "path": "concurrency20/shell-v4-replacement/PATCH.diff",
+      "sha256": "8c2b353dd2256ad3663e1440f932874fa6807a926fea6f396e0e44f97d8e0524",
+      "size": 14373,
+      "route": "9router-vyce-deepseek-v4.1-free-combined",
+      "session_id": "ses_e877e26d7ffeQmw2kgmecFLvN3",
+      "kind": "patch"
+    }
+  ],
+  "candidate_hashes_verified": true,
+  "verification_note": "sha256 computed via hashlib on actual file bytes. Live-write dirs in concurrency20 are mutable; hashes reflect instant of read. No test execution performed (agent bar).",
+  "warning_live_writes": "concurrency20/* are writable worker dirs, not frozen; hashes may drift between reads (observed tab-controls-v2/native_tabs.diff change 77265842->132a3ca1)."
+}

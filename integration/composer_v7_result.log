@@ -1,0 +1,85 @@
+=== COMPOSER V7 DIAGNOSTIC ===
+Base commit: 12018b66653c1d6edfa60479ccbc949d6f898886 (git archive, no patches in base)
+Patch: line-home-completion-repair-v7.patch (SHA 6bd82e2059817ea11600aeb8c82c27eed532d9a06074e61b9c061b7a0b4ae3d1)
+
+=== HASH VERIFICATION ===
+Before patch (base 12018b66):
+  native_composer.rs: 4236248114b335cba9a715275973058d2bea42112d33d1b4250a4a4b7ab662f6
+  native_completion.rs: 145e491d6fc5714c38fc41acfa3b37571adb3688b53c934ae6009c52703ec3f0
+  tui_entry.rs: 945309c21ccbab8d3a00926eb821eaddaea424e1b9b2e069cb112d1835bbac74
+  Cargo.lock: 0dcd8464bf873ddb288dd7f30fbcb59785df7a8df18c8889cf19b1fc922f6d9f
+
+After patch (matches manifest):
+  native_composer.rs: bfe8cd26fb5ca12f6cdcdf6887e91c73ff64851e6c181075059c9a0902e40242
+  native_completion.rs: de1f0b8e5ad455027e5bdc0b4e90829d0ab04ac6e0877b1544938d5e0898c87a
+  tui_entry.rs: 5d38e3c432fcd0ba2a11cbada8b68a1449b2902d4c073ff441e8636cc71a722e
+  Cargo.lock: 0dcd8464bf873ddb288dd7f30fbcb59785df7a8df18c8889cf19b1fc922f6d9f (UNCHANGE)
+
+After compile failure (immutable - all match after-patch):
+  native_composer.rs: bfe8cd26fb5ca12f6cdcdf6887e91c73ff64851e6c181075059c9a0902e40242
+  native_completion.rs: de1f0b8e5ad455027e5bdc0b4e90829d0ab04ac6e0877b1544938d5e0898c87a
+  tui_entry.rs: 5d38e3c432fcd0ba2a11cbada8b68a1449b2902d4c073ff441e8636cc71a722e
+  Cargo.lock: 0dcd8464bf873ddb288dd7f30fbcb59785df7a8df18c8889cf19b1fc922f6d9f
+
+=== COMMAND ===
+cd <snapshot> && CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 DYLD_LIBRARY_PATH=/Users/mymac/.local/lib cargo +1.98.1 test -p opencode-rk-cli --bin oc2 --features native --locked --offline native_composer; echo "CARGO_EXIT=$?"
+
+=== RESULT ===
+CARGO_EXIT=101 (compile failure)
+Tests executed: 0
+
+=== COMPILE ERRORS ===
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+  --> crates/cli/src/native_completion.rs:120:13
+   |
+120 |         let token = prefix[start..];
+   |         ^^^^^ doesn't have a size known at compile-time
+   |
+   = help: the trait `Sized` is not implemented for `str`
+   = note: all local variables must have a statically known size
+help: consider borrowing here
+   |
+120 |         let token = &prefix[start..];
+   |                     +
+
+error: lifetime may not live long enough
+  --> crates/cli/src/native_completion.rs:142:9
+   |
+132 |     fn trigger_at(&self, draft: &str, cursor: usize) -> Option<(usize, char, &str)> {
+   |                   -             - let's call the lifetime of this reference `'1`
+   |                   |
+   |                   let's call the lifetime of this reference `'2`
+142 |         Some((start, marker, token.get(marker.len_utf8()..)?))
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method was supposed to return data with lifetime `'2` but it is returning data with lifetime `'1`
+   |
+help: consider introducing a named lifetime parameter and update trait if needed
+   |
+132 |     fn trigger_at<'a>(&self, draft: &'a str, cursor: usize) -> Option<(usize, char, &'a str)> {
+   |                  ++++                ++                                              ++
+
+error[E0308]: mismatched types
+   --> crates/cli/src/tui_entry.rs:5467:75
+    |
+5467 | ...atches!(crate::native_composer::decide_byte(byte, keymap), Some(crate::native_composer::KeyAction::Newline)) =>
+    |            -----------------------------------       ^^^^^^ expected `native_composer::SubmitKeymap`, found `SubmitKeymap`
+    |            |
+    |            arguments to this function are incorrect
+    |
+    = note: `SubmitKeymap` and `native_composer::SubmitKeymap` have similar names, but are actually distinct types
+note: `SubmitKeymap` is defined in crate `opencode_rk_sessions`
+    --> crates/sessions/src/tui_state.rs:32:1
+note: `native_composer::SubmitKeymap` is defined in the current crate
+    --> crates/cli/src/native_composer.rs:170:1
+
+error[E0308]: mismatched types
+   --> crates/cli/src/tui_entry.rs:5483:71
+    |
+5483 |                 if matches!(crate::native_composer::decide_byte(byte, keymap), Some(crate::native_composer::KeyAction::Submit)) => {
+    |                             -----------------------------------       ^^^^^^ expected `native_composer::SubmitKeymap`, found `SubmitKeymap`
+
+error: could not compile `opencode-rk-cli` (bin "oc2" test) due to 4 previous errors; 19 warnings emitted
+
+=== GATE STATUS ===
+FAIL - compile failure, tests NOT executed
+native_completion filter NOT run (gated on native_composer GREEN)
+SLOT RELEASED

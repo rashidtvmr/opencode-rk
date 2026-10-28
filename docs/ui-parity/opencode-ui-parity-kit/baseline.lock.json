@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "research_date": "2026-10-28",
+  "authoritative_target": {
+    "repository": "https://github.com/anomalyco/opencode",
+    "commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+    "package_version": "2.1.4",
+    "commit_date": "2026-10-25",
+    "frontend": "packages/tui full-screen",
+    "selected_by": "User project AGENTS.md lines337–349"
+  },
+  "renderer": {
+    "repository": "https://github.com/anomalyco/opentui",
+    "tag": "v0.6.8",
+    "commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+    "core": "0.6.8",
+    "solid": "0.6.8",
+    "keymap": "0.6.8"
+  },
+  "reference_runtime": {
+    "bun": "1.4.4",
+    "solid_js": "1.9.15"
+  },
+  "comparison_only": {
+    "tag": "v2.2.0",
+    "commit": "1097e2668b1e08ad63bdf0b1c4860b9bc01e420c",
+    "opentui": "0.7.0",
+    "is_authoritative": false
+  },
+  "default_fixture": {
+    "theme_name": "opencode",
+    "theme_mode": "dark",
+    "new_designs": false,
+    "animations": false,
+    "grouping": "auto",
+    "verbosity": "medium",
+    "thinking": "hide",
+    "markdown": "rendered"
+  },
+  "private_project": {
+    "path": "/Users/mymac/Projects/opencode-rk-recovery-20261005",
+    "verified": "project instructions and directory/workspace inventory",
+    "bridge_implementation_read": false,
+    "rust_build_tested": false,
+    "limitation": "Connector duplicate Secure Tunnel ID routes calls to inconsistent catalogs; current Rust bridge capability mapping not completed."
+  },
+  "upstream_test_gate": {
+    "passed": 224,
+    "failed": 0,
+    "files": 28,
+    "snapshots": 2,
+    "expect_calls": 1143,
+    "reported_seconds": 29.65,
+    "tracked_checkout_clean": true
+  },
+  "rust_parity_status": "unverified"
+}
