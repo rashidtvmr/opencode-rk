@@ -1247,6 +1247,8 @@ struct PaintCtx {
     logo: Option<(u16, u16)>,
     tabs: Option<TabStrip>,
     vertical_rail: Option<crate::native_tab_rail::RailFrame>,
+    context_menu: Option<crate::native_tab_context_menu::MenuFrame>,
+    rename_dialog: Option<(String, Option<String>)>,
 }
 
 #[cfg(feature = "native")]
@@ -1254,6 +1256,307 @@ struct PaintCtx {
 enum NativeIntent {
     SelectTab { session: SessionRef },
     CloseTab { session: SessionRef },
+}
+
+#[cfg(all(test, feature = "native"))]
+mod tab_context_menu_dispatch_tests {
+    use super::*;
+
+    fn nav_with_session() -> (crate::native_navigation::NavigationState, crate::native_navigation::SessionRef) {
+        let mut nav = crate::native_navigation::NavigationState::new();
+        let session = crate::native_navigation::SessionRef("stable-session-id".to_owned());
+        nav.open(session.clone());
+        nav.ingest_snapshot_title(session.clone(), "Visible title".to_owned());
+        (nav, session)
+    }
+
+    fn rendered_strip(
+        nav: &crate::native_navigation::NavigationState,
+    ) -> crate::native_tabs::TabStrip {
+        let inputs = crate::native_tabs::TabStrip::from_navigation(nav, &[]);
+        crate::native_tabs::TabStrip::render_with_hover_and_add(
+            &inputs,
+            TabOrientation::Horizontal,
+            64,
+            1,
+            0,
+            None,
+            true,
+        )
+    }
+
+    #[test]
+    fn production_hit_resolver_uses_painted_session_identity_and_add_hit() {
+        let (nav, session) = nav_with_session();
+        let strip = rendered_strip(&nav);
+        let hit = strip
+            .rects
+            .iter()
+            .find(|(id, _)| *id == session)
+            .expect("painted session rect")
+            .1;
+        assert_eq!(
+            tab_menu_target_at(&nav, Some(&strip), None, false, hit.x, hit.y),
+            Some(crate::native_tab_context_menu::MenuTarget::Session {
+                session: session.clone(),
+                title: "Visible title".to_owned(),
+                can_add: true,
+            })
+        );
+        let add = strip.add_rect.expect("painted add/new hit target");
+        assert_eq!(
+            tab_menu_target_at(&nav, Some(&strip), None, false, add.x, add.y),
+            Some(crate::native_tab_context_menu::MenuTarget::New {
+                recently_closed: None,
+            })
+        );
+        assert_eq!(
+            tab_menu_target_at(&nav, Some(&strip), None, false, 63, 0),
+            None,
+            "no fallback to an arbitrary active tab on a miss"
+        );
+    }
+
+    #[test]
+    fn production_menu_release_dispatches_close_copy_and_rename_stable_id() {
+        let id = crate::native_navigation::SessionRef("stable-session-id".to_owned());
+        let target = crate::native_tab_context_menu::MenuTarget::Session {
+            session: id.clone(),
+            title: "Visible title".to_owned(),
+            can_add: true,
+        };
+        let viewport = crate::native_tab_context_menu::Viewport { width: 80, height: 24 };
+
+        let mut menu = crate::native_tab_context_menu::TabContextMenu::new(1, 0, target.clone());
+        let frame = menu.frame(viewport);
+        let row = |label: &str| {
+            frame
+                .items
+                .iter()
+                .find(|item| item.label.starts_with(label) && item.enabled)
+                .unwrap_or_else(|| panic!("visible enabled row for {label}"))
+                .rect
+        };
+        let close = row("Close");
+        assert_eq!(
+            menu.handle(
+                crate::native_tab_context_menu::MenuEvent::PointerUp {
+                    button: crate::native_tab_context_menu::MouseButton::Left,
+                    x: close.x,
+                    y: close.y,
+                },
+                viewport,
+            ),
+            crate::native_tab_context_menu::MenuOutcome::Invoke(
+                crate::native_tab_context_menu::MenuAction::Close { session: id.clone() }
+            )
+        );
+
+        let mut menu = crate::native_tab_context_menu::TabContextMenu::new(1, 0, target.clone());
+        let frame = menu.frame(viewport);
+        let copy = frame
+            .items
+            .iter()
+            .find(|item| item.label.starts_with("Copy session ID"))
+            .expect("copy row")
+            .rect;
+        assert_eq!(
+            menu.handle(
+                crate::native_tab_context_menu::MenuEvent::PointerUp {
+                    button: crate::native_tab_context_menu::MouseButton::Left,
+                    x: copy.x,
+                    y: copy.y,
+                },
+                viewport,
+            ),
+            crate::native_tab_context_menu::MenuOutcome::Invoke(
+                crate::native_tab_context_menu::MenuAction::CopySessionId { session: id.clone() }
+            )
+        );
+
+        let mut menu = crate::native_tab_context_menu::TabContextMenu::new(1, 0, target);
+        let frame = menu.frame(viewport);
+        let rename = frame
+            .items
+            .iter()
+            .find(|item| item.label.starts_with("Rename"))
+            .expect("rename row")
+            .rect;
+        assert_eq!(
+            menu.handle(
+                crate::native_tab_context_menu::MenuEvent::PointerUp {
+                    button: crate::native_tab_context_menu::MouseButton::Left,
+                    x: rename.x,
+                    y: rename.y,
+                },
+                viewport,
+            ),
+            crate::native_tab_context_menu::MenuOutcome::Invoke(
+                crate::native_tab_context_menu::MenuAction::Rename {
+                    session: id.clone(),
+                    current_title: "Visible title".to_owned(),
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn new_target_without_reopen_facility_omits_reopen_rows() {
+        let menu = crate::native_tab_context_menu::TabContextMenu::new(
+            4,
+            2,
+            crate::native_tab_context_menu::MenuTarget::New { recently_closed: None },
+        );
+        assert!(
+            menu.items().is_empty(),
+            "recently_closed: None must not expose a Reopen action we cannot service"
+        );
+        let frame = menu.frame(crate::native_tab_context_menu::Viewport { width: 80, height: 24 });
+        assert!(frame.rect.is_none(), "empty popup paints nothing");
+    }
+
+    #[test]
+    fn ctrl_c_and_escape_cancel_rename_without_exiting() {
+        let cancel = native_input_decoder::InputEvent::Byte(3);
+        let kill = native_input_decoder::InputEvent::Byte(4);
+        let escape = native_input_decoder::InputEvent::Escape;
+        assert!(rename_dismisses(&cancel), "Ctrl-C cancels the dialog only");
+        assert!(rename_dismisses(&kill), "Ctrl-D cancels the dialog only");
+        assert!(rename_dismisses(&escape), "Escape cancels the dialog only");
+        assert!(!rename_dismisses(&native_input_decoder::InputEvent::Byte(b'a')));
+        assert!(!rename_submits(&cancel), "Ctrl-C must not submit a rename");
+    }
+
+    #[test]
+    fn ctrl_c_and_escape_dismiss_open_popup_before_byte_exit() {
+        for event in [
+            native_input_decoder::InputEvent::Byte(3),
+            native_input_decoder::InputEvent::Byte(4),
+            native_input_decoder::InputEvent::Escape,
+        ] {
+            assert!(
+                menu_dismisses(&event),
+                "open popup consumes {event:?} instead of exiting"
+            );
+        }
+        assert!(!menu_dismisses(&native_input_decoder::InputEvent::Byte(b'q')));
+    }
+
+    #[test]
+    fn rename_request_uses_real_patch_route_and_stable_ack_identity() {
+        assert_eq!(rename_request_path("stable-session-id"), "/api/sessions/stable-session-id");
+        assert_eq!(rename_request_body("Renamed"), r#"{"title":"Renamed"}"#);
+        assert!(rename_ack_matches(
+            r#"{"session":{"id":"stable-session-id","title":"Renamed"}}"#,
+            "stable-session-id",
+        ));
+        assert!(
+            !rename_ack_matches(
+                r#"{"session":{"id":"different-id","title":"Renamed"}}"#,
+                "stable-session-id",
+            ),
+            "an acknowledgement for a different session must be refused"
+        );
+        assert!(
+            !rename_ack_matches(r#"{"session":{}}"#, "stable-session-id"),
+            "a missing session identity must be refused"
+        );
+        assert!(
+            !rename_ack_matches("not json", "stable-session-id"),
+            "a malformed acknowledgement must be refused"
+        );
+    }
+
+    #[test]
+    fn rename_submit_requires_nonempty_trimmed_title() {
+        assert_eq!(rename_accepted_title("  Renamed  "), Some("Renamed".to_owned()));
+        assert_eq!(rename_accepted_title(""), None);
+        assert_eq!(rename_accepted_title("   "), None);
+    }
+
+    #[test]
+    fn settled_rename_ack_is_bound_to_inflight_identity() {
+        let inflight = crate::native_navigation::SessionRef("session-a".to_owned());
+        let accepted = rename_settlement(
+            &inflight,
+            Ok((
+                r#"{"session":{"id":"session-a","title":"New A"}}"#.to_owned(),
+                200,
+                "New A".to_owned(),
+                "session-a".to_owned(),
+            )),
+        );
+        assert_eq!(
+            accepted.accepted,
+            Some((
+                crate::native_navigation::SessionRef("session-a".to_owned()),
+                "New A".to_owned()
+            ))
+        );
+        assert!(accepted.message.is_none());
+
+        // Ack body naming a DIFFERENT session is refused even when the result
+        // identity matches: the server answer must be the requested session's.
+        let foreign_body = rename_settlement(
+            &inflight,
+            Ok((
+                r#"{"session":{"id":"session-b","title":"B"}}"#.to_owned(),
+                200,
+                "B".to_owned(),
+                "session-a".to_owned(),
+            )),
+        );
+        assert!(foreign_body.accepted.is_none());
+        assert!(foreign_body.message.is_some());
+
+        // Cross-tab stale result: a settled reply carrying another session's
+        // identity is never applied to this in-flight record.
+        let stale = rename_settlement(
+            &inflight,
+            Ok((
+                r#"{"session":{"id":"session-b","title":"B"}}"#.to_owned(),
+                200,
+                "B".to_owned(),
+                "session-b".to_owned(),
+            )),
+        );
+        assert!(stale.accepted.is_none(), "stale ack must not retarget");
+        assert!(stale.message.is_some());
+
+        let non_2xx = rename_settlement(
+            &inflight,
+            Ok((
+                r#"{"session":{"id":"session-a"}}"#.to_owned(),
+                409,
+                "x".to_owned(),
+                "session-a".to_owned(),
+            )),
+        );
+        assert!(non_2xx.accepted.is_none());
+
+        let failed = rename_settlement(&inflight, Err("daemon unreachable".to_owned()));
+        assert!(failed.accepted.is_none());
+        assert_eq!(
+            failed.message.as_deref(),
+            Some("Rename failed: daemon unreachable")
+        );
+    }
+
+    #[test]
+    fn dialog_ownership_requires_exact_inflight_session_id() {
+        let inflight = crate::native_navigation::SessionRef("session-a".to_owned());
+        let open_same = Some(crate::native_navigation::SessionRef("session-a".to_owned()));
+        let open_other = Some(crate::native_navigation::SessionRef("session-b".to_owned()));
+        assert!(rename_dialog_owns(open_same.as_ref(), &inflight));
+        assert!(
+            !rename_dialog_owns(open_other.as_ref(), &inflight),
+            "a retargeted dialog never adopts another session's settlement"
+        );
+        assert!(
+            !rename_dialog_owns(None, &inflight),
+            "a cancelled dialog never adopts a settlement"
+        );
+    }
 }
 
 #[cfg(all(test, feature = "native"))]
@@ -1343,6 +1646,8 @@ mod surface_paint_regressions {
             logo: None,
             tabs: None,
             vertical_rail: None,
+            context_menu: None,
+            rename_dialog: None,
         }).expect("paint native frame");
         let snapshot = renderer.snapshot_text().expect("native text snapshot");
         let actual = snapshot.lines().nth(usize::from(composer.1)).expect("painted border row");
@@ -1662,6 +1967,140 @@ mod rounded_surface_color_tests {
             assert_eq!(resolve_surface_corner_background(panel, root, &surfaces, 12, 2, "┐"), panel);
         }
     }
+}
+
+/// One in-flight rename request, identified by the exact stable session id
+/// it targets. Exactly one request may be in flight at a time, so a settled
+/// reply can never be confused with another request's ack.
+#[cfg(feature = "native")]
+type RenameInFlight = crate::native_navigation::SessionRef;
+
+/// Decision for one settled rename request, derived from the in-flight
+/// identity only (never from dialog state, so an ack can never retarget):
+/// `accepted` is a genuinely-acknowledged server rename for exactly the
+/// requested session id; `message` is the truthful failure/refusal text the
+/// caller shows in the owning dialog or, when no dialog owns it, surfaces
+/// in the transcript instead of silently dropping.
+#[cfg(feature = "native")]
+struct RenameSettlement {
+    accepted: Option<(crate::native_navigation::SessionRef, String)>,
+    message: Option<String>,
+}
+
+#[cfg(feature = "native")]
+fn rename_settlement(
+    inflight: &RenameInFlight,
+    result: Result<(String, u16, String, String), String>,
+) -> RenameSettlement {
+    match result {
+        Ok((body, 200, title, id))
+            if id == inflight.0 && rename_ack_matches(&body, &id) =>
+        {
+            RenameSettlement {
+                accepted: Some((inflight.clone(), title)),
+                message: None,
+            }
+        }
+        Ok((_body, status, _, _)) => RenameSettlement {
+            accepted: None,
+            message: Some(format!(
+                "Rename refused: HTTP {status} or mismatched session acknowledgement"
+            )),
+        },
+        Err(error) => RenameSettlement {
+            accepted: None,
+            message: Some(format!("Rename failed: {error}")),
+        },
+    }
+}
+
+/// A settled rename may touch only a dialog still open for the exact
+/// in-flight session id; a cancelled or retargeted dialog never adopts it.
+#[cfg(feature = "native")]
+fn rename_dialog_owns(
+    open: Option<&crate::native_navigation::SessionRef>,
+    inflight: &RenameInFlight,
+) -> bool {
+    open.is_some_and(|dialog| dialog.0 == inflight.0)
+}
+
+#[cfg(feature = "native")]
+fn rename_request_path(session_id: &str) -> String {
+    format!("/api/sessions/{session_id}")
+}
+
+/// PATCH /api/sessions/{id} body; the server contract is `{ "title": ... }`.
+#[cfg(feature = "native")]
+fn rename_request_body(title: &str) -> String {
+    serde_json::json!({ "title": title }).to_string()
+}
+
+/// Validate the real server ACK shape `{"session":{"id":...}}` against the
+/// exact stable identity we asked to rename. Anything else is refused.
+#[cfg(feature = "native")]
+fn rename_ack_matches(body: &str, expected_id: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("session")
+                .and_then(|session| session.get("id"))
+                .and_then(|id| id.as_str())
+                .map(str::to_owned)
+        })
+        .as_deref()
+        == Some(expected_id)
+}
+
+/// Trimmed non-empty title accepted for submit; empty/whitespace is refused
+/// exactly as upstream `DialogSessionRename` refuses an empty value.
+#[cfg(feature = "native")]
+fn rename_accepted_title(value: &str) -> Option<String> {
+    let title = value.trim();
+    (!title.is_empty()).then(|| title.to_owned())
+}
+
+/// Escape or Ctrl-C/Ctrl-D cancels the rename dialog without exiting.
+#[cfg(feature = "native")]
+fn rename_dismisses(event: &native_input_decoder::InputEvent) -> bool {
+    matches!(
+        event,
+        native_input_decoder::InputEvent::Escape
+            | native_input_decoder::InputEvent::Byte(3 | 4)
+    )
+}
+
+#[cfg(feature = "native")]
+fn rename_submits(event: &native_input_decoder::InputEvent) -> bool {
+    matches!(event, native_input_decoder::InputEvent::Byte(13 | 10))
+}
+
+#[cfg(feature = "native")]
+fn rename_backspace(event: &native_input_decoder::InputEvent) -> bool {
+    matches!(event, native_input_decoder::InputEvent::Byte(8 | 127))
+}
+
+/// Ctrl-C/Ctrl-D and Escape dismiss an open popup before any byte-exit path.
+#[cfg(feature = "native")]
+fn menu_dismisses(event: &native_input_decoder::InputEvent) -> bool {
+    matches!(
+        event,
+        native_input_decoder::InputEvent::Escape
+            | native_input_decoder::InputEvent::Byte(3 | 4)
+    )
+}
+
+#[cfg(feature = "native")]
+fn tab_menu_target_at(navigation: &crate::native_navigation::NavigationState, tabs: Option<&TabStrip>, rail: Option<&crate::native_tab_rail::RailFrame>, vertical: bool, x: u16, y: u16) -> Option<crate::native_tab_context_menu::MenuTarget> {
+    if vertical {
+        return rail?.hit(x,y).and_then(|hit| match hit {
+            crate::native_tab_rail::RailHit::Session(session) => navigation.tabs().iter().any(|tab| tab.session == session).then(|| crate::native_tab_context_menu::MenuTarget::Session { title: navigation.title(&session).unwrap_or(&session.0).to_owned(), session, can_add: true }),
+            crate::native_tab_rail::RailHit::New => Some(crate::native_tab_context_menu::MenuTarget::New { recently_closed: None }),
+        });
+    }
+    let tabs=tabs?;
+    if let Some(hit)=tabs.hit(x,y) { return navigation.tabs().iter().any(|tab| tab.session==hit.session).then(|| crate::native_tab_context_menu::MenuTarget::Session { title:navigation.title(&hit.session).unwrap_or(&hit.session.0).to_owned(), session:hit.session, can_add:true }); }
+    tabs.add_rect.filter(|r| x>=r.x && x<r.x.saturating_add(r.width) && y>=r.y && y<r.y.saturating_add(r.height)).map(|_| crate::native_tab_context_menu::MenuTarget::New { recently_closed:None })
 }
 
 #[cfg(feature = "native")]
@@ -2441,6 +2880,30 @@ fn native_paint(
                 paint_color(ctx.palette, style.foreground), Some(bg), style.attributes,
             )?;
         }
+    }
+    if let Some(menu) = ctx.context_menu.as_ref() {
+        if let Some(rect) = menu.rect {
+            let x=u32::from(rect.x); let y=u32::from(rect.y);
+            let w=u32::from(rect.width).min(cols.saturating_sub(x));
+            let h=u32::from(rect.height).min(rows.saturating_sub(y));
+            if w>0 && h>0 { renderer.fill_rect(x,y,w,h,panel)?; }
+            for item in &menu.items {
+                let ix=u32::from(item.rect.x); let iy=u32::from(item.rect.y);
+                if ix>=cols || iy>=rows { continue; }
+                let iw=u32::from(item.rect.width).min(cols.saturating_sub(ix));
+                let bg=paint_color(ctx.palette,item.background); let fg=paint_color(ctx.palette,item.foreground);
+                if iw>0 { renderer.fill_rect(ix,iy,iw,1,bg)?; }
+                renderer.draw_text_styled(ix+u32::from(item.rect.width>=3),iy,&item.label,fg,Some(bg),0)?;
+            }
+        }
+    }
+    if let Some((title,error))=ctx.rename_dialog.as_ref() {
+        let w=cols.min(60); let h=5u32.min(rows); let x=(cols-w)/2; let y=(rows-h)/2;
+        let bg=paint_color(ctx.palette,crate::native_theme_runtime::Slot::BackgroundPanel); let fg=paint_color(ctx.palette,crate::native_theme_runtime::Slot::Text);
+        if w>0&&h>0 { renderer.fill_rect(x,y,w,h,bg)?; renderer.draw_text_styled(x+1,y,"Rename session",fg,Some(bg),0)?; }
+        if h>1 { renderer.draw_text_styled(x+1,y+1,&crate::native_view_layout::fit(title,w.saturating_sub(2) as u16),fg,Some(bg),0)?; }
+        if h>2 { renderer.draw_text_styled(x+1,y+2,"Enter: save  Esc: cancel",fg,Some(bg),0)?; }
+        if let Some(error)=error { if h>3 { renderer.draw_text_styled(x+1,y+3,&crate::native_view_layout::fit(error,w.saturating_sub(2) as u16),paint_color(ctx.palette,crate::native_theme_runtime::Slot::TextMuted),Some(bg),0)?; } }
     }
     renderer.frame(|_| {})?;
     Ok(())
@@ -3551,6 +4014,18 @@ fn native_loop(
     // Press capture binds the click to a stable tab and painted rect.
     let mut tab_press: Option<(crate::native_navigation::SessionRef, crate::native_tabs::TabRect, bool, TabOrientation)> = None;
     let mut add_press: Option<(crate::native_tabs::TabRect, TabOrientation)> = None;
+    let mut context_menu: Option<crate::native_tab_context_menu::TabContextMenu> = None;
+    let mut rename_input: Option<(crate::native_navigation::SessionRef, String)> = None;
+    let mut rename_error: Option<String> = None;
+    // Rename settlements ride the same bounded background-worker/channel
+    // polling pattern as completion/history: spawn_blocking posts one owned
+    // result, the synchronous loop drains it on every iteration (never
+    // awaiting, never blocking the UI thread on HTTP).
+    let (rename_tx, mut rename_rx) = tokio::sync::mpsc::channel::<
+        Result<(String, u16, String, String), String>,
+    >(1);
+    let mut rename_inflight: Option<RenameInFlight> = None;
+    let mut rename_worker: Option<tokio::task::JoinHandle<()>> = None;
     let mut tab_viewport: Option<(u16, u16)> = None;
     if !memory.is_empty() {
         transcript.push(format!("memory: {} file(s) loaded", memory.len()));
@@ -3867,6 +4342,51 @@ fn native_loop(
             // A failed worker may be retried on the next trigger, without an
             // automatic retry loop or permanently retaining its dead handle.
             completion_load.take();
+        }
+        if let Ok(result) = rename_rx.try_recv() {
+            if let Some(inflight) = rename_inflight.take() {
+                let owned_by_dialog =
+                    rename_dialog_owns(rename_input.as_ref().map(|(open, _)| open), &inflight);
+                let settlement = rename_settlement(&inflight, result);
+                if let Some((session, title)) = settlement.accepted {
+                    // Server truth for exactly the requested id: record it in
+                    // the bounded roster and the bound snapshot when present.
+                    if let Some(snapshot) =
+                        live.as_mut().filter(|snapshot| snapshot.session_id == session.0)
+                    {
+                        snapshot.title = title.clone();
+                    }
+                    navigation.ingest_snapshot_title(session, title);
+                    // Only the dialog that still owns this exact id closes;
+                    // a cancelled or retargeted dialog is never cleared by
+                    // someone else's ack.
+                    if owned_by_dialog {
+                        rename_input = None;
+                        rename_error = None;
+                    }
+                } else if let Some(message) = settlement.message {
+                    if owned_by_dialog {
+                        rename_error = Some(message);
+                    } else {
+                        append_transcript(&mut transcript, format!("error: session rename: {message}"));
+                    }
+                }
+            }
+            rename_worker = None;
+            needs_paint = true;
+        } else if rename_worker.as_ref().is_some_and(|worker| worker.is_finished()) {
+            // The worker exited without delivering: fail closed instead of
+            // leaving the request pending forever, and only tell a dialog
+            // that is still open for the same in-flight id.
+            let owned_by_dialog = rename_inflight.as_ref().is_some_and(|inflight| {
+                rename_dialog_owns(rename_input.as_ref().map(|(open, _)| open), inflight)
+            });
+            if owned_by_dialog {
+                rename_error = Some("Rename failed: request exited without a response".into());
+            }
+            rename_worker = None;
+            rename_inflight = None;
+            needs_paint = true;
         }
         if let Ok((request, result)) = history_rx.try_recv() {
             history_trace("history.response.received", &view, history_window.as_ref(), Some(request), history_navigation_request, history_pending, history_navigation_revision, None);
@@ -4763,6 +5283,7 @@ fn native_loop(
         let tab_reservation = TabReservation::for_view(configured_orientation, viewport.0, viewport.1);
         let effective_orientation = tab_reservation.orientation.unwrap_or(TabOrientation::Horizontal);
         if tab_viewport != Some(viewport) {
+            context_menu = None;
             tab_hovered = None;
             tab_viewport = Some(viewport);
         }
@@ -4999,6 +5520,8 @@ fn native_loop(
                     },
             tabs: Some(frame_tabs.clone()),
             vertical_rail: frame_rail.clone(),
+            context_menu: context_menu.as_ref().map(|menu| menu.frame(crate::native_tab_context_menu::Viewport { width: viewport.0, height: viewport.1 })),
+            rename_dialog: rename_input.as_ref().map(|(_,title)| (title.clone(), rename_error.clone())),
                 },
             )?;
             rendered_tabs = Some(frame_tabs);
@@ -5313,9 +5836,105 @@ fn native_loop(
                 _ => {}
             }
         }
+        // Rename dialog owns input before every widget below: Escape and
+        // Ctrl-C/Ctrl-D cancel only (never exit), Enter submits through the
+        // real PATCH route, backspace edits, text is bounded UTF-8.
+        if rename_input.is_some() {
+            if rename_dismisses(&event) {
+                rename_input = None;
+                rename_error = None;
+                utf8.reset();
+                needs_paint = true;
+                continue;
+            }
+            if rename_submits(&event) {
+                let (session, value) = rename_input.as_ref().expect("rename owns input");
+                let Some(title) = rename_accepted_title(value) else {
+                    rename_error = Some("Title cannot be empty".into());
+                    needs_paint = true;
+                    continue;
+                };
+                // Exactly one bounded request in flight: a second Enter is a
+                // truthful refusal, never a queued duplicate or a racing ack.
+                if rename_inflight.is_some() {
+                    rename_error = Some("A rename request is already in flight".into());
+                    needs_paint = true;
+                    continue;
+                }
+                let Some(snapshot) = live.as_ref().filter(|s| s.session_id == session.0) else {
+                    rename_error =
+                        Some("Rename refused: target session is no longer active".into());
+                    needs_paint = true;
+                    continue;
+                };
+                let origin = snapshot.origin.clone();
+                let auth_value = auth.map(str::to_owned);
+                let id = session.0.clone();
+                let body = rename_request_body(&title);
+                let path = rename_request_path(&id);
+                let tx = rename_tx.clone();
+                rename_inflight = Some(crate::native_navigation::SessionRef(id.clone()));
+                rename_worker = Some(tokio::task::spawn_blocking(move || {
+                    let result = http_request_with_status(
+                        &origin,
+                        "PATCH",
+                        &path,
+                        Some(&body),
+                        auth_value.as_deref(),
+                    )
+                    .map(|(body, status)| (body, status, title, id));
+                    let _ = tx.blocking_send(result);
+                }));
+                rename_error = None;
+                needs_paint = true;
+                continue;
+            }
+            if rename_backspace(&event) {
+                if let Some((_, value)) = rename_input.as_mut() {
+                    value.pop();
+                }
+                utf8.reset();
+                needs_paint = true;
+                continue;
+            }
+            if let native_input_decoder::InputEvent::Byte(byte) = &event {
+                if *byte >= 32 {
+                    if let Some(ch) = utf8.push(*byte) {
+                        if let Some((_, value)) = rename_input.as_mut() {
+                            if value.len() + ch.len_utf8() <= 256 && !ch.is_control() {
+                                value.push(ch);
+                            }
+                        }
+                    }
+                    needs_paint = true;
+                }
+                continue;
+            }
+            continue;
+        }
+        if context_menu.is_some() && menu_dismisses(&event) {
+            context_menu = None;
+            needs_paint = true;
+            continue;
+        }
         let byte = match event {
             native_input_decoder::InputEvent::Byte(byte) => byte,
             native_input_decoder::InputEvent::Mouse { x, y, kind, modifiers } => {
+                let menu_vp=crate::native_tab_context_menu::Viewport { width:viewport.0,height:viewport.1 };
+                if let Some(menu)=context_menu.as_mut() {
+                    let me=match kind { 0=>Some(crate::native_tab_context_menu::MenuEvent::PointerDown{button:crate::native_tab_context_menu::MouseButton::Left,x,y}),2=>Some(crate::native_tab_context_menu::MenuEvent::PointerUp{button:crate::native_tab_context_menu::MouseButton::Left,x,y}),5=>Some(crate::native_tab_context_menu::MenuEvent::PointerDown{button:crate::native_tab_context_menu::MouseButton::Right,x,y}),6=>Some(crate::native_tab_context_menu::MenuEvent::PointerUp{button:crate::native_tab_context_menu::MouseButton::Right,x,y}),7=>Some(crate::native_tab_context_menu::MenuEvent::PointerMove{x,y}),3|4=>Some(crate::native_tab_context_menu::MenuEvent::Scroll{delta:if kind==3{-3}else{3},x,y}),_=>None};
+                    if let Some(me)=me { let outcome=menu.handle(me,menu_vp); if let crate::native_tab_context_menu::MenuOutcome::Invoke(action)=outcome { context_menu=None; match action {
+                        crate::native_tab_context_menu::MenuAction::NewSession => { let model=selected.as_ref().map(|m|m.qualified()); let saved=if navigation.active().is_some(){navigation.save_active_state(draft.clone(),draft_cursor,view.chat_scroll_offset(),model)}else{Ok(())}; if let Err(e)=saved{append_transcript(&mut transcript,format!("error: new tab: state save refused: {e:?}"));}else{live=None;history_window=None;history_pending=false;history_active=None;history_navigation_request=None;blocked_history_scroll=None;history_tail_refresh_pending=false;history_browsing=false;draft.clear();draft_cursor=0;navigation.enter_home();session_route=false;view.reset_to_home_after_tab_close();view.set_chat_scroll_offset(0);} },
+                        crate::native_tab_context_menu::MenuAction::CopySessionId{session}=>{let frame=selection_clipboard_frame(&session.0);let mut out=std::io::stdout().lock();out.write_all(frame.as_bytes())?;out.flush()?;},
+                        crate::native_tab_context_menu::MenuAction::Close{session}=>{let scroll=view.chat_scroll_offset();match close_tab_transition(&mut view,&mut transcript,&mut navigation,&draft,draft_cursor,live.as_ref().map(|s|s.origin.as_str()),auth,binding_generation,&session,selected.as_ref().map(|m|m.qualified()),scroll){Ok(result)=>apply_close_tab_result(result,&mut view,&mut live,&mut history_window,&mut binding_generation,&mut draft,&mut draft_cursor,&mut selected,&models,&mut session_route,&mut compact_worker),Err(e)=>append_transcript(&mut transcript,format!("error: close tab: {e}"))}},
+                        crate::native_tab_context_menu::MenuAction::Rename{session,current_title}=>{rename_input=Some((session,current_title));rename_error=None;},
+                        crate::native_tab_context_menu::MenuAction::Reopen{..}=>{},
+                    }} else if !menu.is_open(){context_menu=None;} needs_paint=true; }
+                    continue;
+                }
+                if kind==5 && modifiers==0 && !view.dialogs.intercepts_input() && !permission_editor.open && !appearance.open && !children_panel.open && !help_open && !view.command_palette_open() && matches!(dialog,native_setup::Dialog::None) && import_dialog.as_ref().is_none_or(|i|!i.is_open()) && !page_open {
+                    if let Some(target)=tab_menu_target_at(&navigation,rendered_tabs.as_ref(),rendered_rail.as_ref(),effective_orientation==TabOrientation::Vertical,x,y) { let menu=crate::native_tab_context_menu::TabContextMenu::new(x,y,target); if menu.is_open() && !menu.items().is_empty(){context_menu=Some(menu);} tab_press=None;add_press=None;tab_hovered=None;needs_paint=true;continue; }
+                }
                 if kind != 0 && kind != 2 && kind != 7 { tab_press = None; add_press = None; }
                 if !view.dialogs.intercepts_input() && !permission_editor.open && !appearance.open && !children_panel.open
                     && !help_open && !view.command_palette_open() && matches!(dialog, native_setup::Dialog::None)

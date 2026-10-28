@@ -83,6 +83,8 @@ mod native_palette;
 mod native_shell;
 mod native_status;
 #[cfg(feature = "native")]
+mod native_tab_context_menu;
+#[cfg(feature = "native")]
 mod native_tabs;
 #[cfg(feature = "native")]
 mod native_tab_rail;
