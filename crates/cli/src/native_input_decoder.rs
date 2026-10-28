@@ -519,9 +519,12 @@ fn decode_mouse(sequence: &[u8], end: u8) -> Option<InputEvent> {
     let modifiers = (button & 28) as u8;
     let kind = match (button & !28, end) {
         (0, b'M') => 0,
+        (1, b'M') => 8,
         (32, b'M') => 1,
+        (33, b'M') => 10,
         (35, b'M') => 7,
         (0 | 3, b'm') => 2,
+        (1, b'm') => 9,
         (64, b'M') => 3,
         (65, b'M') => 4,
         (2, b'M') => 5,
@@ -653,6 +656,56 @@ mod mouse_protocol_tests {
             decoder.pop(),
             Some(InputEvent::Mouse { x: 3, y: 1, kind: 6, modifiers: 0 })
         );
+    }
+
+    #[test]
+    fn sgr_middle_press_decode_distinctly_from_left_and_drag() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[<1;5;3M" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::Mouse { x: 4, y: 2, kind: 8, modifiers: 0 }));
+        assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn sgr_middle_release_is_not_silently_dropped() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[<1;9;7m" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::Mouse { x: 8, y: 6, kind: 9, modifiers: 0 }));
+        assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn sgr_middle_drag_is_classified_not_confused_with_left_drag_or_release() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[<33;4;2M" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::Mouse { x: 3, y: 1, kind: 10, modifiers: 0 }));
+        assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn sgr_middle_press_with_modifiers_retains_modifier_bits_and_kind() {
+        for (cb, modbit) in [(5, 4), (9, 8), (17, 16), (29, 28)] {
+            let sequence = format!("\x1b[<{};6;2M", cb);
+            let mut decoder = TerminalInputDecoder::default();
+            for byte in sequence.bytes() { decoder.push(byte, Instant::now()); }
+            assert_eq!(decoder.pop(), Some(InputEvent::Mouse { x: 5, y: 1, kind: 8, modifiers: modbit }));
+            assert_eq!(decoder.pop(), None);
+        }
+    }
+
+    #[test]
+    fn sgr_interleaved_middle_down_up_does_not_corrupt_following_left_events() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[<1;2;2M\x1b[<1;2;2m\x1b[<0;3;3M\x1b[<0;3;3m" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::Mouse { x: 1, y: 1, kind: 8, modifiers: 0 }));
+        assert_eq!(decoder.pop(), Some(InputEvent::Mouse { x: 1, y: 1, kind: 9, modifiers: 0 }));
+        assert_eq!(decoder.pop(), Some(InputEvent::Mouse { x: 2, y: 2, kind: 0, modifiers: 0 }));
+        assert_eq!(decoder.pop(), Some(InputEvent::Mouse { x: 2, y: 2, kind: 2, modifiers: 0 }));
+        assert_eq!(decoder.pop(), None);
     }
 }
 

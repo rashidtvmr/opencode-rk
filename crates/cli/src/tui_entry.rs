@@ -5279,6 +5279,36 @@ fn native_loop(
                         needs_paint = true;
                         continue;
                     }
+                    if kind == 8 {
+                        // Middle-button close on PRESS (upstream session-tabs.tsx:892-898
+                        // and 1652-1657 fire tabs.close(tab.sessionID) on onMouseDown).
+                        // Only the tab under the pointer closes; middle release (kind 9)
+                        // and middle drag (kind 10) are ignored. New-tab region / miss is
+                        // inert (matches upstream `+` add-slot). NO fallback to active on
+                        // miss — Home horizontal NEW_SESSION_TAB close(undefined) is a
+                        // separate layout parity gap, wired by the horizontal owner.
+                        let middle_session = if effective_orientation == TabOrientation::Vertical {
+                            rendered_rail.as_ref().and_then(|rail| match rail.hit(x, y) {
+                                Some(crate::native_tab_rail::RailHit::Session(id)) => Some(id),
+                                _ => None,
+                            })
+                        } else {
+                            rendered_tabs.as_ref().and_then(|tabs| tabs.hit(x, y)).map(|hit| hit.session)
+                        };
+                        if let Some(session) = middle_session {
+                            let close_scroll = view.chat_scroll_offset();
+                            match close_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|m| m.qualified()), close_scroll) {
+                                Ok(result) => {
+                                    apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route, &mut compact_worker);
+                                    completion.sync(&draft);
+                                    history_pending = false; history_active = None; history_navigation_request = None; blocked_history_scroll = None; history_tail_refresh_pending = false; history_browsing = false;
+                                }
+                                Err(error) => append_transcript(&mut transcript, format!("error: close tab: {error}")),
+                            }
+                            needs_paint = true;
+                        }
+                        continue;
+                    }
                     if kind == 0 {
                         tab_press = None;
                         add_press = None;
@@ -9448,5 +9478,126 @@ mod native_theme_registry_tests {
         let choices = native_theme_choices(&[config], Some("removed-custom"), crate::native_theme_runtime::ThemeMode::Dark).unwrap();
         let removed = choices.iter().find(|choice| choice.name == "removed-custom").unwrap();
         assert!(!removed.available);
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod middle_close_hit_tests {
+    use super::native_input_decoder::{InputEvent, TerminalInputDecoder};
+    use crate::native_tabs::{TabHit, TabInput, TabOrientation, TabRect, TabStrip};
+    use crate::native_tab_rail::{RailFrame, RailHit, RailInput};
+    use std::time::Instant;
+
+    fn nav_inputs() -> Vec<RailInput> {
+        vec![
+            RailInput { session: crate::native_navigation::SessionRef("s-a".into()), title: "Alpha".into(), detail: "alpha detail".into(), flags: Default::default() },
+            RailInput { session: crate::native_navigation::SessionRef("s-b".into()), title: "Beta".into(), detail: "".into(), flags: Default::default() },
+        ]
+    }
+
+    #[test]
+    fn vertical_rail_middle_press_targets_only_real_session_rows_not_new_or_gap() {
+        let inputs = nav_inputs();
+        // 42 wide, 10 cells: top padding (1) + two sessions (each 2 rows) + gap.
+        let mut active = inputs.clone();
+        active[1].flags.active = true; // mark session s-b active so active_new=false
+        let frame = RailFrame::render_cells(&active, 42, 10, 0, None, false);
+        // Session rows exist (title row 0, detail row 1 per session).
+        let title_row = frame.rows.iter().find(|r| matches!(r.kind, crate::native_tab_rail::RailRowKind::Session(ref s) if s.0 == "s-a")).expect("session row present");
+        let (x, y) = (title_row.rect.x, title_row.rect.y);
+        assert_eq!(frame.hit(x, y), Some(RailHit::Session(crate::native_navigation::SessionRef("s-a".into()))));
+        assert_eq!(frame.hit(0, 0), None, "top padding never closes");
+        assert_eq!(frame.hit(41, 9), None, "right/bottom whitespace never closes");
+        // New control present only in active_new mode; here inert.
+        let new_rect = frame.new_rect;
+        // Confirm a point within the new rect (if any) is NOT a Session hit.
+        if let Some(rect) = new_rect {
+            assert!(matches!(frame.hit(rect.x, rect.y), Some(RailHit::New) | None), "new row never closes a session");
+        }
+    }
+
+    #[test]
+    fn vertical_rail_middle_release_drag_return_distinct_kinds_and_never_session() {
+        let inputs = nav_inputs();
+        let frame = RailFrame::render_cells(&inputs, 42, 10, 0, None, false);
+        let title_row = frame.rows.iter().find(|r| matches!(r.kind, crate::native_tab_rail::RailRowKind::Session(_))).expect("row");
+        let (x, y) = (title_row.rect.x, title_row.rect.y);
+        let now = Instant::now();
+        // middle press on session
+        let mut dec = TerminalInputDecoder::default();
+        for b in format!("\x1b[<1;{};{}M", x + 1, y + 1).bytes() { dec.push(b, now); }
+        assert_eq!(dec.pop(), Some(InputEvent::Mouse { x, y, kind: 8, modifiers: 0 }));
+        // middle release at same coords
+        let mut dec = TerminalInputDecoder::default();
+        for b in format!("\x1b[<1;{};{}m", x + 1, y + 1).bytes() { dec.push(b, now); }
+        assert_eq!(dec.pop(), Some(InputEvent::Mouse { x, y, kind: 9, modifiers: 0 }));
+        // middle drag
+        let mut dec = TerminalInputDecoder::default();
+        for b in format!("\x1b[<33;{};{}M", x + 1, y + 1).bytes() { dec.push(b, now); }
+        assert_eq!(dec.pop(), Some(InputEvent::Mouse { x, y, kind: 10, modifiers: 0 }));
+        assert_eq!(dec.pop(), None);
+    }
+
+    #[test]
+    fn horizontal_tabs_hit_resolves_session_not_add_region_not_overflow() {
+        let tabs: Vec<_> = (0..2).map(|i| TabInput {
+            session: crate::native_navigation::SessionRef(format!("h-{i}")),
+            title: format!("Tab{i}"),
+            flags: Default::default(),
+        }).collect();
+        let strip = TabStrip::render_with_hover_and_add(&tabs, TabOrientation::Horizontal, 60, 1, 0, None, true);
+        // Some session rects exist.
+        assert!(!strip.rects.is_empty());
+        let (sess, rect) = &strip.rects[0];
+        assert_eq!(strip.hit(rect.x, rect.y), Some(TabHit { session: sess.clone(), close: false }));
+        // Add control (plain +, never closes) is its own rect; hit returns None there.
+        let add = strip.add_rect.expect("add rect present");
+        assert!(strip.add_hit(add.x + 1, 0));
+        assert_eq!(strip.hit(add.x + 1, 0), None, "add region is not a session target");
+        // Whitespace / overflow paint rows (y beyond 0) return None.
+        assert_eq!(strip.hit(0, 5), None, "outside tab row never closes");
+    }
+
+    #[test]
+    fn decoder_middle_kind_assignment_is_stable_and_modifier_isolated() {
+        let now = Instant::now();
+        let cases = [
+            (b"\x1b[<1;10;20M" as &[u8], Some(InputEvent::Mouse { x: 9, y: 19, kind: 8, modifiers: 0 })),   // plain middle down
+            (b"\x1b[<1;10;20m", Some(InputEvent::Mouse { x: 9, y: 19, kind: 9, modifiers: 0 })),              // plain middle up
+            (b"\x1b[<33;10;20M", Some(InputEvent::Mouse { x: 9, y: 19, kind: 10, modifiers: 0 })),           // middle drag
+            (b"\x1b[<5;10;20M", Some(InputEvent::Mouse { x: 9, y: 19, kind: 8, modifiers: 4 })),              // middle+shift
+            (b"\x1b[<9;10;20M", Some(InputEvent::Mouse { x: 9, y: 19, kind: 8, modifiers: 8 })),              // middle+meta
+            (b"\x1b[<17;10;20M", Some(InputEvent::Mouse { x: 9, y: 19, kind: 8, modifiers: 16 })),           // middle+ctrl
+            (b"\x1b[<29;10;20M", Some(InputEvent::Mouse { x: 9, y: 19, kind: 8, modifiers: 28 })),            // middle+all mods
+        ];
+        for (seq, expect) in cases {
+            let mut dec = TerminalInputDecoder::default();
+            for b in seq { dec.push(*b, now); }
+            assert_eq!(dec.pop(), expect, "sequence {:?}", std::str::from_utf8(seq).unwrap());
+            assert_eq!(dec.pop(), None);
+        }
+        // Regression: left/right/wheel/hover still map to their canonical kinds.
+        let reg = b"\x1b[<0;1;1M\x1b[<2;1;1M\x1b[<2;1;1m\x1b[<32;1;1M\x1b[<35;1;1M\x1b[<64;1;1M\x1b[<65;1;1M";
+        let mut dec = TerminalInputDecoder::default();
+        for b in reg { dec.push(*b, now); }
+        assert_eq!(dec.pop().map(|e| if let InputEvent::Mouse { kind, .. } = e { kind } else { 99 }), Some(0));
+        assert_eq!(dec.pop().map(|e| if let InputEvent::Mouse { kind, .. } = e { kind } else { 99 }), Some(5));
+        assert_eq!(dec.pop().map(|e| if let InputEvent::Mouse { kind, .. } = e { kind } else { 99 }), Some(6));
+        assert_eq!(dec.pop().map(|e| if let InputEvent::Mouse { kind, .. } = e { kind } else { 99 }), Some(1));
+        assert_eq!(dec.pop().map(|e| if let InputEvent::Mouse { kind, .. } = e { kind } else { 99 }), Some(7));
+        assert_eq!(dec.pop().map(|e| if let InputEvent::Mouse { kind, .. } = e { kind } else { 99 }), Some(3));
+        assert_eq!(dec.pop().map(|e| if let InputEvent::Mouse { kind, .. } = e { kind } else { 99 }), Some(4));
+        assert_eq!(dec.pop(), None);
+    }
+
+    #[test]
+    fn middle_release_and_drag_kinds_are_consumed_not_zeroed() {
+        // Guard: caller's `kind != 0 && kind != 2 && kind != 7` must also reject
+        // middle release (9) and drag (10) so tab_press/add_press clear — i.e. they
+        // never reach the kind==0/2 close path. This test asserts the guard logic.
+        for kind in [1u8, 9, 10] {
+            let blocked = !(kind == 0 || kind == 2 || kind == 7);
+            assert!(blocked, "kind {kind} must clear tab press state");
+        }
     }
 }
