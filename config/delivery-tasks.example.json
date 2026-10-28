@@ -1,0 +1,22 @@
+{
+  "description": "Example only: replace with an observed failure and exact tests before importing. Nothing imports automatically.",
+  "tasks": [
+    {
+      "id": "EXAMPLE-TUI-BEHAVIOR",
+      "source": "Replace with the current user requirement and pinned upstream file/symbol or an observed failure log.",
+      "goal": "Replace this example with one complete native UI behavior and its focused integration test.",
+      "priority": 2,
+      "dependencies": [],
+      "paths": ["crates/cli/src/example_feature.rs", "crates/cli/tests/example_feature.rs"],
+      "reviews": 1,
+      "checks": [
+        {
+          "id": "example-behavior",
+          "argv": ["cargo", "test", "-p", "opencode-rk-cli", "--test", "example_feature", "--locked"],
+          "required_output": ["test result: ok"],
+          "timeout": 900
+        }
+      ]
+    }
+  ]
+}

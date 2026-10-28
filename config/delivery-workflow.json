@@ -1,0 +1,129 @@
+{
+  "schema": 1,
+  "branch": "main-v2",
+  "workers": 20,
+  "max_wip": 40,
+  "heavy_checks": 1,
+  "lease_seconds": 60,
+  "stage_timeout": 1800,
+  "attempts": 3,
+  "diagnoses": 1,
+  "max_output_bytes": 8388608,
+  "min_free_bytes": 2147483648,
+  "runtime": {
+    "kind": "opencode",
+    "executable": "opencode",
+    "standalone": false,
+    "agent_config": "~/.config/opencode/opencode.json",
+    "forward_env": []
+  },
+  "routes": [
+    {
+      "agent": "vyce-deepseek-v41",
+      "max_parallel": 8
+    },
+    {
+      "agent": "9router-river-glm-5-3-flash",
+      "max_parallel": 40
+    },
+    {
+      "agent": "9router-vyce-deepseek-v4.1-free-combined",
+      "max_parallel": 40
+    },
+    {
+      "agent": "9router-th-free",
+      "max_parallel": 40
+    },
+    {
+      "agent": "xkiro-mimo-v2-6-flash",
+      "max_parallel": 40
+    }
+  ],
+  "use_recovery_capability": true,
+  "guard_checks": [],
+  "full_checks": [
+    {
+      "id": "delivery-regressions",
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests/delivery",
+        "-p",
+        "test_*.py",
+        "-q"
+      ],
+      "timeout": 1800,
+      "required_output": [
+        "OK"
+      ]
+    },
+    {
+      "id": "workspace",
+      "argv": [
+        "cargo",
+        "test",
+        "--workspace",
+        "--locked",
+        "--all-targets"
+      ],
+      "timeout": 3600,
+      "required_output": [
+        "test result: ok"
+      ]
+    }
+  ],
+  "post_merge_checks": [
+    {
+      "id": "delivery-regressions",
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests/delivery",
+        "-p",
+        "test_*.py",
+        "-q"
+      ],
+      "timeout": 1800,
+      "required_output": [
+        "OK"
+      ]
+    },
+    {
+      "id": "workspace",
+      "argv": [
+        "cargo",
+        "test",
+        "--workspace",
+        "--locked",
+        "--all-targets"
+      ],
+      "timeout": 3600,
+      "required_output": [
+        "test result: ok"
+      ]
+    }
+  ],
+  "frozen_tests": [
+    "tests/e2e",
+    "tests/bootstrap"
+  ],
+  "security_paths": [
+    "crates/security",
+    "crates/tools",
+    "crates/providers",
+    "crates/server/src/daemon_auth.rs",
+    "crates/server/src/lib.rs"
+  ],
+  "protected_paths": [
+    "tests/delivery",
+    "tools/dynamic_agent_allocator.py",
+    "tools/recovery_delivery.py",
+    "docs/CONTINUOUS_DELIVERY.md"
+  ]
+}
