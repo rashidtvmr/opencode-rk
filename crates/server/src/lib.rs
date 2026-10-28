@@ -228,6 +228,7 @@ pub fn router_with_events_and_integration(
                 .layer(axum::extract::DefaultBodyLimit::max(32 * 1024)),
         )
         .route("/api/sessions", get(list_sessions).post(create_session))
+        .route("/api/sessions/live", get(list_live_sessions))
         .route("/api/sessions/{id}", get(get_session).patch(rename_session))
         .route("/api/sessions/{id}/archive", post(archive_session))
         .route("/api/sessions/{id}/compact", post(compact_session))
@@ -555,6 +556,15 @@ async fn interrupt_session(
     })?;
     run_owner::cancel_and_wait(id).await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Live, process-local projection of every admitted run owner (roots and
+/// children). Registered literally before the `/api/sessions/{id}` wildcard
+/// so "live" can never be captured as an id; under the shared `/api/` prefix
+/// it is gated by `require_bearer` like every other session route. Emits only
+/// stable identity and lifecycle booleans; never permission request bodies.
+async fn list_live_sessions() -> Json<Value> {
+    Json(json!({"data": run_owner::snapshot()}))
 }
 
 async fn list_session_permissions(

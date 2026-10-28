@@ -154,6 +154,15 @@ impl RunOwner {
             .map(|pending| pending.request.clone())
     }
 
+    /// Lock-protected presence check without cloning the request payload.
+    /// Returns true when a human-pending permission is stored; the request
+    /// body (including `resources`, which embeds the serialized
+    /// `OperationIntent`) is never read or copied. Poison-safe: a poisoned
+    /// mutex reports no pending permission rather than panicking.
+    pub fn has_pending(&self) -> bool {
+        self.pending.lock().is_ok_and(|guard| guard.is_some())
+    }
+
     pub fn install_pending(
         &self,
         request: PermissionRequest,
@@ -176,6 +185,35 @@ impl RunOwner {
             }
             Err(_)=>return Err(Box::new(request)),
             Ok(None)=>{}
+        }
+        *pending = Some(PendingPermission {
+            request,
+            intent,
+            policy_context: broker.policy_context(),
+            broker: broker.clone(),
+            reply,
+        });
+        Ok(receiver)
+    }
+
+    /// TEST-ONLY direct pending injection. Identical slot semantics to
+    /// `install_pending` (exclusive pending slot, refuses when cancelled or
+    /// already pending) but skips persisted-rule adjudication so tests never
+    /// read or depend on the real user preference file at
+    /// `permission_rules::path()`. Compiled out of release builds; no
+    /// production caller exists, so broker adjudication and its security
+    /// properties are untouched.
+    #[cfg(test)]
+    pub(crate) fn install_pending_test_only(
+        &self,
+        request: PermissionRequest,
+        intent: OperationIntent,
+        broker: &PermissionBroker,
+    ) -> Result<oneshot::Receiver<ApprovedPermission>, Box<PermissionRequest>> {
+        let (reply, receiver) = oneshot::channel();
+        let mut pending = self.pending.lock().map_err(|_| Box::new(request.clone()))?;
+        if pending.is_some() || self.is_cancelled() {
+            return Err(Box::new(request));
         }
         *pending = Some(PendingPermission {
             request,
@@ -468,6 +506,53 @@ pub fn active(session_id: SessionId) -> Option<Arc<RunOwner>> {
         .cloned()
 }
 
+/// Atomically projected rail-tab view of one live run owner. Carries only
+/// stable, non-secret identity and lifecycle booleans: it never exposes a
+/// `PermissionRequest` or its `resources` field (which embeds the serialized
+/// `OperationIntent`: file paths, process args, SQL, MCP argument JSON), the
+/// pending intent, policy context, broker, or any capability token.
+/// `admitted` reflects registry admission only, not an in-flight model turn;
+/// `has_pending` is a presence boolean, never the request body.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct SessionTab {
+    #[serde(rename = "sessionID")]
+    pub session_id: String,
+    #[serde(rename = "runID")]
+    pub run_id: u64,
+    #[serde(rename = "admitted")]
+    pub admitted: bool,
+    #[serde(rename = "cancelled")]
+    pub cancelled: bool,
+    #[serde(rename = "hasPendingPermission")]
+    pub has_pending: bool,
+}
+
+/// Single-lock atomic snapshot of every live run owner (roots and children
+/// share `ACTIVE_TURNS`, so both appear) in registry-slot order. Bounded by
+/// `MAX_ACTIVE_TURNS + MAX_ACTIVE_CHILD_TURNS` by construction. Holds
+/// `ACTIVE_TURNS` across field copies and the boolean `has_pending` probe --
+/// the same outer-to-inner order (`ACTIVE_TURNS`, then `RunOwner.pending`)
+/// as the existing `active` + `pending` caller in lib.rs, so no lock
+/// inversion is introduced. Returns empty on a poisoned registry rather
+/// than panicking.
+pub fn snapshot() -> Vec<SessionTab> {
+    let active = match ACTIVE_TURNS.lock() {
+        Ok(active) => active,
+        Err(_) => return Vec::new(),
+    };
+    active
+        .iter()
+        .flatten()
+        .map(|owner| SessionTab {
+            session_id: owner.session_id.to_string(),
+            run_id: owner.run_id,
+            admitted: true,
+            cancelled: owner.is_cancelled(),
+            has_pending: owner.has_pending(),
+        })
+        .collect()
+}
+
 pub async fn cancel_and_wait(session_id: SessionId) {
     let Some(owner) = active(session_id) else {
         return;
@@ -667,5 +752,218 @@ mod admission_lane_tests {
         let mut cancelled = owner.explicit_cancellation_receiver();
         owner.cancel_explicit();
         assert!(*cancelled.borrow_and_update());
+    }
+
+    /// LIVE-SNAPSHOT (v3): the rail snapshot must expose registry admission
+    /// and lifecycle booleans only. These tests share the process-global
+    /// admission registry with the lane-exhaustion tests above, so they
+    /// serialize through `hold_admission_test_lock`. Import resolution:
+    /// `hold_admission_test_lock` is `admission_lane_tests`-local (`super`),
+    /// while `snapshot`, `PermissionRequest`, `PermissionSource` and the
+    /// capacity constants live on the `run_owner` module (`super::super`),
+    /// where private imports remain visible to descendant test modules.
+    mod snapshot_tests {
+        use super::hold_admission_test_lock;
+        use super::super::{
+            MAX_ACTIVE_CHILD_TURNS, MAX_ACTIVE_TURNS, PermissionRequest, PermissionSource,
+            TurnExecutionPermit, snapshot,
+        };
+        use opencode_rk_contracts::SessionId;
+        use opencode_rk_security::{OperationIntent, PermissionBroker, SecurityPolicy};
+
+        fn fresh() -> SessionId {
+            SessionId::new()
+        }
+
+        // Unique fake secret/path injected into a real OperationIntent (process
+        // args + cwd) and, mirroring real call sites, into the request's
+        // `resources` as the serialized intent. Neither may ever appear in a
+        // serialized rail tab or the live route body.
+        const FAKE_SECRET: &str = "rail-snapshot-fake-secret-9f3a7c1e";
+        const FAKE_PATH: &str = "/tmp/rail-fake-path-7b2d406";
+
+        fn broker() -> PermissionBroker {
+            PermissionBroker::new(SecurityPolicy::lean_default("/"))
+        }
+
+        fn secret_request(session_id: SessionId) -> (PermissionRequest, OperationIntent) {
+            let intent = OperationIntent::Process {
+                program: "cat".to_owned(),
+                args: vec!["read".to_owned(), FAKE_SECRET.to_owned()],
+                cwd: std::path::PathBuf::from(FAKE_PATH),
+            };
+            let request = PermissionRequest {
+                id: "per_snapshot_fixture".to_owned(),
+                session_id: session_id.to_string(),
+                action: "process: cat".to_owned(),
+                resources: vec![serde_json::to_string(&intent).expect("intent serializes")],
+                source: PermissionSource {
+                    kind: "tool",
+                    message_id: "m-snapshot".to_owned(),
+                    call_id: "c-snapshot".to_owned(),
+                },
+            };
+            (request, intent)
+        }
+
+        /// The wire shape of one rail tab is exactly these five keys. Any
+        /// future sensitive field added to `SessionTab` breaks this key set,
+        /// so this is a positive shape contract, not a name-substring scan.
+        const TAB_KEYS: [&str; 5] = [
+            "sessionID",
+            "runID",
+            "admitted",
+            "cancelled",
+            "hasPendingPermission",
+        ];
+
+        fn assert_tab_wire_shape(tab: &serde_json::Value) {
+            let object = tab.as_object().expect("rail tab serializes as an object");
+            let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+            keys.sort_unstable();
+            let mut expected = TAB_KEYS;
+            expected.sort_unstable();
+            assert_eq!(keys, expected, "rail tab wire shape must stay boolean-only");
+        }
+
+        #[test]
+        fn snapshot_empty_when_no_owners() {
+            let _lock = hold_admission_test_lock();
+            assert!(snapshot().is_empty(), "no owners means no snapshot rows");
+        }
+
+        #[test]
+        fn snapshot_emits_two_admitted_rows() {
+            let _lock = hold_admission_test_lock();
+            let first = TurnExecutionPermit::acquire(fresh()).expect("root capacity");
+            let second = TurnExecutionPermit::acquire(fresh()).expect("root capacity");
+            let first_id = first.owner().session_id.to_string();
+            let second_id = second.owner().session_id.to_string();
+            let rows = snapshot();
+            assert_eq!(rows.len(), 2, "two admitted sessions must both appear");
+            let ids: Vec<String> = rows.iter().map(|tab| tab.session_id.clone()).collect();
+            assert!(ids.contains(&first_id));
+            assert!(ids.contains(&second_id));
+            for tab in &rows {
+                assert!(tab.admitted, "admitted owner must be admitted == true");
+                assert!(!tab.cancelled, "fresh owner must not be cancelled");
+                assert!(!tab.has_pending, "no permission requested yet");
+                let wire = serde_json::to_value(tab).expect("tab must serialize");
+                assert_tab_wire_shape(&wire);
+            }
+        }
+
+        #[test]
+        fn snapshot_empty_after_all_permits_dropped() {
+            let _lock = hold_admission_test_lock();
+            {
+                let _a = TurnExecutionPermit::acquire(fresh()).expect("root capacity");
+                let _b = TurnExecutionPermit::acquire(fresh()).expect("root capacity");
+                assert_eq!(snapshot().len(), 2);
+            }
+            assert!(
+                snapshot().is_empty(),
+                "dropped permits must clear the registry"
+            );
+        }
+
+        #[test]
+        fn snapshot_records_cancelled_and_evicts_on_finish() {
+            let _lock = hold_admission_test_lock();
+            // Bind the permit to a named binding. A `TurnExecutionPermit`
+            // temporary dropped at the end of the statement finishes AND
+            // evicts the owner before any assertion can observe the
+            // cancelled-but-still-registered state.
+            let permit = TurnExecutionPermit::acquire(fresh()).expect("root capacity");
+            let owner = permit.owner();
+            let id = owner.session_id.to_string();
+            owner.cancel_explicit();
+            let tab = snapshot()
+                .into_iter()
+                .find(|tab| tab.session_id == id)
+                .expect("cancelled owner must appear in snapshot while its permit lives");
+            assert!(tab.cancelled, "explicit cancel must be visible");
+            assert!(
+                tab.admitted,
+                "explicit cancel alone keeps owner admitted until finish"
+            );
+            owner.finish();
+            // Eviction happens on permit drop, never on cancel or finish.
+            drop(permit);
+            assert!(
+                !snapshot().iter().any(|tab| tab.session_id == id),
+                "permit drop must evict the owner from the registry"
+            );
+        }
+
+        /// Genuine pending-permission leak guard. A real `PermissionRequest`
+        /// whose `resources` embed the serialized secret-carrying
+        /// `OperationIntent` is installed through the legitimate
+        /// `install_pending` path, then the projection must report the
+        /// presence boolean as true while the wire form omits every seeded
+        /// secret. The negative path (cancel flips the boolean without
+        /// evicting the owner) is asserted through the same snapshot.
+        #[test]
+        fn snapshot_has_pending_without_resource_leak() {
+            let _lock = hold_admission_test_lock();
+            // Bind the permit exactly as above: a temporary dropped at the
+            // end of the statement would cancel (and evict) the owner, and
+            // the pending hook must then refuse the injection per contract.
+            let permit = TurnExecutionPermit::acquire(fresh()).expect("root capacity");
+            let owner = permit.owner();
+            let id = owner.session_id.to_string();
+            let (request, intent) = secret_request(owner.session_id);
+            // TEST-ONLY hook: stores the genuine PermissionRequest + secret
+            // intent in the real pending slot without consulting persisted
+            // rules, so this test never reads or depends on the real user
+            // preference file. Adjudication behavior stays covered by the
+            // dedicated permission tests; this test pins the projection
+            // contract (boolean + no payload leak).
+            let _receiver = owner
+                .install_pending_test_only(request, intent, &broker())
+                .expect("fresh owner with an empty pending slot must store the request");
+            let tab = snapshot()
+                .into_iter()
+                .find(|tab| tab.session_id == id)
+                .expect("admitted owner must appear in the snapshot");
+            assert!(
+                tab.has_pending,
+                "a stored pending request must read hasPendingPermission == true"
+            );
+            let wire = serde_json::to_value(&tab).expect("tab must serialize");
+            assert_tab_wire_shape(&wire);
+            let serialized = wire.to_string();
+            assert!(!serialized.contains(FAKE_SECRET), "secret must not leak");
+            assert!(!serialized.contains(FAKE_PATH), "secret cwd must not leak");
+            // Negative path: cancel clears the stored request, flipping the
+            // boolean without evicting the owner from the registry.
+            owner.cancel();
+            assert!(!owner.has_pending(), "cancel must clear pending");
+            let tab_after = snapshot()
+                .into_iter()
+                .find(|tab| tab.session_id == id)
+                .expect("owner stays registered until the permit drops");
+            assert!(!tab_after.has_pending);
+            assert!(tab_after.admitted);
+            owner.finish();
+        }
+
+        #[test]
+        fn snapshot_bounded_by_registry_capacity() {
+            let _lock = hold_admission_test_lock();
+            let roots: Vec<_> = (0..MAX_ACTIVE_TURNS)
+                .map(|_| TurnExecutionPermit::acquire(fresh()).expect("root capacity"))
+                .collect();
+            let children: Vec<_> = (0..MAX_ACTIVE_CHILD_TURNS)
+                .map(|_| TurnExecutionPermit::acquire_child(fresh()).expect("child capacity"))
+                .collect();
+            assert_eq!(
+                snapshot().len(),
+                MAX_ACTIVE_TURNS + MAX_ACTIVE_CHILD_TURNS,
+                "snapshot covers the full shared registry, never beyond it"
+            );
+            drop(children);
+            drop(roots);
+        }
     }
 }
