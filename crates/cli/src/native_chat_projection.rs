@@ -490,6 +490,14 @@ pub fn project_message(message: &Value) -> Option<ChatMessage> {
         parts,
         agent: opt_string(message, "agent"),
         model: opt_string(message, "model"),
+        // Real execution facts are not persisted on history records yet: the
+        // native `MessageRecord` carries id/role/body/created_at only, and the
+        // live `assistant_message` frame's `usage`/`stop_reason` are not
+        // written back. Replay therefore projects NO footer facts — the
+        // completion footer stays absent for history until a durable-facts
+        // producer persists them. Never backfilled from `created_at` or the
+        // currently selected UI model.
+        assistant_facts: None,
     })
 }
 

@@ -43,6 +43,7 @@
 //! accepted, preserving state on ambiguous failures, and never
 //! auto-resending are integrator responsibilities, not view state.
 
+use crate::native_assistant_facts::AssistantFacts;
 use crate::native_transcript::{TranscriptLine, render_lines, strip_ansi};
 use std::cell::Cell;
 
@@ -483,13 +484,21 @@ pub enum ChatPart {
 }
 
 /// One typed chat message: caller-supplied role plus ordered parts, with the
-/// optional agent/model facts the caller actually knows for this message.
+/// optional agent/model facts the caller actually knows for this message and
+/// the optional real assistant-turn execution facts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChatMessage {
     pub role: ChatRole,
     pub parts: Vec<ChatPart>,
     pub agent: Option<String>,
     pub model: Option<String>,
+    /// Real assistant-turn execution facts (stop reason, usage tokens,
+    /// interruption, error) from the native turn stream
+    /// ([`crate::native_assistant_facts::AssistantFacts`]). `None` when the
+    /// producer supplied no facts (e.g. replayed history whose schema carries
+    /// none) — never backfilled from `MessageRecord.created_at`, wall time or
+    /// the currently selected UI model.
+    pub assistant_facts: Option<AssistantFacts>,
 }
 
 impl ChatMessage {
@@ -501,7 +510,15 @@ impl ChatMessage {
             parts: vec![ChatPart::Text(text.into())],
             agent: None,
             model: None,
+            assistant_facts: None,
         }
+    }
+
+    /// Attach real assistant-turn execution facts to this message.
+    #[must_use]
+    pub fn with_assistant_facts(mut self, facts: AssistantFacts) -> Self {
+        self.assistant_facts = Some(facts);
+        self
     }
 
     /// Bounded, sanitized `agent`/`model` metadata row, or `None` when the
@@ -535,6 +552,13 @@ pub enum ChatRowClass {
     Separator,
     /// Caller-provided agent/model fact row.
     Metadata,
+    /// Assistant completion footer metadata line (the agent/model/interrupted
+    /// spans of upstream `AssistantFooter`,
+    /// `packages/tui/src/routes/session/index.tsx:2055-2071`).
+    AssistantFooter,
+    /// Assistant completion footer error notice (`Error: {message}`), muted to
+    /// the error fg like upstream `theme.text.feedback.error.base`.
+    FooterError,
     /// Message text (any role).
     Text,
     UserCard,
@@ -1304,9 +1328,15 @@ fn typed_message_rows_with_prefix(
     if separator {
         rows.push((String::new(), ChatRowClass::Separator));
     }
-    if let Some(metadata) = message.metadata_row() {
-        if rows.len() < MAX_MESSAGE_ROWS {
-            rows.push((truncate_row(&metadata, width), ChatRowClass::Metadata));
+    // Upstream `AssistantFooter` IS the metadata line. When real execution
+    // facts are present the footer renders the agent/model/interrupted spans
+    // itself, so the legacy `agent: … model: …` row is suppressed to avoid
+    // double metadata; fact-less messages keep the legacy row unchanged.
+    if message.assistant_facts.is_none() {
+        if let Some(metadata) = message.metadata_row() {
+            if rows.len() < MAX_MESSAGE_ROWS {
+                rows.push((truncate_row(&metadata, width), ChatRowClass::Metadata));
+            }
         }
     }
     for part in message.parts.iter().take(MAX_PARTS_PER_MESSAGE) {
@@ -1504,6 +1534,24 @@ fn typed_message_rows_with_prefix(
             }
         }
     }
+    // Assistant completion footer (upstream `AssistantFooter`): appended after
+    // the message parts, only when real execution facts exist. Missing facts
+    // render nothing. Footer rows receive the same message prefix/inset as
+    // ordinary prose rows (upstream's footer `paddingLeft={3}` and `TextPart`
+    // inset are the same three columns).
+    if let Some(footer) = crate::native_footer::render_assistant_footer(message, width) {
+        let prefix = prefix.unwrap_or_else(|| text_prefix(message.role));
+        for (content, class) in footer.rows {
+            if rows.len() >= MAX_MESSAGE_ROWS {
+                break;
+            }
+            if content.is_empty() {
+                rows.push((String::new(), class));
+            } else {
+                rows.push((truncate_row(&format!("{prefix}{content}"), width), class));
+            }
+        }
+    }
     rows
 }
 
@@ -1512,7 +1560,7 @@ mod diff_wiring_v2_regressions {
     use super::*;
 
     fn patch_message(diff: String) -> ChatMessage {
-        ChatMessage { role: ChatRole::Assistant, parts: vec![ChatPart::Patch { path: "many.rs".into(), diff }], agent: None, model: None }
+        ChatMessage { role: ChatRole::Assistant, parts: vec![ChatPart::Patch { path: "many.rs".into(), diff }], agent: None, model: None, assistant_facts: None }
     }
 
     #[test]
@@ -2173,6 +2221,7 @@ mod tests {
                 }],
                 agent: None,
                 model: None,
+                assistant_facts: None,
             },
         ];
         let appearance = |radius: u8| {
@@ -2921,6 +2970,7 @@ mod tests {
             )],
             agent: None,
             model: None,
+            assistant_facts: None,
         };
         let rows = ChatView::new().render_typed_classified(48, 6, "ws", &[message], "", false);
         assert!(rows.iter().any(|(row, class)| {
@@ -2933,6 +2983,7 @@ mod tests {
             parts: vec![ChatPart::Thinking("[REDACTED]".to_owned())],
             agent: None,
             model: None,
+            assistant_facts: None,
         };
         let rows =
             ChatView::new().render_typed_classified(48, 6, "ws", &[only_placeholder], "", false);
@@ -2952,6 +3003,7 @@ mod tests {
                 parts: vec![ChatPart::Text("tool: rm -rf /".to_owned())],
                 agent: None,
                 model: None,
+                assistant_facts: None,
             },
             ChatMessage {
                 role: ChatRole::Assistant,
@@ -2978,6 +3030,7 @@ mod tests {
                 ],
                 agent: Some("build".to_owned()),
                 model: Some("provider/model-1".to_owned()),
+                assistant_facts: None,
             },
         ];
         let rows = view.render_typed_classified(72, 16, "ws", &messages, "", false);
@@ -3045,6 +3098,7 @@ mod tests {
             parts,
             agent: Some("agent\nname".to_owned()),
             model: None,
+            assistant_facts: None,
         }];
         let rows = view.render_typed_classified(50, MAX_VIEW_ROWS, "ws", &messages, "", false);
         assert!(rows.len() <= MAX_VIEW_ROWS, "frame row cap");
@@ -3655,5 +3709,160 @@ mod tests {
             format!("> {single}"),
             "height-1 prompt priority with exact 32 KiB line"
         );
+    }
+}
+
+/// Assistant completion footer consumer slice (upstream `AssistantFooter`,
+/// `packages/tui/src/routes/session/index.tsx:2055-2071`): footer rows are
+/// appended after the message parts only when real execution facts exist, the
+/// legacy metadata row is suppressed in that case, and all old semantic
+/// assertions above remain pinned unchanged for fact-less messages.
+#[cfg(test)]
+mod footer_v3_consumer_tests {
+    use super::*;
+    use crate::native_assistant_facts::AssistantFacts;
+
+    fn assistant_with_facts(facts: AssistantFacts) -> ChatMessage {
+        ChatMessage::text(ChatRole::Assistant, "body").with_assistant_facts(facts)
+    }
+
+    #[test]
+    fn interruption_footer_appends_after_parts() {
+        let facts = AssistantFacts::from_error(Some("cancelled".to_owned()), "turn cancelled".to_owned());
+        let message = assistant_with_facts(facts);
+        let rows = typed_message_rows(80, &message, false);
+        assert_eq!(rows.len(), 2, "prose row then footer row");
+        assert!(rows[0].0.contains("body"));
+        assert_eq!(rows[1].0, " · interrupted");
+        assert_eq!(rows[1].1, ChatRowClass::AssistantFooter);
+    }
+
+    #[test]
+    fn footer_rows_share_the_message_prefix_like_prose() {
+        let facts = AssistantFacts::from_error(Some("cancelled".to_owned()), "turn cancelled".to_owned());
+        let message = assistant_with_facts(facts);
+        // Rail-card path passes Some("") and adds its own three-column inset
+        // to every returned row; footer rows must therefore come back
+        // unprefixed exactly like prose rows.
+        let rows = typed_message_rows_with_prefix(80, &message, false, Some(""));
+        assert_eq!(rows.last().unwrap().0, " · interrupted");
+    }
+
+    #[test]
+    fn legacy_metadata_row_suppressed_when_facts_present() {
+        // With facts present the footer IS the metadata line (upstream
+        // AssistantFooter), so the legacy `agent: … model: …` row must not
+        // double it. Without facts the legacy row stays untouched.
+        let facts = AssistantFacts::from_error(Some("cancelled".to_owned()), "turn cancelled".to_owned());
+        let mut message = assistant_with_facts(facts);
+        message.agent = Some("build".to_owned());
+        message.model = Some("provider/model-1".to_owned());
+        let rows = typed_message_rows(80, &message, false);
+        assert!(
+            !rows.iter().any(|(text, class)| *class == ChatRowClass::Metadata),
+            "no legacy metadata row when facts render the footer"
+        );
+        assert!(rows.iter().any(|(text, _)| text == "Build · provider/model-1 · interrupted"));
+
+        let mut legacy = ChatMessage::text(ChatRole::Assistant, "body");
+        legacy.agent = Some("build".to_owned());
+        legacy.model = Some("provider/model-1".to_owned());
+        let rows = typed_message_rows(80, &legacy, false);
+        assert!(rows.iter().any(|(text, class)| {
+            *class == ChatRowClass::Metadata && text.contains("agent: build")
+        }));
+    }
+
+    #[test]
+    fn generic_error_footer_rows_keep_class_order() {
+        let facts = AssistantFacts::from_error(Some("provider_stream_failed".to_owned()), "provider stream failed".to_owned());
+        let mut message = assistant_with_facts(facts);
+        message.agent = Some("build".to_owned());
+        let rows = typed_message_rows(80, &message, false);
+        let classes: Vec<ChatRowClass> = rows.iter().map(|(_, class)| *class).collect();
+        assert_eq!(
+            classes,
+            vec![
+                ChatRowClass::AssistantCard,
+                ChatRowClass::FooterError,
+                ChatRowClass::Blank,
+                ChatRowClass::AssistantFooter
+            ],
+            "prose, error notice, gap, metadata line"
+        );
+        assert!(rows[1].0.trim_start().starts_with("Error: provider stream failed"));
+        assert_eq!(rows[3].0.trim_start(), "Build");
+    }
+
+    #[test]
+    fn generic_error_without_metadata_fact_renders_notice_after_prose_only() {
+        // With no real agent/model/interrupt fact the metadata line is empty:
+        // upstream's `marginTop` gap belongs to that line, so the rows are
+        // just the prose and the error notice.
+        let facts = AssistantFacts::from_error(Some("provider_stream_failed".to_owned()), "provider stream failed".to_owned());
+        let message = assistant_with_facts(facts);
+        let rows = typed_message_rows(80, &message, false);
+        let classes: Vec<ChatRowClass> = rows.iter().map(|(_, class)| *class).collect();
+        assert_eq!(classes, vec![ChatRowClass::AssistantCard, ChatRowClass::FooterError]);
+    }
+
+    #[test]
+    fn cancellation_wording_without_typed_code_keeps_error_rows() {
+        // Consumer-level pin of the typed-transport rule: an error whose text
+        // merely contains cancellation wording (and carries no typed code)
+        // renders the generic error rows — never the interrupted suffix.
+        let facts = AssistantFacts::from_error(None, "turn cancelled".to_owned());
+        let message = assistant_with_facts(facts);
+        let rows = typed_message_rows(80, &message, false);
+        assert!(
+            rows.iter().any(|(text, class)| {
+                *class == ChatRowClass::FooterError && text.trim_start().starts_with("Error: turn cancelled")
+            }),
+            "error notice present: {rows:?}"
+        );
+        assert!(
+            !rows.iter().any(|(text, _)| text.contains("interrupted")),
+            "no interrupted suffix without the typed code"
+        );
+    }
+
+    #[test]
+    fn completed_turn_without_renderable_facts_is_byte_identical_to_no_facts() {
+        // Real facts exist (usage/stop_reason) but none render: the typed rows
+        // must be exactly the fact-less rows — no raw token count, no
+        // placeholder footer, no empty rows.
+        let facts = AssistantFacts::from_message_frame(&serde_json::json!({
+            "usage": {"output_tokens": 20, "reasoning_tokens": 5},
+            "stop_reason": "completed"
+        }));
+        let message = assistant_with_facts(facts);
+        let plain = ChatMessage::text(ChatRole::Assistant, "body");
+        assert_eq!(
+            typed_message_rows(80, &message, false),
+            typed_message_rows(80, &plain, false)
+        );
+    }
+
+    #[test]
+    fn non_assistant_message_with_facts_renders_no_footer() {
+        let facts = AssistantFacts::from_error(Some("cancelled".to_owned()), "turn cancelled".to_owned());
+        let mut message = assistant_with_facts(facts);
+        message.role = ChatRole::User;
+        let rows = typed_message_rows(80, &message, false);
+        assert!(
+            !rows.iter().any(|(_, class)| matches!(class, ChatRowClass::AssistantFooter | ChatRowClass::FooterError))
+        );
+    }
+
+    #[test]
+    fn footer_rows_respect_the_message_row_budget() {
+        let facts = AssistantFacts::from_error(Some("provider_stream_failed".to_owned()), "provider stream failed".to_owned());
+        let mut message = assistant_with_facts(facts);
+        message.agent = Some("build".to_owned());
+        message.parts = (0..MAX_PARTS_PER_MESSAGE)
+            .map(|i| ChatPart::Text(format!("line {i}")))
+            .collect();
+        let rows = typed_message_rows(80, &message, false);
+        assert!(rows.len() <= MAX_MESSAGE_ROWS, "row cap respected: {}", rows.len());
     }
 }

@@ -7,6 +7,8 @@ use std::net::ToSocketAddrs;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+use crate::native_assistant_facts::AssistantFacts;
+
 const MAX_FRAME: usize = 1024 * 1024;
 const MAX_TEXT: usize = 64 * 1024;
 const MAX_TOTAL: usize = 256 * 1024;
@@ -29,8 +31,47 @@ pub enum Event {
         output: String,
         error: Option<String>,
     },
-    Assistant(String),
-    Error(String),
+    /// Terminal assistant message: the finalized text plus the real execution
+    /// facts the `assistant_message` frame carries (usage tokens, stop reason).
+    /// The frame carries no agent/model/timestamps
+    /// (`crates/server/src/lib.rs:2706-2715`); those stay absent and are never
+    /// inferred from `created_at` or the selected UI model.
+    Assistant {
+        text: String,
+        facts: AssistantFacts,
+    },
+    /// Terminal transport error. `code` is the TYPED wire error code (the
+    /// in-stream `error` frame's `code` field — `stream_error` at
+    /// `crates/server/src/lib.rs:3183-3189` — or the HTTP `ErrorBody.code` at
+    /// `:3458-3470`), `None` for client-minted transport/protocol failures.
+    /// Interruption is classified only from `code == "cancelled"`, never from
+    /// message text (other error paths legitimately contain cancellation
+    /// wording).
+    Error {
+        code: Option<String>,
+        message: String,
+    },
+}
+
+/// Typed turn-stream failure: carries the wire error code when the transport
+/// provided one. Plain `String` errors convert with `code: None`, so every
+/// transport/protocol failure site keeps its existing `?` / `.into()` shape.
+#[derive(Debug)]
+pub struct TurnFailure {
+    pub code: Option<String>,
+    pub message: String,
+}
+
+impl From<String> for TurnFailure {
+    fn from(message: String) -> Self {
+        Self { code: None, message }
+    }
+}
+
+impl From<&str> for TurnFailure {
+    fn from(message: &str) -> Self {
+        Self { code: None, message: message.to_owned() }
+    }
 }
 
 pub struct TurnWorker {
@@ -147,7 +188,13 @@ impl TurnWorker {
                         if bytes.len() + chunk.len() > 16 * 1024 { break; }
                         bytes.extend_from_slice(&chunk);
                     }
-                    return Err(provider_error_summary(status, &bytes));
+                    // Preserve the typed wire code (HTTP `ErrorBody.code`) so
+                    // cancellation is classified from the transport, never
+                    // from the rewritten display message.
+                    return Err(TurnFailure {
+                        code: error_body_code(&bytes),
+                        message: provider_error_summary(status, &bytes),
+                    });
                 }
                 let mut carry = Vec::new();
                 let mut total = 0;
@@ -184,7 +231,7 @@ impl TurnWorker {
                             }
                         }
                         if let Some(event) = decode(value, &mut retained)? {
-                            if matches!(event, Event::Assistant(_) | Event::Error(_)) {
+                            if matches!(event, Event::Assistant { .. } | Event::Error { .. }) {
                                 terminal = true;
                             }
                             tx.send(event).await.map_err(|_| "UI closed".to_string())?;
@@ -197,15 +244,20 @@ impl TurnWorker {
                 if !terminal {
                     return Err("turn stream ended without a terminal assistant event".into());
                 }
-                Ok::<(), String>(())
+                Ok::<(), TurnFailure>(())
             }
             .await;
             crate::native_debug::event(
                 "turn.stream_closed",
-                serde_json::json!({"ok":result.is_ok(),"error_category":result.as_ref().err().map(|error| if error.contains("HTTP") { "http_status" } else if error.contains("incomplete") || error.contains("terminal") { "truncated_stream" } else if error.contains("limit") || error.contains("budget") { "resource_limit" } else { "transport_or_protocol" })}),
+                serde_json::json!({"ok":result.is_ok(),"error_category":result.as_ref().err().map(|error| if error.message.contains("HTTP") { "http_status" } else if error.message.contains("incomplete") || error.message.contains("terminal") { "truncated_stream" } else if error.message.contains("limit") || error.message.contains("budget") { "resource_limit" } else { "transport_or_protocol" })}),
             );
-            if let Err(error) = result {
-                let _ = tx.send(Event::Error(error)).await;
+            if let Err(failure) = result {
+                let _ = tx
+                    .send(Event::Error {
+                        code: failure.code,
+                        message: failure.message,
+                    })
+                    .await;
             }
         });
         Ok(Self { rx, task })
@@ -289,10 +341,22 @@ fn decode(value: Value, retained: &mut usize) -> Result<Option<Event>, String> {
             if *retained > MAX_TEXT {
                 return Err("retained text limit exceeded".into());
             }
-            Event::Assistant(text.to_owned())
+            // Real execution facts from the frame only: `usage` tokens and
+            // `stop_reason`. No agent/model/timing exists on this wire
+            // (`crates/server/src/lib.rs:2706-2715`), so none is fabricated.
+            Event::Assistant {
+                text: text.to_owned(),
+                facts: AssistantFacts::from_message_frame(&value),
+            }
         }
         "error" => {
-            Event::Error(field("message", retained).unwrap_or_else(|_| "turn failed".into()))
+            // Typed wire code from the in-stream error frame (`stream_error`
+            // emits `{"type":"error","code":…,"message":…}`). Absent codes stay
+            // `None`; message text is never pattern-matched.
+            Event::Error {
+                code: value.get("code").and_then(Value::as_str).map(str::to_owned),
+                message: field("message", retained).unwrap_or_else(|_| "turn failed".into()),
+            }
         }
         "reasoning_summary_delta" => Event::ReasoningDelta(field("delta", retained)?),
         "reasoning_summary" => Event::ReasoningFinal(field("text", retained)?),
@@ -347,6 +411,17 @@ fn provider_error_summary(status: u16, body: &[u8]) -> String {
             format!("Turn failed (HTTP {code}); prompt preserved until admission is acknowledged.")
         }
     }
+}
+
+/// Typed wire code from an HTTP error body (`{"code":…,"message":…}` — the
+/// server's `ErrorBody`, `crates/server/src/lib.rs:3458-3470`). Absent or
+/// non-string codes stay `None`.
+fn error_body_code(body: &[u8]) -> Option<String> {
+    let value: Value = serde_json::from_slice(body).ok()?;
+    value
+        .get("code")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
 }
 
 #[cfg(test)]
@@ -451,7 +526,7 @@ mod native_error_tests {
         .await;
         assert_eq!(events.len(), 1);
         assert!(
-            matches!(&events[0], Event::Error(message) if message.contains("429") && !message.contains("secret-canary"))
+            matches!(&events[0], Event::Error { message, .. } if message.contains("429") && !message.contains("secret-canary"))
         );
     }
 
@@ -463,11 +538,11 @@ mod native_error_tests {
             "{\"type\":\"assistant_message\",\"text\":\"cut off\"}",
         ] {
             let events = mock_turn(201, body).await;
-            assert!(matches!(events.last(), Some(Event::Error(_))));
+            assert!(matches!(events.last(), Some(Event::Error { .. })));
             assert!(
                 !events
                     .iter()
-                    .any(|event| matches!(event, Event::Assistant(_)))
+                    .any(|event| matches!(event, Event::Assistant { .. }))
             );
         }
     }
@@ -491,7 +566,7 @@ mod native_error_tests {
             Event::Usage { input: 10, output: 4, cached: None, reasoning: None }
         );
         assert!(
-            matches!(null_surface.last(), Some(Event::Assistant(_))),
+            matches!(null_surface.last(), Some(Event::Assistant { .. })),
             "usage frame still decodes to its terminal assistant event"
         );
         let explicit_zero = mock_turn(
@@ -556,6 +631,106 @@ mod native_error_tests {
         assert!(result.contains("prompt preserved"));
         assert!(!result.contains("fixture-credential"));
         assert!(provider_error_summary(401, b"not JSON secret").contains("authentication failed"));
+    }
+
+    /// The terminal assistant event carries the REAL frame facts (usage
+    /// tokens, stop reason) and nothing else: the wire has no agent/model/
+    /// timing, so none is fabricated from `created_at` or selection state.
+    #[tokio::test]
+    async fn terminal_assistant_event_carries_real_frame_facts_only() {
+        let events = mock_turn(
+            201,
+            concat!(
+                r#"{"type":"assistant_message","usage":{"input_tokens":10,"output_tokens":4,"cached_tokens":0,"reasoning_tokens":3},"stop_reason":"completed","message":{"body":{"text":"done"}},"created_at":"2026-10-19T00:00:00Z"}"#,
+                "\n",
+            ),
+        )
+        .await;
+        let facts = events.iter().find_map(|event| match event {
+            Event::Assistant { facts, .. } => Some(facts),
+            _ => None,
+        });
+        let facts = facts.expect("terminal assistant event");
+        assert_eq!(facts.output_tokens, Some(4));
+        assert_eq!(facts.reasoning_tokens, Some(3));
+        assert_eq!(facts.stop_reason.as_deref(), Some("completed"));
+        assert!(!facts.interrupted);
+        assert!(facts.error_message.is_none());
+    }
+
+    /// Missing usage/stop reason stay absent (never a fabricated zero or a
+    /// `created_at`-derived value).
+    #[tokio::test]
+    async fn terminal_assistant_event_keeps_missing_facts_absent() {
+        let events = mock_turn(
+            201,
+            concat!(
+                r#"{"type":"assistant_message","message":{"body":{"text":"done"}},"created_at":"2026-10-19T00:00:00Z"}"#,
+                "\n",
+            ),
+        )
+        .await;
+        let facts = events.iter().find_map(|event| match event {
+            Event::Assistant { facts, .. } => Some(facts),
+            _ => None,
+        });
+        let facts = facts.expect("terminal assistant event");
+        assert!(facts.output_tokens.is_none());
+        assert!(facts.reasoning_tokens.is_none());
+        assert!(facts.stop_reason.is_none());
+        assert!(!facts.interrupted);
+        assert!(facts.error_message.is_none());
+    }
+
+    /// Typed transport rule: the in-stream error frame's `code` field is the
+    /// interruption source (`code == "cancelled"`), never message wording.
+    #[tokio::test]
+    async fn error_frame_typed_code_drives_interruption() {
+        let events = mock_turn(
+            201,
+            concat!(r#"{"type":"error","code":"cancelled","message":"turn cancelled"}"#, "\n"),
+        )
+        .await;
+        let (code, message) = match &events[..] {
+            [Event::Error { code, message }] => (code.clone(), message.clone()),
+            other => panic!("expected one coded error event: {other:?}"),
+        };
+        assert_eq!(code.as_deref(), Some("cancelled"));
+        assert_eq!(message, "turn cancelled");
+        let facts = crate::native_assistant_facts::AssistantFacts::from_error(code, message);
+        assert!(facts.interrupted, "typed cancelled code is an interruption");
+    }
+
+    /// The same message wording WITHOUT the typed code is NOT an interruption:
+    /// other error paths legitimately contain cancellation wording (e.g. tool
+    /// outputs at `crates/server/src/lib.rs:2838-2841`).
+    #[tokio::test]
+    async fn error_frame_wording_without_code_is_not_interruption() {
+        let events = mock_turn(201, concat!(r#"{"type":"error","message":"turn cancelled"}"#, "\n")).await;
+        let (code, message) = match &events[..] {
+            [Event::Error { code, message }] => (code.clone(), message.clone()),
+            other => panic!("expected one error event: {other:?}"),
+        };
+        assert_eq!(code, None);
+        assert_eq!(message, "turn cancelled");
+        let facts = crate::native_assistant_facts::AssistantFacts::from_error(code, message);
+        assert!(!facts.interrupted, "message wording alone never interrupts");
+    }
+
+    /// HTTP error bodies carry the typed code (`ErrorBody.code`); it survives
+    /// the display-message rewrite (`provider_error_summary`) so admission
+    /// cancellations still classify from the transport.
+    #[tokio::test]
+    async fn http_error_body_typed_code_survives_message_rewrite() {
+        let events = mock_turn(502, r#"{"code":"cancelled","message":"turn cancelled"}"#).await;
+        let (code, message) = match &events[..] {
+            [Event::Error { code, message }] => (code.clone(), message.clone()),
+            other => panic!("expected one error event: {other:?}"),
+        };
+        assert_eq!(code.as_deref(), Some("cancelled"));
+        assert!(message.contains("502"), "display message is the client summary: {message}");
+        let facts = crate::native_assistant_facts::AssistantFacts::from_error(code, message);
+        assert!(facts.interrupted);
     }
 }
 

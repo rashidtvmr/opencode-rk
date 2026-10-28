@@ -124,6 +124,10 @@ mod upstream_view_parity;
 #[cfg(feature = "native")]
 mod native_view;
 #[cfg(feature = "native")]
+mod native_assistant_facts;
+#[cfg(feature = "native")]
+mod native_footer;
+#[cfg(feature = "native")]
 mod native_view_chat;
 #[cfg(feature = "native")]
 mod native_prompt_layout;

@@ -166,7 +166,7 @@ impl NativeChatHistory {
                 return;
             }
         }
-        self.append("reasoning".into(),ChatMessage{role:ChatRole::Assistant,parts:vec![ChatPart::Thinking(self.reasoning.clone())],agent:None,model:None});
+        self.append("reasoning".into(),ChatMessage{role:ChatRole::Assistant,parts:vec![ChatPart::Thinking(self.reasoning.clone())],agent:None,model:None,assistant_facts:None});
         self.reasoning_partial=Some((self.lines.len()-1,self.messages.len()-1));
     }
 
@@ -201,6 +201,10 @@ impl NativeChatHistory {
         message.parts.truncate(128);
         message.agent = message.agent.map(|v| bounded(&v));
         message.model = message.model.map(|v| bounded(&v));
+        if let Some(facts) = message.assistant_facts.as_mut() {
+            facts.stop_reason = facts.stop_reason.as_deref().map(bounded);
+            facts.error_message = facts.error_message.as_deref().map(bounded);
+        }
         for part in &mut message.parts {
             match part {
                 ChatPart::Text(text) | ChatPart::Thinking(text) => *text = bounded(text),

@@ -1778,7 +1778,35 @@ fn chat_row_background(class: Option<&crate::native_view_chat::ChatRowClass>, ro
         Some(ChatRowClass::SystemCard) => Some(element),
         Some(ChatRowClass::DiffAdded) => Some(Rgba::new(20, 70, 35, 255)),
         Some(ChatRowClass::DiffRemoved) => Some(Rgba::new(80, 25, 30, 255)),
+        // Assistant completion footer rows (upstream `AssistantFooter`) are
+        // plain text on the root surface — upstream draws no box for them.
+        Some(ChatRowClass::AssistantFooter) | Some(ChatRowClass::FooterError) => None,
         _ => None,
+    }
+}
+
+/// Foreground paint for one typed chat row. The assistant completion footer
+/// classes mirror upstream `AssistantFooter`
+/// (`packages/tui/src/routes/session/index.tsx:2055-2071`): the error notice
+/// row uses the error fg (`theme.text.feedback.error.base`) and the metadata
+/// line uses the muted fg (`theme.text.muted` on the field spans).
+#[cfg(feature = "native")]
+fn chat_row_foreground(class: &crate::native_view_chat::ChatRowClass, text_color: Rgba, muted: Rgba, error: Rgba) -> Rgba {
+    use crate::native_view_chat::ChatRowClass;
+    match class {
+        ChatRowClass::Thinking
+        | ChatRowClass::Metadata
+        | ChatRowClass::ToolCall
+        | ChatRowClass::ToolResult
+        | ChatRowClass::AssistantFooter => muted,
+        ChatRowClass::UserCard => text_color,
+        ChatRowClass::AssistantCard => text_color,
+        ChatRowClass::SystemCard => muted,
+        ChatRowClass::DiffAdded => text_color,
+        ChatRowClass::DiffRemoved => error,
+        ChatRowClass::ToolError => error,
+        ChatRowClass::FooterError => error,
+        _ => text_color,
     }
 }
 
@@ -1823,6 +1851,47 @@ mod chat_surface_inset_tests {
                     "message surface ownership at x={x} with {orientation:?}");
             }
         }
+    }
+}
+
+/// Registered production tests for the assistant completion footer paint
+/// classes (upstream `AssistantFooter` fg policy; footer rows carry no
+/// surface background).
+#[cfg(all(test, feature = "native"))]
+mod footer_v3_painter_tests {
+    use super::*;
+    use crate::native_view_chat::ChatRowClass;
+
+    #[test]
+    fn footer_rows_use_error_and_muted_foregrounds() {
+        let text_color = Rgba::rgb(1, 2, 3);
+        let muted = Rgba::rgb(4, 5, 6);
+        let error = Rgba::rgb(7, 8, 9);
+        assert_eq!(
+            chat_row_foreground(&ChatRowClass::FooterError, text_color, muted, error),
+            error,
+            "upstream error notice fg = theme.text.feedback.error.base"
+        );
+        assert_eq!(
+            chat_row_foreground(&ChatRowClass::AssistantFooter, text_color, muted, error),
+            muted,
+            "upstream footer field spans fg = theme.text.muted"
+        );
+    }
+
+    #[test]
+    fn footer_rows_paint_no_surface_background() {
+        let root = Rgba::rgb(10, 10, 10);
+        let panel = Rgba::rgb(20, 20, 20);
+        let element = Rgba::rgb(30, 30, 30);
+        assert_eq!(
+            chat_row_background(Some(&ChatRowClass::FooterError), root, panel, element),
+            None
+        );
+        assert_eq!(
+            chat_row_background(Some(&ChatRowClass::AssistantFooter), root, panel, element),
+            None
+        );
     }
 }
 
@@ -2644,21 +2713,8 @@ fn native_paint(
             ctx.modal.content_x,
             ctx.modal.content_width,
         );
-        use crate::native_view_chat::ChatRowClass;
         let normal_fg = match ctx.chat_row_classes.get(row) {
-            Some(
-                ChatRowClass::Thinking
-                | ChatRowClass::Metadata
-                | ChatRowClass::ToolCall
-                | ChatRowClass::ToolResult,
-            ) => muted,
-            Some(ChatRowClass::UserCard) => text_color,
-            Some(ChatRowClass::AssistantCard) => text_color,
-            Some(ChatRowClass::SystemCard) => muted,
-            Some(ChatRowClass::DiffAdded) => text_color,
-            Some(ChatRowClass::DiffRemoved) => error,
-            Some(ChatRowClass::ToolError) => error,
-            Some(_) => text_color,
+            Some(class) => chat_row_foreground(class, text_color, muted, error),
             None if ctx.home => home_row_fg(lines, row, ctx.palette),
             None => text_color,
         };
@@ -4867,6 +4923,7 @@ fn native_loop(
                                     }],
                                     agent: None,
                                     model: None,
+                                    assistant_facts: None,
                                 },
                             );
                         }
@@ -4892,6 +4949,7 @@ fn native_loop(
                                     ),
                                     agent: None,
                                     model: None,
+                                    assistant_facts: None,
                                 },
                             );
                             if name == "todowrite" {
@@ -4902,27 +4960,50 @@ fn native_loop(
                                 }
                             }
                         }
-                        native_turn::Event::Assistant(text) => {
+                        native_turn::Event::Assistant { text, facts } => {
                             turn_succeeded = true;
                             partial.clear();
                             remove_partial(&mut transcript);
                             settled = true;
                             transcript.append(
                                 format!("assistant: {}", native_transcript::strip_ansi(&text)),
-                                ChatMessage::text(ChatRole::Assistant, text),
+                                ChatMessage::text(ChatRole::Assistant, text)
+                                    .with_assistant_facts(facts),
                             );
                         }
-                        native_turn::Event::Error(error) => {
+                        native_turn::Event::Error { code, message: error } => {
                             if let Some(captured) = pending_submission.take() {
                                 captured.restore(&mut draft, &mut draft_cursor);
                                 completion.sync(&draft);
                             }
-                            partial.clear();
+                            // Keep the streamed partial text as the message
+                            // body: upstream's errored/interrupted assistant
+                            // message retains it, and the completion footer
+                            // annotates the message (` · interrupted` only for
+                            // the TYPED transport code `cancelled`, `Error:
+                            // {message}` notice for any other error). The
+                            // legacy plain line is kept byte-identical.
+                            let partial_text = std::mem::take(&mut partial);
                             remove_partial(&mut transcript);
                             settled = true;
-                            append_transcript(
-                                &mut transcript,
+                            let facts =
+                                crate::native_assistant_facts::AssistantFacts::from_error(
+                                    code,
+                                    error.clone(),
+                                );
+                            transcript.append(
                                 format!("error: {}", native_transcript::strip_ansi(&error)),
+                                ChatMessage {
+                                    role: ChatRole::Assistant,
+                                    parts: if partial_text.is_empty() {
+                                        Vec::new()
+                                    } else {
+                                        vec![ChatPart::Text(partial_text)]
+                                    },
+                                    agent: None,
+                                    model: None,
+                                    assistant_facts: Some(facts),
+                                },
                             );
                         }
                     }
