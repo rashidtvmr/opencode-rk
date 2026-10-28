@@ -1737,6 +1737,38 @@ fn home_composer_bottom_halfblock_override(appearance: &crate::native_box_style:
         && matches!(glyph, "▀" | "▄")
 }
 
+/// Single decision source for the Home prompt's left-column rail cell
+/// (composer left border column). Upstream `mini/footer.prompt.tsx:270-273`
+/// draws the prompt rail as a left border-colored glyph over the root
+/// background — the prompt box paints no surface of its own — so the bordered
+/// default `┃`/`╹` carries the Border role on the root background instead of
+/// the prompt surface color (Home fixture capture: fg #484848 on bg #0a0a0a,
+/// interior #1e1e1e). Outline presets own their rail glyphs; the borderless
+/// prompt keeps its existing accent caret cell; every other glyph falls
+/// through to the caller's unchanged half-block/row paint path.
+#[cfg(feature = "native")]
+fn home_composer_border_cell_style(
+    appearance: &crate::native_box_style::BoxAppearance,
+    style: crate::native_box_style::EffectiveBox,
+    glyph: &str,
+    accent: Rgba,
+    root: Rgba,
+    palette: crate::native_theme_runtime::Palette,
+) -> Option<(Rgba, Rgba)> {
+    use crate::native_theme_runtime::Slot;
+    if appearance.home_composer_outline() {
+        return None;
+    }
+    if !style.has_border() {
+        return Some((accent, root));
+    }
+    if matches!(glyph, "┃" | "╹") {
+        Some((paint_color(palette, Slot::Border), root))
+    } else {
+        None
+    }
+}
+
 #[cfg(feature = "native")]
 fn chat_row_background(class: Option<&crate::native_view_chat::ChatRowClass>, root: Rgba, panel: Rgba, element: Rgba) -> Option<Rgba> {
     use crate::native_view_chat::ChatRowClass;
@@ -1803,9 +1835,96 @@ fn visible_modal_rect(cols:u32, rows:u32, x:u32,y:u32,width:u32,content:usize)->
 
 #[cfg(all(test, feature = "native"))]
 mod rounded_surface_color_tests {
-    use super::{finish_surface_background, home_composer_bottom_halfblock_override, home_composer_root_cell, modal_surface_background, resolve_surface_corner_background, rounded_surface_background, surface_underlay_background, visible_modal_rect};
+    use super::{finish_surface_background, home_composer_border_cell_style, home_composer_bottom_halfblock_override, home_composer_root_cell, modal_surface_background, resolve_surface_corner_background, rounded_surface_background, surface_underlay_background, visible_modal_rect};
     use crate::native_box_style::{BorderStyle, EffectiveBox, RadiusPreset};
     use opencode_rk_opentui_bridge::Rgba;
+
+    // ── Home composer left-rail cell style (home-frame-gap border-v1) ────
+    // Palette roles are derived through the painter, never guessed literals:
+    // dark Border is the upstream `base.border.base` #484848 and Background is
+    // `base.background.base` #0a0a0a (native_theme_runtime::opencode_dark).
+
+    #[test]
+    fn home_composer_default_rail_glyphs_use_border_role_on_root_background() {
+        use crate::native_theme_runtime::{Palette, Slot};
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let style = appearance.effective(crate::native_box_style::BoxId::ChatComposer);
+        assert!(style.has_border(), "the diagnosed default style has a Single border");
+        let palette = Palette::opencode_dark();
+        let accent = Rgba::rgb(200, 190, 100);
+        let root = super::paint_color(palette, Slot::Background);
+        for glyph in ["┃", "╹"] {
+            let (fg, bg) = home_composer_border_cell_style(
+                &appearance, style, glyph, accent, root, palette,
+            )
+            .unwrap_or_else(|| panic!("default bordered rail glyph {glyph:?} needs an explicit style"));
+            assert_eq!(fg, super::paint_color(palette, Slot::Border),
+                "{glyph} foreground is the Border role");
+            assert_eq!(bg, root, "{glyph} background is the root Background role");
+        }
+    }
+
+    #[test]
+    fn home_composer_borderless_caret_keeps_accent_on_root_background() {
+        use crate::native_theme_runtime::Palette;
+        let appearance = crate::native_box_style::BoxAppearance {
+            border_style: BorderStyle::None,
+            ..Default::default()
+        };
+        let style = appearance.effective(crate::native_box_style::BoxId::ChatComposer);
+        assert!(!style.has_border());
+        let palette = Palette::opencode_dark();
+        let accent = Rgba::rgb(200, 190, 100);
+        let root = Rgba::rgb(10, 10, 10);
+        for glyph in ["┃", " ", "draft"] {
+            let (fg, bg) = home_composer_border_cell_style(
+                &appearance, style, glyph, accent, root, palette,
+            )
+            .unwrap_or_else(|| panic!("borderless caret cell {glyph:?} keeps its explicit style"));
+            assert_eq!(fg, accent, "{glyph} caret keeps the accent foreground");
+            assert_eq!(bg, root, "{glyph} caret sits on the root background");
+        }
+    }
+
+    #[test]
+    fn home_composer_outline_presets_keep_own_rail_glyphs() {
+        use crate::native_theme_runtime::Palette;
+        let appearance = crate::native_box_style::BoxAppearance {
+            preset: RadiusPreset::Rounded,
+            ..Default::default()
+        };
+        assert!(appearance.home_composer_outline(), "Rounded is the framed Home outline");
+        let style = appearance.effective(crate::native_box_style::BoxId::ChatComposer);
+        let palette = Palette::opencode_dark();
+        for glyph in ["┃", "╹", "╭", "─"] {
+            assert!(
+                home_composer_border_cell_style(
+                    &appearance, style, glyph, Rgba::rgb(1, 2, 3), Rgba::rgb(4, 5, 6), palette,
+                )
+                .is_none(),
+                "{glyph:?} is owned by the framed outline paint"
+            );
+        }
+    }
+
+    #[test]
+    fn home_composer_default_halfblock_and_text_glyphs_fall_through() {
+        use crate::native_theme_runtime::Palette;
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let style = appearance.effective(crate::native_box_style::BoxId::ChatComposer);
+        let palette = Palette::opencode_dark();
+        // ▀/▄ keep the existing bottom half-block override and ordinary text
+        // glyphs keep the row paint; the helper must not intercept either.
+        for glyph in ["▀", "▄", "x", ""] {
+            assert!(
+                home_composer_border_cell_style(
+                    &appearance, style, glyph, Rgba::rgb(1, 2, 3), Rgba::rgb(4, 5, 6), palette,
+                )
+                .is_none(),
+                "{glyph:?} keeps the prior half-block/row paint path"
+            );
+        }
+    }
 
     #[test]
     fn rounded_corner_uses_supplied_root_and_square_styles_keep_panel() {
@@ -2629,9 +2748,22 @@ fn native_paint(
                             && y < u32::from(top + height)
                         {
                             let composer_style = ctx.appearance.effective(crate::native_box_style::BoxId::ChatComposer);
-                            if x == u32::from(left) && !composer_style.has_border() {
-                                fg = accent;
-                                bg = background;
+                            // Left-column rail cell: single decision source
+                            // (borderless accent caret, bordered default ┃/╹
+                            // Border-on-root fix), else unchanged fallthrough.
+                            let rail_style = (x == u32::from(left))
+                                .then(|| home_composer_border_cell_style(
+                                    &ctx.appearance,
+                                    composer_style,
+                                    glyph,
+                                    accent,
+                                    background,
+                                    ctx.palette,
+                                ))
+                                .flatten();
+                            if let Some((rail_fg, rail_bg)) = rail_style {
+                                fg = rail_fg;
+                                bg = rail_bg;
                             } else if y == u32::from(top + height - 1)
                                 && home_composer_bottom_halfblock_override(
                                     &ctx.appearance,
