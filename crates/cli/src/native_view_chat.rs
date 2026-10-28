@@ -1448,26 +1448,101 @@ fn typed_message_rows_with_prefix(
                     truncate_row(&format!("[diff] {path}"), width),
                     ChatRowClass::Metadata,
                 ));
-                for line in clip_utf8_prefix_bytes(diff, MAX_INPUT_ROW_BYTES)
-                    .lines()
-                    .take(MAX_MESSAGE_ROWS)
-                {
-                    let class = if line.starts_with('+') && !line.starts_with("+++") {
-                        ChatRowClass::DiffAdded
-                    } else if line.starts_with('-') && !line.starts_with("---") {
-                        ChatRowClass::DiffRemoved
-                    } else {
-                        ChatRowClass::Metadata
+                // ONE parser pass at the parser's own bounded ceiling: exact
+                // malformed/truncated facts plus all rows; message-budget
+                // overflow is computed here and OR-ed into the truncation
+                // fact. Never a second parse.
+                let rendered = crate::native_diff_view::paint_rows_with_gutter(
+                    diff,
+                    crate::native_diff_view::MAX_DIFF_LINES,
+                );
+                let total_rows = rendered.rows.len();
+                let malformed = rendered.malformed;
+                // Reserve real status row(s) BEFORE the parser row budget:
+                // each true fact gets its own distinct row inside the hard
+                // MAX_MESSAGE_ROWS cap (the frozen regressions require both
+                // substrings to survive when both facts are true).
+                let budget = MAX_MESSAGE_ROWS.saturating_sub(rows.len());
+                let malformed_slots = usize::from(malformed);
+                let kept_without_trunc_status = total_rows.min(budget.saturating_sub(malformed_slots));
+                let truncated = rendered.truncated || kept_without_trunc_status < total_rows;
+                let reserve = malformed_slots + usize::from(truncated);
+                let kept = total_rows.min(budget.saturating_sub(reserve));
+                for line in rendered.rows.into_iter().take(kept) {
+                    let class = match line.role {
+                        crate::native_diff_view::DiffLineRole::Added => ChatRowClass::DiffAdded,
+                        crate::native_diff_view::DiffLineRole::Removed => ChatRowClass::DiffRemoved,
+                        _ => ChatRowClass::Metadata,
                     };
-                    push_wrapped(&mut rows, width, line, "    ", class);
-                    if rows.len() >= MAX_MESSAGE_ROWS {
-                        break;
+                    rows.push((truncate_row(&format!("    {}", line.text), width), class));
+                }
+                let mut statuses: Vec<(String, ChatRowClass)> = Vec::new();
+                if malformed {
+                    statuses.push((
+                        truncate_row("    [malformed diff]", width),
+                        ChatRowClass::ToolError,
+                    ));
+                }
+                if truncated {
+                    statuses.push((
+                        truncate_row("    [diff truncated]", width),
+                        ChatRowClass::Metadata,
+                    ));
+                }
+                // Place reserved status rows as DISTINCT rows. Normally the
+                // reservation left slack; in the pathological case (earlier
+                // parts already filled the cap) free exactly `statuses.len()`
+                // tail rows in ONE truncate so later statuses can never
+                // overwrite earlier ones, then append all of them.
+                if !statuses.is_empty() {
+                    let slack = MAX_MESSAGE_ROWS.saturating_sub(rows.len());
+                    if statuses.len() > slack {
+                        rows.truncate(rows.len().saturating_sub(statuses.len() - slack));
                     }
+                    rows.extend(statuses);
                 }
             }
         }
     }
     rows
+}
+
+#[cfg(test)]
+mod diff_wiring_v2_regressions {
+    use super::*;
+
+    fn patch_message(diff: String) -> ChatMessage {
+        ChatMessage { role: ChatRole::Assistant, parts: vec![ChatPart::Patch { path: "many.rs".into(), diff }], agent: None, model: None }
+    }
+
+    #[test]
+    fn status_survives_full_message_budget_and_is_truthful() {
+        // One header plus a valid hunk exceeding the render budget.
+        let valid = format!("@@ -1,{} +1,{} @@\n{}", MAX_MESSAGE_ROWS + 4, MAX_MESSAGE_ROWS + 4,
+            (0..MAX_MESSAGE_ROWS + 4).map(|_| " same\n").collect::<String>());
+        let rows = typed_message_rows(100, &patch_message(valid), false);
+        assert_eq!(rows.len(), MAX_MESSAGE_ROWS);
+        assert!(rows.iter().any(|(row, _)| row.contains("[diff truncated]")));
+        assert!(!rows.iter().any(|(row, _)| row.contains("[malformed diff]")));
+
+        // Malformed count and budget overflow both remain visibly reported.
+        let malformed = format!("@@ -1,{} +1,{} @@\n{}", MAX_MESSAGE_ROWS + 4, MAX_MESSAGE_ROWS + 4,
+            (0..MAX_MESSAGE_ROWS + 4).map(|_| "+ extra\n").collect::<String>());
+        let rows = typed_message_rows(100, &patch_message(malformed), false);
+        assert_eq!(rows.len(), MAX_MESSAGE_ROWS);
+        assert!(rows.iter().any(|(row, class)| *class == ChatRowClass::ToolError && row.contains("[malformed diff]")));
+        assert!(rows.iter().any(|(row, _)| row.contains("[diff truncated]")));
+    }
+
+    #[test]
+    fn narrow_unicode_output_remains_bounded_and_status_is_visible() {
+        let diff = format!("@@ -1,{} +1,{} @@\n{}", MAX_MESSAGE_ROWS + 2, MAX_MESSAGE_ROWS + 2,
+            (0..MAX_MESSAGE_ROWS + 2).map(|_| "+ 🦀\n").collect::<String>());
+        let rows = typed_message_rows(24, &patch_message(diff), false);
+        assert_eq!(rows.len(), MAX_MESSAGE_ROWS);
+        assert!(rows.iter().all(|(row, _)| row.chars().count() <= 24));
+        assert!(rows.iter().any(|(row, _)| row.contains("[diff truncated]")));
+    }
 }
 
 impl ChatView {

@@ -96,6 +96,8 @@ mod native_theme_runtime;
 mod native_timeline;
 mod native_transcript;
 #[cfg(feature = "native")]
+mod native_diff_view;
+#[cfg(feature = "native")]
 mod native_ui_budget;
 #[cfg(feature = "native")]
 mod native_ui_preferences;
