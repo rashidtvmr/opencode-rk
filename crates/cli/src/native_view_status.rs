@@ -217,6 +217,7 @@ pub struct StatusView {
     todos: Option<Vec<Todo>>,
     todos_stale: Option<String>,
     sidebar_offset: usize,
+    mcp_open: Option<bool>,
 }
 
 #[cfg(test)]
@@ -273,6 +274,13 @@ mod conditional_sidebar_tests {
 struct SidebarRow {
     line: crate::native_ui_style::Line,
     mcp_index: Option<usize>,
+    mcp_toggle: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum McpSidebarHit<'a> {
+    Toggle,
+    Server { name: &'a str, included: bool },
 }
 
 impl StatusView {
@@ -317,6 +325,18 @@ impl StatusView {
         }).collect()
     }
 
+    pub fn toggle_mcp_sidebar(&mut self) -> bool {
+        if self.mcp.len() <= 2 { return false; }
+        self.mcp_open = Some(!self.mcp_sidebar_open());
+        self.sidebar_offset = 0;
+        true
+    }
+
+    #[must_use]
+    pub fn mcp_sidebar_open(&self) -> bool {
+        self.mcp.len() <= 2 || self.mcp_open.unwrap_or(true)
+    }
+
     pub fn scroll_sidebar(&mut self, lines: isize, height: usize) {
         if height == 0 { return; }
         let count = self.sidebar_rows(1, MAX_ROWS).len();
@@ -327,51 +347,55 @@ impl StatusView {
 
     fn sidebar_rows(&self, width: usize, height: usize) -> Vec<SidebarRow> {
         use crate::native_ui_style::{Line, Role};
-        let mut rows = vec![(String::new(), Role::Description, None)];
+        let mut rows = vec![(String::new(), Role::Description, None, false)];
         if let Some(title) = self.session_title() {
-            rows.push((title.to_owned(), Role::Heading, None));
-            rows.push((String::new(), Role::Description, None));
+            rows.push((title.to_owned(), Role::Heading, None, false));
+            rows.push((String::new(), Role::Description, None, false));
         }
         if let Some((used, window)) = self.context {
-            if rows.last().is_some_and(|(text, _, _)| !text.is_empty()) {
-                rows.push((String::new(), Role::Description, None));
+            if rows.last().is_some_and(|(text, _, _, _)| !text.is_empty()) {
+                rows.push((String::new(), Role::Description, None, false));
             }
-            rows.push(("Context".to_owned(), Role::Heading, None));
+            rows.push(("Context".to_owned(), Role::Heading, None, false));
             let digits = used.to_string();
             let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
             for (index, digit) in digits.chars().enumerate() {
                 if index > 0 && (digits.len() - index) % 3 == 0 { grouped.push(','); }
                 grouped.push(digit);
             }
-            rows.push((format!("{grouped} tokens"), Role::Description, None));
+            rows.push((format!("{grouped} tokens"), Role::Description, None, false));
             if let Some(window) = window.filter(|window| *window > 0) {
-                // Match contextUsage's Math.round without overflowing u64.
                 let percent = (u128::from(used) * 100 + u128::from(window) / 2) / u128::from(window);
-                rows.push((format!("{percent}% used"), Role::Description, None));
+                rows.push((format!("{percent}% used"), Role::Description, None, false));
             }
         }
         if !self.mcp.is_empty() {
-            if rows.last().is_some_and(|(text, _, _)| !text.is_empty()) {
-                rows.push((String::new(), Role::Description, None));
+            if rows.last().is_some_and(|(text, _, _, _)| !text.is_empty()) {
+                rows.push((String::new(), Role::Description, None, false));
             }
-            rows.push(("MCP".to_owned(), Role::Heading, None));
-            for (index, entry) in self.mcp.iter().enumerate() {
-                let inclusion = match entry.included {
-                    Some(true) => "",
-                    Some(false) => " (excluded)",
-                    None => "",
-                };
-                rows.push((format!("• {} {}{inclusion}", entry.name, entry.status.as_str()), Role::Item, Some(index)));
+            let collapsible = self.mcp.len() > 2;
+            let active = self.mcp.iter().filter(|entry| entry.status == McpStatus::Connected).count();
+            let errors = self.mcp.iter().filter(|entry| matches!(entry.status, McpStatus::Failed { .. } | McpStatus::NeedsAuth)).count();
+            let prefix = if collapsible { if self.mcp_sidebar_open() { "▼ " } else { "▶ " } } else { "" };
+            let summary = if collapsible && !self.mcp_sidebar_open() {
+                format!("{prefix}MCP ({} active{})", active, if errors > 0 { format!(", {errors} error{}", if errors == 1 { "" } else { "s" }) } else { String::new() })
+            } else { format!("{prefix}MCP") };
+            rows.push((summary, Role::Heading, None, collapsible));
+            if !collapsible || self.mcp_sidebar_open() {
+                for (index, entry) in self.mcp.iter().enumerate() {
+                    let inclusion = match entry.included { Some(true) => "", Some(false) => " (excluded)", None => "" };
+                    rows.push((format!("• {} {}{inclusion}", entry.name, entry.status.as_str()), Role::Item, Some(index), false));
+                }
             }
         }
         match &self.todos {
-            None => {},
-            Some(todos) if todos.is_empty() => {},
+            None => {}
+            Some(todos) if todos.is_empty() => {}
             Some(todos) => {
-                if rows.last().is_some_and(|(text, _, _)| !text.is_empty()) {
-                    rows.push((String::new(), Role::Description, None));
+                if rows.last().is_some_and(|(text, _, _, _)| !text.is_empty()) {
+                    rows.push((String::new(), Role::Description, None, false));
                 }
-                rows.push(("Todo".to_owned(), Role::Heading, None));
+                rows.push(("Todo".to_owned(), Role::Heading, None, false));
                 for todo in todos {
                     let marker = match &todo.status {
                         opencode_rk_sessions::TodoStatus::Pending => "[ ]",
@@ -380,17 +404,14 @@ impl StatusView {
                         opencode_rk_sessions::TodoStatus::Cancelled => "[-]",
                     };
                     let content = display(Some(&todo.content));
-                    rows.push((format!("{marker} {content}"), Role::Description, None));
+                    rows.push((format!("{marker} {content}"), Role::Description, None, false));
                 }
             }
         }
         let maximum = rows.len().min(MAX_ROWS).saturating_sub(height);
-        rows.into_iter()
-            .take(MAX_ROWS)
-            .skip(self.sidebar_offset.min(maximum))
-            .take(height.min(MAX_ROWS))
-            .map(|(text, role, mcp_index)| SidebarRow {line:Line {text:fit(&text, width),role,detail_from:None},mcp_index})
-            .collect()
+        rows.into_iter().take(MAX_ROWS).skip(self.sidebar_offset.min(maximum)).take(height.min(MAX_ROWS)).map(|(text, role, mcp_index, mcp_toggle)| SidebarRow {
+            line: Line { text: fit(&text, width), role, detail_from: None }, mcp_index, mcp_toggle
+        }).collect()
     }
 
     /// Caller-confirmed daemon connection observation. Call only after an
@@ -560,14 +581,20 @@ impl StatusView {
 
     /// Resolve clicks against the rendered sidebar, never a guessed row
     /// layout. Only authenticated session rows have toggle authority.
-    pub fn mcp_sidebar_hit(&self, width: usize, height: usize, row: usize) -> Option<(&str, bool)> {
-        if width == 0 || height == 0 {
-            return None;
-        }
+    pub fn mcp_sidebar_row_hit(&self, width: usize, height: usize, row: usize) -> Option<McpSidebarHit<'_>> {
+        if width == 0 || height == 0 { return None; }
         let rows = self.sidebar_rows(width, height);
-        let index = rows.get(row)?.mcp_index?;
-        let entry = self.mcp.get(index)?;
-        Some((entry.name.as_str(), entry.included?))
+        let target = rows.get(row)?;
+        if target.mcp_toggle && self.mcp.len() > 2 { return Some(McpSidebarHit::Toggle); }
+        let entry = self.mcp.get(target.mcp_index?)?;
+        Some(McpSidebarHit::Server { name: entry.name.as_str(), included: entry.included? })
+    }
+
+    pub fn mcp_sidebar_hit(&self, width: usize, height: usize, row: usize) -> Option<(&str, bool)> {
+        match self.mcp_sidebar_row_hit(width, height, row)? {
+            McpSidebarHit::Server { name, included } => Some((name, included)),
+            McpSidebarHit::Toggle => None,
+        }
     }
 
     /// Optional context setters (confirmed values only, `None` => Unavailable).
@@ -626,6 +653,7 @@ impl StatusView {
     pub fn apply_mcp(&mut self, value: &Value) -> Result<(), String> {
         match parse_mcp(value) {
             Ok(entries) => {
+                if !self.mcp_ack { self.mcp_open = Some(true); }
                 self.mcp = entries;
                 self.mcp_ack = true;
                 self.mcp_stale = None;
@@ -1347,7 +1375,8 @@ mod tests {
         assert_eq!(view.mcp_sidebar_hit(38, 8, row), Some((last.as_str(), false)));
         view.scroll_sidebar(isize::MIN, 8);
         let first = view.render_sidebar(38, 8);
-        assert!(first.iter().any(|row| row == "MCP"));
+        let heading = first.iter().position(|row| row == "▼ MCP").expect("expanded MCP heading");
+        assert_eq!(view.mcp_sidebar_row_hit(38, 8, heading), Some(McpSidebarHit::Toggle));
         let row = first.iter().position(|line| line.contains("server-00")).expect("first MCP server must remain reachable");
         assert_eq!(view.mcp_sidebar_hit(38, 8, row), Some(("server-00", true)));
     }
@@ -1905,3 +1934,84 @@ mod tests {
         assert!(!rows.iter().any(|row| row == "Todo" || row == "Todos"));
         assert!(!rows.iter().any(|row| row.contains("Unavailable") || row.contains("No todos")));
     }
+
+
+#[cfg(test)]
+mod mcp_sidebar_behavior_regression {
+    use super::{McpSidebarHit, StatusView};
+    use serde_json::json;
+
+    fn three_servers() -> serde_json::Value {
+        json!({
+            "a": {"status":"connected"},
+            "b": {"status":"failed", "error":"timeout"},
+            "c": {"status":"needs_auth"}
+        })
+    }
+
+    #[test]
+    fn three_servers_default_expanded_collapse_and_reexpand() {
+        let mut view = StatusView::default();
+        view.apply_mcp(&three_servers()).unwrap();
+        assert!(view.mcp_sidebar_open());
+        assert!(view.render_sidebar(80, 20).iter().any(|row| row.contains("a connected")));
+        assert!(view.toggle_mcp_sidebar());
+        assert!(!view.mcp_sidebar_open());
+        assert!(view.render_sidebar(80, 20).iter().any(|row| row.contains("▶ MCP")));
+        assert!(!view.render_sidebar(80, 20).iter().any(|row| row.contains("a connected")));
+        assert!(view.toggle_mcp_sidebar());
+        assert!(view.mcp_sidebar_open());
+        assert!(view.render_sidebar(80, 20).iter().any(|row| row.contains("a connected")));
+    }
+
+    #[test]
+    fn collapsed_summary_reports_active_and_errors() {
+        let mut view = StatusView::default();
+        view.apply_mcp(&three_servers()).unwrap();
+        view.toggle_mcp_sidebar();
+        assert!(view.render_sidebar(80, 20).iter().any(|row| row == "▶ MCP (1 active, 2 errors)"));
+    }
+
+    #[test]
+    fn one_and_two_servers_are_always_expanded() {
+        for snapshot in [json!({"a":{"status":"connected"}}), json!({"a":{"status":"connected"},"b":{"status":"disabled"}})] {
+            let mut view = StatusView::default();
+            view.apply_mcp(&snapshot).unwrap();
+            assert!(!view.toggle_mcp_sidebar());
+            assert!(view.mcp_sidebar_open());
+            assert!(view.render_sidebar(80, 20).iter().any(|row| row.contains("a connected")));
+        }
+    }
+
+    #[test]
+    fn accepted_refresh_preserves_user_collapse_state() {
+        let mut view = StatusView::default();
+        let snapshot = three_servers();
+        view.apply_mcp(&snapshot).unwrap();
+        view.toggle_mcp_sidebar();
+        assert!(!view.mcp_sidebar_open());
+        view.apply_mcp(&snapshot).unwrap();
+        assert!(!view.mcp_sidebar_open());
+        assert!(view.render_sidebar(80, 20).iter().any(|row| row.contains("▶ MCP")));
+    }
+
+    #[test]
+    fn typed_header_only_survives_title_todo_collision_and_scroll() {
+        let mut view = StatusView::default();
+        view.set_session_binding(Some(opencode_rk_contracts::SessionId::new().to_string()), Some("MCP incident".into()), Some(0));
+        view.apply_todos(&json!({"todos":[{"id":"m","content":"MCP text","status":"pending","priority":"high"}]})).unwrap();
+        view.apply_mcp(&three_servers()).unwrap();
+        let initial = view.render_sidebar(80, 10);
+        let title = initial.iter().position(|row| row == "MCP incident").unwrap();
+        let todo = initial.iter().position(|row| row.contains("MCP text")).unwrap();
+        assert_ne!(view.mcp_sidebar_row_hit(80, 10, title), Some(McpSidebarHit::Toggle));
+        assert_ne!(view.mcp_sidebar_row_hit(80, 10, todo), Some(McpSidebarHit::Toggle));
+        // Known source-row layout: blank,title,blank,MCP header; scrolling by 2
+        // clips the title while leaving the real header at visible row 1.
+        view.scroll_sidebar(2, 5);
+        let clipped = view.render_sidebar(80, 5);
+        assert_eq!(clipped.get(1).map(String::as_str), Some("▼ MCP"));
+        assert_eq!(view.mcp_sidebar_row_hit(80, 5, 1), Some(McpSidebarHit::Toggle));
+        assert_ne!(view.mcp_sidebar_row_hit(80, 5, 0), Some(McpSidebarHit::Toggle));
+    }
+}

@@ -5528,6 +5528,7 @@ fn native_loop(
                     && matches!(dialog, native_setup::Dialog::None)
                     && import_dialog.as_ref().is_none_or(|import| !import.is_open())
                 {
+                    if view.mcp_sidebar_toggle_action(x, y) { needs_paint = true; continue; }
                     if let Some((name, included)) = view.mcp_sidebar_action(x, y) {
                         if let Some(snapshot) = live.as_ref() {
                             let encoded: String = name.bytes().flat_map(|byte| {

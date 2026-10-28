@@ -140,6 +140,7 @@ pub struct NativeView {
     /// suppressed without changing the composer rows themselves.
     frame_busy: bool,
     mcp_hit: Vec<(String, bool, u16, u16, u16)>,
+    mcp_toggle_hit: Option<(u16, u16, u16)>,
     sidebar_content_height: usize,
     /// Frame reservation owned by the live session-tab shell.
     tab_reservation: TabReservation,
@@ -148,6 +149,23 @@ pub struct NativeView {
 #[cfg(test)]
 mod page_spacing_tests {
     use super::*;
+    #[test]
+    fn mcp_heading_hit_uses_painted_tab_reservation_coordinate() {
+        let mut view = NativeView::new(148, 30); view.set_session_route(true);
+        view.set_tab_reservation(crate::native_tabs::TabReservation::for_view(crate::native_tabs::TabOrientation::Horizontal, 148, 30));
+        view.apply_mcp(&serde_json::json!({"status":{"a":{"status":"connected"},"b":{"status":"disabled"},"c":{"status":"needs_auth"}},"included":{"a":true,"b":true,"c":true}})).unwrap();
+        let _ = view.render("", &[], false, &[]); let (left, top, _) = view.mcp_toggle_hit.expect("painted MCP heading hit");
+        assert_eq!(top, view.tab_reservation().y_offset().saturating_add(1)); assert!(!view.mcp_sidebar_toggle_action(left + 1, top.saturating_sub(1))); assert!(view.mcp_sidebar_toggle_action(left + 1, top));
+        let _ = view.render("", &[], false, &[]); assert_eq!(view.mcp_toggle_hit.expect("repainted heading").1, top);
+    }
+
+    #[test]
+    fn scroll_and_resize_clear_old_mcp_heading_geometry_until_repaint() {
+        let mut view = NativeView::new(148, 30); view.set_session_route(true);
+        view.apply_mcp(&serde_json::json!({"a":{"status":"connected"},"b":{"status":"disabled"},"c":{"status":"needs_auth"}})).unwrap(); let _ = view.render("", &[], false, &[]);
+        assert!(view.mcp_toggle_hit.is_some()); view.scroll_sidebar_at(view.presentation().sidebar_offset.unwrap() + 1, 2, 1); assert!(view.mcp_toggle_hit.is_none()); let _ = view.render("", &[], false, &[]); assert!(view.mcp_toggle_hit.is_some()); view.resize(160, 30); assert!(view.mcp_toggle_hit.is_none());
+    }
+
     #[test]
     fn sidebar_click_authority_is_retracted_before_hidden_or_rebound_frames() {
         let mut view = NativeView::new(148, 30);
@@ -584,6 +602,7 @@ impl NativeView {
             overlay_roles: Vec::new(),
             frame_busy: false,
             mcp_hit: Vec::new(),
+            mcp_toggle_hit: None,
             sidebar_content_height: 0,
             tab_reservation: TabReservation::default(),
         }
@@ -595,6 +614,7 @@ impl NativeView {
     pub fn set_tab_reservation(&mut self, reservation: TabReservation) {
         if self.tab_reservation != reservation {
             self.mcp_hit.clear();
+            self.mcp_toggle_hit = None;
             self.context_usage_hit = None;
         }
         self.tab_reservation = reservation;
@@ -607,6 +627,7 @@ impl NativeView {
 
     pub fn resize(&mut self, cols: u16, rows: u16) {
         self.mcp_hit.clear();
+        self.mcp_toggle_hit = None;
         self.context_usage_hit = None;
         self.sidebar_content_height = 0;
         self.layout = Layout::new(cols, rows);
@@ -915,6 +936,7 @@ impl NativeView {
     pub fn set_box_appearance(&mut self, appearance: crate::native_box_style::BoxAppearance) {
         if self.box_appearance != appearance {
             self.mcp_hit.clear();
+            self.mcp_toggle_hit = None;
         }
         self.box_appearance = appearance;
     }
@@ -922,6 +944,7 @@ impl NativeView {
     pub fn set_session_route(&mut self, session_route: bool) {
         if self.session_route != session_route {
             self.mcp_hit.clear();
+            self.mcp_toggle_hit = None;
             self.context_usage_hit = None;
             self.context_usage_hit = None;
         }
@@ -931,6 +954,7 @@ impl NativeView {
     /// Toggle the optional wide sidebar (`session.sidebar.toggle`).
     pub fn toggle_sidebar(&mut self) {
         self.mcp_hit.clear();
+        self.mcp_toggle_hit = None;
         let visible = self.sidebar_visible();
         self.sidebar_hidden = visible;
         self.sidebar_open = !visible;
@@ -939,6 +963,7 @@ impl NativeView {
     /// Force the sidebar hidden/shown. Hidden wins over the wide auto rule.
     pub fn set_sidebar_hidden(&mut self, hidden: bool) {
         self.mcp_hit.clear();
+        self.mcp_toggle_hit = None;
         self.sidebar_hidden = hidden;
         self.sidebar_open = false;
     }
@@ -952,6 +977,7 @@ impl NativeView {
     pub fn set_parent_session(&mut self, parent_session: bool) {
         if self.parent_session != parent_session {
             self.mcp_hit.clear();
+            self.mcp_toggle_hit = None;
         }
         self.parent_session = parent_session;
     }
@@ -1315,18 +1341,29 @@ impl NativeView {
     pub fn apply_mcp(&mut self, value: &Value) -> Result<(), String> {
         self.status.apply_mcp(value)?;
         self.mcp_hit.clear();
+        self.mcp_toggle_hit = None;
         Ok(())
     }
 
     pub fn apply_todos(&mut self, value: &Value) -> Result<(), String> {
         let result = self.status.apply_todos(value);
         self.mcp_hit.clear();
+        self.mcp_toggle_hit = None;
         result
     }
 
     pub fn set_todos_error(&mut self, reason: &str) {
         self.status.set_todos_error(reason);
         self.mcp_hit.clear();
+        self.mcp_toggle_hit = None;
+    }
+
+    pub fn mcp_sidebar_toggle_action(&mut self, x: u16, y: u16) -> bool {
+        if self.presentation().sidebar_offset.is_none() || self.dialogs.intercepts_input() || self.command_palette_open() { return false; }
+        let Some((left, top, width)) = self.mcp_toggle_hit else { return false; };
+        if x < left || x >= left.saturating_add(width) || y != top { return false; }
+        if !self.status.toggle_mcp_sidebar() { return false; }
+        self.mcp_hit.clear(); self.mcp_toggle_hit = None; true
     }
 
     pub fn mcp_sidebar_action(&self, x: u16, y: u16) -> Option<(String, bool)> {
@@ -1365,6 +1402,7 @@ impl NativeView {
         self.status
             .scroll_sidebar(lines, self.sidebar_content_height);
         self.mcp_hit.clear();
+        self.mcp_toggle_hit = None;
         true
     }
 
@@ -2175,6 +2213,7 @@ impl NativeView {
             Vec::new()
         };
         self.mcp_hit.clear();
+        self.mcp_toggle_hit = None;
         let mut sidebar: Vec<String> = sidebar_styled
             .iter()
             .map(|line| padded(&line.text, presentation.sidebar_width))
@@ -2290,6 +2329,9 @@ impl NativeView {
                     detail_from: None,
                     modal: false,
                 });
+                if matches!(self.status.mcp_sidebar_row_hit(38, self.sidebar_content_height, index), Some(crate::native_view_status::McpSidebarHit::Toggle)) {
+                    self.mcp_toggle_hit = Some((left.saturating_add(sidebar_inset), if sidebar_frame_painted { sidebar_top.saturating_add(1).saturating_add(index as u16) } else { index as u16 }, sidebar_text_width));
+                }
                 if let Some((name, included)) =
                     self.status
                         .mcp_sidebar_hit(38, self.sidebar_content_height, index)
@@ -2354,6 +2396,9 @@ impl NativeView {
             }
             for hit in &mut self.mcp_hit {
                 hit.3 = hit.3.saturating_add(self.tab_reservation.y_offset());
+            }
+            if let Some((_, ref mut top, _)) = self.mcp_toggle_hit {
+                *top = top.saturating_add(self.tab_reservation.y_offset());
             }
         }
         if let Some((left, row, button_width)) = self.send_button_region(draft) {
