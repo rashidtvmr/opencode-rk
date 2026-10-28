@@ -353,6 +353,8 @@ struct LiveSnapshot {
     directory: Option<String>,
     #[cfg(feature = "native")]
     session_titles: Vec<(String, String)>,
+    #[cfg(feature = "native")]
+    session_project_labels: Vec<(String, Option<String>)>,
 }
 
 
@@ -869,6 +871,18 @@ fn fetch_snapshot(
     snapshot_from_listing(origin, &value, session, auth)
 }
 
+/// Display-only fallback for a session directory from the authenticated
+/// listing. An unusable optional directory is omitted rather than preventing
+/// session selection or allowing control characters into the terminal.
+#[cfg(feature = "native")]
+fn session_directory_label(value: Option<&serde_json::Value>) -> Option<String> {
+    let path = value?.as_str()?;
+    if path.is_empty() || path.len() > 4096 || path.chars().any(char::is_control) {
+        return None;
+    }
+    std::path::Path::new(path).file_name()?.to_str().map(str::to_owned)
+}
+
 /// Target selection + bounded message history from an ALREADY authenticated
 /// listing payload. Shared so `bind_session` satisfies its contract with ONE
 /// `GET /api/sessions`: the same parsed body proves target row membership
@@ -952,6 +966,11 @@ fn snapshot_from_listing(
         serde_json::Value::String(text) => Some(preview(text)),
         _ => Some("<blob payload>".to_string()),
     });
+    #[cfg(feature = "native")]
+    let session_project_labels = parsed_rows.iter().map(|row| {
+        let entry = sessions.iter().find(|candidate| candidate["id"].as_str() == Some(row.id.as_str()));
+        (row.id.clone(), session_directory_label(entry.and_then(|item| item.get("directory"))))
+    }).collect();
     Ok(LiveSnapshot {
         origin: origin.to_owned(),
         session_id: id,
@@ -977,6 +996,8 @@ fn snapshot_from_listing(
         directory: target["directory"].as_str().map(str::to_owned),
         #[cfg(feature = "native")]
         session_titles: parsed_rows.into_iter().map(|row| (row.id, row.title)).collect(),
+        #[cfg(feature = "native")]
+        session_project_labels,
     })
 }
 
@@ -2406,6 +2427,21 @@ fn seed_navigation_titles(
         rows.push((crate::native_navigation::SessionRef(id.clone()), title.clone()));
     }
     navigation.ingest_snapshot_titles(rows);
+    let labels: Vec<_> = snapshot.session_project_labels.iter().map(|(id, label)| {
+        (crate::native_navigation::SessionRef(id.clone()), label.clone())
+    }).collect();
+    navigation.replace_project_labels(&labels);
+}
+
+#[cfg(feature = "native")]
+fn rail_inputs_for_navigation(
+    navigation: &crate::native_navigation::NavigationState,
+    tabs: &[crate::native_tabs::TabInput],
+) -> Vec<crate::native_tab_rail::RailInput> {
+    tabs.iter().map(|tab| crate::native_tab_rail::RailInput {
+        session: tab.session.clone(), title: tab.title.clone(),
+        detail: navigation.project_label(&tab.session).unwrap_or_default().to_owned(), flags: tab.flags,
+    }).collect()
 }
 
 #[cfg(feature = "native")]
@@ -4238,6 +4274,7 @@ fn native_loop(
                                 history_window = Some(crate::native_chat_projection::NativeHistoryWindow::new(&snapshot.raw_history, snapshot.history_next_before.clone()));
                                 transcript.reset(snapshot.history.clone(), snapshot.typed_history.clone());
                             }
+                            seed_navigation_titles(&mut navigation, &snapshot);
                             live = Some(snapshot);
                             needs_paint = true;
                         }
@@ -4261,6 +4298,7 @@ fn native_loop(
                             if let Some(current) = live.as_ref() {
                                 match fetch_snapshot(&current.origin, Some(&current.session_id), auth) {
                                     Ok(snapshot) if snapshot.session_id == current.session_id => {
+                                        seed_navigation_titles(&mut navigation, &snapshot);
                                         live = Some(snapshot);
                                         append_transcript(&mut transcript, "compaction complete".into());
                                     }
@@ -4702,10 +4740,8 @@ fn native_loop(
             matches!(effective_orientation, TabOrientation::Horizontal),
         );
         let frame_rail = if effective_orientation == TabOrientation::Vertical {
-            let rail_inputs = tab_inputs.iter().map(|tab| crate::native_tab_rail::RailInput {
-                session: tab.session.clone(), title: tab.title.clone(), detail: String::new(), flags: tab.flags,
-            }).collect::<Vec<_>>();
-            Some(crate::native_tab_rail::RailFrame::render(&rail_inputs, tab_reservation.width, viewport.1, rendered_rail.as_ref().map_or(0, |r| r.scroll_start), tab_hovered.as_ref()))
+            let rail_inputs = rail_inputs_for_navigation(&navigation, &tab_inputs);
+            Some(crate::native_tab_rail::RailFrame::render_cells(&rail_inputs, tab_reservation.width, viewport.1, rendered_rail.as_ref().map_or(0, |r| r.scroll_cells), tab_hovered.as_ref(), navigation.active().is_none()))
         } else { None };
         let mut lines = if help_open && !dialog_open {
             Vec::new()
@@ -5249,10 +5285,9 @@ fn native_loop(
                         if effective_orientation == TabOrientation::Vertical {
                             if let Some(rail) = rendered_rail.as_ref() {
                                 match rail.hit(x, y) {
-                                    Some(crate::native_tab_rail::RailHit::Session(session)) => {
-                                        if let Some(row) = rail.rows.iter().find(|row| matches!(&row.kind, crate::native_tab_rail::RailRowKind::Session(id) if id == &session)) {
-                                            let close = rail.close_hit(x, y) == Some(&session);
-                                            tab_press = Some((session, crate::native_tabs::TabRect { x: row.rect.x, y: row.rect.y, width: row.rect.width, height: row.rect.height }, close, effective_orientation));
+                                    Some(crate::native_tab_rail::RailHit::Session(_)) => {
+                                        if let Some((session, rect, close)) = rail.session_press_target(x, y) {
+                                            tab_press = Some((session, crate::native_tabs::TabRect { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, close, effective_orientation));
                                         }
                                     }
                                     Some(crate::native_tab_rail::RailHit::New) => add_press = Some((crate::native_tabs::TabRect { x: rail.new_rect.map_or(0, |r| r.x), y: rail.new_rect.map_or(0, |r| r.y), width: rail.new_rect.map_or(0, |r| r.width), height: rail.new_rect.map_or(0, |r| r.height) }, effective_orientation)),
@@ -6485,6 +6520,7 @@ fn native_loop(
                                     Ok((snapshot, restored_draft)) => {
                                         session_route = true;
                                         view.set_session_route(session_route);
+                                        seed_navigation_titles(&mut navigation, &snapshot);
                                         live = Some(snapshot);
                                         history_window = live.as_ref().map(|snapshot| crate::native_chat_projection::NativeHistoryWindow::new(&snapshot.raw_history, snapshot.history_next_before.clone()));
                                         history_pending = false;
@@ -7386,6 +7422,7 @@ fn native_loop(
                                 bind_session(&mut view, &mut transcript, &working, draft_cursor, &snapshot.origin, Some(&id), auth));
                             match bound {
                                 Ok((snapshot, restored)) => {
+                                    seed_navigation_titles(&mut navigation, &snapshot);
                                     live = Some(snapshot);
                                     let restored_cursor = navigation.active().map(|tab| tab.cursor).unwrap_or(restored.len());
                                     crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, restored, restored_cursor);
@@ -8525,6 +8562,39 @@ mod tab_binding_tests {
     }
 
     #[test]
+    fn rail_details_follow_authenticated_session_directory_without_stale_or_invented_labels() {
+        // Use the same authenticated history fetch and production tab-to-rail
+        // projection as the real loop. Different sessions must retain their
+        // own project fallback labels; no project/VCS metadata is invented.
+        let fixture = Fixture::new();
+        let listing = serde_json::json!({"sessions":[
+            {"id":A,"title":"Session A","directory":"/tmp/opencode/packages/tui"},
+            {"id":B,"title":"Session B","directory":"/tmp/other/"}
+        ]});
+        let snapshot = snapshot_from_listing(&fixture.origin, &listing, Some(A), Some(&fixture.token)).unwrap();
+        let mut nav = navigation();
+        seed_navigation_titles(&mut nav, &snapshot);
+        let tabs = crate::native_tabs::TabStrip::from_navigation(&nav, &[]);
+        let rail_inputs = rail_inputs_for_navigation(&nav, &tabs);
+        assert_eq!(rail_inputs.iter().map(|tab| tab.detail.as_str()).collect::<Vec<_>>(), ["tui", "other"]);
+        let rail = crate::native_tab_rail::RailFrame::render_cells(&rail_inputs, 42, 40, 0, None, false);
+        assert_eq!(rail.rows[2].text.trim(), "tui");
+        assert_eq!(rail.rows[5].text.trim(), "other");
+
+        // A fresh listing that no longer supplies valid directories must not
+        // leave old labels behind, block the bind, or paint terminal controls.
+        let listing = serde_json::json!({"sessions":[
+            {"id":A,"title":"Session A"},
+            {"id":B,"title":"Session B","directory":"/tmp/other\u{1b}[31m"}
+        ]});
+        let snapshot = snapshot_from_listing(&fixture.origin, &listing, Some(A), Some(&fixture.token)).unwrap();
+        seed_navigation_titles(&mut nav, &snapshot);
+        let tabs = crate::native_tabs::TabStrip::from_navigation(&nav, &[]);
+        let rail_inputs = rail_inputs_for_navigation(&nav, &tabs);
+        assert_eq!(rail_inputs.iter().map(|tab| tab.detail.as_str()).collect::<Vec<_>>(), ["", ""]);
+    }
+
+    #[test]
     fn tab_selection_binds_authenticated_target_history_and_live_send_identity() {
         let fixture = Fixture::new();
         let mut view = crate::native_view::NativeView::new(100, 32);
@@ -8623,7 +8693,7 @@ mod tab_binding_tests {
         let mut completion = crate::native_completion::Completion::default();
         let models = vec![native_setup::Model { id: "child".into(), name: "Child".into(), provider_id: "fixture".into(), context_window: None }];
         let mut selected = None;
-        let snapshot = LiveSnapshot { origin: "http://127.0.0.1:1".into(), session_id: A.into(), title: "A".into(), state: "idle".into(), updated_at: String::new(), message_count: 0, last_text: None, history: vec![], typed_history: vec![], raw_history: vec![], history_next_before: None, parent_session: true, parent_session_id: Some(B.into()), directory: None, session_titles: vec![] };
+        let snapshot = LiveSnapshot { origin: "http://127.0.0.1:1".into(), session_id: A.into(), title: "A".into(), state: "idle".into(), updated_at: String::new(), message_count: 0, last_text: None, history: vec![], typed_history: vec![], raw_history: vec![], history_next_before: None, parent_session: true, parent_session_id: Some(B.into()), directory: None, session_titles: vec![], session_project_labels: vec![] };
         commit_child_route(snapshot, "child draft".into(), 2, 8, 13, Some("fixture/child".into()), &models, &mut selected, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut route, &mut completion);
         assert_eq!(draft, "child draft");
         assert_eq!(cursor, 8);
@@ -8936,6 +9006,7 @@ mod command_consumption_tests {
             parent_session_id: None,
             directory: None,
             session_titles: vec![],
+            session_project_labels: vec![],
         });
         let mut history_window = live.as_ref().map(|snapshot| crate::native_chat_projection::NativeHistoryWindow::new(
             &snapshot.raw_history,
@@ -8988,6 +9059,7 @@ mod command_consumption_tests {
             message_count: 0, last_text: None, history: Vec::new(), typed_history: Vec::new(),
             raw_history: Vec::new(), history_next_before: None, parent_session: false, parent_session_id: None, directory: None,
             session_titles: vec![],
+            session_project_labels: vec![],
         });
         let mut history = None;
         let mut generation = 7;

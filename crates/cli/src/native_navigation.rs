@@ -203,6 +203,9 @@ pub struct Tab {
     pub session: SessionRef,
     /// Parent session when this tab was opened by fork/branch navigation.
     pub parent: Option<SessionRef>,
+    /// Display-only directory fallback from the latest authenticated listing.
+    /// Named projects and VCS metadata are not inferred from this value.
+    project_label: Option<String>,
     pub draft: String,
     /// Composer cursor position, retained independently for every session tab.
     pub cursor: usize,
@@ -215,6 +218,7 @@ impl Tab {
         Self {
             session,
             parent: None,
+            project_label: None,
             draft: String::new(),
             cursor: 0,
             scroll: 0,
@@ -497,6 +501,22 @@ impl NavigationState {
     #[must_use]
     pub fn tabs(&self) -> &[Tab] {
         &self.tabs
+    }
+
+    /// Replace labels only on open tabs, so a missing directory never leaves a
+    /// previously observed label visible and memory is bounded by MAX_TABS.
+    pub fn replace_project_labels(&mut self, labels: &[(SessionRef, Option<String>)]) {
+        for tab in &mut self.tabs {
+            tab.project_label = labels.iter()
+                .find(|(session, _)| *session == tab.session)
+                .and_then(|(_, label)| label.clone());
+        }
+    }
+
+    #[must_use]
+    pub fn project_label(&self, session: &SessionRef) -> Option<&str> {
+        self.tabs.iter().find(|tab| &tab.session == session)
+            .and_then(|tab| tab.project_label.as_deref())
     }
 
     #[must_use]
