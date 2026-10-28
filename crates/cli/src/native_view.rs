@@ -773,6 +773,27 @@ impl NativeView {
             .min(MAX_FRAME_CELLS / cols)
     }
 
+    /// Rows of the composed full-screen frame: the tab strip is INCLUDED and
+    /// the shared footer is its last row.  Modal coordinates (`y`,
+    /// `content_y`) and the footer exclusion both live in THIS frame, so the
+    /// modal content budget and the modal paint clip must use this height,
+    /// never `render_height()` (which is tab-reduced and mixes frames).
+    /// Mirrors the exact composed buffer length in `render_content`: the
+    /// tab-shift path resizes the frame to `min(rows, 256)` rows; without a
+    /// tab reservation the frame is `render_height()` rows.
+    fn full_frame_rows(&self) -> usize {
+        let cols = usize::from(self.layout.cols);
+        if cols == 0 {
+            return 0;
+        }
+        let rows = usize::from(self.layout.rows).min(256);
+        if self.tab_reservation.width > 0 || self.tab_reservation.height > 0 {
+            rows
+        } else {
+            rows.min(MAX_FRAME_CELLS / cols)
+        }
+    }
+
     pub fn home_prompt_width(&self) -> u16 {
         let width = self.presentation().main_width;
         let requested = match self.prompt_width {
@@ -796,10 +817,29 @@ impl NativeView {
         // calculated against the rows above it, otherwise modal compositing
         // paints over the footer and leaves hit regions inconsistent with the
         // visible action rows.
-        let available_height = self.render_height().saturating_sub(1);
-        let content_cols = self.layout.cols.saturating_sub(self.tab_reservation.x_offset());
-        let width = content_cols.saturating_sub(2).min(self.dialog_size.width());
-        let y = (available_height as u16).div_ceil(4);
+        //
+        // Every coordinate below is a FULL-VIEWPORT coordinate (the composed
+        // frame includes the horizontal tab strip), matching upstream
+        // dialog.tsx where the backdrop is absolute at left=0/top=0 with the
+        // complete terminal width/height and the panel is centered against it.
+        // The upstream `paddingTop = dimensions().height / 4` is a FRACTIONAL
+        // source value; the terminal-row rounding is established by capture
+        // evidence, not source arithmetic: in all 24 pinned cases
+        // (`10-render-capture/dialog-geometry-summary.json`, SHA-256
+        // 9d6067be0d0d41547cd0882f8238958415bbf2b8bfb714d3207a267365e5e828)
+        // the panel top is exactly floor((rows + 2) / 4).
+        let full_rows = self.layout.rows;
+        // Center against the FULL viewport columns, not the content area after
+        // subtracting the left rail.  Raw capture evidence
+        // (`dialog-geometry-vertical-120x20.json`, SHA-256
+        // f8d00f461a129f46e35d5c90dad50538fae55bcb3a5be82b61ffef27fc8365f7)
+        // shows the 60-cell dialog background at columns 30..=89 of a
+        // 120-column vertical-tab frame: outer panel x = (120 - 60) / 2 = 30
+        // while the header cell sits at x = 34 (panel x + 4).  The header x
+        // is NOT the outer panel x; the same +4 header inset holds in all 24
+        // capture cases (80-wide horizontal fixtures: header 14, panel 10).
+        let center_cols = self.layout.cols;
+        let width = center_cols.saturating_sub(2).min(self.dialog_size.width());
         let box_id = if self.command_palette.is_open() {
             crate::native_box_style::BoxId::Menu
         } else {
@@ -811,20 +851,31 @@ impl NativeView {
                 .padding
                 .min(crate::native_box_style::MAX_PADDING),
         );
-        let x = self
-            .tab_reservation
-            .x_offset()
-            .saturating_add(content_cols.saturating_sub(width) / 2);
+        // Panel top = floor((full_rows + 2) / 4) (capture-backed, see above),
+        // clamped to stay on a row above the footer (full_rows - 1) whenever
+        // the frame has at least two rows.
+        let max_y = full_rows.saturating_sub(2);
+        let y = (full_rows.saturating_add(2) / 4).min(max_y);
+        // Center against the full viewport for both x and y.  When a left rail
+        // or top tab strip exists, the modal panel overlays them (per upstream
+        // absolute positioning); the panel coordinate must not receive the
+        // reservation offset added again.
+        let x = center_cols.saturating_sub(width) / 2;
         let inset = 2u16.saturating_add(padding).min(width);
         ModalPresentation {
             x,
-            y: y.saturating_add(self.tab_reservation.y_offset()),
+            y,
             width,
             content_x: x.saturating_add(inset),
+            // Content starts below the panel's top padding row (upstream
+            // panel `paddingTop=1`) plus the configured box padding, counted
+            // exactly once.  The min keeps the content start on a real frame
+            // row for degenerate small/padded terminals; the budget formula
+            // then zeroes out instead of underflowing.
             content_y: y
                 .saturating_add(1)
                 .saturating_add(padding)
-                .saturating_add(self.tab_reservation.y_offset()),
+                .min(full_rows.saturating_sub(1)),
             content_width: width.saturating_sub(2 * inset),
             bottom_padding: padding,
             backdrop_alpha: 150,
@@ -840,18 +891,24 @@ impl NativeView {
     }
 
     /// Window modal content below its top inset and above its bottom border.
+    ///
+    /// The budget is computed in ONE coordinate frame: the full composed
+    /// viewport (`full_frame_rows()`), in which `content_y` is absolute and
+    /// the last row is the shared footer.  Never start from
+    /// `render_height()`: that height is tab-reduced while `content_y` is
+    /// not, which silently loses one modal row for horizontal tabs (the
+    /// mixed-frame defect reviewed in
+    /// `modal-full-viewport-review-combined/REPORT.md` finding 4).
     pub fn modal_content_height(&self) -> usize {
         let modal = self.modal_presentation();
         if modal.content_width == 0 {
             return 0;
         }
-        self.render_height()
-            .saturating_sub(1)
-            .saturating_sub(
-                usize::from(modal.content_y.saturating_sub(self.tab_reservation.y_offset()))
-                    + 1
-                    + usize::from(modal.bottom_padding),
-            )
+        self.full_frame_rows()
+            .saturating_sub(1) // footer row is excluded from modal content
+            .saturating_sub(usize::from(modal.content_y)) // rows above content
+            .saturating_sub(1) // panel bottom border/padding row
+            .saturating_sub(usize::from(modal.bottom_padding))
     }
 
     fn composer_metadata(&self) -> String {
@@ -1436,11 +1493,9 @@ impl NativeView {
             return Vec::new();
         }
         let geometry = self.modal_presentation();
-        let height = self
-            .render_height()
-            .saturating_sub(usize::from(geometry.content_y))
-            .saturating_sub(1)
-            .min(16);
+        // Same full-viewport-frame budget as the painted theme dialog in
+        // `render_content` (which uses `modal_content_height().min(16)`).
+        let height = self.modal_content_height().min(16);
         let mut rows = self
             .pages
             .render(usize::from(geometry.content_width), height);
@@ -2492,9 +2547,13 @@ impl NativeView {
                 .collect()
         };
         let modal_content_height = self.modal_content_height();
+        // Modal rows clip at the shared footer of the FULL composed frame
+        // (`content_y` is absolute); `height` above is the tab-reduced
+        // render height and must not bound modal rows.
+        let modal_frame_footer = self.full_frame_rows().saturating_sub(1);
         for (index, line) in modal_lines.iter().enumerate().take(modal_content_height) {
             let y = usize::from(modal_geometry.content_y).saturating_add(index);
-            if y >= height.saturating_sub(1) {
+            if y >= modal_frame_footer {
                 break;
             }
             self.ui_regions.push(crate::native_ui_style::Region {
@@ -2524,7 +2583,7 @@ impl NativeView {
             // The panel's inner top padding is an empty panel row, not
             // transcript text behind the dialog.
             for row in usize::from(modal_geometry.y)
-                ..height.saturating_sub(1).min(
+                ..modal_frame_footer.min(
                     top.saturating_add(content_rows)
                         .saturating_add(1 + usize::from(modal_geometry.bottom_padding)),
                 )
@@ -2984,28 +3043,104 @@ mod tab_interaction_geometry_tests {
     }
 
     #[test]
-    fn modal_rectangles_translate_once_and_stay_inside_content_viewport() {
+    fn modal_rectangles_center_against_full_viewport_not_tab_offset() {
+        // SUPERSEDES `modal_rectangles_translate_once_and_stay_inside_content_viewport`
+        // (old contract: tabbed geometry equals reduced-view geometry plus the
+        // reservation offset).  Upstream dialog.tsx renders the backdrop
+        // absolute over the full terminal viewport, so the panel centers
+        // against the complete frame and never receives the tab offset.  The
+        // preserved invariant from the old test is CONTAINMENT: panel and
+        // content rectangles stay inside the viewport and strictly above the
+        // footer row, with top-pad/content/footer rows non-overlapping.
+        // Preserved from the rejected rewrite: capture-backed exact x/y
+        // (floor((rows + 2) / 4) in 24/24 pinned captures).  Restored (the
+        // rejected rewrite dropped these): content rect bounds and content
+        // containment assertions.
         for orientation in [TabOrientation::Horizontal, TabOrientation::Vertical] {
-            let (view, plain, reservation) = views(orientation);
+            let (view, plain, _reservation) = views(orientation);
             let actual = view.modal_presentation();
             let expected = plain.modal_presentation();
-            assert_eq!(actual.x, expected.x + reservation.x_offset());
-            assert_eq!(actual.y, expected.y + reservation.y_offset());
-            assert_eq!(actual.content_x, expected.content_x + reservation.x_offset());
-            assert_eq!(actual.content_y, expected.content_y + reservation.y_offset());
+            // The panel top is floor((full_rows + 2) / 4) against the FULL
+            // 32-row terminal, independent of tabs.  The x is centered against
+            // the full terminal width without adding x_offset; for Vertical
+            // tabs the panel overlays the left rail.
+            assert_eq!(actual.x, (150u16.saturating_sub(actual.width)) / 2);
+            assert_eq!(actual.y, (32u16.saturating_add(2)) / 4);
             assert_eq!(actual.width, expected.width);
             assert_eq!(actual.content_width, expected.content_width);
+            // Panel rectangle contained in the viewport width.
             assert!(actual.x + actual.width <= 150);
+            // Content rectangle contained in the panel rectangle.
+            assert!(actual.content_x >= actual.x);
+            assert!(
+                usize::from(actual.content_x) + usize::from(actual.content_width)
+                    <= usize::from(actual.x) + usize::from(actual.width)
+            );
+            // Top pad row, content rows and the footer row do not overlap:
+            // content starts below the panel's top padding row and the panel
+            // (content + bottom padding + bottom row) ends exactly above the
+            // footer row 31.
+            assert!(actual.content_y > actual.y);
+            assert_eq!(
+                usize::from(actual.content_y) + view.modal_content_height()
+                    + usize::from(actual.bottom_padding) + 1,
+                31,
+                "modal panel must end exactly above the footer row"
+            );
             assert!(actual.content_y < 31, "modal content must remain above the footer");
+            // Hit regions agree with the rectangle: first content cell in,
+            // the footer row out.
+            assert_eq!(
+                actual.content_point(actual.content_x, actual.content_y, view.modal_content_height()),
+                Some((0, 0))
+            );
+            assert_eq!(
+                actual.content_point(actual.content_x, 31, view.modal_content_height()),
+                None
+            );
         }
     }
 
     #[test]
     fn modal_content_budget_is_independent_of_absolute_tab_offset() {
+        // Restores the OLD contract name and its equality intent in the
+        // full-viewport frame, and supersedes the rejected
+        // `modal_content_budget_grows_when_panel_overlaps_tab_strip` rewrite
+        // (which only asserted `ch >= plain.ch`, could pass with unchanged
+        // heights, and contradicted its own comment).  Upstream owns the
+        // dialog overlay against the full viewport, so for the SAME terminal
+        // size the modal content budget is identical with and without a tab
+        // reservation: the budget is computed from footer row, content start,
+        // panel bottom row and bottom padding in the full frame, never from
+        // the tab-reduced render height.  (Equality against the OLD reduced
+        // "plain" view is intentionally NOT asserted: that view measures a
+        // smaller terminal and the reduced-view translation contract is
+        // superseded by the upstream absolute-overlay contract.)
         for orientation in [TabOrientation::Horizontal, TabOrientation::Vertical] {
-            let (view, plain, _) = views(orientation);
-            assert_eq!(view.modal_content_height(), plain.modal_content_height());
-            assert!(view.modal_content_height() > 0);
+            let (view, _plain, _) = views(orientation);
+            let mut untabbed = NativeView::new(150, 32);
+            untabbed.set_session_route(false);
+            let modal = view.modal_presentation();
+            // Exact capture-frame budget: full rows=32 -> panel y=8,
+            // content_y=9 (upstream paddingTop=1), so
+            // 32 - 1 (footer) - 9 - 1 (panel bottom row) - 0 (padding) = 21.
+            assert_eq!(modal.y, 8);
+            assert_eq!(modal.content_y, 9);
+            assert_eq!(view.modal_content_height(), 21);
+            assert_eq!(untabbed.modal_content_height(), 21);
+            assert_eq!(
+                view.modal_content_height(),
+                untabbed.modal_content_height(),
+                "{orientation:?}: budget must not depend on the tab reservation"
+            );
+            // Full-footer exclusion: content plus bottom padding plus the
+            // panel's bottom row end exactly above the footer row (31).
+            assert_eq!(
+                usize::from(modal.content_y) + view.modal_content_height()
+                    + usize::from(modal.bottom_padding) + 1,
+                32 - 1
+            );
+            assert!(view.modal_content_height() > 0, "modal content must have positive height");
         }
     }
 
@@ -5577,5 +5712,383 @@ mod tests {
             !frame.iter().any(|r| r.contains("session: Alpha (live)")),
             "no stale title on the new id"
         );
+    }
+}
+
+#[cfg(test)]
+mod modal_full_viewport_geometry_tests {
+    use super::*;
+    use crate::native_tabs::{TabOrientation, TabReservation};
+
+    // Capture-backed fixtures from the pinned upstream TUI at
+    // 450e7b92412c780a7b5a75226bb8d49aaca24e22 (Message Actions dialog),
+    // `10-render-capture/dialog-geometry-summary.json`, SHA-256
+    // 9d6067be0d0d41547cd0882f8238958415bbf2b8bfb714d3207a267365e5e828.
+    // In 24/24 captures the panel top is exactly floor((rows + 2) / 4); the
+    // header cell sits at panel_x + 4 and is NOT the outer panel edge.  The
+    // raw frame `dialog-geometry-vertical-120x20.json`, SHA-256
+    // f8d00f461a129f46e35d5c90dad50538fae55bcb3a5be82b61ffef27fc8365f7,
+    // shows the 60-cell dialog background at columns 30..=89, proving the
+    // outer panel x = (120 - 60) / 2 = 30 for the vertical-tab fixture while
+    // its header cell is at x = 34.
+    //
+    // Case tuples are (cols, rows, panel_x, panel_y, content_budget) with
+    // default (zero) box padding: content_y = panel_y + 1 (upstream panel
+    // `paddingTop=1`) and budget = rows - 1 (footer) - content_y
+    // - 1 (panel bottom row) - padding, all in the FULL viewport frame.
+    const HORIZONTAL_CASES: &[(u16, u16, u16, u16, usize)] = &[
+        (80, 19, 10, 5, 11),
+        (80, 20, 10, 5, 12),
+        (80, 21, 10, 5, 13),
+        (80, 22, 10, 6, 13),
+        (80, 23, 10, 6, 14),
+        (80, 24, 10, 6, 15),
+        (80, 25, 10, 6, 16),
+        (80, 26, 10, 7, 16),
+        (80, 27, 10, 7, 17),
+        (80, 28, 10, 7, 18),
+        (80, 29, 10, 7, 19),
+        (80, 30, 10, 8, 19),
+        (80, 31, 10, 8, 20),
+        (80, 32, 10, 8, 21),
+        (80, 33, 10, 8, 22),
+        (80, 34, 10, 9, 22),
+        (80, 35, 10, 9, 23),
+        (80, 36, 10, 9, 24),
+    ];
+
+    const VERTICAL_CASES: &[(u16, u16, u16, u16, usize)] = &[
+        (120, 20, 30, 5, 12),
+        (120, 21, 30, 5, 13),
+        (120, 24, 30, 6, 15),
+        (120, 25, 30, 6, 16),
+        (120, 32, 30, 8, 21),
+        (120, 33, 30, 8, 22),
+    ];
+
+    /// Assert the shared rectangle/budget/footer/hit contract for one
+    /// capture fixture.  `rows` is the FULL viewport height (the frame
+    /// `content_y` is measured in); the footer is its last row.
+    fn assert_exact_geometry(
+        view: &NativeView,
+        cols: u16,
+        rows: u16,
+        expected_x: u16,
+        expected_y: u16,
+        expected_budget: usize,
+    ) {
+        let modal = view.modal_presentation();
+        let budget = view.modal_content_height();
+        assert_eq!(modal.x, expected_x, "{cols}x{rows}: panel x (outer edge)");
+        assert_eq!(modal.y, expected_y, "{cols}x{rows}: panel y");
+        assert_eq!(
+            modal.content_y,
+            expected_y + 1,
+            "{cols}x{rows}: content_y = panel_y + paddingTop(1)"
+        );
+        assert_eq!(
+            budget, expected_budget,
+            "{cols}x{rows}: exact full-frame content budget"
+        );
+        // Explicit rectangle bounds: panel inside the viewport ...
+        assert_eq!(modal.width, 60, "{cols}x{rows}: capture fixture is the medium preset");
+        assert!(
+            usize::from(modal.x) + usize::from(modal.width) <= usize::from(cols),
+            "{cols}x{rows}: panel exceeds frame width"
+        );
+        // ... content rect inside the panel rect ...
+        assert!(modal.content_x >= modal.x, "{cols}x{rows}: content_x left of panel");
+        assert_eq!(
+            modal.content_x,
+            modal.x + 2,
+            "{cols}x{rows}: zero-padding content inset is two cells"
+        );
+        assert!(
+            usize::from(modal.content_x) + usize::from(modal.content_width)
+                <= usize::from(modal.x) + usize::from(modal.width),
+            "{cols}x{rows}: content exceeds panel width"
+        );
+        // ... content below the panel's top padding row ...
+        assert!(modal.content_y > modal.y, "{cols}x{rows}: top/content overlap");
+        // ... and content + bottom padding + the panel's bottom row end
+        // exactly above the footer row.
+        assert_eq!(
+            usize::from(modal.content_y) + budget + usize::from(modal.bottom_padding) + 1,
+            usize::from(rows) - 1,
+            "{cols}x{rows}: modal panel must end exactly above the footer row"
+        );
+        // Hit regions agree with the painted budget: the first content cell
+        // maps to (0, 0); the first row past the budget and the footer row
+        // are outside.
+        assert_eq!(
+            modal.content_point(modal.content_x, modal.content_y, budget),
+            Some((0, 0)),
+            "{cols}x{rows}: first content cell"
+        );
+        assert_eq!(
+            modal.content_point(modal.content_x, modal.content_y + budget as u16, budget),
+            None,
+            "{cols}x{rows}: first row past the budget"
+        );
+        assert_eq!(
+            modal.content_point(modal.content_x, rows - 1, budget),
+            None,
+            "{cols}x{rows}: footer row"
+        );
+    }
+
+    #[test]
+    fn horizontal_panels_match_captured_top_floor_rows_plus_2_div4() {
+        for &(cols, rows, x, y, budget) in HORIZONTAL_CASES {
+            let mut view = NativeView::new(cols, rows);
+            // Simulate the horizontal tab strip (1 row at top) like the captures.
+            let reservation = TabReservation::for_view(TabOrientation::Horizontal, cols, rows);
+            view.set_tab_reservation(reservation);
+            assert_exact_geometry(&view, cols, rows, x, y, budget);
+        }
+    }
+
+    #[test]
+    fn vertical_tab_panels_center_against_full_viewport_not_content_area() {
+        for &(cols, rows, x, y, budget) in VERTICAL_CASES {
+            let mut view = NativeView::new(cols, rows);
+            let reservation = TabReservation::for_view(TabOrientation::Vertical, cols, rows);
+            view.set_tab_reservation(reservation);
+            assert_exact_geometry(&view, cols, rows, x, y, budget);
+        }
+    }
+
+    #[test]
+    fn no_tabs_120x32_preserves_existing_y8() {
+        // Regression guard: the existing no-tabs 120x32 y=8 must remain correct.
+        let mut view = NativeView::new(120, 32);
+        view.set_tab_reservation(TabReservation::default());
+        assert_exact_geometry(&view, 120, 32, 30, 8, 21);
+    }
+
+    #[test]
+    fn modal_content_budget_counts_the_horizontal_tab_row_in_the_full_frame() {
+        // Regression for the reviewed mixed-frame defect
+        // (`modal-full-viewport-review-combined/REPORT.md` finding 4): the
+        // horizontal tab strip lives INSIDE the full viewport frame that
+        // `content_y` is measured from, so the budget must count it.  A
+        // `render_height()`-based budget (tab-reduced rows) returns 12 here
+        // (render_height = 21 for a 22-row frame with a 1-row tab strip);
+        // the exact full-frame budget is
+        // 22 - 1 (footer) - 7 (content_y) - 1 (panel bottom row) - 0 = 13.
+        let mut view = NativeView::new(80, 22);
+        view.set_tab_reservation(TabReservation::for_view(TabOrientation::Horizontal, 80, 22));
+        let modal = view.modal_presentation();
+        assert_eq!(modal.y, 6);
+        assert_eq!(modal.content_y, 7);
+        assert_eq!(view.modal_content_height(), 13);
+        // The vertical orientation has y_offset = 0, so its frame is already
+        // full-height: the same formula must hold unchanged.
+        let mut vertical = NativeView::new(120, 22);
+        vertical.set_tab_reservation(TabReservation::for_view(TabOrientation::Vertical, 120, 22));
+        assert_eq!(vertical.modal_presentation().content_y, 7);
+        assert_eq!(vertical.modal_content_height(), 13);
+    }
+
+    #[test]
+    fn tiny_viewports_never_produce_negative_or_overflowing_geometry() {
+        use crate::native_box_style::{BoxAppearance, MAX_PADDING};
+        // Every 0..=10 cols/rows pair x every dialog size preset x every
+        // padding value x both tab orientations and the untabbed default.
+        // The exact budget identity, rectangle containment and hit mapping
+        // are asserted unconditionally; height bounds never depend on width
+        // degeneracy (the only waived case is a 0-1 row frame, which is
+        // footer-only and inert by construction).
+        for cols in 0u16..=10 {
+            for rows in 0u16..=10 {
+                for preset in [DialogSize::Medium, DialogSize::Large, DialogSize::XLarge] {
+                    for padding in 0u8..=MAX_PADDING {
+                        for orientation in
+                            [None, Some(TabOrientation::Horizontal), Some(TabOrientation::Vertical)]
+                        {
+                            let mut view = NativeView::new(cols, rows);
+                            view.set_dialog_size(preset);
+                            view.set_box_appearance(BoxAppearance {
+                                padding,
+                                ..BoxAppearance::default()
+                            });
+                            view.set_tab_reservation(match orientation {
+                                Some(orientation) => {
+                                    TabReservation::for_view(orientation, cols, rows)
+                                }
+                                None => TabReservation::default(),
+                            });
+                            let modal = view.modal_presentation();
+                            let budget = view.modal_content_height();
+                            let label =
+                                format!("{cols}x{rows} {preset:?} pad={padding} {orientation:?}");
+                            // Exact budget identity in the full-viewport
+                            // frame, from first principles (never from the
+                            // tab-reduced render height):
+                            // rows - footer(1) - content_y - panel bottom(1)
+                            // - bottom padding.
+                            let frame_rows = if cols == 0 { 0usize } else { usize::from(rows) };
+                            let expected = if modal.content_width == 0 {
+                                0
+                            } else {
+                                frame_rows
+                                    .saturating_sub(1)
+                                    .saturating_sub(usize::from(modal.content_y))
+                                    .saturating_sub(1)
+                                    .saturating_sub(usize::from(modal.bottom_padding))
+                            };
+                            assert_eq!(budget, expected, "budget {label}");
+                            // The content start never lands past the frame's
+                            // last row (the rejected test admitted
+                            // content_y == rows here).
+                            assert!(
+                                usize::from(modal.content_y) <= usize::from(rows).saturating_sub(1),
+                                "content_y outside frame {label}"
+                            );
+                            // Panel containment in the frame width.
+                            assert!(
+                                usize::from(modal.x) + usize::from(modal.width)
+                                    <= usize::from(cols),
+                                "panel width overflow {label}"
+                            );
+                            assert_eq!(
+                                modal.width,
+                                cols.saturating_sub(2).min(preset.width()),
+                                "width clamp {label}"
+                            );
+                            // Content containment inside the panel (width).
+                            assert!(modal.content_x >= modal.x, "content_x {label}");
+                            assert!(
+                                usize::from(modal.content_x) + usize::from(modal.content_width)
+                                    <= usize::from(modal.x) + usize::from(modal.width),
+                                "content width overflow {label}"
+                            );
+                            if rows >= 2 {
+                                // Top pad row and content rows do not overlap.
+                                assert!(modal.content_y > modal.y, "top/content overlap {label}");
+                            }
+                            if budget > 0 {
+                                // Real content: content + bottom padding + the
+                                // panel's bottom row end exactly above the
+                                // footer row (rows - 1).
+                                assert_eq!(
+                                    usize::from(modal.content_y)
+                                        + budget
+                                        + usize::from(modal.bottom_padding)
+                                        + 1,
+                                    usize::from(rows) - 1,
+                                    "footer separation {label}"
+                                );
+                            }
+                            if rows <= 1 {
+                                // A 0-1 row frame is footer-only: no content
+                                // row can exist.
+                                assert_eq!(budget, 0, "inert frame {label}");
+                            }
+                            // Hit testing matches the content rectangle
+                            // exactly, whatever the width degeneracy: cells
+                            // in the content rect map to (column, row), every
+                            // other cell misses.
+                            for y in 0..=rows {
+                                for x in 0..=cols {
+                                    let inside = x >= modal.content_x
+                                        && usize::from(x)
+                                            < usize::from(modal.content_x)
+                                                + usize::from(modal.content_width)
+                                        && y >= modal.content_y
+                                        && usize::from(y)
+                                            < usize::from(modal.content_y) + budget;
+                                    match modal.content_point(x, y, budget) {
+                                        Some((column, row)) => {
+                                            assert!(
+                                                inside,
+                                                "hit outside content rect {label} at {x},{y}"
+                                            );
+                                            assert_eq!(column, x - modal.content_x, "{label}");
+                                            assert_eq!(
+                                                row,
+                                                usize::from(y - modal.content_y),
+                                                "{label}"
+                                            );
+                                        }
+                                        None => assert!(
+                                            !inside,
+                                            "miss inside content rect {label} at {x},{y}"
+                                        ),
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn modal_overlapping_left_rail_preserves_hit_test_identity() {
+        // Vertical tabs overlap the modal panel. Hit testing must still work
+        // in full-viewport coordinates; content_point must not double-apply
+        // the x_offset.  Every content rect cell maps to itself and every
+        // cell outside (rail cells, footer row, rows past the budget) misses.
+        let mut view = NativeView::new(120, 32);
+        let reservation = TabReservation::for_view(TabOrientation::Vertical, 120, 32);
+        view.set_tab_reservation(reservation);
+        let modal = view.modal_presentation();
+        let content_height = view.modal_content_height();
+        assert_eq!(modal.x, 30, "panel overlays the 42-cell left rail (capture x=30)");
+        assert_eq!(content_height, 21, "full-frame budget 32 - 1 - 9 - 1");
+        // A click on the first content cell maps to (0, 0).
+        assert_eq!(
+            modal.content_point(modal.content_x, modal.content_y, content_height),
+            Some((0, 0)),
+        );
+        // A click on the left rail (before content_x) is outside the modal.
+        assert_eq!(
+            modal.content_point(modal.content_x.saturating_sub(1), modal.content_y, content_height),
+            None,
+        );
+        // A click below the content area is outside.
+        assert_eq!(
+            modal.content_point(
+                modal.content_x,
+                modal.content_y.saturating_add(u16::try_from(content_height).unwrap() + 1),
+                content_height
+            ),
+            None,
+        );
+        // The last content row maps in; the footer row maps out.
+        let last = modal.content_y + u16::try_from(content_height).unwrap() - 1;
+        assert_eq!(
+            modal.content_point(modal.content_x, last, content_height),
+            Some((0, content_height - 1)),
+        );
+        assert_eq!(modal.content_point(modal.content_x, 31, content_height), None);
+    }
+
+    #[test]
+    fn modal_overlapping_top_tabs_preserves_hit_test_identity() {
+        // Horizontal tabs overlap the modal panel. Hit testing must work in
+        // full-viewport coordinates; the panel geometry must be identical to
+        // the untabbed frame of the same terminal size.
+        let mut view = NativeView::new(80, 24);
+        let reservation = TabReservation::for_view(TabOrientation::Horizontal, 80, 24);
+        view.set_tab_reservation(reservation);
+        let modal = view.modal_presentation();
+        let content_height = view.modal_content_height();
+        let mut untabbed = NativeView::new(80, 24);
+        untabbed.set_tab_reservation(TabReservation::default());
+        assert_eq!(modal, untabbed.modal_presentation(), "viewport-owned overlay geometry");
+        assert_eq!(modal.y, 6);
+        assert_eq!(modal.content_y, 7);
+        assert_eq!(content_height, 15, "full-frame budget 24 - 1 - 7 - 1");
+        assert_eq!(
+            modal.content_point(modal.content_x, modal.content_y, content_height),
+            Some((0, 0)),
+        );
+        // Click in the tab row (above panel y) is outside the modal content.
+        assert_eq!(modal.content_point(modal.content_x, modal.y, content_height), None);
+        // The footer row (23) is outside.
+        assert_eq!(modal.content_point(modal.content_x, 23, content_height), None);
     }
 }
