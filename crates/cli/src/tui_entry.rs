@@ -5000,6 +5000,14 @@ fn native_loop(
         if matches!(dialog, native_setup::Dialog::Settings) {
             let action = match event {
                 native_input_decoder::InputEvent::Escape => { settings_dialog.close(); utf8.reset(); dialog = native_setup::Dialog::None; None }
+                native_input_decoder::InputEvent::ArrowUp => {
+                    settings_dialog.previous();
+                    None
+                }
+                native_input_decoder::InputEvent::ArrowDown => {
+                    settings_dialog.next();
+                    None
+                }
                 native_input_decoder::InputEvent::ArrowLeft => settings_dialog.left(),
                 native_input_decoder::InputEvent::ArrowRight => settings_dialog.right(),
                 native_input_decoder::InputEvent::Byte(13 | 10) => settings_dialog.right(),
@@ -5010,21 +5018,30 @@ fn native_loop(
                 },
                 native_input_decoder::InputEvent::Mouse { x, y, kind: 0, modifiers: 0 } => {
                     let modal = view.modal_presentation();
-                    let in_row = x.checked_sub(modal.content_x).zip(y.checked_sub(modal.content_y))
-                        .is_some_and(|(column, row)| settings_dialog.hit_layout(
-                            column, row, modal.content_width, view.modal_content_height()));
-                    if in_row { settings_dialog.click("tabs.layout") } else { None }
+                    let content_height = view.modal_content_height();
+                    let row_id = modal
+                        .content_point(x, y, content_height)
+                        .and_then(|(column, row)| settings_dialog.hit_row(
+                            column, row, modal.content_width, content_height));
+                    row_id.and_then(|id| settings_dialog.click(id))
                 }
                 _ => None,
             };
-            if let Some(crate::native_settings::SettingsAction::Apply(orientation)) = action {
-                match cli_path.as_deref() {
-                    Some(path) => match crate::native_ui_preferences::UiPreferences::persist_tab_orientation(path, orientation) {
-                        Ok(()) => { navigation.set_orientation(orientation); settings_dialog.applied(orientation); settings_error = None; }
-                        Err(error) => settings_error = Some(error),
-                    },
-                    None => settings_error = Some("settings configuration path unavailable".into()),
-                }
+            if let Some(action) = action {
+                let result = match action {
+                    crate::native_settings::SettingsAction::ApplyTabs(orientation) => {
+                        match cli_path.as_deref() {
+                            Some(path) => crate::native_ui_preferences::UiPreferences::persist_tab_orientation(path, orientation)
+                                .map(|()| { navigation.set_orientation(orientation); settings_dialog.applied(orientation); }),
+                            None => Err("settings configuration path unavailable".into()),
+                        }
+                    }
+                    crate::native_settings::SettingsAction::ApplySidebar(hidden) => {
+                        crate::native_ui_preferences::UiPreferences::persist_sidebar(&state_path, hidden)
+                            .map(|()| { view.set_sidebar_hidden(hidden); settings_dialog.applied_sidebar(hidden); })
+                    }
+                };
+                settings_error = result.err();
             }
             needs_paint = true;
             continue;
@@ -6930,7 +6947,7 @@ fn native_loop(
                     continue;
                 }
                 if command == "/settings" {
-                    settings_dialog.open(navigation.orientation());
+                    settings_dialog.open_with_state(view.sidebar_hidden(), navigation.orientation());
                     settings_error = None;
                     dialog = native_setup::Dialog::Settings;
                     consume_local_command_with_cursor(&mut draft, &mut draft_cursor, command, from_chat_composer);
