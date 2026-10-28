@@ -1271,6 +1271,7 @@ mod surface_paint_regressions {
             kind: RailRowKind::Empty, style: RailStyle::Idle,
             rect: RailRect { x: 0, y: 0, width: 12, height: 2 },
             text: "abcdefghijkl\nmnopqrstuvwx".into(),
+            color_spans: Vec::new(), flags: Default::default(), is_hovered: false,
         };
         paint_rail_row(&mut renderer, &row, Some((3, 0, 5, 1)), foreground, background).unwrap();
         renderer.frame(|_| {}).unwrap();
@@ -1915,6 +1916,59 @@ fn paint_rail_row(
 }
 
 #[cfg(feature = "native")]
+fn paint_styled_rail_row(
+    renderer: &mut NativeRenderer,
+    row: &crate::native_tab_rail::RailRow,
+    modal: Option<(u32, u32, u32, u32)>,
+    paint: crate::native_tab_rail::RowPaint,
+    alpha: u8,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::native_tab_rail::CellColor;
+    let color = |bytes: [u8; 4]| {
+        let bytes = crate::native_theme_runtime::dim(bytes, alpha);
+        Rgba::new(bytes[0], bytes[1], bytes[2], bytes[3])
+    };
+    let background = color(paint.background);
+    let foreground = color(paint.title_fg);
+    // The existing bounded primitive owns clipping and modal exclusion.
+    paint_rail_row(renderer, row, modal, foreground, background)?;
+    let left = u32::from(row.rect.x);
+    let top = u32::from(row.rect.y);
+    for (offset, line) in row.text.lines().take(usize::from(row.rect.height)).enumerate() {
+        let y = top.saturating_add(offset as u32);
+        if y >= renderer.rows() { continue; }
+        let mut failure = None;
+        let mut column = 0usize;
+        crate::native_view_layout::visit_unpadded_cells(line, usize::from(row.rect.width), |grapheme, width| {
+            let current = column;
+            column = column.saturating_add(width);
+            if failure.is_some() { return; }
+            let x = left.saturating_add(current as u32);
+            let end = x.saturating_add(width as u32);
+            if end > renderer.cols() || modal.is_some_and(|(mx, my, mw, mh)| {
+                y >= my && y < my.saturating_add(mh) && x < mx.saturating_add(mw) && end > mx
+            }) { return; }
+            let role = row.color_spans.iter().rev().find(|(start, _)| usize::from(*start) <= current)
+                .map_or(CellColor::Fill, |(_, role)| *role);
+            let (fg, attr) = match role {
+                CellColor::Fill => (paint.title_fg, 0),
+                CellColor::Title => (paint.title_fg, paint.title_attr),
+                CellColor::Detail => (paint.detail_fg, 0),
+                CellColor::Spinner => (paint.spinner_fg, paint.title_attr),
+                CellColor::Close => (paint.close_fg, 0),
+                CellColor::NewIndicator => (paint.plus_fg, paint.new_attr),
+                CellColor::NewText => (paint.new_text_fg, paint.new_attr),
+            };
+            if let Err(error) = renderer.draw_text_styled(x, y, grapheme, color(fg), Some(background), attr) {
+                failure = Some(error);
+            }
+        });
+        if let Some(error) = failure { return Err(error.into()); }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "native")]
 fn native_paint(
     renderer: &mut NativeRenderer,
     lines: &[String],
@@ -2243,17 +2297,14 @@ fn native_paint(
         for row in &rail.rows {
             let x = u32::from(row.rect.x); let y = u32::from(row.rect.y);
             if x >= cols || y >= rows { continue; }
-            let bg = match row.style {
-                crate::native_tab_rail::RailStyle::Active => element,
-                crate::native_tab_rail::RailStyle::Hovered => element,
-                crate::native_tab_rail::RailStyle::Busy => panel,
-                crate::native_tab_rail::RailStyle::Attention => element,
-                crate::native_tab_rail::RailStyle::NewControl => element,
-                _ => panel,
+            let paint = if matches!(row.kind, crate::native_tab_rail::RailRowKind::New) {
+                crate::native_tab_rail::RowPaint::new_control_row(&ctx.palette, rail.active_new, row.is_hovered)
+            } else {
+                crate::native_tab_rail::RowPaint::session_row(&ctx.palette, &row.flags, row.is_hovered)
             };
             // Modal body cells were painted by the general row pass above.
             // Exclude their whole rectangle, not just the later border pass.
-            paint_rail_row(renderer, row, modal, dim(text_color, base_alpha), dim(bg, base_alpha))?;
+            paint_styled_rail_row(renderer, row, modal, paint, base_alpha)?;
         }
     }
     if let Some(tabs) = ctx.tabs.filter(|_| ctx.vertical_rail.is_none()) {
