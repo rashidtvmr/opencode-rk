@@ -10,8 +10,11 @@ BIN="oc2"
 VERSION="${OC2_VERSION:-}"
 ARCHIVE=""
 CHECKSUM=""
+ALIASES="${OC2_ALIASES:-}"
 INSTALL_DIR="${OC2_INSTALL_DIR:-$HOME/.local/bin}"
 DO_UNINSTALL=0
+MAX_ALIASES=16
+MAX_ALIAS_LENGTH=64
 # Two regular payloads and their three optional directory ancestors.
 MAX_ARCHIVE_MEMBERS=5
 # The native executable and its library total ~72 MiB on arm64 macOS. Keep
@@ -20,7 +23,7 @@ MAX_ARCHIVE_MEMBERS=5
 MAX_ARCHIVE_PAYLOAD=134217728
 
 usage() {
-  echo "usage: install-oc2.sh [--version V] --archive FILE --checksum SHA256 [--install-dir DIR] [--uninstall]" >&2
+  echo "usage: install-oc2.sh [--version V] [--archive FILE --checksum SHA256] [--aliases a,b] [--install-dir DIR] [--uninstall]" >&2
 }
 
 while [ $# -gt 0 ]; do
@@ -28,12 +31,46 @@ while [ $# -gt 0 ]; do
     --version) VERSION="$2"; shift 2 ;;
     --archive) ARCHIVE="$2"; shift 2 ;;
     --checksum) CHECKSUM="$2"; shift 2 ;;
+    --aliases) ALIASES="$2"; shift 2 ;;
     --install-dir) INSTALL_DIR="$2"; shift 2 ;;
+    OC2_RELEASE_BASE=*) OC2_RELEASE_BASE="${1#OC2_RELEASE_BASE=}"; shift ;;
     --uninstall) DO_UNINSTALL=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown flag: $1" >&2; usage; exit 64 ;;
   esac
 done
+
+# Aliases are deliberately a small, inert name list.  Do not turn this into a
+# shell fragment: names are only ever passed as quoted path components.
+validate_aliases() {
+  alias_count=0
+  old_ifs=$IFS
+  IFS=,
+  for alias in $ALIASES; do
+    IFS=$old_ifs
+    alias_count=$((alias_count + 1))
+    [ "$alias_count" -le "$MAX_ALIASES" ] || { echo "too many aliases" >&2; exit 64; }
+    [ -n "$alias" ] && [ "${#alias}" -le "$MAX_ALIAS_LENGTH" ] || { echo "invalid alias" >&2; exit 64; }
+    case "$alias" in
+      oc2|opencode|unsafe|.|..|*/*|*\\*|*" "*|*[[:cntrl:]]*)
+        echo "reserved or unsafe alias: $alias" >&2; exit 64 ;;
+      *[!A-Za-z0-9._-]*) echo "invalid alias: $alias" >&2; exit 64 ;;
+    esac
+    IFS=,
+  done
+  IFS=$old_ifs
+}
+
+alias_path() { printf '%s/%s' "$INSTALL_DIR" "$1"; }
+
+validate_checksum() {
+  case "$1" in
+    ''|*[!0123456789abcdefABCDEF]*) echo "invalid SHA-256 checksum" >&2; exit 65 ;;
+  esac
+  [ "${#1}" -eq 64 ] || { echo "invalid SHA-256 checksum" >&2; exit 65; }
+}
+
+validate_aliases
 
 detect_platform() {
   os="$(uname -s)"; arch="$(uname -m)"
@@ -69,6 +106,7 @@ binary_swap_started=0
 native_swap_started=0
 binary_restore_failed=0
 native_restore_failed=0
+aliases_created=""
 
 restore_previous() {
   # A failing rename can also affect rollback. Keep a copy fallback and retain
@@ -83,6 +121,13 @@ restore_previous() {
 rollback_install() {
   transaction_active=0
   trap '' HUP INT TERM
+  old_ifs=$IFS; IFS=,
+  for alias in $aliases_created; do
+    IFS=$old_ifs
+    [ -z "$alias" ] || rm -f "$(alias_path "$alias")" 2>/dev/null || :
+    IFS=,
+  done
+  IFS=$old_ifs
   if [ "$binary_swap_started" -eq 1 ]; then
     if [ "$binary_had_old" -eq 1 ]; then
       restore_previous "$binary_backup" "$target" || binary_restore_failed=1
@@ -129,6 +174,28 @@ uninstall() {
     echo "refusing: destination directory is a symlink" >&2
     exit 74
   fi
+  target_inode=""
+  if [ -f "$target" ] && [ ! -L "$target" ]; then
+    target_inode="$(ls -di "$target" 2>/dev/null | awk '{print $1}')"
+  fi
+  # Metadata is untrusted: validate it before deriving any alias path.
+  alias_file="$INSTALL_DIR/.oc2-aliases"
+  metadata_aliases=""
+  if [ -e "$alias_file" ] || [ -L "$alias_file" ]; then
+    [ -f "$alias_file" ] && [ ! -L "$alias_file" ] || {
+      echo "refusing: invalid alias metadata" >&2; exit 64;
+    }
+    metadata_bytes="$(wc -c <"$alias_file" | tr -d '[:space:]')"
+    case "$metadata_bytes" in ''|*[!0-9]*) echo "refusing: invalid alias metadata" >&2; exit 64 ;; esac
+    [ "$metadata_bytes" -le $((MAX_ALIASES * (MAX_ALIAS_LENGTH + 1))) ] || {
+      echo "refusing: alias metadata exceeds bounds" >&2; exit 64;
+    }
+    metadata_aliases="$(cat "$alias_file")"
+    saved_aliases="$ALIASES"
+    ALIASES="$metadata_aliases"
+    validate_aliases
+    ALIASES="$saved_aliases"
+  fi
   if [ -e "$target" ] || [ -L "$target" ]; then
     # Export marker so history tooling can re-import; never delete user data.
     echo "note: preserving user data; only removing $target" >&2
@@ -136,6 +203,31 @@ uninstall() {
     echo "uninstalled $target (user data untouched)" >&2
   else
     echo "nothing to uninstall at $target" >&2
+  fi
+  # Remove only aliases recorded by this installer and still hard-linked to
+  # the installed oc2 inode. Never unlink an unrelated replacement.
+  if [ -n "$ALIASES" ]; then
+    requested_aliases="$ALIASES"
+  elif [ -n "$metadata_aliases" ]; then
+    requested_aliases="$metadata_aliases"
+  else
+    requested_aliases=""
+  fi
+  old_ifs=$IFS; IFS=,
+  for alias in $requested_aliases; do
+    IFS=$old_ifs
+    alias_target="$(alias_path "$alias")"
+    alias_inode=""
+    [ -f "$alias_target" ] && [ ! -L "$alias_target" ] && alias_inode="$(ls -di "$alias_target" 2>/dev/null | awk '{print $1}')"
+    if [ -n "$target_inode" ] && [ "$alias_inode" = "$target_inode" ]; then
+      rm -f "$alias_target"
+    fi
+    IFS=,
+  done
+  IFS=$old_ifs
+  # Preserve the record if primary ownership is absent or ambiguous.
+  if [ -n "$target_inode" ]; then
+    rm -f "$alias_file" 2>/dev/null || :
   fi
   if [ -e "$native_target" ] || [ -L "$native_target" ]; then
     rm -f "$native_target"
@@ -145,9 +237,19 @@ uninstall() {
 }
 
 if [ "$DO_UNINSTALL" -eq 0 ]; then
-  [ -n "$ARCHIVE" ] || { echo "missing --archive" >&2; usage; exit 64; }
-  [ -n "$CHECKSUM" ] || { echo "missing --checksum (fail-closed)" >&2; usage; exit 64; }
-  [ -f "$ARCHIVE" ] || { echo "archive not found: $ARCHIVE" >&2; exit 66; }
+  if [ -z "$ARCHIVE" ] && [ -n "${OC2_RELEASE_BASE:-}" ]; then
+    [ -n "$VERSION" ] || { echo "download mode requires --version" >&2; exit 64; }
+    case "$VERSION" in *[!A-Za-z0-9._-]*|*[.][.]*|/*|*/*) echo "invalid version" >&2; exit 64 ;; esac
+  elif [ -z "$ARCHIVE" ]; then
+    echo "missing --archive" >&2; usage; exit 64
+  else
+    [ -n "$CHECKSUM" ] || { echo "missing --checksum (fail-closed)" >&2; usage; exit 64; }
+    validate_checksum "$CHECKSUM"
+    [ -f "$ARCHIVE" ] || { echo "archive not found: $ARCHIVE" >&2; exit 66; }
+  fi
+  if [ -z "$ARCHIVE" ]; then
+    case "${OC2_RELEASE_BASE}" in http://*|https://*|file://*) ;; *) echo "invalid release base" >&2; exit 64 ;; esac
+  fi
 fi
 
 PLATFORM="$(detect_platform)"
@@ -160,6 +262,38 @@ esac
 NATIVE_NAME="libopentui$LIB_SUFFIX"
 EXPECTED_NATIVE="native/lib/$PLATFORM/$NATIVE_NAME"
 [ "$DO_UNINSTALL" -eq 1 ] && uninstall
+
+# Collision checks happen before creating directories, temporary files, or
+# replacing either payload. Existing oc2 itself remains an upgrade target;
+# aliases must be absent (or already the exact installed inode on uninstall).
+if [ "$DO_UNINSTALL" -eq 0 ]; then
+  old_ifs=$IFS; IFS=,
+  for alias in $ALIASES; do
+    IFS=$old_ifs
+    [ "$alias" = "$BIN" ] && { echo "alias collides with oc2" >&2; exit 64; }
+    if [ -e "$(alias_path "$alias")" ] || [ -L "$(alias_path "$alias")" ]; then
+      echo "alias already exists: $alias" >&2; exit 64
+    fi
+    IFS=,
+  done
+  IFS=$old_ifs
+  if [ -n "$ALIASES" ] && { [ -e "$INSTALL_DIR/.oc2-aliases" ] || [ -L "$INSTALL_DIR/.oc2-aliases" ]; }; then
+    echo "alias metadata already exists" >&2; exit 64
+  fi
+fi
+
+if [ "$DO_UNINSTALL" -eq 0 ] && [ -z "$ARCHIVE" ]; then
+  download_stage="$(mktemp -d "${TMPDIR:-/tmp}/oc2-download.XXXXXX")" || { echo "cannot create download temp" >&2; exit 74; }
+  ARCHIVE="$download_stage/oc2.tar.gz"
+  CHECKSUM_FILE="$download_stage/oc2.sha256"
+  url="${OC2_RELEASE_BASE%/}/$VERSION/oc2-$PLATFORM.tar.gz"
+  checksum_url="$url.sha256"
+  command -v curl >/dev/null 2>&1 || { echo "curl required for download" >&2; exit 69; }
+  curl --fail --location --proto '=https,http,file' --connect-timeout 10 --max-time 120 --max-filesize 268435456 -sS "$url" -o "$ARCHIVE" || { echo "release download failed" >&2; exit 65; }
+  curl --fail --location --proto '=https,http,file' --connect-timeout 10 --max-time 30 --max-filesize 4096 -sS "$checksum_url" -o "$CHECKSUM_FILE" || { echo "checksum download failed" >&2; exit 65; }
+  CHECKSUM="$(awk 'NF {print $1; exit}' "$CHECKSUM_FILE")"
+  validate_checksum "$CHECKSUM"
+fi
 
 # Checksum gate BEFORE any write. sha256sum or shasum required.
 if command -v sha256sum >/dev/null 2>&1; then
@@ -182,7 +316,7 @@ stage="$(mktemp -d)"
 # Bounded safe-member gate: only regular files and directories, exact binary
 # plus exact native closure and only its directory ancestors, five-member bound.
 # Salvaged from cc3ebaa/2f16929; no manifest/receipt producer here.
-if ! tar -tzf "$ARCHIVE" 2>/dev/null | awk \
+if ! tar -Ptzf "$ARCHIVE" 2>/dev/null | awk \
   -v bin="$BIN" -v native="$EXPECTED_NATIVE" -v max="$MAX_ARCHIVE_MEMBERS" '
   BEGIN { count = 0; bin_seen = 0; native_seen = 0 }
   {
@@ -206,7 +340,7 @@ fi
 
 # Validate member types before extraction. First character is portable across
 # BSD and GNU tar listings: '-' regular, 'd' directory.
-if ! tar -tvzf "$ARCHIVE" 2>/dev/null | awk \
+if ! tar -Ptvzf "$ARCHIVE" 2>/dev/null | awk \
   -v bin="$BIN" -v native="$EXPECTED_NATIVE" -v max="$MAX_ARCHIVE_MEMBERS" '
   BEGIN { count = 0; bin_seen = 0; native_seen = 0 }
   {
@@ -399,6 +533,26 @@ mv "$binary_tmp" "$target" || {
   echo "FAIL: cannot install binary" >&2
   exit 74
 }
+# Hard links deliberately share the installed binary inode and therefore also
+# preserve exact bytes and executable mode. Keep the transaction armed until
+# every alias and its ownership record has succeeded.
+old_ifs=$IFS; IFS=,
+for alias in $ALIASES; do
+  IFS=$old_ifs
+  alias_target="$(alias_path "$alias")"
+  if ! ln "$target" "$alias_target"; then
+    echo "FAIL: cannot install alias $alias" >&2
+    exit 74
+  fi
+  if [ -n "$aliases_created" ]; then aliases_created="$aliases_created,$alias"; else aliases_created="$alias"; fi
+  IFS=,
+done
+IFS=$old_ifs
+if [ -n "$ALIASES" ]; then
+  aliases_tmp="$(mktemp "$INSTALL_DIR/.oc2-aliases.tmp.XXXXXX")" || { echo "FAIL: cannot record aliases" >&2; exit 74; }
+  printf '%s\n' "$ALIASES" >"$aliases_tmp" || { rm -f "$aliases_tmp"; echo "FAIL: cannot record aliases" >&2; exit 74; }
+  mv "$aliases_tmp" "$INSTALL_DIR/.oc2-aliases" || { rm -f "$aliases_tmp"; echo "FAIL: cannot record aliases" >&2; exit 74; }
+fi
 transaction_active=0
 echo "installed $INSTALL_DIR/$BIN ($PLATFORM)" >&2
 printf '%s\n' "$identity_out"

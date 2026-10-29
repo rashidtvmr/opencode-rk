@@ -86,9 +86,27 @@ if [ -e "$INSTALL_DIR/opencode" ]; then
 fi
 
 stage="$(mktemp -d)"; trap 'rm -rf "$stage"' EXIT INT TERM
-tar -xzf "$ARCHIVE" -C "$stage"
+# Preserve original names while listing: BSD tar otherwise strips leading '/'
+# and can hide an absolute member from validation. Only one regular payload is
+# part of this legacy archive; reject links, extra members and path aliases.
+if ! tar -Ptzf "$ARCHIVE" 2>/dev/null | awk -v bin="$BIN" '
+  { count++; if (count != 1 || $0 != bin) bad = 1 }
+  END { if (bad || count != 1) exit 1 }
+'; then
+  echo "invalid archive: expected exact binary member" >&2; exit 65
+fi
+if ! tar -Ptvzf "$ARCHIVE" 2>/dev/null | awk -v bin="$BIN" '
+  { count++; if (count != 1 || substr($0, 1, 1) != "-" || $NF != bin) bad = 1 }
+  END { if (bad || count != 1) exit 1 }
+'; then
+  echo "invalid archive: expected regular binary member" >&2; exit 65
+fi
+if ! tar -xzf "$ARCHIVE" -C "$stage" "$BIN"; then
+  echo "invalid archive: extraction failed" >&2; exit 65
+fi
 src="$stage/$BIN"
 [ -f "$src" ] || { echo "archive missing $BIN binary" >&2; exit 65; }
+[ ! -L "$src" ] || { echo "invalid archive: binary is a symlink" >&2; exit 65; }
 
 mkdir -p "$INSTALL_DIR"
 if [ -e "$INSTALL_DIR/$BIN" ]; then

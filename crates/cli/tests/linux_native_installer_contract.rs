@@ -561,9 +561,30 @@ fn run_valid_install(
     version: &str,
 ) -> (PathBuf, Vec<u8>, Captured) {
     let binary = fixture_binary(installer, version);
+    let mut entries = vec![TarEntry::file(installer.binary, binary.clone(), 0o755)];
+    if installer.binary == "oc2" {
+        // Native releases contain the platform library alongside the executable.
+        // The executable is a shell fixture, so these are packaging bytes only.
+        let os = match std::env::consts::OS {
+            "macos" => "macos",
+            "linux" => "linux",
+            other => panic!("unsupported installer fixture OS: {other}"),
+        };
+        let arch = match std::env::consts::ARCH {
+            "aarch64" => "arm64",
+            "x86_64" => "x64",
+            other => panic!("unsupported installer fixture architecture: {other}"),
+        };
+        let suffix = if os == "macos" { "dylib" } else { "so" };
+        entries.push(TarEntry::file(
+            &format!("native/lib/{os}-{arch}/libopentui.{suffix}"),
+            b"native library packaging fixture\n".to_vec(),
+            0o755,
+        ));
+    }
     let archive = sandbox.archive(
         &format!("{}-{version}", installer.binary),
-        &[TarEntry::file(installer.binary, binary.clone(), 0o755)],
+        &entries,
     );
     let digest = checksum(&archive, sandbox);
     let args = archive_args(&archive, &digest);
