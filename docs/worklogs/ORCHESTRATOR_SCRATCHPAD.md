@@ -1,5 +1,31 @@
 # Orchestrator scratchpad
 
+## 2026-10-28 — Four-route unattended continuation
+
+- Current SHA remains `7ceb21fb267751e1b3772f482d1673a76aa235df`; no later
+  product publication or installed acceptance. Latest user requests continued
+  UI parity delivery with Vyce DeepSeek, combined Vyce, MiMo and Luna Free.
+- Durable current assignment/session ledger and exact check evidence:
+  `/Users/mymac/Projects/opencode-rk/.git/recovery-evidence/ui-parity-kit-20261028/unattended-four/DISPATCH-LEDGER.md`.
+  Twenty useful new assignments acknowledged, not measured execution concurrency;
+  five new Vyce assignments, plus one strategy continuation, below eight.
+- Inset v3 actual 283 focused / 1 boundary / 1151 full native PASS; provider v3
+  16 focused / 1 frozen probe / 1153 full PASS and one fresh approval; pointer v3
+  6 focused / 1157 full PASS and fresh approval. These are private candidates,
+  not controller acceptance. High-water reached: prioritize integration and checks.
+- Readback v3 native/test-code and non-native library compile PASS, safety findings
+  still block; MiMo sole private v4 optimizer. Theme v2 33 legacy tests PASS but
+  genuine V2 resolution/wiring rejected. P03 original truncated; strategy review
+  required before replacement. P01 second review artifact finalization pending.
+- Canonical dirty work preserved: AGENTS user steering, this scratchpad,
+  unauthorized read-only worker's untracked native_text_width.rs, and unknown
+  `.DS_Store`. Unicode artifact exact hash and copy preserved outside canonical;
+  it is incomplete and excluded from integration. No clean/reset/stash bypass.
+- Independent publication diagnosis confirms dirty protected policy cannot be
+  landed through existing controller without further authority. Continue useful
+  private checks/reviews; do not fabricate canonical cleanliness or acceptance.
+  Usage UNKNOWN on every route; no daemon/database/preferences mutation.
+
 ## 2026-10-28 — User authorizes all-current-work commit and UI-kit implementation
 
 - Latest user: commit everything, read every docs/ui-parity file and implement CLI
@@ -8805,3 +8831,14 @@ Home. No visual parity PASS; native color readback remains unresolved.
   `opencode.json.bak-20261028-before-xkiro-haiku`; JSON re-parsed valid (399 agents).
 - Not dispatched: Xkiro route remains paused by the 2026-10-28 user steering, so
   this agent is config-verified only, not live-verified. No product change.
+
+## 2026-10-28 — P01-v3 second independent review completed
+
+- Route: 9router/vyce-deepseek-v4.1-free-combined (combined route, uniform four-route set per latest steering). No route error. Usage UNKNOWN.
+- Candidate: P01-v3-haiku/ (context.rs c612a317..., PROPOSED.patch 83e979ef..., lib.rs 774a129f...). Patch composition verified: v3 PROPOSED.patch applies cleanly to v2-river pre-image (f67e60f) via patch -p1 dry-run + applied; diff -q vs candidate context.rs EMPTY; shasum c612a317 both match. VERIFIED.
+- Header verification (this session, line-by-line): all 15 externs, 20 status constants (-1..-20), 5 session states (0-4), 10 terminal phases (0-9), 4 flag bits (1/2/4/8), OT_SESSION_CONTROL_PACKET_BYTES=4096, all struct layouts match opentui.h-at-8d6065a3-0.6.8.h (sha256 52190da4...).
+- Handle validity: header line 69 all-zero handle is the ONLY invalidation rule; slot 0 NOT reserved. is_created_handle checks whole all-zero. Correct.
+- v2 Luna blocking findings: ALL FIXED in v3 (slot==0 sentinel, explicit handle_created state, all-zero-success fail-closed, remote comment).
+- All v2-approved behavior preserved: Rc ownership, !Send/!Sync, release-mode check_thread before every FFI, NativeError exact status, validate_session_limits, close/cancel/destroy ladder, ot_terminal_flush_input declared.
+- CONTAMINATION NOTICE: first P01-v3 review (P01-v3-review-vyce-glm VERDICT.md APPROVE) read BEFORE this review began. Static corroboration review, NOT clean second approval. All technical verification fresh this session. Owner may dispatch fresh reviewer if procedural independence required.
+- No build/test/Cargo/PTY/GUI/DB/network/Git mutation. Compile/link/runtime UNEXECUTED. FFI-02 owner step remains runtime precondition. Artifacts in .../parallel-replenishment/P01-v3-second-review-combined/ (SCRATCHPAD.md, VERDICT.md, REPORT.md, HASHES.md).

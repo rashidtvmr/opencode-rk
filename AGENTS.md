@@ -4,6 +4,77 @@ This repository is in **product-convergence mode**. The goal is a working OpenCo
 
 ## Current user operating instructions — 2026-10-26
 
+### One-time scoped maintenance authorization — 2026-10-29
+
+The user explicitly selected **Authorize scoped maintenance**: independently
+review and commit only `AGENTS.md` and
+`docs/worklogs/ORCHESTRATOR_SCRATCHPAD.md`; relocate the untracked
+`crates/cli/src/native_text_width.rs`, `evidence/` worker artifacts, and
+`docs/ui-parity/.DS_Store` into hashed external evidence storage with every byte
+preserved; then use the existing policy-approval command. This is one narrowly
+scoped maintenance exception to resolve the dirty-source publication blocker.
+It does not accept the incomplete Unicode implementation, import external
+approvals, waive any product/test gate, authorize other canonical edits, or
+permit resetting/stashing/deleting unrelated work. Keep existing hooks and the
+single guarded publisher. Record exact reviewed hashes, custody and commit
+receipts externally; the exception is exhausted after that maintenance commit.
+
+### Latest unattended delivery steering — four consistent routes (2026-10-28)
+
+The user is going to sleep and explicitly requests continued work until the UI
+parity checklist is completed, merged into oc2 and tested. Use these exact routes
+consistently for new useful assignments and terminally failed/stalled scope
+replacements: `@vyce-deepseek-v41`,
+`@9router-vyce-deepseek-v4.1-free-combined`, `@xkiro-mimo-v2-6-flash`, and
+`@9router-luna-free`. This restores Luna Free and supersedes the nine-route
+rotation for new work. Preserve existing live assignments and private grants;
+do not duplicate writers or migrate them solely to change providers. Maintain
+20+ useful parallel assignments where independent work is available, with at
+most eight concurrent Vyce DeepSeek assignments. At candidate high-water,
+prioritize reviews, checks, runtime/blocker diagnosis and integration readiness.
+Continue through completion rather than stopping at planning or partial passes.
+Keep sole canonical publication, independent exact-candidate reviews, existing
+dynamic controller and serialized heavy validation. No authority to bypass
+publication gates, alter user databases/preferences, restart the user's daemon,
+or claim parity from source/compilation alone. Usage UNKNOWN absent telemetry;
+record actual failures and move unfinished work only among authorized routes.
+
+### Latest route steering — uniform nine-route rotation (2026-10-28)
+
+The user explicitly requests uniform use of these exact harness agents:
+`@vyce-deepseek-v41`, `@9router-vyce-deepseek-v4.1-free-combined`,
+`@xkiro-haiku-5-5`, `@xkiro-gpt-6-luna`, `@xkiro-mimo-v2-6-flash`,
+`@9router-th-free`, `@apimaster-gpt-6-luna`, and
+`@9router-river-glm-5-3-flash`, and `@vyce-glm-5-3-flash`.
+The user adds `@vyce-glm-5-3-flash` with a **50 million tokens per day**
+allowance; this supersedes the older total-allowance wording for that route.
+Track actually reported daily usage across sessions; a new conversation is not
+a daily reset. Without telemetry usage and remaining allowance are UNKNOWN.
+Stop that route on exhaustion or an error and move to the next authorized route.
+Do not concentrate seven or
+eight successive assignments on one route. Account for live assignments when
+distributing new useful work; preserve their ownership rather than duplicating
+writers. This restores APIMaster and authorizes a fresh attempt on the previously
+failing combined and Token Harbor routes. If a route fails, record its actual
+error and skip to the next authorized route; do not repeatedly retry it. Retain
+the eight-concurrent Vyce limit, private grants, independent exact-candidate
+review, sole canonical publisher and serialized heavy validation. Historical
+errors remain evidence; usage UNKNOWN without telemetry. This nine-route list
+supersedes earlier conflicting route distribution and exclusion instructions.
+
+### Latest route restoration — Haiku 5.5 and GPT-6 Luna (2026-10-28)
+
+The user explicitly reports `@xkiro-haiku-5-5` and `@xkiro-gpt-6-luna`
+are back and directs using both too. Restore these exact harness routes for
+new useful assignments alongside the currently available authorized routes.
+This supersedes their earlier dispatch pauses and the MiMo replacement-only
+direction. Preserve live assignments and private grants; do not duplicate or
+migrate live writers just to change routes. Independent reviews, dynamic
+publication, sole canonical writer, serialized heavy validation and the
+eight-concurrent Vyce limit remain. Availability is user-reported until actual
+dispatch outcomes; usage UNKNOWN without telemetry. Token Harbor and combined
+route observed errors remain recorded and are not cleared by this restoration.
+
 ### Latest user steering — commit current work and implement supplied UI parity kit (2026-10-28)
 
 The user explicitly requests committing all current uncommitted work, reading all
