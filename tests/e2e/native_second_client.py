@@ -39,13 +39,15 @@ from native_provider_setup import (  # noqa: E402
     TerminalScreen,
     checked_artifact,
     read_until,
+    current_composer_ready,
 )
 
 MAX_HTTP_BODY = 256 * 1024
 HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
 KEY = golden.KEY
 FIRST = golden.FIRST
-NATIVE_MODEL_METADATA = "stream fixture openai"
+NATIVE_MODEL_LABEL = "stream fixture"
+NATIVE_MODEL_METADATA = NATIVE_MODEL_LABEL + " openai"
 
 
 def sha256(path):
@@ -60,12 +62,16 @@ def redact(value):
     return value.replace(KEY, "[REDACTED]").replace(FIRST, "[PROMPT]")
 
 
-def write_failure_evidence(artifacts, reason):
+def write_failure_evidence(artifacts, reason, owned_process_cleanup=False):
     path = artifacts / "native-second-client-failure.json"
     try:
         path.write_text(
             json.dumps(
-                {"phase": "failed", "owned_process_cleanup": False, "reason": reason},
+                {
+                    "phase": "failed",
+                    "owned_process_cleanup": owned_process_cleanup,
+                    "reason": reason,
+                },
                 indent=2,
             )
             + "\n"
@@ -247,7 +253,7 @@ def run_second_client(state, binary):
             NATIVE_MODEL_METADATA.encode(),
             0,
             screen,
-            lambda: screen.contains(NATIVE_MODEL_METADATA) and screen.contains(">"),
+            lambda: current_composer_ready(screen, NATIVE_MODEL_LABEL),
         )
         if child.poll() is not None:
             raise RuntimeError("second client exited instead of attaching")
@@ -272,7 +278,9 @@ def run_second_client(state, binary):
                 lambda: screen.contains(expected_prompt),
             )
         visible = screen.text()
-        if NATIVE_MODEL_METADATA not in visible or ">" not in visible:
+        if NATIVE_MODEL_METADATA not in visible or not current_composer_ready(
+            screen, NATIVE_MODEL_LABEL
+        ):
             raise RuntimeError("second client did not render through the native TUI path")
         if FIRST not in visible:
             raise RuntimeError("second client did not render the known first-turn prompt")
@@ -432,15 +440,21 @@ class CallbackEvent(threading.Event):
             invoke = not self.callback_used and (self.ready is None or self.ready())
             if invoke:
                 self.callback_used = True
+        # Publish only the observation gate before entering the callback.  The
+        # provider remains stopped on ``release_partial``; setting this event
+        # cannot release the stream barrier or permit another provider request.
+        # This ordering lets the producer continue waiting for the observer
+        # while the observer performs its bounded overlapping-client probe.
+        super().set()
+        if not invoke:
+            return
         try:
-            if invoke:
-                self.callback()
+            self.callback()
         except BaseException as error:
-            # Event release is also used by the golden fixture's finally.
-            # Do not let callback failures skip its daemon/server cleanup.
-            self.callback_error = error
-        finally:
-            super().set()
+            # Preserve the primary observer failure while allowing the golden
+            # fixture's finally to release its own barrier and reap resources.
+            with self.callback_lock:
+                self.callback_error = error
 
 
 def run(binary, library, manifest, artifacts):
@@ -471,14 +485,39 @@ def run(binary, library, manifest, artifacts):
     try:
         golden.run(binary, library, manifest, artifacts)
     except BaseException as error:
-        write_failure_evidence(artifacts, redact(str(error)))
+        state = active.get("state")
+        callback_error = (
+            state.partial_visible.callback_error
+            if state is not None
+            else None
+        )
+        cleanup_proven = state is None or not getattr(
+            state, "second_client_unsafe", False
+        )
+        if callback_error is not None:
+            if hasattr(callback_error, "add_note"):
+                callback_error.add_note(
+                    "golden journey failure after observer callback: "
+                    + redact(str(error))
+                )
+            write_failure_evidence(
+                artifacts,
+                "observer callback failed: "
+                + redact(str(callback_error))
+                + "; golden journey failure: "
+                + redact(str(error)),
+                cleanup_proven,
+            )
+            raise callback_error
+        write_failure_evidence(artifacts, redact(str(error)), cleanup_proven)
         raise
     finally:
         golden.ProviderState = original_state
     state = active.get("state")
     if state is not None and state.partial_visible.callback_error is not None:
         error = state.partial_visible.callback_error
-        write_failure_evidence(artifacts, redact(str(error)))
+        cleanup_proven = not getattr(state, "second_client_unsafe", False)
+        write_failure_evidence(artifacts, redact(str(error)), cleanup_proven)
         raise error
     if len(observations) != 1:
         raise RuntimeError("second-client overlap probe did not run exactly once")
