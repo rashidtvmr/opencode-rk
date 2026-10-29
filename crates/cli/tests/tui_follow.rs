@@ -28,6 +28,8 @@ impl TestHome {
             std::process::id()
         ));
         fs::create_dir_all(&path).unwrap();
+        fs::create_dir_all(path.join("config")).unwrap();
+        fs::create_dir_all(path.join("data")).unwrap();
         Self(path)
     }
 }
@@ -55,21 +57,42 @@ fn free_loopback_port() -> u16 {
         .port()
 }
 
-fn spawn_daemon(home: &TestHome, port: u16) -> (ChildGuard, String) {
+const MAX_DESCRIPTOR_BYTES: u64 = 8 * 1024;
+
+fn read_bounded_descriptor(path: &std::path::Path) -> Vec<u8> {
+    let file_type = fs::symlink_metadata(path)
+        .expect("stat daemon backend descriptor")
+        .file_type();
+    assert!(file_type.is_file() && !file_type.is_symlink(), "descriptor must be a regular non-symlink file");
+    let file = fs::File::open(path).expect("open daemon backend descriptor");
+    assert!(file.metadata().expect("stat opened descriptor").len() <= MAX_DESCRIPTOR_BYTES, "descriptor is bounded");
+    let mut descriptor = Vec::with_capacity(MAX_DESCRIPTOR_BYTES as usize + 1);
+    let bytes_read = Read::take(file, MAX_DESCRIPTOR_BYTES + 1)
+        .read_to_end(&mut descriptor)
+        .expect("read daemon backend descriptor");
+    assert!(bytes_read as u64 <= MAX_DESCRIPTOR_BYTES, "descriptor grew beyond bound");
+    descriptor
+}
+
+fn spawn_daemon(home: &TestHome, port: u16) -> (ChildGuard, String, String) {
     let child = Command::new(env!("CARGO_BIN_EXE_opencode-rk"))
         .env_clear()
         .env("OPENCODE_RK_HOME", home.0.clone())
+        .env("HOME", home.0.join("home"))
+        .env("XDG_CONFIG_HOME", home.0.join("config"))
+        .env("XDG_DATA_HOME", home.0.join("data"))
         .args(["web", "--no-open", "--listen", &format!("127.0.0.1:{port}")])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .expect("spawn daemon");
+    let child_pid = child.id();
     let guard = ChildGuard(child);
     let origin = format!("http://127.0.0.1:{port}");
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        if http(&origin, "GET", "/health", None).is_some() {
+        if http(&origin, "GET", "/health", None, None).is_some() {
             break;
         }
         assert!(
@@ -78,18 +101,31 @@ fn spawn_daemon(home: &TestHome, port: u16) -> (ChildGuard, String) {
         );
         thread::sleep(Duration::from_millis(50));
     }
-    (guard, origin)
+    let descriptor_path = home.0.join("runtime/backend.json");
+    let descriptor = read_bounded_descriptor(&descriptor_path);
+    let value: serde_json::Value = serde_json::from_slice(&descriptor).expect("valid backend descriptor");
+    assert_eq!(value["schema_version"].as_u64(), Some(1), "descriptor schema version must be 1");
+    assert_eq!(value["http_origin"].as_str(), Some(origin.as_str()), "descriptor origin is pinned");
+    assert!(origin.strip_prefix("http://127.0.0.1:").is_some_and(|port| port.parse::<u16>().is_ok_and(|port| port != 0)), "descriptor origin must be a nonzero loopback port");
+    let descriptor_pid = u32::try_from(value["pid"].as_u64().expect("descriptor pid")).expect("descriptor PID bound");
+    assert_eq!(descriptor_pid, child_pid, "descriptor must name the actual owned daemon child");
+    let token = value["auth_token"].as_str().expect("descriptor bearer token");
+    assert!(token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_hexdigit()), "descriptor token is validated");
+    (guard, origin, token.to_owned())
 }
 
 fn tui_cmd(home: &TestHome) -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
     cmd.env_clear()
         .env("OPENCODE_RK_HOME", home.0.clone())
+        .env("HOME", home.0.join("home"))
+        .env("XDG_CONFIG_HOME", home.0.join("config"))
+        .env("XDG_DATA_HOME", home.0.join("data"))
         .env("NO_COLOR", "1");
     cmd
 }
 
-fn http(origin: &str, method: &str, path: &str, body: Option<&str>) -> Option<String> {
+fn http(origin: &str, method: &str, path: &str, body: Option<&str>, bearer: Option<&str>) -> Option<String> {
     let mut stream = TcpStream::connect(origin.trim_start_matches("http://")).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(3))).ok()?;
     stream
@@ -97,7 +133,8 @@ fn http(origin: &str, method: &str, path: &str, body: Option<&str>) -> Option<St
         .ok()?;
     let payload = body.unwrap_or("");
     let req = format!(
-        "{method} {path} HTTP/1.1\r\nHost: {origin}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+        "{method} {path} HTTP/1.1\r\nHost: {origin}\r\n{}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+        bearer.map(|token| format!("Authorization: Bearer {token}\r\n")).unwrap_or_default(),
         payload.len()
     );
     stream.write_all(req.as_bytes()).ok()?;
@@ -111,12 +148,13 @@ fn http(origin: &str, method: &str, path: &str, body: Option<&str>) -> Option<St
     Some(response[body_start..].to_string())
 }
 
-fn create_session(origin: &str, title: &str) -> String {
+fn create_session(origin: &str, token: &str, title: &str) -> String {
     let body = http(
         origin,
         "POST",
         "/api/sessions",
         Some(&format!(r#"{{"title":"{title}"}}"#)),
+        Some(token),
     )
     .expect("create session");
     let value: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -126,12 +164,13 @@ fn create_session(origin: &str, title: &str) -> String {
         .to_string()
 }
 
-fn post_message(origin: &str, id: &str, text: &str) {
+fn post_message(origin: &str, token: &str, id: &str, text: &str) {
     http(
         origin,
         "POST",
         &format!("/api/sessions/{id}/messages"),
         Some(&format!(r#"{{"text":"{text}"}}"#)),
+        Some(token),
     )
     .expect("post message");
 }
@@ -142,9 +181,9 @@ fn post_message(origin: &str, id: &str, text: &str) {
 fn f01_follow_detects_message_from_another_client() {
     let home = TestHome::new();
     let port = free_loopback_port();
-    let (_guard, origin) = spawn_daemon(&home, port);
-    let id = create_session(&origin, "follow probe");
-    post_message(&origin, &id, "seed before follow");
+    let (_guard, origin, token) = spawn_daemon(&home, port);
+    let id = create_session(&origin, &token, "follow probe");
+    post_message(&origin, &token, &id, "seed before follow");
 
     let mut child = tui_cmd(&home)
         .args([
@@ -164,7 +203,7 @@ fn f01_follow_detects_message_from_another_client() {
         .expect("spawn tui --follow");
     // Let the first frame render, then act as the other client.
     thread::sleep(Duration::from_millis(1200));
-    post_message(&origin, &id, "mid-flight from web client");
+    post_message(&origin, &token, &id, "mid-flight from web client");
 
     let deadline = Instant::now() + Duration::from_secs(15);
     let (stdout, stderr) = loop {
@@ -198,9 +237,9 @@ fn f01_follow_detects_message_from_another_client() {
 fn f02_follow_bounded_no_change_exits_zero() {
     let home = TestHome::new();
     let port = free_loopback_port();
-    let (_guard, origin) = spawn_daemon(&home, port);
-    let id = create_session(&origin, "quiet probe");
-    post_message(&origin, &id, "only message");
+    let (_guard, origin, token) = spawn_daemon(&home, port);
+    let id = create_session(&origin, &token, "quiet probe");
+    post_message(&origin, &token, &id, "only message");
 
     let out = tui_cmd(&home)
         .args([
@@ -280,10 +319,10 @@ fn f04_follow_requires_origin() {
 fn f05_follow_pinned_session_isolates() {
     let home = TestHome::new();
     let port = free_loopback_port();
-    let (_guard, origin) = spawn_daemon(&home, port);
-    let pinned = create_session(&origin, "pinned probe");
-    let other = create_session(&origin, "other probe");
-    post_message(&origin, &pinned, "pinned seed");
+    let (_guard, origin, token) = spawn_daemon(&home, port);
+    let pinned = create_session(&origin, &token, "pinned probe");
+    let other = create_session(&origin, &token, "other probe");
+    post_message(&origin, &token, &pinned, "pinned seed");
 
     let mut child = tui_cmd(&home)
         .args([
@@ -304,7 +343,7 @@ fn f05_follow_pinned_session_isolates() {
         .spawn()
         .expect("spawn pinned follow");
     thread::sleep(Duration::from_millis(1200));
-    post_message(&origin, &other, "noise from other session");
+    post_message(&origin, &token, &other, "noise from other session");
 
     let deadline = Instant::now() + Duration::from_secs(15);
     let stdout = loop {
