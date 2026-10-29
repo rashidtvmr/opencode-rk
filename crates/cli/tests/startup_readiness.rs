@@ -69,6 +69,7 @@ impl Drop for FixtureRoot {
 
 #[derive(Clone, Debug)]
 struct ObservedRequest {
+    method: String,
     path: String,
     authorization: Option<String>,
 }
@@ -82,6 +83,9 @@ struct HttpFixture {
     stop: Arc<AtomicBool>,
     requests: Arc<Mutex<Vec<ObservedRequest>>>,
     worker: Option<thread::JoinHandle<()>>,
+    proof_origin: String,
+    proof_pid: u32,
+    proof_token: String,
 }
 
 impl HttpFixture {
@@ -99,10 +103,22 @@ impl HttpFixture {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let worker_stop = Arc::clone(&stop);
         let worker_requests = Arc::clone(&requests);
+        let proof_origin = format!("http://{address}");
+        let proof_pid = std::process::id();
+        let proof_token = TEST_TOKEN.repeat(32);
+        let worker_proof_origin = proof_origin.clone();
+        let worker_proof_token = proof_token.clone();
         let worker = thread::spawn(move || {
             while !worker_stop.load(Ordering::Acquire) {
                 match listener.accept() {
-                    Ok((mut stream, _)) => serve_one(&mut stream, &worker_requests, health_status),
+                    Ok((mut stream, _)) => serve_one(
+                        &mut stream,
+                        &worker_requests,
+                        health_status,
+                        &worker_proof_origin,
+                        proof_pid,
+                        &worker_proof_token,
+                    ),
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(5));
                     }
@@ -116,6 +132,9 @@ impl HttpFixture {
             stop,
             requests,
             worker: Some(worker),
+            proof_origin,
+            proof_pid,
+            proof_token,
         }
     }
 
@@ -141,6 +160,28 @@ impl HttpFixture {
             .collect()
     }
 
+    fn discovery_requests(&self) -> Vec<ObservedRequest> {
+        self.requests()
+            .into_iter()
+            .filter(|request| request.path.starts_with("/discovery-proof?nonce="))
+            .collect()
+    }
+
+    fn unexpected_api_requests(&self) -> Vec<ObservedRequest> {
+        self.api_requests().into_iter().filter(|request| {
+            !matches!(
+                (request.method.as_str(), request.path.as_str()),
+                ("POST", "/api/sessions")
+                    | ("GET", "/api/sessions")
+                    | ("GET", "/api/models?provider=openai&limit=500")
+                    | ("GET", "/api/providers")
+                    | ("GET", "/api/commands")
+                    | ("GET", "/api/sessions/550e8400-e29b-41d4-a716-446655440000/history?limit=100")
+                    | ("GET", "/api/sessions/550e8400-e29b-41d4-a716-446655440000/mcp")
+                    | ("GET", "/api/sessions/550e8400-e29b-41d4-a716-446655440000/todo")
+            )
+        }).collect()
+    }
     fn health_still_responds(&self) -> bool {
         let Ok(mut stream) = TcpStream::connect_timeout(
             &self.address.parse().expect("fixture socket address"),
@@ -175,7 +216,36 @@ impl Drop for HttpFixture {
     }
 }
 
-fn serve_one(stream: &mut TcpStream, log: &Mutex<Vec<ObservedRequest>>, health_status: u16) {
+fn decode_discovery_nonce(value: &str) -> Option<Vec<u8>> {
+    if value.len() != 64 || !value.is_ascii() {
+        return None;
+    }
+    value.as_bytes().chunks_exact(2).map(|pair| {
+        let high = match pair[0] {
+            b'0'..=b'9' => pair[0] - b'0',
+            b'a'..=b'f' => pair[0] - b'a' + 10,
+            b'A'..=b'F' => pair[0] - b'A' + 10,
+            _ => return None,
+        };
+        let low = match pair[1] {
+            b'0'..=b'9' => pair[1] - b'0',
+            b'a'..=b'f' => pair[1] - b'a' + 10,
+            b'A'..=b'F' => pair[1] - b'A' + 10,
+            _ => return None,
+        };
+        Some((high << 4) | low)
+    }).collect()
+}
+
+
+fn serve_one(
+    stream: &mut TcpStream,
+    log: &Mutex<Vec<ObservedRequest>>,
+    health_status: u16,
+    proof_origin: &str,
+    proof_pid: u32,
+    proof_token: &str,
+) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
     let mut bytes = Vec::new();
     let mut chunk = [0_u8; 2048];
@@ -197,7 +267,7 @@ fn serve_one(stream: &mut TcpStream, log: &Mutex<Vec<ObservedRequest>>, health_s
     let mut lines = headers.lines();
     let request_line = lines.next().unwrap_or_default();
     let mut fields = request_line.split_whitespace();
-    let _method = fields.next().unwrap_or_default();
+    let method = fields.next().unwrap_or_default().to_owned();
     let path = fields.next().unwrap_or_default().to_owned();
     let authorization = lines.find_map(|line| {
         let (name, value) = line.split_once(':')?;
@@ -205,26 +275,90 @@ fn serve_one(stream: &mut TcpStream, log: &Mutex<Vec<ObservedRequest>>, health_s
             .then(|| value.trim().to_owned())
     });
     log.lock().expect("request log lock").push(ObservedRequest {
+        method: method.clone(),
         path: path.clone(),
         authorization: authorization.clone(),
     });
 
     let (status, body) = if path == "/health" && health_status == 200 {
-        ("200 OK", r#"{"status":"ok"}"#)
+        ("200 OK", r#"{"status":"ok"}"#.to_owned())
     } else if path == "/health" {
-        ("503 Service Unavailable", r#"{"status":"unavailable"}"#)
-    } else if path.starts_with("/api/")
-        && authorization.as_deref()
-            == Some("Bearer ".to_owned() + &TEST_TOKEN.repeat(32)).as_deref()
+        ("503 Service Unavailable", r#"{"status":"unavailable"}"#.to_owned())
+    } else if let Some(nonce_hex) = path.strip_prefix("/discovery-proof?nonce=") {
+        match decode_discovery_nonce(nonce_hex).and_then(|nonce| {
+            opencode_rk_server::discovery_proof::mac(
+                proof_token,
+                &nonce,
+                proof_origin,
+                1,
+                proof_pid,
+            ).map(|mac| serde_json::json!({
+                "schema_version": 1,
+                "pid": proof_pid,
+                "http_origin": proof_origin,
+                "nonce": nonce_hex,
+                "mac": mac,
+            }).to_string())
+        }) {
+            Some(body) => ("200 OK", body),
+            None => ("400 Bad Request", r#"{"message":"invalid discovery nonce"}"#.to_owned()),
+        }
+    } else if authorization.as_deref()
+        == Some("Bearer ".to_owned() + &TEST_TOKEN.repeat(32)).as_deref()
+        && path.starts_with("/api/")
     {
-        ("200 OK", r#"{"sessions":[]}"#)
+        // Explicit startup graph only. Unknown authenticated paths never get
+        // a plausible success envelope: they are observable 404s.
+        const SESSION_ID: &str = "550e8400-e29b-41d4-a716-446655440000";
+        const SESSION_TITLE: &str = "APP017 fixture session";
+        let (status, body) = match (method.as_str(), path.as_str()) {
+            ("POST", "/api/sessions") => (
+                "201 Created",
+                serde_json::json!({"session": {"id": SESSION_ID, "title": SESSION_TITLE, "state": "idle", "updated_at": "2026-01-01T00:00:00Z"}}).to_string(),
+            ),
+            ("GET", "/api/sessions") => (
+                "200 OK",
+                serde_json::json!({"sessions": [{"id": SESSION_ID, "title": SESSION_TITLE, "state": "idle", "updated_at": "2026-01-01T00:00:00Z", "directory": "/tmp"}]}).to_string(),
+            ),
+            ("GET", "/api/models?provider=openai&limit=500") => (
+                "200 OK",
+                serde_json::json!({"schema_version": 1, "source": "models.dev", "count": 0, "models": []}).to_string(),
+            ),
+            ("GET", "/api/providers") => (
+                "200 OK",
+                serde_json::json!({"providers": []}).to_string(),
+            ),
+            ("GET", "/api/commands") => (
+                "200 OK",
+                serde_json::json!({"agents": [], "commands": []}).to_string(),
+            ),
+            ("GET", "/api/sessions/550e8400-e29b-41d4-a716-446655440000/history?limit=100") => (
+                "200 OK", r#"{"messages":[],"next_before":null}"#.to_owned(),
+            ),
+            ("GET", "/api/sessions/550e8400-e29b-41d4-a716-446655440000/mcp") => (
+                "200 OK", r#"{}"#.to_owned(),
+            ),
+            ("GET", "/api/sessions/550e8400-e29b-41d4-a716-446655440000/todo") => (
+                "200 OK", r#"{"todos":[]}"#.to_owned(),
+            ),
+            ("POST", "/api/models?provider=openai&limit=500")
+            | ("POST", "/api/providers") | ("POST", "/api/commands") => (
+                "405 Method Not Allowed", r#"{"message":"method not allowed"}"#.to_owned(),
+            ),
+            _ => ("404 Not Found", r#"{"message":"not found"}"#.to_owned()),
+        };
+        (status, body)
     } else {
-        ("401 Unauthorized", r#"{"message":"unauthorized"}"#)
+        ("401 Unauthorized", r#"{"message":"unauthorized"}"#.to_owned())
     };
     let response = format!(
         "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
+    // The accept worker is joined by HttpFixture::Drop; bound both sides of
+    // every socket before any response write so a peer that stops reading
+    // cannot strand teardown indefinitely.
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
     let _ = stream.write_all(response.as_bytes());
     let _ = stream.flush();
 }
@@ -233,16 +367,18 @@ fn serve_one(stream: &mut TcpStream, log: &Mutex<Vec<ObservedRequest>>, health_s
 /// PTY adapter; all launch, descriptor reads, health probes, requests and
 /// lifecycle ownership under test execute in the compiled Rust CLI binary.
 /// The child environment is reconstructed from a tiny explicit allowlist and
-/// the PTY transcript is byte-capped. A 25-second Python alarm bounds even a
-/// stuck CLI and its `finally` block kills/reaps the PTY session process group.
+/// the PTY transcript is byte-capped. Rust launches the Python supervisor as
+/// an owned setsid process-group leader; the native child shares that group.
+/// A 25-second Python alarm and independent outer bound govern cleanup.
 fn run_default_cli(root: &FixtureRoot, address: &str) -> (i32, String, String) {
     const DRIVER: &str = r#"
-import errno, os, pty, select, signal, sys, time
+import errno, os, pty, select, signal, subprocess, sys, time
 
+os.setsid()
 binary, data_dir, home, address = sys.argv[1:]
-pid = None
-pgid = None
+child = None
 master = None
+slave = None
 captured = bytearray()
 ready_marker = b"OpenCode RK"
 capture_limit = 32768
@@ -259,14 +395,11 @@ signal.signal(signal.SIGALRM, alarm)
 signal.alarm(25)
 try:
     try:
-        pid, master = pty.fork()
-        pgid = pid
-    except BaseException as error:
-        infra("pty.fork failed: " + repr(error))
-    if pid == 0:
-        # The driver's hard alarm belongs to the parent supervisor, not the
-        # exec'd CLI (which has its own independently asserted deadlines).
-        signal.alarm(0)
+        # Rust launches this Python supervisor through setsid, making the
+        # supervisor PID the live process-group leader. The native child is
+        # deliberately Popen'd without a new session, so it remains in that
+        # same owned group; Rust can verify PGID==child.id() before signalling.
+        master, slave = pty.openpty()
         env = {
             "HOME": home,
             "OPENCODE_RK_HOME": data_dir,
@@ -274,11 +407,23 @@ try:
             "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
             "TMPDIR": home,
         }
-        try:
-            os.execve(binary, [binary, "--data-dir", data_dir], env)
-        except BaseException as error:
-            os.write(2, ("PTY_EXEC_FAILED: " + repr(error) + "\n").encode())
-            os._exit(90)
+        child = subprocess.Popen(
+            [binary, "--data-dir", data_dir],
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+            env=env,
+            close_fds=True,
+        )
+        # Install the supervisor-only TERM policy after spawning. The native
+        # child inherited the default disposition and can still terminate;
+        # this supervisor ignores the group TERM it sends during final cleanup
+        # so it can drain/reap without recursively terminating itself.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        os.close(slave)
+        slave = None
+    except BaseException as error:
+        infra("PTY open/Popen failed: " + repr(error))
 
     # Await output from the actual CLI before sending commands. This prevents
     # empty transcripts from satisfying the negative attachment assertions.
@@ -299,15 +444,53 @@ try:
                 if len(captured) + len(block) > capture_limit:
                     infra("PTY transcript exceeded 32768-byte cap before banner")
                 captured.extend(block)
-        waited, child_status = os.waitpid(pid, os.WNOHANG)
-        if waited == pid:
-            pid = None
-            infra("CLI exited before startup banner; status=" + repr(child_status))
+        child_status = child.poll()
+        if child_status is not None:
+            # Preserve the bounded transcript when the executable exits before
+            # readiness. This is diagnostic evidence, never acceptance: the
+            # caller still raises an infrastructure blocker with the actual
+            # exit status and captured native output.
+            rendered = bytes(captured[:capture_limit]).decode("utf-8", "replace")
+            infra("CLI exited before startup banner; status=" + repr(child_status)
+                  + "\nCAPTURED_PTY_TRANSCRIPT_BEGIN\n" + rendered
+                  + "\nCAPTURED_PTY_TRANSCRIPT_END")
     if ready_marker not in captured:
         infra("PTY_NOT_READY: CLI startup banner absent within eleven seconds")
 
-    # Canonical TTY input remains queued until the real chat loop reads it.
-    os.write(master, b"/sessions\n/exit\n")
+    # Submit each native command with the active Enter mapping (CR).  LF is
+    # ordinary composer Newline in the native loop, so it must not be used to
+    # submit /sessions or the exit route.
+    os.write(master, b"/sessions\r")
+
+    # Observe the actual Sessions-page frame before dismissing it.  This keeps
+    # the authenticated GET /api/sessions and its rendered result in the test
+    # path rather than racing a second command into the composer.  The marker
+    # is intentionally broad native page content; the byte/output bounds below
+    # remain authoritative if a broken page emits nothing.
+    page_deadline = time.monotonic() + 5.0
+    while b"Sessions" not in captured and time.monotonic() < page_deadline:
+        ready, _, _ = select.select([master], [], [], 0.05)
+        if ready:
+            try:
+                block = os.read(master, 4096)
+            except OSError as error:
+                if error.errno == errno.EIO:
+                    block = b""
+                else:
+                    infra("PTY Sessions-page read failed: " + repr(error))
+            if block:
+                if len(captured) + len(block) > capture_limit:
+                    infra("PTY transcript exceeded 32768-byte cap while observing Sessions page")
+                captured.extend(block)
+    if b"Sessions" not in captured:
+        infra("PTY_SESSIONS_NOT_OBSERVED: native Sessions page/result absent within five seconds")
+
+    # A standalone ESC is decoded only after the decoder's quiet timeout; wait
+    # 50 ms before submitting the process exit command so it cannot be folded
+    # into an escape sequence or share the Sessions-page input frame.
+    os.write(master, b"\x1b")
+    time.sleep(0.05)
+    os.write(master, b":q\r")
     deadline = time.monotonic() + 10.5
     status = None
     while time.monotonic() < deadline:
@@ -324,13 +507,12 @@ try:
                 if len(captured) + len(block) > capture_limit:
                     infra("PTY transcript exceeded 32768-byte cap")
                 captured.extend(block)
-        waited, child_status = os.waitpid(pid, os.WNOHANG)
-        if waited == pid:
+        child_status = child.poll()
+        if child_status is not None:
             status = child_status
-            pid = None
             break
     if status is None:
-        infra("CLI did not exit after /exit within 10.5 seconds")
+        infra("CLI did not exit after Sessions-page dismissal and :q within 10.5 seconds")
 
     # Drain the PTY after waitpid: the child may exit while its final output is
     # still buffered in the PTY master. Stop at EOF/EIO or a bounded quiet read.
@@ -350,20 +532,84 @@ try:
         if len(captured) + len(block) > capture_limit:
             infra("PTY transcript exceeded 32768-byte cap during drain")
         captured.extend(block)
-    code = os.waitstatus_to_exitcode(status)
+    code = status
     sys.stdout.buffer.write((str(code) + "\n").encode() + captured)
     sys.stdout.buffer.flush()
 finally:
     signal.alarm(0)
-    if pgid is not None:
+    if child is not None:
         try:
-            os.killpg(pgid, signal.SIGKILL)
-        except ProcessLookupError:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=2.0)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
             pass
-    if pid is not None:
         try:
-            os.waitpid(pid, 0)
-        except ChildProcessError:
+            # The CLI may have spawned an owned daemon. The supervisor is the
+            # live group leader; after the direct child is reaped, terminate
+            # remaining group members without self-recursion, then bound the
+            # final drain. The real T08 daemon is never in this group.
+            own_group = os.getpgrp() == os.getpid() and os.getsid(0) == os.getpid()
+            if own_group:
+                group = os.getpgrp()
+                os.killpg(group, signal.SIGTERM)
+                time.sleep(0.05)
+                # Never SIGKILL the group leader: it is this live supervisor.
+                # Re-enumerate the live group and kill only remaining children
+                # by identity, excluding our own PID; no stale PID ledger is
+                # retained or trusted.
+                listing = subprocess.run(
+                    ["ps", "-axo", "pid=,pgid="],
+                    capture_output=True,
+                    text=True,
+                    timeout=1.0,
+                ).stdout
+                own = os.getpid()
+                for line in listing.splitlines():
+                    fields = line.split()
+                    if len(fields) == 2 and fields[1] == str(group):
+                        try:
+                            member = int(fields[0])
+                        except ValueError:
+                            continue
+                        if member > 1 and member != own:
+                            try:
+                                if os.getpgid(member) == group:
+                                    os.kill(member, signal.SIGKILL)
+                            except ProcessLookupError:
+                                pass
+                # Recheck live membership after KILL, while this supervisor
+                # still anchors the session and excludes itself from cleanup.
+                cleanup_deadline = time.monotonic() + 2.0
+                while True:
+                    listing = subprocess.run(
+                        ["/bin/ps", "-axo", "pid=,pgid="],
+                        capture_output=True, text=True, timeout=1.0, check=True,
+                    ).stdout
+                    remaining = []
+                    for line in listing.splitlines():
+                        fields = line.split()
+                        if len(fields) != 2 or fields[1] != str(group):
+                            continue
+                        member = int(fields[0])
+                        if member <= 1 or member == own:
+                            continue
+                        try:
+                            if os.getpgid(member) == group:
+                                remaining.append(member)
+                        except ProcessLookupError:
+                            pass
+                    if not remaining:
+                        break
+                    if time.monotonic() >= cleanup_deadline:
+                        infra("owned PTY descendants remain after bounded cleanup")
+                    time.sleep(0.025)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
+            pass
+    if slave is not None:
+        try:
+            os.close(slave)
+        except OSError:
             pass
     if master is not None:
         try:
@@ -373,7 +619,7 @@ finally:
 "#;
 
     let binary = env!("CARGO_BIN_EXE_opencode-rk");
-    let mut driver = Command::new("python3");
+    let mut driver = Command::new("/usr/bin/python3");
     driver
         .arg("-c")
         .arg(DRIVER)
@@ -394,6 +640,28 @@ finally:
             break status;
         }
         if Instant::now() >= deadline {
+            // `setsid` makes this direct Rust child the live group leader;
+            // verify that identity from the kernel process table before using
+            // a negative-PID group signal. Never trust a descriptor/PID file.
+            let group_is_owned = Command::new("ps")
+                .args(["-o", "pgid=", "-p", &child.id().to_string()])
+                .output()
+                .ok()
+                .and_then(|output| String::from_utf8(output.stdout).ok())
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .is_some_and(|pgid| pgid == child.id())
+                && Command::new("/usr/bin/python3")
+                    .args(["-c", "import os,sys; print(os.getsid(int(sys.argv[1])))", &child.id().to_string()])
+                    .output()
+                    .ok()
+                    .and_then(|output| String::from_utf8(output.stdout).ok())
+                    .and_then(|value| value.trim().parse::<u32>().ok())
+                    .is_some_and(|sid| sid == child.id());
+            if group_is_owned {
+                let _ = Command::new("kill")
+                    .args(["-KILL", "--", &format!("-{}", child.id())])
+                    .status();
+            }
             let _ = child.kill();
             let _ = child.wait();
             panic!("PTY driver exceeded 30-second outer bound");
@@ -453,13 +721,14 @@ fn app017_t01_matching_descriptor_and_healthy_peer_attach_with_its_bearer() {
         "real no-subcommand CLI should exit cleanly: {transcript}"
     );
     assert!(
-        transcript.contains(&format!("daemon: {origin}")),
-        "real chat attach banner: {transcript}"
+        transcript.contains("Sessions") && transcript.contains("APP017 fixture session"),
+        "native authenticated Sessions table must render the fixture row after attach: {transcript}"
     );
-    assert!(
-        !fixture.health_requests().is_empty(),
-        "fixture must observe public readiness probe"
-    );
+    assert!(!fixture.health_requests().is_empty(), "fixture must observe public readiness probe");
+    assert!(!fixture.discovery_requests().is_empty(), "fixture must observe signed discovery proof");
+    let descriptor: serde_json::Value = serde_json::from_slice(&fs::read(root.descriptor_path()).expect("read attached descriptor")).expect("valid attached descriptor");
+    assert_eq!(descriptor["http_origin"].as_str(), Some(origin.as_str()));
+    assert_eq!(descriptor["pid"].as_u64(), Some(u64::from(std::process::id())));
     assert_no_token_output(&transcript);
     assert_no_token_output(&driver_stderr);
     let api = fixture.api_requests();
@@ -472,6 +741,7 @@ fn app017_t01_matching_descriptor_and_healthy_peer_attach_with_its_bearer() {
             == Some(format!("Bearer {}", TEST_TOKEN.repeat(32)).as_str())),
         "every API request must carry only the descriptor bearer: {api:?}"
     );
+    assert!(fixture.unexpected_api_requests().is_empty(), "unexpected authenticated startup routes: {:?}", fixture.unexpected_api_requests());
 }
 
 #[test]
@@ -489,9 +759,12 @@ fn app017_t02_healthy_foreign_listener_without_descriptor_is_not_attached_or_kil
         !transcript.contains(&format!("daemon: {}", fixture.origin())),
         "public liveness alone must not yield an attached lease: {transcript}"
     );
+    // With no validated descriptor, native bootstrap must not route even a
+    // public-health request to this foreign listener. The listener-survival
+    // probe below is the explicit non-destructive observation.
     assert!(
-        !fixture.health_requests().is_empty(),
-        "CLI must make a public health probe"
+        fixture.health_requests().is_empty(),
+        "descriptor-less foreign listener must not receive startup probes"
     );
     assert!(
         fixture.api_requests().is_empty(),
@@ -577,10 +850,10 @@ fn app017_t03_bad_descriptor_shapes_never_authorize_foreign_api_requests() {
             !transcript.contains(&format!("daemon: {configured_origin}")),
             "invalid descriptor {case} must not be presented as an attached daemon: {transcript}"
         );
-        assert!(
-            !configured.health_requests().is_empty(),
-            "CLI must probe configured health origin"
-        );
+        // Invalid descriptor validation fails closed before native bootstrap
+        // acquires an origin, so no health/API request is authorized for this
+        // foreign or malformed target. Valid descriptor paths retain the
+        // explicit public-health assertions below and above.
         assert!(
             configured.api_requests().is_empty(),
             "invalid descriptor {case} must not authorize API requests"
@@ -649,8 +922,8 @@ fn app017_t07_wrong_owner_descriptor_is_refused_or_explicitly_classified_unsuppo
         "wrong-owner descriptor must not establish an attached lease"
     );
     assert!(
-        !fixture.health_requests().is_empty(),
-        "CLI must probe wrong-owner listener"
+        fixture.health_requests().is_empty(),
+        "wrong-owner descriptor must not trigger a health probe to the foreign listener"
     );
     assert!(
         fixture.api_requests().is_empty(),
@@ -773,9 +1046,11 @@ fn app017_t05_valid_existing_service_is_reused_without_descriptor_replacement() 
         "existing healthy daemon must be reusable: {transcript}"
     );
     assert!(
-        transcript.contains(&format!("daemon: {origin}")),
-        "existing service attach observed: {transcript}"
+        transcript.contains("Sessions") && transcript.contains("APP017 fixture session"),
+        "native authenticated Sessions table must render the fixture row for reused service: {transcript}"
     );
+    assert!(!fixture.discovery_requests().is_empty(), "reused service must answer signed discovery proof");
+    assert!(!fixture.api_requests().is_empty(), "reused service must receive authenticated API traffic");
     assert_eq!(
         fs::read(root.descriptor_path()).expect("descriptor after CLI exit"),
         before,
@@ -793,6 +1068,7 @@ fn app017_t05_valid_existing_service_is_reused_without_descriptor_replacement() 
         !fixture.api_requests().is_empty(),
         "existing valid service saw real API requests"
     );
+    assert!(fixture.unexpected_api_requests().is_empty(), "unexpected authenticated reuse routes: {:?}", fixture.unexpected_api_requests());
     assert_no_token_output(&transcript);
     assert_no_token_output(&driver_stderr);
 }
@@ -804,6 +1080,27 @@ fn app017_t05_valid_existing_service_is_reused_without_descriptor_replacement() 
 /// sessions marker only after its authenticated GET /api/sessions succeeds.
 /// This proves two-client reuse of this daemon/origin, not absence of unrelated
 /// process starts elsewhere on the host.
+fn authenticated_json_request(
+    address: &str,
+    token: &str,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+) -> String {
+    let mut stream = TcpStream::connect(address).expect("connect owned serve for authenticated fixture request");
+    stream.set_read_timeout(Some(Duration::from_secs(1))).expect("bound fixture request read");
+    stream.set_write_timeout(Some(Duration::from_secs(1))).expect("bound fixture request write");
+    let body = body.unwrap_or("");
+    write!(
+        stream,
+        "{method} {path} HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    ).expect("write authenticated fixture request");
+    let mut response = String::new();
+    stream.read_to_string(&mut response).expect("read authenticated fixture response");
+    response
+}
+
 #[test]
 fn app017_t08_two_clients_reuse_one_live_authenticated_serve_daemon() {
     use std::process::Child;
@@ -943,6 +1240,17 @@ fn app017_t08_two_clients_reuse_one_live_authenticated_serve_daemon() {
         bearer.bytes().all(|byte| byte.is_ascii_hexdigit()),
         "real daemon bearer must have the expected hexadecimal encoding"
     );
+    // Seed one uniquely named authenticated row through the real API before
+    // either client starts. Each native client must render this persisted row
+    // in its Sessions page; the row is not fabricated in the PTY transcript.
+    let seeded = authenticated_json_request(
+        &address,
+        &bearer,
+        "POST",
+        "/api/sessions",
+        Some(r#"{"title":"APP017 two-client persisted row"}"#),
+    );
+    assert!(seeded.starts_with("HTTP/1.1 201 "), "seed authenticated session: {seeded}");
 
     for client_number in 1..=2 {
         let (code, transcript, driver_stderr) = run_default_cli(&root, &address);
@@ -954,13 +1262,13 @@ fn app017_t08_two_clients_reuse_one_live_authenticated_serve_daemon() {
             transcript.contains("OpenCode RK"),
             "client {client_number} must reach real interactive startup: {transcript}"
         );
+        // Native rendering does not expose the legacy line-chat attach or
+        // empty-list labels. Causal proof is the real descriptor/origin/PID
+        // identity above, the authenticated Sessions-page observation in the
+        // bounded PTY driver, and the no-401 result below.
         assert!(
-            transcript.contains(&format!("daemon: {origin}")),
-            "client {client_number} must attach to the same live origin: {transcript}"
-        );
-        assert!(
-            transcript.contains("no sessions yet; type /new to start one"),
-            "client {client_number} must receive the authenticated empty-session result: {transcript}"
+            transcript.contains("Sessions") && transcript.contains("APP017 two-client persisted row"),
+            "client {client_number} must render the authenticated Sessions row: {transcript}"
         );
         assert!(
             !transcript.contains("session list failed: 401")

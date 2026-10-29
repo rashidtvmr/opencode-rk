@@ -11,6 +11,11 @@ import urllib.error, urllib.request
 MAX_PTY, MAX_REQUEST, MAX_RESPONSE = 256 * 1024, 128 * 1024, 256 * 1024
 KEY, MODEL = "fixture-generated-key-7f3a", "gpt-5.6-mini"
 PROMPTS = ["native provider contract first", "native provider contract second"]
+T06_MODE = False
+T06_PROMPT = "hello"
+T06_ASSISTANT = "t06 fixture response"
+T06_CHILD = None
+T06_STOPPING = False
 HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
 HOST_LIBRARY_SUFFIX = ".dylib" if sys.platform == "darwin" else ".so"
 # SOURCE: crates/contracts/src/lib.rs:73 `uuid_id!(SessionId)` renders the
@@ -150,10 +155,21 @@ def model_ready(screen, model_label):
 def home_ready(screen, model_label=None):
     return all(screen.contains(row) for row in HOME_LOGO) and screen.contains("Ask anything") and (model_label is None or model_ready(screen, model_label))
 
+def current_composer_ready(screen, model_label):
+    """Recognize the current native framed composer, not transcript history."""
+    lines = screen.text().splitlines()
+    def border(line): return re.fullmatch(r"\s*[┃│║]\s*", line) is not None
+    for index, line in enumerate(lines):
+        if "[Send]" not in line or model_label not in line: continue
+        if index < 2 or not border(lines[index - 1]) or not border(lines[index - 2]): continue
+        if index + 1 >= len(lines): continue
+        if "╹" not in lines[index + 1] or "▀" not in lines[index + 1]: continue
+        if model_ready(screen, model_label): return True
+    return False
+
 def session_ready(screen, session_id, model_label):
-    composer = any(re.fullmatch(r"\s*[│║┃]\s*>\s*[│║┃]\s*",line) for line in screen.text().splitlines())
     # Sidebar identity may be hidden at 80 columns; authenticate it separately.
-    return composer and model_ready(screen,model_label)
+    return current_composer_ready(screen, model_label)
 
 def authenticated_json(descriptor_value, route):
     """Exact loopback origin + fixture token; no redirect, no proxy, bounded read."""
@@ -168,7 +184,7 @@ def authenticated_json(descriptor_value, route):
             raise AssertionError("bounded authenticated request failed")
         return json.loads(raw)
 
-def persisted_session_id(descriptor_value, expected_assistant=None):
+def persisted_session_id(descriptor_value, expected_assistant=None, expected_user=None):
     """Select only the sole authenticated session in this disposable fixture."""
     sessions=authenticated_json(descriptor_value,"/api/sessions").get("sessions")
     if not isinstance(sessions,list) or len(sessions)!=1:raise AssertionError("fixture must have exactly one persisted session")
@@ -178,6 +194,8 @@ def persisted_session_id(descriptor_value, expected_assistant=None):
     if not isinstance(messages,list) or not messages or any(message.get("session_id")!=selected for message in messages):raise AssertionError("persisted session history has missing/foreign identity")
     if expected_assistant is not None and not any(message.get("role") == "assistant" and message.get("body", {}).get("text") == expected_assistant for message in messages):
         raise AssertionError("persisted assistant role/content did not match")
+    if expected_user is not None and not any(message.get("role") == "user" and message.get("body", {}).get("text") == expected_user for message in messages):
+        raise AssertionError("persisted user role/content did not match")
     return selected
 
 def checked_artifact(raw_binary, raw_library, raw_manifest):
@@ -210,12 +228,13 @@ class State:
         if not isinstance(inputs, list) or any(not isinstance(x, dict) for x in inputs): raise RuntimeError("input is not a list of objects")
         if value.get("model") != MODEL: raise RuntimeError("non-default model was not selected")
         users = [x.get("content") for x in inputs if x.get("role") == "user"]
-        expected_users = PROMPTS[:len(self.requests) + 1]
-        expected_assistants = [] if not self.requests else ["G2 first response"]
+        prompts = [T06_PROMPT] if T06_MODE else PROMPTS
+        expected_users = prompts[:len(self.requests) + 1]
+        expected_assistants = [] if not self.requests else ([T06_ASSISTANT] if T06_MODE else ["G2 first response"])
         assistants = [x.get("content") for x in inputs if x.get("role") == "assistant"]
         if users != expected_users or assistants != expected_assistants: raise RuntimeError("settled history is not durable")
         self.requests.append(value)
-        text = "G2 first response" if len(self.requests) == 1 else "G2 resumed response"
+        text = T06_ASSISTANT if T06_MODE else ("G2 first response" if len(self.requests) == 1 else "G2 resumed response")
         stream = value.get("stream", False)
         if not isinstance(stream, bool):
             raise RuntimeError("stream must be boolean when present")
@@ -230,6 +249,208 @@ class State:
             content_type = "text/event-stream"
         if len(out) > MAX_RESPONSE: raise RuntimeError("response exceeded 256 KiB")
         return out, content_type
+
+current_fixture_state = None
+
+
+def drain_until_exit(master, child, buf, screen):
+    """Drain a bounded PTY after the requested native quit, then reap it."""
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if child.poll() is not None:
+            break
+        ready, _, _ = select.select([master], [], [], min(.1, deadline - time.monotonic()))
+        if not ready:
+            continue
+        try:
+            chunk = os.read(master, min(65536, MAX_PTY - len(buf)))
+        except OSError as exc:
+            if getattr(exc, "errno", None) in (5,):
+                break
+            raise
+        if not chunk:
+            break
+        if len(buf) + len(chunk) > MAX_PTY:
+            raise AssertionError("t06 PTY capture bound reached while draining")
+        buf.extend(chunk); screen.feed(chunk)
+    if child.poll() is None:
+        # PTY EOF/EIO may precede the kernel's child-exit notification. Keep
+        # waiting within the original deadline; never force an exit to pass.
+        try:
+            child.wait(timeout=max(0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            raise AssertionError("native :q did not exit within bounded deadline")
+    if child.returncode != 0:
+        raise AssertionError("native :q exited %s" % child.returncode)
+
+def _stop_t06_daemon(descriptor_value):
+    """Stop the validated daemon directly; never signal the supervisor group."""
+    pid = descriptor_value.get("_validated_pid")
+    group = descriptor_value.get("_owner_pgid")
+    start_identity = descriptor_value.get("_validated_start_identity")
+    if (not isinstance(pid, int) or not isinstance(group, int) or pid <= 1 or group <= 1
+            or not isinstance(start_identity, str) or not start_identity):
+        raise RuntimeError("refusing unvalidated T06 daemon cleanup")
+    try:
+        os.getpgid(pid)
+    except ProcessLookupError:
+        return
+    if (_process_start_identity(pid) != start_identity
+            or os.getpgid(pid) != group or os.getpgid(os.getpid()) != group):
+        raise RuntimeError("T06 daemon ownership group changed")
+    try:
+        if _process_start_identity(pid) != start_identity or os.getpgid(pid) != group:
+            raise RuntimeError("T06 daemon identity changed before terminate")
+        os.kill(pid, signal.SIGTERM)
+        end = time.monotonic() + 3
+        while time.monotonic() < end:
+            try: os.kill(pid, 0)
+            except ProcessLookupError: return
+            time.sleep(.05)
+        if _process_start_identity(pid) != start_identity or os.getpgid(pid) != group:
+            raise RuntimeError("T06 daemon identity changed before kill")
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+
+def _assert_t06_group_empty():
+    """Prove bounded cleanup without signaling the live supervisor group."""
+    own = os.getpid()
+    if os.getpgrp() != own or os.getsid(0) != own:
+        raise RuntimeError("T06 cleanup requires its own live session/group leader")
+    deadline = time.monotonic() + 2.0
+    while True:
+        # -g selects this owned session/group on the supported POSIX hosts.
+        # Read with an explicit cap/deadline rather than capturing all output.
+        probe = subprocess.Popen(["/bin/ps", "-o", "pid=,pgid=", "-g", str(own)],
+                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        raw = bytearray()
+        try:
+            probe_deadline = time.monotonic() + 1.0
+            while True:
+                remaining = probe_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError("T06 group liveness probe timed out")
+                ready, _, _ = select.select([probe.stdout], [], [], remaining)
+                if not ready:
+                    raise RuntimeError("T06 group liveness probe timed out")
+                block = os.read(probe.stdout.fileno(), 4096)
+                if not block:
+                    break
+                raw.extend(block)
+                if len(raw) > 65536:
+                    raise RuntimeError("T06 group liveness output exceeded 64 KiB")
+            if probe.wait(timeout=0.2) != 0:
+                raise RuntimeError("T06 group liveness probe failed")
+        finally:
+            if probe.poll() is None:
+                probe.kill()
+                probe.wait(timeout=1.0)
+            probe.stdout.close()
+        members = []
+        for line in raw.decode("ascii", "strict").splitlines():
+            fields = line.split()
+            if len(fields) != 2:
+                raise RuntimeError("invalid T06 group liveness response")
+            pid, group = map(int, fields)
+            if group != own or pid <= 1 or pid == own:
+                continue
+            try:
+                if os.getpgid(pid) == own:
+                    members.append(pid)
+            except ProcessLookupError:
+                pass
+        if not members:
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError("T06 owned descendants remain after bounded cleanup")
+        time.sleep(0.025)
+
+def _stop_t06_child(child):
+    """Reap only the live direct child; the Python supervisor owns its group."""
+    if child is None or child.poll() is not None:
+        return
+    try:
+        if os.getpgid(child.pid) != os.getpgrp():
+            raise RuntimeError("refusing to stop child outside the T06 supervisor group")
+        child.terminate(); child.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        if child.poll() is None and os.getpgid(child.pid) == os.getpgrp():
+            child.kill(); child.wait(timeout=3)
+    except OSError:
+        if child.poll() is None:
+            raise
+
+def _t06_signal(signum, _frame):
+    # The native child shares this supervisor group. Never signal the group from
+    # this handler: doing so would kill Python before it can reap the child.
+    global T06_STOPPING
+    T06_STOPPING = True
+    _stop_t06_child(T06_CHILD)
+    raise SystemExit(128 + signum)
+
+def run_t06(exe, env, root, captures, daemon_port, descriptor_records):
+    global T06_MODE, T06_CHILD
+    T06_MODE = True
+    master, slave = pty.openpty(); child = None; buf = bytearray(); screen = TerminalScreen()
+    descriptor_value = None; exited_naturally = False
+    try:
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+        child = subprocess.Popen([str(exe)], cwd=root / "project", env=env, stdin=slave, stdout=slave, stderr=slave, close_fds=True)
+        T06_CHILD = child
+        os.close(slave); slave = None
+        descriptor_value = descriptor(root / "d", daemon_port, child, time.monotonic() + 20, os.getpgrp())
+        descriptor_records.append({"pid": descriptor_value["_validated_pid"], "owner_pgid": descriptor_value["_owner_pgid"], "start_identity": descriptor_value["_validated_start_identity"], "origin": descriptor_value["http_origin"], "port": daemon_port, "phase": "t06_initial"})
+        read_until(master, time.monotonic() + 20, buf, b"native frame", 0, screen, lambda: home_ready(screen))
+        def command(text, marker=None, predicate=None):
+            start = len(buf); os.write(master, text.encode() + b"\r")
+            if marker is not None or predicate is not None:
+                read_until(master, time.monotonic() + 20, buf, marker or b"native frame", start, screen, predicate)
+        command("/connect", b"Connect a provider")
+        command("openai", b"API key", lambda: screen.has_api_prompt())
+        command(KEY, MODEL.encode())
+        auth_path = root / "d" / "opencode" / "auth.json"
+        if not auth_path.is_file() or auth_path.stat().st_mode & 0o777 != 0o600:
+            raise AssertionError("t06 provider setup did not persist 0600 auth")
+        saved = json.loads(auth_path.read_text()).get("openai", {})
+        if saved.get("type") != "api" or saved.get("key") != KEY:
+            raise AssertionError("t06 provider setup persisted wrong auth schema")
+        command(MODEL, MODEL.encode(), lambda: screen.has_model_status() and screen.picker_closed())
+        command(T06_PROMPT, T06_ASSISTANT.encode(), lambda: screen.has_assistant(T06_ASSISTANT))
+        if len(fixture_requests := getattr(current_fixture_state, "requests", [])) != 1:
+            raise AssertionError("t06 provider did not receive exactly one request")
+        if fixture_requests[0].get("input", [{}])[0].get("content") != T06_PROMPT:
+            raise AssertionError("t06 provider request did not contain hello")
+        session_id = persisted_session_id(descriptor_value, T06_ASSISTANT, T06_PROMPT)
+        command("/help", b"Help - active keybindings", lambda: screen.contains("Help - active keybindings"))
+        # Help consumes text keys; dismiss its actual page before sending the
+        # native process-exit command to the session composer.
+        start = len(buf); os.write(master, b"\x1b")
+        read_until(master, time.monotonic() + 5, buf, T06_ASSISTANT.encode(), start, screen,
+                   lambda: not screen.contains("Help - active keybindings") and screen.has_assistant(T06_ASSISTANT))
+        start = len(buf); os.write(master, b":q\r")
+        drain_until_exit(master, child, buf, screen); exited_naturally = True
+        _stop_t06_daemon(descriptor_value)
+        _assert_t06_group_empty()
+        captures.extend(buf)
+        if len(captures) > MAX_PTY: raise AssertionError("combined PTY capture bound reached")
+        return session_id
+    finally:
+        if not exited_naturally:
+            captures.extend(buf[:max(0, MAX_PTY - len(captures))])
+        if child is not None and child.poll() is None:
+            _stop_t06_child(child)
+        if descriptor_value is not None:
+            try: _stop_t06_daemon(descriptor_value)
+            except (OSError, RuntimeError): pass
+        for fd in (slave, master):
+            if fd is not None:
+                try: os.close(fd)
+                except OSError: pass
+        T06_MODE = False
+        T06_CHILD = None
+        if not exited_naturally and child is not None and sys.exc_info()[0] is None:
+            raise AssertionError("t06 did not complete natural :q exit")
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
@@ -280,8 +501,19 @@ def read_until(fd, deadline, buf, needle, start, screen=None, predicate=None):
     if len(buf) >= MAX_PTY: raise AssertionError("PTY capture bound reached before marker %r" % needle)
     raise AssertionError("PTY timeout before fresh marker %r" % needle)
 
-def descriptor(data_root, port, child, deadline):
+def _process_start_identity(pid):
+    if not isinstance(pid, int) or pid <= 1: return None
+    try:
+        output = subprocess.check_output(["/bin/ps", "-o", "lstart=", "-p", str(pid)], stderr=subprocess.DEVNULL, timeout=1)
+    except (OSError, subprocess.SubprocessError): return None
+    value = output.decode("ascii", "strict").strip()
+    return value or None
+
+def descriptor(data_root, port, child, deadline, owner_group=None):
     path = data_root / "runtime" / "backend.json"
+    expected_group = child.pid if owner_group is None else owner_group
+    if not isinstance(expected_group, int) or expected_group <= 1:
+        raise RuntimeError("invalid owned supervisor process group")
     while time.monotonic() < deadline:
         if child.poll() is not None: raise RuntimeError("native process exited before daemon descriptor")
         try:
@@ -289,15 +521,21 @@ def descriptor(data_root, port, child, deadline):
             daemon_pid = d.get("pid")
             same_group = isinstance(daemon_pid, int) and daemon_pid > 1
             if same_group:
-                try: same_group = os.getpgid(daemon_pid) == child.pid
+                try:
+                    same_group = (os.getpgid(daemon_pid) == expected_group
+                                  and os.getpgid(child.pid) == expected_group)
                 except OSError: same_group = False
             if same_group and origin == "http://127.0.0.1:%d" % port and HEX64.fullmatch(d.get("auth_token", "")):
                 value = authenticated_json(d, "/api/models?limit=20")
                 ids = {item.get("model_id") for item in value.get("models", [])
                        if isinstance(item, dict) and item.get("provider_id") == "openai"}
                 if {"gpt-5.6", MODEL} <= ids:
+                    start_identity = _process_start_identity(daemon_pid)
+                    if not start_identity or os.getpgid(daemon_pid) != expected_group:
+                        raise RuntimeError("daemon identity changed during readiness")
                     d["_validated_pid"] = daemon_pid
-                    d["_owner_pgid"] = child.pid
+                    d["_owner_pgid"] = expected_group
+                    d["_validated_start_identity"] = start_identity
                     return d
         except (OSError, ValueError, urllib.error.URLError, AssertionError): pass
         time.sleep(.03)
@@ -306,11 +544,14 @@ def descriptor(data_root, port, child, deadline):
 def stop_owned_daemon(descriptor_value):
     pid = descriptor_value.get("_validated_pid")
     owner_pgid = descriptor_value.get("_owner_pgid")
-    if not isinstance(pid, int) or pid <= 1 or not isinstance(owner_pgid, int) or owner_pgid <= 1:
+    start_identity = descriptor_value.get("_validated_start_identity")
+    if (not isinstance(pid, int) or pid <= 1 or not isinstance(owner_pgid, int) or owner_pgid <= 1
+            or not isinstance(start_identity, str) or not start_identity
+            or owner_pgid == os.getpgrp()):
         raise RuntimeError("refusing to signal unvalidated daemon group")
     try:
-        if os.getpgid(pid) != owner_pgid:
-            raise RuntimeError("daemon PID group ownership changed")
+        if os.getpgid(pid) != owner_pgid or _process_start_identity(pid) != start_identity:
+            raise RuntimeError("daemon process identity changed before terminate")
         os.killpg(owner_pgid, 0)
         os.killpg(owner_pgid, signal.SIGTERM)
         deadline = time.monotonic() + 3
@@ -318,8 +559,8 @@ def stop_owned_daemon(descriptor_value):
             try: os.killpg(owner_pgid, 0)
             except ProcessLookupError: return
             time.sleep(.05)
-        if os.getpgid(pid) != owner_pgid:
-            raise RuntimeError("daemon PID group ownership changed before kill")
+        if os.getpgid(pid) != owner_pgid or _process_start_identity(pid) != start_identity:
+            raise RuntimeError("daemon process identity changed before kill")
         os.killpg(owner_pgid, signal.SIGKILL)
     except ProcessLookupError:
         return
@@ -335,7 +576,7 @@ def run_ui(exe, env, root, first, captures, daemon_port, descriptor_records, aut
         child = subprocess.Popen(args, cwd=root/"project", env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True, close_fds=True)
         os.close(slave); slave = None
         descriptor_value = descriptor(root/"d", daemon_port, child, time.monotonic()+20)
-        descriptor_records.append({"pid": descriptor_value["_validated_pid"], "owner_pgid": descriptor_value["_owner_pgid"], "origin": descriptor_value["http_origin"], "port": daemon_port})
+        descriptor_records.append({"pid": descriptor_value["_validated_pid"], "owner_pgid": descriptor_value["_owner_pgid"], "start_identity": descriptor_value["_validated_start_identity"], "origin": descriptor_value["http_origin"], "port": daemon_port})
         descriptor_records[-1]["phase"] = "initial_frame"
         read_until(master, time.monotonic()+20, buf, b"native frame", 0, screen,
                    lambda:home_ready(screen) if first else session_ready(screen,resume_id,"Non-default fixture") and screen.contains("G2 first response"))
@@ -479,9 +720,11 @@ def self_check():
     print("self-check: artifacts, catalog, fresh markers, auth, model, count, history, SSE, and redaction passed")
 
 def main():
-    ap=argparse.ArgumentParser(); ap.add_argument("--binary"); ap.add_argument("--native-library"); ap.add_argument("--build-json"); ap.add_argument("--artifact-dir", required=True); ap.add_argument("--self-check", action="store_true"); a=ap.parse_args()
+    global current_fixture_state
+    ap=argparse.ArgumentParser(); ap.add_argument("--binary"); ap.add_argument("--native-library"); ap.add_argument("--build-json"); ap.add_argument("--artifact-dir", required=True); ap.add_argument("--self-check", action="store_true"); ap.add_argument("--t06", action="store_true"); a=ap.parse_args()
     if a.self_check: self_check(); return
-    if not all((a.binary,a.native_library,a.build_json)): ap.error("actual run requires --binary --native-library --build-json")
+    if not a.binary: ap.error("actual run requires --binary")
+    if not all((a.native_library,a.build_json)): ap.error("actual run requires --native-library --build-json")
     binary, library, source, binary_sha, library_sha = checked_artifact(a.binary,a.native_library,a.build_json)
     artifacts=pathlib.Path(a.artifact_dir)
     if not artifacts.is_absolute(): raise RuntimeError("artifact directory must be absolute")
@@ -493,28 +736,46 @@ def main():
     data=root/"d"; (data/"runtime").mkdir(); (data/"catalog").mkdir()
     if len(str(data/"runtime"/"opencode-rk.sock").encode())>100: raise RuntimeError("runtime socket path exceeds 100 bytes")
     catalog=data/"catalog"/"models.dev.api.json"; catalog.write_text(json.dumps(models_json()))
-    fixture=Fixture(("127.0.0.1",0),Handler); fixture.state=State(); import threading; thread=threading.Thread(target=fixture.serve_forever); thread.start(); captures=bytearray(); descriptor_info=None; descriptor_records=[]
+    fixture=Fixture(("127.0.0.1",0),Handler); fixture.state=State(); current_fixture_state = fixture.state; import threading; thread=threading.Thread(target=fixture.serve_forever); thread.start(); captures=bytearray(); descriptor_info=None; descriptor_records=[]
     provider_port=fixture.server_port; daemon_port=free_loopback_port()
     env={"HOME":str(root/"home"),"XDG_CONFIG_HOME":str(root/"home"/".config"),"XDG_DATA_HOME":str(data),"XDG_RUNTIME_DIR":str(data/"runtime"),"OPENCODE_RK_HOME":str(data),"OPENCODE_RK_DAEMON_ADDR":"127.0.0.1:%d"%daemon_port,"OPENCODE_PROJECT_DIR":str(root/"project"),"PATH":"/usr/bin:/bin","TERM":"xterm-256color","OPENAI_BASE_URL":"http://127.0.0.1:%d/v1"%provider_port}
-    (root/"home"/".config").mkdir(); failed=False; resume_id=None
+    (root/"home"/".config").mkdir(); failed=False; t06_success=False; resume_id=None
     try:
+        if a.t06:
+            signal.signal(signal.SIGTERM, _t06_signal); signal.signal(signal.SIGINT, _t06_signal)
         auth=data/"opencode"/"auth.json"
-        first_descriptor=run_ui(install/"bin"/"oc2",env,root,True,captures,daemon_port,descriptor_records,auth); descriptor_info=descriptor_records[-1]
-        if not auth.is_file() or auth.stat().st_mode&0o777!=0o600: raise AssertionError("UI did not create 0600 auth.json")
-        saved=json.loads(auth.read_text()).get("openai",{}); assert saved.get("type")=="api" and saved.get("key")==KEY
-        resume_id=persisted_session_id(first_descriptor, "G2 first response")
-        stop_owned_daemon(first_descriptor)
-        second_descriptor = run_ui(install/"bin"/"oc2",env,root,False,captures,daemon_port,descriptor_records,auth,resume_id)
-        if fixture.state.error or len(fixture.state.requests)!=2: raise AssertionError(fixture.state.error or "expected exactly two provider requests")
-        (artifacts/"native-provider-evidence.json").write_text(json.dumps({"resumed_session_id":resume_id,"source_sha":source,"binary_sha256":binary_sha,"native_library_sha256":library_sha,"model":MODEL,"request_count":2,"requests":[{"model":r.get("model"),"input":r.get("input")} for r in fixture.state.requests]},indent=2)+"\n")
+        if a.t06:
+            session_id = run_t06(install/"bin"/"oc2", env, root, captures, daemon_port, descriptor_records)
+            if fixture.state.error or len(fixture.state.requests) != 1: raise AssertionError(fixture.state.error or "expected exactly one t06 provider request")
+            (artifacts/"native-provider-evidence.json").write_text(json.dumps({"session_id":session_id,"source_sha":source,"binary_sha256":binary_sha,"native_library_sha256":library_sha,"request_count":1,"requests":[{"model":r.get("model"),"input":r.get("input")} for r in fixture.state.requests]},indent=2)+"\n")
+            t06_success = True
+        else:
+            first_descriptor=run_ui(install/"bin"/"oc2",env,root,True,captures,daemon_port,descriptor_records,auth); descriptor_info=descriptor_records[-1]
+            if not auth.is_file() or auth.stat().st_mode&0o777!=0o600: raise AssertionError("UI did not create 0600 auth.json")
+            saved=json.loads(auth.read_text()).get("openai",{}); assert saved.get("type")=="api" and saved.get("key")==KEY
+            resume_id=persisted_session_id(first_descriptor, "G2 first response")
+            stop_owned_daemon(first_descriptor)
+            second_descriptor = run_ui(install/"bin"/"oc2",env,root,False,captures,daemon_port,descriptor_records,auth,resume_id)
+            if fixture.state.error or len(fixture.state.requests)!=2: raise AssertionError(fixture.state.error or "expected exactly two provider requests")
+            (artifacts/"native-provider-evidence.json").write_text(json.dumps({"resumed_session_id":resume_id,"source_sha":source,"binary_sha256":binary_sha,"native_library_sha256":library_sha,"model":MODEL,"request_count":2,"requests":[{"model":r.get("model"),"input":r.get("input")} for r in fixture.state.requests]},indent=2)+"\n")
     except Exception: failed=True; raise
     finally:
+        cleanup_errors = []
         for record in descriptor_records:
-            try: stop_owned_daemon({"_validated_pid":record["pid"], "_owner_pgid":record["owner_pgid"]})
-            except (OSError, RuntimeError): pass
+            try:
+                cleanup = _stop_t06_daemon if a.t06 else stop_owned_daemon
+                cleanup({"_validated_pid":record["pid"], "_owner_pgid":record["owner_pgid"],
+                         "_validated_start_identity":record["start_identity"]})
+            except (OSError, RuntimeError) as exc:
+                cleanup_errors.append(str(exc))
+        failed = failed or bool(cleanup_errors)
         evidence={"source_sha":source,"binary_sha256":binary_sha,"native_library_sha256":library_sha,"phase":"failed" if failed else "success","provider_requests":len(fixture.state.requests),"fixture_root":str(root),"descriptors":descriptor_records,"ui_capture":sanitize(bytes(captures)).decode("utf-8","replace")}
         (artifacts/"native-provider-result.json").write_text(json.dumps(evidence,indent=2)+"\n"); fixture.shutdown(); fixture.server_close(); thread.join(timeout=5)
         if thread.is_alive(): raise RuntimeError("fixture server failed bounded shutdown")
+        if cleanup_errors:
+            raise RuntimeError("fixture daemon cleanup failed: " + "; ".join(cleanup_errors))
         if not failed: shutil.rmtree(root,ignore_errors=True)
         else: print("preserved failure fixture:",root)
+    if a.t06 and t06_success and not failed:
+        print("native-provider-result.json")
 if __name__=="__main__": main()

@@ -1,12 +1,15 @@
 //! TUI entrypoint lane (UI-014..UI-018 observability through the real CLI).
 //!
-//! Binary-driven only: no TTY required, stdio pipes are the transport. The
-//! interactive loop is line-based so the same code path runs in tests and in
-//! a real terminal without a rendering dependency.
+//! Binary-driven tests. Snapshot tests use pipes; the native interactive journey
+//! is delegated to the bounded provider fixture, which owns a real PTY.
 
 use std::{
     fs,
     process::{Command, Stdio},
+    io::Read,
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -140,14 +143,120 @@ fn t05_invalid_keymap_fails_closed() {
     );
 }
 
-// UI-014: interactive line composer submits drafts, help toggles, quit exits.
+fn drain_bounded<R: Read>(mut reader: R) -> String {
+    const CAP: usize = 256 * 1024;
+    let mut kept = Vec::with_capacity(CAP);
+    let mut chunk = [0u8; 16 * 1024];
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                let remaining = CAP.saturating_sub(kept.len());
+                kept.extend_from_slice(&chunk[..n.min(remaining)]);
+            }
+            Err(_) => break,
+        }
+    }
+    String::from_utf8_lossy(&kept).into_owned()
+}
+
+fn bounded_drain<R: Read + Send + 'static>(reader: R) -> mpsc::Receiver<String> {
+    let (sender, receiver) = mpsc::sync_channel(1);
+    thread::spawn(move || { let _ = sender.send(drain_bounded(reader)); });
+    receiver
+}
+
+fn verified_session_group(pid: u32) -> Option<u32> {
+    let output = Command::new("/bin/ps").args(["-o", "pgid=", "-p", &pid.to_string()]).output().ok()?;
+    if !output.status.success() { return None; }
+    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+}
+
+fn run_native_provider_t06() -> (i32, String, String) {
+    let artifact_dir = std::env::temp_dir().join(format!(
+        "opencode-rk-t06-fixture-{}-{}", std::process::id(), NEXT_ID.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&artifact_dir).expect("t06 artifact directory");
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/e2e/native_provider_setup.py");
+    let native_library = std::env::var_os("OC2_TEST_NATIVE_LIBRARY")
+        .expect("OC2_TEST_NATIVE_LIBRARY must name the staged native library");
+    let build_json = std::env::var_os("OC2_TEST_BUILD_JSON")
+        .expect("OC2_TEST_BUILD_JSON must name the generated build manifest");
+    // A tiny Python exec supervisor is portable across the supported POSIX
+    // runners: it calls setsid, then execs the fixture so the direct child is
+    // the session/group leader. The fixture's native child inherits this group.
+    let supervisor = r#"import os,sys; os.setsid(); os.execv(sys.argv[1],sys.argv[1:])"#;
+    let mut child = Command::new("/usr/bin/python3")
+        .arg("-c").arg(supervisor).arg("/usr/bin/python3")
+        .arg(script).arg("--t06")
+        .arg("--binary").arg(env!("CARGO_BIN_EXE_opencode-rk"))
+        .arg("--native-library").arg(native_library)
+        .arg("--build-json").arg(build_json)
+        .arg("--artifact-dir").arg(&artifact_dir)
+        .stdout(Stdio::piped()).stderr(Stdio::piped())
+        .spawn().expect("spawn bounded T06 supervisor");
+    let supervisor_pgid = child.id();
+    let stdout = child.stdout.take().expect("T06 stdout pipe");
+    let stderr = child.stderr.take().expect("T06 stderr pipe");
+    let out_reader = bounded_drain(stdout);
+    let err_reader = bounded_drain(stderr);
+    let deadline = Instant::now() + Duration::from_secs(45);
+    loop {
+        if child.try_wait().expect("poll T06 supervisor").is_some() { break; }
+        if Instant::now() >= deadline {
+            // Verify the live direct child still owns the intentionally-created
+            // session group immediately before any group signal.
+            let live = child.try_wait().expect("poll T06 timeout cleanup").is_none();
+            let verified = live && verified_session_group(child.id()) == Some(supervisor_pgid);
+            if verified {
+                let _ = Command::new("/bin/kill").args(["-TERM", &format!("-{}", supervisor_pgid)]).status();
+            }
+            let grace = Instant::now() + Duration::from_secs(3);
+            while Instant::now() < grace && child.try_wait().expect("poll T06 timeout cleanup").is_none() {
+                thread::sleep(Duration::from_millis(25));
+            }
+            if child.try_wait().expect("poll T06 timeout cleanup").is_none()
+                && verified_session_group(child.id()) == Some(supervisor_pgid) {
+                let _ = Command::new("/bin/kill").args(["-KILL", &format!("-{}", supervisor_pgid)]).status();
+            }
+            // Direct Child ownership remains valid even if session verification
+            // failed. Do not wait indefinitely for a failed group signal.
+            if child.try_wait().expect("poll T06 direct cleanup").is_none() {
+                let _ = child.kill();
+            }
+            let reap_deadline = Instant::now() + Duration::from_secs(2);
+            let reaped = loop {
+                if child.try_wait().expect("poll T06 bounded reap").is_some() {
+                    break true;
+                }
+                if Instant::now() >= reap_deadline { break false; }
+                thread::sleep(Duration::from_millis(25));
+            };
+            let _ = out_reader.recv_timeout(Duration::from_secs(2));
+            let _ = err_reader.recv_timeout(Duration::from_secs(2));
+            if !reaped { panic!("T06 timeout cleanup could not reap its direct child within two seconds"); }
+            if !verified { panic!("T06 supervisor group identity could not be verified; cleanup failed closed"); }
+            panic!("native provider fixture exceeded 45 second bound");
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let status = child.wait().expect("reap bounded T06 supervisor");
+    let stdout = out_reader.recv_timeout(Duration::from_secs(2)).expect("bounded T06 stdout drain");
+    let stderr = err_reader.recv_timeout(Duration::from_secs(2)).expect("bounded T06 stderr drain");
+    if status.success() {
+        let _ = fs::remove_dir_all(&artifact_dir);
+    } else {
+        eprintln!("T06 failure artifacts retained: {}", artifact_dir.display());
+    }
+    (status.code().unwrap_or(-1), stdout, stderr)
+}
+
+// UI-014: native interactive composer submits a real provider-backed turn,
+// opens help, and exits through the native :q route.
 #[test]
-fn t06_interactive_pipe_submit_help_quit() {
-    let (code, stdout, stderr) = run(bin(), &["tui"], Some("hello\n?\n:q\n"));
-    assert_eq!(code, 0, "clean quit must exit 0 (stderr: {stderr})");
-    assert!(stdout.contains("you: hello"), "echoed submit: {stdout}");
-    assert!(
-        stdout.contains("Keybindings"),
-        "? shows keybinding help: {stdout}"
-    );
+fn t06_interactive_pty_submit_help_quit() {
+    let (code, stdout, stderr) = run_native_provider_t06();
+    assert_eq!(code, 0, "native provider fixture must exit 0 (stderr: {stderr})");
+    assert!(stdout.contains("native-provider-result.json"), "fixture evidence: {stdout}");
 }
