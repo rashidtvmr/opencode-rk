@@ -2309,6 +2309,7 @@ fn tab_menu_target_at(navigation: &crate::native_navigation::NavigationState, ta
         return rail?.hit(x,y).and_then(|hit| match hit {
             crate::native_tab_rail::RailHit::Session(session) => navigation.tabs().iter().any(|tab| tab.session == session).then(|| crate::native_tab_context_menu::MenuTarget::Session { title: navigation.title(&session).unwrap_or(&session.0).to_owned(), session, can_add: true }),
             crate::native_tab_rail::RailHit::New => Some(crate::native_tab_context_menu::MenuTarget::New { recently_closed: None }),
+            crate::native_tab_rail::RailHit::Search => None,
         });
     }
     let tabs=tabs?;
@@ -2626,6 +2627,8 @@ fn paint_styled_rail_row(
                 CellColor::Close => (paint.close_fg, 0),
                 CellColor::NewIndicator => (paint.plus_fg, paint.new_attr),
                 CellColor::NewText => (paint.new_text_fg, paint.new_attr),
+                CellColor::CapTop => (paint.cap_top_fg, 0),
+                CellColor::CapBottom => (paint.cap_bottom_fg, 0),
             };
             if let Err(error) = renderer.draw_text_styled(x, y, grapheme, color(fg), Some(background), attr) {
                 failure = Some(error);
@@ -3043,6 +3046,13 @@ fn native_paint(
             if x >= cols || y >= rows { continue; }
             let paint = if matches!(row.kind, crate::native_tab_rail::RailRowKind::New) {
                 crate::native_tab_rail::RowPaint::new_control_row(&ctx.palette, rail.active_new, row.is_hovered)
+            } else if matches!(row.kind, crate::native_tab_rail::RailRowKind::CapTop) {
+                crate::native_tab_rail::RowPaint::cap_row(&ctx.palette, false)
+            } else if matches!(row.kind, crate::native_tab_rail::RailRowKind::CapBottom) {
+                crate::native_tab_rail::RowPaint::cap_row(&ctx.palette, true)
+            } else if rail.width < crate::native_tab_rail::COMPACT_BREAKPOINT
+                && matches!(row.kind, crate::native_tab_rail::RailRowKind::Session(_)) {
+                crate::native_tab_rail::RowPaint::compact_session_row(&ctx.palette, &row.flags, row.is_hovered)
             } else {
                 crate::native_tab_rail::RowPaint::session_row(&ctx.palette, &row.flags, row.is_hovered)
             };
@@ -4361,6 +4371,7 @@ fn native_loop(
     // Press capture binds the click to a stable tab and painted rect.
     let mut tab_press: Option<(crate::native_navigation::SessionRef, crate::native_tabs::TabRect, bool, TabOrientation)> = None;
     let mut add_press: Option<(crate::native_tabs::TabRect, TabOrientation)> = None;
+    let mut rail_search_press: Option<(crate::native_tabs::TabRect, TabOrientation)> = None;
     // Promoted Home slot state: pointer-over fact drives the close glyph, a
     // captured press (body or close child) absorbs the click so it can never
     // leak into composer/send regions while already on Home.
@@ -5665,6 +5676,7 @@ fn native_loop(
             tab_hovered = None;
             tab_home_hovered = false;
             tab_add_hovered = false;
+            rail_search_press = None;
             home_press = None;
             tab_viewport = Some(viewport);
         }
@@ -6315,6 +6327,9 @@ fn native_loop(
         // have handled the event. The existing composer KeyAction/SubmitKeymap
         // remains the authority for newline versus submission.
         let event = normalize_modified_return(event, keymap);
+        if !matches!(event, native_input_decoder::InputEvent::Mouse { .. }) {
+            rail_search_press = None;
+        }
         let byte = match event {
             native_input_decoder::InputEvent::Byte(byte) => byte,
             native_input_decoder::InputEvent::Mouse { x, y, kind, modifiers } => {
@@ -6336,6 +6351,7 @@ fn native_loop(
                 if kind != 0 && kind != 2 && kind != 7 {
                     tab_press = None;
                     add_press = None;
+                    rail_search_press = None;
                     home_press = None;
                     tab_home_hovered = false;
                 }
@@ -6419,6 +6435,7 @@ fn native_loop(
                     if kind == 0 {
                         tab_press = None;
                         add_press = None;
+                        rail_search_press = None;
                         if effective_orientation == TabOrientation::Vertical {
                             if let Some(rail) = rendered_rail.as_ref() {
                                 match rail.hit(x, y) {
@@ -6428,6 +6445,7 @@ fn native_loop(
                                         }
                                     }
                                     Some(crate::native_tab_rail::RailHit::New) => add_press = Some((crate::native_tabs::TabRect { x: rail.new_rect.map_or(0, |r| r.x), y: rail.new_rect.map_or(0, |r| r.y), width: rail.new_rect.map_or(0, |r| r.width), height: rail.new_rect.map_or(0, |r| r.height) }, effective_orientation)),
+                                    Some(crate::native_tab_rail::RailHit::Search) => rail_search_press = Some((crate::native_tabs::TabRect { x: 0, y: 1, width: rail.width, height: 1 }, effective_orientation)),
                                     None => {}
                                 }
                             }
@@ -6459,13 +6477,39 @@ fn native_loop(
                                 add_press = Some((rect, effective_orientation));
                             }
                         }
-                        if tab_press.is_some() || add_press.is_some() || home_press.is_some() {
+                        if tab_press.is_some() || add_press.is_some() || home_press.is_some() || rail_search_press.is_some() {
                             continue;
                         }
                     }
                     if kind == 2 {
                         let captured = tab_press.take();
                         let captured_add = add_press.take();
+                        let captured_search = rail_search_press.take();
+                        if let Some((pressed_rect, pressed_orientation)) = captured_search {
+                            let same = pressed_orientation == effective_orientation
+                                && effective_orientation == TabOrientation::Vertical
+                                && rendered_rail.as_ref().is_some_and(|rail| {
+                                    rail.search_hit(x, y)
+                                        && x >= pressed_rect.x
+                                        && y >= pressed_rect.y
+                                        && x < pressed_rect.x.saturating_add(pressed_rect.width)
+                                        && y < pressed_rect.y.saturating_add(pressed_rect.height)
+                                });
+                            if same {
+                                view.open_page(crate::native_view_pages::Page::Sessions);
+                                consume_local_command_with_cursor(&mut draft, &mut draft_cursor, "/sessions", true);
+                                match live.as_ref() {
+                                    Some(snapshot) => match session_page_rows(&snapshot.origin, auth, Some(&snapshot.session_id)) {
+                                        Ok(rows) => view.set_page_rows(rows),
+                                        Err(error) => append_transcript(&mut transcript, format!("error: sessions page: {error}")),
+                                    },
+                                    None => append_transcript(&mut transcript, "error: sessions page: daemon unavailable".to_owned()),
+                                }
+                                utf8.reset();
+                                needs_paint = true;
+                            }
+                            continue;
+                        }
                         let Some(tabs) = rendered_tabs.as_ref() else { continue };
                         if let Some((session, rect, pressed_close, pressed_orientation)) = captured {
                             let still_same = pressed_orientation == effective_orientation && if effective_orientation == TabOrientation::Vertical { rendered_rail.as_ref().is_some_and(|rail| rail.rows.iter().any(|row| matches!(&row.kind, crate::native_tab_rail::RailRowKind::Session(id) if id == &session) && row.rect.x == rect.x && row.rect.y == rect.y && row.rect.width == rect.width && row.rect.height == rect.height && x >= rect.x && y >= rect.y && x < rect.x.saturating_add(rect.width) && y < rect.y.saturating_add(rect.height))) } else { tabs.rects.iter().any(|(id, current)| *id == session && *current == rect && x >= current.x && y >= current.y && x < current.x.saturating_add(current.width) && y < current.y.saturating_add(current.height)) };

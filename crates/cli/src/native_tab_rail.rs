@@ -25,6 +25,8 @@ pub enum CellColor {
     NewIndicator,
     /// New-session "New session" text. Fg: TextMuted (not newTab), Text (newTab); bold only when newTab.
     NewText,
+    CapTop,
+    CapBottom,
 }
 
 /// Resolved paint parameters for a row, from palette via upstream theme mappings.
@@ -49,6 +51,8 @@ pub struct RowPaint {
     pub new_text_fg: [u8; 4],
     /// New "+"/"New session" attribute: 1 if newTab, else 0.
     pub new_attr: u32,
+    pub cap_top_fg: [u8; 4],
+    pub cap_bottom_fg: [u8; 4],
 }
 
 /// tint(base, overlay, alpha) = round(base + (overlay - base) * alpha), per color.ts:43.
@@ -79,6 +83,58 @@ pub fn idle_number(palette: &crate::native_theme_runtime::Palette) -> [u8; 4] {
 }
 
 impl RowPaint {
+    pub fn compact_session_row(
+        palette: &crate::native_theme_runtime::Palette,
+        flags: &TabFlags,
+        is_hovered: bool,
+    ) -> Self {
+        let mut paint = Self::session_row(palette, flags, is_hovered);
+        use crate::native_theme_runtime::Slot;
+        if flags.active {
+            paint.background = palette.get(Slot::BackgroundElement);
+            paint.detail_fg = tint(palette.get(Slot::TextMuted), paint.background, 0.35);
+        }
+        paint
+    }
+
+    pub fn cap_row(palette: &crate::native_theme_runtime::Palette, bottom: bool) -> Self {
+        use crate::native_theme_runtime::Slot;
+        let panel = palette.get(Slot::BackgroundPanel);
+        let element = palette.get(Slot::BackgroundElement);
+        Self {
+            background: panel,
+            title_fg: if bottom { element } else { panel },
+            detail_fg: panel,
+            title_attr: 0,
+            spinner_fg: panel,
+            close_fg: panel,
+            plus_fg: panel,
+            new_text_fg: panel,
+            new_attr: 0,
+            cap_top_fg: panel,
+            cap_bottom_fg: element,
+        }
+    }
+
+    pub fn compact_search_row(palette: &crate::native_theme_runtime::Palette) -> Self {
+        use crate::native_theme_runtime::Slot;
+        let background = palette.get(Slot::BackgroundPanel);
+        let muted = palette.get(Slot::TextMuted);
+        Self {
+            background,
+            title_fg: muted,
+            detail_fg: muted,
+            title_attr: 0,
+            spinner_fg: muted,
+            close_fg: muted,
+            plus_fg: muted,
+            new_text_fg: muted,
+            new_attr: 0,
+            cap_top_fg: background,
+            cap_bottom_fg: background,
+        }
+    }
+
     /// Resolve paint for a session row. Upstream priority: attention > busy >
     /// hovered+selected > hovered > selected > idle for fg/attr, but bg follows
     /// tabBackground() logic (selected -> panel, hovered-only -> element, else panel).
@@ -139,6 +195,8 @@ impl RowPaint {
             plus_fg: [0, 0, 0, 0],
             new_text_fg: [0, 0, 0, 0],
             new_attr: 0,
+            cap_top_fg: [0, 0, 0, 0],
+            cap_bottom_fg: [0, 0, 0, 0],
         }
     }
 
@@ -189,6 +247,8 @@ impl RowPaint {
             plus_fg,
             new_text_fg,
             new_attr,
+            cap_top_fg: palette.get(Slot::BackgroundPanel),
+            cap_bottom_fg: palette.get(Slot::BackgroundElement),
         }
     }
 }
@@ -210,6 +270,9 @@ pub const TAB_HEIGHT: u16 = 2;
 pub const TAB_GAP: u16 = 1;
 pub const ADD_HEIGHT: u16 = 1;
 pub const TAB_STRIDE: u16 = TAB_HEIGHT + TAB_GAP;
+/// OpenCode switches the vertical rail to its compact renderer below 12 cells.
+pub const COMPACT_BREAKPOINT: u16 = 12;
+pub const COMPACT_STRIDE: u16 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RailInput {
@@ -240,11 +303,15 @@ impl RailRect {
 pub enum RailHit {
     Session(crate::native_navigation::SessionRef),
     New,
+    Search,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RailRowKind {
     Padding,
+    Search,
+    CapTop,
+    CapBottom,
     Session(crate::native_navigation::SessionRef),
     Gap,
     New,
@@ -298,7 +365,7 @@ impl RailFrame {
         hovered: Option<&crate::native_navigation::SessionRef>,
         active_new: bool,
     ) -> Self {
-        Self::render_cells(
+        Self::render_expanded_cells(
             inputs,
             width,
             height,
@@ -311,6 +378,23 @@ impl RailFrame {
     /// Scroll and clip in physical cells, including partially visible sessions.
     /// Upstream session-tabs.tsx:658-667 reveals the selected child's exact bottom.
     pub fn render_cells(
+        inputs: &[RailInput],
+        width: u16,
+        height: u16,
+        requested_scroll: usize,
+        hovered: Option<&crate::native_navigation::SessionRef>,
+        active_new: bool,
+    ) -> Self {
+        // Five cells is the upstream compact minimum.  Sub-minimum test
+        // viewports retain the bounded expanded projection so legacy close
+        // hit geometry remains well-defined without exposing compact search.
+        if width >= 5 && width < COMPACT_BREAKPOINT {
+            return Self::render_compact_cells(inputs, width, height, requested_scroll, hovered, active_new);
+        }
+        Self::render_expanded_cells(inputs, width, height, requested_scroll, hovered, active_new)
+    }
+
+    fn render_expanded_cells(
         inputs: &[RailInput],
         width: u16,
         height: u16,
@@ -428,7 +512,8 @@ impl RailFrame {
                                 height: 1,
                             },
                         ));
-                        format!("{prefix}{text}✕ ")
+                        let body = fit(&format!("{prefix}{text}"), width.saturating_sub(2));
+                        format!("{body}✕ ")
                     } else {
                         fit(&format!("{prefix}{text}"), width)
                     };
@@ -517,6 +602,202 @@ impl RailFrame {
         frame
     }
 
+    /// Compact vertical rail projection.  The controls are deliberately kept
+    /// as rows in the same frame model as expanded tabs: row 0 is the search
+    /// cap, row 1 is search, row 2 is its lower cap/scroll-box lead, and the
+    /// first item starts at row 3.  This is the pinned width-5 geometry from
+    /// session-tabs-rail.test.tsx; rows containing caps/search are inert.
+    fn render_compact_cells(
+        inputs: &[RailInput],
+        width: u16,
+        height: u16,
+        requested_scroll: usize,
+        hovered: Option<&crate::native_navigation::SessionRef>,
+        active_new: bool,
+    ) -> Self {
+        let mut frame = Self {
+            width,
+            height,
+            scroll_start: 0,
+            scroll_cells: 0,
+            rows: Vec::new(),
+            new_rect: None,
+            active_new,
+            visible_close: None,
+        };
+        if width == 0 || height == 0 {
+            return frame;
+        }
+
+        let content_top = 2usize;
+        let content_height = usize::from(height).saturating_sub(content_top);
+        let logical_len = 1usize.saturating_add(inputs.len().saturating_mul(2)).saturating_add(1);
+        let maximum = logical_len.saturating_sub(content_height);
+        let mut scroll = requested_scroll.min(maximum);
+        let reveal = if active_new {
+            Some(1usize.saturating_add(inputs.len().saturating_mul(2)))
+        } else {
+            inputs
+                .iter()
+                .position(|input| input.flags.active)
+                .map(|index| 1usize.saturating_add(index.saturating_mul(2)))
+        };
+        if let Some(target) = reveal {
+            if target < scroll {
+                scroll = target;
+            } else if target.saturating_add(1) > scroll.saturating_add(content_height) {
+                scroll = target.saturating_add(1).saturating_sub(content_height);
+            }
+        }
+        frame.scroll_cells = scroll.min(maximum);
+        frame.scroll_start = frame.scroll_cells / usize::from(COMPACT_STRIDE);
+
+        let centered = |value: &str| -> String {
+            // A wide grapheme (or a narrow rail) must be clipped before the
+            // centering arithmetic.  Otherwise padding is computed from the
+            // clipped width while the original glyph still escapes the row.
+            let mut value_cells = String::new();
+            visit_unpadded_cells(value, usize::from(width), |glyph, _| value_cells.push_str(glyph));
+            let value = value_cells;
+            let used = Self::display_width(&value).min(usize::from(width));
+            let left = usize::from(width).saturating_sub(used) / 2;
+            let right = usize::from(width).saturating_sub(used).saturating_sub(left);
+            format!("{}{}{}", " ".repeat(left), value, " ".repeat(right))
+        };
+        let first_grapheme = |value: &str| -> String {
+            let mut first = String::new();
+            crate::native_view_layout::visit_unpadded_cells(value.trim_start(), 4, |glyph, _| {
+                if first.is_empty() {
+                    first.push_str(glyph);
+                }
+            });
+            if first.is_empty() { "U".to_owned() } else { first }
+        };
+        let inert = |y: u16, text: String, kind: RailRowKind, role: CellColor| RailRow {
+            kind,
+            text,
+            rect: RailRect { x: 0, y, width, height: 1 },
+            style: RailStyle::Empty,
+            color_spans: vec![(0, role)],
+            flags: TabFlags::default(),
+            is_hovered: false,
+        };
+
+        for y in 0..height {
+            if y == 0 {
+                frame.rows.push(inert(y, "▄".repeat(usize::from(width)), RailRowKind::CapTop, CellColor::CapTop));
+                continue;
+            }
+            if y == 1 {
+                frame.rows.push(inert(y, centered("⌕"), RailRowKind::Search, CellColor::NewIndicator));
+                continue;
+            }
+
+            let logical = frame.scroll_cells.saturating_add(usize::from(y).saturating_sub(content_top));
+            if logical == 0 {
+                let highlighted = inputs.first().is_some_and(|input| {
+                    input.flags.active || hovered == Some(&input.session)
+                });
+                frame.rows.push(inert(
+                    y,
+                    "▄".repeat(usize::from(width)),
+                    if highlighted { RailRowKind::CapBottom } else { RailRowKind::CapTop },
+                    if highlighted { CellColor::CapBottom } else { CellColor::CapTop },
+                ));
+                continue;
+            }
+            let item = logical.saturating_sub(1) / 2;
+            let item_row = logical.saturating_sub(1) % 2 == 0;
+            if !item_row {
+        let highlighted = inputs.get(item).is_some_and(|input| {
+            input.flags.active || hovered == Some(&input.session)
+        });
+                let text = if highlighted {
+                    "▀".repeat(usize::from(width))
+                } else {
+                    " ".repeat(usize::from(width))
+                };
+                frame.rows.push(inert(
+                    y,
+                    text,
+                    if highlighted { RailRowKind::CapBottom } else { RailRowKind::Gap },
+                    if highlighted { CellColor::CapBottom } else { CellColor::Fill },
+                ));
+                continue;
+            }
+            if let Some(input) = inputs.get(item) {
+                let is_hovered = hovered == Some(&input.session);
+                let style = if input.flags.needs_attention {
+                    RailStyle::Attention
+                } else if input.flags.busy {
+                    RailStyle::Busy
+                } else if is_hovered {
+                    RailStyle::Hovered
+                } else if input.flags.active {
+                    RailStyle::Active
+                } else {
+                    RailStyle::Idle
+                };
+                let glyph = if input.flags.needs_attention {
+                    "!".to_owned()
+                } else if input.flags.busy {
+                    "⠋".to_owned()
+                } else {
+                    first_grapheme(&input.title)
+                };
+                let close = is_hovered && width >= 4;
+                let text_width = width.saturating_sub(if close { 2 } else { 0 });
+                let mut glyph_cells = String::new();
+                visit_unpadded_cells(&glyph, usize::from(text_width), |part, _| glyph_cells.push_str(part));
+                let used = Self::display_width(&glyph_cells).min(usize::from(text_width));
+                let left = usize::from(text_width).saturating_sub(used) / 2;
+                let right = usize::from(text_width).saturating_sub(used).saturating_sub(left);
+                let text = if close {
+                    format!("{}{}{}✕ ", " ".repeat(left), glyph_cells, " ".repeat(right))
+                } else {
+                    format!("{}{}{}", " ".repeat(left), glyph_cells, " ".repeat(right))
+                };
+                if close {
+                    frame.visible_close = Some((
+                        input.session.clone(),
+                        RailRect { x: width - 2, y, width: 1, height: 1 },
+                    ));
+                }
+                let start = left as u16;
+                let mut color_spans = vec![(0, CellColor::Fill), (start, CellColor::Title)];
+                if close {
+                    color_spans.push((width - 2, CellColor::Close));
+                    color_spans.push((width - 1, CellColor::Fill));
+                }
+                frame.rows.push(RailRow {
+                    kind: RailRowKind::Session(input.session.clone()),
+                    text,
+                    rect: RailRect { x: 0, y, width, height: 1 },
+                    style,
+                    color_spans,
+                    flags: input.flags,
+                    is_hovered,
+                });
+            } else if item == inputs.len() {
+                frame.new_rect = Some(RailRect { x: 0, y, width, height: 1 });
+                let text = centered("+");
+                let start = (usize::from(width).saturating_sub(1) / 2) as u16;
+                frame.rows.push(RailRow {
+                    kind: RailRowKind::New,
+                    text,
+                    rect: RailRect { x: 0, y, width, height: 1 },
+                    style: RailStyle::NewControl,
+                    color_spans: vec![(0, CellColor::Fill), (start, CellColor::NewIndicator)],
+                    flags: TabFlags::default(),
+                    is_hovered: false,
+                });
+            } else {
+                frame.rows.push(inert(y, " ".repeat(usize::from(width)), RailRowKind::Gap, CellColor::Fill));
+            }
+        }
+        frame
+    }
+
     pub fn hit(&self, x: u16, y: u16) -> Option<RailHit> {
         self.rows
             .iter()
@@ -524,6 +805,7 @@ impl RailFrame {
             .and_then(|row| match &row.kind {
                 RailRowKind::Session(id) => Some(RailHit::Session(id.clone())),
                 RailRowKind::New => Some(RailHit::New),
+                RailRowKind::Search => Some(RailHit::Search),
                 _ => None,
             })
     }
@@ -550,6 +832,16 @@ impl RailFrame {
                     self.close_hit(x, y) == Some(&session),
                 )
             })
+    }
+
+    pub fn search_hit(&self, x: u16, y: u16) -> bool {
+        matches!(self.hit(x, y), Some(RailHit::Search))
+    }
+
+    pub fn compact_cap_role(&self, y: u16) -> Option<CellColor> {
+        self.rows.iter().find(|row| row.rect.contains(0, y)).and_then(|row| {
+            row.color_spans.first().map(|(_, role)| *role)
+        }).filter(|role| matches!(role, CellColor::CapTop | CellColor::CapBottom))
     }
 
     pub fn close_hit(&self, x: u16, y: u16) -> Option<&crate::native_navigation::SessionRef> {
@@ -971,6 +1263,7 @@ mod tests {
                     .and_then(|row| match &row.kind {
                         RailRowKind::Session(id) => Some(RailHit::Session(id.clone())),
                         RailRowKind::New => Some(RailHit::New),
+                        RailRowKind::Search | RailRowKind::CapTop | RailRowKind::CapBottom => None,
                         _ => None,
                     });
                 assert_eq!(frame.hit(0, y), painted, "height={height} y={y}");
@@ -1308,5 +1601,81 @@ mod tests {
         let paint = RowPaint::session_row(&palette, &flags, false);
         assert_eq!(paint.background[3], 255, "palette always opaque");
         assert_eq!(paint.title_fg[3], 255, "foreground always opaque");
+    }
+
+    #[test]
+    fn compact_width_five_matches_pinned_row_geometry_and_hit_targets() {
+        let inputs = vec![
+            RailInput {
+                session: crate::native_navigation::SessionRef("first".into()),
+                title: "First session".into(),
+                detail: "project-alpha".into(),
+                flags: TabFlags { active: true, busy: false, needs_attention: false },
+            },
+            RailInput {
+                session: crate::native_navigation::SessionRef("second".into()),
+                title: "Second session".into(),
+                detail: "project-alpha".into(),
+                flags: TabFlags::default(),
+            },
+            RailInput {
+                session: crate::native_navigation::SessionRef("third".into()),
+                title: "Third session".into(),
+                detail: "project-alpha".into(),
+                flags: TabFlags::default(),
+            },
+        ];
+        let frame = RailFrame::render_cells(&inputs, 5, 24, 0, None, false);
+        assert_eq!(frame.rows[1].text, "  ⌕  ");
+        assert_eq!(frame.rows[3].text, "  F  ");
+        assert_eq!(frame.rows[5].text, "  S  ");
+        assert_eq!(frame.rows[7].text, "  T  ");
+        assert_eq!(frame.rows[9].text, "  +  ");
+        assert_eq!(frame.hit(2, 3), Some(RailHit::Session(inputs[0].session.clone())));
+        assert_eq!(frame.hit(2, 5), Some(RailHit::Session(inputs[1].session.clone())));
+        assert_eq!(frame.hit(2, 7), Some(RailHit::Session(inputs[2].session.clone())));
+        assert_eq!(frame.hit(2, 9), Some(RailHit::New));
+        assert_eq!(frame.hit(2, 1), Some(RailHit::Search));
+    }
+
+    #[test]
+    fn compact_status_precedence_and_width_boundary_preserve_expanded_geometry() {
+        let input = RailInput {
+            session: crate::native_navigation::SessionRef("status".into()),
+            title: "Status".into(),
+            detail: "project".into(),
+            flags: TabFlags { active: false, busy: true, needs_attention: true },
+        };
+        let compact = RailFrame::render_cells(std::slice::from_ref(&input), 11, 10, 0, None, false);
+        assert_eq!(compact.rows[3].text.trim(), "!");
+        assert_eq!(compact.rows[3].rect.height, 1);
+        let expanded = RailFrame::render_cells(std::slice::from_ref(&input), 12, 10, 0, None, false);
+        assert_eq!(expanded.rows[1].kind, RailRowKind::Session(input.session));
+        assert_eq!(expanded.rows[2].kind, RailRowKind::Session(crate::native_navigation::SessionRef("status".into())));
+        assert_eq!(expanded.rows[3].kind, RailRowKind::Gap);
+    }
+
+    #[test]
+    fn compact_hover_close_is_painted_and_exact_for_widths_five_through_eleven() {
+        let input = sessions(1).remove(0);
+        for width in 5..=11 {
+            let frame = RailFrame::render_cells(
+                std::slice::from_ref(&input),
+                width,
+                8,
+                0,
+                Some(&input.session),
+                false,
+            );
+            let row = frame.rows.iter().find(|row| row.rect.y == 3).expect("compact title row");
+            assert!(RailFrame::display_width(&row.text) <= usize::from(width));
+            assert_eq!(row.text.chars().last(), Some(' '));
+            assert_eq!(crate::native_view_layout::slice_cells(&row.text, width - 2, 1), "✕");
+            assert!(row.color_spans.contains(&(width - 2, CellColor::Close)));
+            assert_eq!(frame.close_hit(width - 2, 3), Some(&input.session));
+            assert_eq!(frame.close_hit(width - 1, 3), None);
+            assert_eq!(frame.close_hit(width - 2, 4), None);
+            assert_eq!(frame.close_hit(width - 2, 1), None);
+        }
     }
 }
