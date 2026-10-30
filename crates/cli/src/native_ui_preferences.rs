@@ -35,6 +35,7 @@ pub struct UiPreferences {
     pub sidebar_hidden: bool,
     pub theme_mode: Option<String>,
     pub theme_mode_lock: Option<String>,
+    pub vertical_tabs_width: Option<u16>,
     /// Bounded diagnostics for config/state files skipped during startup.
     pub diagnostics: Vec<String>,
 }
@@ -248,6 +249,10 @@ impl UiPreferences {
                 .get("theme_mode_lock")
                 .and_then(Value::as_str)
                 .map(str::to_owned),
+            vertical_tabs_width: state.get("layout").and_then(Value::as_object)
+                .and_then(|layout| layout.get("verticalTabsWidth"))
+                .and_then(Value::as_u64)
+                .map(|width| width.clamp(5, 72) as u16),
             diagnostics,
         })
     }
@@ -303,6 +308,15 @@ impl UiPreferences {
         }.into()));
         location.write_with_limit(state, MAX_CONFIG_BYTES)
     }
+
+    pub fn persist_vertical_tabs_width(state_path: &Path, width: u16) -> Result<(), String> {
+        if !(5..=72).contains(&width) { return Err("invalid vertical tabs width".into()); }
+        mutate_state(state_path, |state| {
+            let layout = state.entry("layout").or_insert_with(|| Value::Object(Map::new()));
+            if let Some(layout) = layout.as_object_mut() { layout.insert("verticalTabsWidth".into(), Value::from(width)); }
+        })
+    }
+
 }
 
 pub(crate) fn read_bounded(

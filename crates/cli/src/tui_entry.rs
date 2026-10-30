@@ -4624,6 +4624,11 @@ fn native_loop(
             inline_cli.as_deref(),
         );
     navigation.set_orientation(tab_orientation);
+    let mut rail_resize = crate::native_tab_resize::ResizeState::new(
+        preferences.vertical_tabs_width.unwrap_or(TabReservation::VERTICAL_WIDTH),
+        TabReservation::VERTICAL_WIDTH,
+        cols.min(u32::from(u16::MAX)) as u16,
+    );
     let (cli_theme, cli_theme_diagnostics) =
         crate::native_ui_preferences::UiPreferences::cli_theme(
             cli_path.as_deref(),
@@ -5184,14 +5189,16 @@ fn native_loop(
                 );
                 renderer.resize(size.0, size.1)?;
                 observed_size = size;
+                rail_resize.cancel();
                 let next_orientation = match navigation.orientation() {
                     crate::native_navigation::TabOrientation::Horizontal => TabOrientation::Horizontal,
                     crate::native_navigation::TabOrientation::Vertical => TabOrientation::Vertical,
                 };
-                let next_tab_reservation = resize_tab_reservation(
+                let next_tab_reservation = TabReservation::for_view_with_width(
                     next_orientation,
                     size.0 as u16,
                     size.1 as u16,
+                    rail_resize.preferred(),
                 );
                 let preserve_anchor = session_route && history_browsing && !view.chat_at_tail();
                 resize_chat_preserving_anchor(
@@ -5844,9 +5851,12 @@ fn native_loop(
             crate::native_navigation::TabOrientation::Horizontal => TabOrientation::Horizontal,
             crate::native_navigation::TabOrientation::Vertical => TabOrientation::Vertical,
         };
-        let tab_reservation = TabReservation::for_view(configured_orientation, viewport.0, viewport.1);
+        let tab_reservation = TabReservation::for_view_with_width(
+            configured_orientation, viewport.0, viewport.1, rail_resize.preferred(),
+        );
         let effective_orientation = tab_reservation.orientation.unwrap_or(TabOrientation::Horizontal);
         if tab_viewport != Some(viewport) {
+            rail_resize.cancel();
             context_menu = None;
             tab_hovered = None;
             tab_home_hovered = false;
@@ -5858,12 +5868,20 @@ fn native_loop(
         if dialog_open || help_open || view.command_palette_open() || permission_editor.open
             || appearance.open || children_panel.open
         {
+            rail_resize.cancel();
             tab_hovered = None;
             tab_home_hovered = false;
             tab_add_hovered = false;
             tab_press = None;
             add_press = None;
             home_press = None;
+        }
+        if view.tab_reservation() != tab_reservation {
+            let preserve_anchor = session_route && history_browsing && !view.chat_at_tail();
+            resize_chat_preserving_anchor(
+                &mut view, viewport.0, viewport.1, tab_reservation,
+                &transcript.messages, &draft, preserve_anchor,
+            );
         }
         view.set_tab_reservation(tab_reservation);
         let tab_inputs = TabStrip::from_navigation(&navigation, &[]);
@@ -6149,6 +6167,26 @@ fn native_loop(
             input.push(byte[0], Instant::now());
         }
         let Some(mut event) = input.pop() else { continue };
+        // Search owns cancellation until its captured pointer gesture settles.
+        // Consume the cancel key before generic Ctrl-C can exit the client.
+        if rail_search_press.is_some()
+            && matches!(&event, native_input_decoder::InputEvent::Byte(3)
+                | native_input_decoder::InputEvent::Escape)
+        {
+            rail_search_press = None;
+            utf8.reset();
+            needs_paint = true;
+            continue;
+        }
+        // A keyboard event cancels an owned resize rather than also reaching
+        // the composer (in particular Ctrl-C must not exit during a drag).
+        if !matches!(&event, native_input_decoder::InputEvent::Mouse { .. })
+            && rail_resize.is_resizing()
+        {
+            rail_resize.cancel();
+            needs_paint = true;
+            continue;
+        }
         let leader_followup_pending = leader_pending
             && matches!(&event, native_input_decoder::InputEvent::Byte(byte) if *byte >= 0x20 && *byte != b'\t');
         // Every popped event expires pending state; Ctrl-X re-arms in dispatch below.
@@ -6508,6 +6546,51 @@ fn native_loop(
         let byte = match event {
             native_input_decoder::InputEvent::Byte(byte) => byte,
             native_input_decoder::InputEvent::Mouse { x, y, kind, modifiers } => {
+                // The parent owns drag/release after a boundary press, even
+                // outside the old rail. Consume before tab/close/new dispatch.
+                let resize_allowed = !view.dialogs.intercepts_input()
+                    && !permission_editor.open && !appearance.open && !children_panel.open
+                    && !help_open && !view.command_palette_open() && !page_open
+                    && context_menu.is_none() && rename_input.is_none()
+                    && matches!(dialog, native_setup::Dialog::None)
+                    && import_dialog.as_ref().is_none_or(|import| !import.is_open());
+                if !resize_allowed || modifiers != 0 {
+                    rail_resize.cancel();
+                } else {
+                    let now_ms = animation_start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+                    let mut resize_consumed = false;
+                    let mut commit_width = None;
+                    if rail_resize.is_resizing() {
+                        match kind {
+                            1 => { let _ = rail_resize.drag(x, viewport.0); resize_consumed = true; }
+                            2 => { commit_width = rail_resize.release(now_ms, x, viewport.0); resize_consumed = true; }
+                            7 => { resize_consumed = true; }
+                            _ => rail_resize.cancel(),
+                        }
+                    } else if kind == 0 && effective_orientation == TabOrientation::Vertical
+                        && y < viewport.1 && rendered_rail.is_some()
+                        && rail_resize.press(now_ms, x, viewport.0)
+                    {
+                        resize_consumed = true;
+                        if !rail_resize.is_resizing() {
+                            commit_width = Some(rail_resize.size(viewport.0));
+                        }
+                    }
+                    if resize_consumed {
+                        tab_press = None;
+                        add_press = None;
+                        home_press = None;
+                        rail_search_press = None;
+                        tab_hovered = None;
+                        if let Some(width) = commit_width {
+                            if let Err(error) = crate::native_ui_preferences::UiPreferences::persist_vertical_tabs_width(&state_path, width) {
+                                append_transcript(&mut transcript, format!("error: tab rail width: {error}"));
+                            }
+                        }
+                        needs_paint = true;
+                        continue;
+                    }
+                }
                 let menu_vp=crate::native_tab_context_menu::Viewport { width:viewport.0,height:viewport.1 };
                 if let Some(menu)=context_menu.as_mut() {
                     let me=match kind { 0=>Some(crate::native_tab_context_menu::MenuEvent::PointerDown{button:crate::native_tab_context_menu::MouseButton::Left,x,y}),2=>Some(crate::native_tab_context_menu::MenuEvent::PointerUp{button:crate::native_tab_context_menu::MouseButton::Left,x,y}),5=>Some(crate::native_tab_context_menu::MenuEvent::PointerDown{button:crate::native_tab_context_menu::MouseButton::Right,x,y}),6=>Some(crate::native_tab_context_menu::MenuEvent::PointerUp{button:crate::native_tab_context_menu::MouseButton::Right,x,y}),7=>Some(crate::native_tab_context_menu::MenuEvent::PointerMove{x,y}),3|4=>Some(crate::native_tab_context_menu::MenuEvent::Scroll{delta:if kind==3{-3}else{3},x,y}),_=>None};

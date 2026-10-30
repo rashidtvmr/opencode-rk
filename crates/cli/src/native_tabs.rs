@@ -28,6 +28,9 @@ pub struct TabReservation {
 impl TabReservation {
     pub const VERTICAL_WIDTH: u16 = 42;
     pub const CONTENT_PREFERRED_WIDTH: u16 = 64;
+    pub const VERTICAL_MIN_WIDTH: u16 = 5;
+    pub const VERTICAL_MAX_WIDTH: u16 = 72;
+    pub const CONTENT_MIN_WIDTH: u16 = 44;
     pub const ADD_TAB_WIDTH: u16 = 3;
 
     /// Upstream packages/tui/src/context/session-tabs-model.ts:8
@@ -53,6 +56,14 @@ impl TabReservation {
     }
 
     pub fn for_view(orientation: TabOrientation, cols: u16, rows: u16) -> Self {
+        Self::for_view_with_width(orientation, cols, rows, Self::VERTICAL_WIDTH)
+    }
+
+    pub fn for_view_with_width(orientation: TabOrientation, cols: u16, rows: u16, vertical_width: u16) -> Self {
+        let vertical_width = vertical_width
+            .max(Self::VERTICAL_MIN_WIDTH)
+            .min(Self::VERTICAL_MAX_WIDTH)
+            .min(cols.saturating_sub(Self::CONTENT_MIN_WIDTH).max(Self::VERTICAL_MIN_WIDTH));
         match orientation {
             TabOrientation::Horizontal if rows > 0 => Self {
                 orientation: Some(TabOrientation::Horizontal),
@@ -61,16 +72,17 @@ impl TabReservation {
                 ..Self::default()
             },
             TabOrientation::Vertical
-                if rows > 0 && cols >= Self::VERTICAL_WIDTH + Self::CONTENT_PREFERRED_WIDTH =>
+                if rows > 0
+                    && cols >= vertical_width.saturating_add(Self::CONTENT_PREFERRED_WIDTH) =>
             {
                 Self {
                     orientation: Some(TabOrientation::Vertical),
-                    width: Self::VERTICAL_WIDTH,
+                    width: vertical_width,
                     height: rows,
                     ..Self::default()
                 }
             }
-            TabOrientation::Vertical => Self::for_view(TabOrientation::Horizontal, cols, rows),
+            TabOrientation::Vertical => Self::for_view_with_width(TabOrientation::Horizontal, cols, rows, vertical_width),
             _ => Self::default(),
         }
     }

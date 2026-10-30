@@ -89,6 +89,8 @@ mod native_tabs;
 #[cfg(feature = "native")]
 mod native_tab_rail;
 #[cfg(feature = "native")]
+mod native_tab_resize;
+#[cfg(feature = "native")]
 mod native_text_selection;
 mod native_theme;
 #[cfg(feature = "native")]
