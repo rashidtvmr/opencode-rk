@@ -304,6 +304,27 @@ const fn native_composer_keymap(keymap: SubmitKeymap) -> crate::native_composer:
 }
 
 #[cfg(feature = "native")]
+fn normalize_modified_return(
+    event: native_input_decoder::InputEvent,
+    keymap: SubmitKeymap,
+) -> native_input_decoder::InputEvent {
+    use crate::native_composer::{decide_key, Key, KeyAction};
+    let composer_keymap = native_composer_keymap(keymap);
+    let (physical_key, newline_byte) = match &event {
+        native_input_decoder::InputEvent::ShiftEnter
+        | native_input_decoder::InputEvent::AltEnter =>
+            (Key::ShiftEnter, if matches!(keymap, SubmitKeymap::CtrlJ) { b'\r' } else { b'\n' }),
+        native_input_decoder::InputEvent::CtrlJ => (Key::CtrlJ, b'\n'),
+        _ => return event,
+    };
+    match decide_key(physical_key, composer_keymap) {
+        KeyAction::Newline | KeyAction::Submit =>
+            native_input_decoder::InputEvent::Byte(newline_byte),
+        _ => event,
+    }
+}
+
+#[cfg(feature = "native")]
 fn composer_pointer_event(
     event: native_input_decoder::InputEvent,
     view: &crate::native_view::NativeView,
@@ -5956,6 +5977,9 @@ fn native_loop(
                 ("control", 1, Some(*byte))
             }
             native_input_decoder::InputEvent::Byte(_) => ("text", 1, None),
+            native_input_decoder::InputEvent::ShiftEnter
+            | native_input_decoder::InputEvent::CtrlJ
+            | native_input_decoder::InputEvent::AltEnter => ("control", 1, Some(13)),
             native_input_decoder::InputEvent::Paste(text) => ("paste", text.len(), None),
             native_input_decoder::InputEvent::ArrowUp => ("up", 0, None),
             native_input_decoder::InputEvent::ArrowDown => ("down", 0, None),
@@ -6288,6 +6312,10 @@ fn native_loop(
             needs_paint = true;
             continue;
         }
+        // Normalize only after higher-priority modal/page/completion owners
+        // have handled the event. The existing composer KeyAction/SubmitKeymap
+        // remains the authority for newline versus submission.
+        let event = normalize_modified_return(event, keymap);
         let byte = match event {
             native_input_decoder::InputEvent::Byte(byte) => byte,
             native_input_decoder::InputEvent::Mouse { x, y, kind, modifiers } => {
@@ -7006,6 +7034,11 @@ fn native_loop(
                 // Paste has no key actions, even in a dialog or a busy turn.
                 continue;
             }
+            // Defensive exhaustive arms; normal dispatch has already
+            // normalized these through the composer keymap above.
+            native_input_decoder::InputEvent::ShiftEnter
+            | native_input_decoder::InputEvent::CtrlJ
+            | native_input_decoder::InputEvent::AltEnter => continue,
             // Preserve the existing standalone-escape action (clear dialog /
             // draft) while keeping protocol escape bytes out of the composer.
             native_input_decoder::InputEvent::Escape => 27,
@@ -9944,6 +9977,42 @@ mod command_consumption_tests {
         assert_eq!(super::composer_pointer_event(click.clone(), &view, draft, super::SubmitKeymap::Enter, false), click);
         view.dialogs.open_permission("request", "session", "Run command").unwrap();
         assert_eq!(super::composer_pointer_event(click.clone(), &view, draft, super::SubmitKeymap::Enter, true), click);
+    }
+
+    #[test]
+    fn modified_return_matrix_uses_real_key_action_authority() {
+        use crate::native_composer::{decide_byte, KeyAction};
+        let events = [
+            InputEvent::ShiftEnter,
+            InputEvent::AltEnter,
+            InputEvent::CtrlJ,
+        ];
+        for keymap in [super::SubmitKeymap::Enter, super::SubmitKeymap::CtrlJ] {
+            for event in events.iter().cloned() {
+                let normalized = super::normalize_modified_return(event.clone(), keymap);
+                let byte = match normalized {
+                    InputEvent::Byte(byte) => byte,
+                    other => panic!("modified Return not normalized: {other:?}"),
+                };
+                let action = decide_byte(byte, super::native_composer_keymap(keymap));
+                let expected = match event {
+                    InputEvent::ShiftEnter | InputEvent::AltEnter => KeyAction::Newline,
+                    InputEvent::CtrlJ if matches!(keymap, super::SubmitKeymap::CtrlJ) => KeyAction::Submit,
+                    InputEvent::CtrlJ => KeyAction::Newline,
+                    _ => unreachable!(),
+                };
+                assert_eq!(action, Some(expected));
+            }
+        }
+    }
+
+    #[test]
+    fn rename_owner_does_not_submit_modified_return_events() {
+        use super::native_input_decoder::InputEvent;
+        for event in [InputEvent::ShiftEnter, InputEvent::AltEnter, InputEvent::CtrlJ] {
+            assert!(!super::rename_submits(&event));
+            assert!(!super::rename_dismisses(&event));
+        }
     }
 
     #[test]

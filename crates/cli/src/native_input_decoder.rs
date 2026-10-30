@@ -26,6 +26,14 @@ pub(crate) enum InputEvent {
     ArrowDown,
     ArrowLeft,
     ArrowRight,
+    /// Kitty Shift+Return (CSI 13;2u). The caller resolves this as newline;
+    /// it must not become Byte(13), which is the bare submit key.
+    ShiftEnter,
+    /// Kitty Ctrl+Return (CSI 13;5u). The caller resolves this through the
+    /// existing Ctrl-J/SubmitKeymap path rather than treating it as CR.
+    CtrlJ,
+    /// Kitty Alt+Return (CSI 13;3u). The upstream keymap treats it as newline.
+    AltEnter,
     Paste(String),
     Mouse { x: u16, y: u16, kind: u8, modifiers: u8 },
 }
@@ -432,12 +440,29 @@ impl TerminalInputDecoder {
             return;
         }
         let modifier_bits = modifier - 1;
-        // Only the explicit Ctrl-letter mapping is text-safe.  In particular,
-        // never turn modified punctuation into arbitrary C0 controls.
+        // Kitty Return-family presses are distinct from raw CR. The upstream
+        // keymap binds bare Return to submit and Shift/Ctrl/Alt+Return plus
+        // Ctrl-J to newline (keybind.ts:208-212). Preserve the physical event
+        // here so the caller's existing SubmitKeymap remains authoritative.
         const SHIFT: u32 = 0b001;
+        const ALT: u32 = 0b010;
         const CTRL: u32 = 0b100;
         const CAPS_LOCK: u32 = 0b1_000_000;
         const NUM_LOCK: u32 = 0b10_000_000;
+        if codepoint == 0x0d
+            && modifier_bits & !(SHIFT | ALT | CTRL | CAPS_LOCK | NUM_LOCK) == 0
+        {
+            match modifier_bits & (SHIFT | ALT | CTRL) {
+                0 => self.emit(InputEvent::Byte(0x0d)),
+                SHIFT => self.emit(InputEvent::ShiftEnter),
+                ALT => self.emit(InputEvent::AltEnter),
+                CTRL => self.emit(InputEvent::CtrlJ),
+                _ => return,
+            }
+            return;
+        }
+        // Only the explicit Ctrl-letter mapping is text-safe.  In particular,
+        // never turn modified punctuation into arbitrary C0 controls.
         let harmless_locks = CAPS_LOCK | NUM_LOCK;
         if modifier_bits & CTRL != 0
             && character.is_ascii_alphabetic()
@@ -763,5 +788,67 @@ mod kitty_printable_regressions {
             events,
             "native escape seed c café".bytes().map(InputEvent::Byte).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn return_family_is_distinct_and_resolves_via_caller_keymap() {
+        assert_eq!(decode(b"\x1b[13;1u"), vec![InputEvent::Byte(13)]);
+        assert_eq!(decode(b"\x1b[13;2u"), vec![InputEvent::ShiftEnter]);
+        assert_eq!(decode(b"\x1b[13;3u"), vec![InputEvent::AltEnter]);
+        assert_eq!(decode(b"\x1b[13;5u"), vec![InputEvent::CtrlJ]);
+    }
+
+    #[test]
+    fn return_family_accepts_fragmented_input_and_lock_bits() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[13;" { decoder.push(*byte, now); }
+        for byte in b"66u\x1b[13;69u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::ShiftEnter));
+        assert_eq!(decoder.pop(), Some(InputEvent::CtrlJ));
+        assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn paste_cr_lf_is_one_atomic_event_and_never_keyboard_enter() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[200~one\r\ntwo\r\x1b[201~" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::Paste("one\ntwo\n".to_owned())));
+        assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn invalid_utf8_paste_is_rejected_atomically_without_leaking_bytes() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[200~valid\xfftail\x1b[201~" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), None);
+        decoder.push(b'x', now);
+        assert_eq!(decoder.pop(), Some(InputEvent::Byte(b'x')));
+    }
+
+    #[test]
+    fn unterminated_paste_is_abandoned_and_late_body_never_becomes_keyboard_input() {
+        let mut decoder = TerminalInputDecoder::default();
+        let start = Instant::now();
+        for byte in b"\x1b[200~partial\r" { decoder.push(*byte, start); }
+        decoder.expire(start + PASTE_FRAME_TIMEOUT + ESCAPE_GRACE);
+        assert_eq!(decoder.pop(), None);
+        for byte in b"tail\r\n" { decoder.push(*byte, start + PASTE_FRAME_TIMEOUT + ESCAPE_GRACE); }
+        assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn oversized_paste_is_rejected_but_following_input_remains_atomic() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[200~" { decoder.push(*byte, now); }
+        for _ in 0..=MAX_PASTE_BYTES { decoder.push(b'x', now); }
+        for byte in b"\x1b[201~" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), None);
+        for byte in b"ok" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::Byte(b'o')));
+        assert_eq!(decoder.pop(), Some(InputEvent::Byte(b'k')));
     }
 }
