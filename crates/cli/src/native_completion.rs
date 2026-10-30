@@ -79,7 +79,7 @@ impl Completion {
     pub fn panel_at(&self, draft: &str, cursor: usize, anchor: (u16, u16, u16, u16)) -> Option<Panel> {
         let (x, y, width, _) = anchor;
         let items = self.visible_at(draft, cursor);
-        if items.is_empty() || y == 0 || width < 12 { return None; }
+        if items.is_empty() || y == 0 || width == 0 { return None; }
         let capacity = usize::from(y).min(10);
         let selected = self.selected.min(items.len().saturating_sub(1));
         let start = selected.saturating_sub(capacity - 1);
@@ -472,6 +472,16 @@ mod tests {
         let mut draft = "@".to_owned();
         assert!(c.accept(&mut draft, 4096));
         assert_eq!(draft, "@src/café.rs ");
+    }
+    #[test]
+    fn narrow_anchor_keeps_upstream_popup_instead_of_suppressing_it() {
+        let mut c = fixture();
+        c.sync("/");
+        assert!(c.panel((0, 2, 0, 1)).is_none(),
+            "a zero-width popup cannot own completion input");
+        let panel = c.panel((0, 2, 1, 1)).expect("upstream popup has no width floor");
+        assert_eq!((panel.x, panel.y, panel.width), (0, 0, 1));
+        assert_eq!(panel.rows.len(), 2);
     }
     #[test]
     fn panel_is_above_composer_and_selection_scrolls_on_short_viewport() {
