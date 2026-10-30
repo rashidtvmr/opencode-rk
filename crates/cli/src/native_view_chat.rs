@@ -746,7 +746,7 @@ fn boxed_message_rows_spans_mode(
     // their full-row text interval (selected template, never decoration).
     let plain = |wrap: usize, spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>| -> Vec<StyledChatRow> {
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(wrap.min(width), message, separator, None, &mut typed_spans, markdown_mode);
+        let typed = typed_message_rows_with_prefix_spans_mode(wrap.min(width), message, separator, None, &mut typed_spans, markdown_mode, width);
         let rows: Vec<StyledChatRow> = typed
             .into_iter()
             .map(|(text, class)| (text, class, Some((0, width.min(u16::MAX as usize) as u16))))
@@ -777,7 +777,7 @@ fn boxed_message_rows_spans_mode(
         let limit = MAX_MESSAGE_ROWS.saturating_sub(output.len() + usize::from(user));
         let base = output.len();
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, Some(""), &mut typed_spans, markdown_mode);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, Some(""), &mut typed_spans, markdown_mode, width);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
         {
@@ -813,7 +813,7 @@ fn boxed_message_rows_spans_mode(
         for _ in 0..pad { output.push((frame.blank(), ChatRowClass::Blank, None)); }
         let base = output.len();
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, markdown_mode);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, markdown_mode, width);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 + 2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit) {
@@ -847,7 +847,7 @@ fn boxed_message_rows_spans_mode(
         }
         let base = output.len();
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, markdown_mode);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, markdown_mode, width);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
@@ -886,7 +886,7 @@ fn boxed_message_rows_spans_mode(
         }
         let base = output.len();
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, markdown_mode);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, markdown_mode, width);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
@@ -1646,6 +1646,7 @@ fn typed_message_rows_with_prefix_spans(
     typed_message_rows_with_prefix_spans_mode(
         width, message, separator, prefix, spans_out,
         crate::markdown_runs::MarkdownMode::Rendered,
+        width,
     )
 }
 
@@ -1653,6 +1654,7 @@ fn typed_message_rows_with_prefix_spans_mode(
     width: usize, message: &ChatMessage, separator: bool, prefix: Option<&str>,
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
     markdown_mode: crate::markdown_runs::MarkdownMode,
+    terminal_width: usize,
 ) -> Vec<(String, ChatRowClass)> {
     let mut rows: Vec<(String, ChatRowClass)> = Vec::new();
     if separator {
@@ -1879,8 +1881,12 @@ fn typed_message_rows_with_prefix_spans_mode(
     // the message parts, only when real execution facts exist. Missing facts
     // render nothing. Footer rows receive the same message prefix/inset as
     // ordinary prose rows (upstream's footer `paddingLeft={3}` and `TextPart`
-    // inset are the same three columns).
-    if let Some(footer) = crate::native_footer::render_assistant_footer(message, width) {
+    // inset are the same three columns). The footer's width gates use the full
+    // terminal width — exactly as upstream `ctx.terminal.width >= 28` and the
+    // 28..=35 duration band do — NOT the inner content width, so that narrow
+    // padding does not suppress the model span at width 28 or shift the
+    // duration gap band.
+    if let Some(footer) = crate::native_footer::render_assistant_footer(message, terminal_width) {
         let prefix = prefix.unwrap_or_else(|| text_prefix(message.role));
         for (content, class) in footer.rows {
             if rows.len() >= MAX_MESSAGE_ROWS {
