@@ -314,21 +314,26 @@ impl ContextView {
             let mut rows = Vec::new();
             if height == 1 {
                 rows.push(usage_line("Context Usage".into(), Vec::new()));
+            } else if let Some(report) = &self.usage_report {
+                rows.push(usage_line(
+                    format!("Context Usage · {}", report.model.as_deref().unwrap_or("model unreported")),
+                    Vec::new(),
+                ));
+                let used = report.used_tokens.map_or_else(|| "unreported".into(), |tokens| tokens.to_string());
+                let capacity = report.capacity_tokens.map_or_else(|| "unreported".into(), |tokens| tokens.to_string());
+                rows.push(usage_line(
+                    format!("Used: {used} / {capacity} tokens · {}", utilization(report.used_tokens, report.capacity_tokens)),
+                    Vec::new(),
+                ));
+            } else if let Some(item) = self.selected() {
+                // Keep the selected item's measured-vs-unreported distinction
+                // visible in the compact two-row viewport.
+                rows.push(usage_line(format!("Context Usage · {}", item.kind), Vec::new()));
+                rows.push(usage_line(format!("{} bytes / {} tokens", shown(item.bytes), shown(item.estimated_tokens)), Vec::new()));
             } else {
-                // Preserve the selected measurement as a complete, compact
-                // acknowledgement in the two-row viewport.  The normal
-                // dashboard remains cell-clipped by `fit_usage`; this short
-                // summary is intentionally allowed to wrap at the caller's
-                // terminal edge so neither token value nor provenance is
-                // silently dropped.
-                if let Some(item) = self.selected() {
-                    rows.push(usage_line(format!("Context Usage · {}", item.kind), Vec::new()));
-                    rows.push(usage_line(format!("{} bytes / {} tokens", shown(item.bytes), shown(item.estimated_tokens)), Vec::new()));
-                } else {
-                    rows.push(usage_line("Context unloaded".into(), Vec::new()));
-                }
+                rows.push(usage_line("Context unloaded".into(), Vec::new()));
             }
-            return rows;
+            return fit_usage(rows, width);
         }
         let report = self.usage_report.as_ref();
         let mut head = vec![usage_line("Context Usage".into(), Vec::new())];
@@ -1066,6 +1071,41 @@ mod usage_report_self_tests {
             let mut view = ContextView::new();
             assert!(view.load_response(&body.to_string()).is_err());
         }
+    }
+
+    #[test]
+    fn compact_summary_respects_cell_width_without_fabricating_usage() {
+        let model = "モデルe\u{301}👩‍💻";
+        let mut missing_limit = ContextView::new();
+        missing_limit.load_response(&json!({
+            "scope":"session", "items":[],
+            "usage_report":{"model_id":model,"reported_used_tokens":0}
+        }).to_string()).unwrap();
+
+        let full = missing_limit.render(80, 2);
+        assert_eq!(full.len(), 2);
+        assert!(full[0].contains(model), "full model label must survive when it fits");
+        assert!(full[1].contains("Used: 0 / unreported tokens"));
+        assert!(full[1].contains("capacity unreported"));
+        for width in 0..=24 {
+            let rows = missing_limit.render(width, 2);
+            assert_eq!(rows.len(), if width == 0 { 0 } else { 2 });
+            for row in rows {
+                let mut cells = 0;
+                crate::native_view_layout::visit_unpadded_cells(&row, width + 1, |_, n| cells += n);
+                assert_eq!(cells, width, "row does not fit exactly {width} cells: {row:?}");
+            }
+        }
+
+        let mut missing_usage = ContextView::new();
+        missing_usage.load_response(&json!({
+            "scope":"session", "items":[],
+            "usage_report":{"model_id":"known-model","capacity_tokens":100}
+        }).to_string()).unwrap();
+        let full = missing_usage.render(80, 2);
+        assert!(full[1].contains("Used: unreported / 100 tokens"));
+        assert!(full[1].contains("unreported"));
+        assert!(!full[1].contains("Used: 0"), "unreported usage must not become zero");
     }
 
     #[test]
