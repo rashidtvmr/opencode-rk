@@ -22,6 +22,16 @@ pub enum PartKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MarkdownMode {
+    Rendered,
+    Source,
+}
+
+impl Default for MarkdownMode {
+    fn default() -> Self { Self::Rendered }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RunKind {
     Bold,
     Italic,
@@ -36,7 +46,8 @@ pub const LINK: u8 = 8;
 /// Inline raw code receives upstream base background; fenced/block code does not.
 pub const CODE_BLOCK: u8 = 16;
 
-/// A style interval on an undecorated, sanitized source row.
+/// A style interval on a sanitized source row. `start..end` is the source
+/// interval used by projection; rendered concealment is derived separately.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MarkdownRun {
     pub start: usize,
@@ -121,6 +132,16 @@ pub fn parse_part(kind: PartKind, input: &str) -> MarkdownPart {
     MarkdownPart { kind, rows, truncated }
 }
 
+/// Render one sanitized prose row according to the production Markdown mode.
+/// Source mode intentionally preserves the exact sanitized row and its source
+/// intervals; rendered mode conceals only complete inline delimiters.
+pub fn display_row(mode: MarkdownMode, text: &str, runs: &[MarkdownRun]) -> String {
+    match mode {
+        MarkdownMode::Rendered => conceal_inline_row(text, runs),
+        MarkdownMode::Source => text.to_owned(),
+    }
+}
+
 /// Rebase source-cell runs through an explicit caller prefix and clipping
 /// window. The caller supplies the undecorated source row, not a painted row.
 pub fn project_row(
@@ -144,6 +165,43 @@ pub fn project_row(
         projected.push(copy);
     }
     projected
+}
+
+/// Return the rendered inline row for Markdown's conceal mode. Only complete
+/// bold, italic, and code runs lose their delimiters; unmatched and escaped
+/// delimiters remain literal source, which is required while assistant text
+/// is streaming. `Link` is deliberately not concealed here: links need a
+/// separate renderer/action projection and this package must not fabricate one.
+pub fn conceal_inline_row(text: &str, runs: &[MarkdownRun]) -> String {
+    let mut hidden = Vec::new();
+    for run in runs {
+        let marker = match run.kind {
+            RunKind::Bold => "**",
+            RunKind::Italic => "*",
+            RunKind::Code => "`",
+            RunKind::Link => continue,
+        };
+        if run.start < marker.len() || run.end > text.len() {
+            continue;
+        }
+        if text.get(run.start - marker.len()..run.start) == Some(marker)
+            && text.get(run.end..run.end + marker.len()) == Some(marker)
+        {
+            hidden.push((run.start - marker.len(), run.start));
+            hidden.push((run.end, run.end + marker.len()));
+        }
+    }
+    hidden.sort_unstable();
+    hidden.dedup();
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for (start, end) in hidden {
+        if start < cursor { continue; }
+        out.push_str(&text[cursor..start]);
+        cursor = end;
+    }
+    out.push_str(&text[cursor..]);
+    out
 }
 
 fn sanitize_prose_line(line: &str) -> String {
@@ -338,9 +396,19 @@ fn scan_inline(
     let mut at = start;
     while at < end && out.len() < MAX_RUNS_PER_ROW {
         if text.as_bytes()[at] == b'\\' {
+            let slash = at;
             at = next_char(text, at);
             if at < end {
+                let escaped_at = at;
                 at = next_char(text, at);
+                // Consume the entire escaped delimiter run. This prevents the
+                // second star in \**literal** from falling through as a
+                // single-star opener. Backticks and single stars retain their
+                // ordinary escaped-byte behavior.
+                if text[escaped_at..end].starts_with("**") {
+                    at = next_char(text, at);
+                }
+                let _ = slash;
             }
             continue;
         }
@@ -475,6 +543,9 @@ mod tests {
     #[test]
     fn escapes_and_url_bound_are_safe() {
         let parsed = parse_part(PartKind::Prose, r"\**literal** **bold** [x](https://example.test)");
+        assert!(parsed.rows[0].runs.iter().all(|run| run.kind != RunKind::Italic));
+        assert_eq!(display_row(MarkdownMode::Source, &parsed.rows[0].text, &parsed.rows[0].runs), r"\**literal** **bold** [x](https://example.test)");
+        assert_eq!(display_row(MarkdownMode::Rendered, &parsed.rows[0].text, &parsed.rows[0].runs), r"\**literal** bold [x](https://example.test)");
         assert_eq!(parsed.rows[0].runs.iter().filter(|run| run.kind == RunKind::Bold).count(), 1);
         assert_eq!(parsed.rows[0].runs.iter().find(|run| run.kind == RunKind::Link).unwrap().url.as_deref(), Some("https://example.test"));
         let huge = format!("[x]({})", "u".repeat(MAX_URL_BYTES + 1));
@@ -525,5 +596,25 @@ mod tests {
         assert_eq!(run.end, row.text.len());
         assert_eq!(run.start_cell, 0);
         assert_eq!(run.end_cell, cell_width(&row.text));
+    }
+
+    #[test]
+    fn escaped_delimiters_make_forward_progress_without_runs() {
+        for (input, expected) in [(r"\**literal**", r"\**literal**"), (r"\*literal*", r"\*literal*"), (r"\`code`", r"\`code`"), (r"é \**界** *ok*", r"é \**界** ok")] {
+            let parsed = parse_part(PartKind::Prose, input);
+            assert!(parsed.rows[0].runs.iter().all(|run| run.kind != RunKind::Italic || input.contains("*ok*")));
+            assert_eq!(display_row(MarkdownMode::Rendered, &parsed.rows[0].text, &parsed.rows[0].runs), expected);
+        }
+        let nested = parse_part(PartKind::Prose, r"\**literal** **bold** `code`");
+        assert_eq!(display_row(MarkdownMode::Rendered, &nested.rows[0].text, &nested.rows[0].runs), r"\**literal** bold code");
+    }
+
+    #[test]
+    fn conceal_complete_inline_runs_but_preserve_incomplete_and_escaped_source() {
+        let parsed = parse_part(PartKind::Prose, "**bold** *italic* `code` **unfinished");
+        assert_eq!(conceal_inline_row(&parsed.rows[0].text, &parsed.rows[0].runs),
+            "bold italic code **unfinished");
+        let escaped = parse_part(PartKind::Prose, r"\**literal**");
+        assert_eq!(conceal_inline_row(&escaped.rows[0].text, &escaped.rows[0].runs), r"\**literal**");
     }
 }

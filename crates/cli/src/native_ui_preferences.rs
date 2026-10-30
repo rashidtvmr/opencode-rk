@@ -40,6 +40,25 @@ pub struct UiPreferences {
 }
 
 impl UiPreferences {
+    pub fn markdown_mode(cli_path: Option<&Path>, inline: Option<&str>) -> (Option<String>, Vec<String>) {
+        fn apply(text: &str, selected: &mut Option<String>, diagnostics: &mut Vec<String>, label: &str) {
+            if text.len() > MAX_CONFIG_BYTES { diagnostics.push(format!("{label} configuration exceeds size limit")); return; }
+            let clean = match strip_jsonc(text) { Ok(clean) => clean, Err(_) => { diagnostics.push(format!("invalid {label} configuration")); return; } };
+            let value = match serde_json::from_str::<Value>(&clean) {
+                Ok(value) => value,
+                Err(_) => { diagnostics.push(format!("invalid {label} configuration")); return; }
+            };
+            match value.get("session").and_then(|session| session.get("markdown")) {
+                Some(Value::String(mode)) if mode == "source" || mode == "rendered" => *selected = Some(mode.clone()),
+                Some(_) => diagnostics.push("invalid session.markdown value".to_owned()),
+                None => {}
+            }
+        }
+        let mut selected = None; let mut diagnostics = Vec::new();
+        if let Some(path) = cli_path { let mut budget = crate::native_ui_budget::ReadBudget::default(); match budget.read(path, MAX_CONFIG_BYTES, "CLI config") { Ok(Some(text)) => apply(&text, &mut selected, &mut diagnostics, "disk CLI"), Ok(None) => {}, Err(_) => diagnostics.push("unable to read bounded global CLI configuration".into()) } }
+        if let Some(text) = inline { apply(text, &mut selected, &mut diagnostics, "inline CLI"); }
+        (selected, diagnostics)
+    }
     /// Load the V2 global/inline CLI theme. The inline document overlays the
     /// global document, matching upstream CLI config merge semantics. Legacy
     /// `tui.json`/kv theme remains the caller's lower-precedence fallback.
@@ -1028,5 +1047,76 @@ mod settings_persistence_tests {
         fs::write(&path, original).unwrap();
         assert!(UiPreferences::persist_tab_orientation(&path, TabOrientation::Vertical).is_err());
         assert_eq!(fs::read_to_string(path).unwrap(), original);
+    }
+}
+
+#[cfg(test)]
+mod markdown_mode_tests {
+    use super::*;
+
+    #[test]
+    fn disk_source_is_selected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        fs::write(&path, r#"{"session":{"markdown":"source"}}"#).unwrap();
+        assert_eq!(UiPreferences::markdown_mode(Some(&path), None).0.as_deref(), Some("source"));
+    }
+
+    #[test]
+    fn inline_rendered_overrides_disk_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        fs::write(&path, r#"{"session":{"markdown":"source"}}"#).unwrap();
+        assert_eq!(UiPreferences::markdown_mode(Some(&path), Some(r#"{"session":{"markdown":"rendered"}}"#)).0.as_deref(), Some("rendered"));
+    }
+
+    #[test]
+    fn absent_markdown_returns_none_for_rendered_upstream_default() {
+        assert_eq!(UiPreferences::markdown_mode(None, None), (None, Vec::<String>::new()));
+        assert_eq!(UiPreferences::markdown_mode(None, Some(r#"{"session":{}}"#)), (None, Vec::<String>::new()));
+    }
+
+    #[test]
+    fn invalid_value_is_generic_diagnostic_without_content() {
+        let secret = "SECRET_MARKDOWN_VALUE";
+        let (_, diagnostics) = UiPreferences::markdown_mode(None, Some(&format!(r#"{{"session":{{"markdown":"{secret}"}}}}"#)));
+        assert_eq!(diagnostics, vec!["invalid session.markdown value"]);
+        assert!(diagnostics.iter().all(|line| !line.contains(secret)));
+    }
+
+    #[test]
+    fn inline_exact_max_bytes_valid_json_is_accepted() {
+        let base = r#"{"session":{"markdown":"source"}}"#;
+        let inline = format!("{}{}", base, " ".repeat(MAX_CONFIG_BYTES - base.len()));
+        assert_eq!(inline.len(), MAX_CONFIG_BYTES);
+        assert_eq!(UiPreferences::markdown_mode(None, Some(&inline)).0.as_deref(), Some("source"));
+        assert!(UiPreferences::markdown_mode(None, Some(&inline)).1.is_empty());
+    }
+
+    #[test]
+    fn oversized_inline_and_disk_reject_without_overriding_valid_prior() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        fs::write(&path, "x".repeat(MAX_CONFIG_BYTES + 1)).unwrap();
+        let oversized_inline = "y".repeat(MAX_CONFIG_BYTES + 1);
+        let (selected, diagnostics) = UiPreferences::markdown_mode(Some(&path), Some(&oversized_inline));
+        assert_eq!(selected, None);
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(diagnostics, vec!["unable to read bounded global CLI configuration", "inline CLI configuration exceeds size limit"]);
+
+        fs::write(&path, r#"{"session":{"markdown":"source"}}"#).unwrap();
+        let (selected, diagnostics) = UiPreferences::markdown_mode(Some(&path), Some(&oversized_inline));
+        assert_eq!(selected.as_deref(), Some("source"));
+        assert_eq!(diagnostics, vec!["inline CLI configuration exceeds size limit"]);
+    }
+
+    #[test]
+    fn malformed_jsonc_reports_generic_diagnostic_without_secret() {
+        let secret = "SECRET_MALFORMED_MARKDOWN";
+        let malformed = format!(r#"{{"session":{{"markdown":"source",}},"secret":"{secret}""#);
+        let (selected, diagnostics) = UiPreferences::markdown_mode(None, Some(&malformed));
+        assert_eq!(selected, None);
+        assert_eq!(diagnostics, vec!["invalid inline CLI configuration"]);
+        assert!(diagnostics.iter().all(|line| !line.contains(secret)));
     }
 }

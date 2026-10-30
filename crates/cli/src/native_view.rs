@@ -145,6 +145,7 @@ pub struct NativeView {
     sidebar_content_height: usize,
     /// Frame reservation owned by the live session-tab shell.
     tab_reservation: TabReservation,
+    markdown_mode: crate::markdown_runs::MarkdownMode,
 }
 
 #[cfg(test)]
@@ -607,6 +608,7 @@ impl NativeView {
             mcp_toggle_hit: None,
             sidebar_content_height: 0,
             tab_reservation: TabReservation::default(),
+            markdown_mode: crate::markdown_runs::MarkdownMode::Rendered,
         }
     }
 
@@ -623,6 +625,11 @@ impl NativeView {
     }
 
     #[must_use]
+    pub fn set_markdown_mode(&mut self, mode: crate::markdown_runs::MarkdownMode) {
+        self.markdown_mode = mode;
+        self.chat.set_markdown_mode(mode);
+    }
+
     pub fn tab_reservation(&self) -> TabReservation {
         self.tab_reservation
     }
@@ -2034,6 +2041,7 @@ impl NativeView {
         self.chat_row_classes.clear();
         self.chat_text_bounds.clear();
         self.chat_markdown_spans.clear();
+        self.chat.set_markdown_mode(self.markdown_mode);
         self.context_usage_hit = None;
         self.ui_regions.clear();
         self.context_usage_styles.clear();
@@ -2160,16 +2168,16 @@ impl NativeView {
             } else { self.session_body_height() };
             let mut body = if let Some(messages) = messages {
                 let (rows, markdown_spans) = if has_permission {
-                    self.chat.render_styled_without_prompt_with_spans(inner_width as usize, body_height,
-                        &self.workspace, messages, busy, &self.box_appearance)
-                } else { self.chat.render_styled_with_spans(
+                    self.chat.render_styled_without_prompt_with_spans_mode(inner_width as usize, body_height,
+                        &self.workspace, messages, busy, &self.box_appearance, self.markdown_mode)
+                } else { self.chat.render_styled_with_spans_mode(
                     inner_width as usize,
                     body_height,
                     &self.workspace,
                     messages,
                     draft,
                     busy,
-                    &self.box_appearance,
+                    &self.box_appearance, self.markdown_mode,
                 ) };
                 self.chat_markdown_spans.extend(markdown_spans);
                 self.chat_row_classes

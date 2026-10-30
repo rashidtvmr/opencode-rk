@@ -109,9 +109,17 @@ pub struct ChatView {
     /// Rows above the tail; clamped to [`MAX_SCROLL_ROWS`].
     scroll: Cell<usize>,
     prompt_cursor: Option<usize>,
+    markdown_mode: crate::markdown_runs::MarkdownMode,
 }
 
 impl ChatView {
+    pub(crate) fn set_markdown_mode(&mut self, mode: crate::markdown_runs::MarkdownMode) {
+        self.markdown_mode = mode;
+    }
+
+    pub(crate) fn markdown_mode(&self) -> crate::markdown_runs::MarkdownMode {
+        self.markdown_mode
+    }
     pub(crate) fn set_prompt_cursor(&mut self, cursor: usize) { self.prompt_cursor = Some(cursor); }
     pub(crate) fn prompt_cursor(&self, draft: &str) -> usize {
         self.prompt_cursor.filter(|cursor| *cursor <= draft.len() && draft.is_char_boundary(*cursor))
@@ -700,6 +708,15 @@ fn boxed_message_rows_spans(
     appearance: &crate::native_box_style::BoxAppearance,
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
 ) -> Vec<StyledChatRow> {
+    boxed_message_rows_spans_mode(width, message, separator, appearance, spans_out, crate::markdown_runs::MarkdownMode::Rendered)
+}
+
+fn boxed_message_rows_spans_mode(
+    width: usize, message: &ChatMessage, separator: bool,
+    appearance: &crate::native_box_style::BoxAppearance,
+    spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
+    markdown_mode: crate::markdown_runs::MarkdownMode,
+) -> Vec<StyledChatRow> {
     use crate::native_box_style::BoxId;
     let id = if message.role == ChatRole::Tool
         || message.parts.iter().any(|part| {
@@ -729,7 +746,7 @@ fn boxed_message_rows_spans(
     // their full-row text interval (selected template, never decoration).
     let plain = |wrap: usize, spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>| -> Vec<StyledChatRow> {
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans(wrap.min(width), message, separator, None, &mut typed_spans);
+        let typed = typed_message_rows_with_prefix_spans_mode(wrap.min(width), message, separator, None, &mut typed_spans, markdown_mode);
         let rows: Vec<StyledChatRow> = typed
             .into_iter()
             .map(|(text, class)| (text, class, Some((0, width.min(u16::MAX as usize) as u16))))
@@ -760,7 +777,7 @@ fn boxed_message_rows_spans(
         let limit = MAX_MESSAGE_ROWS.saturating_sub(output.len() + usize::from(user));
         let base = output.len();
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans(inner, message, false, Some(""), &mut typed_spans);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, Some(""), &mut typed_spans, markdown_mode);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
         {
@@ -796,7 +813,7 @@ fn boxed_message_rows_spans(
         for _ in 0..pad { output.push((frame.blank(), ChatRowClass::Blank, None)); }
         let base = output.len();
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans(inner, message, false, None, &mut typed_spans);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, markdown_mode);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 + 2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit) {
@@ -830,7 +847,7 @@ fn boxed_message_rows_spans(
         }
         let base = output.len();
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans(inner, message, false, None, &mut typed_spans);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, markdown_mode);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
@@ -869,7 +886,7 @@ fn boxed_message_rows_spans(
         }
         let base = output.len();
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans(inner, message, false, None, &mut typed_spans);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, markdown_mode);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
@@ -1032,6 +1049,17 @@ fn push_markdown_wrapped(
     prefix: &str,
     class: ChatRowClass,
 ) {
+    push_markdown_wrapped_mode(rows, width, text, prefix, class, crate::markdown_runs::MarkdownMode::Rendered);
+}
+
+fn push_markdown_wrapped_mode(
+    rows: &mut Vec<(String, ChatRowClass)>,
+    width: usize,
+    text: &str,
+    prefix: &str,
+    class: ChatRowClass,
+    markdown_mode: crate::markdown_runs::MarkdownMode,
+) {
     let input_truncated = text.len() > MAX_INPUT_ROW_BYTES;
     // Keep the bounded source raw until fence state is known: code indentation
     // is source data, so the ordinary tab-normalizing sanitizer must not run
@@ -1071,7 +1099,11 @@ fn push_markdown_wrapped(
         let line = if code {
             expand_code_tabs(&sanitize_code(raw_line))
         } else {
-            sanitize(raw_line)
+            let clean = sanitize(raw_line);
+            let parsed = crate::markdown_runs::parse_part(crate::markdown_runs::PartKind::Prose, &clean);
+            parsed.rows.first().map_or(clean, |row| {
+                crate::markdown_runs::display_row(markdown_mode, &row.text, &row.runs)
+            })
         };
         let line_overflow = if code {
             push_code_wrapped(rows, width, &line, prefix, class)
@@ -1358,6 +1390,16 @@ fn markdown_part_row_spans(
     prefix: &str,
     actual: &[(String, ChatRowClass)],
 ) -> Vec<Vec<ChatRunSpan>> {
+    markdown_part_row_spans_mode(text, width, prefix, actual, crate::markdown_runs::MarkdownMode::Rendered)
+}
+
+fn markdown_part_row_spans_mode(
+    text: &str,
+    width: usize,
+    prefix: &str,
+    actual: &[(String, ChatRowClass)],
+    markdown_mode: crate::markdown_runs::MarkdownMode,
+) -> Vec<Vec<ChatRunSpan>> {
     let parsed = crate::markdown_runs::parse_part(crate::markdown_runs::PartKind::Prose, text);
     let prefix_cells = row_cells(prefix);
     let mut out: Vec<(Vec<ChatRunSpan>, Option<usize>)> = Vec::new();
@@ -1382,7 +1424,12 @@ fn markdown_part_row_spans(
         }
         let Some(source_row) = parsed.rows.get(index) else { return Vec::new(); };
         if source_row.code != code { return Vec::new(); }
-        let line = if code { expand_code_tabs(&sanitize_code(raw_line)) } else { sanitize(raw_line) };
+        let line = if code {
+            expand_code_tabs(&sanitize_code(raw_line))
+        } else {
+            let clean = sanitize(raw_line);
+            crate::markdown_runs::display_row(markdown_mode, &clean, &source_row.runs)
+        };
         let mut capped = false;
         if code {
             let prefix_eff = if width == 0 || prefix.len() < width { prefix } else { "" };
@@ -1409,7 +1456,7 @@ fn markdown_part_row_spans(
                 let row = truncate_row(&format!("{prefix}{fragment}"), width);
                 let rendered_cells = row_cells(&row);
                 if !dropped {
-                    match map_fragment_chars(&source_row.text, cursor, &fragment) {
+                        match map_fragment_chars(&source_row.text, &source_row.runs, cursor, &fragment, markdown_mode) {
                         Some((pairs, next_cursor)) => {
                             cursor = next_cursor;
                             spans = project_pairs(&source_row.runs, &fragment, &pairs, prefix_cells, rendered_cells);
@@ -1470,12 +1517,18 @@ fn code_row_chunks(line: &str, width: usize, prefix: &str) -> Vec<(String, usize
 
 /// Explicit mapping from sanitized source bytes to wrap-fragment bytes.
 /// Whitespace is consumed separately because prose wrapping collapses it.
-fn map_fragment_chars(source: &str, cursor: usize, fragment: &str) -> Option<(Vec<(usize, usize, usize)>, usize)> {
+fn map_fragment_chars(source: &str, runs: &[crate::markdown_runs::MarkdownRun], cursor: usize, fragment: &str, markdown_mode: crate::markdown_runs::MarkdownMode) -> Option<(Vec<(usize, usize, usize)>, usize)> {
     let mut pairs = Vec::new();
     let mut source_at = cursor.min(source.len());
     let mut frag_at = 0usize;
     loop {
         while let Some(ch) = source[source_at..].chars().next() {
+            if markdown_mode == crate::markdown_runs::MarkdownMode::Rendered
+                && concealed_delimiter_byte(source_at, runs)
+            {
+                source_at += ch.len_utf8();
+                continue;
+            }
             if !ch.is_whitespace() { break; }
             source_at += ch.len_utf8();
         }
@@ -1492,6 +1545,18 @@ fn map_fragment_chars(source: &str, cursor: usize, fragment: &str) -> Option<(Ve
         source_at += source_ch.len_utf8();
         frag_at += frag_ch.len_utf8();
     }
+}
+
+fn concealed_delimiter_byte(at: usize, runs: &[crate::markdown_runs::MarkdownRun]) -> bool {
+    runs.iter().any(|run| {
+        let marker = match run.kind {
+            crate::markdown_runs::RunKind::Bold => 2,
+            crate::markdown_runs::RunKind::Italic | crate::markdown_runs::RunKind::Code => 1,
+            crate::markdown_runs::RunKind::Link => return false,
+        };
+        (run.start.saturating_sub(marker)..run.start).contains(&at)
+            || (run.end..run.end.saturating_add(marker)).contains(&at)
+    })
 }
 
 /// A style is projected only when all characters of a display cluster map
@@ -1578,6 +1643,17 @@ fn typed_message_rows_with_prefix_spans(
     width: usize, message: &ChatMessage, separator: bool, prefix: Option<&str>,
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
 ) -> Vec<(String, ChatRowClass)> {
+    typed_message_rows_with_prefix_spans_mode(
+        width, message, separator, prefix, spans_out,
+        crate::markdown_runs::MarkdownMode::Rendered,
+    )
+}
+
+fn typed_message_rows_with_prefix_spans_mode(
+    width: usize, message: &ChatMessage, separator: bool, prefix: Option<&str>,
+    spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
+    markdown_mode: crate::markdown_runs::MarkdownMode,
+) -> Vec<(String, ChatRowClass)> {
     let mut rows: Vec<(String, ChatRowClass)> = Vec::new();
     if separator {
         rows.push((String::new(), ChatRowClass::Separator));
@@ -1603,7 +1679,7 @@ fn typed_message_rows_with_prefix_spans(
                     if message.role == ChatRole::User {
                         push_wrapped(rows, width, text, prefix, class);
                     } else {
-                        push_markdown_wrapped(rows, width, text, prefix, class);
+                        push_markdown_wrapped_mode(rows, width, text, prefix, class, markdown_mode);
                     }
                 };
                 let part_prefix = prefix.unwrap_or_else(|| text_prefix(message.role));
@@ -1621,7 +1697,7 @@ fn typed_message_rows_with_prefix_spans(
                     },
                 );
                 if message.role != ChatRole::User {
-                    for (offset, spans) in markdown_part_row_spans(text, width, part_prefix, &rows[before..]).into_iter().enumerate() {
+                    for (offset, spans) in markdown_part_row_spans_mode(text, width, part_prefix, &rows[before..], markdown_mode).into_iter().enumerate() {
                         if !spans.is_empty() { spans_out.push((before + offset, spans)); }
                     }
                 }
@@ -1636,7 +1712,11 @@ fn typed_message_rows_with_prefix_spans(
                 let display = text.replace("[REDACTED]", "");
                 let display = display.trim();
                 if !display.is_empty() {
-                    push_wrapped(&mut rows, width, display, "  ", ChatRowClass::Thinking);
+                    let before = rows.len();
+                    push_markdown_wrapped_mode(&mut rows, width, display, "  ", ChatRowClass::Thinking, markdown_mode);
+                    for (offset, spans) in markdown_part_row_spans_mode(display, width, "  ", &rows[before..], markdown_mode).into_iter().enumerate() {
+                        if !spans.is_empty() { spans_out.push((before + offset, spans)); }
+                    }
                 }
             }
             ChatPart::ToolCall { name, id } => {
@@ -1743,13 +1823,9 @@ fn typed_message_rows_with_prefix_spans(
                 // malformed/truncated facts plus all rows; message-budget
                 // overflow is computed here and OR-ed into the truncation
                 // fact. Never a second parse.
-                // The four-cell message inset is outside the diff surface;
-                // wrap against the measured remaining pane width so wide and
-                // combining Unicode clusters are not split by char count.
-                let rendered = crate::native_diff_view::paint_rows_with_gutter_wrapped(
+                let rendered = crate::native_diff_view::paint_rows_with_gutter(
                     diff,
                     crate::native_diff_view::MAX_DIFF_LINES,
-                    width.saturating_sub(4),
                 );
                 let total_rows = rendered.rows.len();
                 let malformed = rendered.malformed;
@@ -2038,7 +2114,7 @@ impl ChatView {
         busy: bool,
         appearance: &crate::native_box_style::BoxAppearance,
     ) -> Vec<StyledChatRow> {
-        self.render_styled_mode(width, height, workspace, messages, draft, busy, appearance, true).0
+        self.render_styled_mode(width, height, workspace, messages, draft, busy, appearance, true, self.markdown_mode).0
     }
 
     #[must_use]
@@ -2046,14 +2122,22 @@ impl ChatView {
         &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
         draft: &str, busy: bool, appearance: &crate::native_box_style::BoxAppearance,
     ) -> (Vec<StyledChatRow>, Vec<Vec<ChatRunSpan>>) {
-        self.render_styled_mode(width, height, workspace, messages, draft, busy, appearance, true)
+        self.render_styled_mode(width, height, workspace, messages, draft, busy, appearance, true, self.markdown_mode)
+    }
+
+    pub(crate) fn render_styled_with_spans_mode(
+        &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
+        draft: &str, busy: bool, appearance: &crate::native_box_style::BoxAppearance,
+        markdown_mode: crate::markdown_runs::MarkdownMode,
+    ) -> (Vec<StyledChatRow>, Vec<Vec<ChatRunSpan>>) {
+        self.render_styled_mode(width, height, workspace, messages, draft, busy, appearance, true, markdown_mode)
     }
 
     pub fn render_styled_without_prompt(
         &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
         busy: bool, appearance: &crate::native_box_style::BoxAppearance,
     ) -> Vec<StyledChatRow> {
-        self.render_styled_mode(width, height, workspace, messages, "", busy, appearance, false).0
+        self.render_styled_mode(width, height, workspace, messages, "", busy, appearance, false, self.markdown_mode).0
     }
 
     #[must_use]
@@ -2061,13 +2145,21 @@ impl ChatView {
         &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
         busy: bool, appearance: &crate::native_box_style::BoxAppearance,
     ) -> (Vec<StyledChatRow>, Vec<Vec<ChatRunSpan>>) {
-        self.render_styled_mode(width, height, workspace, messages, "", busy, appearance, false)
+        self.render_styled_mode(width, height, workspace, messages, "", busy, appearance, false, self.markdown_mode)
+    }
+
+    pub(crate) fn render_styled_without_prompt_with_spans_mode(
+        &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
+        busy: bool, appearance: &crate::native_box_style::BoxAppearance,
+        markdown_mode: crate::markdown_runs::MarkdownMode,
+    ) -> (Vec<StyledChatRow>, Vec<Vec<ChatRunSpan>>) {
+        self.render_styled_mode(width, height, workspace, messages, "", busy, appearance, false, markdown_mode)
     }
 
     fn render_styled_mode(
         &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
         draft: &str, busy: bool, appearance: &crate::native_box_style::BoxAppearance,
-        show_prompt: bool,
+        show_prompt: bool, markdown_mode: crate::markdown_runs::MarkdownMode,
     ) -> (Vec<StyledChatRow>, Vec<Vec<ChatRunSpan>>) {
         let requested_scroll = self.scroll.get();
         let height = height.min(MAX_VIEW_ROWS);
@@ -2139,12 +2231,13 @@ impl ChatView {
         if transcript_h > 0 {
             'messages: for (index, message) in messages.iter().enumerate().rev() {
                 let mut message_spans: Vec<(usize, Vec<ChatRunSpan>)> = Vec::new();
-                let message_rows = boxed_message_rows_spans(
+                let message_rows = boxed_message_rows_spans_mode(
                     width,
                     message,
                     starts_styled_group(index, messages),
                     appearance,
                     &mut message_spans,
+                    markdown_mode,
                 );
                 let mut dense = vec![Vec::new(); message_rows.len()];
                 for (row, spans) in message_spans {
@@ -2210,7 +2303,7 @@ impl ChatView {
         show_prompt: bool,
     ) -> Vec<StyledChatRow> {
         let scroll = self.scroll.get();
-        let mut rows = self.render_styled_mode(width, height, workspace, &[], draft, busy, appearance, show_prompt).0;
+        let mut rows = self.render_styled_mode(width, height, workspace, &[], draft, busy, appearance, show_prompt, self.markdown_mode).0;
         self.scroll.set(scroll);
         let body = rows.iter().position(|(_, class, _)| *class == ChatRowClass::Composer).unwrap_or(rows.len());
         let first = usize::from(body > 0);
@@ -2303,11 +2396,86 @@ mod tests {
         assert_eq!(spans.len(), rows.len());
         assert!(spans[0].is_empty());
         assert!(spans[1].is_empty());
-        assert_eq!(spans[2], vec![ChatRunSpan { start: 2, end: 6, flags: crate::markdown_runs::BOLD }]);
+        assert_eq!(rows[2].0, "bold word");
+        assert_eq!(spans[2], vec![ChatRunSpan { start: 0, end: 4, flags: crate::markdown_runs::BOLD }]);
         for (row, end) in [(3, 3), (4, 4), (5, 3)] {
             assert_eq!(spans[row], vec![ChatRunSpan { start: 0, end, flags: crate::markdown_runs::CODE | crate::markdown_runs::CODE_BLOCK }]);
         }
         assert!(spans[6].is_empty());
+    }
+
+    #[test]
+    fn source_mode_preserves_delimiters_and_rendered_mode_preserves_style_span_geometry() {
+        let message = ChatMessage::text(ChatRole::Assistant, "**bold** `code` *italic*");
+        let mut rendered = ChatView::new();
+        rendered.set_markdown_mode(crate::markdown_runs::MarkdownMode::Rendered);
+        let rendered_rows = rendered.render_styled_with_spans_mode(
+            40, 12, "ws", &[message.clone()], "", false,
+            &crate::native_box_style::BoxAppearance::default(),
+            crate::markdown_runs::MarkdownMode::Rendered,
+        );
+        let rendered_text = rendered_rows.0.iter().map(|(text, _, _)| text).find(|text| text.contains("bold"));
+        assert!(rendered_text.is_some_and(|text| !text.contains("**") && !text.contains('`')));
+        assert!(rendered_rows.1.iter().flatten().any(|span| span.flags & crate::markdown_runs::BOLD != 0));
+        assert!(rendered_rows.1.iter().flatten().any(|span| span.flags & crate::markdown_runs::CODE != 0));
+
+        let mut source = ChatView::new();
+        source.set_markdown_mode(crate::markdown_runs::MarkdownMode::Source);
+        let source_rows = source.render_styled_with_spans_mode(
+            40, 12, "ws", &[message], "", false,
+            &crate::native_box_style::BoxAppearance::default(),
+            crate::markdown_runs::MarkdownMode::Source,
+        );
+        assert!(source_rows.0.iter().any(|(text, _, _)| text.contains("**bold**") && text.contains("`code`")));
+        assert!(source_rows.1.iter().flatten().any(|span| span.flags & crate::markdown_runs::BOLD != 0));
+    }
+
+    #[test]
+    fn source_mode_keeps_escaped_literal_fence_and_user_literal_geometry() {
+        let escaped = "\\**literal** **bold**\n~~~\n**code**\n~~~";
+        let message = ChatMessage::text(ChatRole::Assistant, escaped);
+        let mut view = ChatView::new();
+        view.set_markdown_mode(crate::markdown_runs::MarkdownMode::Source);
+        let (rows, spans) = view.render_styled_with_spans_mode(
+            40, 16, "ws", &[message], "", false,
+            &crate::native_box_style::BoxAppearance::default(),
+            crate::markdown_runs::MarkdownMode::Source,
+        );
+        assert!(rows.iter().any(|(row, _, _)| row.contains("\\**literal**")));
+        assert!(spans.iter().flatten().any(|span| span.flags & crate::markdown_runs::BOLD != 0));
+        assert!(rows.iter().any(|(row, _, _)| row.contains("**code**")));
+
+        let user = ChatMessage::text(ChatRole::User, "**literal** `code`");
+        let (user_rows, user_spans) = ChatView::new().render_styled_with_spans_mode(
+            24, 8, "ws", &[user], "", false,
+            &crate::native_box_style::BoxAppearance::default(),
+            crate::markdown_runs::MarkdownMode::Rendered,
+        );
+        assert!(user_rows.iter().any(|(row, _, _)| row.contains("**literal** `code`")));
+        assert!(user_spans.iter().flatten().all(|span| span.flags & (crate::markdown_runs::BOLD | crate::markdown_runs::CODE) == 0));
+    }
+
+    #[test]
+    fn narrow_source_rows_reconstruct_delimiters_and_bound_mapped_spans() {
+        let mode = crate::markdown_runs::MarkdownMode::Source;
+        for width in [10, 12] {
+            for text in ["**bold**`code`*italic*", "\\**literal**", "é**界**`code`"] {
+                let mut rows = Vec::new();
+                push_markdown_wrapped_mode(&mut rows, width, text, "", ChatRowClass::AssistantCard, mode);
+                if crate::native_view_layout::visit_unpadded_cells(text, text.len(), |_, _| {}) > width {
+                    assert!(rows.len() > 1, "over-width fixture must wrap");
+                }
+                assert_eq!(rows.iter().map(|(row, _)| row.as_str()).collect::<String>(), text);
+                let spans = markdown_part_row_spans_mode(text, width, "", &rows, mode);
+                for (index, (row, _)) in rows.iter().enumerate() {
+                    let cells = crate::native_view_layout::visit_unpadded_cells(row, row.len(), |_, _| {});
+                    assert!(cells <= width);
+                    for span in &spans[index] {
+                        assert!(span.start < span.end && usize::from(span.end) <= cells);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -2335,10 +2503,12 @@ mod tests {
         assert_eq!(rows.len(), 4);
         assert!(!spans[0].is_empty());
         assert!(spans[0].iter().all(|span| span.flags & crate::markdown_runs::CODE != 0 && span.flags & crate::markdown_runs::CODE_BLOCK != 0));
-        assert_eq!(spans[3], vec![ChatRunSpan { start: 2, end: 3, flags: crate::markdown_runs::BOLD }]);
+        assert_eq!(rows[3].0, "a");
+        assert_eq!(spans[3], vec![ChatRunSpan { start: 0, end: 1, flags: crate::markdown_runs::BOLD }]);
         rows.clear();
         push_markdown_wrapped(&mut rows, 40, "**b**", "", ChatRowClass::AssistantCard);
-        assert_eq!(markdown_part_row_spans("**b**", 40, "", &rows)[0], vec![ChatRunSpan { start: 2, end: 3, flags: crate::markdown_runs::BOLD }]);
+        assert_eq!(rows[0].0, "b");
+        assert_eq!(markdown_part_row_spans("**b**", 40, "", &rows)[0], vec![ChatRunSpan { start: 0, end: 1, flags: crate::markdown_runs::BOLD }]);
         let linked = "see [x](https://example.test)";
         rows.clear();
         push_markdown_wrapped(&mut rows, 40, linked, "  ", ChatRowClass::ToolResult);
