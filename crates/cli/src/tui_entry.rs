@@ -1039,6 +1039,155 @@ fn apply_history_window(window: &crate::native_chat_projection::NativeHistoryWin
     transcript.reset(lines, crate::native_chat_projection::project_history(window.messages()));
 }
 
+/// Resize the live native frame using the next frame's exact tab reservation,
+/// preserving a browsing transcript's semantic rendered-row anchor.
+#[cfg(feature = "native")]
+fn resize_tab_reservation(orientation: TabOrientation, cols: u16, rows: u16) -> TabReservation {
+    TabReservation::for_view(orientation, cols, rows)
+}
+
+/// Resize the live native frame using the next frame's exact tab reservation,
+/// preserving a browsing transcript's semantic rendered-row anchor.
+#[cfg(feature = "native")]
+fn resize_chat_preserving_anchor(
+    view: &mut crate::native_view::NativeView,
+    cols: u16,
+    rows: u16,
+    next_tab_reservation: TabReservation,
+    messages: &[crate::native_view_chat::ChatMessage],
+    draft: &str,
+    preserve: bool,
+) -> bool {
+    if !preserve {
+        view.resize(cols, rows);
+        view.set_tab_reservation(next_tab_reservation);
+        return false;
+    }
+    let entries: Vec<(String, crate::native_view_chat::ChatMessage)> = messages
+        .iter()
+        .enumerate()
+        .map(|(index, message)| (format!("entry-{index}"), message.clone()))
+        .collect();
+    let anchor = view.chat_rendered_anchor(&entries);
+    view.resize(cols, rows);
+    // Paint installs this exact reservation for the same next frame.
+    view.set_tab_reservation(next_tab_reservation);
+    match anchor {
+        Some(anchor) => view.restore_chat_rendered_anchor(&entries, &anchor),
+        None => false,
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod resize_anchor_tests {
+    use super::*;
+    use crate::native_view_chat::{ChatMessage, ChatRole};
+
+    fn wrapped(marker: &str, count: usize) -> ChatMessage {
+        let mut text = marker.to_owned();
+        while text.chars().count() < count {
+            text.push_str(" wrap");
+        }
+        ChatMessage::text(ChatRole::Tool, text)
+    }
+
+    #[test]
+    fn resize_restores_identity_and_intra_message_row_with_reservation() {
+        let mut view = crate::native_view::NativeView::new(150, 32);
+        view.set_session_route(true);
+        view.set_tab_reservation(resize_tab_reservation(TabOrientation::Vertical, 150, 32));
+        let messages = vec![
+            ChatMessage::text(ChatRole::User, "P14-ANCHOR\n".repeat(48)),
+            wrapped("P14-FOLLOWING", 220),
+        ];
+        let _ = view.render_typed("", &messages, false, &[]);
+        let prefix_rows = view.chat_message_rows(&messages[..1]);
+        let total_rows = view.chat_message_rows(&messages);
+        view.scroll_up(total_rows.saturating_sub(prefix_rows));
+        assert!(prefix_rows >= 32, "anchor message must exceed the transcript viewport");
+        let _ = view.render_typed("", &messages, false, &[]);
+        let entries: Vec<(String, ChatMessage)> = messages.iter().enumerate()
+            .map(|(i, message)| (format!("entry-{i}"), message.clone())).collect();
+        let captured = view.chat_rendered_anchor(&entries).expect("browsing anchor");
+        assert_eq!(captured.id, "entry-0");
+        let captured_row = captured.row;
+        let next = resize_tab_reservation(TabOrientation::Vertical, 100, 32);
+        assert_eq!(next.orientation, Some(TabOrientation::Horizontal));
+        assert!(resize_chat_preserving_anchor(&mut view, 100, 32, next, &messages, "", true));
+        let _ = view.render_typed("", &messages, false, &[]);
+        let restored = view.chat_rendered_anchor(&entries).expect("restored anchor");
+        assert_eq!(restored.id, captured.id);
+        assert_eq!(restored.row, captured_row);
+        let prefix = view.chat_message_rows(&messages[..restored.index]);
+        let total = view.chat_message_rows(&messages);
+        let expected_scroll = total.saturating_sub(prefix + captured_row + 1);
+        assert_eq!(view.chat_scroll_offset(), expected_scroll);
+        assert_eq!(view.tab_reservation(), next);
+    }
+
+    #[test]
+    fn resize_without_browsing_anchor_preserves_tail_and_installs_reservation() {
+        let mut view = crate::native_view::NativeView::new(150, 32);
+        view.set_session_route(true);
+        let messages = vec![wrapped("P14-TAIL", 220)];
+        let _ = view.render_typed("", &messages, false, &[]);
+        let next = resize_tab_reservation(TabOrientation::Vertical, 100, 32);
+        assert_eq!(next.orientation, Some(TabOrientation::Horizontal));
+        assert!(!resize_chat_preserving_anchor(&mut view, 100, 32, next, &messages, "", false));
+        assert_eq!(view.chat_scroll_offset(), 0);
+        assert_eq!(view.tab_reservation(), next);
+    }
+
+    #[test]
+    fn resize_restores_anchor_when_tab_reservation_height_changes() {
+        let mut view = crate::native_view::NativeView::new(150, 32);
+        view.set_session_route(true);
+        let old = resize_tab_reservation(TabOrientation::Horizontal, 100, 32);
+        view.set_tab_reservation(old);
+        let messages = vec![
+            ChatMessage::text(ChatRole::User, "P14-HEIGHT-ANCHOR\n".repeat(48)),
+            wrapped("P14-HEIGHT-FOLLOWING", 260),
+        ];
+        let _ = view.render_typed("", &messages, false, &[]);
+        let prefix_rows = view.chat_message_rows(&messages[..1]);
+        let total_rows = view.chat_message_rows(&messages);
+        view.scroll_up(total_rows.saturating_sub(prefix_rows));
+        assert!(prefix_rows >= 32, "anchor message must exceed the transcript viewport");
+        let _ = view.render_typed("", &messages, false, &[]);
+        let entries: Vec<(String, ChatMessage)> = messages.iter().enumerate()
+            .map(|(i, message)| (format!("entry-{i}"), message.clone())).collect();
+        let captured = view.chat_rendered_anchor(&entries).expect("browsing anchor");
+        assert_eq!(captured.id, "entry-0");
+        let captured_row = captured.row;
+        let next = resize_tab_reservation(TabOrientation::Vertical, 150, 24);
+        assert_eq!(next.orientation, Some(TabOrientation::Vertical));
+        assert!(resize_chat_preserving_anchor(&mut view, 150, 24, next, &messages, "", true));
+        let _ = view.render_typed("", &messages, false, &[]);
+        let restored = view.chat_rendered_anchor(&entries).expect("restored anchor");
+        assert_eq!((restored.id.as_str(), restored.row), ("entry-0", captured_row));
+        assert_eq!(view.tab_reservation(), next);
+    }
+
+    #[test]
+    fn resize_empty_or_zero_height_fails_closed_without_anchor() {
+        let mut view = crate::native_view::NativeView::new(100, 24);
+        let zero = resize_tab_reservation(TabOrientation::Vertical, 100, 0);
+        assert_eq!(zero, TabReservation::default());
+        assert!(!resize_chat_preserving_anchor(&mut view, 100, 0, zero, &[], "", true));
+        assert_eq!(view.tab_reservation(), zero);
+        assert_eq!(view.chat_scroll_offset(), 0);
+    }
+
+    #[test]
+    fn resize_short_height_and_empty_projection_fail_closed() {
+        let mut view = crate::native_view::NativeView::new(150, 32);
+        let short = resize_tab_reservation(TabOrientation::Vertical, 100, 1);
+        assert_eq!(short.orientation, Some(TabOrientation::Horizontal));
+        assert!(!resize_chat_preserving_anchor(&mut view, 100, 1, short, &[], "", true));
+        assert_eq!(view.tab_reservation(), short);
+    }
+}
+
 fn preview(text: &str) -> String {
     if text.chars().count() <= LIVE_PREVIEW_CHARS {
         text.to_owned()
@@ -5027,7 +5176,25 @@ fn native_loop(
                 );
                 renderer.resize(size.0, size.1)?;
                 observed_size = size;
-                view.resize(size.0 as u16, size.1 as u16);
+                let next_orientation = match navigation.orientation() {
+                    crate::native_navigation::TabOrientation::Horizontal => TabOrientation::Horizontal,
+                    crate::native_navigation::TabOrientation::Vertical => TabOrientation::Vertical,
+                };
+                let next_tab_reservation = resize_tab_reservation(
+                    next_orientation,
+                    size.0 as u16,
+                    size.1 as u16,
+                );
+                let preserve_anchor = session_route && history_browsing && !view.chat_at_tail();
+                resize_chat_preserving_anchor(
+                    &mut view,
+                    size.0 as u16,
+                    size.1 as u16,
+                    next_tab_reservation,
+                    &transcript.messages,
+                    &draft,
+                    preserve_anchor,
+                );
                 needs_paint = true;
             }
         }
