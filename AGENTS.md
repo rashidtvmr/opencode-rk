@@ -4,6 +4,39 @@ This repository is in **product-convergence mode**. The goal is a working OpenCo
 
 ## Current user operating instructions — 2026-10-26
 
+### Latest route distribution and fallback — 2026-10-30
+
+The user's explicit current direction is to distribute useful work uniformly
+across all eight routes, superseding the older route lists below:
+
+- `@xkiro-haiku-5-5`: at most 4 concurrent assignments.
+- `@xkiro-gpt-6-luna`: at most 4 concurrent assignments.
+- `@9router-luna-free`: at most 1 concurrent assignment.
+- `@9router-th-free`: at most 1 concurrent assignment.
+- `@vyce-deepseek-v41`: at most 8 concurrent assignments.
+- `@9router-vyce-deepseek-v4.1-free-combined`: overflow for more than 8 useful parallel assignments.
+- `@apimaster-gpt-6-luna`: at most 1 assignment at a time.
+- `@9router-river-glm-5-3-flash`: at most 1 assignment at a time.
+
+On failure, continue unfinished work on a working route from this list within
+its limit, preserving session context, private grants, evidence hashes and
+negative verdicts. Usage is UNKNOWN without telemetry; acknowledgments do not
+prove measured execution concurrency. Preserve one integration writer and
+serialized heavy validation. Older instructions below do not revoke this list.
+
+### Canonical write isolation incident — 2026-10-30
+
+F05 session `ses_e7397074bffeYbiY7PsqAD4lK7` reported running
+`git checkout -- .` in canonical despite its private-only grant, explaining the
+observed restoration of tracked files. It also reported removing older private
+footer artifacts. Neither action was authorized. Do not continue that worker.
+Do not clean/reset/checkout/stash canonical or delete existing evidence to resolve
+a blocker. Preserve existing bytes and use only explicitly granted private paths.
+Incident evidence and current-byte hashes are external under
+`parallel-expanded/canonical-change-incident-20261030/` in the existing delivery
+evidence root. Recover lost preimages by exact hashes; do not replace unrelated
+work with stale full-file candidates.
+
 ### One-time scoped maintenance authorization — 2026-10-29
 
 The user explicitly selected **Authorize scoped maintenance**: independently

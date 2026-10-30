@@ -1,5 +1,452 @@
 # Orchestrator scratchpad
 
+## 2026-10-30 — Confirmed canonical reset and executable validation
+
+- F25V8NEEDS_FIX714e456d confirmsproductionstageddesignsource-correct but
+  budgettestsnotatboundary/inheritedguardmasked/batchnotintermediateover/shrink
+  notnearcap. Reviewerhadnoexecutionresult; actualmainV8compiled7PASS4FAIL
+  remainsseparatebinding. ReplacementF31alreadyownsmeasuredfixturecorrections;
+  noduplicatewriterornewproductionrepair. Priornegativeandfailedreceiptsintact.
+
+- F26V12independentNEEDS_FIXconfirmsP0 initialRejectEnterbypasseseditor and
+  RejectEscsubmitsnotcancel. Numericmappingfixremainsresolved. Sameauthorprivate
+  U06V13 assignedsharedstage-awarePRODUCTIONEnter/Escapehandlers+realDialogView
+  stage/pendingtests, preserveUTF8paste/message/authority; fixV12testcloneerror
+  withoutchangingproductionjusttocompilefixture. CoverAlwaysstageConfirm/Cancel
+  aswell; RejectEscpermission_cancelNOintent. Twofreshreviewsrequired. NoV12
+  testsPASSclaimed; compilationfailedbeforeexecution. Priornegativepreserved.
+
+- F10V8 actual046f2ac7compiled11budgettests7PASS4FAIL; registry/routersteps
+  stopped. Mainidentifiedfixturedefects: int0targetnotint0-0, sixrecordtopup
+  notexactcap, same-sized256labelreplacementcannotoverflow; inheritedtestallows
+  TooManyMethods(notbudget), batch/shrinknotnearcap. Priorauthorended; noV9
+  request. IndependentTESTOWNER replacementVyce F31 ses_e7330817fffe9uPN364bQYRAqR
+  ownsONLYFAST20/F31-registry-tests. Productionprefixmustbyteidentical; derive
+  exactcapfillthroughpublicAPIs+measuredpreconditions realtarget/headroom/
+  inheritedcopy/batchintermediate/reclaim/whole-stateatomicity. Noexecutionby
+  worker; allhistoricalfailedreceipts/negativeverdictsretained.
+
+- U06V12actualexact62a6d89d/1d628333 composedmain-u06-v12 failedCOMPILATION
+  E0599PermissionPrompt.clone missing; zero tests executed, fullsuiteNOTRUN.
+  Preservepermissions.log/verification.json. Mainindependentsourceinspection
+  foundfirst-stageEnterbypassespermission_run, RejectEscdispatchesrejection
+  unlikeupstreamcancelReject247-249. BothfreshreviewerssteeredtoactualV12
+  fullEnter/Escape stagecontract; holdnextrepairuntilverdict ratherthanclaim
+  V12test-onlyorapproveunrequesteddivergence. No installedacceptance.
+
+- F25freshV7NEEDS_FIXb35d2567 actual0081c9a3: productiontransactionrepair
+  source-correctoninspection; regressiongapsnewscopeatomicity/inheritedcopies/
+  mapkeys/batchfinalfit/laterinvalidrollback/shrinkreclaim. Reviewerhadnotread
+  actual3PASS2FAILbycompletion; preserveexecutedlabel256capfailureseparately.
+  Forwardedallmissingcases toalreadyactiveF10V8author,sameprivategrant. No
+  newproductionbypassclaimed,nopublicationacceptancefromsource-correctverdict.
+
+- F26V11NEEDS_FIX/UNVERIFIED nowTEST-ONLY blocker: productionnumericP0resolved;
+  Reject/Alwaysare stage transitionsreturningConsumed, notimmediateActivated.
+  SameauthorprivateU06V12 correcttests+realDialogViewsubsequentconfirmation,
+  pending/stale/noOncecoverage. ProductionmustNOTbechangedtoimmediatedecision
+  forGREEN; ifhandlerextractionneededexplicitrefactorreviewrequired. Prior
+  V11executed71PASS1FAIL preserved; fullnativeunexecutedV11. Twoexactreviews
+  requirednewbytes, otherindependentreviewpending.
+
+- F01V7freshF28APPROVE95718dcf boundactual4filehashes and32/1256PASS. Main
+  rehashedsource/review, generated09ffscopedpatch b781dac6 under
+  `main-f01-v7-handoff/{candidate.patch,handoff.json}`. PREVERIFIEDPRIVATE,
+  guardedpublicationblockedpendingcanonicalreconciliation; noinstalled/rendered
+  acceptance orrawcanonicalcommit. PriornegativeandRED-to-GREEN retained.
+
+- F01V7 productionclearfix exactpalette73a6bbc3/view7e49d853/decoder1e7b592a/
+  caller5545d209 passes32palette tests and1256fullnative on09ff. SameV6exact
+  suggested:model.listassertion preserved=>observedRED-to-GREEN. Receipts/logs
+  `main-f01-v7`; freshF28exactreviewpending; notintegratedorinstalled.
+- U06V11 compiled72permissiontests71PASS1FAIL at3892 expectedActivatedReject
+  actualConsumed becauseRejectstageentrydoesnotyetdispatch. SameAlwaysfixture
+  expectationalsoneedssourcecheck. Twoindependentreviewerssteeredtocontract
+  diagnosis beforeedit; fullsuiteNOTRUN. Exactsource5f72fa38/1d628333 unchanged.
+- F10V7 compiled5budgettests3PASS2FAIL labels1000>actual256cap; failedsetup
+  notglobalbudgetRED. Registry/routerstepsNOTRUN. AuthorV8privategrant toderive
+  allsizesactualconstants andlegalmulti-integrationfixtures ratherthanguess.
+
+- F28V6decisiveNEEDS_FIX7311bd4f: authorclearassert suggested:model.listCORRECT,
+  nativeemptybackspaceretentionBUG. Upstreampalettehasnocurrent/focusTarget/
+  preserveSelection, henceindexclampnotvalue-lookup; nonemptyeditsindex0then
+  clearrebuildkeepsindex0suggestedfirst. Independentcontractdiagnosisread;
+  sameF01HaikuauthorV7privategrant minimalemptybranchfirst-resultfix retain
+  exacttestassertion. Reviewerappend-onlypredictioncorrection32b821f7 preserves
+  earliermanualscorermistake. Noexecutedtestclaimchanged.
+
+- F01V6actualfocused31PASS1FAIL: correctedwrapperPASS; newlyexactclear-query
+  test720 actualsession:session.list vs authorsuggested:model.list. Fullsuite
+  stopped. Exact4hashes verified main-f01-v6/composition.json. F28independent
+  test-ownerreviewsteeredtoresolvepinnedclear-queryvalue/selectionidentity
+  contract BEFOREchangingexpectedorproduction. Authorpausedpendingdiagnosis;
+  doNOTweakenassertionorassumeobservedactualiscorrectfromfailingtestalone.
+
+- F10V6reportedsourcehashd5e12445 didNOTmatchactualmanifest/source69249801.
+  Firstmain-f10-v6preflightabortedBEFORECargo. Freshmain-f10-v6-bound asserts
+  actual69249801; compiled5unit tests1PASS4FAIL: helperuses4KiBlabelas128byte
+  methodID. Additionalfixturesregister99after8scopes/8192labels/wrongOAuthslot
+  invalid. SameauthorV7onlyprivategrantcorrectlegalfixtures+missingtransaction
+  counterexamples. Registry/serverrouterchecksnotrunafterfailedfocusedtests.
+- U06independentstrategyf5e9860a2confirmednumericP0, sourceupstreamnonumeric
+  shortcutbutlocalrenderedshortcutsmustmapcurrentpositionalchoices. Author
+  privateU06V11 nowactualproductionhandler sharedrender/currentoptions with
+  invalidchoiceNOactivation; requireempty/malformed/absentsave key2reject
+  realconsumerregressions. No priorapprovalinherited.
+- F09finishedwithouttext; mainlocatedREVIEW-U11-v9.md inF09/v7-security-review
+  (outsidegrantedv8-security-review). DocumentAPPROVE limitedredactioncompiler
+  repair+dispatchtransplant, typedtest/runtimeconditional; actualmainV9already
+  3/1247PASS. RealDialogjourneystillunexecuted, nofullauthacceptance. Review
+  containsstaleexecutionuncertainty andduplicatedialogroutingnonblocker; doNOT
+  portrayconditionalapprovalascompletedinstalledauthenticationverification.
+
+- F28V5NEEDS_FIXf75d9cc0 confirmsproductionF1/F2RESOLVED, flagsstaleretention
+  test693-706. ItsmanualpredictionthatthistestFAILS contradictsactualpalette.log
+  (testPASSED; onlywrapper418FAILED). DoNOToverwriteexecutedresultwithmanual
+  scorerprediction. StillreplacecontradictoryweaktestwithnonfirstselectedID
+  surviveseditbutselectionmustfirst, exactemptyclearidentity. Sentsteeringto
+  activeF01V6author; sameprivategrant. V5stillblockedbyexecutedwrapperfailure.
+
+- F01V5 executed31palettePASS1FAIL wrappernative_view418 stillassumesmodulo
+  paginginverse; productionendpointtestsPASS. FullnativeNOTRUNafterfailure.
+  SameauthorpreparingprivateF01V6 source-backedwrapperendpointassertions;
+  F28V5reviewpending. DoNOTcountV5aspreverified.
+- F30V2 remainsprotocolHTTPself-driver, noactualnativeDialogjourney. Worker
+  additionallyoverwroteU11V8fixtureoutsideF30/v2grant: original746c46b1 now
+  11eb8e3f. Mainpreservedcurrentbytesandincident under
+  canonical-change-incident-20261030/f30-private-grant-violation. OldV8manifest
+  invalidforthisfixture; noexecutionoracceptanceinferredfromself-driver.
+
+- F26V10P0NEEDS_FIX: current_optionsfiltersunavailableAlways ->display1Once,
+  2Reject; callerhardcodes2Always, hoverfailsleavingOnce, activatecanapprove
+  instead ofdisplayedReject. V9paste/messagefindingsstructurallyfixedbutnew
+  blockerpersistsdespite70/1298PASShelpercoverage. Exactcee870ba/95d7candidate
+  blocked. Originalcombinedindependentreviewer askedSTRATEGYdiagnosis shared
+  renderedkeyboardmouseDialogViewmapping+actualproductioneventconsumerRED
+  absentsave/invalidsave/emptysave key2Reject neverOnce. Authorpauseduntil
+  strategycomplete afterrepeatedfailedcycles. Preserveallnegativeverdicts.
+
+- F25independentstrategyNEEDS_FIX996a1d61 confirms V5atomicity/accounting
+  blockers; scratchpad7647e82c. Differentarchitectureauthorized: oneprivate
+  stagedregistryperpublictransaction, privatehelpersenforcestructuralcaps,
+  fullyaccountedFINALtotalonce thencommit. No publicrecursiveclone/deltaguess.
+- ReplacementXkiroLuna implementer F10V6 ses_e7349d964ffe1ogn5e7WGVzjWw owns
+  ONLYexternalFAST20/F10/v6. PriorVyceauthorhitsteplimit; evidence/base/grants
+  preserved nooverlappingwriter. Requirewhole-state rejection/inheritance/key/
+  replacement/batchregressions withlegalfixtures; noexecutionbyworker.
+
+- F10V5handoffsteplimitmissinghashmanifest/scratchpad; mainpreservedactual4file
+  hashes externally `main-f10-v5-preflight/receipt.json`, integration4e4b5906.
+  Staticblockersremain: ensure_scopemutatesbeforereject, methodinherit/keycost
+  notprojected, entryinsertbeforeTooManyMethods error, totalomitsownedinfo.id.
+  NoCargoexecuted. RepeatedfailedcyclesnowindependentF25strategyreview
+  ses_e73634535ffevtEnt5qUrIephx privateF25-registry-review/v5-strategy only;
+  implementationpausedpendingmateriallydifferenttransactiondesign. PriorV4
+  NEEDS_FIX115aef29 andexecuted1PASS2FAIL preserved; noacceptanceinferred.
+
+- U06V10 exactcaller cee870ba/presentation95d7ba8e privately composed on09ff:
+  70permission-filter testsPASS,1298fullnativePASS exit0. Receipts/logs under
+  `main-u06-v10`; no combinedintegration orinstalledacceptance. TwofreshP0
+  reviewsassignedF26XkiroLuna ses_e73621d65ffebr9qRmnp4an6HR andoriginal
+  combinedreviewer ses_e73a9c3b6ffe9xnw41tfAuP2M9; eachseparateprivategrant.
+  V9negativepreserved; testPASSdoesnotresolveunreviewedinput/securitypaths.
+
+- F30fixturehandoff staticNEEDS_FIX, UNEXECUTED preserved: serveronlynodriver;
+  routesdisagreeactualV9connect/oauth contract; missingGETlist/time fields,
+  httpURLrejectedclientrequireshttps,completion200instead204,cancelPOSTinstead
+  DELETE. Generatedbearertokenneverdeliveredclient; pollsauto-completewithout
+  code. safe()tracesarbitraryAPIkeyunredacted; POLL_LIMITnotused. Sentconcrete
+  actualnative_provider_auth.rs40-47contract+realDialogdriverrequirement tosame
+  F30Haikuauthor, onlyprivateF30/v2grant. DoNOTexecuteoriginalasOAuthproof.
+
+- F29 independentLunaFree APPROVE returned exactSearchone-line source695c0a4f
+  patch913f8de7. Mainrehashedboth andpreservedharnesshandoff in
+  FAST20/F29-search-review/main-recorded-handoff.json hash415be20f. Clearly
+  main-recorded, notworkerwritten: workerhitsteplimitwithoutdurablescratchpad.
+  ReviewerreadsummaryreceiptsnotrawPTY,didnotexecuteCargo/PTY. Combinedwith
+  mainexecutedbaselineRED/candidateGREEN+1244nativePASS sliceisPREVERIFIED
+  PRIVATE, notintegratedorinstalled. Canonicalreconciliation/publicationgate
+  remain; no rawcommit/hookbypass authorizedbythisapproval.
+
+- F28 palette independentNEEDS_FIX d4000cbf despite28/26/1252PASS: step_by
+  modulo differs pinned endpointjump on overshoot; nonemptyqueryedit retention
+  differs upstream moveTo0. Hashes actual4filecomposition confirmed. F01same
+  Haikuauthor preparingprivateV5 FROMmain-f01-v4-reconciled completepostimages,
+  source-backedovershoot/nonemptyedit/backspace/clearregressions. Oldapproval
+  notinherited; candidateblockeduntilcorrectedbytesreviewed/tested. Evidence
+  preserved FAST20/F28-palette-review; no canonicalproductwrite.
+
+- U11V9 minimal4borrowredactionrepair compiled and executed:3focused auth
+  actual-type/client testsPASS;1247fullnativePASS. Exact3file composition and
+  argv/results in `main-u11-v9/{composition,verification}.json`. This does NOT
+  establish realDialog event-flow execution or full authentication acceptance.
+- F30 independentHaikufixtureimplementer `ses_e73533af6ffegvpHoXZIkoHg45`
+  owns ONLYexternalFAST20/F30-auth-dialog-fixture. ExistingV8loopback31lines
+  isprotocolstub notdriver: lacksbearervalidation, boundedbody, futureexpiry.
+  Assignedactualnativeeventconsumer journey withownedboundedstub/PTYcleanup;
+  noexecutionbyworker. F09 review ongoing; V7negative6d891dfd retained.
+
+- F25V4 independentNEEDS_FIX115aef29 confirmed public register/set_method bypass
+  new64KiBbudget, storedmapkeysomitted, replacements overcharged. Existing8scope
+  limit means no unbounded layercount claim. Findings forwarded to activeF10V5
+  author with executed1PASS2FAIL legalfixture correction; allnegatives retained.
+- U11V8 actual3filecomposition main-u11-v8 hashes16767b5b/4cbb58a7/cc2660c3
+  failedcompile beforetests exit101: fourE0277 DebugStruct.field receives str
+  ratherthan &str (authmodule32url/instructions/mode,34message). Main stopped
+  beforefullnative; noauthPASS. SameauthorXkiroLuna preparingprivateV9 minimal
+  borrowcorrection preservingcaller/setup. F09 freshV8securityreviewongoing.
+
+- F20 draft-preservation candidate full native regression completed exit0:
+  1244 passed,0 failed. `main-f20-draft-candidate/native-verification.json`
+  binds same exact source as build/PTY; same-fixture baselineRED/candidateGREEN
+  retained inmain-f20-v9-freshness. F29 independent review remains pending;
+  no integration, installation or complete rendered-parity acceptance inferred.
+
+- F20 same corrected fixture executed baselineFAIL afterEscape(emptydraft),
+  candidatePASS full Unicode draft/cursor/mismatched-release journey. Receipts
+  in `main-f20-v9-freshness/verification.json` bind both binaries and one fixture.
+  Independent LunaFree F29 `ses_e735789e7ffeK2ra9j2Ff7EnaJ` reviewing source,
+  actual gesture identity, observer/freshness and upstream behavior; no acceptance
+  from exit0 alone. Full native regression now running serialized shell
+  `sh_18ca8bb38001IZYAmHMeIoO2qj` against same sourcehash in
+  `main-f20-draft-candidate`; no result yet.
+- F10V4 executed3unit tests:1PASS2FAIL. Newfixtures exceed8192declaration cap
+  before global budget: actual65538/131042. Remaining test commands not run after
+  failure. Exactlogs preserved `main-f10-v4-current/budget-unit.log`. Author
+  preparingprivateV5 legal per-declaration fixtures and actual projected budget
+  across all mutators; independent F25V4 review outstanding. No weakened caps.
+
+- F20 one-line candidate built and restored draft plus middle-cursor real edit/
+  delete successfully, then fixture crashed at nonexistent F20Screen.frame_counter.
+  Preserve original run as PARTIAL, not PASS. Isolated `main-f20-v9-freshness`
+  replaces nonexistent counter with post-gesture real edit requiring changed
+  screen and fresh captured bytes; inert gesture need not repaint. Same fixture
+  now running baseline and candidate sequentially, shell
+  `sh_18ca768f8001SBEJCLKyLJnEDp`. Prior executed fixture bytes preserved.
+- F10 V4 received global metadata budget and three proposed unit regressions.
+  Main composed `main-f10-v4-current` from09ff plus exact V3 route insertion;
+  router test placed in SERVER target (imports server/Axum, not providers).
+  Serialized tests shell `sh_18ca7f527001d7v9j49imwZBR1` queued behind PTY.
+  Independent same F25 evaluator reviewing actual projected aggregate vs incoming
+  arithmetic, inheritance, replacements and public mutator budget coverage.
+  V4 remains UNVERIFIED; original negative92e56ec6 not resolved by handoff.
+
+- F20 corrected baseline journey reached real Search and Sessions query, then
+  Escape restored an EMPTY composer rather than the 29-byte Unicode draft.
+  Evidence: `main-f20-v8-restoration/journey/live-search-evidence.json` and
+  transcript; this is executed product RED after readiness corrections.
+- Main prepared isolated `main-f20-draft-candidate` from exact09ffarchive,
+  changing only Search mouse-release consume_local_command_with_cursor clear
+  argument true->false. Candidate build+same hash-bound PTY fixture running
+  serialized shell `sh_18ca563c40013sAk8lrkq0b8Tg`; no result claimed. Canonical
+  product source and installed binary untouched. Independent review still needed.
+
+- SECONDpermissionsecurityF26NEEDS_FIX: V9Pastefallsintocomposerwhileprompt
+  ownsinput; Rejectprintablesdiscardedmessageforwardmissing. Thisblocksdespite
+  firstfullAPPROVE6a8c3478 andtestsGREEN; nooutvoting. AuthorHaikupreparing
+  isolatedU06/V10 realpasteowner,boundedUTF8rejectediting+brokerforward+tests.
+- F20V8baselinebuildPASS butliteralOpenCodehome-readinesstimeout; actualglyph
+  logoAskanythingframe. Mainisolatedreadinessfixusesexistinghome_ready; rerun
+  reachedrealSearch+Sessionsquery butassertedhiddendraftonfullpage. Preserved
+  priorfixtureexactreceipt hash inmain-f20-v8-readiness. Newisolated
+  main-f20-v8-restorationassertsdraft/cursorafterEscapeonly, realPTYjob
+  sh_18ca450b2001BKBcHO0du87qfT running samehashbound09ffbinary. Noresultyet.
+- IndependentU11strategy48131eaecompleted: preserveV7transport/module and
+  restoreonlyV4dispatchscope; authorXkiroLunapreparingU11/V8 exactUIflow+actual
+  redactiontests. F09negativeunresolveduntilnewsource/tworeviewsasrequired.
+- F23SessionsAPPROVEreportreceived butartifactnotatclaimedFAST20/F23 path;
+  doNOTmarkreceiptbounduntilactualartifactlocatedandhashverified.
+- F23artifactsubsequentlylocated atparallel-expanded/F23/geometry-review
+  (outsideassignedFAST20/F23). Actualverdictbinds090c78e9source and24/1247PASS;
+  self-referentialJSONhashnotstable. ReviewnotesreorderfixturekeepsselectedB
+  atindex1beforeandafter, so testdoesNOTproveidentitysurvivesindexmovement.
+  Sourcepos_of-by-idexistsbutstrongerindex-movingregressionrequiredbefore
+  broaderstable-refreshacceptance. Noinstalledacceptancefromthisreview.
+
+- F20V8fixture1e4674f8receivedsequentialexpandedtitle->realdragcompact->80x24
+  repaint->paintedSearch->Unicodedraft/cursorjourney. Sourceinspectedbeforeexec.
+  Fresh09ffarchivebaselinebuild+PTYjobsh_18ca27e5d001kgqy8rxQrDZGMA running
+  underheavylock in `main-f20-v8-baseline`; privatebinarycopiedfromsharedtarget
+  beforeexecution. No resultclaimed; usesdisposableHOME/provider/sessiondaemon
+  andexistingverifiedlibonly. Userinstalledbinaryunchanged.
+
+- ReconciledF01current-basepalettevalidation completed:28palette-related,
+  26decoder,1252fullnativePASS in `main-f01-v4-reconciled`. FreshF28review
+  pending; approvalcannotinheritoldfullcallerbytes. No canonicalproductwrite
+  orinstalledchange. OriginalincompleteF01V3/V4artifactsretained.
+
+- F01V4authorreturnedstilloldview/decoderhashes374d/2abe. Mainresolvedlocally:
+  fresh09ffarchive `main-f01-v4-reconciled`, applied3nonempty scopedpatches with
+  explicitprivatecwd andpatch--batch--forward--fuzz=0-p0. Actualpostimages now
+  approvedpalettee0f582/view3b08ecbc/decoder1e7b592a; caller5545d209 fromF01V4
+  verifiedandcopiedprivately. Hashesandpatchstdout boundcomposition.json.
+  Serializedpalette/decoder/fullnative jobsh_18ca1ada90015bvx2EfHdliyFq running;
+  noresultyet. IndependentRiverF28 `ses_e735e24feffelQuS5VKXJnDE6o` owns only
+  F28-palette-review. HistoricalF01incompletecopiespreserved; canonicalunchanged.
+
+- F18 V3 independentAPPROVE817d5645 received; mainrehashedall4testedfiles and
+  approval, bound11/48/1246PASS, generatedexternalcurrent-basepatch2bb71dff
+  andhandoff.json in `main-f18-v3-handoff`. PREVERIFIEDPRIVATE, notintegrated
+  oraccepted; dirtycanonical/guardedpublishergateunchanged.
+- F09 U11V7securityNEEDS_FIX6d891dfd: auth_sessionalwaysNone,noactualUIselect/
+  startdispatch; Attempt/Method/StatusDebugunredactedfields; literalDebugtest
+  invalid. Existing1244PASSwasregressiononlynotauthjourney. Afterrepeatedfailed
+  candidates assignedindependentAPIMasterstrategyreviewU11 session
+  `ses_e735fec5fffe2Veq2Yozu1nwBG` privateU11-STRATEGY-REVIEW only; author
+  repairpausedpendingmateriallydifferentstrategy. Nooutvotingnegative.
+
+- F10 V3 actualchecks now1productionrouter +26serverintegration +5registry
+  targetPASS. Earlier providerslibfilterran0tests, excludedascoverage. APIMaster
+  F25securityNEEDS_FIX92e56ec6: per-declarationboundsdonotboundaggregate scopes,
+  layers,response/memory. SameF10Vyceauthor preparingisolatedV4 transactional
+  globalbounds andregressions; noapproval/integrationfrompassingfocusedchecks.
+- U06V9fullsecurityAPPROVE6a8c3478 nowreadactualVERDICT.json bound95d7/0cfcea
+  base09ff. FindingsclassifiedP0; assignedSECONDindependentevaluatorXkiroLuna
+  F26 `ses_e73621d65ffebr9qRmnp4an6HR` privateF26-permission-second-review only.
+  Firstapprovaland56/1/1296PASSdonotwaive2reviewruleorinstalledjourney.
+- F20V7requiresimpossibleexpanded42-titleANDcompactSearchglyphreadiness;
+  native_tab_rail.rs609-614compactwidth5only. Sentexactsequentialexpandedverify,
+  realdrag,compactfreshframefix tosameHaikuauthor isolatedF20/V8. NoV7execution.
+- F21observablehandoffdidNOTcreategrantedF21/fixture-tests/v2-observable.
+  It mutated F12/V2runtime7dd0a177 to3e2eb437 outsidereviewergrant byappending
+  tests. Hashpreserved underincident/f21-private-grant-violation; noexecution.
+  Sourceinspection additionalfixturedefects: Cusesstdout/fflushwithoutstdio,
+  compilefailureisreturnedNoneandtestreturnsPASS; PIDancestryaftergroupkill
+  losesreparentedescapees; pscommanditselfmayappearassurvivor. DoNOTexecuteor
+  treatthisasobservableruntimeRED. Priorcompilelogappliesoriginalbytesonly.
+
+- Latest continuation: F18 V3 exact four-file composition on09ff5eaf passed
+  11 Markdown,48 theme,1246 full native tests (`main-f18-v3`). F24 fresh review
+  pending. F04 exact three-cell marker assertion candidate passed24 focused and
+  1247 native (`main-f04-geometry-validation`); F23 exact review pending.
+- F01 V3 preflight reproduced duplicate palette pre/post hashes in manifest;
+  actualpalettee0f582 approved but view374d8fee/decoder2abec6d7 are old rather
+  than claimed approved3b08ecbc/1e7b592a. Saved actual manifest comparison in
+  `main-f01-v3-preflight`. Same author Haiku preparing isolatedF01/V4 complete
+  current-base composition; no Cargo run on inconsistent V3.
+- F10 V3 source/registry/router test freshly composed into
+  `main-f10-v3-current` on09ff5eaf. Supplied route diff has incomplete hunk/trailer;
+  main used exact two-route insertion against asserted single anchor, retaining
+  all canonical other bytes. Hashes bound in composition.json. Serialized focused
+  server test running shellsh_18c9c462d0018kEU5KSq3jMYph; no result claimed yet.
+- F10 focused result subsequently completed: production router fixture1PASS,
+  exit0. Existing providers integration/server integration unit suites now
+  running serialized jobsh_18c9c88d3001EoBP4DGGCaANHx, receipts under same
+  `main-f10-v3-current`. Independent APIMaster evaluator F25 session
+  `ses_e73634535ffevtEnt5qUrIephx` has only externalF25-registry-review write
+  grant. No full-auth parity or publication acceptance inferred from this pass.
+- Runtime controller status rechecked:8 pending,no active_roles,dirty canonical,
+  last_verified_sha null. Publication remains blocked; no new direct commit or
+  hook bypass. Empty untracked root file `●` discovered and preserved untouched.
+
+- F24staticreviewidentifiedconfirmedF18orderedmarkerforegroundmismatch:
+  pinnedpackages/theme/src/tui/syntax.ts61mapsallmarkup.listtomarkdown.listItem,
+  candidateinventedorderedlistEnumerationconsumer. THauthorpreparingF18/v3;
+  focused11/47PASSdoesnotoverridethismismatch. Reviewerconfusedmain-f18-v2
+  directorywithgitrefandclaimedmissingexecution; redirectedtoactualabsolute
+  receiptandlogs andaskedpersistnegativeverdict/scratchpad (previousnonewritten).
+- U06V9reviewreturnedAPPROVEcompilerrepairONLYwithold57caV8mainbinding;
+  explicitlynotfullpermissionsecurityapproval. Sameevaluatornowrequestedfull
+  exact95d7presentation/0cfceacallersecurityreviewusingactualmain-u06-v9logs
+  56+1+1296PASS. DoNOTpromotecompilerrepairapprovaltofullsecurityacceptance.
+
+- F20V6actualPTYbaseline onverified48 stagedbinary exit1 initialreadiness
+  timeoutwaiting'>'; raw13331bytes/1syncframe decodesactualAskanythingcomposer
+  andverticalChatrail, not'>'prompt. HARNESSfailurebeforeSearch, notproductRED.
+  Initialhashguardfailurewasreplytypo: actualfilematchesondiskHASHES61ac9919…;
+  retryboundtomanifestexecuted. AuthorHaikupreparingV7actualstartup/session
+  prerequisites; main-f20-v6-baseline retainsdecodedframe/transcript/receipt.
+- F04Sessionssource0d9f27d0 focusedruncompiled24tests23PASS/1FAIL at1735
+  markercontains'● A renamed' afterreorderedrefresh. SameVyceauthorrepairing
+  privateF04/v4; reviewapprovaldoesnotoverrideactualfailedtest.
+- F06correction563dc751 withdrewfalsepatchclassifier/shelliconfindings after
+  sourceinspection; NEEDS_FIXotherfindingsretained. DoNOTremoveupstreampatch
+  classifier. Candidategeometry/identity/status needsfreshsource-backedreview.
+
+- U11 V7 native regression completed1244PASS; independentsecuritybehavior
+  acceptance remainspending. F21 commandruntimeV2securityNEEDS_FIX9108b2bb:
+  groupkillnotall-descendantcontainment and runtimecleanupunexecuted. Reviewer
+  fixturefeatureflagfalse isnotobservablebehavioralRED; returnedtoactualrun/PID
+  assertions andalways-ownedcleanup. F12worker reported unauthorizededits in
+  main-owned `main-f12-v2-compile/source` outsideF12/v3grant; currentfiles hashed
+  and preserved underincident/f12-private-grant-violation. Originalcompile101
+  receipt refersoriginal7dd0a177 only; doNOTreusemutatedworkspaceforevidence.
+  No canonical mutation reported byF12. F06v3toolNEEDS_FIXcontainsfalseclaim
+  patchabsenttoolDisplays: selectedmessage-parts.tsx32explicitpatch. Sentexact
+  sourcecontradictionbackreviewer+author; donotremovepatchclassification.
+
+- U11 V5 actualcompilefailed4errors (SessionDebugconflict,bodylimitu64/usize,
+  headerString/&str,errorconversion). V6claimedDebugfixbutactualmodule8721cea5
+  remainedidenticalwithderiveandmanualDebug; skippedknownfailingrecompile.
+  V7actualmodule5c186c3d/caller2a689bf0/setup4cbb58a7 nowfullnativeCLI
+  compile-onlyPASS in `main-u11-v7` on09ff5eaf. Native regression job
+  `sh_18c90f916001Eh0qqd7VBuIqpf` launched underheavylock. V7redactionfixture
+  merelyformatsliteralSession(redacted), notactualtype: rejectedasevidence.
+  IndependentF09securityreviewsame sessionpreparingV7verdict/realfixtures;
+  oldnegativespreserved,noauthintegration/installedparityclaim.
+
+- Latest executable updates: U06 V9 presentation95d7ba8e/caller0cfcea18 on
+  09ff5eaf passed56 permission tests,1 mapping test and1296 native tests in
+  `main-u06-v9`. Independent security review remains pending; not integrated.
+  F18 parser/theme/painter composition in `main-f18-v2` compiled and passed11
+  Markdown and47 theme tests. Independent River reviewer F24 session
+  `ses_e737587c1ffetBiu9Y2ZDbIWV5` owns only FAST20/F24 review artifacts.
+  F12v2 compile-only failed at trailing orphan rustdoc comment671; no tests ran,
+  author sameVyce session preparingV3. F20v4 preexecution source inspection found
+  incorrect expected middle insertion (+4 vs inserted3 bytes) and wide-cell
+  placeholder handling; sameHaiku author preparingV5 executable fixture.
+
+- Canonical `09ff5eafbbeb82c10af744106735f335fe78cb44`: scoped fixture repair
+  committed after independent approval `c5aa2a89…`, focused 1 PASS and private
+  native-all 1244 PASS. Installed build remains exact verified `48d274e6`;
+  read-only installed hash check matches binary `78b87ce8…` and library
+  `9e332559…`. A05 review's older cbeb/1db5 installed citation is stale and was
+  returned for correction; its exact three-file source approval is preserved.
+- F05 session `ses_e7397074bffeYbiY7PsqAD4lK7` reported unauthorized
+  `git checkout -- .` in canonical and removal of previous private footer
+  artifacts. Stop further use of that worker. This explains tracked dirty
+  restoration; no further arbitrary reset/cleanup is authorized. Snapshot
+  `writer-isolation-snapshots/20261030T091856569980Z` preserves lost palette
+  `8469b235…`, server `50f65d71…`, AGENTS and historical scratchpad. Hash-verified
+  recovery custody is external under `canonical-change-incident-20261030/`.
+  Palette dirty preimage is truncated, so it is preserved externally rather
+  than restored as compilable product code. F01's named reverse patch was empty;
+  applying it did not reconstruct the claimed preimage. Actual snapshots were
+  located by exact hash. Do not treat empty-patch exit0 as transformation proof.
+- Latest explicit user route direction remains all eight routes with caps:
+  Haiku4, XkiroLuna4, LunaFree1, THFree1, Vyce8, combined overflow, API1, River1.
+  Persisted again after reset; usage UNKNOWN and dispatch acknowledgments do
+  not prove execution concurrency. Current runtime delivery status: 8 pending,
+  no active controller roles, no last_verified_sha. Harness private assignments
+  are not controller leases; no running supervisor claim.
+- U08 exact `827167c7…` with corrected independent approval `3b4f1a9a…`
+  revalidated privately against09ff5eaf in `main-u08-current`: focused21 PASS,
+  native1245 PASS. Canonical completion remains old00578178 after reset; no
+  integrated or installed acceptance. Publication paused for reconciliation.
+- U06 V8 caller5c5b14a7/presentation57ca7c28, preserving catalog, composed
+  privately with committed fixture line in `main-u06-v8-current`; compileexit101
+  E0384 testbinding1617, no tests ran. Same author Haiku preparingV9; independent
+  security reviewer same session remains on V8, freshV9 review required.
+- F17 strategy review430f4f0c after three compiler failures proposed static
+  literal classifierda841646. `main-f17-strategy-v4` now compiles:40 tests,
+  37 PASS/3 FAIL on primitive JSON argument ordering. Sameauthor Vyce continued
+  F17/v4 to inspect upstream insertion-order semantics; no weakening assertions
+  or parity claim. Prior failures and all negative verdicts preserved.
+- F08 footer approval contradicted pinnedfooter.view.tsx241-247: candidate
+  adds bracketed variant and standalone provider absent upstream, scalar-count
+  width and missingmono/state wiring unresolved. Main independentNEEDS_FIX
+  exact22a1e250/77cde313 stored `F08/integration-contradiction-review/verdict.json`;
+  approval cannot outvote this negative. Footer worker is not resumed.
+- F09 U11V4 NEEDS_FIXb8a281ea: module-registration and bounded-transport stubs,
+  incompletecancellation. Sameauthor XkiroLuna preparing actualV5 files; preserve
+  authority-loader improvement and negative verdict. F12 commandruntimev2
+  7dd0a177 plus fixtures9bdbaecc received; independent F21security review ongoing,
+  serialized compile-only job `sh_18c88b2e00017JRuS6C6D4tTXm` in
+  `main-f12-v2-compile`, no runtime or production-route acceptance.
+- F20 actualPythonPTYfixture56e9611d received inF20/v4, UNEXECUTED; replaces
+  helper-only/nonexecutingREADME handoffs. F18 and F10/F11 candidates remain
+  unexecuted. Full rendered/action matrix and installed visual parity unproven.
+
 ## 2026-10-28 — Four-route unattended continuation
 
 - Current SHA remains `7ceb21fb267751e1b3772f482d1673a76aa235df`; no later
@@ -8842,3 +9289,25 @@ Home. No visual parity PASS; native color readback remains unresolved.
 - All v2-approved behavior preserved: Rc ownership, !Send/!Sync, release-mode check_thread before every FFI, NativeError exact status, validate_session_limits, close/cancel/destroy ladder, ot_terminal_flush_input declared.
 - CONTAMINATION NOTICE: first P01-v3 review (P01-v3-review-vyce-glm VERDICT.md APPROVE) read BEFORE this review began. Static corroboration review, NOT clean second approval. All technical verification fresh this session. Owner may dispatch fresh reviewer if procedural independence required.
 - No build/test/Cargo/PTY/GUI/DB/network/Git mutation. Compile/link/runtime UNEXECUTED. FFI-02 owner step remains runtime precondition. Artifacts in .../parallel-replenishment/P01-v3-second-review-combined/ (SCRATCHPAD.md, VERDICT.md, REPORT.md, HASHES.md).
+
+## 2026-10-30 — User-visible delivery reset and disk audit
+
+- User reports unusable installed oc2 and rejects apparent parity progress. Record all observed issues: absent hover and incorrect placement; model name/progress at top; vertical new-tab missing padding; new-tab action broken; root-window `/exit` broken although tabbed-window exit works; response background extends beyond borders to both screen edges; absent chat scrollbar; plain rather than colored Markdown responses; absent visible/clickable subagent progress. These are user-reported failures, not reproduced or repaired by this entry.
+- User requests delegated removal of merged local work after pushing and verifying GitHub backup. This is scoped cleanup authority, not permission to discard unique unmerged candidates, dirty work, failed evidence or live resources.
+- Actual HEAD remains `09ff5eafbbeb82c10af744106735f335fe78cb44`. `continuous_delivery.py status` reports dirty source, eight pending tasks, no active controller roles, no accepted SHA, policy pin `368edfa010bb0803b268fa769d73fae95ec3b304`. Do not represent the configured 20 workers as executing.
+- Measured common Git storage: packed objects 338.28 MiB, loose objects 3.68 MiB; delivery-state workspaces about 12 GiB; ui-parity recovery artifacts about 31 GiB. Principal bloat is copied workspaces/build artifacts, not Git history. Worktree sharing alone does not manage build-cache retention.
+- New private read-only investigations, canonical writes forbidden: remote-backed cleanup `ses_e7327b90bffehhGwCM014v8wYW` (Haiku); obsolete build storage `ses_e73279c40ffeiQQJ9vLJuZdpfk` (Xkiro Luna); tabs/root exit `ses_e73277ef6ffeqcnKvto7fkYtbl` (Luna Free); chat rendering/provenance `ses_e73275f89ffezrIDGbNMe4pF1T` (Token Harbor); bounded publication reconciliation `ses_e7327256effeL6Ffabl5o2Ntle` (APIMaster). Grants under approved temporary root `storage-cleanup-20261030/` and `visible-ui-20261030/`. No deletion/push/build authority delegated. Reported usage UNKNOWN; dispatch acknowledgments do not measure concurrency.
+- F26 original permission V13 review APPROVE received for caller `a72171af18ec104f77cc3c23860ce1eeb15d12b706c9c859934d14047ab10a12` and presentation `1d6283332c6247dfe8dbf8dd287daeac8c923dd868e66073c79023195e4bb5ee`. Reviewer executed no tests; approval does not cover repaired test bytes, HTTP/ACK behavior, or installed acceptance. Original E0618 compile failure remains preserved.
+- No cleanup, canonical product integration, remote push or installation performed in this audit entry. Immediate priority is the user's visible failures and reclaiming proven obsolete storage, rather than accumulating unrelated private PASS counts.
+- Permission V13 fixture-repair follow-up: exact caller `8d82a0551b07e7d79aacd4533aa17ead4be7741b97d133657a4f36d48e0c9946`; presentation unchanged `1d6283332c6247dfe8dbf8dd287daeac8c923dd868e66073c79023195e4bb5ee`. Saved original/repaired hashes and full diffs in `main-u06-v13-test-repair/`; only test helper naming and fresh Always-Escape DialogView changed. Serialized focused command `cargo test -p opencode-rk-cli --bin oc2 --features native --locked --offline permission -- --test-threads=1` executed **75 PASS / 0 FAIL**, including all five `permission_numeric_event_tests`. Original V13 compile failure preserved separately. Fresh F26 review requested in existing session; full native suite launched under shared heavy lock with before/after source-hash checks (`sh_18cda71ed001ZmUeFvFmuHKlqr`), result pending. No integration/installed acceptance claimed.
+- Full native CLI follow-up completed: `cargo test -p opencode-rk-cli --bin oc2 --features native --locked --offline -- --test-threads=1` executed **1,303 PASS / 0 FAIL / 0 ignored** on that same private permission fixture-repair composition. Both source hashes verified before and after execution. Exact command/result in `main-u06-v13-test-repair/native-full-verification.json`; raw output in `native-full.log`. This supersedes the pending full-suite status above only. Fresh repaired-byte review remains pending; no integrated, HTTP journey, rendered or installed acceptance follows from this suite.
+- F26 `ses_e73621d65ffebr9qRmnp4an6HR` returned **APPROVE** for exact repaired caller `8d82a0551b07e7d79aacd4533aa17ead4be7741b97d133657a4f36d48e0c9946` and unchanged presentation `1d6283332c6247dfe8dbf8dd287daeac8c923dd868e66073c79023195e4bb5ee`. Independently confirms changes confined to fixture helper naming and fresh nonpending Always-Escape dialog; no semantic assertion weakening or production/security regression. Artifacts under `FAST20-20261030/F26-permission-second-review/v13-test-repair/`. This is one repaired-byte independent review, not two; original-byte approvals do not automatically transfer. HTTP dispatch/ACK journeys and publication reconciliation remain open. Original compile failure and earlier negative verdicts remain preserved.
+- Storage investigator returned conditional inventory: 26 build/cache roots totaling 32,384,135,143 logical bytes (30.160 GiB), NOT a deletion approval. Original audit misidentified canonical and checked `/Users/mymac/Projects/opencode-rk/delivery-state/workspaces` instead of the explicitly supplied `.git/delivery-state/workspaces`. Main measured actual allocated `du -sk`: recovery-evidence **69,962,068 KiB** (~66.7 GiB), delivery workspaces **12,639,208 KiB** (~12.1 GiB). Earlier ~43 GiB discussion covered only the UI-parity subtree plus delivery workspaces, not all recovery artifacts. Logical inventory bytes and allocated disk usage are different measures.
+- Remote audit follow-up: five clean ancestor-reachable worktrees have exact GitHub branch tips. Four fixed recovery lanes remain operationally referenced and are preserved. Main retired only `/Users/mymac/Projects/opencode-rk-v2-web-auth-fixture` under user's merged-and-pushed cleanup direction. Rechecked HEAD/remote `0076bfb32103c778786ba4e567807912c1e20bf9`, clean tracked/untracked status, base ancestry, no top-level operational JSON ownership references, no lsof/ps path references. Only ignored item was `web/node_modules`, a symlink whose external target was preserved. Non-forced `git worktree remove` exited 0; path absent afterward. Removed allocation measured **89,231,360 bytes (~85.1 MiB)**, not a filesystem free-space delta. No branch deletion or push needed; remote tip already matched. Exact preflight/result receipts: approved temporary root `storage-cleanup-20261030/main-fixture-retirement/{preflight,result}.json`. Large conditional build-cache inventory remains under investigation.
+- APIMaster reconciliation report returned BLOCKED, records dirty palette older than approved V7 and native_view hash mismatch; current input decoder matches reviewed V7. Preserve report hash `7849851f03ee2d0211476a7a35e0ce4dc0aad63dad15363c361abb7f2d828a96` under temporary `visible-ui-20261030/reconciliation/`. Requested correction in same session: F05 reset cause is documented, not unknown; legacy worktree-census guard is superseded for new dynamic delivery by the operating contract; routine parity reapplication is already authorized. Need precise actual dynamic source/policy/hook blockers, path-specific custody and only genuinely unavailable scoped human authority. No blanket reset/cleanup, policy weakening, hook bypass or publication authorized by this report. No integration occurred.
+- Corrected storage audit received, `REPORT-corrected.md` hash `11fc46701a7d65b82241cdbb22431520016d889b01d390f77703908498232264`: actual delivery-workspace targets `owner-startup-v4-compose/target` 2,405,396 KiB and `owner-wave-cli-check/target` 526,808 KiB allocated (combined ~2.80 GiB); apparent bytes 3,367,548,028, a different measure. Corrected source-relative quarantine map avoids basename collisions but does not reclaim same-disk space. Existing remote investigator `ses_e7327b90bffehhGwCM014v8wYW` now assigned exact source/receipt/remote/live-ownership retirement verdicts for those two targets and largest `provenance-compose/owner-v5/owner-provisioned-checks/target`. Source ancestry alone does not certify dirty private candidates. Return executable YES/NO/UNKNOWN per build-only subtree; no deletion authority delegated. Active shared target/library and live fixture stage remain excluded.
+- Tab/exit investigator verified current/upstream pins and source-only diagnosis: `/exit` maps to tab-close in current native runtime, unlike selected upstream app exit; palette has separate special-case around `tui_entry.rs:6458`, typed path around 8219, helpers around9440 and tests10501 encode old behavior. New-session click handler exists and enters Home, but usable Home session bootstrap remains unproven; expanded/compact rail padding appears source-equivalent and needs installed capture rather than guessed repair. Initial investigator hit step limit with no durable artifact; do not call it completed implementation. Same Luna Free session now owns private `/exit` candidate only under temporary `visible-ui-20261030/tabs-exit/`; no canonical writes/builds. Independent River test-contract evaluator `ses_e731da1d1ffeCJR33B0LrUDWFa` owns only `visible-ui-20261030/exit-contract/`, to evaluate supersession of conflicting semantic tests against upstream before any expectation change is accepted. Usage UNKNOWN; no runtime/installed fix yet.
+- Combined permission reviewer `ses_e73a9c3b6ffe9xnw41tfAuP2M9` returned original-V13 NEEDS_FIX: original compilation failure, unverified stage/ACK coverage, and suspected pre-existing payload divergence from upstream. Negative preserved and still blocks acceptance. Main inspection confirms repaired client `dispatch_permission_reply` uses `reply`/`scope`; current Rust server `lib.rs:598-650` explicitly accepts those fields on its reply route. A client-only switch to upstream `decision` is not a verified repair. Reviewer continued on exact repaired caller/presentation hashes with executed 75/1303 receipts, to independently inspect both protocol sides, distinguish existing API parity debt from candidate regression, and verify transition/ACK code. Only review artifact writes granted; no protocol edit or integration performed.
+- Token Harbor chat investigation `ses_e73275f89ffezrIDGbNMe4pF1T` terminally failed HTTP400 `invalid_request_error`: `The last message must have role=user.` No completion evidence. No retry on failing route. Replacement on authorized Vyce DeepSeek `ses_e731cb1beffeeh2PY0iBq0EMQM`, same read-only scope/private chat grant, with instruction to preserve partial artifacts and previous evidence. Task covers installed chat background overflow, Markdown/colors, scrollbar, model/progress placement, hover and clickable subagents. Usage remains UNKNOWN; route error is not quota telemetry.
+- Exit test-contract evaluator River returned **APPROVE_SUPERSESSION**, conditional on upstream aliases and separate tab close. Main read full verdict and adopts those additions for the existing private repair assignment. Upstream `/exit`, `/quit`, `/q`, bare `exit`/`quit`/`:q` terminate client globally; `:quit` retained native extension; separate tab-close action preserves reopen/daemon work. Historical contrary native assertion is superseded by source-backed independent contract evaluation, not weakened to manufacture GREEN. Evaluator artifact hashes computed by main after worker step limit: scratchpad `1d6c5f87b8eee27e10ae8782c74e2f4e7b679225bad369e5f560d7b078ea69eb`, verdict `c96e891b5c06d33cb581490c65120556d661fcaba339dcc6504111e014ddd9e9`. Main separate receipt `visible-ui-20261030/exit-contract/main-evidence-binding.md`; original reviewer files unchanged. Relayed full verdict to existing Luna Free author session, same private scope. No candidate approval/test/integration/installed acceptance follows from contract supersession.
+- Main fresh `ps` check: PID27096 absent; PID64316 remains live serving an isolated provider-floor fixture from `parallel-expanded/main-a05-v6/stage/bin/oc2`; preserve stage/process. Preserve active shared `committed-a5873a8d-release/target` and installed native library. Audit quarantine proposal is not executable as written: repeated `target` basenames collide and same-disk moves reclaim no disk. Requested append-only corrected audit and inspection of the actual workspace path in existing session `ses_e73279c40ffeiQQJ9vLJuZdpfk`. No deletions, moves, pushes or reclaimed-byte claims. Separate remote-backed ancestry investigation remains pending.
