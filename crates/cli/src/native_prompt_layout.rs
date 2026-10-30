@@ -20,6 +20,9 @@ pub(crate) struct PromptRows {
 
 impl PromptRows {
     pub fn window_start(&self, height: usize) -> usize {
+        if height == 0 || self.rows.is_empty() {
+            return 0;
+        }
         let row = self.cursor.map_or(self.rows.len().saturating_sub(1), |(_, row)| row);
         row.saturating_add(1).saturating_sub(height)
             .min(self.rows.len().saturating_sub(height))
@@ -28,7 +31,12 @@ impl PromptRows {
 
 pub(crate) fn wrap_prompt(draft: &str, width: usize, cursor: usize) -> PromptRows {
     let draft = bounded_source(draft);
-    let valid_cursor = cursor <= draft.len() && draft.is_char_boundary(cursor);
+    // Rendering is deliberately bounded, but callers commonly pass the live
+    // buffer's end offset.  Once the source is capped, that offset is still
+    // the insertion point at the visible end (not an absent cursor).  Keep
+    // non-boundary offsets invalid: an editor offset must never split UTF-8.
+    let cursor = cursor.min(draft.len());
+    let valid_cursor = draft.is_char_boundary(cursor);
     let before = valid_cursor.then(|| normalize(&draft[..cursor]));
     let cursor_line = before.as_ref().map(|value| value.bytes().filter(|byte| *byte == b'\n').count());
     let cursor_col = before.as_ref().map(|value| visit_unpadded_cells(
@@ -189,5 +197,40 @@ mod tests {
         let rows = wrap_prompt("界", 1, "界".len());
         assert_eq!(rows.rows, [" "]);
         assert_eq!(rows.cursor, Some((1, 0)));
+    }
+
+    #[test]
+    fn ansi_is_not_counted_in_rows_or_insertion_columns() {
+        let draft = "\u{1b}[31mred\u{1b}[0m blue";
+        let rows = wrap_prompt(draft, 7, draft.len());
+        assert_eq!(rows.rows, ["red ", "blue"]);
+        assert_eq!(rows.cursor, Some((4, 1)));
+    }
+
+    #[test]
+    fn width_43_and_44_keep_the_same_cursor_projection_at_the_boundary() {
+        for width in [43, 44] {
+            let draft = format!("{}界", "x".repeat(width - 2));
+            let rows = wrap_prompt(&draft, width, draft.len());
+            assert_eq!(rows.rows.len(), 1, "width={width}");
+            assert_eq!(rows.cursor, Some((width, 0)), "width={width}");
+        }
+    }
+
+    #[test]
+    fn capped_live_cursor_projects_to_the_end_of_the_visible_source() {
+        let draft = "x".repeat(MAX_BYTES + 17);
+        let rows = wrap_prompt(&draft, 43, draft.len());
+        assert!(rows.cursor.is_some());
+        let (column, row) = rows.cursor.unwrap();
+        assert_eq!(row, rows.rows.len() - 1);
+        assert_eq!(column, visit_unpadded_cells(&rows.rows[row], usize::MAX, |_, _| {}));
+    }
+
+    #[test]
+    fn zero_height_window_is_empty_and_does_not_scroll_past_the_rows() {
+        let rows = wrap_prompt("hello", 5, 5);
+        assert_eq!(rows.window_start(0), 0);
+        assert_eq!(rows.window_start(1), 0);
     }
 }
