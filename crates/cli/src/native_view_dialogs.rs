@@ -443,7 +443,62 @@ fn visible_cells(text: &str, budget: usize) -> usize {
     crate::native_view_layout::visit_unpadded_cells(text, budget, |_, _| {})
 }
 
+/// Which upstream layout contract owns the list viewport.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DialogViewportPolicy {
+    /// Generic permission/confirm/error action dialogs use their supplied
+    /// content budget. These are not `DialogSelect` surfaces upstream.
+    ContentBudget,
+    /// Shared DialogSelect lists derive their viewport from full terminal H.
+    SelectTerminal,
+}
+
+/// Geometry shared by dialog paint and pointer hit testing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DialogLayoutMetrics {
+    pub width: usize,
+    pub content_height: usize,
+    pub terminal_height: usize,
+    pub viewport: DialogViewportPolicy,
+}
+
+impl DialogLayoutMetrics {
+    #[must_use]
+    pub const fn legacy(width: usize, content_height: usize) -> Self {
+        Self { width, content_height, terminal_height: content_height, viewport: DialogViewportPolicy::ContentBudget }
+    }
+
+    #[must_use]
+    pub const fn new(
+        width: usize,
+        content_height: usize,
+        terminal_height: usize,
+        viewport: DialogViewportPolicy,
+    ) -> Self {
+        Self { width, content_height, terminal_height, viewport }
+    }
+
+    #[must_use]
+    pub const fn select(width: usize, content_height: usize, terminal_height: usize) -> Self {
+        Self::new(width, content_height, terminal_height, DialogViewportPolicy::SelectTerminal)
+    }
+}
+
 impl DialogView {
+    /// Current native dialogs are action overlays, not upstream DialogSelect
+    /// lists. The production caller must not opt them into the select viewport
+    /// merely because a full terminal height is available.
+    #[must_use]
+    pub fn production_viewport_policy(&self) -> DialogViewportPolicy {
+        match self.dialog.as_ref().map(|dialog| dialog.kind) {
+            Some(DialogKind::Permission)
+            | Some(DialogKind::Question)
+            | Some(DialogKind::Confirm)
+            | Some(DialogKind::Error)
+            | None => DialogViewportPolicy::ContentBudget,
+        }
+    }
+
     /// Closed view (no dialog, input passes through).
     #[must_use]
     pub fn new() -> Self {
@@ -808,21 +863,34 @@ impl DialogView {
         Ok(attempt)
     }
 
-    /// Render the modal into a `height`-line grid of at most `width`
-    /// chars each. Row 0 is always the heading, so a short terminal still
-    /// shows what owns focus. All control bytes are stripped; clipping is
-    /// by Unicode scalar (the layout worker applies final cell width).
+    /// Render with one geometry object shared by paint and hit testing.
+    #[must_use]
+    pub fn render_with_metrics(&self, metrics: DialogLayoutMetrics) -> Vec<String> {
+        self.render_styled_with_metrics(metrics).into_iter().map(|line| line.text).collect()
+    }
+
+    /// Compatibility API: preserves the historical content-budget contract.
     #[must_use]
     pub fn render(&self, width: usize, height: usize) -> Vec<String> {
-        self.render_styled(width, height).into_iter().map(|line| line.text).collect()
+        self.render_with_metrics(DialogLayoutMetrics::legacy(width, height))
+    }
+
+    #[must_use]
+    pub fn render_styled_with_metrics(&self, metrics: DialogLayoutMetrics) -> Vec<crate::native_ui_style::Line> {
+        self.layout(metrics).0
     }
 
     pub fn render_styled(&self, width: usize, height: usize) -> Vec<crate::native_ui_style::Line> {
-        self.layout(width, height).0
+        self.render_styled_with_metrics(DialogLayoutMetrics::legacy(width, height))
+    }
+
+    #[must_use]
+    pub fn choice_at_row_with_metrics(&self, metrics: DialogLayoutMetrics, row: usize) -> Option<usize> {
+        self.layout(metrics).1.get(row).copied().flatten()
     }
 
     pub fn choice_at_row(&self, width: usize, height: usize, row: usize) -> Option<usize> {
-        self.layout(width, height).1.get(row).copied().flatten()
+        self.choice_at_row_with_metrics(DialogLayoutMetrics::legacy(width, height), row)
     }
 
     /// Click-confirm affordance derived from the same layout that renders
@@ -830,18 +898,22 @@ impl DialogView {
     /// blank padding below it, never a hidden/clipped footer (no footer
     /// line exists for errors), and never a pending decision.
     #[must_use]
-    pub fn confirm_at_row(&self, width: usize, height: usize, row: usize) -> bool {
-        self.layout(width, height).2 == Some(row)
+    pub fn confirm_at_row_with_metrics(&self, metrics: DialogLayoutMetrics, row: usize) -> bool {
+        self.layout(metrics).2 == Some(row)
     }
 
     #[must_use]
+    pub fn confirm_at_row(&self, width: usize, height: usize, row: usize) -> bool {
+        self.confirm_at_row_with_metrics(DialogLayoutMetrics::legacy(width, height), row)
+    }
+
     /// Return the rendered terminal-cell span for a permission action on `row`.
     /// Both the prefix and label are measured by the native cell iterator used
     /// by the painter, so wide/combining clusters and cell clipping cannot move
     /// the pointer target away from the painted action.
     #[must_use]
-    pub fn choice_region_at_row(&self, width: usize, height: usize, row: usize) -> Option<(usize, usize, usize)> {
-        let (lines, hits, _) = self.layout(width, height);
+    pub fn choice_region_at_row_with_metrics(&self, metrics: DialogLayoutMetrics, row: usize) -> Option<(usize, usize, usize)> {
+        let (lines, hits, _) = self.layout(metrics);
         let index = hits.get(row).copied().flatten()?;
         let dialog = self.dialog.as_ref()?;
         let label = dialog.choices.get(index)?;
@@ -851,23 +923,31 @@ impl DialogView {
         // Measure the same unpadded cluster stream as `fit`, with the same
         // terminal-cell budget. A wide cluster that does not fit is dropped,
         // leaving only actual painted source cells clickable.
-        let start = visible_cells(&prefix, width);
-        let label_width = visible_cells(label, width.saturating_sub(start));
+        let start = visible_cells(&prefix, metrics.width);
+        let label_width = visible_cells(label, metrics.width.saturating_sub(start));
         let end = start.saturating_add(label_width);
         (end > start).then_some((index, start, end - start))
     }
 
     #[must_use]
-    pub fn choice_at_cell(&self, width: usize, height: usize, row: usize, col: usize) -> Option<usize> {
-        let (lines, hits, _) = self.layout(width, height);
+    pub fn choice_at_cell_with_metrics(&self, metrics: DialogLayoutMetrics, row: usize, col: usize) -> Option<usize> {
+        let (lines, hits, _) = self.layout(metrics);
         let index = hits.get(row).copied().flatten()?;
-        let (_, start, span) = self.choice_region_at_row(width, height, row)?;
+        let (_, start, span) = self.choice_region_at_row_with_metrics(metrics, row)?;
         (col >= start && col < start.saturating_add(span)).then_some(index)
     }
 
+    pub fn choice_region_at_row(&self, width: usize, height: usize, row: usize) -> Option<(usize, usize, usize)> {
+        self.choice_region_at_row_with_metrics(DialogLayoutMetrics::legacy(width, height), row)
+    }
+
+    pub fn choice_at_cell(&self, width: usize, height: usize, row: usize, col: usize) -> Option<usize> {
+        self.choice_at_cell_with_metrics(DialogLayoutMetrics::legacy(width, height), row, col)
+    }
+
     #[must_use]
-    pub fn confirm_at_cell(&self, width: usize, height: usize, row: usize, col: usize) -> bool {
-        let (lines, _, footer) = self.layout(width, height);
+    pub fn confirm_at_cell_with_metrics(&self, metrics: DialogLayoutMetrics, row: usize, col: usize) -> bool {
+        let (lines, _, footer) = self.layout(metrics);
         if footer != Some(row) { return false; }
         let text = lines.get(row).map(|line| line.text.as_str()).unwrap_or("");
         let Some(start) = text
@@ -879,8 +959,14 @@ impl DialogView {
         col >= start && col < end
     }
 
-    fn layout(&self, width: usize, height: usize) -> (Vec<crate::native_ui_style::Line>, Vec<Option<usize>>, Option<usize>) {
+    pub fn confirm_at_cell(&self, width: usize, height: usize, row: usize, col: usize) -> bool {
+        self.confirm_at_cell_with_metrics(DialogLayoutMetrics::legacy(width, height), row, col)
+    }
+
+    fn layout(&self, metrics: DialogLayoutMetrics) -> (Vec<crate::native_ui_style::Line>, Vec<Option<usize>>, Option<usize>) {
         use crate::native_ui_style::{Line, Role};
+        let width = metrics.width;
+        let height = metrics.content_height;
         if height == 0 {
             return (Vec::new(), Vec::new(), None);
         }
@@ -922,9 +1008,18 @@ impl DialogView {
             if roomy && !dialog.choices.is_empty() {
                 lines.push(line(String::new(), Role::Description));
             }
-            // Keep the active choice in the viewport; supplementary text may
-            // shrink, but neither focus nor the action hint may scroll away.
-            let capacity = height.saturating_sub(lines.len() + footer_rows + usize::from(roomy));
+            // Only DialogSelect owns the terminal-derived viewport. Generic
+            // permission/confirm/error action dialogs retain their content
+            // budget, including on tiny terminals.
+            let viewport_cap = match metrics.viewport {
+                DialogViewportPolicy::ContentBudget => usize::MAX,
+                DialogViewportPolicy::SelectTerminal => {
+                    metrics.terminal_height.saturating_div(2).saturating_sub(6)
+                }
+            };
+            let capacity = height
+                .saturating_sub(lines.len() + footer_rows + usize::from(roomy))
+                .min(viewport_cap);
             let start = self.selection.unwrap_or(0).saturating_sub(capacity.saturating_sub(1));
             for (index, choice) in dialog.choices.iter().enumerate().skip(start).take(capacity) {
                 if lines.len() < height && !dialog.disabled[index] && self.phase == Phase::Open {
@@ -1143,6 +1238,23 @@ mod scoped_input_tests {
         let row = (0..8).find(|&r| generic.choice_at_row(4, 8, r) == Some(0)).unwrap();
         assert!(generic.choice_region_at_row(4, 8, row).is_none());
         assert!((0..4).all(|col| generic.choice_at_cell(4, 8, row, col).is_none()));
+    }
+
+    #[test]
+    fn select_policy_uses_full_terminal_height_only_for_select_surface() {
+        let mut dialog = DialogView::new();
+        dialog.open_request(DialogRequest {
+            id: "r".into(), session_id: "s".into(), kind: DialogKind::Confirm,
+            title: "Choose".into(), choices: (0..20).map(|i| format!("choice-{i}")).collect(),
+            message: None, disabled: Vec::new(), error: None,
+        }).unwrap();
+        assert_eq!(dialog.production_viewport_policy(), DialogViewportPolicy::ContentBudget);
+        let metrics = DialogLayoutMetrics::select(60, 13, 24);
+        assert!(dialog.select(19));
+        let rows = dialog.render_with_metrics(metrics);
+        let visible = rows.iter().filter(|row| row.contains("choice-")).count();
+        assert_eq!(visible, 6);
+        assert!(rows.iter().any(|row| row.contains("choice-19")));
     }
 
     #[test]

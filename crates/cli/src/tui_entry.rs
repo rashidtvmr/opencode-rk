@@ -5769,9 +5769,8 @@ fn native_loop(
             let modal_rows = if help_open {
                 None
             } else if dialog_open {
-                Some(modal_content_rows(&view.dialogs.render(
-                    view.modal_presentation().content_width as usize,
-                    view.modal_content_height(),
+                Some(modal_content_rows(&view.dialogs.render_with_metrics(
+                    view.dialog_layout_metrics(view.modal_presentation().content_width),
                 )))
             } else if view.command_palette_open() {
                 Some(modal_content_rows(&view.command_palette_render()))
@@ -6627,9 +6626,11 @@ fn native_loop(
                             let content_x = modal.content_x;
                             let Some(col) = x.checked_sub(content_x).map(usize::from) else { continue };
                             if col >= usize::from(modal.content_width) { continue; }
-                            if let Some(index) = view.dialogs.choice_at_cell(usize::from(modal.content_width), view.modal_content_height(), row, col) {
+                            if let Some(index) = view.dialogs.choice_at_cell_with_metrics(
+                                    view.dialog_layout_metrics(modal.content_width), row, col) {
                                 view.dialogs.select(index);
-                            } else if view.dialogs.confirm_at_cell(usize::from(modal.content_width), view.modal_content_height(), row, col) {
+                            } else if view.dialogs.confirm_at_cell_with_metrics(
+                                    view.dialog_layout_metrics(modal.content_width), row, col) {
                                 if let Ok(intent) = view.dialogs.answer() {
                                     dispatch_permission_reply(&mut view, &mut transcript, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, intent);
                                 }

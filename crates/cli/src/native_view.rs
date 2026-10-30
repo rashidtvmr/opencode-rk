@@ -903,6 +903,15 @@ impl NativeView {
     /// not, which silently loses one modal row for horizontal tabs (the
     /// mixed-frame defect reviewed in
     /// `modal-full-viewport-review-combined/REPORT.md` finding 4).
+    pub fn dialog_layout_metrics(&self, content_width: u16) -> crate::native_view_dialogs::DialogLayoutMetrics {
+        crate::native_view_dialogs::DialogLayoutMetrics::new(
+            usize::from(content_width),
+            self.modal_content_height(),
+            usize::from(self.layout.rows),
+            self.dialogs.production_viewport_policy(),
+        )
+    }
+
     pub fn modal_content_height(&self) -> usize {
         let modal = self.modal_presentation();
         if modal.content_width == 0 {
@@ -2517,10 +2526,8 @@ impl NativeView {
         let modal_geometry = self.modal_presentation();
         let dialog_width = modal_geometry.width;
         let modal_lines = if self.dialogs.is_open() && permission_rows.is_none() {
-            self.dialogs.render_styled(
-                modal_geometry.content_width as usize,
-                self.modal_content_height(),
-            )
+            self.dialogs
+                .render_styled_with_metrics(self.dialog_layout_metrics(modal_geometry.content_width))
         } else if self.command_palette.is_open() {
             self.command_palette
                 .render_styled(modal_geometry.content_width, self.modal_content_height())
