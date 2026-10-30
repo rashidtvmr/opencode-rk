@@ -2769,6 +2769,8 @@ fn paint_styled_rail_row(
             let role = row.color_spans.iter().rev().find(|(start, _)| usize::from(*start) <= current)
                 .map_or(CellColor::Fill, |(_, role)| *role);
             let (fg, attr) = match role {
+                // Native buffer clear/fill uses opaque white for unstyled blank cells.
+                CellColor::CompactPadding => ([255, 255, 255, 255], 0),
                 CellColor::Fill => (paint.title_fg, 0),
                 CellColor::Title => (paint.title_fg, paint.title_attr),
                 CellColor::Detail => (paint.detail_fg, 0),

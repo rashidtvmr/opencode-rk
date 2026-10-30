@@ -11,6 +11,8 @@ use crate::native_view_layout::{fit, visit_unpadded_cells};
 /// close indicator, or New-session "+", so roles are assigned structurally.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CellColor {
+    /// Unstyled compact layout padding: native blank-cell default, never bold.
+    CompactPadding,
     /// Background filler (leading pad spaces, trailing gap).
     Fill,
     /// Title text on a session row. Fg: Text (sel/hov), TextMuted (idle); bold if sel/att/busy.
@@ -691,7 +693,10 @@ impl RailFrame {
                 continue;
             }
             if y == 1 {
-                frame.rows.push(inert(y, centered("⌕"), RailRowKind::Search, CellColor::Search));
+                let mut row = inert(y, centered("⌕"), RailRowKind::Search, CellColor::CompactPadding);
+                let start = width.saturating_sub(1) / 2;
+                row.color_spans.extend([(start, CellColor::Search), (start + 1, CellColor::CompactPadding)]);
+                frame.rows.push(row);
                 continue;
             }
 
@@ -723,7 +728,7 @@ impl RailFrame {
                     y,
                     text,
                     if highlighted { RailRowKind::CapBottom } else { RailRowKind::Gap },
-                    if highlighted { CellColor::CapBottom } else { CellColor::Fill },
+                    if highlighted { CellColor::CapBottom } else { CellColor::CompactPadding },
                 ));
                 continue;
             }
@@ -766,10 +771,10 @@ impl RailFrame {
                     ));
                 }
                 let start = left as u16;
-                let mut color_spans = vec![(0, CellColor::Fill), (start, CellColor::Title)];
+                let mut color_spans = vec![(0, CellColor::CompactPadding), (start, CellColor::Title), (start + used as u16, CellColor::CompactPadding)];
                 if close {
                     color_spans.push((width - 2, CellColor::Close));
-                    color_spans.push((width - 1, CellColor::Fill));
+                    color_spans.push((width - 1, CellColor::CompactPadding));
                 }
                 frame.rows.push(RailRow {
                     kind: RailRowKind::Session(input.session.clone()),
@@ -789,12 +794,12 @@ impl RailFrame {
                     text,
                     rect: RailRect { x: 0, y, width, height: 1 },
                     style: RailStyle::NewControl,
-                    color_spans: vec![(0, CellColor::Fill), (start, CellColor::NewIndicator)],
+                    color_spans: vec![(0, CellColor::CompactPadding), (start, CellColor::NewIndicator), (start + 1, CellColor::CompactPadding)],
                     flags: TabFlags::default(),
                     is_hovered: false,
                 });
             } else {
-                frame.rows.push(inert(y, " ".repeat(usize::from(width)), RailRowKind::Gap, CellColor::Fill));
+                frame.rows.push(inert(y, " ".repeat(usize::from(width)), RailRowKind::Gap, CellColor::CompactPadding));
             }
         }
         frame
