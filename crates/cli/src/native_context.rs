@@ -328,7 +328,7 @@ impl ContextView {
             } else if let Some(item) = self.selected() {
                 // Keep the selected item's measured-vs-unreported distinction
                 // visible in the compact two-row viewport.
-                rows.push(usage_line(format!("Context Usage · {}", item.kind), Vec::new()));
+                rows.push(usage_line(format!("Context · {}", item.kind), Vec::new()));
                 rows.push(usage_line(format!("{} bytes / {} tokens", shown(item.bytes), shown(item.estimated_tokens)), Vec::new()));
             } else {
                 rows.push(usage_line("Context unloaded".into(), Vec::new()));
