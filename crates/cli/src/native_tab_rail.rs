@@ -25,6 +25,8 @@ pub enum CellColor {
     NewIndicator,
     /// New-session "New session" text. Fg: TextMuted (not newTab), Text (newTab); bold only when newTab.
     NewText,
+    /// Compact search glyph. Fg: TextMuted, never bold.
+    Search,
     CapTop,
     CapBottom,
 }
@@ -689,7 +691,7 @@ impl RailFrame {
                 continue;
             }
             if y == 1 {
-                frame.rows.push(inert(y, centered("⌕"), RailRowKind::Search, CellColor::NewIndicator));
+                frame.rows.push(inert(y, centered("⌕"), RailRowKind::Search, CellColor::Search));
                 continue;
             }
 

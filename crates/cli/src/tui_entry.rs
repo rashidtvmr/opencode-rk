@@ -2774,6 +2774,7 @@ fn paint_styled_rail_row(
                 CellColor::Detail => (paint.detail_fg, 0),
                 CellColor::Spinner => (paint.spinner_fg, paint.title_attr),
                 CellColor::Close => (paint.close_fg, 0),
+                CellColor::Search => (paint.title_fg, 0),
                 CellColor::NewIndicator => (paint.plus_fg, paint.new_attr),
                 CellColor::NewText => (paint.new_text_fg, paint.new_attr),
                 CellColor::CapTop => (paint.cap_top_fg, 0),
@@ -3199,6 +3200,8 @@ fn native_paint(
                 crate::native_tab_rail::RowPaint::cap_row(&ctx.palette, false)
             } else if matches!(row.kind, crate::native_tab_rail::RailRowKind::CapBottom) {
                 crate::native_tab_rail::RowPaint::cap_row(&ctx.palette, true)
+            } else if matches!(row.kind, crate::native_tab_rail::RailRowKind::Search) {
+                crate::native_tab_rail::RowPaint::compact_search_row(&ctx.palette)
             } else if rail.width < crate::native_tab_rail::COMPACT_BREAKPOINT
                 && matches!(row.kind, crate::native_tab_rail::RailRowKind::Session(_)) {
                 crate::native_tab_rail::RowPaint::compact_session_row(&ctx.palette, &row.flags, row.is_hovered)
