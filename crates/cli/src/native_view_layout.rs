@@ -553,6 +553,12 @@ const ZERO_WIDTH_RANGES: &[(u32, u32)] = &[
     (0x081B, 0x0823),
     (0x0825, 0x0827),
     (0x0829, 0x082D),
+    // Tamil dependent signs and vowels are combining editor marks.
+    (0x0B82, 0x0B83),
+    (0x0BBE, 0x0BC2),
+    (0x0BC6, 0x0BC8),
+    (0x0BCA, 0x0BCD),
+    (0x0BD7, 0x0BD7),
     (0x0E31, 0x0E31),
     (0x0E34, 0x0E3A),
     (0x0E47, 0x0E4E),
@@ -949,6 +955,16 @@ mod tests {
         let expected = format!("{}\u{1F469}\u{200D}\u{1F4BB} ", "漢".repeat(18));
         assert_eq!(fitted2, expected);
         assert!(fitted2.contains("\u{1F469}\u{200D}\u{1F4BB}"));
+    }
+
+    #[test]
+    fn tamil_dependent_signs_share_painter_cells_with_their_base() {
+        let text = "தமிழ்";
+        let mut cells = Vec::new();
+        visit_unpadded_cells(text, 20, |glyph, width| cells.push((glyph.to_owned(), width)));
+        assert_eq!(cells, vec![("த".to_owned(), 1), ("மி".to_owned(), 1), ("ழ்".to_owned(), 1)]);
+        assert_eq!(fit(text, 3), text);
+        assert_eq!(fit("\u{0bbe}த", 3), "த  ");
     }
 
     #[test]

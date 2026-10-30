@@ -200,6 +200,17 @@ mod tests {
     }
 
     #[test]
+    fn tamil_cursor_projection_matches_native_editor_prefix_oracle() {
+        let draft = "தமிழ்";
+        for (cursor, expected) in [(0, (0, 0)), (3, (1, 0)), (6, (2, 0)), (9, (2, 0)), (12, (3, 0)), (15, (3, 0))] {
+            assert_eq!(wrap_prompt(draft, 3, cursor).cursor, Some(expected), "cursor={cursor}");
+        }
+        for (cursor, expected) in [(0, (0, 0)), (3, (1, 0)), (6, (1, 0)), (7, (2, 0))] {
+            assert_eq!(wrap_prompt("மிX", 3, cursor).cursor, Some(expected), "cursor={cursor}");
+        }
+    }
+
+    #[test]
     fn ansi_is_not_counted_in_rows_or_insertion_columns() {
         let draft = "\u{1b}[31mred\u{1b}[0m blue";
         let rows = wrap_prompt(draft, 7, draft.len());
