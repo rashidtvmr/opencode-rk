@@ -12,6 +12,61 @@ use crate::native_view_layout::fit;
 pub const MAX_QUERY_CHARS: usize = 256;
 const MAX_ENTRIES: usize = 16;
 
+#[cfg(test)]
+mod filtered_command_regressions {
+    use super::*;
+
+    fn search(query: &str) -> CommandPalette {
+        let mut palette = CommandPalette::default();
+        palette.open(true);
+        for ch in query.chars() {
+            assert!(palette.push_query(ch));
+        }
+        palette
+    }
+
+    #[test]
+    fn uppercase_query_has_the_same_command_identities() {
+        let identities = |palette: CommandPalette| palette.visible().into_iter()
+            .map(|row| (row.command_name, row.route)).collect::<Vec<_>>();
+        let lower = identities(search("session"));
+        assert!(!lower.is_empty());
+        assert_eq!(identities(search("SESSION")), lower);
+    }
+
+    #[test]
+    fn command_id_search_activates_the_registered_route() {
+        let palette = search("opencode.status");
+        let selected = palette.selected().expect("registered status command");
+        assert_eq!(selected.command_name, "opencode.status");
+        assert_eq!(selected.category, "System");
+        assert_eq!(palette.activate(), Some(PaletteAction::Route("/status")));
+    }
+
+    #[test]
+    fn filtered_commands_are_unique_and_navigation_keeps_route_identity() {
+        assert!(search("").visible().iter().any(|row| row.category == "Suggested"));
+        let mut palette = search("session");
+        let rows = palette.visible();
+        assert!(rows.len() >= 2);
+        let mut ids = std::collections::HashSet::new();
+        let mut routes = std::collections::HashSet::new();
+        for row in &rows {
+            assert_ne!(row.category, "Suggested");
+            assert!(ids.insert(row.command_name));
+            assert!(routes.insert(row.route));
+        }
+        for expected in rows.iter().cycle().take(rows.len() + 1) {
+            assert_eq!(palette.selected().map(|row| row.id), Some(expected.id));
+            assert_eq!(palette.activate(), Some(expected.action));
+            palette.next();
+        }
+        assert!(palette.push_query('.'));
+        let selected = palette.selected().expect("session command ID remains searchable");
+        assert_eq!(palette.activate(), Some(PaletteAction::Route(selected.route)));
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PaletteAction {
     /// Hand the exact existing local command to the native command dispatcher.
@@ -205,19 +260,23 @@ impl CommandPalette {
                 "/settings",
             ));
         }
-        entries.extend(regular);
+        entries.extend(regular.clone());
         if needle.is_empty() {
             return entries.into_iter().take(MAX_ENTRIES).collect();
         }
-        let mut filtered: Vec<_> = entries
+        // V2 `list()` duplicates suggested rows only while the filter is empty;
+        // filtered search uses the real command options once, avoiding duplicate
+        // selectable values (command-palette.tsx:48-60).
+        let mut filtered: Vec<_> = regular
             .into_iter()
             .filter_map(|item| {
                 let title = fuzzy_score(&needle, item.title);
                 let category = fuzzy_score(&needle, item.category);
-                if title.is_none() && category.is_none() {
+                let command = fuzzy_score(&needle, item.command_name);
+                if title.is_none() && category.is_none() && command.is_none() {
                     return None;
                 }
-                Some((title.unwrap_or(0) * 2 + category.unwrap_or(0), item))
+                Some((title.unwrap_or(0) * 2 + category.unwrap_or(0) + command.unwrap_or(0), item))
             })
             .collect();
         filtered.sort_by(|a, b| b.0.cmp(&a.0));
@@ -358,7 +417,7 @@ impl CommandPalette {
 
 fn fuzzy_score(needle: &str, value: &str) -> Option<usize> {
     let haystack: Vec<_> = value.to_lowercase().chars().collect();
-    let query: Vec<_> = needle.chars().collect();
+    let query: Vec<_> = needle.to_lowercase().chars().collect();
     let first = *query.first()?;
     haystack
         .iter()
@@ -366,22 +425,13 @@ fn fuzzy_score(needle: &str, value: &str) -> Option<usize> {
         .filter(|(_, ch)| **ch == first)
         .filter_map(|(start, _)| {
             let mut previous = start;
-            let mut score = 4 + if start == 0 || !haystack[start - 1].is_alphanumeric() {
-                8
-            } else {
-                0
-            };
+            let mut score = 4 + usize::from(start == 0 || !haystack[start - 1].is_alphanumeric()) * 8;
             for &character in &query[1..] {
                 let cursor = previous + 1;
-                let offset = haystack
-                    .get(cursor..)?
-                    .iter()
-                    .position(|&item| item == character)?;
+                let offset = haystack.get(cursor..)?.iter().position(|&item| item == character)?;
                 let position = cursor + offset;
                 score += if position == cursor { 16 } else { 4 };
-                if !haystack[position - 1].is_alphanumeric() {
-                    score += 8;
-                }
+                if !haystack[position - 1].is_alphanumeric() { score += 8; }
                 previous = position;
             }
             Some(score)
@@ -403,7 +453,7 @@ fn entry(
         command_name,
         route,
         // Native currently implements no direct model/session key bindings
-        // matching the pinned upstream leader bindings; do not invent them.
+        // matching pinned upstream leader bindings; do not invent labels.
         key_label: None,
         action: PaletteAction::Route(route),
     }
