@@ -6,6 +6,8 @@ use std::hash::{Hash, Hasher};
 use crate::native_view_chat::{ChatMessage, ChatView};
 use crate::native_view_layout::fit;
 
+const MAX_LIST_ROWS: usize = 5;
+
 #[derive(Default)]
 pub struct Panel {
     pub open: bool,
@@ -376,6 +378,64 @@ mod tests {
         assert!(matches!(panel.mouse(height as u16 - 1, stop.start, 40, height), Some(Action::Stop(_))));
     }
     #[test]
+    fn subagent_rows_cap_at_five_and_running_is_indeterminate_literal() {
+        let mut panel = roster(5);
+        let rendered = panel.render(100, 32).join("\n");
+        assert_eq!(rendered.matches("[Running]").count(), 5);
+        assert!(!rendered.contains("%"));
+        assert!(!rendered.contains("progress"));
+        assert!(rendered.contains("task 4"));
+    }
+
+    #[test]
+    fn child_hierarchy_prefix_comes_only_from_daemon_parent_ids() {
+        let mut panel = Panel::default();
+        panel.show("parent");
+        panel.update(&json!({"children":[
+            {"session_id":IDS[0],"parent_id":"parent","agent":"build","state":"running","description":"root child"},
+            {"session_id":IDS[1],"parent_id":IDS[0],"agent":"explore","state":"running","description":"nested child"}
+        ]})).unwrap();
+        let lines = panel.render(100, 12);
+        assert!(lines.iter().any(|line| line.contains("├─ build")));
+        assert!(lines.iter().any(|line| line.contains("│ └─ explore")));
+        // Presentation never invents an id or issues a daemon call.
+        assert_eq!(panel.selected_id().as_deref(), Some(IDS[0]));
+    }
+
+    #[test]
+    fn five_row_window_and_hit_map_share_the_same_visible_indices() {
+        let mut panel = roster(5);
+        let map = panel.hit_map(100, 32);
+        let child_hits: Vec<_> = map.iter().flat_map(|row| row.iter()).filter_map(|hit| match hit.hit {
+            Hit::Child(index) => Some(index), _ => None,
+        }).collect();
+        assert_eq!(child_hits, vec![0, 1, 2, 3, 4]);
+        panel.key(14);
+        panel.key(14);
+        panel.key(14);
+        panel.key(14);
+        let rendered = panel.render(100, 8);
+        let map = panel.hit_map(100, 8);
+        let child_hits: Vec<_> = map.iter().flat_map(|row| row.iter()).filter_map(|hit| match hit.hit {
+            Hit::Child(index) => Some(index), _ => None,
+        }).collect();
+        assert_eq!(child_hits, vec![1, 2, 3, 4]);
+        assert!(rendered.iter().any(|line| line.contains("task 4")));
+    }
+
+    #[test]
+    fn metadata_fallback_does_not_create_child_identity() {
+        let mut panel = Panel::default();
+        panel.show("parent");
+        panel.update(&json!({"children":[{"session_id":IDS[0],"state":"running",
+            "metadata":{"agent":"reviewer","description":"metadata task"}}]})).unwrap();
+        let rendered = panel.render(100, 8).join("\n");
+        assert!(rendered.contains("reviewer"));
+        assert!(rendered.contains("metadata task"));
+        assert_eq!(panel.selected_id().as_deref(), Some(IDS[0]));
+    }
+
+    #[test]
     fn untrusted_daemon_text_cannot_shift_child_hit_rows() {
         let mut panel = Panel::default();
         panel.show("parent");
@@ -471,7 +531,42 @@ impl Panel {
         }
     }
     pub fn selected_id(&self) -> Option<String> {
-        self.rows.get(self.selected)?.get("session_id")?.as_str().map(str::to_owned)
+        self.rows.get(self.selected)?.get("session_id").and_then(Value::as_str).map(str::to_owned)
+    }
+
+    fn row_text<'a>(row: &'a Value, key: &str, fallback: &'a str) -> &'a str {
+        row.get(key).and_then(Value::as_str).filter(|value| !value.trim().is_empty())
+            .or_else(|| row.get("metadata").and_then(|metadata| metadata.get(key)).and_then(Value::as_str).filter(|value| !value.trim().is_empty()))
+            .unwrap_or(fallback)
+    }
+
+    /// Returns the source Composer's family prefix for a daemon-provided row.
+    /// The panel never discovers or creates sessions: `parent_id` and the row
+    /// set are authoritative inputs from the existing children endpoint.
+    fn family_prefix(&self, index: usize) -> String {
+        let Some(row) = self.rows.get(index) else { return String::new(); };
+        let Some(parent) = row.get("parent_id").and_then(Value::as_str) else {
+            return if index + 1 == self.rows.len() { "└─" } else { "├─" }.to_owned();
+        };
+        let mut depth = 0usize;
+        let mut current = parent;
+        let mut seen = std::collections::HashSet::new();
+        while current != self.parent && depth < self.rows.len() && seen.insert(current) {
+            let Some(parent_row) = self.rows.iter().find(|candidate|
+                candidate.get("session_id").and_then(Value::as_str) == Some(current)) else { break; };
+            current = parent_row.get("parent_id").and_then(Value::as_str).unwrap_or(self.parent.as_str());
+            depth += 1;
+        }
+        let last = index + 1 == self.rows.len();
+        let branch = if last { "└─" } else { "├─" };
+        if depth == 0 { branch.to_owned() } else { format!("{}{}", "│ ".repeat(depth), branch) }
+    }
+
+    fn list_window(&self, height: usize, error_row: bool) -> (usize, usize) {
+        let top = 2 + usize::from(error_row);
+        let capacity = height.saturating_sub(top + 2).min(MAX_LIST_ROWS);
+        let start = self.selected.saturating_sub(capacity.saturating_sub(1));
+        (start, capacity)
     }
     pub fn text(&mut self, character: char) {
         if self.composing && !character.is_control() && self.input.len() + character.len_utf8() <= 32768 { self.input.push(character); }
@@ -543,9 +638,8 @@ impl Panel {
             // Mirror the list branch of render: two header rows, an optional
             // error row, and the bottom footer row stay unclickable.
             let top = 2 + usize::from(self.error.is_some() || self.action_error.is_some());
-            let capacity = height.saturating_sub(top + 2);
+            let (start, capacity) = self.list_window(height, self.error.is_some() || self.action_error.is_some());
             if capacity > 0 {
-                let start = self.selected.saturating_sub(capacity.saturating_sub(1));
                 let limit = height.saturating_sub(2).max(1);
                 for (index, _) in self.rows.iter().enumerate().skip(start).take(capacity) {
                     let line = top + index - start;
@@ -627,12 +721,22 @@ impl Panel {
             lines.push("No child tasks in this daemon session".into());
             lines.push("Ask the agent to delegate using the task tool.".into());
         } else {
-            let capacity = height.saturating_sub(lines.len() + 2);
-            let start = self.selected.saturating_sub(capacity.saturating_sub(1));
+            let error_row = self.error.is_some() || self.action_error.is_some();
+            let (start, capacity) = self.list_window(height, error_row);
             for (index, row) in self.rows.iter().enumerate().skip(start).take(capacity) {
-                let state = if row["awaiting_permission"] == true { "approval needed" } else { row["state"].as_str().unwrap_or("unknown") };
-                lines.push(format!("{} [{}] {} — {}", if index == self.selected { ">" } else { " " }, state,
-                    row["agent"].as_str().unwrap_or("?"), row["description"].as_str().unwrap_or("?")));
+                let state = if row["awaiting_permission"] == true {
+                    "approval needed"
+                } else if row["state"].as_str() == Some("running") {
+                    // Upstream Composer C08 uses a literal Running label: no
+                    // percentage or determinate/fake progress is available.
+                    "Running"
+                } else {
+                    row["state"].as_str().unwrap_or("unknown")
+                };
+                let agent = Self::row_text(row, "agent", "Subagent");
+                let description = Self::row_text(row, "description", "?");
+                lines.push(format!("{} [{}] {} {} — {}", if index == self.selected { ">" } else { " " },
+                    state, self.family_prefix(index), agent, description));
             }
         }
         lines.truncate(height.saturating_sub(2).max(1));
