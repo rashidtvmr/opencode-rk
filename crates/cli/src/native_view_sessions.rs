@@ -209,22 +209,27 @@ impl SessionView {
     /// Case-insensitive, Unicode-safe substring filter over id and title.
     /// Empty/whitespace query clears the filter. Selection follows the filter.
     pub fn search(&mut self, query: &str) -> Option<String> {
+        // Capture the old-window identity before changing the query.
+        let keep = self.selected_id().map(str::to_owned);
         let q: String = query.trim().to_lowercase();
         if q.is_empty() {
             self.query = None;
         } else {
             self.query = Some(q);
         }
-        self.refilter();
+        self.refilter(keep);
         self.filtered_ids().first().cloned()
     }
 
     /// Set the current filter without reporting selection (None = clear).
     pub fn set_query(&mut self, query: Option<&str>) {
+        // Callers may use this for backspace/clear, so preserve the identity
+        // from the pre-mutation filtered window as search() does.
+        let keep = self.selected_id().map(str::to_owned);
         self.query = query
             .map(|q| q.trim().to_lowercase())
             .filter(|q| !q.is_empty());
-        self.refilter();
+        self.refilter(keep);
     }
 
     /// Store an unsent draft for one session id. Refuses to silently drop or
@@ -331,17 +336,11 @@ impl SessionView {
         }
     }
 
-    fn refilter(&mut self) {
+    fn refilter(&mut self, keep: Option<String>) {
         let ids = self.filtered_ids();
-        let keep = self
-            .rows
-            .get(self.selected)
-            .map(|r| r.id.clone())
-            .unwrap_or_default();
-        self.selected = match ids.iter().position(|i| *i == keep) {
-            Some(i) => i,
-            None => 0,
-        };
+        self.selected = keep
+            .and_then(|id| ids.iter().position(|candidate| *candidate == id))
+            .unwrap_or(0);
     }
 
     fn open_tab(&mut self, id: &str) {
@@ -843,6 +842,43 @@ mod tests {
         assert_eq!(v.search("zzz"), None);
         v.search("");
         assert_eq!(v.filtered_ids().len(), 2);
+    }
+
+    #[test]
+    fn filtering_preserves_identity_across_multi_item_query_changes() {
+        let mut v = view();
+        v.acknowledge_active(VALID_ID);
+        assert_eq!(v.search("alpha"), Some(VALID_ID.to_owned()));
+        assert_eq!(v.search("beta"), Some(OTHER_ID.to_owned()));
+        v.set_query(Some(""));
+        assert_eq!(v.selected_id(), Some(OTHER_ID));
+        v.set_query(Some("alp"));
+        assert_eq!(v.selected_id(), Some(VALID_ID));
+        v.set_query(None);
+        assert_eq!(v.selected_id(), Some(VALID_ID));
+        assert_eq!(v.active_id(), Some(VALID_ID));
+    }
+
+    #[test]
+    fn cancel_preserves_active_identity_when_filter_hides_it() {
+        let mut v = view();
+        v.acknowledge_active(VALID_ID);
+        v.set_query(Some("beta"));
+        assert_eq!(v.select_next(), Some(OTHER_ID.to_owned()));
+        v.cancel_pending();
+        assert_eq!(v.active_id(), Some(VALID_ID));
+        assert_eq!(v.selected_id(), Some(OTHER_ID));
+        v.set_query(None);
+        assert_eq!(v.selected_id(), Some(OTHER_ID));
+    }
+
+    #[test]
+    fn blank_title_remains_uninvented_without_metadata() {
+        let mut v = SessionView::default();
+        v.set_rows(vec![SessionRow { id: VALID_ID.into(), title: String::new() }], Some(VALID_ID.into()));
+        let lines = v.render(40, 3);
+        assert!(!lines.iter().any(|line| line.contains("New session")));
+        assert_eq!(v.active_id(), Some(VALID_ID));
     }
 
     #[test]
