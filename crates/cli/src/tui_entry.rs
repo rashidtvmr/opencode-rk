@@ -4395,6 +4395,21 @@ fn native_loop(
             provider_url.clone(),
         ),
     ];
+    // The bundled catalog is the complete fresh-install floor. A valid cache
+    // overlays it by resolved provider ID; bounded reads preserve the floor
+    // when cache data is missing, stale, partial, or corrupt.
+    let cached_catalog = crate::native_ui_preferences::read_bounded(
+        &data_dir.join("catalog/models.dev.api.json"),
+        8 * 1024 * 1024,
+        "models.dev provider catalog",
+    )
+    .ok()
+    .flatten();
+    let catalog = opencode_rk_catalog::Catalog::from_cache_or_bundled(
+        cached_catalog.as_deref().map(str::as_bytes),
+    )
+    .ok();
+    let catalog_rows = catalog.map(|catalog| catalog.ordered_providers()).unwrap_or_default();
     // The own config is an authoritative local provider registry layer.  Do
     // not wait for the optional daemon listing to expose it: startup model
     // selection must be able to initialize an imported provider before any
@@ -4443,11 +4458,40 @@ fn native_loop(
             }
         }
     }
+    // All configured/imported/daemon rows have now been collected. Merge
+    // exactly once against the complete catalog before adding custom, so
+    // existing rows win name/API precedence and duplicate IDs are removed.
+    let existing: Vec<_> = providers.iter().filter_map(|(id, name, url)| {
+        Some(opencode_rk_catalog::ProviderSummary {
+            id: opencode_rk_contracts::ProviderId::new(id.clone()).ok()?,
+            name: name.clone(),
+            environment: Vec::new(),
+            api: (!url.is_empty()).then(|| url.clone()),
+        })
+    }).collect();
+    providers = opencode_rk_catalog::Catalog::merge_provider_rows(&catalog_rows, &existing)
+        .into_iter()
+        .map(|provider| (provider.id.to_string(), provider.name, provider.api.unwrap_or_default()))
+        .collect();
+
     providers.push((
         "custom".into(),
         "Other — custom OpenAI-compatible provider".into(),
         String::new(),
     ));
+    providers.sort_by(|a, b| {
+        let rank = |id: &str| opencode_rk_catalog::POPULAR_PROVIDER_IDS
+            .iter()
+            .position(|popular| *popular == id);
+        match (rank(&a.0), rank(&b.0)) {
+            (Some(left), Some(right)) => left.cmp(&right),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) if a.0 == "custom" => std::cmp::Ordering::Greater,
+            (None, None) if b.0 == "custom" => std::cmp::Ordering::Less,
+            _ => a.1.to_lowercase().cmp(&b.1.to_lowercase()).then(a.0.cmp(&b.0)),
+        }
+    });
     // `custom` is the picker sentinel, not a configured provider and must
     // never be allowed to become a discovery route.
     let known_provider_ids: Vec<&str> = providers
