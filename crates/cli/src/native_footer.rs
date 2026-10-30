@@ -55,6 +55,20 @@ pub const WIDTH_DURATION_GAP_HIGH: usize = 36;
 /// Exact interruption suffix text (upstream `index.tsx:2065`: ` · interrupted`).
 pub const INTERRUPTED_SPAN: &str = " · interrupted";
 
+/// Live shell-mode prompt hint from the pinned footer plugin. The mode is an
+/// authoritative native view fact; no provider, usage, or shortcut is inferred.
+#[must_use]
+pub fn shell_mode_footer(width: usize) -> Option<String> {
+    if width == 0 {
+        return None;
+    }
+    Some(if width < 44 {
+        "esc shell"
+    } else {
+        "esc exit shell mode"
+    }.to_owned())
+}
+
 /// One rendered footer row: content (no caller decoration) and its paint class.
 pub type FooterRow = (String, ChatRowClass);
 

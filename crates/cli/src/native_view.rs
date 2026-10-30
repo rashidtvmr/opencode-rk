@@ -2655,6 +2655,14 @@ impl NativeView {
         if inner == 0 {
             return (padded("", width), None);
         }
+        // Shell mode is an exclusive live prompt-footer branch. The mode fact
+        // is set by the native input controller; do not retain idle directory,
+        // version, MCP or context chrome beside it.
+        if self.shell_mode {
+            let label = crate::native_footer::shell_mode_footer(usize::from(width))
+                .unwrap_or_default();
+            return (padded(&label, width), None);
+        }
         // Active Thinking is rendered by the bounded conversation header
         // (`native_view_chat::render_header`), before sidebar composition. The
         // shared shell footer remains directory + MCP/version status and never
@@ -6100,5 +6108,52 @@ mod modal_full_viewport_geometry_tests {
         assert_eq!(modal.content_point(modal.content_x, modal.y, content_height), None);
         // The footer row (23) is outside.
         assert_eq!(modal.content_point(modal.content_x, 23, content_height), None);
+    }
+}
+
+
+#[cfg(test)]
+mod p05_footer_caller_regression {
+    use super::NativeView;
+
+    fn display_cells(text: &str) -> usize {
+        let mut cells = 0;
+        crate::native_view_layout::visit_unpadded_cells(text, usize::from(u16::MAX), |_, width| {
+            cells += width;
+        });
+        cells
+    }
+
+    #[test]
+    fn shell_footer_uses_full_padded_row_and_returns_to_original_idle_footer() {
+        let mut view = NativeView::new(80, 12);
+        view.set_session_route(true);
+        view.set_workspace("/fixture/project".to_owned());
+        view.set_context_window(Some(10_000));
+        view.set_usage(1_000, 0, None, None);
+        view.set_prompt_mode(true);
+
+        let wide = view.render_typed("", &[], false, &[]);
+        let wide_row = wide.last().expect("footer row");
+        assert_eq!(display_cells(wide_row), 80);
+        assert!(wide_row.starts_with("  esc exit shell mode"), "source inset: {wide_row:?}");
+        assert_eq!(wide_row.trim(), "esc exit shell mode");
+
+        view.resize(43, 12);
+        let narrow = view.render_typed("", &[], false, &[]);
+        let narrow_row = narrow.last().expect("narrow footer row");
+        assert_eq!(display_cells(narrow_row), 43);
+        assert!(narrow_row.starts_with("  esc shell"), "source inset: {narrow_row:?}");
+        assert_eq!(narrow_row.trim(), "esc shell");
+
+        view.set_prompt_mode(false);
+        view.resize(80, 12);
+        let idle = view.render_typed("", &[], false, &[]);
+        let idle_row = idle.last().expect("idle footer row");
+        assert_eq!(display_cells(idle_row), 80);
+        assert!(!idle_row.contains("esc shell"));
+        assert!(!idle_row.contains("exit shell mode"));
+        assert!(idle_row.contains("/fixture/project"), "directory restored: {idle_row:?}");
+        assert!(idle_row.contains("Context Usage 1000/10000"), "persistent context restored: {idle_row:?}");
     }
 }
