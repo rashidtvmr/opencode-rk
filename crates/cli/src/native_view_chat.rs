@@ -1743,9 +1743,13 @@ fn typed_message_rows_with_prefix_spans(
                 // malformed/truncated facts plus all rows; message-budget
                 // overflow is computed here and OR-ed into the truncation
                 // fact. Never a second parse.
-                let rendered = crate::native_diff_view::paint_rows_with_gutter(
+                // The four-cell message inset is outside the diff surface;
+                // wrap against the measured remaining pane width so wide and
+                // combining Unicode clusters are not split by char count.
+                let rendered = crate::native_diff_view::paint_rows_with_gutter_wrapped(
                     diff,
                     crate::native_diff_view::MAX_DIFF_LINES,
+                    width.saturating_sub(4),
                 );
                 let total_rows = rendered.rows.len();
                 let malformed = rendered.malformed;
