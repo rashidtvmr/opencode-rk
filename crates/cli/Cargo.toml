@@ -18,6 +18,7 @@ name = "opencode-rk"
 path = "src/main.rs"
 
 [dependencies]
+unicode-segmentation.workspace = true
 axum.workspace = true
 clap.workspace = true
 opencode-rk-catalog = { path = "../catalog" }

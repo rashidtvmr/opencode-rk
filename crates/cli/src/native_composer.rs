@@ -2,17 +2,15 @@
 //! Unicode composer buffer, keymap, paste gate and busy queue (TUI-004).
 //!
 //! Pure state only: no rendering, no IO, no clock, no threads, no FFI.
-//! Std only (`VecDeque`, `fmt`, `mem`); compiles under `rustc --test` with no
-//! external crates.
+//! Uses `VecDeque`, `fmt`, `mem`, and the pinned `unicode-segmentation`
+//! dependency for exact extended-grapheme editing.
 //!
 //! Invariants:
-//! - [`EditBuffer`] cursor is always a UTF-8 char boundary. Every mutation
-//!   asserts it (`debug_assert`) and moves/inserts/deletes whole `char`s, so
-//!   Tamil, combining marks, emoji and CJK can never split a code point.
-//!   ponytail: cursor moves per Unicode scalar, not extended grapheme
-//!   cluster (ZWJ sequences delete scalar-by-scalar, still byte-safe);
-//!   upgrade to cluster segmentation with a unicode-segmentation dependency
-//!   if the lane ever allows non-std crates.
+//! - [`EditBuffer`] cursor is always a UTF-8 boundary. Horizontal and
+//!   destructive edits use Unicode extended-grapheme boundaries from
+//!   `unicode-segmentation`, so flags, keycaps, spacing/prepend marks, Tamil,
+//!   combining sequences and ZWJ emoji are not split. Word editing remains a
+//!   separate decoder-owned concern.
 //! - Paste is a gate, never a trigger: [`Composer::apply_paste`] inserts the
 //!   bracketed body literally (embedded newlines, `:q`, `rm -rf`, ANSI all
 //!   stay inert draft text) and can never submit or queue. Submission happens
@@ -326,21 +324,37 @@ fn line_starts(text: &str) -> Vec<usize> {
     starts
 }
 
-/// Byte offset `col` chars into `[start, end)` (char range, so the result is
-/// a boundary), clamped to `end`.
-fn offset_at_col(text: &str, start: usize, end: usize, col: usize) -> usize {
-    let mut off = start;
-    for (n, c) in text[start..end].chars().enumerate() {
-        if n == col {
-            break;
-        }
-        off += c.len_utf8();
-    }
-    off
+/// Return the byte offset at grapheme column `col` in `[start, end)`.
+fn offset_at_grapheme_col(text: &str, start: usize, end: usize, col: usize) -> usize {
+    use unicode_segmentation::UnicodeSegmentation;
+    let segment = &text[start..end];
+    segment.grapheme_indices(true).nth(col).map_or(end, |(offset, _)| start + offset)
 }
 
-/// Grapheme-safe (char-boundary) edit buffer with cursor and bounded undo.
-/// All edits move by whole `char`s; the cursor can never rest mid-code-point.
+fn grapheme_column(text: &str, start: usize, cursor: usize) -> usize {
+    use unicode_segmentation::UnicodeSegmentation;
+    text[start..cursor].graphemes(true).count()
+}
+
+fn previous_grapheme_boundary(text: &str, cursor: usize) -> usize {
+    use unicode_segmentation::UnicodeSegmentation;
+    text[..cursor].grapheme_indices(true).next_back().map_or(0, |(start, _)| start)
+}
+
+fn next_grapheme_boundary(text: &str, cursor: usize) -> usize {
+    use unicode_segmentation::UnicodeSegmentation;
+    text[cursor..].grapheme_indices(true).next().map_or(text.len(), |(start, grapheme)| cursor + start + grapheme.len())
+}
+
+fn normalize_grapheme_boundary(text: &str, cursor: usize) -> usize {
+    if cursor == 0 || cursor == text.len() { return cursor; }
+    use unicode_segmentation::UnicodeSegmentation;
+    if text.grapheme_indices(true).any(|(start, _)| start == cursor) { cursor }
+    else { previous_grapheme_boundary(text, cursor) }
+}
+
+/// Grapheme-safe edit buffer with cursor and bounded undo.
+/// Cursor positions remain UTF-8 boundaries and edits use UAX #29 clusters.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct EditBuffer {
     text: String,
@@ -376,7 +390,7 @@ impl EditBuffer {
         while cursor > 0 && !self.text.is_char_boundary(cursor) {
             cursor -= 1;
         }
-        self.cursor = cursor;
+        self.cursor = normalize_grapheme_boundary(&self.text, cursor);
         self.check();
     }
 
@@ -466,47 +480,37 @@ impl EditBuffer {
         taken
     }
 
-    /// Delete the scalar before the cursor. False at buffer start.
+    /// Delete the previous Unicode extended grapheme cluster.
     pub fn backspace(&mut self) -> bool {
-        let width = match self.text[..self.cursor].chars().next_back() {
-            Some(c) => c.len_utf8(),
-            None => return false,
-        };
+        if self.cursor == 0 { return false; }
+        let start = previous_grapheme_boundary(&self.text, self.cursor);
         self.checkpoint();
-        self.cursor -= width;
-        self.text.drain(self.cursor..self.cursor + width);
+        self.text.drain(start..self.cursor);
+        self.cursor = start;
         self.check();
         true
     }
 
-    /// Delete the scalar under the cursor. False at buffer end.
+    /// Delete the complete Unicode extended grapheme cluster under the cursor.
     pub fn delete_forward(&mut self) -> bool {
-        let width = match self.text[self.cursor..].chars().next() {
-            Some(c) => c.len_utf8(),
-            None => return false,
-        };
+        if self.cursor == self.text.len() { return false; }
+        let end = next_grapheme_boundary(&self.text, self.cursor);
         self.checkpoint();
-        self.text.drain(self.cursor..self.cursor + width);
+        self.text.drain(self.cursor..end);
         self.check();
         true
     }
 
     pub fn move_left(&mut self) -> bool {
-        let width = match self.text[..self.cursor].chars().next_back() {
-            Some(c) => c.len_utf8(),
-            None => return false,
-        };
-        self.cursor -= width;
+        if self.cursor == 0 { return false; }
+        self.cursor = previous_grapheme_boundary(&self.text, self.cursor);
         self.check();
         true
     }
 
     pub fn move_right(&mut self) -> bool {
-        let width = match self.text[self.cursor..].chars().next() {
-            Some(c) => c.len_utf8(),
-            None => return false,
-        };
-        self.cursor += width;
+        if self.cursor == self.text.len() { return false; }
+        self.cursor = next_grapheme_boundary(&self.text, self.cursor);
         self.check();
         true
     }
@@ -547,9 +551,9 @@ impl EditBuffer {
         if line == 0 {
             return false;
         }
-        let col = self.text[starts[line]..self.cursor].chars().count();
+        let col = grapheme_column(&self.text, starts[line], self.cursor);
         let target_end = starts[line] - 1;
-        let next = offset_at_col(&self.text, starts[line - 1], target_end, col);
+        let next = offset_at_grapheme_col(&self.text, starts[line - 1], target_end, col);
         self.cursor = next;
         self.check();
         true
@@ -562,12 +566,12 @@ impl EditBuffer {
         if line + 1 >= starts.len() {
             return false;
         }
-        let col = self.text[starts[line]..self.cursor].chars().count();
+        let col = grapheme_column(&self.text, starts[line], self.cursor);
         let target_end = match starts.get(line + 2) {
             Some(&ns) => ns - 1,
             None => self.text.len(),
         };
-        let next = offset_at_col(&self.text, starts[line + 1], target_end, col);
+        let next = offset_at_grapheme_col(&self.text, starts[line + 1], target_end, col);
         self.cursor = next;
         self.check();
         true
@@ -578,7 +582,9 @@ impl EditBuffer {
         match self.undo.pop() {
             Some((text, cursor)) => {
                 self.text = text;
-                self.cursor = cursor;
+                self.cursor = cursor.min(self.text.len());
+                while self.cursor > 0 && !self.text.is_char_boundary(self.cursor) { self.cursor -= 1; }
+                self.cursor = normalize_grapheme_boundary(&self.text, self.cursor);
                 self.check();
                 true
             }
@@ -1027,6 +1033,53 @@ mod tests {
     use super::*;
 
     #[test]
+    fn grapheme_navigation_and_delete_preserve_flags_keycaps_spacing_prepend_tamil_and_zwj() {
+        let cases = ["🇺🇸", "1️⃣", "\u{0600}ا", "நி", "é", "👨‍👩‍👧‍👦"];
+        for cluster in cases {
+            let mut buf = EditBuffer::new();
+            buf.insert_text(&format!("x{cluster}y")).unwrap();
+            buf.move_to_end();
+            assert!(buf.move_left());
+            assert!(buf.backspace(), "backspace must remove {cluster:?} as one cluster");
+            assert_eq!(buf.text(), "xy", "cluster was split: {cluster:?}");
+            buf.set_text(format!("x{cluster}y")).unwrap();
+            buf.move_to_start();
+            assert!(buf.move_right());
+            assert!(buf.delete_forward());
+            assert_eq!(buf.text(), "xy", "forward delete split: {cluster:?}");
+        }
+    }
+
+    #[test]
+    fn vertical_navigation_keeps_grapheme_boundaries_for_all_fixture_clusters() {
+        let clusters = ["🇺🇸", "1️⃣", "\u{0600}ا", "நி", "é", "👨‍👩‍👧‍👦"];
+        for cluster in clusters {
+            let text = format!("a{cluster}b\nx{cluster}y");
+            let mut buf = EditBuffer::new();
+            buf.insert_text(&text).unwrap();
+            buf.set_cursor(format!("a{cluster}b\nx{cluster}").len());
+            assert!(buf.move_up());
+            assert!(buf.is_cursor_on_boundary());
+            assert!(buf.backspace());
+            assert_eq!(buf.text(), format!("ab\nx{cluster}y"));
+            assert!(buf.undo());
+            assert!(buf.is_cursor_on_boundary());
+            assert!(buf.move_down());
+            assert!(buf.is_cursor_on_boundary());
+        }
+    }
+
+    #[test]
+    fn grapheme_edit_preserves_multiline_newlines() {
+        let mut buf = EditBuffer::new();
+        buf.insert_text("one\n🇺🇸\nthree").unwrap();
+        buf.set_cursor("one\n🇺🇸".len());
+        assert!(buf.backspace());
+        assert_eq!(buf.text(), "one\n\nthree");
+        assert!(buf.is_cursor_on_boundary());
+    }
+
+    #[test]
     fn emoji_edit_never_splits_code_point() {
         let mut buf = EditBuffer::new();
         buf.insert_text("a🦀b").unwrap();
@@ -1047,18 +1100,13 @@ mod tests {
     }
 
     #[test]
-    fn zwj_emoji_deletes_scalar_by_scalar_without_corruption() {
+    fn zwj_emoji_deletes_as_one_cluster_without_corruption() {
         let mut buf = EditBuffer::new();
         buf.insert_text("👩‍💻").unwrap(); // woman technologist: scalar, ZWJ, scalar
         assert!(buf.is_cursor_on_boundary());
-        let mut steps = 0;
-        while buf.backspace() {
-            assert!(buf.is_cursor_on_boundary());
-            assert!(buf.text().is_char_boundary(buf.text().len()));
-            steps += 1;
-        }
+        assert!(buf.backspace());
         assert_eq!(buf.text(), "");
-        assert_eq!(steps, 3);
+        assert!(buf.is_cursor_on_boundary());
     }
 
     #[test]
@@ -1092,7 +1140,9 @@ mod tests {
         assert_eq!(buf.text(), "é");
         assert!(buf.is_cursor_on_boundary());
         assert!(buf.backspace());
-        assert_eq!(buf.text(), "e");
+        // EditBuffer's upstream contract is grapheme-aware deletion, so the
+        // base and combining acute form one deletion unit.
+        assert_eq!(buf.text(), "");
         assert!(buf.is_cursor_on_boundary());
     }
 

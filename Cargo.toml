@@ -23,6 +23,7 @@ license = "MIT"
 rust-version = "1.85"
 
 [workspace.dependencies]
+unicode-segmentation = "=1.13.3"
 axum = "0.8"
 blake3 = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
