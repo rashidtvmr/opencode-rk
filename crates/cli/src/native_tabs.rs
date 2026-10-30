@@ -175,6 +175,272 @@ pub fn middle_action(target: &HorizontalTarget) -> HorizontalMiddleAction {
     }
 }
 
+/// Per-row color role for the horizontal strip, enabling multi-color rows
+/// without guessing glyph text. Vertical rail rows do not use this; they are
+/// painted by native_tab_rail with its own CellColor semantics.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TabCellColor {
+    /// Idle tab: bg=background.base, fg=text.muted.
+    Idle,
+    /// Selected tab: bg=raised.high, fg=text.base, bold.
+    Selected,
+    /// Hovered (not selected): bg=raised.high, fg=text.base.
+    Hovered,
+    /// New-session idle affordance: plus fg=idleNumber, "New session" fg=TextMuted.
+    AddIdle,
+    /// New-session hovered affordance: bg=raised.high, plus+text fg=text.base.
+    AddHovered,
+    /// Promoted Home slot (active new tab): bg=raised.high fg=text.base, bold.
+    HomeActive,
+    /// Promoted Home slot hovered (not active): bg=raised.high fg=text.base.
+    HomeHovered,
+}
+
+/// Resolved horizontal paint parameters for one tab row, derived from the
+/// palette via upstream theme mappings (session-tabs.tsx :1569-1736,
+/// :1770-1794). All colors are raw palette `[u8;4]`. Zero-valued channels in
+/// unused roles are ignored by the caller.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TabRowPaint {
+    /// Background: idle->background.base, hovered/selected->raised.high.
+    pub background: [u8; 4],
+    /// Title/number fg: idle=text.muted, hovered/selected=text.base.
+    pub title_fg: [u8; 4],
+    /// Close glyph fg: tint(text.muted, text.base, 0.6) per upstream :1731-1736.
+    pub close_fg: [u8; 4],
+    /// Plus "+" fg for the add affordance: idleNumber (idle) / Text (hovered).
+    pub plus_fg: [u8; 4],
+    /// "New session" text fg: TextMuted (idle) / Text (hovered).
+    pub new_text_fg: [u8; 4],
+    /// Bold attribute: selected (or dragged) -> 1, else 0.
+    pub title_attr: u32,
+    /// Color role tag for this row (Idle/Selected/Hovered/Add/Hover/Home).
+    pub color: TabCellColor,
+    /// Number/indicator column fg per upstream session-tabs.tsx:1648-1658.
+    /// Zero channels mean "caller falls back to title_fg" (Home/add conven-
+    /// tional rows keep their own upstream prop colors).
+    pub number_fg: [u8; 4],
+}
+
+impl TabRowPaint {
+    /// Idle horizontal session tab: bg=background.base fg=text.muted.
+    #[must_use]
+    pub fn horizontal_idle(palette: &crate::native_theme_runtime::Palette) -> Self {
+        use crate::native_theme_runtime::Slot;
+        let bg = palette.get(Slot::Background);
+        let title_fg = palette.get(Slot::TextMuted);
+        let close_fg = crate::native_tab_rail::tint(
+            palette.get(Slot::TextMuted),
+            palette.get(Slot::Text),
+            0.6,
+        );
+        TabRowPaint {
+            background: bg,
+            title_fg,
+            close_fg,
+            plus_fg: [0, 0, 0, 0],
+            new_text_fg: [0, 0, 0, 0],
+            title_attr: 0,
+            number_fg: [0, 0, 0, 0],
+            color: TabCellColor::Idle,
+        }
+    }
+
+    /// Hovered horizontal session tab: bg=raised.high fg=text.base.
+    #[must_use]
+    pub fn horizontal_hovered(palette: &crate::native_theme_runtime::Palette) -> Self {
+        use crate::native_theme_runtime::Slot;
+        let bg = palette.get(Slot::BackgroundElement);
+        let title_fg = palette.get(Slot::Text);
+        let close_fg = crate::native_tab_rail::tint(
+            palette.get(Slot::TextMuted),
+            palette.get(Slot::Text),
+            0.6,
+        );
+        TabRowPaint {
+            background: bg,
+            title_fg,
+            close_fg,
+            plus_fg: [0, 0, 0, 0],
+            new_text_fg: [0, 0, 0, 0],
+            title_attr: 0,
+            number_fg: [0, 0, 0, 0],
+            color: TabCellColor::Hovered,
+        }
+    }
+
+    /// Selected horizontal session tab: bg=raised.high fg=text.base bold.
+    #[must_use]
+    pub fn horizontal_selected(palette: &crate::native_theme_runtime::Palette) -> Self {
+        use crate::native_theme_runtime::Slot;
+        // selected bg = tint(action.hovered:bg->raised.high, decrease(raised.base), 1) = raised.high
+        let bg = palette.get(Slot::BackgroundElement);
+        let title_fg = palette.get(Slot::Text);
+        let close_fg = crate::native_tab_rail::tint(
+            palette.get(Slot::TextMuted),
+            palette.get(Slot::Text),
+            0.6,
+        );
+        TabRowPaint {
+            background: bg,
+            title_fg,
+            close_fg,
+            plus_fg: [0, 0, 0, 0],
+            new_text_fg: [0, 0, 0, 0],
+            title_attr: 1,
+            number_fg: [0, 0, 0, 0],
+            color: TabCellColor::Selected,
+        }
+    }
+
+    /// Idle horizontal plus inherits background.base and uses text.muted.
+    #[must_use]
+    pub fn horizontal_add_idle(palette: &crate::native_theme_runtime::Palette) -> Self {
+        use crate::native_theme_runtime::Slot;
+        let bg = palette.get(Slot::Background);
+        let plus_fg = palette.get(Slot::TextMuted);
+        let new_text_fg = palette.get(Slot::TextMuted);
+        TabRowPaint {
+            background: bg,
+            title_fg: [0, 0, 0, 0],
+            close_fg: [0, 0, 0, 0],
+            plus_fg,
+            new_text_fg,
+            title_attr: 0,
+            number_fg: [0, 0, 0, 0],
+            color: TabCellColor::AddIdle,
+        }
+    }
+
+    /// Hovered add-session affordance: bg=raised.high, plus+text=Text.
+    #[must_use]
+    pub fn horizontal_add_hovered(palette: &crate::native_theme_runtime::Palette) -> Self {
+        use crate::native_theme_runtime::Slot;
+        let bg = palette.get(Slot::BackgroundElement);
+        let text = palette.get(Slot::Text);
+        TabRowPaint {
+            background: bg,
+            title_fg: [0, 0, 0, 0],
+            close_fg: [0, 0, 0, 0],
+            plus_fg: text,
+            new_text_fg: text,
+            title_attr: 0,
+            number_fg: [0, 0, 0, 0],
+            color: TabCellColor::AddHovered,
+        }
+    }
+
+    /// Promoted Home slot (active new tab): bg=raised.high fg=text.base bold.
+    #[must_use]
+    pub fn horizontal_home_active(palette: &crate::native_theme_runtime::Palette) -> Self {
+        use crate::native_theme_runtime::Slot;
+        let bg = palette.get(Slot::BackgroundElement);
+        let text = palette.get(Slot::Text);
+        TabRowPaint {
+            background: bg,
+            title_fg: text,
+            close_fg: [0, 0, 0, 0],
+            plus_fg: [0, 0, 0, 0],
+            new_text_fg: [0, 0, 0, 0],
+            title_attr: 1,
+            number_fg: [0, 0, 0, 0],
+            color: TabCellColor::HomeActive,
+        }
+    }
+
+    /// Promoted Home slot hovered (not active): bg=raised.high fg=text.base.
+    #[must_use]
+    pub fn horizontal_home_hovered(palette: &crate::native_theme_runtime::Palette) -> Self {
+        use crate::native_theme_runtime::Slot;
+        let bg = palette.get(Slot::BackgroundElement);
+        let text = palette.get(Slot::Text);
+        TabRowPaint {
+            background: bg,
+            title_fg: text,
+            close_fg: [0, 0, 0, 0],
+            plus_fg: [0, 0, 0, 0],
+            new_text_fg: [0, 0, 0, 0],
+            title_attr: 0,
+            number_fg: [0, 0, 0, 0],
+            color: TabCellColor::HomeHovered,
+        }
+    }
+}
+
+/// Classify a horizontal session tab's color role from upstream formulas
+/// (session-tabs.tsx :1569-1583 :1609-1612 :1642):
+/// - selected -> Selected (bg=raised.high, fg=Text, bold)
+/// - hovered && !selected -> Hovered (bg=raised.high, fg=Text)
+/// - otherwise -> Idle (bg=background.base, fg=TextMuted)
+#[must_use]
+pub fn cell_color(_flags: &TabFlags, is_hovered: bool, is_active: bool) -> TabCellColor {
+    if is_active {
+        TabCellColor::Selected
+    } else if is_hovered {
+        TabCellColor::Hovered
+    } else {
+        TabCellColor::Idle
+    }
+}
+
+/// Full horizontal session-row paint including the number/indicator column
+/// color, per upstream session-tabs.tsx:1648-1658 with the recorded theme
+/// mappings: runs (busy) and attention feedback numbers use the Primary slot
+/// (upstream activeNumber orange.200 / attention accent[200]; accent has no
+/// palette slot yet, recorded I16 divergence); hovered -> Text; selected ->
+/// tint(Text, Background, 0.25) (selection alpha 1 inside
+/// tint(idleNumber(), ..)); idle -> idleNumber().
+#[must_use]
+pub fn horizontal_session_paint(
+    color: TabCellColor,
+    flags: &TabFlags,
+    palette: &crate::native_theme_runtime::Palette,
+) -> TabRowPaint {
+    horizontal_session_paint_with_semantics(color, flags, palette, None)
+}
+
+/// Semantic V2 status colors, with explicit legacy fallback for custom themes.
+#[must_use]
+pub fn horizontal_session_paint_with_semantics(
+    color: TabCellColor,
+    flags: &TabFlags,
+    palette: &crate::native_theme_runtime::Palette,
+    semantic: Option<&crate::native_theme_runtime::SemanticPalette>,
+) -> TabRowPaint {
+    use crate::native_theme_runtime::Slot;
+    let mut paint = row_paint_for(color, palette);
+    paint.number_fg = if flags.busy {
+        semantic.map_or_else(|| palette.get(Slot::Primary), |theme| theme.tab_interactive.rgba)
+    } else if flags.needs_attention {
+        semantic.map_or_else(|| palette.get(Slot::Warning), |theme| theme.tab_attention.rgba)
+    } else if color == TabCellColor::Hovered {
+        palette.get(Slot::Text)
+    } else if color == TabCellColor::Selected {
+        crate::native_tab_rail::tint(palette.get(Slot::Text), palette.get(Slot::Background), 0.25)
+    } else {
+        crate::native_tab_rail::idle_number(palette)
+    };
+    paint
+}
+
+/// Resolve a TabCellColor into a concrete TabRowPaint from the palette.
+/// Vertical rail rows (Idle) map to the rail's own CellColor semantics.
+#[must_use]
+pub fn row_paint_for(
+    color: TabCellColor,
+    palette: &crate::native_theme_runtime::Palette,
+) -> TabRowPaint {
+    match color {
+        TabCellColor::Idle => TabRowPaint::horizontal_idle(palette),
+        TabCellColor::Selected => TabRowPaint::horizontal_selected(palette),
+        TabCellColor::Hovered => TabRowPaint::horizontal_hovered(palette),
+        TabCellColor::AddIdle => TabRowPaint::horizontal_add_idle(palette),
+        TabCellColor::AddHovered => TabRowPaint::horizontal_add_hovered(palette),
+        TabCellColor::HomeActive => TabRowPaint::horizontal_home_active(palette),
+        TabCellColor::HomeHovered => TabRowPaint::horizontal_home_hovered(palette),
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TabStrip {
     /// Painted add-session control, independent of session hit rectangles.
@@ -208,6 +474,33 @@ pub struct TabStrip {
     /// Explicit paint projection for the hovered close child. Structural
     /// `close_rects` remain available for hit testing but are not paint commands.
     visible_close_session: Option<SessionRef>,
+    /// Per-row color metadata (horizontal only). Empty for vertical rail; the
+    /// caller paints uniform fg/bg when empty. Length equals `rows` for the
+    /// session rows; home_paint and add_paint cover the promoted Home and the
+    /// idle plus control respectively.
+    pub row_paints: Vec<TabRowPaint>,
+    pub home_paint: Option<TabRowPaint>,
+    pub add_paint: Option<TabRowPaint>,
+    /// Caller-reported pointer-over-add control fact (horizontal).
+    add_hovered: bool,
+    /// Whether the promoted Home slot is the active new tab.
+    home_active: bool,
+    /// Cells composed for the number/indicator column (number_width(items)+1,
+    /// clamped by the row composer); 0 for the vertical rail. The caller uses
+    /// this to paint the leading cells with TabRowPaint.number_fg (upstream
+    /// session-tabs.tsx TabIndicator owns this column's color).
+    pub indicator_cells: u16,
+    /// Palette-free color facts for the visible horizontal session rows,
+    /// aligned one-to-one with the session entries in `rects`/`rows`;
+    /// `with_row_colors` resolves them into `row_paints` once a palette is
+    /// supplied by the caller.
+    row_colors: Vec<TabCellColor>,
+    /// Palette-free flag facts per visible session row, aligned with
+    /// `row_colors`; they slot the number/indicator column color into the
+    /// resolved paints.
+    row_flags: Vec<TabFlags>,
+    /// Palette-free color fact for the promoted Home slot, if painted.
+    home_color: Option<TabCellColor>,
 }
 
 impl TabStrip {
@@ -347,6 +640,15 @@ impl TabStrip {
             scroll: 0,
             hovered: hovered.cloned(),
             visible_close_session: None,
+            row_paints: Vec::new(),
+            home_paint: None,
+            add_paint: None,
+            add_hovered: false,
+            home_active: false,
+            row_colors: Vec::new(),
+            row_flags: Vec::new(),
+            home_color: None,
+            indicator_cells: 0,
         };
         if width == 0 || height == 0 {
             return out;
@@ -356,6 +658,7 @@ impl TabStrip {
         // and the promoted Home slot are mutually exclusive states of one
         // control. The vertical rail keeps its own New row untouched.
         let home_active = home_active && horizontal;
+        out.home_active = home_active;
         if home_active {
             show_add = false;
         }
@@ -405,6 +708,7 @@ impl TabStrip {
         } else {
             0
         };
+        out.indicator_cells = if horizontal { gauge as u16 } else { 0 };
         if horizontal {
             for (position, input) in inputs[solved.start..solved.start + visible_sessions].iter().enumerate() {
                 let slot_width = solved.widths[position] as u16;
@@ -424,6 +728,18 @@ impl TabStrip {
                 if let Some(close) = close {
                     out.close_rects.push((input.session.clone(), close));
                 }
+                if horizontal {
+                    // Palette-free fact first; concrete paints resolve in
+                    // with_row_colors so every render entry point stays
+                    // palette-free and existing callers/tests are unchanged.
+                    let color = cell_color(
+                        &input.flags,
+                        hovered == Some(&input.session),
+                        input.flags.active,
+                    );
+                    out.row_colors.push(color);
+                    out.row_flags.push(input.flags);
+                }
                 x_or_y = x_or_y.saturating_add(slot_width);
             }
             if home_visible {
@@ -431,6 +747,10 @@ impl TabStrip {
                 let slot_width = solved.widths[solved.count - 1] as u16;
                 let slot = TabRect { x: x_or_y, y: 0, width: slot_width, height: height.min(1) };
                 out.home_row = Some(horizontal_row_home(slot_width, gauge, home_hovered));
+                // home_visible implies home_active; upstream checks selected
+                // before hovered (session-tabs.tsx:766-779), so the slot
+                // resolves with the active-new style in with_row_colors.
+                out.home_color = Some(TabCellColor::HomeActive);
                 out.home_rect = Some(slot);
                 if slot_width >= 2 {
                     out.home_close_rect = Some(TabRect {
@@ -488,12 +808,16 @@ impl TabStrip {
             let x = usize::from(x_or_y)
                 .saturating_add(if solved.after > 0 { overflow_width(solved.after) } else { 0 })
                 .min(usize::from(available)) as u16;
+            let add_width = TabReservation::ADD_TAB_WIDTH.min(width.saturating_sub(x));
             out.add_rect = Some(TabRect {
                 x,
                 y: 0,
-                width: TabReservation::ADD_TAB_WIDTH.min(width.saturating_sub(x)),
+                width: add_width,
                 height: 1,
             });
+            // add_paint resolves in with_row_colors from the add_hovered
+            // fact; the fact defaults to explicit false in the constructor
+            // and is only changed via the with_add_hovered builder.
         }
         out.home_hovered = home_hovered && out.home_rect.is_some();
         out.visible_close_session = out
@@ -601,6 +925,71 @@ impl TabStrip {
             return Some(HorizontalTarget::NewControl);
         }
         None
+    }
+}
+
+impl TabStrip {
+    /// Resolve stored palette-free color facts into concrete paint metadata
+    /// (`row_paints`, `home_paint`, `add_paint`) using `palette`. Pure
+    /// builder: geometry, identity and hit rectangles are untouched, and
+    /// renders that skip this builder keep empty/default metadata.
+    #[must_use]
+    pub fn with_row_colors(mut self, palette: &crate::native_theme_runtime::Palette) -> Self {
+        self.with_row_colors_semantic(palette, None)
+    }
+
+    #[must_use]
+    pub fn with_row_colors_semantic(
+        mut self,
+        palette: &crate::native_theme_runtime::Palette,
+        semantic: Option<&crate::native_theme_runtime::SemanticPalette>,
+    ) -> Self {
+        self.row_paints = self
+            .row_colors
+            .iter()
+            .zip(self.row_flags.iter())
+            .map(|(color, flags)| horizontal_session_paint_with_semantics(*color, flags, palette, semantic))
+            .collect();
+        self.home_paint = self.home_color.map(|color| row_paint_for(color, palette));
+        self.add_paint = self.add_rect.map(|_| {
+            if self.add_hovered {
+                TabRowPaint::horizontal_add_hovered(palette)
+            } else {
+                TabRowPaint::horizontal_add_idle(palette)
+            }
+        });
+        self
+    }
+
+    /// Record the caller's pointer-over-add fact (explicit default `false`)
+    /// and refresh the add control paint to the matching hovered/idle style.
+    #[must_use]
+    pub fn with_add_hovered(
+        mut self,
+        hovered: bool,
+        palette: &crate::native_theme_runtime::Palette,
+    ) -> Self {
+        self.add_hovered = hovered;
+        if self.add_rect.is_some() {
+            self.add_paint = Some(if hovered {
+                TabRowPaint::horizontal_add_hovered(palette)
+            } else {
+                TabRowPaint::horizontal_add_idle(palette)
+            });
+        }
+        self
+    }
+
+    /// Caller-reported pointer-over-add fact for this frame.
+    #[must_use]
+    pub fn add_hovered(&self) -> bool {
+        self.add_hovered
+    }
+
+    /// Whether the promoted Home slot is the active new tab in this frame.
+    #[must_use]
+    pub fn home_active(&self) -> bool {
+        self.home_active
     }
 }
 
@@ -1447,5 +1836,174 @@ mod tests {
             let row = home_strip.home_row.as_ref().expect("home paint row");
             assert_eq!(display_width(row), usize::from(home.width), "Home row conserves its allocated slot at {width}");
         }
+    }
+
+    // -- Additive horizontal paint-metadata fixtures (I16) ----------------
+
+    #[test]
+    fn row_paint_metadata_resolves_distinct_idle_hovered_selected_states() {
+        use crate::native_theme_runtime::{Palette, Slot};
+        let palette = Palette::opencode_dark();
+        let mut hovered_tab = input("hov", "hovered");
+        hovered_tab.flags = TabFlags { active: false, busy: false, needs_attention: false };
+        let mut selected_tab = input("sel", "selected");
+        selected_tab.flags = TabFlags { active: true, busy: false, needs_attention: false };
+        let strip = TabStrip::render_with_hover(
+            &[input("idle", "idle"), hovered_tab, selected_tab],
+            TabOrientation::Horizontal,
+            120,
+            1,
+            0,
+            Some(&SessionRef("hov".into())),
+        )
+        .with_row_colors(&palette);
+        assert_eq!(strip.row_paints.len(), 3, "one paint fact per visible session row");
+        assert_eq!(strip.indicator_cells, 3, "number_width(3 sessions)+1");
+        assert_eq!(strip.row_paints[0].color, TabCellColor::Idle);
+        assert_eq!(strip.row_paints[1].color, TabCellColor::Hovered);
+        assert_eq!(strip.row_paints[2].color, TabCellColor::Selected);
+        // Upstream session-tabs.tsx:1569-1583 with the recorded theme mapping:
+        // idle bg=background.base fg=text.muted; hovered/selected bg=raised.high
+        // fg=text.base (selected bold).
+        assert_eq!(strip.row_paints[0].background, palette.get(Slot::Background));
+        assert_eq!(strip.row_paints[0].title_fg, palette.get(Slot::TextMuted));
+        assert_eq!(strip.row_paints[2].background, palette.get(Slot::BackgroundElement));
+        assert_eq!(strip.row_paints[2].title_fg, palette.get(Slot::Text));
+        assert_eq!(strip.row_paints[2].title_attr, 1);
+        assert_eq!(strip.row_paints[1].title_attr, 0, "hovered alone is not bold");
+        // Close glyph fg = tint(text.muted, text.base, 0.6), upstream :1731-1736.
+        let close = crate::native_tab_rail::tint(
+            palette.get(Slot::TextMuted),
+            palette.get(Slot::Text),
+            0.6,
+        );
+        assert_eq!(strip.row_paints[1].close_fg, close);
+        // Number/indicator column colors, upstream session-tabs.tsx:1648-1658.
+        assert_eq!(
+            strip.row_paints[0].number_fg,
+            crate::native_tab_rail::idle_number(&palette),
+            "idle number is idleNumber()"
+        );
+        assert_eq!(
+            strip.row_paints[2].number_fg,
+            crate::native_tab_rail::tint(
+                palette.get(Slot::Text),
+                palette.get(Slot::Background),
+                0.25,
+            ),
+            "selected number is the selection-tinted inner color"
+        );
+        // Legacy palette-only API keeps explicit fallback roles; semantic V2
+        // callers use the focused vector below to distinguish hues.
+        let mut busy_tab = input("b", "job");
+        busy_tab.flags = TabFlags { active: false, busy: true, needs_attention: false };
+        let mut attention_tab = input("attn", "perm");
+        attention_tab.flags = TabFlags { active: false, busy: false, needs_attention: true };
+        let status = TabStrip::render_with_hover(
+            &[busy_tab, attention_tab],
+            TabOrientation::Horizontal,
+            80,
+            1,
+            0,
+            None,
+        )
+        .with_row_colors(&palette);
+        assert_eq!(status.row_paints[0].number_fg, palette.get(Slot::Primary));
+        assert_eq!(status.row_paints[1].number_fg, palette.get(Slot::Warning));
+    }
+
+    #[test]
+    fn semantic_status_vectors_distinguish_busy_interactive_and_attention_accent() {
+        use crate::native_theme_runtime::{Palette, RuntimeTheme, ThemeMode};
+        let theme = RuntimeTheme::builtin_default(ThemeMode::Dark);
+        let palette = Palette::opencode_dark();
+        let mut busy = input("busy", "job");
+        busy.flags.busy = true;
+        let mut attention = input("attention", "permission");
+        attention.flags.needs_attention = true;
+        let strip = TabStrip::render_with_hover(&[busy, attention], TabOrientation::Horizontal, 80, 1, 0, None)
+            .with_row_colors_semantic(&palette, theme.semantic.as_ref());
+        let semantic = theme.semantic.as_ref().expect("built-in V2 semantic palette");
+        assert_eq!(strip.row_paints[0].number_fg, semantic.tab_interactive.rgba);
+        assert_eq!(strip.row_paints[1].number_fg, semantic.tab_attention.rgba);
+        assert_ne!(strip.row_paints[0].number_fg, palette.get(crate::native_theme_runtime::Slot::Warning));
+    }
+
+    #[test]
+    fn paint_metadata_is_empty_until_with_row_colors_is_applied() {
+        use crate::native_theme_runtime::Palette;
+        let palette = Palette::opencode_dark();
+        let strip = TabStrip::render(&[input("a", "alpha")], TabOrientation::Horizontal, 40, 1, 0);
+        assert!(
+            strip.row_paints.is_empty() && strip.home_paint.is_none() && strip.add_paint.is_none(),
+            "default render entry points stay metadata-free and byte-compatible"
+        );
+        // Vertical rows keep their rail-owned painting; TabStrip metadata and
+        // the add-hover fact stay off for the vertical rail.
+        let vertical = TabStrip::render(&[input("a", "alpha")], TabOrientation::Vertical, 20, 4, 0)
+            .with_row_colors(&palette);
+        assert!(vertical.row_paints.is_empty(), "vertical rows paint via the rail");
+        assert!(vertical.home_paint.is_none() && vertical.add_paint.is_none());
+        assert!(!vertical.add_hovered(), "add-hover fact defaults to false");
+        assert_eq!(vertical.indicator_cells, 0, "vertical rows paint via the rail");
+    }
+
+    #[test]
+    fn home_and_add_paint_metadata_follow_upstream_styles() {
+        use crate::native_theme_runtime::{Palette, Slot};
+        let palette = Palette::opencode_dark();
+        // Promoted Home slot always resolves HomeActive when visible.
+        let home_strip = TabStrip::render_with_hover_add_home(
+            &[input("a", "alpha")],
+            TabOrientation::Horizontal,
+            40,
+            1,
+            0,
+            None,
+            true,
+            true,
+            false,
+        )
+        .with_row_colors(&palette);
+        let home_paint = home_strip.home_paint.expect("home paint metadata");
+        assert_eq!(home_paint.color, TabCellColor::HomeActive);
+        assert_eq!(home_paint.background, palette.get(Slot::BackgroundElement));
+        assert_eq!(home_paint.title_fg, palette.get(Slot::Text));
+        assert_eq!(home_paint.title_attr, 1, "active new tab is bold");
+
+        // Horizontal plus inherits base background and text.muted
+        // (upstream session-tabs.tsx:1766-1770); vertical numbering is separate.
+        let add_strip = TabStrip::render_with_hover_and_add(
+            &[input("a", "alpha")],
+            TabOrientation::Horizontal,
+            20,
+            1,
+            0,
+            None,
+            true,
+        )
+        .with_row_colors(&palette);
+        let add_paint = add_strip.add_paint.expect("add paint metadata");
+        assert_eq!(add_paint.color, TabCellColor::AddIdle);
+        assert_eq!(add_paint.plus_fg, palette.get(Slot::TextMuted));
+        assert_eq!(add_paint.background, palette.get(Slot::Background));
+        assert_eq!(add_paint.new_text_fg, palette.get(Slot::TextMuted));
+        assert!(!add_strip.add_hovered());
+
+        // Hovered add control: bg=raised.high and both fg=Text.
+        let add_hover = add_strip.with_add_hovered(true, &palette);
+        assert!(add_hover.add_hovered());
+        let paint = add_hover.add_paint.expect("add paint after builder");
+        assert_eq!(paint.color, TabCellColor::AddHovered);
+        assert_eq!(paint.background, palette.get(Slot::BackgroundElement));
+        assert_eq!(paint.plus_fg, palette.get(Slot::Text));
+        assert_eq!(paint.new_text_fg, palette.get(Slot::Text));
+
+        // Disabling the fact again restores the idle style.
+        let back = add_hover.with_add_hovered(false, &palette);
+        assert_eq!(
+            back.add_paint.expect("idle restore").color,
+            TabCellColor::AddIdle
+        );
     }
 }

@@ -37,6 +37,7 @@
 //! failure for every unusable config. Missing config paths are not an error —
 //! they resolve to the shipped upstream default theme, honestly named.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::path::Path;
@@ -345,6 +346,9 @@ pub enum PaletteError {
     AliasTooDeep { role: String },
     /// `{dark,light}` variant lacks the selected side.
     VariantMissing { role: String, side: &'static str },
+    /// V2 semantic theme document is malformed or contains a bounded
+    /// reference/alias failure.
+    V2Invalid { message: String },
 }
 
 impl fmt::Display for PaletteError {
@@ -369,6 +373,7 @@ impl fmt::Display for PaletteError {
             Self::VariantMissing { role, side } => {
                 write!(f, "theme role {role} variant is missing its {side} color")
             }
+            Self::V2Invalid { message } => write!(f, "invalid V2 theme: {message}"),
         }
     }
 }
@@ -540,11 +545,318 @@ pub fn palette_from_asset(asset: &Value, mode: ThemeMode) -> Result<Palette, Pal
     let object = asset.as_object().ok_or(PaletteError::NotAnObject {
         context: "theme asset",
     })?;
+    if object.contains_key("base") {
+        return v2_theme_from_asset(asset, mode).map(|theme| theme.palette);
+    }
     let defs = object.get("defs").cloned().unwrap_or(Value::Null);
     let theme = object
         .get("theme")
         .ok_or(PaletteError::NotAnObject { context: "theme" })?;
     palette_from_json(&defs, theme, mode)
+}
+
+const V2_STEPS: [u16; 9] = [100, 200, 300, 400, 500, 600, 700, 800, 900];
+const V2_STATES: [&str; 5] = ["disabled", "pressed", "focused", "selected", "hovered"];
+const V2_MAX_HUES: usize = 128;
+const V2_DEFAULT_ASSET: &str = include_str!("../assets/opencode-v2.json");
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HueSource {
+    pub hue: String,
+    pub step: u16,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HueColor {
+    pub rgba: [u8; 4],
+    pub provenance: Option<HueSource>,
+}
+
+impl HueColor {
+    fn literal(rgba: [u8; 4]) -> Self {
+        Self { rgba, provenance: None }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MarkdownPalette {
+    /// Resolved upstream `markdown.code` foreground.
+    pub code: HueColor,
+    /// Resolved upstream `background.base` for inline raw Markdown.
+    pub inline_background: HueColor,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SemanticPalette {
+    pub background_base: HueColor,
+    pub background_raised_base: HueColor,
+    pub background_raised_high: HueColor,
+    pub text_base: HueColor,
+    pub text_muted: HueColor,
+    pub text_feedback_error: HueColor,
+    pub text_feedback_warning: HueColor,
+    pub text_feedback_success: HueColor,
+    /// V2 tab status hues: interactive.200 for running and accent.200 for attention.
+    pub tab_interactive: HueColor,
+    pub tab_attention: HueColor,
+    pub background_action_primary: V2StatefulColor,
+    pub markdown: MarkdownPalette,
+    pub categorical: Vec<String>,
+    hues: HashMap<String, Vec<HueColor>>,
+}
+
+impl SemanticPalette {
+    #[must_use]
+    pub fn source<'a>(&self, color: &'a HueColor) -> Option<&'a HueSource> {
+        color.provenance.as_ref()
+    }
+
+    #[must_use]
+    pub fn increase(&self, color: &HueColor, amount: f64) -> HueColor {
+        self.shift(color, amount)
+    }
+
+    #[must_use]
+    pub fn decrease(&self, color: &HueColor, amount: f64) -> HueColor {
+        self.shift(color, -amount)
+    }
+
+    /// Upstream default amount (`amount = 1`) for [`Self::increase`].
+    #[must_use]
+    pub fn increase_default(&self, color: &HueColor) -> HueColor {
+        self.increase(color, 1.0)
+    }
+
+    /// Upstream default amount (`amount = 1`) for [`Self::decrease`].
+    #[must_use]
+    pub fn decrease_default(&self, color: &HueColor) -> HueColor {
+        self.decrease(color, 1.0)
+    }
+
+    fn shift(&self, color: &HueColor, amount: f64) -> HueColor {
+        let Some(source) = &color.provenance else { return color.clone() };
+        let Some(scale) = self.hues.get(&source.hue) else { return color.clone() };
+        let position = V2_STEPS.iter().position(|step| *step == source.step).unwrap_or(0);
+        let delta = if amount.is_finite() { amount.trunc() } else { 0.0 };
+        let delta = delta.clamp(-8.0, 8.0) as i32;
+        let target = (position as i32 + delta).clamp(0, 8) as usize;
+        scale[target].clone()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct V2StatefulColor {
+    pub base: HueColor,
+    pub states: HashMap<String, HueColor>,
+}
+
+impl V2StatefulColor {
+    #[must_use]
+    pub fn state(&self, states: &HashMap<String, bool>) -> &HueColor {
+        V2_STATES
+            .iter()
+            .find(|name| states.get(**name).copied().unwrap_or(false))
+            .and_then(|name| self.states.get(*name))
+            .unwrap_or(&self.base)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct V2Theme {
+    pub selected_mode: ThemeMode,
+    pub palette: Palette,
+    pub semantic: SemanticPalette,
+}
+
+/// Resolve one V2 theme document through the existing palette boundary.
+pub fn v2_theme_from_asset(asset: &Value, mode: ThemeMode) -> Result<V2Theme, PaletteError> {
+    let invalid = |message: String| PaletteError::V2Invalid { message };
+    let root = asset.as_object().ok_or_else(|| invalid("document is not an object".into()))?;
+    let modes = ["light", "dark"].into_iter().filter(|name| root.contains_key(*name)).collect::<Vec<_>>();
+    if modes.is_empty() { return Err(invalid("document provides no modes".into())); }
+    if root.len() > MAX_MAP_KEYS { return Err(PaletteError::TooManyKeys { context: "v2 document" }); }
+    let requested = mode.key();
+    let selected = if root.contains_key(requested) { requested } else { modes[0] };
+    let base = root.get("base").and_then(Value::as_object).cloned().unwrap_or_default();
+    let selected_obj = root.get(selected).and_then(Value::as_object).ok_or_else(|| invalid("selected mode is not an object".into()))?;
+    let mut merged = v2_merge(Value::Object(base.clone()), Value::Object(selected_obj.clone()));
+    v2_apply_contextual_actions(&mut merged, &Value::Object(base), &Value::Object(selected_obj.clone()));
+    let mut resolver = V2Resolver::new(merged);
+    resolver.compile_hues()?;
+    let palette = resolver.palette()?;
+    let semantic = resolver.semantic()?;
+    Ok(V2Theme { selected_mode: if selected == "dark" { ThemeMode::Dark } else { ThemeMode::Light }, palette, semantic })
+}
+
+/// Action variants rebuilt with upstream `contextualActions` precedence.
+const V2_ACTION_VARIANTS: [&str; 3] = ["primary", "secondary", "destructive"];
+/// Keys rebuilt per action variant by upstream `contextualActions`.
+const V2_ACTION_KEYS: [&str; 6] = ["base", "$disabled", "$pressed", "$focused", "$selected", "$hovered"];
+
+/// Upstream `contextualActions` value chain
+/// (`packages/theme/src/tui/resolve.ts`): `over[key] ?? over.base ??
+/// base[key] ?? base.base`.
+fn v2_state_pick(over: Option<&Value>, base: Option<&Value>, key: &str) -> Option<Value> {
+    over.and_then(|value| value.get(key))
+        .cloned()
+        .or_else(|| over.and_then(|value| value.get("base")).cloned())
+        .or_else(|| base.and_then(|value| value.get(key)).cloned())
+        .or_else(|| base.and_then(|value| value.get("base")).cloned())
+}
+
+/// Rebuild `text.action` / `background.action` variant state keys with the
+/// upstream `contextualActions` precedence instead of the ordinary deep merge:
+/// a mode-level `base` beats a shared-`base` state key
+/// (`surface[key] ?? surface.base ?? base[key] ?? base.base`). Variants defined
+/// on neither layer are left untouched.
+fn v2_apply_contextual_actions(merged: &mut Value, base: &Value, over: &Value) {
+    let Some(root) = merged.as_object_mut() else { return };
+    for surface in ["text", "background"] {
+        let base_action = base.get(surface).and_then(|value| value.get("action"));
+        let over_action = over.get(surface).and_then(|value| value.get("action"));
+        if base_action.is_none() && over_action.is_none() {
+            continue;
+        }
+        let surface_entry = root
+            .entry(surface.to_owned())
+            .or_insert_with(|| Value::Object(serde_json::Map::new()));
+        let Some(surface_map) = surface_entry.as_object_mut() else { continue };
+        let action_entry = surface_map
+            .entry("action".to_owned())
+            .or_insert_with(|| Value::Object(serde_json::Map::new()));
+        let Some(actions) = action_entry.as_object_mut() else { continue };
+        for variant in V2_ACTION_VARIANTS {
+            let base_variant = base_action.and_then(|value| value.get(variant));
+            let over_variant = over_action.and_then(|value| value.get(variant));
+            if base_variant.is_none() && over_variant.is_none() {
+                continue;
+            }
+            let mut entry = serde_json::Map::new();
+            for key in V2_ACTION_KEYS {
+                if let Some(value) = v2_state_pick(over_variant, base_variant, key) {
+                    entry.insert(key.to_owned(), value);
+                }
+            }
+            actions.insert(variant.to_owned(), Value::Object(entry));
+        }
+    }
+}
+
+fn v2_merge(base: Value, over: Value) -> Value {
+    match (base, over) {
+        (Value::Object(mut left), Value::Object(right)) => {
+            for (key, value) in right { let previous = left.remove(&key).unwrap_or(Value::Null); left.insert(key, v2_merge(previous, value)); }
+            Value::Object(left)
+        }
+        (_, value) => value,
+    }
+}
+
+struct V2Resolver {
+    mode: Value,
+    hues: HashMap<String, Vec<HueColor>>,
+}
+
+impl V2Resolver {
+    fn new(mode: Value) -> Self { Self { mode, hues: HashMap::new() } }
+
+    fn compile_hues(&mut self) -> Result<(), PaletteError> {
+        let map = self.mode.get("hue").and_then(Value::as_object).ok_or_else(|| PaletteError::V2Invalid { message: "mode hue map missing".into() })?;
+        if map.len() > V2_MAX_HUES { return Err(PaletteError::TooManyKeys { context: "v2 hues" }); }
+        let names = map.keys().cloned().collect::<Vec<_>>();
+        for name in names { self.resolve_hue(&name, &mut Vec::new())?; }
+        Ok(())
+    }
+
+    fn resolve_hue(&mut self, name: &str, stack: &mut Vec<String>) -> Result<Vec<HueColor>, PaletteError> {
+        if let Some(hue) = self.hues.get(name) { return Ok(hue.clone()); }
+        if stack.len() >= MAX_ALIAS_DEPTH { return Err(PaletteError::V2Invalid { message: "hue alias depth exceeded".into() }); }
+        if stack.iter().any(|seen| seen == name) { return Err(PaletteError::V2Invalid { message: format!("hue alias cycle at {name}") }); }
+        let raw = self.mode.get("hue").and_then(|h| h.get(name)).ok_or_else(|| PaletteError::V2Invalid { message: format!("missing hue {name}") })?.clone();
+        stack.push(name.to_owned());
+        let values = if let Some(alias) = raw.as_str() {
+            let target = alias.strip_prefix("$hue.").ok_or_else(|| PaletteError::V2Invalid { message: "invalid hue alias".into() })?;
+            self.resolve_hue(target, stack)?.into_iter().map(|color| HueColor { rgba: color.rgba, provenance: Some(HueSource { hue: name.to_owned(), step: color.provenance.map_or(100, |p| p.step) }) }).collect()
+        } else {
+            let object = raw.as_object().ok_or_else(|| PaletteError::V2Invalid { message: format!("hue {name} is not an object") })?;
+            if object.len() != V2_STEPS.len() { return Err(PaletteError::V2Invalid { message: format!("hue {name} must contain nine steps") }); }
+            let mut values = Vec::with_capacity(V2_STEPS.len());
+            for step in V2_STEPS {
+                let token = object.get(&step.to_string()).and_then(Value::as_str).ok_or_else(|| PaletteError::V2Invalid { message: format!("invalid hue {name}.{step}") })?;
+                let rgba = parse_color(token).map_err(|_| PaletteError::V2Invalid { message: format!("invalid hue color {name}.{step}") })?;
+                values.push(HueColor { rgba, provenance: Some(HueSource { hue: name.to_owned(), step }) });
+            }
+            values
+        };
+        stack.pop();
+        self.hues.insert(name.to_owned(), values.clone());
+        Ok(values)
+    }
+
+    fn resolve_color(&self, value: &Value, context: &Value, depth: usize) -> Result<HueColor, PaletteError> {
+        if depth > MAX_ALIAS_DEPTH { return Err(PaletteError::V2Invalid { message: "token reference depth exceeded".into() }); }
+        let token = value.as_str().ok_or_else(|| PaletteError::V2Invalid { message: "token is not a string".into() })?;
+        if token == "transparent" { return Ok(HueColor::literal([0, 0, 0, 0])); }
+        if token.starts_with('#') { return parse_color(token).map(HueColor::literal).map_err(|_| PaletteError::V2Invalid { message: "invalid hex color".into() }); }
+        let target = token.strip_prefix('$').ok_or_else(|| PaletteError::V2Invalid { message: format!("invalid color token {token}") })?;
+        if let Some(rest) = target.strip_prefix("hue.") {
+            if let Some((name, step)) = rest.rsplit_once('.') {
+                let step: u16 = step.parse().map_err(|_| PaletteError::V2Invalid { message: "invalid hue step".into() })?;
+                if let Some(index) = V2_STEPS.iter().position(|candidate| *candidate == step) {
+                    return self.hues.get(name).and_then(|scale| scale.get(index)).cloned().ok_or_else(|| PaletteError::V2Invalid { message: format!("missing hue reference {target}") });
+                }
+            }
+        }
+        let mut current = context;
+        for segment in target.split('.') { current = current.get(segment).ok_or_else(|| PaletteError::V2Invalid { message: format!("missing reference {target}") })?; }
+        self.resolve_color(current, context, depth + 1)
+    }
+
+    fn palette(&self) -> Result<Palette, PaletteError> {
+        let role = |path: &[&str]| -> Result<HueColor, PaletteError> {
+            let mut value = &self.mode;
+            for segment in path { value = value.get(*segment).ok_or_else(|| PaletteError::V2Invalid { message: format!("missing semantic role {}", path.join(".")) })?; }
+            self.resolve_color(value, &self.mode, 0)
+        };
+        let mut palette = Palette::from_table([0; ROLE_COUNT]);
+        for (slot, path) in [
+            (Slot::Background, vec!["background", "base"]),
+            (Slot::BackgroundPanel, vec!["background", "raised", "base"]),
+            (Slot::BackgroundElement, vec!["background", "raised", "high"]),
+            (Slot::Text, vec!["text", "base"]), (Slot::TextMuted, vec!["text", "muted"]),
+            (Slot::Border, vec!["border", "base"]), (Slot::Error, vec!["text", "feedback", "error", "base"]),
+            (Slot::Warning, vec!["text", "feedback", "warning", "base"]), (Slot::Success, vec!["text", "feedback", "success", "base"]),
+        ] { palette.set(slot, role(&path)?.rgba); }
+        palette.set(Slot::Primary, role(&["background", "action", "primary", "$focused"])?.rgba);
+        Ok(palette)
+    }
+
+    fn semantic(&self) -> Result<SemanticPalette, PaletteError> {
+        let get = |path: &[&str]| -> Result<HueColor, PaletteError> {
+            let mut value = &self.mode;
+            for segment in path { value = value.get(*segment).ok_or_else(|| PaletteError::V2Invalid { message: format!("missing semantic role {}", path.join(".")) })?; }
+            self.resolve_color(value, &self.mode, 0)
+        };
+        let action = self.mode.get("background").and_then(|v| v.get("action")).and_then(|v| v.get("primary")).ok_or_else(|| PaletteError::V2Invalid { message: "missing primary action".into() })?;
+        let base = action.get("base").ok_or_else(|| PaletteError::V2Invalid { message: "missing primary action base".into() })?;
+        let mut states = HashMap::new();
+        for state in V2_STATES {
+            let key = format!("${state}");
+            let value = action.get(&key).unwrap_or(base);
+            states.insert(state.to_owned(), self.resolve_color(value, &self.mode, 0)?);
+        }
+        let categorical = self.mode.get("categorical").and_then(Value::as_array).ok_or_else(|| PaletteError::V2Invalid { message: "categorical list missing".into() })?.iter().map(|v| v.as_str().map(str::to_owned).ok_or_else(|| PaletteError::V2Invalid { message: "invalid categorical hue".into() })).collect::<Result<Vec<_>, _>>()?;
+        Ok(SemanticPalette {
+            background_base: get(&["background", "base"])?, background_raised_base: get(&["background", "raised", "base"])?, background_raised_high: get(&["background", "raised", "high"])?,
+            text_base: get(&["text", "base"])?, text_muted: get(&["text", "muted"])?,
+            text_feedback_error: get(&["text", "feedback", "error", "base"])?, text_feedback_warning: get(&["text", "feedback", "warning", "base"])?, text_feedback_success: get(&["text", "feedback", "success", "base"])?,
+            tab_interactive: self.resolve_color(&Value::String("$hue.interactive.200".into()), &self.mode, 0)?,
+            tab_attention: self.resolve_color(&Value::String("$hue.accent.200".into()), &self.mode, 0)?,
+            background_action_primary: V2StatefulColor { base: self.resolve_color(base, &self.mode, 0)?, states },
+            markdown: MarkdownPalette { code: get(&["markdown", "code"])?, inline_background: get(&["background", "base"])? },
+            categorical, hues: self.hues.clone(),
+        })
+    }
 }
 
 // ── Runtime theme + runtime config resolution ─────────────────────────
@@ -693,6 +1005,8 @@ pub struct RuntimeTheme {
     pub mode: ThemeMode,
     /// Palette resolved from the theme definitions for [`Self::mode`].
     pub palette: Palette,
+    /// Semantic V2 token view when loaded from a V2 theme document.
+    pub semantic: Option<SemanticPalette>,
 }
 
 impl RuntimeTheme {
@@ -700,14 +1014,18 @@ impl RuntimeTheme {
     /// opencode.json`) resolved in `mode`.
     #[must_use]
     pub fn builtin_default(mode: ThemeMode) -> Self {
-        let palette = match mode {
-            ThemeMode::Dark => Palette::opencode_dark(),
-            ThemeMode::Light => Palette::opencode_light(),
-        };
+        let v2 = serde_json::from_str::<Value>(V2_DEFAULT_ASSET)
+            .ok()
+            .and_then(|asset| v2_theme_from_asset(&asset, mode).ok());
+        let palette = v2.as_ref().map_or_else(
+            || match mode { ThemeMode::Dark => Palette::opencode_dark(), ThemeMode::Light => Palette::opencode_light() },
+            |theme| theme.palette,
+        );
         Self {
             name: "opencode".to_owned(),
-            mode,
+            mode: v2.as_ref().map_or(mode, |theme| theme.selected_mode),
             palette,
+            semantic: v2.map(|theme| theme.semantic),
         }
     }
 
@@ -725,10 +1043,15 @@ impl RuntimeTheme {
     /// [`PaletteError`] when the asset shape or any core role is unusable
     /// for `mode`.
     pub fn from_asset(name: &str, asset: &Value, mode: ThemeMode) -> Result<Self, PaletteError> {
+        if asset.as_object().is_some_and(|object| object.contains_key("base")) {
+            let resolved = v2_theme_from_asset(asset, mode)?;
+            return Ok(Self { name: name.to_owned(), mode: resolved.selected_mode, palette: resolved.palette, semantic: Some(resolved.semantic) });
+        }
         Ok(Self {
             name: name.to_owned(),
             mode,
             palette: palette_from_asset(asset, mode)?,
+            semantic: None,
         })
     }
 }
@@ -1170,4 +1493,302 @@ mod tests {
         let _ = std::fs::remove_file(&good);
         let _ = std::fs::remove_dir(&dir);
     }
+
+// ── genuine-V2 semantic fixtures (M02 F1–F6 + V3, additive; the frozen legacy
+// tests above stay byte-identical to canonical). Oracle authority: pinned
+// upstream 450e7b92412c780a7b5a75226bb8d49aaca24e22 — schema.ts ActionState
+// order and StatefulColorDefinition keys; resolve.ts statefulColor/state(),
+// contextualActions, compileHueSteps; shipped asset
+// packages/tui/src/theme/assets/v2/opencode.json. The frozen helper `hex` above
+// is reused (M02's identical helper is not redeclared).
+
+fn dark_semantic() -> SemanticPalette {
+    RuntimeTheme::builtin_default(ThemeMode::Dark)
+        .semantic
+        .expect("shipped V2 asset attaches semantic once $focused key is fixed")
+}
+
+fn hue_entry(semantic: &SemanticPalette, hue: &str, step: u16) -> HueColor {
+    let index = (step / 100 - 1) as usize;
+    semantic.hues.get(hue).expect("hue scale present")[index].clone()
+}
+
+fn state_on(keys: &[&str]) -> HashMap<String, bool> {
+    keys.iter().map(|key| ((*key).to_owned(), true)).collect()
+}
+
+// ── F1: semantic != None and genuine-V2 document resolves end-to-end ──────
+
+#[test]
+fn f1_builtin_default_dark_has_semantic_projection() {
+    let semantic = dark_semantic();
+    // V17 prerequisite: dark background.raised.base = neutral.700 = #141414.
+    assert_eq!(
+        semantic.background_raised_base,
+        HueColor {
+            rgba: hex("#141414"),
+            provenance: Some(HueSource {
+                hue: "neutral".to_owned(),
+                step: 700
+            })
+        }
+    );
+}
+
+#[test]
+fn f1_shipped_v2_asset_resolves_via_from_asset() {
+    let asset: Value =
+        serde_json::from_str(include_str!("../assets/opencode-v2.json"))
+            .expect("shipped asset parses");
+    let dark = RuntimeTheme::from_asset("opencode-v2", &asset, ThemeMode::Dark)
+        .expect("genuine V2 document must resolve ($focused key)");
+    assert!(dark.semantic.is_some(), "semantic must not be silently None");
+    assert_eq!(dark.palette.get(Slot::Warning), hex("#f5a742"));
+    assert_eq!(dark.palette.get(Slot::Primary), hex("#fab283"));
+    let light = RuntimeTheme::from_asset("opencode-v2", &asset, ThemeMode::Light)
+        .expect("light mode resolves");
+    assert!(light.semantic.is_some());
+    assert_eq!(light.palette.get(Slot::Warning), hex("#d68c27"));
+    assert_eq!(light.palette.get(Slot::Primary), hex("#3b7dd8"));
+}
+
+// ── F2: alias identity (V4/V12/V13/V14/V15) ────────────────────────────────
+
+#[test]
+fn f2_alias_identity_distinct_provenance_at_equal_value() {
+    let semantic = dark_semantic();
+    let neutral = hue_entry(&semantic, "neutral", 700);
+    let gray = hue_entry(&semantic, "gray", 700);
+    assert_eq!(neutral.rgba, hex("#141414"));
+    assert_eq!(gray.rgba, neutral.rgba, "alias copies are value-equal");
+    // Identity oracle: value-equal but distinct provenance (upstream WeakMap
+    // registers each scale's own entries; alias clones are separate keys).
+    assert_eq!(
+        semantic.source(&neutral),
+        Some(&HueSource {
+            hue: "neutral".to_owned(),
+            step: 700
+        })
+    );
+    assert_eq!(
+        semantic.source(&gray),
+        Some(&HueSource {
+            hue: "gray".to_owned(),
+            step: 700
+        })
+    );
+}
+
+#[test]
+fn f2_alias_shift_stays_in_alias_scale() {
+    let semantic = dark_semantic();
+    let neutral = hue_entry(&semantic, "neutral", 700);
+    let gray = hue_entry(&semantic, "gray", 700);
+    // V13: result carries the ALIAS name, never "gray".
+    assert_eq!(
+        semantic.decrease(&neutral, 1.0).provenance,
+        Some(HueSource {
+            hue: "neutral".to_owned(),
+            step: 600
+        })
+    );
+    // V15: gray.700 never conflated with neutral.700.
+    assert_eq!(
+        semantic.decrease(&gray, 1.0).provenance,
+        Some(HueSource {
+            hue: "gray".to_owned(),
+            step: 600
+        })
+    );
+}
+
+#[test]
+fn f2_untracked_literal_passthrough() {
+    let semantic = dark_semantic();
+    // V4/V14: value-equal hand-made literal has NO provenance -> identity map
+    // miss -> returned unchanged, source() = None.
+    let lit = HueColor {
+        rgba: hex("#141414"),
+        provenance: None,
+    };
+    assert_eq!(semantic.decrease(&lit, 1.0), lit);
+    assert_eq!(semantic.increase(&lit, 5.0), lit);
+    assert_eq!(semantic.source(&lit), None);
+}
+
+// ── F3: shift amount arithmetic (V5–V11, V16, V7–V9) ───────────────────────
+
+#[test]
+fn f3_shift_truncates_toward_zero_and_sign_doubles() {
+    let semantic = dark_semantic();
+    let n700 = hue_entry(&semantic, "neutral", 700);
+    let n600 = hue_entry(&semantic, "neutral", 600);
+    let n800 = hue_entry(&semantic, "neutral", 800);
+    // V8a: decrease(x, 1.9) offset = trunc(-1.9) = -1 -> 600.
+    assert_eq!(semantic.decrease(&n700, 1.9), n600);
+    // V8b: decrease(x, -1.9) offset = trunc(1.9) = +1 -> 800 (double negation).
+    assert_eq!(semantic.decrease(&n700, -1.9), n800);
+    // V8c: decrease(x, 0.9) offset = trunc(-0.9) = 0 -> unchanged.
+    assert_eq!(semantic.decrease(&n700, 0.9), n700);
+    // V9: decrease(x, -1) moves UP one step.
+    assert_eq!(semantic.decrease(&n700, -1.0), n800);
+    // V1: decrease(x, 1) -> neutral.600 #1e1e1e with {neutral,600} provenance.
+    let one = semantic.decrease(&n700, 1.0);
+    assert_eq!(one.rgba, hex("#1e1e1e"));
+    assert_eq!(
+        one.provenance,
+        Some(HueSource {
+            hue: "neutral".to_owned(),
+            step: 600
+        })
+    );
+}
+
+#[test]
+fn f3_shift_nonfinite_amount_is_noop() {
+    let semantic = dark_semantic();
+    let n700 = hue_entry(&semantic, "neutral", 700);
+    // V7: NaN / +Inf / -Inf -> offset 0, value AND provenance unchanged.
+    for amount in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(semantic.decrease(&n700, amount), n700);
+        assert_eq!(semantic.increase(&n700, amount), n700);
+    }
+}
+
+#[test]
+fn f3_shift_clamps_floor_ceiling_saturating_keeps_input_provenance() {
+    let semantic = dark_semantic();
+    let n100 = hue_entry(&semantic, "neutral", 100); // #ffffff
+    let n700 = hue_entry(&semantic, "neutral", 700); // #141414
+    let n900 = hue_entry(&semantic, "neutral", 900); // #030303
+    // V5: clamp floor — result IS the input entry (provenance unchanged).
+    let floor = semantic.decrease(&n100, 3.0);
+    assert_eq!(floor, n100);
+    assert_eq!(
+        floor.provenance,
+        Some(HueSource {
+            hue: "neutral".to_owned(),
+            step: 100
+        })
+    );
+    // V6: clamp ceiling.
+    let ceil = semantic.increase(&n900, 9.0);
+    assert_eq!(ceil, n900);
+    // V16: 1e30 must saturate (no wrap) to 900 / 100 respectively.
+    assert_eq!(semantic.increase(&n700, 1e30).provenance.unwrap().step, 900);
+    assert_eq!(semantic.decrease(&n700, 1e30).provenance.unwrap().step, 100);
+}
+
+#[test]
+fn f3_shift_chains_with_provenance() {
+    let semantic = dark_semantic();
+    let n700 = hue_entry(&semantic, "neutral", 700);
+    let n500 = hue_entry(&semantic, "neutral", 500); // #4c4c4c
+    // V10/V11: decrease(decrease(x,1),1) == decrease(x,2) in value AND provenance.
+    assert_eq!(semantic.decrease(&semantic.decrease(&n700, 1.0), 1.0), n500);
+    assert_eq!(semantic.decrease(&n700, 2.0), n500);
+}
+
+// ── V3: default amount = 1 (types.ts amount defaults) ──────────────────────
+
+#[test]
+fn v3_default_amount_is_one() {
+    let semantic = dark_semantic();
+    let n700 = hue_entry(&semantic, "neutral", 700);
+    assert_eq!(semantic.decrease_default(&n700), semantic.decrease(&n700, 1.0));
+    assert_eq!(semantic.increase_default(&n700), semantic.increase(&n700, 1.0));
+}
+
+// ── F4: state precedence (resolve.ts statefulColor L168) ───────────────────
+// Shipped dark background.action.primary: base=transparent,
+// $hovered=$hue.neutral.700 (#141414), $focused=$hue.interactive.200 (#fab283),
+// $selected=transparent, $disabled/$pressed absent -> fall back to base.
+
+#[test]
+fn f4_state_precedence_disabled_pressed_focused_selected_hovered() {
+    let semantic = dark_semantic();
+    let action = &semantic.background_action_primary;
+    let transparent = [0, 0, 0, 0];
+    // Base fallback when no state is active.
+    assert_eq!(action.state(&state_on(&[])).rgba, transparent);
+    // Single states.
+    assert_eq!(action.state(&state_on(&["hovered"])).rgba, hex("#141414"));
+    assert_eq!(action.state(&state_on(&["focused"])).rgba, hex("#fab283"));
+    // Precedence pairs: first truthy in
+    // [disabled, pressed, focused, selected, hovered] order wins.
+    assert_eq!(
+        action.state(&state_on(&["hovered", "focused"])).rgba,
+        hex("#fab283"),
+        "focused beats hovered"
+    );
+    assert_eq!(
+        action.state(&state_on(&["hovered", "selected"])).rgba,
+        transparent,
+        "selected beats hovered even though selected resolves to transparent"
+    );
+    assert_eq!(
+        action.state(&state_on(&["focused", "disabled"])).rgba,
+        transparent,
+        "disabled beats focused ($disabled absent -> base fallback slot)"
+    );
+    assert_eq!(
+        action.state(&state_on(&["focused", "pressed"])).rgba,
+        transparent,
+        "pressed beats focused ($pressed absent -> base fallback slot)"
+    );
+}
+
+// ── F5: frozen-Warning guard (ruling evidence) ─────────────────────────────
+// Upstream authority: base.text.feedback.warning.base = "#f5a742" literal
+// (dark); light.text.feedback.warning.base = $hue.accent.200 -> orange.200 =
+// "#d68c27". Dark accent.200 (purple, #9d7cd8) feeds syntax keyword /
+// markdown heading — it has NO warning authority.
+
+#[test]
+fn f5_dark_warning_matches_frozen_legacy_oracle_not_accent_purple() {
+    let semantic = dark_semantic();
+    assert_eq!(semantic.text_feedback_warning.rgba, hex("#f5a742"));
+    assert_ne!(
+        semantic.text_feedback_warning.rgba,
+        hex("#9d7cd8"),
+        "dark warning must NOT be modernized to dark accent.200 (purple)"
+    );
+}
+
+#[test]
+fn f5_light_warning_matches_frozen_legacy_oracle() {
+    let asset: Value =
+        serde_json::from_str(include_str!("../assets/opencode-v2.json"))
+            .expect("shipped asset parses");
+    let light = RuntimeTheme::from_asset("opencode-v2", &asset, ThemeMode::Light)
+        .expect("light resolves");
+    let semantic = light.semantic.expect("semantic present");
+    assert_eq!(semantic.text_feedback_warning.rgba, hex("#d68c27"));
+}
+
+// ── F6: upstream state-key merge precedence (contextualActions) ────────────
+// resolve.ts: surfaceVariant[key] ?? surfaceVariant.base ?? baseVariant[key]
+// ?? baseVariant.base — a mode-level `base` beats a shared-`base` state key.
+// Enabled/adapted from M02's commented f6: its synthetic minimal document
+// cannot resolve (palette() requires the core roles), so the same precedence is
+// pinned on the genuine shipped V2 document with a mode-level primary override.
+
+#[test]
+fn f6_state_key_merge_mode_base_beats_shared_base_state() {
+    let mut doc: Value =
+        serde_json::from_str(include_str!("../assets/opencode-v2.json"))
+            .expect("shipped asset parses");
+    let dark = doc["dark"].as_object_mut().expect("dark object");
+    dark.insert(
+        "background".to_owned(),
+        serde_json::json!({ "action": { "primary": { "base": "#333333" } } }),
+    );
+    let theme = RuntimeTheme::from_asset("t", &doc, ThemeMode::Dark).expect("resolves");
+    let action = &theme.semantic.expect("semantic present").background_action_primary;
+    // Upstream: dark $hovered falls to dark base #333333, NOT shared
+    // base $hovered ($hue.neutral.700).
+    assert_eq!(action.state(&state_on(&["hovered"])).rgba, hex("#333333"));
+    // Mode base also beats shared-base $focused ($hue.interactive.200).
+    assert_eq!(action.state(&state_on(&["focused"])).rgba, hex("#333333"));
+}
 }

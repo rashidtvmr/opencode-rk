@@ -127,6 +127,7 @@ pub struct NativeView {
     composer_effort: Option<String>,
     chat_row_classes: Vec<crate::native_view_chat::ChatRowClass>,
     chat_text_bounds: Vec<Option<(u16, u16)>>,
+    chat_markdown_spans: Vec<Vec<crate::native_view_chat::ChatRunSpan>>,
     /// Persisted global + per-box appearance; the framed composer reads the
     /// `BoxId::ChatComposer` effective values (default = upstream sharp).
     box_appearance: crate::native_box_style::BoxAppearance,
@@ -595,6 +596,7 @@ impl NativeView {
             composer_effort: None,
             chat_row_classes: Vec::new(),
             chat_text_bounds: Vec::new(),
+            chat_markdown_spans: Vec::new(),
             box_appearance: crate::native_box_style::BoxAppearance::default(),
             context_window: None,
             ui_regions: Vec::new(),
@@ -719,6 +721,8 @@ impl NativeView {
     pub fn chat_text_bounds(&self) -> &[Option<(u16, u16)>] {
         &self.chat_text_bounds
     }
+
+    pub fn chat_markdown_spans(&self) -> &[Vec<crate::native_view_chat::ChatRunSpan>] { &self.chat_markdown_spans }
 
     pub fn set_prompt_mode(&mut self, shell: bool) {
         self.shell_mode = shell;
@@ -2020,6 +2024,7 @@ impl NativeView {
         self.frame_busy = false;
         self.chat_row_classes.clear();
         self.chat_text_bounds.clear();
+        self.chat_markdown_spans.clear();
         self.context_usage_hit = None;
         self.ui_regions.clear();
         self.context_usage_styles.clear();
@@ -2145,10 +2150,10 @@ impl NativeView {
                 height.saturating_sub(1).saturating_sub(permission_height)
             } else { self.session_body_height() };
             let mut body = if let Some(messages) = messages {
-                let rows = if has_permission {
-                    self.chat.render_styled_without_prompt(inner_width as usize, body_height,
+                let (rows, markdown_spans) = if has_permission {
+                    self.chat.render_styled_without_prompt_with_spans(inner_width as usize, body_height,
                         &self.workspace, messages, busy, &self.box_appearance)
-                } else { self.chat.render_styled(
+                } else { self.chat.render_styled_with_spans(
                     inner_width as usize,
                     body_height,
                     &self.workspace,
@@ -2157,6 +2162,7 @@ impl NativeView {
                     busy,
                     &self.box_appearance,
                 ) };
+                self.chat_markdown_spans.extend(markdown_spans);
                 self.chat_row_classes
                     .extend(rows.iter().map(|(_, class, _)| *class));
                 self.chat_text_bounds
@@ -2201,10 +2207,12 @@ impl NativeView {
                 if let Some(class) = self.chat_row_classes.get_mut(row) {
                     *class = crate::native_view_chat::ChatRowClass::Metadata;
                 }
+                if let Some(spans) = self.chat_markdown_spans.get_mut(row) { spans.clear(); }
             }
             let mut body: Vec<_> = body.into_iter().map(|line| padded(&line, width)).collect();
             self.chat_row_classes.resize(body.len(), crate::native_view_chat::ChatRowClass::Blank);
             self.chat_text_bounds.resize(body.len(), None);
+            self.chat_markdown_spans.resize(body.len(), Vec::new());
             if let Some(rows) = permission_rows {
                 body.extend(rows.iter().take(15).map(|row| padded(row, width)));
                 self.chat_row_classes.extend(std::iter::repeat_n(
@@ -2435,6 +2443,8 @@ impl NativeView {
             self.chat_row_classes = std::iter::repeat_n(
                 crate::native_view_chat::ChatRowClass::Blank, y.min(rows),
             ).chain(self.chat_row_classes.drain(..)).take(rows).collect();
+            self.chat_markdown_spans = std::iter::repeat_n(Vec::new(), y.min(rows)).chain(self.chat_markdown_spans.drain(..).map(|spans| spans.into_iter().map(|span| crate::native_view_chat::ChatRunSpan { start: span.start.saturating_add(x as u16), end: span.end.saturating_add(x as u16), flags: span.flags }).collect())).take(rows).collect();
+            self.chat_markdown_spans.resize(rows, Vec::new());
             self.chat_text_bounds = std::iter::repeat_n(None, y.min(rows))
                 .chain(self.chat_text_bounds.drain(..).map(|bounds|
                     bounds.map(|(left, width)| (left.saturating_add(x as u16), width))))

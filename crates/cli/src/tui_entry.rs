@@ -1223,6 +1223,7 @@ fn native_size() -> (u32, u32) {
 #[cfg(feature = "native")]
 struct PaintCtx {
     palette: crate::native_theme_runtime::Palette,
+    markdown: Option<crate::native_theme_runtime::MarkdownPalette>,
     /// Region geometry for this frame (positions for the style pass).
     presentation: crate::native_view::ViewPresentation,
     /// `Some(n)` when a modal panel owns the frame: `n` content rows
@@ -1231,6 +1232,7 @@ struct PaintCtx {
     modal: crate::native_view::ModalPresentation,
     sidebar_backdrop_alpha: u8,
     chat_row_classes: Vec<crate::native_view_chat::ChatRowClass>,
+    chat_markdown_spans: Vec<Vec<crate::native_view_chat::ChatRunSpan>>,
     selection: Vec<(u32, u32, u32)>,
     appearance: crate::native_box_style::BoxAppearance,
     modal_box: crate::native_box_style::BoxId,
@@ -1626,11 +1628,13 @@ mod surface_paint_regressions {
         let mut renderer = NativeRenderer::create_memory(80, 24).expect("memory renderer");
         native_paint(&mut renderer, &lines, PaintCtx {
             palette: crate::native_theme_runtime::Palette::opencode_dark(),
+            markdown: None,
             presentation: view.presentation(),
             modal_rows: None,
             modal: view.modal_presentation(),
             sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
             chat_row_classes: view.chat_row_classes().to_vec(),
+            chat_markdown_spans: view.chat_markdown_spans().to_vec(),
             selection: Vec::new(),
             appearance: crate::native_box_style::BoxAppearance::default(),
             modal_box: crate::native_box_style::BoxId::Dialog,
@@ -2372,6 +2376,17 @@ fn modal_row_fg(line: &str, heading: bool, palette: crate::native_theme_runtime:
     }
 }
 
+fn run_attributes(flags: u8) -> u32 {
+    // Pinned OpenTUI attributes: BOLD=1, ITALIC=4, UNDERLINE=8.
+    // Code is colored semantically rather than approximated as DIM.
+    let mut attributes = 0;
+    if flags & crate::markdown_runs::BOLD != 0 { attributes |= 1; }
+    if flags & crate::markdown_runs::ITALIC != 0 { attributes |= 4; }
+    if flags & crate::markdown_runs::LINK != 0 { attributes |= 8; }
+    attributes
+}
+
+
 #[cfg(feature = "native")]
 fn paint_color(
     palette: crate::native_theme_runtime::Palette,
@@ -2601,6 +2616,50 @@ fn paint_styled_rail_row(
 }
 
 #[cfg(feature = "native")]
+fn paint_tab_segment(
+    renderer: &mut NativeRenderer,
+    rect: (u16, u16, u16, u16),
+    text: &str,
+    modal: Option<(u32, u32, u32, u32)>,
+    foreground: Rgba,
+    background: Rgba,
+    attributes: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (left, top, width, height) = rect;
+    let left = u32::from(left);
+    let right = left.saturating_add(u32::from(width)).min(renderer.cols());
+    for offset in 0..height {
+        let y = u32::from(top).saturating_add(u32::from(offset));
+        if y >= renderer.rows() || left >= right { continue; }
+        let spans = match modal {
+            Some((x, modal_top, modal_width, modal_height))
+                if y >= modal_top && y < modal_top.saturating_add(modal_height) =>
+                [(left, right.min(x)), (left.max(x.saturating_add(modal_width)), right)],
+            _ => [(left, right), (right, right)],
+        };
+        for (start, end) in spans {
+            if start < end { renderer.fill_rect(start, y, end - start, 1, background)?; }
+        }
+        let line = text.split('\n').nth(usize::from(offset)).unwrap_or("");
+        let mut column = 0usize;
+        let mut failure = None;
+        crate::native_view_layout::visit_unpadded_cells(line, usize::from(width), |cluster, cells| {
+            let x = left.saturating_add(column as u32);
+            column = column.saturating_add(cells);
+            let end = x.saturating_add(cells as u32);
+            if failure.is_some() || end > right || modal.is_some_and(|(mx, my, mw, mh)|
+                y >= my && y < my.saturating_add(mh) && x < mx.saturating_add(mw) && end > mx
+            ) { return; }
+            if let Err(error) = renderer.draw_text_styled(x, y, cluster, foreground, Some(background), attributes) {
+                failure = Some(error);
+            }
+        });
+        if let Some(error) = failure { return Err(error.into()); }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "native")]
 fn native_paint(
     renderer: &mut NativeRenderer,
     lines: &[String],
@@ -2627,6 +2686,10 @@ fn native_paint(
     fn dim(color: Rgba, alpha: u8) -> Rgba {
         let [r, g, b, a] =
             crate::native_theme_runtime::dim([color.r, color.g, color.b, color.a], alpha);
+        Rgba::new(r, g, b, a)
+    }
+    fn dim_tab(color: [u8; 4], alpha: u8) -> Rgba {
+        let [r, g, b, a] = crate::native_theme_runtime::dim(color, alpha);
         Rgba::new(r, g, b, a)
     }
     // Paint only the intersection with the actual renderer viewport. Region
@@ -2841,6 +2904,23 @@ fn native_paint(
                     }
                 }
                 if !in_modal {
+                    if let Some(markdown) = ctx.markdown.as_ref() {
+                        if let Some(run_spans) = ctx.chat_markdown_spans.get(row) {
+                            for run_span in run_spans {
+                                if run_span.flags & crate::markdown_runs::CODE != 0
+                                    && x >= u32::from(run_span.start)
+                                    && x.saturating_add(u32::from(cells)) <= u32::from(run_span.end)
+                                {
+                                    fg = Rgba::new(markdown.code.rgba[0], markdown.code.rgba[1], markdown.code.rgba[2], markdown.code.rgba[3]);
+                                    if run_span.flags & crate::markdown_runs::CODE_BLOCK == 0 {
+                                        bg = Rgba::new(markdown.inline_background.rgba[0], markdown.inline_background.rgba[1], markdown.inline_background.rgba[2], markdown.inline_background.rgba[3]);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if !in_modal {
                     // Every text cell, including whitespace, must obey the
                     // same fill mask as the rectangle pass. Glyph-only corner
                     // adjustment cannot repair opaque rectangular underpaint.
@@ -2859,6 +2939,17 @@ fn native_paint(
                 if !in_modal && selected_cells.contains(&(y, x)) {
                     bg = accent;
                     fg = background;
+                }
+                if !in_modal {
+                    if let Some(run_spans) = ctx.chat_markdown_spans.get(row) {
+                        for run_span in run_spans {
+                            if x >= u32::from(run_span.start)
+                                && x.saturating_add(u32::from(cells)) <= u32::from(run_span.end)
+                            {
+                                attributes |= run_attributes(run_span.flags);
+                            }
+                        }
+                    }
                 }
                 if let Some((_, text, last_fg, last_bg, last_attributes)) = spans.last_mut() {
                     if span_end == x
@@ -2940,47 +3031,78 @@ fn native_paint(
         }
     }
     if let Some(tabs) = ctx.tabs.filter(|_| ctx.vertical_rail.is_none()) {
-        let fg = accent;
-        let bg = dim(panel, base_alpha);
+        let tabs = tabs.clone().with_row_colors(&ctx.palette);
+        let fallback_fg = accent;
+        let fallback_bg = dim(background, base_alpha);
         for (index, row) in tabs.rows.iter().enumerate() {
             let Some((_, rect)) = tabs.rects.get(index) else { continue };
             let x = u32::from(rect.x);
             let y = u32::from(rect.y);
-            if x < cols && y < rows {
-                renderer.fill_rect(x, y, u32::from(rect.width).min(cols - x), u32::from(rect.height).min(rows - y), bg)?;
-                renderer.draw_text_styled(x, y, row, fg, Some(bg), 0)?;
+            if x >= cols || y >= rows { continue; }
+            let paint = tabs.row_paints.get(index);
+            let row_bg = paint.map_or(fallback_bg, |p| dim_tab(p.background, base_alpha));
+            let width = u32::from(rect.width).min(cols - x) as u16;
+            let indicator = tabs.indicator_cells.min(width);
+            let number = crate::native_view_layout::slice_cells(row, 0, indicator);
+            let title = crate::native_view_layout::slice_cells(row, indicator, width - indicator);
+            if indicator > 0 {
+                paint_tab_segment(renderer, (rect.x, rect.y, indicator, rect.height), &number, modal,
+                    paint.map_or(fallback_fg, |p| dim_tab(p.number_fg, base_alpha)), row_bg, 0)?;
+            }
+            if width > indicator {
+                paint_tab_segment(renderer, (rect.x.saturating_add(indicator), rect.y, width - indicator, rect.height), &title, modal,
+                    paint.map_or(fallback_fg, |p| dim_tab(p.title_fg, base_alpha)), row_bg,
+                    paint.map_or(0, |p| p.title_attr))?;
             }
         }
-        // Structural close rectangles are for hit testing. Paint only the
-        // explicitly projected hovered close child.
         if let Some(rect) = tabs.visible_close_rect() {
             if rect.x < cols as u16 && rect.y < rows as u16 {
-                renderer.draw_text_styled(u32::from(rect.x), u32::from(rect.y), "✕", fg, Some(bg), 0)?;
+                let paint = tabs.rects.iter().position(|(_, parent)|
+                    rect.x >= parent.x && rect.x < parent.x.saturating_add(parent.width) && rect.y == parent.y)
+                    .and_then(|index| tabs.row_paints.get(index));
+                paint_tab_segment(renderer, (rect.x, rect.y, rect.width, rect.height), "✕", modal,
+                    paint.map_or(muted, |p| dim_tab(p.close_fg, base_alpha)),
+                    paint.map_or(fallback_bg, |p| dim_tab(p.background, base_alpha)), 0)?;
             }
         }
         for (row, rect) in tabs.rows.iter().skip(tabs.rects.len()).zip(&tabs.overflow_rects) {
             if rect.x < cols as u16 && rect.y < rows as u16 {
-                renderer.fill_rect(u32::from(rect.x), u32::from(rect.y),
-                    u32::from(rect.width).min(cols - u32::from(rect.x)), 1, bg)?;
-                renderer.draw_text_styled(u32::from(rect.x), u32::from(rect.y), row,
-                    muted, Some(bg), 0)?;
+                paint_tab_segment(renderer, (rect.x, rect.y, rect.width, 1), row, modal, muted, fallback_bg, 0)?;
             }
         }
         if let Some(rect) = tabs.add_rect {
             if rect.x < cols as u16 && rect.y < rows as u16 {
-                renderer.fill_rect(u32::from(rect.x), u32::from(rect.y), u32::from(rect.width).min(cols - u32::from(rect.x)), u32::from(rect.height).min(rows - u32::from(rect.y)), bg)?;
+                let paint = tabs.add_paint;
+                let add_bg = paint.map_or(fallback_bg, |p| dim_tab(p.background, base_alpha));
+                let add_fg = paint.map_or(muted, |p| dim_tab(p.plus_fg, base_alpha));
                 let label = if rect.width < 3 { "+" } else { " + " };
-                renderer.draw_text_styled(u32::from(rect.x), u32::from(rect.y), label, accent, Some(bg), 0)?;
+                paint_tab_segment(renderer, (rect.x, rect.y, rect.width, rect.height), label, modal, add_fg, add_bg,
+                    paint.map_or(0, |p| p.title_attr))?;
             }
         }
-        // Promoted Home slot: fill + composed row; its close glyph paints from
-        // the row itself only while home_hovered was true at render time, and
-        // the slot is always filled even when no row could compose.
         if let Some(rect) = tabs.home_rect {
             if rect.x < cols as u16 && rect.y < rows as u16 {
-                renderer.fill_rect(u32::from(rect.x), u32::from(rect.y), u32::from(rect.width).min(cols - u32::from(rect.x)), u32::from(rect.height).min(rows - u32::from(rect.y)), bg)?;
+                let paint = tabs.home_paint;
+                let home_bg = paint.map_or(fallback_bg, |p| dim_tab(p.background, base_alpha));
                 if let Some(row) = tabs.home_row.as_deref() {
-                    renderer.draw_text_styled(u32::from(rect.x), u32::from(rect.y), row, fg, Some(bg), 0)?;
+                    let width = rect.width;
+                    let indicator = tabs.indicator_cells.min(width);
+                    let number = crate::native_view_layout::slice_cells(row, 0, indicator);
+                    let title = crate::native_view_layout::slice_cells(row, indicator, width - indicator);
+                    if indicator > 0 {
+                        paint_tab_segment(renderer, (rect.x, rect.y, indicator, rect.height), &number, modal,
+                            paint.map_or(fallback_fg, |p| dim_tab(if p.number_fg == [0, 0, 0, 0] { p.title_fg } else { p.number_fg }, base_alpha)), home_bg,
+                            paint.map_or(0, |p| p.title_attr))?;
+                    }
+                    if width > indicator {
+                        paint_tab_segment(renderer, (rect.x.saturating_add(indicator), rect.y, width - indicator, rect.height), &title, modal,
+                            paint.map_or(fallback_fg, |p| dim_tab(p.title_fg, base_alpha)), home_bg,
+                            paint.map_or(0, |p| p.title_attr))?;
+                    }
+                }
+                if let Some(close) = tabs.home_close_visible_rect() {
+                    paint_tab_segment(renderer, (close.x, close.y, close.width, close.height), "✕", modal,
+                        paint.map_or(muted, |p| dim_tab(p.close_fg, base_alpha)), home_bg, 0)?;
                 }
             }
         }
@@ -4223,6 +4345,7 @@ fn native_loop(
     // leak into composer/send regions while already on Home.
     let mut home_press: Option<(crate::native_tabs::TabRect, TabOrientation, bool)> = None;
     let mut tab_home_hovered = false;
+    let mut tab_add_hovered = false;
     let mut context_menu: Option<crate::native_tab_context_menu::TabContextMenu> = None;
     let mut rename_input: Option<(crate::native_navigation::SessionRef, String)> = None;
     let mut rename_error: Option<String> = None;
@@ -5520,6 +5643,7 @@ fn native_loop(
             context_menu = None;
             tab_hovered = None;
             tab_home_hovered = false;
+            tab_add_hovered = false;
             home_press = None;
             tab_viewport = Some(viewport);
         }
@@ -5528,6 +5652,7 @@ fn native_loop(
         {
             tab_hovered = None;
             tab_home_hovered = false;
+            tab_add_hovered = false;
             tab_press = None;
             add_press = None;
             home_press = None;
@@ -5554,7 +5679,7 @@ fn native_loop(
             matches!(effective_orientation, TabOrientation::Horizontal),
             home_active,
             home_active && tab_home_hovered,
-        );
+        ).with_row_colors_semantic(&theme.palette, theme.semantic.as_ref()).with_add_hovered(tab_add_hovered, &theme.palette);
         let frame_rail = if effective_orientation == TabOrientation::Vertical {
             let rail_inputs = rail_inputs_for_navigation(&navigation, &tab_inputs);
             Some(crate::native_tab_rail::RailFrame::render_cells(&rail_inputs, tab_reservation.width, viewport.1, rendered_rail.as_ref().map_or(0, |r| r.scroll_cells), tab_hovered.as_ref(), navigation.active().is_none()))
@@ -5717,11 +5842,13 @@ fn native_loop(
                 &lines,
                 PaintCtx {
                     palette: theme.palette,
+                    markdown: theme.semantic.clone().map(|semantic| semantic.markdown),
                     presentation,
                     modal_rows: modal_rows.map(|count| count.min(view.modal_content_height())).filter(|count| *count > 0),
                     modal: view.modal_presentation(),
                     sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
                     chat_row_classes: view.chat_row_classes().to_vec(),
+                    chat_markdown_spans: view.chat_markdown_spans().to_vec(),
                     selection: selection.spans(),
                     appearance: appearance.style.clone(),
                     modal_box: if view.command_palette_open() {
@@ -6200,6 +6327,8 @@ fn native_loop(
                         tab_home_hovered = effective_orientation == TabOrientation::Horizontal
                             && tab_hovered.is_none()
                             && rendered_tabs.as_ref().is_some_and(|tabs| tabs.home_hit(x, y));
+                        tab_add_hovered = effective_orientation == TabOrientation::Horizontal
+                            && rendered_tabs.as_ref().is_some_and(|tabs| tabs.add_hit(x, y));
                         needs_paint = true;
                         continue;
                     }

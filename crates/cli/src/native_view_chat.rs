@@ -689,6 +689,17 @@ fn boxed_message_rows(
     separator: bool,
     appearance: &crate::native_box_style::BoxAppearance,
 ) -> Vec<StyledChatRow> {
+    boxed_message_rows_spans(width, message, separator, appearance, &mut Vec::new())
+}
+
+/// Preserve the boxed rows while carrying source-derived Markdown intervals.
+fn boxed_message_rows_spans(
+    width: usize,
+    message: &ChatMessage,
+    separator: bool,
+    appearance: &crate::native_box_style::BoxAppearance,
+    spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
+) -> Vec<StyledChatRow> {
     use crate::native_box_style::BoxId;
     let id = if message.role == ChatRole::Tool
         || message.parts.iter().any(|part| {
@@ -716,11 +727,15 @@ fn boxed_message_rows(
         && matches!(id,BoxId::User|BoxId::Assistant) {1} else {usize::from(style.padding)};
     // Unstyled fallback: caller facts at the caller's wrap width, carrying
     // their full-row text interval (selected template, never decoration).
-    let plain = |wrap: usize| -> Vec<StyledChatRow> {
-        typed_message_rows(wrap.min(width), message, separator)
+    let plain = |wrap: usize, spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>| -> Vec<StyledChatRow> {
+        let mut typed_spans = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans(wrap.min(width), message, separator, None, &mut typed_spans);
+        let rows: Vec<StyledChatRow> = typed
             .into_iter()
             .map(|(text, class)| (text, class, Some((0, width.min(u16::MAX as usize) as u16))))
-            .collect()
+            .collect();
+        rebase_part_spans(typed_spans, rows.len(), 0, 0, usize::MAX, width, spans_out);
+        rows
     };
     // The pinned TUI has two different primitives, not a shared padded card:
     // UserMessage is a raised left-rail surface (1 + 2 columns), whereas
@@ -743,8 +758,11 @@ fn boxed_message_rows(
             output.push((padding.clone(), ChatRowClass::UserCard, None));
         }
         let limit = MAX_MESSAGE_ROWS.saturating_sub(output.len() + usize::from(user));
-        for (text, class) in typed_message_rows_with_prefix(inner, message, false, Some(""))
-            .into_iter().take(limit)
+        let base = output.len();
+        let mut typed_spans = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans(inner, message, false, Some(""), &mut typed_spans);
+        let taken = typed.len().min(limit);
+        for (text, class) in typed.into_iter().take(limit)
         {
             let text = crate::native_view_layout::slice_cells(&text, 0, inner.min(u16::MAX as usize) as u16);
             output.push((
@@ -753,6 +771,7 @@ fn boxed_message_rows(
                 Some((3, inner.min(u16::MAX as usize) as u16)),
             ));
         }
+        rebase_part_spans(typed_spans, taken, base, 3, inner, width, spans_out);
         if user {
             output.push((padding, ChatRowClass::UserCard, None));
         }
@@ -762,23 +781,28 @@ fn boxed_message_rows(
     // path (which would reserve outline rows) and do not synthesize blank
     // border glyphs; retain the ordinary typed message classes and bounds.
     if !style.has_border() {
-        return plain(width);
+        return plain(width, spans_out);
     }
     // A full drawn frame exists ONLY through an explicit Double/Heavy line
     // weight (kept explicit). A radius preset or a Custom radius must never
     // create or widen a frame — changing radius affects existing corners,
     // never activates framing.
     if appearance.full_outline(id) {
-        let Some(frame) = crate::native_box_style::TextFrame::new(style, width, pad) else { return plain(width); };
+        let Some(frame) = crate::native_box_style::TextFrame::new(style, width, pad) else { return plain(width, spans_out); };
         let inner = usize::from(frame.content_width());
         let mut output = Vec::new();
         if separator { output.push((String::new(), ChatRowClass::Separator, None)); }
         output.push((frame.edge(false), ChatRowClass::Separator, None));
         for _ in 0..pad { output.push((frame.blank(), ChatRowClass::Blank, None)); }
-        for (text, class) in typed_message_rows(inner, message, false)
-            .into_iter().take(MAX_MESSAGE_ROWS.saturating_sub(2 + 2 * pad)) {
+        let base = output.len();
+        let mut typed_spans = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans(inner, message, false, None, &mut typed_spans);
+        let limit = MAX_MESSAGE_ROWS.saturating_sub(2 + 2 * pad);
+        let taken = typed.len().min(limit);
+        for (text, class) in typed.into_iter().take(limit) {
             output.push((frame.row(&text), class, Some(((1 + pad) as u16, inner as u16))));
         }
+        rebase_part_spans(typed_spans, taken, base, 1 + pad, inner, width, spans_out);
         for _ in 0..pad { output.push((frame.blank(), ChatRowClass::Blank, None)); }
         output.push((frame.edge(true), ChatRowClass::Separator, None));
         return output;
@@ -793,7 +817,7 @@ fn boxed_message_rows(
         let rail = 1;
         let overhead = rail + pad;
         if width <= overhead + 1 {
-            return plain(width);
+            return plain(width, spans_out);
         }
         let inner = width - overhead;
         let mut output = Vec::new();
@@ -804,9 +828,12 @@ fn boxed_message_rows(
         for _ in 0..pad {
             output.push((rail_pad.clone(), ChatRowClass::Blank, None));
         }
-        for (text, class) in typed_message_rows(inner, message, false)
-            .into_iter()
-            .take(MAX_MESSAGE_ROWS.saturating_sub(2 * pad))
+        let base = output.len();
+        let mut typed_spans = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans(inner, message, false, None, &mut typed_spans);
+        let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
+        let taken = typed.len().min(limit);
+        for (text, class) in typed.into_iter().take(limit)
         {
             let text =
                 crate::native_view_layout::slice_cells(&text, 0, inner.min(u16::MAX as usize) as u16);
@@ -822,6 +849,7 @@ fn boxed_message_rows(
                 Some(((1 + pad) as u16, inner as u16)),
             ));
         }
+        rebase_part_spans(typed_spans, taken, base, 1 + pad, inner, width, spans_out);
         for _ in 0..pad {
             output.push((rail_pad.clone(), ChatRowClass::Blank, None));
         }
@@ -829,7 +857,7 @@ fn boxed_message_rows(
     }
     if pad > 0 {
         if width <= pad.max(1) {
-            return plain(width);
+            return plain(width, spans_out);
         }
         let inner = width - pad;
         let mut output = Vec::new();
@@ -839,9 +867,12 @@ fn boxed_message_rows(
         for _ in 0..pad {
             output.push((String::new(), ChatRowClass::Blank, None));
         }
-        for (text, class) in typed_message_rows(inner, message, false)
-            .into_iter()
-            .take(MAX_MESSAGE_ROWS.saturating_sub(2 * pad))
+        let base = output.len();
+        let mut typed_spans = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans(inner, message, false, None, &mut typed_spans);
+        let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
+        let taken = typed.len().min(limit);
+        for (text, class) in typed.into_iter().take(limit)
         {
             let text =
                 crate::native_view_layout::slice_cells(&text, 0, inner.min(u16::MAX as usize) as u16);
@@ -857,12 +888,13 @@ fn boxed_message_rows(
                 Some((pad as u16, inner as u16)),
             ));
         }
+        rebase_part_spans(typed_spans, taken, base, pad, inner, width, spans_out);
         for _ in 0..pad {
             output.push((String::new(), ChatRowClass::Blank, None));
         }
         output
     } else {
-        plain(width)
+        plain(width, spans_out)
     }
 }
 
@@ -1306,6 +1338,221 @@ fn push_code_wrapped(
     false
 }
 
+/// Source-derived style interval in display cells; link targets are not actionable.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChatRunSpan {
+    pub start: u16,
+    pub end: u16,
+    pub flags: u8,
+}
+
+fn row_cells(text: &str) -> usize {
+    crate::native_view_layout::visit_unpadded_cells(text, text.len(), |_, _| {})
+}
+
+/// Reproduce the existing wrapper's geometry, accepting style only from the
+/// undecorated canonical part. Any inconsistent projection drops its spans.
+fn markdown_part_row_spans(
+    text: &str,
+    width: usize,
+    prefix: &str,
+    actual: &[(String, ChatRowClass)],
+) -> Vec<Vec<ChatRunSpan>> {
+    let parsed = crate::markdown_runs::parse_part(crate::markdown_runs::PartKind::Prose, text);
+    let prefix_cells = row_cells(prefix);
+    let mut out: Vec<(Vec<ChatRunSpan>, Option<usize>)> = Vec::new();
+    let bounded = clip_utf8_prefix_bytes(text, MAX_INPUT_ROW_BYTES);
+    let sanitized = strip_ansi(bounded);
+    let mut fence: Option<(char, usize)> = None;
+    let mut overflow = text.len() > MAX_INPUT_ROW_BYTES;
+    let mut dropped = false;
+    for (index, raw_line) in sanitized.split('\n').enumerate() {
+        if out.len() >= MAX_MESSAGE_ROWS { overflow = true; break; }
+        let mut code = fence.is_some();
+        if let Some((marker, run, trailing)) = markdown_fence_marker(raw_line) {
+            match fence {
+                Some((open, minimum)) if marker == open && run >= minimum
+                    && trailing.bytes().all(|byte| matches!(byte, b' ' | b'\t')) => {
+                    fence = None;
+                    code = true;
+                }
+                None => { fence = Some((marker, run)); code = true; }
+                _ => {}
+            }
+        }
+        let Some(source_row) = parsed.rows.get(index) else { return Vec::new(); };
+        if source_row.code != code { return Vec::new(); }
+        let line = if code { expand_code_tabs(&sanitize_code(raw_line)) } else { sanitize(raw_line) };
+        let mut capped = false;
+        if code {
+            let prefix_eff = if width == 0 || prefix.len() < width { prefix } else { "" };
+            for (chunk, cells) in code_row_chunks(&line, width, prefix) {
+                if out.len() >= MAX_MESSAGE_ROWS { capped = true; break; }
+                let start = row_cells(prefix_eff);
+                let mut end = start.saturating_add(cells);
+                let row = truncate_row(&format!("{prefix_eff}{chunk}"), width);
+                let rendered_cells = row_cells(&row);
+                if width > 0 { end = end.min(rendered_cells); }
+                let spans = if end > start {
+                    vec![ChatRunSpan { start: start as u16, end: end as u16,
+                        flags: crate::markdown_runs::CODE | crate::markdown_runs::CODE_BLOCK }]
+                } else { Vec::new() };
+                out.push((spans, Some(rendered_cells)));
+            }
+        } else {
+            let content_width = if width == 0 { 0 } else { width.saturating_sub(prefix.len()).max(1) };
+            let clean = sanitize(clip_utf8_prefix_bytes(&line, MAX_INPUT_ROW_BYTES));
+            let mut cursor = 0usize;
+            for fragment in render_lines(&[TranscriptLine { id: 0, text: clean.clone() }], content_width) {
+                if out.len() >= MAX_MESSAGE_ROWS { capped = true; break; }
+                let mut spans = Vec::new();
+                let row = truncate_row(&format!("{prefix}{fragment}"), width);
+                let rendered_cells = row_cells(&row);
+                if !dropped {
+                    match map_fragment_chars(&source_row.text, cursor, &fragment) {
+                        Some((pairs, next_cursor)) => {
+                            cursor = next_cursor;
+                            spans = project_pairs(&source_row.runs, &fragment, &pairs, prefix_cells, rendered_cells);
+                        }
+                        None => { dropped = true; }
+                    }
+                }
+                out.push((spans, Some(rendered_cells)));
+            }
+        }
+        if capped { overflow = true; break; }
+    }
+    if overflow {
+        if out.len() >= MAX_MESSAGE_ROWS {
+            if let Some(last) = out.last_mut() { last.0.clear(); last.1 = None; }
+        } else { out.push((Vec::new(), None)); }
+    }
+    if dropped || out.len() != actual.len() { return Vec::new(); }
+    for (index, (_, expected)) in out.iter().enumerate() {
+        if let Some(expected) = expected {
+            if row_cells(&actual[index].0) != *expected { return Vec::new(); }
+        }
+    }
+    out.into_iter().map(|(spans, _)| spans).collect()
+}
+
+fn code_row_chunks(line: &str, width: usize, prefix: &str) -> Vec<(String, usize)> {
+    let clean = sanitize_code(clip_utf8_prefix_bytes(line, MAX_INPUT_ROW_BYTES));
+    if width == 0 { return vec![(clean.clone(), row_cells(&clean))]; }
+    let clean = lossless_markdown_code_line(&clean);
+    let prefix_eff_len = if prefix.len() < width { prefix.len() } else { 0 };
+    let content_width = width.saturating_sub(prefix_eff_len).max(1);
+    if clean.is_empty() { return vec![(String::new(), 0)]; }
+    let mut clusters: Vec<(String, usize)> = Vec::new();
+    crate::native_view_layout::visit_unpadded_cells(&clean, clean.len(), |glyph, cells| {
+        clusters.push((glyph.to_owned(), cells));
+    });
+    let mut out = Vec::new();
+    let mut used = 0usize;
+    let mut line_text = String::new();
+    for (glyph, cells) in clusters {
+        if cells > content_width {
+            if !line_text.is_empty() { out.push((std::mem::take(&mut line_text), std::mem::take(&mut used))); }
+            let escaped: String = glyph.chars().map(|c| format!("\\u{{{:x}}}", c as u32)).collect();
+            for chunk in escaped.chars().collect::<Vec<_>>().chunks(content_width) {
+                let chunk: String = chunk.iter().collect();
+                out.push((chunk.clone(), chunk.chars().count()));
+            }
+            continue;
+        }
+        if used + cells > content_width { out.push((std::mem::take(&mut line_text), std::mem::take(&mut used))); }
+        line_text.push_str(&glyph);
+        used += cells;
+    }
+    if !line_text.is_empty() { out.push((line_text, used)); }
+    out
+}
+
+/// Explicit mapping from sanitized source bytes to wrap-fragment bytes.
+/// Whitespace is consumed separately because prose wrapping collapses it.
+fn map_fragment_chars(source: &str, cursor: usize, fragment: &str) -> Option<(Vec<(usize, usize, usize)>, usize)> {
+    let mut pairs = Vec::new();
+    let mut source_at = cursor.min(source.len());
+    let mut frag_at = 0usize;
+    loop {
+        while let Some(ch) = source[source_at..].chars().next() {
+            if !ch.is_whitespace() { break; }
+            source_at += ch.len_utf8();
+        }
+        while let Some(ch) = fragment[frag_at..].chars().next() {
+            if !ch.is_whitespace() { break; }
+            frag_at += ch.len_utf8();
+        }
+        if frag_at >= fragment.len() { return Some((pairs, source_at)); }
+        if source_at >= source.len() { return None; }
+        let source_ch = source[source_at..].chars().next()?;
+        let frag_ch = fragment[frag_at..].chars().next()?;
+        if source_ch != frag_ch { return None; }
+        pairs.push((source_at, source_at + source_ch.len_utf8(), frag_at));
+        source_at += source_ch.len_utf8();
+        frag_at += frag_ch.len_utf8();
+    }
+}
+
+/// A style is projected only when all characters of a display cluster map
+/// inside a source run. Decorations and link targets never create style facts.
+fn project_pairs(
+    runs: &[crate::markdown_runs::MarkdownRun], fragment: &str,
+    pairs: &[(usize, usize, usize)], prefix_cells: usize, row_end: usize,
+) -> Vec<ChatRunSpan> {
+    if runs.is_empty() || pairs.is_empty() { return Vec::new(); }
+    let mut spans: Vec<ChatRunSpan> = Vec::new();
+    let mut pair_at = 0usize;
+    let mut frag_byte = 0usize;
+    let mut cell = 0usize;
+    crate::native_view_layout::visit_unpadded_cells(fragment, fragment.len(), |glyph, cells| {
+        frag_byte += glyph.len();
+        let cell_start = cell;
+        cell += cells;
+        let cluster_chars = glyph.chars().count();
+        let mut mapped = 0usize;
+        let mut source_start = usize::MAX;
+        let mut source_end = 0usize;
+        while pair_at < pairs.len() && pairs[pair_at].2 < frag_byte {
+            let (start, end, _) = pairs[pair_at];
+            source_start = source_start.min(start);
+            source_end = source_end.max(end);
+            mapped += 1;
+            pair_at += 1;
+        }
+        if mapped != cluster_chars || mapped == 0 { return; }
+        let mut flags = 0u8;
+        for run in runs.iter().take(crate::markdown_runs::MAX_RUNS_PER_ROW) {
+            if run.start <= source_start && run.end >= source_end { flags |= run.flags; }
+        }
+        if flags == 0 { return; }
+        let start = prefix_cells.saturating_add(cell_start);
+        let end = prefix_cells.saturating_add(cell).min(row_end);
+        if start >= end { return; }
+        if let Some(last) = spans.last_mut() {
+            if last.flags == flags && usize::from(last.end) == start { last.end = end as u16; return; }
+        }
+        spans.push(ChatRunSpan { start: start as u16, end: end as u16, flags });
+    });
+    spans
+}
+
+fn rebase_part_spans(
+    spans: Vec<(usize, Vec<ChatRunSpan>)>, taken: usize, base: usize,
+    left: usize, inner: usize, width: usize, sink: &mut Vec<(usize, Vec<ChatRunSpan>)>,
+) {
+    for (index, row_spans) in spans {
+        if index >= taken || row_spans.is_empty() { continue; }
+        let rebased: Vec<ChatRunSpan> = row_spans.into_iter().filter_map(|span| {
+            let start = usize::from(span.start).min(inner).saturating_add(left);
+            let mut end = usize::from(span.end).min(inner).saturating_add(left);
+            if width > 0 { end = end.min(width); }
+            (start < end).then_some(ChatRunSpan { start: start as u16, end: end as u16, flags: span.flags })
+        }).collect();
+        if !rebased.is_empty() { sink.push((base + index, rebased)); }
+    }
+}
+
 /// Display rows of one typed message: optional group separator, optional
 /// agent/model metadata row, then its parts in order. Tool results are
 /// labeled `[result]`/`[error]` with indented output — the view never
@@ -1323,6 +1570,13 @@ fn typed_message_rows_with_prefix(
     message: &ChatMessage,
     separator: bool,
     prefix: Option<&str>,
+) -> Vec<(String, ChatRowClass)> {
+    typed_message_rows_with_prefix_spans(width, message, separator, prefix, &mut Vec::new())
+}
+
+fn typed_message_rows_with_prefix_spans(
+    width: usize, message: &ChatMessage, separator: bool, prefix: Option<&str>,
+    spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
 ) -> Vec<(String, ChatRowClass)> {
     let mut rows: Vec<(String, ChatRowClass)> = Vec::new();
     if separator {
@@ -1352,11 +1606,13 @@ fn typed_message_rows_with_prefix(
                         push_markdown_wrapped(rows, width, text, prefix, class);
                     }
                 };
+                let part_prefix = prefix.unwrap_or_else(|| text_prefix(message.role));
+                let before = rows.len();
                 push(
                     &mut rows,
                     width,
                     text,
-                    prefix.unwrap_or_else(|| text_prefix(message.role)),
+                    part_prefix,
                     match message.role {
                         ChatRole::User => ChatRowClass::UserCard,
                         ChatRole::Assistant => ChatRowClass::AssistantCard,
@@ -1364,6 +1620,11 @@ fn typed_message_rows_with_prefix(
                         ChatRole::Tool => ChatRowClass::ToolResult,
                     },
                 );
+                if message.role != ChatRole::User {
+                    for (offset, spans) in markdown_part_row_spans(text, width, part_prefix, &rows[before..]).into_iter().enumerate() {
+                        if !spans.is_empty() { spans_out.push((before + offset, spans)); }
+                    }
+                }
             }
             ChatPart::Thinking(text) => {
                 // Match the pinned TUI's reasoning presentation: providers can
@@ -1773,6 +2034,14 @@ impl ChatView {
         busy: bool,
         appearance: &crate::native_box_style::BoxAppearance,
     ) -> Vec<StyledChatRow> {
+        self.render_styled_mode(width, height, workspace, messages, draft, busy, appearance, true).0
+    }
+
+    #[must_use]
+    pub fn render_styled_with_spans(
+        &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
+        draft: &str, busy: bool, appearance: &crate::native_box_style::BoxAppearance,
+    ) -> (Vec<StyledChatRow>, Vec<Vec<ChatRunSpan>>) {
         self.render_styled_mode(width, height, workspace, messages, draft, busy, appearance, true)
     }
 
@@ -1780,6 +2049,14 @@ impl ChatView {
         &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
         busy: bool, appearance: &crate::native_box_style::BoxAppearance,
     ) -> Vec<StyledChatRow> {
+        self.render_styled_mode(width, height, workspace, messages, "", busy, appearance, false).0
+    }
+
+    #[must_use]
+    pub fn render_styled_without_prompt_with_spans(
+        &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
+        busy: bool, appearance: &crate::native_box_style::BoxAppearance,
+    ) -> (Vec<StyledChatRow>, Vec<Vec<ChatRunSpan>>) {
         self.render_styled_mode(width, height, workspace, messages, "", busy, appearance, false)
     }
 
@@ -1787,7 +2064,7 @@ impl ChatView {
         &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
         draft: &str, busy: bool, appearance: &crate::native_box_style::BoxAppearance,
         show_prompt: bool,
-    ) -> Vec<StyledChatRow> {
+    ) -> (Vec<StyledChatRow>, Vec<Vec<ChatRunSpan>>) {
         let requested_scroll = self.scroll.get();
         let height = height.min(MAX_VIEW_ROWS);
         let width = width.min(u16::MAX as usize);
@@ -1854,19 +2131,23 @@ impl ChatView {
             .unwrap_or(rows.len());
         let transcript_h = body_h.saturating_sub(1);
         let target = self.scroll.get().saturating_add(transcript_h);
-        let mut reversed = Vec::new();
+        let mut reversed: Vec<(StyledChatRow, Vec<ChatRunSpan>)> = Vec::new();
         if transcript_h > 0 {
             'messages: for (index, message) in messages.iter().enumerate().rev() {
-                for row in boxed_message_rows(
+                let mut message_spans: Vec<(usize, Vec<ChatRunSpan>)> = Vec::new();
+                let message_rows = boxed_message_rows_spans(
                     width,
                     message,
                     starts_styled_group(index, messages),
                     appearance,
-                )
-                .into_iter()
-                .rev()
-                {
-                    reversed.push(row);
+                    &mut message_spans,
+                );
+                let mut dense = vec![Vec::new(); message_rows.len()];
+                for (row, spans) in message_spans {
+                    if row < dense.len() { dense[row] = spans; }
+                }
+                for (row, spans) in message_rows.into_iter().zip(dense).rev() {
+                    reversed.push((row, spans));
                     if reversed.len() >= target {
                         break 'messages;
                     }
@@ -1889,14 +2170,17 @@ impl ChatView {
             .position(|(_, class)| *class == ChatRowClass::Header)
             .map_or(0, |header| header + 1);
         let mut bounds = vec![None; rows.len()];
-        for (index, (text, class, range)) in visible.into_iter().enumerate() {
+        let mut row_spans: Vec<Vec<ChatRunSpan>> = vec![Vec::new(); rows.len()];
+        for (index, ((text, class, range), spans)) in visible.into_iter().enumerate() {
             rows[first + index] = (text, class);
             bounds[first + index] = range;
+            row_spans[first + index] = spans;
         }
-        rows.into_iter()
+        let styled: Vec<StyledChatRow> = rows.into_iter()
             .zip(bounds)
             .map(|((text, class), bounds)| (text, class, bounds))
-            .collect()
+            .collect();
+        (styled, row_spans)
     }
 
     /// Legacy callers have text rows, not role facts. Reuse the exact prompt
@@ -1922,7 +2206,7 @@ impl ChatView {
         show_prompt: bool,
     ) -> Vec<StyledChatRow> {
         let scroll = self.scroll.get();
-        let mut rows = self.render_styled_mode(width, height, workspace, &[], draft, busy, appearance, show_prompt);
+        let mut rows = self.render_styled_mode(width, height, workspace, &[], draft, busy, appearance, show_prompt).0;
         self.scroll.set(scroll);
         let body = rows.iter().position(|(_, class, _)| *class == ChatRowClass::Composer).unwrap_or(rows.len());
         let first = usize::from(body > 0);
@@ -2004,6 +2288,60 @@ impl ChatView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_facts_map_onto_rendered_rows_without_painted_inference() {
+        let text = "before\n\n**bold** word\n~~~\ncode\n~~~\nafter";
+        let mut rows = Vec::new();
+        push_markdown_wrapped(&mut rows, 40, text, "", ChatRowClass::AssistantCard);
+        let spans = markdown_part_row_spans(text, 40, "", &rows);
+        assert_eq!(rows.len(), 7);
+        assert_eq!(spans.len(), rows.len());
+        assert!(spans[0].is_empty());
+        assert!(spans[1].is_empty());
+        assert_eq!(spans[2], vec![ChatRunSpan { start: 2, end: 6, flags: crate::markdown_runs::BOLD }]);
+        for (row, end) in [(3, 3), (4, 4), (5, 3)] {
+            assert_eq!(spans[row], vec![ChatRunSpan { start: 0, end, flags: crate::markdown_runs::CODE | crate::markdown_runs::CODE_BLOCK }]);
+        }
+        assert!(spans[6].is_empty());
+    }
+
+    #[test]
+    fn markdown_code_spans_distinguish_inline_background_from_block_background() {
+        let inline = "before `code` after";
+        let mut rows = Vec::new();
+        push_markdown_wrapped(&mut rows, 40, inline, "", ChatRowClass::AssistantCard);
+        let spans = markdown_part_row_spans(inline, 40, "", &rows);
+        let code = spans[0].iter().find(|span| span.flags & crate::markdown_runs::CODE != 0).expect("inline code span");
+        assert_eq!(code.flags & crate::markdown_runs::CODE_BLOCK, 0);
+        let block = "~~~\ncode\n~~~";
+        rows.clear();
+        push_markdown_wrapped(&mut rows, 40, block, "", ChatRowClass::AssistantCard);
+        let spans = markdown_part_row_spans(block, 40, "", &rows);
+        assert_eq!(spans.len(), 3);
+        for row in spans { assert_ne!(row.first().expect("block span").flags & crate::markdown_runs::CODE_BLOCK, 0); }
+    }
+
+    #[test]
+    fn markdown_facts_reset_fence_per_part_and_keep_links_inert() {
+        let text = "~~~\ncode\n~~~\n**a**";
+        let mut rows = Vec::new();
+        push_markdown_wrapped(&mut rows, 40, text, "", ChatRowClass::AssistantCard);
+        let spans = markdown_part_row_spans(text, 40, "", &rows);
+        assert_eq!(rows.len(), 4);
+        assert!(!spans[0].is_empty());
+        assert!(spans[0].iter().all(|span| span.flags & crate::markdown_runs::CODE != 0 && span.flags & crate::markdown_runs::CODE_BLOCK != 0));
+        assert_eq!(spans[3], vec![ChatRunSpan { start: 2, end: 3, flags: crate::markdown_runs::BOLD }]);
+        rows.clear();
+        push_markdown_wrapped(&mut rows, 40, "**b**", "", ChatRowClass::AssistantCard);
+        assert_eq!(markdown_part_row_spans("**b**", 40, "", &rows)[0], vec![ChatRunSpan { start: 2, end: 3, flags: crate::markdown_runs::BOLD }]);
+        let linked = "see [x](https://example.test)";
+        rows.clear();
+        push_markdown_wrapped(&mut rows, 40, linked, "  ", ChatRowClass::ToolResult);
+        let spans = markdown_part_row_spans(linked, 40, "  ", &rows);
+        let link = spans[0].iter().find(|span| span.flags & crate::markdown_runs::LINK != 0).expect("inert link span");
+        assert_eq!((link.start, link.end), (7, 8));
+    }
 
     #[test]
     fn markdown_fenced_code_preserves_whitespace_and_unicode_when_wrapped() {
