@@ -2856,7 +2856,7 @@ fn native_paint(
                         &corner_surfaces, x, y, glyph), None, alpha);
                     fg = dim(fg, alpha);
                 }
-                if selected_cells.contains(&(y, x)) {
+                if !in_modal && selected_cells.contains(&(y, x)) {
                     bg = accent;
                     fg = background;
                 }
