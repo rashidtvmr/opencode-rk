@@ -304,6 +304,38 @@ pub struct NavigationState {
     snapshot_titles: Vec<(SessionRef, String)>,
     /// Archive tombstones so stale renames cannot resurrect dead sessions.
     archived: Vec<(SessionRef, u64)>,
+    /// Bounded in-memory session navigation history (`session-tabs-model.ts:147-176`).
+    history: TabHistory,
+    /// User-closed tabs eligible for reopen, in-memory only
+    /// (`session-tabs-model.ts:70-101`). Never persisted.
+    closed: Vec<ClosedTab>,
+}
+
+/// In-memory tab history. Upstream bounds it at 100 entries and keeps the
+/// newest at `index` (`session-tabs-model.ts:147-176`).
+const SESSION_TAB_HISTORY_LIMIT: usize = 100;
+const CLOSED_SESSION_TAB_LIMIT: usize = 25;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct TabHistory {
+    entries: Vec<SessionRef>,
+    index: Option<usize>,
+}
+
+/// One recently closed tab and the slot it occupied, so reopening restores the
+/// original position (`session-tabs-model.ts:84-101`).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClosedTab {
+    pub session: SessionRef,
+    pub index: usize,
+}
+
+/// Serialized tab layout. Only order and titles survive a restart; the
+/// recently-closed stack and navigation history are deliberately absent.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PersistedTabs {
+    pub order: Vec<SessionRef>,
+    pub titles: Vec<(SessionRef, String)>,
 }
 
 impl NavigationState {
@@ -339,7 +371,7 @@ impl NavigationState {
     pub fn open(&mut self, session: SessionRef) -> usize {
         self.home = false;
         if let Some(idx) = self.tabs.iter().position(|t| t.session == session) {
-            self.active = idx;
+            self.focus_index(idx);
             return idx;
         }
         if self.tabs.len() >= MAX_TABS {
@@ -347,8 +379,143 @@ impl NavigationState {
             self.active = self.active.saturating_sub(1);
         }
         self.tabs.push(Tab::new(session));
-        self.active = self.tabs.len() - 1;
-        self.active
+        let idx = self.tabs.len() - 1;
+        self.focus_index(idx);
+        idx
+    }
+
+    /// Focus a tab slot and append it to the bounded navigation history.
+    /// `context/session-tabs.tsx:211-220` records history on every routed
+    /// session change; opening and switching are the native equivalents.
+    fn focus_index(&mut self, index: usize) {
+        self.active = index;
+        self.home = false;
+        let session = self.tabs[index].session.clone();
+        self.record_history(&session);
+    }
+
+    /// Port of `recordSessionTabHistory` (`session-tabs-model.ts:147-156`):
+    /// re-selecting the current entry is a no-op, otherwise the forward tail
+    /// is replaced and the list is bounded from the oldest side.
+    fn record_history(&mut self, session: &SessionRef) {
+        let current = self
+            .history
+            .index
+            .and_then(|index| self.history.entries.get(index));
+        if current == Some(session) {
+            return;
+        }
+        let keep = self
+            .history
+            .index
+            .map_or(0, |index| (index + 1).min(self.history.entries.len()));
+        let mut entries: Vec<SessionRef> = self.history.entries[..keep].to_vec();
+        entries.push(session.clone());
+        if entries.len() > SESSION_TAB_HISTORY_LIMIT {
+            let excess = entries.len() - SESSION_TAB_HISTORY_LIMIT;
+            entries.drain(..excess);
+        }
+        self.history.entries = entries;
+        self.history.index = self.history.entries.len().checked_sub(1);
+    }
+
+    /// Port of `moveSessionTabHistory` (`session-tabs-model.ts:158-176`) for
+    /// the backward direction used by close: walk history backwards for the
+    /// newest entry that is still open and is not the closing tab.
+    fn history_previous(&self, open: &[SessionRef], closing: &SessionRef) -> Option<SessionRef> {
+        let index = self.history.index?;
+        self.history.entries[..index.min(self.history.entries.len())]
+            .iter()
+            .rev()
+            .find(|entry| *entry != closing && open.contains(entry))
+            .cloned()
+    }
+
+    /// Bounded in-memory history entries, oldest first. History is never
+    /// persisted, so it is empty after a restart restore.
+    #[must_use]
+    pub fn history_entries(&self) -> &[SessionRef] {
+        &self.history.entries
+    }
+
+    /// User-closed tabs that are still closed, oldest first. Upstream
+    /// `recentlyClosed` filters entries already open again
+    /// (`context/session-tabs.tsx:381-389`).
+    #[must_use]
+    pub fn recently_closed(&self) -> Vec<ClosedTab> {
+        self.closed
+            .iter()
+            .filter(|entry| !self.tabs.iter().any(|tab| tab.session == entry.session))
+            .cloned()
+            .collect()
+    }
+
+    /// Reopen a closed tab at its original slot. Without an explicit session
+    /// the most recent entry is used. Already-open entries are consumed so
+    /// repeated reopens walk the stack (`session-tabs-model.ts:91-111`).
+    pub fn reopen(&mut self, session: Option<&SessionRef>) -> Option<SessionRef> {
+        loop {
+            let index = match session {
+                Some(target) => self.closed.iter().position(|entry| &entry.session == target)?,
+                None => self.closed.len().checked_sub(1)?,
+            };
+            let entry = self.closed.remove(index);
+            if self.tabs.iter().any(|tab| tab.session == entry.session) {
+                if session.is_some() {
+                    return None;
+                }
+                continue;
+            }
+            let slot = entry.index.min(self.tabs.len());
+            self.tabs.insert(slot, Tab::new(entry.session.clone()));
+            self.focus_index(slot);
+            return Some(entry.session);
+        }
+    }
+
+    /// Persisted tab layout: order plus display titles. Upstream persists
+    /// `{ tabs, unread }` per scope (`context/session-tabs.tsx:72-102`); the
+    /// active route, recently-closed stack and navigation history stay
+    /// in-memory by design.
+    #[must_use]
+    pub fn persist_tabs(&self) -> PersistedTabs {
+        PersistedTabs {
+            order: self.tabs.iter().map(|tab| tab.session.clone()).collect(),
+            titles: self
+                .tabs
+                .iter()
+                .filter_map(|tab| {
+                    self.title(&tab.session)
+                        .map(|title| (tab.session.clone(), title.to_owned()))
+                })
+                .collect(),
+        }
+    }
+
+    /// Restore a persisted order. Duplicates are dropped, the list is bounded,
+    /// and focus starts at the first restored tab because the active route is
+    /// not part of the persisted layout.
+    pub fn restore_tabs(&mut self, persisted: &PersistedTabs) {
+        self.tabs.clear();
+        self.active = 0;
+        self.home = false;
+        for session in &persisted.order {
+            if self.tabs.len() >= MAX_TABS {
+                break;
+            }
+            if self.tabs.iter().any(|tab| &tab.session == session) {
+                continue;
+            }
+            self.tabs.push(Tab::new(session.clone()));
+        }
+        let titles: Vec<(SessionRef, String)> = persisted.titles.clone();
+        for (session, title) in titles {
+            if self.tabs.iter().any(|tab| tab.session == session) {
+                self.ingest_snapshot_title(session, title);
+            }
+        }
+        self.history = TabHistory::default();
+        self.closed.clear();
     }
 
     /// Explicit tab lifecycle name used by native view callers. This is an
@@ -365,29 +532,54 @@ impl NavigationState {
     }
 
     /// Close a tab by session. Daemon-owned work keeps running (T05): the
-    /// work entry is retained and echoed in the returned receipt.
+    /// work entry is retained and echoed in the returned receipt. The closed
+    /// slot is remembered in memory for reopen; background closes never move
+    /// focus (`context/session-tabs.tsx:326-374`).
     pub fn close(&mut self, session: &SessionRef) -> Result<CloseReceipt, NavRefusal> {
-        if !self.remove_tab(session) {
-            return Err(NavRefusal::NoSuchTab);
+        let index = self
+            .tabs
+            .iter()
+            .position(|tab| &tab.session == session)
+            .ok_or(NavRefusal::NoSuchTab)?;
+        self.closed.retain(|entry| &entry.session != session);
+        self.closed.push(ClosedTab {
+            session: session.clone(),
+            index,
+        });
+        if self.closed.len() > CLOSED_SESSION_TAB_LIMIT {
+            self.closed.remove(0);
         }
+        self.remove_tab(session);
         Ok(CloseReceipt {
             session: session.clone(),
             daemon_work: self.work_state(session),
         })
     }
 
-    /// Close the focused tab and choose the deterministic neighbor: the tab
-    /// to its right, or the tab to its left when it was the last tab. The
-    /// daemon work map is intentionally untouched.
+    /// Close the focused tab. The successor is the newest still-open history
+    /// entry, falling back to the right neighbor and then the left one
+    /// (`context/session-tabs.tsx:326-374` `previous.sessionID ?? closed.next`).
+    /// The daemon work map is intentionally untouched.
     pub fn close_active(&mut self) -> Result<CloseReceipt, NavRefusal> {
         let session = self
             .active()
             .map(|tab| tab.session.clone())
             .ok_or(NavRefusal::NoTabOpen)?;
-        self.close(&session)
+        self.record_history(&session);
+        let open: Vec<SessionRef> = self.tabs.iter().map(|tab| tab.session.clone()).collect();
+        let successor = self
+            .history_previous(&open, &session)
+            .or_else(|| self.active_successor());
+        let receipt = self.close(&session)?;
+        if let Some(next) = successor {
+            if self.tabs.iter().any(|tab| tab.session == next) {
+                let _ = self.switch(&next);
+            }
+        }
+        Ok(receipt)
     }
 
-    /// Return the upstream close successor without mutating the tab list:
+    /// Return the upstream close fallback without consulting history: the
     /// right neighbor first, otherwise the left neighbor.
     #[must_use]
     pub fn active_successor(&self) -> Option<SessionRef> {
@@ -440,8 +632,7 @@ impl NavigationState {
             .iter()
             .position(|t| t.session == *session)
             .ok_or(NavRefusal::NoSuchTab)?;
-        self.active = idx;
-        self.home = false;
+        self.focus_index(idx);
         Ok(idx)
     }
 
@@ -457,12 +648,38 @@ impl NavigationState {
         if self.tabs.is_empty() {
             return None;
         }
-        self.active = if forward {
+        let next = if forward {
             (self.active + 1) % self.tabs.len()
         } else {
             self.active.checked_sub(1).unwrap_or(self.tabs.len() - 1)
         };
-        Some(self.active)
+        self.focus_index(next);
+        Some(next)
+    }
+
+    /// Cycle one tab in either direction, skipping slots whose session does
+    /// not match. This is the native form of `cycleUnread`
+    /// (`context/session-tabs.tsx:484-490`), used by the unread shortcuts.
+    pub fn step_tab_where(
+        &mut self,
+        forward: bool,
+        matches: impl Fn(&SessionRef) -> bool,
+    ) -> Option<usize> {
+        if self.tabs.is_empty() {
+            return None;
+        }
+        for offset in 1..=self.tabs.len() {
+            let index = if forward {
+                (self.active + offset) % self.tabs.len()
+            } else {
+                (self.active + self.tabs.len() * 2 - offset) % self.tabs.len()
+            };
+            if matches(&self.tabs[index].session) {
+                self.focus_index(index);
+                return Some(index);
+            }
+        }
+        None
     }
 
     /// Select a one-based quick tab slot. Out-of-range slots are a no-op.
@@ -471,7 +688,7 @@ impl NavigationState {
         if index >= self.tabs.len() {
             return None;
         }
-        self.active = index;
+        self.focus_index(index);
         Some(index)
     }
 
@@ -629,6 +846,7 @@ impl NavigationState {
                     return;
                 }
                 self.remove_tab(&session);
+                self.closed.retain(|entry| entry.session != session);
                 self.titles.retain(|(s, _, _)| *s != session);
                 self.snapshot_titles.retain(|(s, _)| *s != session);
                 self.work.retain(|(s, _)| *s != session);
@@ -730,6 +948,187 @@ impl NavigationState {
         }
         true
     }
+}
+
+// ---------------------------------------------------------------------------
+// Focus-confirmed view acknowledgement.
+//
+// Upstream `packages/tui/src/context/session-tabs.tsx:53-55,229-267`: the
+// unread watermark is acknowledged only while the terminal is focused and the
+// route shows that session; the watermark is recorded before the request, a
+// failure clears it, and retries back off 250 ms -> 5 s while a success resets.
+// ---------------------------------------------------------------------------
+
+pub const VIEW_RETRY_DELAY_MS: u64 = 250;
+pub const VIEW_RETRY_MAX_DELAY_MS: u64 = 5_000;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ViewAcknowledgement {
+    focused: bool,
+    idle: Option<u64>,
+    viewed: Option<u64>,
+    acknowledged: Option<u64>,
+    retry_at: Option<u64>,
+    attempts: u32,
+}
+
+impl ViewAcknowledgement {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Feed the session's timestamps and focus state. `idle` is the newest
+    /// idle transition; `viewed` is the server-global watermark.
+    pub fn observe(&mut self, focused: bool, idle: Option<u64>, viewed: Option<u64>) {
+        self.focused = focused;
+        self.idle = idle;
+        self.viewed = viewed;
+    }
+
+    /// `context/session-tabs.tsx:120-123` `isUnread`.
+    #[must_use]
+    pub fn unread(&self) -> bool {
+        match self.idle {
+            Some(idle) => self.viewed.is_none_or(|viewed| idle > viewed),
+            None => false,
+        }
+    }
+
+    /// Return the watermark to POST, recording it first so event-driven
+    /// re-runs do not duplicate the request. Retries are gated by `now`.
+    pub fn poll(&mut self, now_ms: u64) -> Option<u64> {
+        if !self.focused || !self.unread() {
+            return None;
+        }
+        let idle = self.idle?;
+        if self.acknowledged == Some(idle) {
+            return None;
+        }
+        if self.retry_at.is_some_and(|at| now_ms < at) {
+            return None;
+        }
+        self.retry_at = None;
+        self.acknowledged = Some(idle);
+        Some(idle)
+    }
+
+    /// The request failed: forget the watermark for this idle and schedule the
+    /// next attempt, capped at 5 s. Returns the delay used.
+    pub fn failed(&mut self, now_ms: u64) -> u64 {
+        self.acknowledged = None;
+        let delay = VIEW_RETRY_DELAY_MS
+            .saturating_mul(1u64 << self.attempts.min(8))
+            .min(VIEW_RETRY_MAX_DELAY_MS);
+        self.attempts = self.attempts.saturating_add(1);
+        self.retry_at = Some(now_ms.saturating_add(delay));
+        delay
+    }
+
+    /// The request succeeded: clear the timer and the backoff.
+    pub fn succeeded(&mut self) {
+        self.retry_at = None;
+        self.attempts = 0;
+    }
+
+    #[must_use]
+    pub fn attempts(&self) -> u32 {
+        self.attempts
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tab commands and shortcuts.
+//
+// Upstream `packages/tui/src/app.tsx:854-902` defines the `session.tab.*`
+// commands and `packages/tui/src/config/keybind.ts:113-120,152-161` binds
+// default keys. A customized binding only replaces the key; it still resolves
+// to the same command name and therefore the same behavior.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TabCommand {
+    Next,
+    Previous,
+    NextUnread,
+    PreviousUnread,
+    Close,
+    Reopen,
+    Select(usize),
+}
+
+impl TabCommand {
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "session.tab.next" => Some(Self::Next),
+            "session.tab.previous" => Some(Self::Previous),
+            "session.tab.next_unread" => Some(Self::NextUnread),
+            "session.tab.previous_unread" => Some(Self::PreviousUnread),
+            "session.tab.close" => Some(Self::Close),
+            "session.tab.reopen" => Some(Self::Reopen),
+            _ => {
+                let slot = name.strip_prefix("session.tab.select.")?;
+                let slot: usize = slot.parse().ok()?;
+                (1..=10).contains(&slot).then_some(Self::Select(slot - 1))
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn name(self) -> String {
+        match self {
+            Self::Next => "session.tab.next".to_owned(),
+            Self::Previous => "session.tab.previous".to_owned(),
+            Self::NextUnread => "session.tab.next_unread".to_owned(),
+            Self::PreviousUnread => "session.tab.previous_unread".to_owned(),
+            Self::Close => "session.tab.close".to_owned(),
+            Self::Reopen => "session.tab.reopen".to_owned(),
+            Self::Select(slot) => format!("session.tab.select.{}", slot + 1),
+        }
+    }
+}
+
+/// Default bindings from the pinned `config/keybind.ts:113-120,152-161`.
+pub const DEFAULT_TAB_KEYBINDS: &[(&str, &str)] = &[
+    ("ctrl+tab", "session.tab.next"),
+    ("alt+down", "session.tab.next"),
+    ("ctrl+shift+tab", "session.tab.previous"),
+    ("alt+up", "session.tab.previous"),
+    ("alt+shift+down", "session.tab.next_unread"),
+    ("alt+shift+up", "session.tab.previous_unread"),
+    ("<leader>w", "session.tab.close"),
+    ("ctrl+shift+t", "session.tab.reopen"),
+    ("<leader>1", "session.tab.select.1"),
+    ("ctrl+1", "session.tab.select.1"),
+    ("<leader>2", "session.tab.select.2"),
+    ("ctrl+2", "session.tab.select.2"),
+    ("<leader>3", "session.tab.select.3"),
+    ("ctrl+3", "session.tab.select.3"),
+    ("<leader>4", "session.tab.select.4"),
+    ("ctrl+4", "session.tab.select.4"),
+    ("<leader>5", "session.tab.select.5"),
+    ("ctrl+5", "session.tab.select.5"),
+    ("<leader>6", "session.tab.select.6"),
+    ("ctrl+6", "session.tab.select.6"),
+    ("<leader>7", "session.tab.select.7"),
+    ("ctrl+7", "session.tab.select.7"),
+    ("<leader>8", "session.tab.select.8"),
+    ("ctrl+8", "session.tab.select.8"),
+    ("<leader>9", "session.tab.select.9"),
+    ("ctrl+9", "session.tab.select.9"),
+    ("<leader>0", "session.tab.select.10"),
+    ("ctrl+0", "session.tab.select.10"),
+];
+
+/// First matching binding. Defaults and user-customized tables share this
+/// resolver, so both dispatch the same `TabCommand`.
+#[must_use]
+pub fn resolve_tab_shortcut(bindings: &[(&str, &str)], key: &str) -> Option<TabCommand> {
+    bindings
+        .iter()
+        .find(|(binding, _)| *binding == key)
+        .and_then(|(_, name)| TabCommand::from_name(name))
 }
 
 #[cfg(test)]
@@ -1284,5 +1683,216 @@ mod tests {
     fn home_side(target: Option<SessionRef>) -> Option<SessionRef> {
         // Identity-only seam so the assertion messages above stay readable.
         target
+    }
+
+    #[test]
+    fn tab_19_close_active_chooses_mru_then_neighbor_and_reopen_restores_slot() {
+        // context/session-tabs.tsx:326-374: successor = newest open history
+        // entry, else right-then-left; background close keeps focus; reopen
+        // restores the recorded slot.
+        let mut nav = NavigationState::new();
+        for id in ["a", "b", "c", "d"] {
+            nav.open(s(id));
+        }
+        nav.switch(&s("a")).unwrap();
+        nav.switch(&s("c")).unwrap();
+        nav.close_active().unwrap();
+        assert_eq!(nav.active().unwrap().session, s("a"), "MRU wins over the right neighbor");
+        assert_eq!(
+            nav.tabs().iter().map(|tab| tab.session.clone()).collect::<Vec<_>>(),
+            vec![s("a"), s("b"), s("d")]
+        );
+
+        // Background close leaves the active tab untouched.
+        nav.switch(&s("d")).unwrap();
+        nav.close(&s("b")).unwrap();
+        assert_eq!(nav.active().unwrap().session, s("d"));
+        assert_eq!(nav.recently_closed().last().unwrap().session, s("b"));
+        // Reopen restores b at its original slot 1 and focuses it.
+        assert_eq!(nav.reopen(None), Some(s("b")));
+        assert_eq!(
+            nav.tabs().iter().map(|tab| tab.session.clone()).collect::<Vec<_>>(),
+            vec![s("a"), s("b"), s("d")]
+        );
+        assert_eq!(nav.active().unwrap().session, s("b"));
+        assert_eq!(
+            nav.recently_closed().iter().map(|entry| entry.session.clone()).collect::<Vec<_>>(),
+            vec![s("c")]
+        );
+        assert_eq!(
+            nav.recently_closed().iter().map(|entry| entry.session.clone()).collect::<Vec<_>>(),
+            vec![s("c")],
+            "closing c earlier stays eligible"
+        );
+        assert_eq!(nav.reopen(None), Some(s("c")));
+        assert_eq!(
+            nav.tabs().iter().map(|tab| tab.session.clone()).collect::<Vec<_>>(),
+            vec![s("a"), s("b"), s("c"), s("d")],
+            "c returns at its recorded slot"
+        );
+        assert!(nav.recently_closed().is_empty());
+        assert_eq!(nav.reopen(None), None);
+        assert_eq!(nav.reopen(Some(&s("missing"))), None);
+    }
+
+    #[test]
+    fn tab_20_order_and_scope_survive_restart_but_closed_history_does_not() {
+        // context/session-tabs.tsx:72-102 persists only { tabs } per scope.
+        let mut nav = NavigationState::new();
+        nav.open(s("one"));
+        nav.open(s("two"));
+        nav.open(s("three"));
+        nav.apply(DaemonEvent::Renamed {
+            session: s("two"),
+            title: "Second".to_owned(),
+            rev: 1,
+        });
+        nav.close(&s("three")).unwrap();
+        nav.switch(&s("one")).unwrap();
+        let persisted = nav.persist_tabs();
+        assert_eq!(persisted.order, vec![s("one"), s("two")]);
+        assert_eq!(persisted.titles, vec![(s("two"), "Second".to_owned())]);
+
+        // A fresh process restores the same order; the active route, the
+        // recently-closed stack and navigation history are not persisted.
+        let mut restored = NavigationState::new();
+        restored.restore_tabs(&persisted);
+        assert_eq!(
+            restored.tabs().iter().map(|tab| tab.session.clone()).collect::<Vec<_>>(),
+            vec![s("one"), s("two")]
+        );
+        assert_eq!(restored.title(&s("two")), Some("Second"));
+        assert_eq!(restored.active().unwrap().session, s("one"));
+        assert!(restored.recently_closed().is_empty());
+        assert!(restored.history_entries().is_empty());
+        assert_eq!(restored.reopen(None), None);
+    }
+
+    #[test]
+    fn tab_21_focus_confirmed_ack_retries_250ms_to_5s() {
+        // context/session-tabs.tsx:53-55,229-267.
+        let mut ack = ViewAcknowledgement::new();
+        ack.observe(true, Some(100), Some(40));
+        assert!(ack.unread());
+        assert_eq!(ack.poll(0), Some(100), "focused unread view posts the watermark");
+        assert_eq!(ack.poll(0), None, "the watermark is recorded before the request");
+        assert_eq!(ack.failed(0), VIEW_RETRY_DELAY_MS);
+        assert_eq!(ack.poll(249), None, "retry waits");
+        assert_eq!(ack.poll(250), Some(100));
+        assert_eq!(ack.failed(250), 500);
+        assert_eq!(ack.poll(749), None);
+        assert_eq!(ack.poll(750), Some(100));
+        assert_eq!(ack.failed(750), 1_000);
+        ack.failed(1_750);
+        assert_eq!(ack.attempts(), 4);
+        for expected in [4_000u64, 5_000, 5_000, 5_000] {
+            assert_eq!(ack.failed(0), expected);
+        }
+        ack.succeeded();
+        assert_eq!(ack.attempts(), 0);
+        // Delivery only happens for the focused route with a newer idle.
+        ack.observe(false, Some(200), Some(40));
+        assert_eq!(ack.poll(10_000), None);
+        ack.observe(true, Some(200), Some(200));
+        assert!(!ack.unread());
+        assert_eq!(ack.poll(10_000), None);
+    }
+
+    #[test]
+    fn tab_22_async_snapshot_and_rename_cannot_resurrect_a_closed_tab() {
+        // A late snapshot/rename after close may refresh the display cache but
+        // must not re-admit a tab; only an explicit open does.
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.open(s("b"));
+        nav.close(&s("b")).unwrap();
+        nav.ingest_snapshot_title(s("b"), "Snapshot title".to_owned());
+        nav.apply(DaemonEvent::Renamed {
+            session: s("b"),
+            title: "Late rename".to_owned(),
+            rev: 2,
+        });
+        assert_eq!(nav.tabs().len(), 1);
+        assert_eq!(nav.active().unwrap().session, s("a"));
+        // No alternate fallback title replaced the closed entry's identity.
+        assert!(nav.tabs().iter().all(|tab| tab.session != s("b")));
+        assert_eq!(nav.title(&s("b")), Some("Late rename"));
+        // Explicit user open clears the closed state.
+        nav.open(s("b"));
+        assert_eq!(nav.tabs().len(), 2);
+        assert!(nav.recently_closed().iter().all(|entry| entry.session != s("b")));
+    }
+
+    #[test]
+    fn tab_23_default_and_custom_shortcuts_dispatch_the_same_commands() {
+        // config/keybind.ts:113-120,152-161 and app.tsx:854-902.
+        assert_eq!(
+            resolve_tab_shortcut(DEFAULT_TAB_KEYBINDS, "ctrl+tab"),
+            Some(TabCommand::Next)
+        );
+        assert_eq!(
+            resolve_tab_shortcut(DEFAULT_TAB_KEYBINDS, "alt+down"),
+            Some(TabCommand::Next),
+            "second default binding maps to the same command"
+        );
+        assert_eq!(
+            resolve_tab_shortcut(DEFAULT_TAB_KEYBINDS, "ctrl+shift+tab"),
+            Some(TabCommand::Previous)
+        );
+        assert_eq!(
+            resolve_tab_shortcut(DEFAULT_TAB_KEYBINDS, "alt+shift+down"),
+            Some(TabCommand::NextUnread)
+        );
+        assert_eq!(
+            resolve_tab_shortcut(DEFAULT_TAB_KEYBINDS, "ctrl+shift+t"),
+            Some(TabCommand::Reopen)
+        );
+        assert_eq!(
+            resolve_tab_shortcut(DEFAULT_TAB_KEYBINDS, "ctrl+0"),
+            Some(TabCommand::Select(9)),
+            "slot 10 is zero-based index 9"
+        );
+        assert_eq!(resolve_tab_shortcut(DEFAULT_TAB_KEYBINDS, "ctrl+alt+z"), None);
+        // A customized table still resolves the semantic command.
+        let custom = [("x", "session.tab.next"), ("y", "session.tab.select.3")];
+        assert_eq!(
+            resolve_tab_shortcut(&custom, "x"),
+            resolve_tab_shortcut(DEFAULT_TAB_KEYBINDS, "ctrl+tab")
+        );
+        assert_eq!(
+            resolve_tab_shortcut(&custom, "y"),
+            Some(TabCommand::Select(2))
+        );
+        for command in [
+            TabCommand::Next,
+            TabCommand::Previous,
+            TabCommand::NextUnread,
+            TabCommand::PreviousUnread,
+            TabCommand::Close,
+            TabCommand::Reopen,
+            TabCommand::Select(0),
+            TabCommand::Select(9),
+        ] {
+            assert_eq!(TabCommand::from_name(&command.name()), Some(command));
+        }
+
+        // Unread cycling skips slots that do not match and never mutates on a
+        // full miss.
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.open(s("b"));
+        nav.open(s("c"));
+        nav.switch(&s("a")).unwrap();
+        assert_eq!(nav.step_tab_where(true, |id| id == &s("b")), Some(1));
+        assert_eq!(nav.active().unwrap().session, s("b"));
+        // `cycleSessionTab` scans exactly `tabs.length` slots starting after
+        // the active one, so a full cycle that only matches the current slot
+        // wraps back to it (`context/session-tabs-model.ts:111-114`).
+        assert_eq!(nav.step_tab_where(true, |id| id == &s("b")), Some(1));
+        assert_eq!(nav.active().unwrap().session, s("b"));
+        // A predicate that matches no tab leaves the active tab untouched.
+        assert_eq!(nav.step_tab_where(true, |id| id == &s("missing")), None);
+        assert_eq!(nav.active().unwrap().session, s("b"));
+        assert_eq!(nav.step_tab_where(false, |_| true), Some(0));
     }
 }

@@ -718,4 +718,70 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    fn tab_18_placement_entries_hover_dismissal_and_recent_limit() {
+        // `session-tabs.tsx:370-501,892-913,1652-1675`: popup is clamped to the
+        // viewport, entries keep stable IDs, hover tracks the row, a press
+        // outside closes it, and only ten recently closed tabs are offered.
+        let mut menu = session_menu(50, 7, "pinned-id");
+        let frame = menu.frame(VIEW);
+        let rect = frame.rect.unwrap();
+        assert_eq!((rect.width, rect.height), (CONTEXT_MENU_MIN_WIDTH, 4));
+        assert!(rect.x + rect.width <= VIEW.width);
+        assert!(rect.y + rect.height <= VIEW.height);
+        assert_eq!(
+            frame
+                .items
+                .iter()
+                .map(|item| item.label.trim_end())
+                .collect::<Vec<_>>(),
+            ["New session", "Rename", "Copy session ID", "Close"]
+        );
+        let rename = frame.items[1].rect;
+        assert_eq!(
+            menu.handle(
+                MenuEvent::PointerMove {
+                    x: rename.x + 1,
+                    y: rename.y
+                },
+                VIEW
+            ),
+            MenuOutcome::Captured
+        );
+        assert!(menu.frame(VIEW).items[1].hovered);
+        assert_eq!(
+            menu.handle(
+                MenuEvent::PointerDown {
+                    button: MouseButton::Left,
+                    x: 0,
+                    y: 0
+                },
+                VIEW
+            ),
+            MenuOutcome::Closed
+        );
+        assert!(!menu.is_open());
+
+        let closed = (0..MAX_RECENTLY_CLOSED + 2)
+            .map(|index| ClosedTab {
+                session: SessionRef(format!("recent-{index}")),
+                title: format!("recent {index}"),
+            })
+            .collect();
+        let recent = TabContextMenu::new(
+            10,
+            0,
+            MenuTarget::New {
+                recently_closed: Some(closed),
+            },
+        );
+        assert_eq!(recent.items().len(), MAX_RECENTLY_CLOSED + 1);
+        assert_eq!(
+            recent.items()[MAX_RECENTLY_CLOSED].action,
+            Some(MenuAction::Reopen {
+                session: SessionRef(format!("recent-{}", MAX_RECENTLY_CLOSED - 1))
+            })
+        );
+    }
 }

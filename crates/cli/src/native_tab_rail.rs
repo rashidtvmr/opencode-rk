@@ -863,6 +863,83 @@ impl RailFrame {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Compact rail hover tooltip.
+//
+// Upstream `packages/tui/src/component/session-tabs.tsx:1349-1387`: while the
+// vertical rail is compact and no drag/menu is active, a hovered tab shows a
+// 4-row tooltip at `left = rail width`, width `min(54, cols - railWidth)`,
+// `top = clamp(hoverY - 1, 0, rows - 4)` with title/detail truncated to
+// `tooltipWidth - 2` cells.
+// ---------------------------------------------------------------------------
+
+/// `session-tabs.tsx:574-575` `tooltipWidth = min(54, dimensions.width - width)`.
+pub const COMPACT_TOOLTIP_MAX_WIDTH: u16 = 54;
+/// Upstream box height in `session-tabs.tsx:1352`.
+pub const COMPACT_TOOLTIP_ROWS: u16 = 4;
+/// `session-tabs.tsx:1356-1368` two text lines inside `paddingY={1}`.
+pub const COMPACT_TOOLTIP_TEXT_INSET: u16 = 2;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompactTooltip {
+    pub rect: RailRect,
+    pub title: String,
+    pub detail: String,
+}
+
+/// Resolve the compact hover tooltip. `hover_y` is the pointer row inside the
+/// rail's own coordinate space (the caller subtracts `screenY` as upstream
+/// does at `session-tabs.tsx:1354`).
+#[must_use]
+pub fn compact_tooltip(
+    rail_width: u16,
+    cols: u16,
+    rows: u16,
+    hover_y: u16,
+    hovered: bool,
+    dragging: bool,
+    menu_open: bool,
+    title: &str,
+    detail: &str,
+) -> Option<CompactTooltip> {
+    // `Show when={compact() && !dragging() && !contextMenu() && hovered()}`
+    // at `session-tabs.tsx:1349`.
+    if !hovered || dragging || menu_open || rail_width == 0 || rows == 0 {
+        return None;
+    }
+    let width = COMPACT_TOOLTIP_MAX_WIDTH.min(cols.saturating_sub(rail_width));
+    if width == 0 {
+        return None;
+    }
+    let height = COMPACT_TOOLTIP_ROWS.min(rows);
+    let top = hover_y
+        .saturating_sub(1)
+        .min(rows.saturating_sub(height));
+    let text_width = width.saturating_sub(COMPACT_TOOLTIP_TEXT_INSET);
+    Some(CompactTooltip {
+        rect: RailRect {
+            x: rail_width,
+            y: top,
+            width,
+            height,
+        },
+        title: truncate_cells(title, text_width),
+        detail: truncate_cells(detail, text_width),
+    })
+}
+
+fn truncate_cells(value: &str, width: u16) -> String {
+    let mut out = String::new();
+    let mut used = 0usize;
+    visit_unpadded_cells(value, usize::from(width), |glyph, cells| {
+        if used + cells <= usize::from(width) {
+            out.push_str(glyph);
+            used += cells;
+        }
+    });
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1684,5 +1761,169 @@ mod tests {
             assert_eq!(frame.close_hit(width - 2, 4), None);
             assert_eq!(frame.close_hit(width - 2, 1), None);
         }
+    }
+
+    #[test]
+    fn tab_12_compact_tooltip_is_four_rows_capped_and_clamped() {
+        // session-tabs.tsx:574-575 tooltipWidth; :1349-1387 placement.
+        let tooltip = compact_tooltip(
+            11,
+            31,
+            40,
+            10,
+            true,
+            false,
+            false,
+            "A very long session title that will not fit",
+            "project ⎇ branch",
+        )
+        .expect("hovered compact tooltip");
+        assert_eq!(tooltip.rect.x, 11, "left = rail width");
+        assert_eq!(tooltip.rect.width, 20, "cols - rail width");
+        assert_eq!(tooltip.rect.height, 4, "4 rows including the two caps");
+        assert_eq!(tooltip.rect.y, 9, "hover row - 1");
+        assert!(RailFrame::display_width(&tooltip.title) <= 18);
+        assert!(RailFrame::display_width(&tooltip.detail) <= 18);
+        assert!(tooltip.title.len() < "A very long session title that will not fit".len());
+        // A wide terminal caps the tooltip at 54 columns.
+        assert_eq!(
+            compact_tooltip(11, 120, 40, 10, true, false, false, "t", "d")
+                .unwrap()
+                .rect
+                .width,
+            COMPACT_TOOLTIP_MAX_WIDTH
+        );
+
+        // The tooltip narrows with the viewport and clamps to the bottom edge.
+        let narrow = compact_tooltip(5, 40, 24, 30, true, false, false, "t", "d").unwrap();
+        assert_eq!(narrow.rect.width, 35);
+        assert_eq!(narrow.rect.y, 20, "rows - height");
+        assert_eq!(
+            compact_tooltip(5, 24, 24, 23, true, false, false, "t", "d")
+                .unwrap()
+                .rect
+                .y,
+            20
+        );
+        // A viewport narrower than the rail never invents a negative width.
+        assert_eq!(
+            compact_tooltip(30, 24, 24, 3, true, false, false, "t", "d"),
+            None
+        );
+        // Hidden while dragging or while the context menu owns the pointer.
+        for (hovered, dragging, menu) in [(false, false, false), (true, true, false), (true, false, true)] {
+            assert_eq!(
+                compact_tooltip(10, 80, 24, 4, hovered, dragging, menu, "t", "d"),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn tab_17_active_reveal_uses_new_layout_and_respects_viewport() {
+        // session-tabs.tsx:658-667 reveals the active child after layout:
+        // `top + height` must stay inside the scroll viewport for long lists.
+        let mut inputs = sessions(30);
+        for input in &mut inputs {
+            input.flags.active = false;
+        }
+        inputs[27].flags.active = true;
+        let frame = RailFrame::render_cells(&inputs, 42, 10, 0, None, false);
+        let active = frame
+            .rows
+            .iter()
+            .find(|row| matches!(&row.kind, RailRowKind::Session(id) if *id == inputs[27].session))
+            .expect("active title row is painted");
+        assert!(active.rect.y < frame.height, "active row inside the viewport");
+        assert_eq!(active.rect.height, 1);
+        // The reveal scrolls minimally: the active title and its detail row
+        // end exactly at the viewport bottom.
+        assert_eq!(active.rect.y + 2, frame.height);
+        assert!(frame.scroll_cells > 0, "a long list scrolls to the active tab");
+        // A taller viewport needs no scroll and paints the same row in place.
+        let roomy = RailFrame::render_cells(&inputs, 42, 100, 0, None, false);
+        assert_eq!(roomy.scroll_cells, 0);
+        assert!(roomy
+            .rows
+            .iter()
+            .any(|row| matches!(&row.kind, RailRowKind::Session(id) if *id == inputs[27].session)));
+    }
+
+    #[test]
+    fn tab_10_expanded_uses_two_row_entries_with_gap_and_compact_uses_one() {
+        // Expanded rows are title+detail with a one-row gap between entries
+        // (`session-tabs.tsx:1462-1475`, rail `TAB_HEIGHT=2`, `TAB_GAP=1`);
+        // compact entries are one row plus one gap (`session-tabs.tsx:1652-1675`).
+        let inputs = sessions(2);
+        let expanded = RailFrame::render(&inputs, RAIL_WIDTH, 12, 0, None);
+        let title = &expanded.rows[1];
+        let detail = &expanded.rows[2];
+        let gap = &expanded.rows[3];
+        assert_eq!(title.kind, RailRowKind::Session(inputs[0].session.clone()));
+        assert_eq!(detail.kind, RailRowKind::Session(inputs[0].session.clone()));
+        assert_eq!(gap.kind, RailRowKind::Gap);
+        assert_eq!(detail.rect.y, title.rect.y + 1);
+        assert_eq!(gap.rect.y, detail.rect.y + 1);
+        assert_eq!((TAB_HEIGHT, TAB_GAP, TAB_STRIDE), (2, 1, 3));
+
+        let compact = RailFrame::render_cells(&inputs, 5, 12, 0, None, false);
+        assert_eq!(compact.rows[1].kind, RailRowKind::Search);
+        assert_eq!(
+            compact.rows[3].kind,
+            RailRowKind::Session(inputs[0].session.clone())
+        );
+        assert_eq!(compact.rows[4].kind, RailRowKind::Gap);
+        assert_eq!(
+            compact.rows[5].kind,
+            RailRowKind::Session(inputs[1].session.clone())
+        );
+        assert_eq!(compact.rows[3].rect.height, 1);
+        assert_eq!(compact.rows[5].rect.y, compact.rows[3].rect.y + 2);
+    }
+
+    #[test]
+    fn tab_11_five_column_compact_golden_rows_are_pinned() {
+        // Five-column compact golden (`session-tabs.tsx:1652-1675`): cap row 0,
+        // search row 1, items 3/5/7, plus row 9, all in a 5-cell rail.
+        let inputs = vec![
+            RailInput {
+                session: crate::native_navigation::SessionRef("first".into()),
+                title: "First session".into(),
+                detail: "project-alpha".into(),
+                flags: TabFlags { active: true, busy: false, needs_attention: false },
+            },
+            RailInput {
+                session: crate::native_navigation::SessionRef("second".into()),
+                title: "Second session".into(),
+                detail: "project-alpha".into(),
+                flags: TabFlags::default(),
+            },
+            RailInput {
+                session: crate::native_navigation::SessionRef("third".into()),
+                title: "Third session".into(),
+                detail: "project-alpha".into(),
+                flags: TabFlags::default(),
+            },
+        ];
+        let frame = RailFrame::render_cells(&inputs, 5, 24, 0, None, false);
+        assert_eq!(frame.width, 5);
+        assert_eq!(frame.rows[0].text, "▄▄▄▄▄");
+        assert_eq!(frame.rows[1].text, "  ⌕  ");
+        assert_eq!(frame.rows[3].text, "  F  ");
+        assert_eq!(frame.rows[5].text, "  S  ");
+        assert_eq!(frame.rows[7].text, "  T  ");
+        assert_eq!(frame.rows[9].text, "  +  ");
+        assert_eq!(frame.rows[1].rect.y, 1);
+        for (row, session) in [(3, 0), (5, 1), (7, 2)] {
+            assert_eq!(
+                frame.rows[row].kind,
+                RailRowKind::Session(inputs[session].session.clone())
+            );
+            assert_eq!(frame.rows[row].rect.width, 5);
+        }
+        assert_eq!(frame.rows[9].kind, RailRowKind::New);
+        // The rail owns exactly five columns; the transcript starts at x=5.
+        assert_eq!(frame.hit(4, 3), Some(RailHit::Session(inputs[0].session.clone())));
+        assert_eq!(frame.hit(5, 3), None);
     }
 }

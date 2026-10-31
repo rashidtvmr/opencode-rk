@@ -1226,6 +1226,859 @@ fn display_width(s: &str) -> usize {
     visit_unpadded_cells(s, 4096, |_, _| {}).min(4096)
 }
 
+// ---------------------------------------------------------------------------
+// Tab indicator/status model.
+//
+// Upstream `packages/tui/src/component/session-tabs.tsx:132-200` (TabIndicator)
+// chooses one glyph from the tab status, and
+// `packages/tui/src/context/session-tabs.tsx:143-173` builds that status from
+// the root session plus its family. The models below keep those rules pure so
+// the paint loop never re-derives glyph precedence.
+// ---------------------------------------------------------------------------
+
+/// `packages/tui/src/component/session-tabs.tsx:63` `TAB_SPINNERS.dots.frames`
+/// comes from `spinner-frames.ts:1`.
+pub const TAB_SPINNER_DOTS: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TabSpinner {
+    Dots,
+    Arcs,
+    Quadrants,
+    Line,
+}
+
+impl TabSpinner {
+    /// `session-tabs.tsx:63-68`.
+    #[must_use]
+    pub const fn frames(self) -> &'static [&'static str] {
+        match self {
+            Self::Dots => &TAB_SPINNER_DOTS,
+            Self::Arcs => &["◜", "◝", "◞", "◟"],
+            Self::Quadrants => &["◴", "◷", "◶", "◵"],
+            Self::Line => &["|", "/", "-", "\\"],
+        }
+    }
+
+    /// `session-tabs.tsx:63-68` interval in milliseconds.
+    #[must_use]
+    pub const fn interval_ms(self) -> u64 {
+        match self {
+            Self::Dots => 80,
+            Self::Arcs | Self::Quadrants | Self::Line => 120,
+        }
+    }
+}
+
+/// `session-tabs.tsx:65-70` `TAB_UNREAD_MARKERS`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TabUnreadMarker {
+    SmallDot,
+    Dot,
+    Square,
+    LargeSquare,
+}
+
+impl TabUnreadMarker {
+    #[must_use]
+    pub const fn glyph(self) -> &'static str {
+        match self {
+            Self::SmallDot => "•",
+            Self::Dot => "●",
+            Self::Square => "▪",
+            Self::LargeSquare => "■",
+        }
+    }
+}
+
+/// `session-tabs.tsx:88-92` / `config.tabs.indicators`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TabIndicators {
+    Status,
+    Numbers,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TabUnread {
+    Activity,
+    Error,
+}
+
+/// Upstream `attention` precedence: permission list first, then forms.
+/// `context/session-tabs.tsx:163-167`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TabAttention {
+    Permission,
+    Question,
+}
+
+/// One tab's derived status. Mirrors the object returned by
+/// `context/session-tabs.tsx:143-173` plus `promptPulse` from
+/// `session-tabs.tsx:316-329` and the `renaming` title state.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TabStatus {
+    pub unread: Option<TabUnread>,
+    pub prompt_pulse: u64,
+    pub attention: Option<TabAttention>,
+    pub busy: bool,
+    pub renaming: bool,
+}
+
+/// `EMPTY_SESSION_TAB_STATUS` at `session-tabs.tsx:83-89`.
+pub const EMPTY_TAB_STATUS: TabStatus = TabStatus {
+    unread: None,
+    prompt_pulse: 0,
+    attention: None,
+    busy: false,
+    renaming: false,
+};
+
+impl TabStatus {
+    /// `session-tabs.tsx:150` `runs = busy && !attention`.
+    #[must_use]
+    pub const fn runs(self) -> bool {
+        self.busy && self.attention.is_none()
+    }
+
+    /// `session-tabs.tsx:151` `pending = busy || Boolean(attention)`.
+    #[must_use]
+    pub const fn pending(self) -> bool {
+        self.busy || self.attention.is_some()
+    }
+
+    /// `session-tabs-model.ts:29-31` `sessionTabComplete`.
+    #[must_use]
+    pub const fn complete(self) -> bool {
+        matches!(self.unread, Some(TabUnread::Activity)) && !self.busy
+    }
+
+    /// `session-tabs.tsx:153` `unread && !pending`.
+    #[must_use]
+    pub const fn unread_active(self) -> bool {
+        self.unread.is_some() && !self.pending()
+    }
+
+    /// `session-tabs.tsx:157-163`: a tab glows when it needs attention, or when
+    /// it is not the active tab, is not busy, and carries any unread fact.
+    #[must_use]
+    pub const fn glows(self, active: bool) -> bool {
+        self.attention.is_some() || (!active && !self.busy && self.unread.is_some())
+    }
+
+    /// Root/family aggregation from `context/session-tabs.tsx:143-173`: unread
+    /// and renaming read the root only; attention scans every family member
+    /// with permission outranking question; any member busy marks the root
+    /// busy. `root` must not also appear in `members`.
+    #[must_use]
+    pub fn family(root: Self, members: &[Self]) -> Self {
+        let mut attention = root.attention;
+        let mut busy = root.busy;
+        for member in members {
+            attention = match (attention, member.attention) {
+                (Some(TabAttention::Permission), _) | (_, Some(TabAttention::Permission)) => {
+                    Some(TabAttention::Permission)
+                }
+                (_, Some(TabAttention::Question)) => Some(TabAttention::Question),
+                (current, None) => current,
+            };
+            if member.busy {
+                busy = true;
+            }
+        }
+        Self {
+            unread: root.unread,
+            prompt_pulse: root.prompt_pulse,
+            attention,
+            busy,
+            renaming: root.renaming,
+        }
+    }
+
+    /// `context/session-tabs.tsx:355-361`: only a `user` enqueue for another
+    /// open tab bumps the pulse. A busy tab still flashes, and tabs that are
+    /// not open (or the current route) are ignored.
+    pub fn enqueue_user_prompt(&mut self, is_open: bool, is_current: bool) {
+        if is_open && !is_current {
+            self.prompt_pulse = self.prompt_pulse.saturating_add(1);
+        }
+    }
+}
+
+/// Pending work kinds. `context/session-tabs.tsx:167-171` counts every pending
+/// item except `synthetic` as busy; parked synthetic context never wakes a tab.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PendingKind {
+    User,
+    Synthetic,
+}
+
+#[must_use]
+pub fn pending_marks_busy(pending: &[PendingKind]) -> bool {
+    pending.iter().any(|kind| *kind != PendingKind::Synthetic)
+}
+
+/// Busy composition for a family member: daemon `running` state or any
+/// non-synthetic pending item (`context/session-tabs.tsx:167-171`).
+#[must_use]
+pub fn member_busy(running: bool, pending: &[PendingKind]) -> bool {
+    running || pending_marks_busy(pending)
+}
+
+/// `session-tabs.tsx:169-187` TabIndicator `label()` in evaluation order.
+/// Numbers mode always keeps the numeric label, which is what makes status
+/// changes unable to move the title start cell.
+#[must_use]
+pub fn indicator_text(
+    number: &str,
+    status: TabStatus,
+    indicators: TabIndicators,
+    is_home: bool,
+    spinner: TabSpinner,
+    marker: TabUnreadMarker,
+    idle: &str,
+) -> String {
+    if indicators == TabIndicators::Numbers {
+        return number.to_owned();
+    }
+    match status.attention {
+        Some(TabAttention::Permission) => return "!".to_owned(),
+        Some(TabAttention::Question) => return "?".to_owned(),
+        None => {}
+    }
+    if status.runs() {
+        return spinner.frames()[0].to_owned();
+    }
+    if is_home {
+        return "+".to_owned();
+    }
+    if status.unread_active() {
+        return marker.glyph().to_owned();
+    }
+    idle.to_owned()
+}
+
+/// `session-tabs.tsx:1033-1041` / `1863-1871`: a renaming title is DIM while
+/// animations are disabled; otherwise the selected tab is BOLD.
+#[must_use]
+pub fn title_attributes(selected: bool, renaming: bool, animations: bool) -> u32 {
+    use crate::native_ui_style::{ATTR_BOLD, ATTR_DIM};
+    if renaming && !animations {
+        ATTR_DIM
+    } else if selected {
+        ATTR_BOLD
+    } else {
+        0
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Title fade and marquee overflow.
+//
+// Upstream `session-tabs.tsx:73-77` fixes FADE_WIDTH = 4, and
+// `util/marquee.ts:1-51` defines the loop/offset arithmetic. Reduced-motion
+// mode only disables the animation clock; the marquee text projection is
+// identical.
+// ---------------------------------------------------------------------------
+
+/// `session-tabs.tsx:74`.
+pub const FADE_WIDTH: usize = 4;
+/// `session-tabs.tsx:75`.
+pub const ADD_TAB_WIDTH: u16 = 3;
+/// `session-tabs.tsx:77-78`.
+pub const MARQUEE_DELAY_MS: u64 = 600;
+pub const MARQUEE_INTERVAL_MS: u64 = 80;
+/// `util/marquee.ts:4`.
+pub const MARQUEE_GAP: &str = " · ";
+/// `session-tabs.tsx:79`.
+pub const CONTEXT_MENU_WIDTH: u16 = 20;
+/// `session-tabs.tsx:80-83`.
+pub const MOUSE_CLOSE_HOLD_MS: u64 = 5_000;
+
+/// Opacity toward the tab background for one title cell. Port of
+/// `session-tabs.tsx:221-228` `fadeTitleColor`: 0 keeps the text color, 1 is
+/// fully dissolved into the background. The first and last FADE_WIDTH cells
+/// ramp toward the background; the middle stays at 0.
+#[must_use]
+pub fn title_fade_weight(index: usize, length: usize, leading: f32) -> f32 {
+    let fade = |position: isize| -> f32 {
+        if position <= 0 {
+            0.0
+        } else {
+            let span = FADE_WIDTH.saturating_sub(1).max(1) as f32;
+            0.2 + 0.72 * ((position as f32 - 1.0) / span)
+        }
+    };
+    let index_isize = index as isize;
+    let start = if index < FADE_WIDTH {
+        (FADE_WIDTH - index) as isize
+    } else {
+        0
+    };
+    let end = index_isize - (length as isize - FADE_WIDTH as isize) + 1;
+    (fade(start) * leading).max(fade(end))
+}
+
+/// Sanitized grapheme clusters, matching the widths used by `display_width`.
+fn graphemes(value: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    visit_unpadded_cells(value, 4096, |glyph, _| out.push(glyph.to_owned()));
+    out
+}
+
+fn take_width(value: &str, width: u16) -> String {
+    let mut out = String::new();
+    let mut used = 0usize;
+    visit_unpadded_cells(value, usize::from(width), |glyph, cells| {
+        if used + cells <= usize::from(width) {
+            out.push_str(glyph);
+            used += cells;
+        }
+    });
+    out
+}
+
+/// `util/marquee.ts:9-11`.
+#[must_use]
+pub fn marquee_cycle_width(value: &str) -> usize {
+    display_width(&format!("{value}{MARQUEE_GAP}"))
+}
+
+/// `util/marquee.ts:13-15`.
+#[must_use]
+pub fn marquee_overflows(value: &str, width: u16) -> bool {
+    display_width(value) > usize::from(width)
+}
+
+/// `util/marquee.ts:5-8`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MarqueePart {
+    pub value: String,
+    pub separator: bool,
+}
+
+/// Direct port of `util/marquee.ts:21-50` `marqueeTextParts`.
+#[must_use]
+pub fn marquee_text_parts(value: &str, width: u16, offset: usize) -> Vec<MarqueePart> {
+    if width == 0 {
+        return Vec::new();
+    }
+    if !marquee_overflows(value, width) || offset == 0 {
+        return graphemes(&take_width(value, width))
+            .into_iter()
+            .map(|value| MarqueePart {
+                value,
+                separator: false,
+            })
+            .collect();
+    }
+    let mut parts: Vec<MarqueePart> = graphemes(value)
+        .into_iter()
+        .map(|value| MarqueePart {
+            value,
+            separator: false,
+        })
+        .collect();
+    parts.extend(graphemes(MARQUEE_GAP).into_iter().map(|value| MarqueePart {
+        separator: value == "·",
+        value,
+    }));
+    let cursor = offset % marquee_cycle_width(value).max(1);
+    let looped: Vec<MarqueePart> = parts.iter().chain(parts.iter()).cloned().collect();
+    let mut start = 0usize;
+    let mut start_width = 0usize;
+    for (index, part) in looped.iter().enumerate() {
+        if start_width >= cursor {
+            break;
+        }
+        start = index + 1;
+        start_width += display_width(&part.value);
+    }
+    let mut visible = 0usize;
+    let mut used = 0usize;
+    for part in &looped[start..] {
+        let cells = display_width(&part.value);
+        if used + cells > usize::from(width) {
+            break;
+        }
+        used += cells;
+        visible += 1;
+    }
+    looped[start..start + visible].to_vec()
+}
+
+/// `util/marquee.ts:17-20` convenience joining of the parts.
+#[must_use]
+pub fn marquee_text(value: &str, width: u16, offset: usize) -> String {
+    marquee_text_parts(value, width, offset)
+        .into_iter()
+        .map(|part| part.value)
+        .collect()
+}
+
+/// `session-tabs.tsx:247-330` `createMarquee`, driven by an explicit clock so
+/// reduced-motion/off-screen rendering can be replayed deterministically.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Marquee {
+    active: Option<String>,
+    offset: usize,
+    cycle_width: usize,
+    started_at: Option<u64>,
+    next_tick: Option<u64>,
+}
+
+impl Marquee {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn active(&self) -> Option<&str> {
+        self.active.as_deref()
+    }
+
+    #[must_use]
+    pub const fn offset(&self) -> usize {
+        self.offset
+    }
+
+    /// The leading fade is fully on while a cycle is running.
+    #[must_use]
+    pub const fn leading(&self) -> bool {
+        self.offset > 0
+    }
+
+    /// `session-tabs.tsx:272-290`: a fitting title resets; re-entering the
+    /// active tab keeps its running cycle; otherwise wait 600 ms from zero.
+    pub fn enter(&mut self, session: &str, title: &str, width: u16, now_ms: u64) {
+        if !marquee_overflows(title, width) {
+            self.reset();
+            return;
+        }
+        if self.active() == Some(session) {
+            return;
+        }
+        self.reset();
+        self.cycle_width = marquee_cycle_width(title);
+        self.active = Some(session.to_owned());
+        self.started_at = Some(now_ms);
+    }
+
+    /// `session-tabs.tsx:291-294`.
+    pub fn leave(&mut self, session: &str) {
+        if self.active() == Some(session) {
+            self.reset();
+        }
+    }
+
+    /// `session-tabs.tsx:295-301`.
+    pub fn reset(&mut self) {
+        self.active = None;
+        self.offset = 0;
+        self.cycle_width = 0;
+        self.started_at = None;
+        self.next_tick = None;
+    }
+
+    /// Advance the deterministic clock. Returns true when the visible frame
+    /// changed (offset or active identity).
+    pub fn advance(&mut self, now_ms: u64) -> bool {
+        let before = (self.active.clone(), self.offset);
+        if self.active.is_none() {
+            return false;
+        }
+        if self.offset == 0 {
+            let Some(started) = self.started_at else {
+                return false;
+            };
+            if now_ms < started.saturating_add(MARQUEE_DELAY_MS) {
+                return false;
+            }
+            self.offset = 1;
+            self.next_tick = Some(started + MARQUEE_DELAY_MS + MARQUEE_INTERVAL_MS);
+        }
+        while let Some(tick) = self.next_tick {
+            if now_ms < tick {
+                break;
+            }
+            if self.offset + 1 < self.cycle_width {
+                self.offset += 1;
+                self.next_tick = Some(tick + MARQUEE_INTERVAL_MS);
+            } else {
+                // One full cycle: clear the interval and drop the leading fade.
+                self.reset();
+                break;
+            }
+        }
+        before != (self.active.clone(), self.offset)
+    }
+}
+
+/// `session-tabs.tsx:303-326` `createTabMarquee`: hover identity plus the
+/// zero-delay leave clear that a re-enter can cancel.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TabMarquee {
+    hovered: Option<String>,
+    pending_leave: Option<(String, u64)>,
+    marquee: Marquee,
+}
+
+impl TabMarquee {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn hovered(&self) -> Option<&str> {
+        self.hovered.as_deref()
+    }
+
+    #[must_use]
+    pub fn marquee(&self) -> &Marquee {
+        &self.marquee
+    }
+
+    pub fn enter(&mut self, session: &str, title: &str, width: u16, now_ms: u64) {
+        self.pending_leave = None;
+        self.hovered = Some(session.to_owned());
+        self.marquee.enter(session, title, width, now_ms);
+    }
+
+    /// `session-tabs.tsx:315-322`: schedule a zero-delay clear so re-entering
+    /// the same tab before the next tick keeps the marquee alive.
+    pub fn leave(&mut self, session: &str, now_ms: u64) {
+        if self.hovered() == Some(session) {
+            self.pending_leave = Some((session.to_owned(), now_ms));
+        }
+    }
+
+    /// Leave whichever tab is hovered (`session-tabs.tsx:323-326`).
+    pub fn leave_hovered(&mut self, now_ms: u64) {
+        if let Some(session) = self.hovered.clone() {
+            self.leave(&session, now_ms);
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.hovered = None;
+        self.pending_leave = None;
+        self.marquee.reset();
+    }
+
+    /// Apply the pending zero-delay leave at `now_ms`.
+    pub fn advance(&mut self, now_ms: u64) -> bool {
+        if let Some((session, at)) = self.pending_leave.clone() {
+            if now_ms >= at {
+                self.pending_leave = None;
+                if self.hovered() == Some(&session) {
+                    self.hovered = None;
+                    self.marquee.leave(&session);
+                }
+            }
+        }
+        self.marquee.advance(now_ms)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pointer interactions: drag preview, close-cell hold and gesture gating.
+// Upstream `session-tabs.tsx:615-660` (drag/release), `session-tabs.tsx:868-900`
+// (close hold), `session-tabs.tsx:986-1024` (selection release over add).
+// ---------------------------------------------------------------------------
+
+/// A pointer down/up target. A release only activates the control that also
+/// received the press, so a transcript selection that ends over the plus,
+/// search or close cell is inert.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TabPointerTarget {
+    Transcript,
+    Session,
+    Close,
+    Add,
+    Search,
+    Overflow,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PointerGesture {
+    down: Option<TabPointerTarget>,
+    did_drag: bool,
+}
+
+impl PointerGesture {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn press(&mut self, target: TabPointerTarget) {
+        self.down = Some(target);
+        self.did_drag = false;
+    }
+
+    pub fn drag(&mut self) {
+        if self.down.is_some() {
+            self.did_drag = true;
+        }
+    }
+
+    /// Release action, if any. Only session/close/add clicks that started on
+    /// the same control (and did not drag) activate.
+    pub fn release(&mut self, up: TabPointerTarget) -> Option<TabPointerTarget> {
+        let down = self.down.take();
+        let activate = !self.did_drag
+            && down == Some(up)
+            && matches!(
+                up,
+                TabPointerTarget::Session
+                    | TabPointerTarget::Close
+                    | TabPointerTarget::Add
+                    | TabPointerTarget::Search
+            );
+        self.did_drag = false;
+        if activate {
+            Some(up)
+        } else {
+            None
+        }
+    }
+}
+
+/// Upstream drag preview (`session-tabs.tsx:598-614,1362-1382`): one local move
+/// preview per drag, kept after release until the store reflects the move, and
+/// a captured drag suppresses the synthetic release click.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DragState {
+    source: Option<SessionRef>,
+    source_index: usize,
+    preview: Option<(SessionRef, usize)>,
+    did_drag: bool,
+    suppress_click: bool,
+}
+
+impl DragState {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn preview(&self) -> Option<(&SessionRef, usize)> {
+        self.preview.as_ref().map(|(session, index)| (session, *index))
+    }
+
+    #[must_use]
+    pub fn dragging(&self) -> Option<&SessionRef> {
+        self.source.as_ref()
+    }
+
+    #[must_use]
+    pub const fn suppress_click(&self) -> bool {
+        self.suppress_click
+    }
+
+    pub fn press(&mut self, session: &SessionRef, index: usize) {
+        self.source = Some(session.clone());
+        self.source_index = index;
+        self.did_drag = false;
+    }
+
+    /// Update the preview from a slot under the pointer. Moving onto the
+    /// source slot clears it; repeated reports of one target keep one preview.
+    pub fn drag_to(&mut self, slot: usize, tab_len: usize) {
+        let Some(source) = self.source.clone() else {
+            return;
+        };
+        if tab_len == 0 {
+            return;
+        }
+        self.did_drag = true;
+        let target = slot.min(tab_len - 1);
+        if target == self.source_index {
+            self.preview = None;
+        } else if self.preview.as_ref() != Some(&(source.clone(), target)) {
+            self.preview = Some((source, target));
+        }
+    }
+
+    /// `release()` at `session-tabs.tsx:650-660`: persist at most one move,
+    /// select the source, and suppress the synthetic click after a drag.
+    pub fn release(&mut self) -> DragRelease {
+        let source = self.source.take();
+        let move_to = self
+            .preview
+            .as_ref()
+            .filter(|(session, _)| Some(session) == source.as_ref())
+            .map(|(_, index)| *index);
+        if self.did_drag {
+            self.suppress_click = true;
+        }
+        self.did_drag = false;
+        DragRelease {
+            select: source,
+            move_to,
+        }
+    }
+
+    /// Clear the preview once the tab store reflects it (`session-tabs.tsx:742-748`).
+    pub fn settle(&mut self, tabs: &[SessionRef]) {
+        let Some((session, index)) = self.preview.clone() else {
+            return;
+        };
+        let expected = move_id(tabs, &session, index);
+        if expected == tabs {
+            self.preview = None;
+        }
+    }
+
+    /// Clear the synthetic-click suppression in the next microtask.
+    pub fn clear_suppress(&mut self) {
+        self.suppress_click = false;
+    }
+
+    /// Local order with the single preview move applied.
+    #[must_use]
+    pub fn ordered(&self, tabs: &[SessionRef]) -> Vec<SessionRef> {
+        match self.preview.clone() {
+            Some((session, index)) => move_id(tabs, &session, index),
+            None => tabs.to_vec(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DragRelease {
+    pub select: Option<SessionRef>,
+    pub move_to: Option<usize>,
+}
+
+fn move_id(tabs: &[SessionRef], session: &SessionRef, index: usize) -> Vec<SessionRef> {
+    let Some(from) = tabs.iter().position(|tab| tab == session) else {
+        return tabs.to_vec();
+    };
+    let to = index.min(tabs.len().saturating_sub(1));
+    if from == to {
+        return tabs.to_vec();
+    }
+    let mut next: Vec<SessionRef> = tabs.iter().filter(|tab| *tab != session).cloned().collect();
+    next.insert(to.min(next.len()), session.clone());
+    next
+}
+
+/// Upstream close-cell hold (`session-tabs.tsx:868-900`): after a close the
+/// pointer keeps the same physical close cell even when the strip overflows or
+/// reflows, until leave or the 5 s timer releases it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CloseHold {
+    pub items: Vec<SessionRef>,
+    pub visible: Vec<SessionRef>,
+    pub widths: Vec<u16>,
+    pub closed: SessionRef,
+    pub target: SessionRef,
+    pub x: u16,
+    expires_at: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HeldLayout {
+    pub tabs: Vec<SessionRef>,
+    pub widths: Vec<u16>,
+    pub start: usize,
+    pub total: u16,
+}
+
+impl CloseHold {
+    #[must_use]
+    pub fn new(
+        items: &[SessionRef],
+        visible: &[SessionRef],
+        widths: &[u16],
+        closed: &SessionRef,
+        target: &SessionRef,
+        x: u16,
+        now_ms: u64,
+    ) -> Self {
+        Self {
+            items: items.to_vec(),
+            visible: visible.to_vec(),
+            widths: widths.to_vec(),
+            closed: closed.clone(),
+            target: target.clone(),
+            x,
+            expires_at: now_ms.saturating_add(MOUSE_CLOSE_HOLD_MS),
+        }
+    }
+
+    #[must_use]
+    pub fn expired(&self, now_ms: u64) -> bool {
+        now_ms >= self.expires_at
+    }
+
+    /// Direct port of `session-tabs.tsx:229-268` `heldSessionTabLayout`.
+    #[must_use]
+    pub fn layout(&self, tabs: &[SessionRef]) -> Option<HeldLayout> {
+        let expected: Vec<&SessionRef> = self.items.iter().filter(|id| **id != self.closed).collect();
+        let unchanged = tabs == self.items.as_slice();
+        let removed = tabs.len() == expected.len()
+            && tabs.iter().zip(expected.iter()).all(|(tab, id)| tab == *id);
+        if !unchanged && !removed {
+            return None;
+        }
+        let mut visible: Vec<SessionRef> = self
+            .visible
+            .iter()
+            .filter(|id| tabs.contains(id))
+            .cloned()
+            .collect();
+        if removed && !visible.contains(&self.target) {
+            visible.push(self.target.clone());
+            visible.sort_by_key(|id| tabs.iter().position(|tab| tab == id).unwrap_or(usize::MAX));
+        }
+        let positions: Vec<usize> = visible
+            .iter()
+            .map(|id| tabs.iter().position(|tab| tab == id))
+            .collect::<Option<Vec<_>>>()?;
+        let start = *positions.first()?;
+        if positions
+            .iter()
+            .enumerate()
+            .any(|(index, position)| *position != start + index)
+        {
+            return None;
+        }
+        let mut widths: Vec<u16> = visible
+            .iter()
+            .map(|id| {
+                self.widths
+                    .get(self.visible.iter().position(|tab| tab == id).unwrap_or(usize::MAX))
+                    .copied()
+                    .unwrap_or(1)
+            })
+            .collect();
+        if removed {
+            let index = visible.iter().position(|id| id == &self.target)?;
+            let leading = if start > 0 {
+                u16::try_from(overflow_width(start)).unwrap_or(u16::MAX)
+            } else {
+                0
+            };
+            let preceding: u16 = widths.iter().take(index).copied().sum();
+            let width = self.x.saturating_sub(leading).saturating_sub(preceding) + 2;
+            if width < 1 {
+                return None;
+            }
+            widths[index] = width;
+        }
+        Some(HeldLayout {
+            tabs: visible,
+            total: widths.iter().copied().sum(),
+            widths,
+            start,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2017,5 +2870,593 @@ mod tests {
             back.add_paint.expect("idle restore").color,
             TabCellColor::AddIdle
         );
+    }
+
+    // -- TAB-01..TAB-24: status, marquee and interaction parity -------------
+
+    #[test]
+    fn tab_01_adaptive_fixture_allocations_and_sticky_window() {
+        // fixtures.json tab-allocation-7-3-76 / 5-4-54 / 3-1-100 / 4-1-100 /
+        // 5-2-100 / 1-0-100, model_available_width already excludes the plus.
+        let fixtures = [
+            (7usize, 3usize, 76usize, vec![9, 9, 9, 22, 9, 9, 9]),
+            (5, 4, 54, vec![8, 8, 8, 8, 22]),
+            (3, 1, 100, vec![32, 32, 32]),
+            (4, 1, 100, vec![25, 25, 25, 25]),
+            (5, 2, 100, vec![19, 19, 24, 19, 19]),
+            (1, 0, 100, vec![32]),
+        ];
+        for (len, active, available, widths) in fixtures {
+            let got = adaptive_layout(len, Some(active), available, 0);
+            assert_eq!((got.start, got.count), (0, len), "len={len} all fit");
+            assert_eq!(got.widths, widths, "len={len} active={active}");
+            assert!(
+                got.widths.iter().sum::<usize>() <= available,
+                "never exceeds the model width"
+            );
+        }
+        // Sticky overflow window: an active tab outside the window pulls the
+        // start only as far as needed; a retained previous start sticks.
+        let sticky = adaptive_layout(12, Some(7), 40, 5);
+        assert_eq!((sticky.start, sticky.count), (6, 2));
+        assert!(sticky.start <= 7 && 7 < sticky.start + sticky.count);
+        assert_eq!(adaptive_layout(12, Some(7), 40, 8).start, 7);
+        assert_eq!(adaptive_layout(12, Some(1), 40, 8).start, 1);
+        assert_eq!(adaptive_layout(12, Some(10), 40, 2).start, 9);
+    }
+
+    #[test]
+    fn tab_02_idle_plus_consumes_three_cells_and_active_new_replaces_it() {
+        // session-tabs.tsx:75 ADD_TAB_WIDTH = 3; session-tabs.tsx:1436-1448
+        // showPlus() is false while the promoted new-session tab is active.
+        let tabs = vec![input("a", "alpha")];
+        let idle = TabStrip::render_with_hover_and_add(
+            &tabs,
+            TabOrientation::Horizontal,
+            20,
+            1,
+            0,
+            None,
+            true,
+        );
+        assert_eq!(idle.add_rect.unwrap().width, ADD_TAB_WIDTH);
+        assert_eq!(idle.add_rect.unwrap().x + ADD_TAB_WIDTH, 20);
+        let promoted = TabStrip::render_with_hover_add_home(
+            &tabs,
+            TabOrientation::Horizontal,
+            20,
+            1,
+            0,
+            None,
+            true,
+            true,
+            false,
+        );
+        assert!(promoted.add_rect.is_none(), "idle plus is not duplicated");
+        assert!(promoted.home_rect.is_some(), "the active new tab occupies the slot");
+        let home = promoted.home_rect.unwrap();
+        assert_eq!(home.x + home.width, 20, "promoted slot uses the reserved strip width");
+    }
+
+    #[test]
+    fn tab_03_status_switch_never_shifts_title_start_and_number_width_grows() {
+        // session-tabs.tsx:1005-1013 numberWidth = max(2, digits(items.len()));
+        // TabIndicator owns a fixed numberWidth+1 column.
+        assert_eq!(number_width(9), 2);
+        assert_eq!(number_width(99), 2);
+        assert_eq!(number_width(100), 3);
+        assert_eq!(number_width(1000), 4);
+        let cases = [
+            (TabStatus::default(), "1"),
+            (
+                TabStatus {
+                    busy: true,
+                    ..TabStatus::default()
+                },
+                "1",
+            ),
+            (
+                TabStatus {
+                    attention: Some(TabAttention::Permission),
+                    ..TabStatus::default()
+                },
+                "1",
+            ),
+            (
+                TabStatus {
+                    attention: Some(TabAttention::Question),
+                    ..TabStatus::default()
+                },
+                "1",
+            ),
+            (
+                TabStatus {
+                    unread: Some(TabUnread::Activity),
+                    ..TabStatus::default()
+                },
+                "1",
+            ),
+        ];
+        for (status, number) in cases {
+            for indicators in [TabIndicators::Status, TabIndicators::Numbers] {
+                let glyph = indicator_text(
+                    number,
+                    status,
+                    indicators,
+                    false,
+                    TabSpinner::Dots,
+                    TabUnreadMarker::SmallDot,
+                    "",
+                );
+                let column = format_indicator_column(&glyph, 3);
+                assert_eq!(display_width(&column), 3, "indicator column width is fixed");
+            }
+        }
+        // The title region always begins after the same numberWidth+1+pad
+        // cells; 100 tabs grow the column but every status keeps its start.
+        let strip = TabStrip::render(&[input("a", "alpha")], TabOrientation::Horizontal, 40, 1, 0);
+        assert_eq!(strip.indicator_cells, 3);
+    }
+
+    #[test]
+    fn tab_04_busy_permission_question_glyphs_and_numbers_mode() {
+        // session-tabs.tsx:169-187 label() precedence.
+        let busy = TabStatus {
+            busy: true,
+            ..TabStatus::default()
+        };
+        let permission = TabStatus {
+            busy: true,
+            attention: Some(TabAttention::Permission),
+            ..TabStatus::default()
+        };
+        let question = TabStatus {
+            busy: true,
+            attention: Some(TabAttention::Question),
+            ..TabStatus::default()
+        };
+        let text = |status| {
+            indicator_text(
+                "4",
+                status,
+                TabIndicators::Status,
+                false,
+                TabSpinner::Dots,
+                TabUnreadMarker::SmallDot,
+                "",
+            )
+        };
+        assert_eq!(text(busy), "⠋", "dots frame 0 while running");
+        assert_eq!(text(permission), "!", "permission pauses and replaces the spinner");
+        assert_eq!(text(question), "?", "question pauses and replaces the spinner");
+        for status in [busy, permission, question] {
+            assert_eq!(
+                indicator_text(
+                    "4",
+                    status,
+                    TabIndicators::Numbers,
+                    false,
+                    TabSpinner::Dots,
+                    TabUnreadMarker::SmallDot,
+                    ""
+                ),
+                "4",
+                "numbers mode never changes glyph"
+            );
+        }
+        assert_eq!(TabSpinner::Dots.interval_ms(), 80);
+        assert_eq!(TabSpinner::Arcs.frames()[0], "◜");
+        assert_eq!(TabSpinner::Arcs.interval_ms(), 120);
+        assert_eq!(
+            indicator_text(
+                "1",
+                TabStatus {
+                    unread: Some(TabUnread::Error),
+                    ..TabStatus::default()
+                },
+                TabIndicators::Status,
+                false,
+                TabSpinner::Dots,
+                TabUnreadMarker::Dot,
+                ""
+            ),
+            "●"
+        );
+        assert_eq!(
+            indicator_text(
+                "1",
+                TabStatus {
+                    unread: Some(TabUnread::Activity),
+                    busy: true,
+                    ..TabStatus::default()
+                },
+                TabIndicators::Status,
+                false,
+                TabSpinner::Dots,
+                TabUnreadMarker::SmallDot,
+                ""
+            ),
+            "⠋",
+            "pending work outranks the unread marker"
+        );
+    }
+
+    #[test]
+    fn tab_05_family_status_aggregation() {
+        // context/session-tabs.tsx:143-173: unread reads the root only;
+        // attention scans the family with permission first.
+        let root_unread = TabStatus {
+            unread: Some(TabUnread::Activity),
+            ..TabStatus::default()
+        };
+        let child_only_unread = TabStatus {
+            unread: Some(TabUnread::Error),
+            ..TabStatus::default()
+        };
+        let aggregate = TabStatus::family(root_unread, &[child_only_unread]);
+        assert_eq!(aggregate.unread, Some(TabUnread::Activity));
+        assert_eq!(aggregate.attention, None, "child-only unread never wakes attention");
+
+        let question = TabStatus {
+            attention: Some(TabAttention::Question),
+            ..TabStatus::default()
+        };
+        let permission = TabStatus {
+            attention: Some(TabAttention::Permission),
+            ..TabStatus::default()
+        };
+        let busy_child = TabStatus {
+            busy: true,
+            ..TabStatus::default()
+        };
+        assert_eq!(
+            TabStatus::family(TabStatus::default(), &[question, permission]).attention,
+            Some(TabAttention::Permission),
+            "permission outranks question regardless of order"
+        );
+        assert_eq!(
+            TabStatus::family(TabStatus::default(), &[question]).attention,
+            Some(TabAttention::Question)
+        );
+        let busy = TabStatus::family(TabStatus::default(), &[busy_child]);
+        assert!(busy.busy, "a child's work marks the root busy");
+        assert!(!busy.complete(), "busy never completes");
+        assert!(!busy.glows(false), "busy tabs do not glow");
+        assert!(
+            TabStatus::family(root_unread, &[]).glows(false),
+            "an idle unread root glows"
+        );
+    }
+
+    #[test]
+    fn tab_06_background_enqueue_flash_and_synthetic_parking() {
+        // context/session-tabs.tsx:355-361 enqueue flash; :167-171 pending busy.
+        let mut status = TabStatus {
+            busy: true,
+            ..TabStatus::default()
+        };
+        status.enqueue_user_prompt(true, false);
+        assert_eq!(status.prompt_pulse, 1, "a busy tab still flashes");
+        status.enqueue_user_prompt(true, true);
+        assert_eq!(status.prompt_pulse, 1, "the visible tab is not flashed");
+        status.enqueue_user_prompt(false, false);
+        assert_eq!(status.prompt_pulse, 1, "closed tabs are not flashed");
+
+        let synthetic_only = [PendingKind::Synthetic, PendingKind::Synthetic];
+        assert!(!pending_marks_busy(&synthetic_only));
+        assert!(!member_busy(false, &synthetic_only));
+        assert!(member_busy(false, &[PendingKind::User]));
+        assert!(member_busy(true, &[]));
+        assert!(member_busy(false, &[PendingKind::Synthetic, PendingKind::User]));
+    }
+
+    #[test]
+    fn tab_07_selected_hovered_and_dragged_paint_attributes() {
+        // session-tabs.tsx:1522-1523,1567: selected/dragged are BOLD, hovered
+        // only lifts the background; the existing paint tests cover colors.
+        assert_eq!(
+            title_attributes(true, false, true),
+            crate::native_ui_style::ATTR_BOLD
+        );
+        assert_eq!(title_attributes(false, false, true), 0);
+        assert_eq!(
+            title_attributes(false, false, false),
+            0,
+            "drag boldness is supplied by the selected flag"
+        );
+    }
+
+    #[test]
+    fn tab_08_four_cell_fade_and_grapheme_marquee() {
+        // session-tabs.tsx:74 FADE_WIDTH = 4 and :221-228 fadeTitleColor.
+        // A 10-cell title keeps its middle opaque and ramps both 4-cell edges
+        // toward the background.
+        let weights: Vec<f32> = (0..10).map(|i| title_fade_weight(i, 10, 1.0)).collect();
+        assert!((weights[0] - 0.92).abs() < 0.001);
+        assert!((weights[1] - 0.68).abs() < 0.001);
+        assert!((weights[2] - 0.44).abs() < 0.001);
+        assert!((weights[3] - 0.20).abs() < 0.001);
+        assert!((weights[4] - 0.0).abs() < 0.001);
+        assert!((weights[9] - 0.92).abs() < 0.001);
+        assert_eq!(FADE_WIDTH, 4);
+        // The leading fade scales the left edge while the marquee runs; the
+        // trailing ramp follows the title end independently.
+        assert!((title_fade_weight(0, 10, 0.0) - 0.0).abs() < 0.001);
+        assert!((title_fade_weight(0, 10, 0.5) - 0.46).abs() < 0.001);
+
+        // util/marquee.ts:21-50 is grapheme-aware for CJK, emoji ZWJ,
+        // combining accents, Tamil and long paths.
+        assert_eq!(marquee_cycle_width("東京abc"), 10, "7 text cells + 3 gap");
+        assert_eq!(marquee_text("東京abc", 4, 0), "東京");
+        assert_eq!(marquee_text("東京abc", 4, 1), "京ab");
+        let combining = "e\u{301}x";
+        assert_eq!(marquee_cycle_width(combining), 5, "e+accent is one cluster");
+        let emoji = "👩‍💻x";
+        assert_eq!(marquee_cycle_width(emoji), 6, "ZWJ cluster counts once");
+        for value in ["東京abc", combining, emoji, "தமிழ்", "a/very/long/path/name"] {
+            for offset in 0..marquee_cycle_width(value) {
+                let parts = marquee_text_parts(value, 4, offset);
+                assert!(
+                    parts
+                        .iter()
+                        .map(|part| display_width(&part.value))
+                        .sum::<usize>()
+                        <= 4
+                );
+                assert!(parts.iter().all(|part| !part.value.is_empty()));
+            }
+        }
+        assert!(marquee_overflows("東京abc", 6));
+        assert!(!marquee_overflows("東京abc", 7));
+    }
+
+    #[test]
+    fn tab_09_marquee_clock_waits_advances_and_stops_after_one_cycle() {
+        // session-tabs.tsx:77-78 MARQUEE_DELAY = 600, MARQUEE_INTERVAL = 80;
+        // :255-270 waits, advances by one cell per interval, then clears.
+        let title = "abcdef"; // 6 cells + 3 gap = 9-cell cycle
+        assert_eq!(marquee_cycle_width(title), 9);
+        let mut marquee = Marquee::new();
+        marquee.enter("a", title, 4, 0);
+        assert_eq!(marquee.active(), Some("a"));
+        assert_eq!(marquee.offset(), 0);
+        assert!(!marquee.advance(599));
+        assert_eq!(marquee.offset(), 0, "nothing moves before 600 ms");
+        assert!(marquee.advance(600));
+        assert_eq!(marquee.offset(), 1);
+        assert!(marquee.leading());
+        assert!(marquee.advance(680));
+        assert_eq!(marquee.offset(), 2, "80 ms per cell");
+        assert!(!marquee.advance(681), "no motion between ticks");
+        let mut now = 680;
+        let mut max = marquee.offset();
+        while marquee.active().is_some() && now < 10_000 {
+            now += MARQUEE_INTERVAL_MS;
+            marquee.advance(now);
+            max = max.max(marquee.offset());
+        }
+        assert_eq!(max, 8, "one cycle ends at cycleWidth - 1");
+        assert_eq!(marquee.active(), None, "stops after one cycle");
+        assert_eq!(marquee.offset(), 0);
+
+        // Re-entering the running tab keeps its offset; leaving resets; a
+        // fitting title never starts.
+        marquee.enter("a", title, 4, 0);
+        marquee.advance(600);
+        marquee.enter("a", title, 4, 700);
+        assert_eq!(marquee.offset(), 1);
+        marquee.leave("b");
+        assert_eq!(marquee.active(), Some("a"));
+        marquee.leave("a");
+        assert_eq!(marquee.active(), None);
+        marquee.enter("a", "abc", 4, 0);
+        marquee.advance(2_000);
+        assert_eq!(marquee.active(), None, "a fitting title resets");
+
+        // TabMarquee cancels a leave scheduled for the same tick when the
+        // pointer re-enters, matching the hover-clear timeout.
+        let mut hover = TabMarquee::new();
+        hover.enter("a", title, 4, 0);
+        hover.leave("a", 0);
+        hover.enter("a", title, 4, 0);
+        assert_eq!(hover.hovered(), Some("a"));
+        hover.advance(0);
+        assert_eq!(hover.marquee().active(), Some("a"));
+        hover.leave_hovered(5);
+        hover.advance(5);
+        assert_eq!(hover.hovered(), None);
+        assert_eq!(hover.marquee().active(), None);
+    }
+
+    #[test]
+    fn tab_13_pointer_press_release_controls_and_hidden_close_cell() {
+        // session-tabs.tsx:1589-1604: close is hover-gated; 923-947 middle and
+        // right press are separate controls.
+        let tabs = vec![input("a", "alpha")];
+        let strip = TabStrip::render(&tabs, TabOrientation::Horizontal, 20, 1, 0);
+        let close_cell = strip.close_rects[0].1;
+        let action = strip
+            .mouse_action(close_cell.x, close_cell.y)
+            .expect("session target");
+        assert!(!action.close, "an unhovered close cell selects the tab");
+        let hovered = TabStrip::render_with_hover(
+            &tabs,
+            TabOrientation::Horizontal,
+            20,
+            1,
+            0,
+            Some(&SessionRef("a".into())),
+        );
+        assert!(
+            hovered
+                .mouse_action(close_cell.x, close_cell.y)
+                .expect("session target")
+                .close,
+            "the visible close cell closes"
+        );
+        let mut gesture = PointerGesture::new();
+        gesture.press(TabPointerTarget::Session);
+        assert_eq!(
+            gesture.release(TabPointerTarget::Session),
+            Some(TabPointerTarget::Session)
+        );
+        gesture.press(TabPointerTarget::Close);
+        assert_eq!(
+            gesture.release(TabPointerTarget::Close),
+            Some(TabPointerTarget::Close)
+        );
+        gesture.press(TabPointerTarget::Session);
+        gesture.drag();
+        assert_eq!(gesture.release(TabPointerTarget::Session), None);
+    }
+
+    #[test]
+    fn tab_14_selection_release_over_add_search_and_close_is_inert() {
+        // A transcript selection press starts on Transcript; releasing over
+        // the plus/search/close never activates that control.
+        for up in [
+            TabPointerTarget::Add,
+            TabPointerTarget::Search,
+            TabPointerTarget::Close,
+            TabPointerTarget::Overflow,
+        ] {
+            let mut gesture = PointerGesture::new();
+            gesture.press(TabPointerTarget::Transcript);
+            assert_eq!(gesture.release(up), None, "release over {up:?}");
+        }
+        let tabs = vec![input("a", "alpha")];
+        let strip = TabStrip::render_with_hover_and_add(
+            &tabs,
+            TabOrientation::Horizontal,
+            20,
+            1,
+            0,
+            None,
+            true,
+        );
+        let add = strip.add_rect.unwrap();
+        assert!(strip.mouse_action(add.x + 1, 0).is_none());
+        assert!(strip.hit(add.x + 1, 0).is_none());
+    }
+
+    #[test]
+    fn tab_15_drag_preview_persists_once_and_suppresses_synthetic_release() {
+        // session-tabs.tsx:598-614,650-660: one preview move, persisted on
+        // release, with the captured-drag synthetic click suppressed.
+        let ids: Vec<SessionRef> = ["a", "b", "c"]
+            .into_iter()
+            .map(|id| SessionRef(id.into()))
+            .collect();
+        let mut drag = DragState::new();
+        drag.press(&ids[0], 0);
+        drag.drag_to(2, ids.len());
+        drag.drag_to(2, ids.len());
+        assert_eq!(
+            drag.preview().map(|(session, index)| (session.0.as_str(), index)),
+            Some(("a", 2)),
+            "repeated reports keep one preview"
+        );
+        let order: Vec<String> = drag.ordered(&ids).iter().map(|s| s.0.clone()).collect();
+        assert_eq!(order, ["b", "c", "a"]);
+        let release = drag.release();
+        assert_eq!(release.select, Some(SessionRef("a".into())));
+        assert_eq!(release.move_to, Some(2), "exactly one persisted move");
+        assert!(drag.suppress_click());
+        // The preview holds until the store reflects the move.
+        assert_eq!(
+            drag.preview().map(|(session, index)| (session.0.as_str(), index)),
+            Some(("a", 2))
+        );
+        drag.settle(&ids);
+        assert_eq!(
+            drag.preview().map(|(session, index)| (session.0.as_str(), index)),
+            Some(("a", 2))
+        );
+        drag.settle(&[SessionRef("b".into()), SessionRef("c".into()), SessionRef("a".into())]);
+        assert_eq!(drag.preview(), None);
+        drag.clear_suppress();
+        assert!(!drag.suppress_click());
+        // A second release cannot move again.
+        assert_eq!(drag.release().move_to, None);
+    }
+
+    #[test]
+    fn tab_16_close_hold_keeps_pointer_close_cell_until_leave_or_timeout() {
+        // session-tabs.tsx:229-268 heldSessionTabLayout: the pointer keeps its
+        // physical close cell through the overflow change; leave or 5 s ends it.
+        let ids: Vec<SessionRef> = ["a", "b", "c"]
+            .into_iter()
+            .map(|id| SessionRef(id.into()))
+            .collect();
+        let hold = CloseHold::new(
+            &ids,
+            &ids,
+            &[10, 10, 10],
+            &SessionRef("b".into()),
+            &SessionRef("c".into()),
+            18, // c starts at 10, its close cell is start + width - 2 = 18
+            0,
+        );
+        let after: Vec<SessionRef> = [SessionRef("a".into()), SessionRef("c".into())].to_vec();
+        let held = hold.layout(&after).expect("held layout");
+        assert_eq!(held.tabs, after);
+        assert_eq!(held.widths, vec![10, 10], "the close cell stays under the pointer");
+        assert_eq!(held.total, 20);
+        assert_eq!(held.start, 0);
+        assert!(!hold.expired(4_999));
+        assert!(hold.expired(MOUSE_CLOSE_HOLD_MS));
+        // A layout change that is neither the unchanged list nor the exact
+        // removal invalidates the hold.
+        assert_eq!(
+            hold.layout(&[SessionRef("a".into()), SessionRef("x".into())]),
+            None
+        );
+        // The pre-close list (no removal yet) keeps the original widths.
+        assert_eq!(hold.layout(&ids).unwrap().widths, vec![10, 10, 10]);
+    }
+
+    #[test]
+    fn tab_24_reduced_animation_preserves_status_and_dims_renaming_title() {
+        // session-tabs.tsx:1030-1041: renaming + animations=false -> DIM;
+        // reduced motion does not change status facts or attention glow.
+        let status = TabStatus {
+            attention: Some(TabAttention::Permission),
+            busy: true,
+            unread: Some(TabUnread::Error),
+            renaming: true,
+            prompt_pulse: 3,
+        };
+        assert!(status.glows(false));
+        assert_eq!(
+            indicator_text(
+                "2",
+                status,
+                TabIndicators::Status,
+                false,
+                TabSpinner::Dots,
+                TabUnreadMarker::SmallDot,
+                ""
+            ),
+            "!",
+            "status is preserved under reduced motion"
+        );
+        assert_eq!(
+            title_attributes(true, true, false),
+            crate::native_ui_style::ATTR_DIM
+        );
+        assert_eq!(
+            title_attributes(true, false, false),
+            crate::native_ui_style::ATTR_BOLD
+        );
+        assert_eq!(title_attributes(false, true, true), 0);
+        // The deterministic clock can replay every full-motion phase.
+        let mut marquee = Marquee::new();
+        marquee.enter("a", "abcdef", 4, 0);
+        let mut frames = Vec::new();
+        for tick in 0..=9 {
+            marquee.advance(600 + tick * MARQUEE_INTERVAL_MS);
+            frames.push(marquee.offset());
+        }
+        assert_eq!(frames, vec![1, 2, 3, 4, 5, 6, 7, 8, 0, 0]);
     }
 }
