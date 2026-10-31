@@ -631,6 +631,51 @@ fn allocate_con_id() -> Option<String> {
 mod tests {
     use super::*;
 
+    /// `XDG_DATA_HOME` and `OPENCODE_AUTH_CONTENT` are process-global, and a
+    /// successful `complete_code` writes the real auth document. Point that
+    /// document at a disposable directory so tests never touch the user's
+    /// `~/.local/share/opencode/auth.json`.
+    static AUTH_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct AuthDiskFixture {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        _dir: tempfile::TempDir,
+        prior_xdg: Option<std::ffi::OsString>,
+        prior_inline: Option<String>,
+    }
+
+    impl AuthDiskFixture {
+        fn new(inline: &str) -> Self {
+            let lock = AUTH_ENV_LOCK
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let dir = tempfile::tempdir().expect("disposable auth directory");
+            let prior_xdg = std::env::var_os("XDG_DATA_HOME");
+            let prior_inline = std::env::var("OPENCODE_AUTH_CONTENT").ok();
+            std::env::set_var("XDG_DATA_HOME", dir.path());
+            std::env::set_var("OPENCODE_AUTH_CONTENT", inline);
+            Self {
+                _lock: lock,
+                _dir: dir,
+                prior_xdg,
+                prior_inline,
+            }
+        }
+    }
+
+    impl Drop for AuthDiskFixture {
+        fn drop(&mut self) {
+            match self.prior_xdg.as_ref() {
+                Some(value) => std::env::set_var("XDG_DATA_HOME", value),
+                None => std::env::remove_var("XDG_DATA_HOME"),
+            }
+            match self.prior_inline.as_ref() {
+                Some(value) => std::env::set_var("OPENCODE_AUTH_CONTENT", value),
+                None => std::env::remove_var("OPENCODE_AUTH_CONTENT"),
+            }
+        }
+    }
+
     struct StubRuntime {
         begin_result: Result<Authorization, IntegrationError>,
         complete_result: Result<OpenAiCredential, IntegrationError>,
@@ -813,14 +858,15 @@ mod tests {
                 account_id: Some("user-123".into()),
             }),
         };
-        std::env::set_var("OPENCODE_AUTH_CONTENT", r#"{"openai":{"type":"oauth","access":"old","refresh":"old","expires":1}}"#);
+        let _auth = AuthDiskFixture::new(
+            r#"{"openai":{"type":"oauth","access":"old","refresh":"old","expires":1}}"#,
+        );
         let server = IntegrationServer::new(runtime);
         let attempt = server.connect("openai", ConnectRequest { method_id: "chatgpt-headless".into(), answer: None, label: None }, now_ms()).await.unwrap();
         let result = server.complete_code("openai", &attempt.attempt_id, Some("auth-code".into()), now_ms()).await;
         assert!(result.is_ok(), "complete_code should succeed: {:?}", result);
         let status = server.status("openai", &attempt.attempt_id, now_ms()).await.unwrap();
         assert!(matches!(status, AttemptStatus::Complete { .. }));
-        std::env::remove_var("OPENCODE_AUTH_CONTENT");
     }
 
     #[tokio::test]
@@ -858,7 +904,9 @@ mod tests {
                 account_id: None,
             }),
         };
-        std::env::set_var("OPENCODE_AUTH_CONTENT", r#"{"openai":{"type":"oauth","access":"old","refresh":"old","expires":1}}"#);
+        let _auth = AuthDiskFixture::new(
+            r#"{"openai":{"type":"oauth","access":"old","refresh":"old","expires":1}}"#,
+        );
         let server = IntegrationServer::new(runtime);
         let attempt = server.connect("openai", ConnectRequest { method_id: "chatgpt-headless".into(), answer: None, label: None }, now_ms()).await.unwrap();
         // First complete succeeds
@@ -867,11 +915,13 @@ mod tests {
         // Second complete fails because attempt is no longer Pending
         let result2 = server.complete_code("openai", &attempt.attempt_id, Some("code".into()), now_ms()).await;
         assert_eq!(result2.map(|_| ()), Err(IntegrationError::AttemptNotFound));
-        std::env::remove_var("OPENCODE_AUTH_CONTENT");
     }
 
     #[tokio::test]
     async fn terminal_retention_reclaims_capacity_after_successes_and_failures() {
+        let _auth = AuthDiskFixture::new(
+            r#"{"openai":{"type":"oauth","access":"old","refresh":"old","expires":1}}"#,
+        );
         let clock = Arc::new(std::sync::atomic::AtomicUsize::new(1_000));
         let server = IntegrationServer::with_parts_clock(
             Arc::new(stub_success()), Arc::new(LegacyCredentialSink),
