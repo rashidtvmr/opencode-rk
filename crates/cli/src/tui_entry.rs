@@ -418,10 +418,14 @@ fn http_request_with_status_inner(
         match auth {
             Some(token) if crate::daemon_client::is_wellformed_token(token) => {}
             _ => {
-                return Err(
-                    "refusing unauthenticated /api/* request: no validated backend descriptor"
-                        .to_string(),
-                );
+                // Fail closed before any socket work: an unauthenticated
+                // `/api/*` request must never reach the network. The message
+                // still names the origin and the actual cause, so a dead or
+                // unstarted daemon reads as offline rather than as a generic
+                // credential refusal.
+                return Err(format!(
+                    "refusing unauthenticated /api/* request to {origin}: no validated backend descriptor (daemon offline or not started at this origin)"
+                ));
             }
         }
     }
@@ -1216,6 +1220,31 @@ fn display_name(p: &PathBuf) -> String {
     p.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| p.to_string_lossy().into_owned())
+}
+
+#[cfg(test)]
+mod memory_file_cap_tests {
+    use super::*;
+
+    /// Retention is the part of the 64-file bound the clipped `--once` frame
+    /// cannot show: 70 inputs must load exactly `MAX_MEMORY_FILES` sources.
+    #[test]
+    fn load_memory_retains_at_most_the_file_cap() {
+        let dir = std::env::temp_dir().join(format!("oc2-memory-cap-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut paths = Vec::new();
+        for index in 0..70 {
+            let path = dir.join(format!("f{index:03}.md"));
+            std::fs::write(&path, "z").unwrap();
+            paths.push(path);
+        }
+        let loaded = load_memory(&paths);
+        assert_eq!(loaded.len(), MAX_MEMORY_FILES);
+        assert_eq!(loaded.len(), 64);
+        assert_eq!(loaded.first().map(|file| file.path.as_str()), Some("f000.md"));
+        assert_eq!(loaded.last().map(|file| file.path.as_str()), Some("f063.md"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }
 
 fn render_memory(files: &[MemoryFile]) -> String {

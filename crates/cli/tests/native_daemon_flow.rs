@@ -21,10 +21,11 @@
 //!   attaches to a live daemon, else auto-spawns `serve` as an owned child and
 //!   kills it on exit (`chat.rs:80-84`). `chat` binds the recent session and
 //!   reads `/exit` (`chat.rs:383`).
-//! - The `tui` **subcommand** has NO implicit discovery: without `--origin`,
-//!   `resolve_origin_bearer(None)` returns `None` and `live` stays `None`
-//!   (`tui_entry.rs:512,526-557`). Its bound path is `--origin`
-//!   (`docs/USER_GUIDE.md:108`). Native quit is `:q` (`tui_entry.rs:408-409`).
+//! - The `tui` **subcommand** performs the same discovery when no `--origin`
+//!   is given: `tui_entry::run_with_dir` acquires the data-dir lease through
+//!   `chat::prepare_daemon` and binds the lease origin
+//!   (`tui_entry.rs:9829-9842`). An explicit `--origin` still bypasses it.
+//!   Native quit accepts `:q` (`tui_entry.rs:9462`).
 //!
 //! PTY transport: an embedded Python stdlib `pty.fork` driver launched as
 //! `/usr/bin/python3 -c DRIVER RECORD -- EXE ARGS...`; the repository also has
@@ -570,9 +571,12 @@ fn plain_command(home: &TestHome, daemon_addr: &str) -> Command {
     cmd
 }
 
+/// Type a command and submit it. The composer's `input.submit` binding is
+/// Return (`\r`); `\n` is Ctrl-J (`input.newline`), which only inserts a
+/// newline and never exits (`crates/cli/src/native_composer.rs`).
 fn send_line(child: &mut Child, line: &str) {
     let stdin = child.stdin.as_mut().expect("piped stdin");
-    writeln!(stdin, "{line}").expect("write line");
+    write!(stdin, "{line}\r").expect("write line");
     stdin.flush().expect("flush line");
 }
 
@@ -655,6 +659,47 @@ fn create_session(origin: &str, token: &str, title: &str) {
     );
 }
 
+/// Read the daemon's authenticated session listing as `(id, title)` pairs.
+fn list_sessions(origin: &str, token: &str) -> Vec<(String, String)> {
+    let addr = origin
+        .strip_prefix("http://")
+        .unwrap_or_else(|| panic!("only http origins supported, got {origin:?}"));
+    let request = format!(
+        "GET /api/sessions HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\n\
+         Connection: close\r\n\r\n"
+    );
+    let mut stream = TcpStream::connect_timeout(
+        &addr.parse().expect("daemon address"),
+        Duration::from_secs(5),
+    )
+    .expect("connect daemon api");
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
+    stream.write_all(request.as_bytes()).expect("write listing");
+    let mut response = Vec::new();
+    let _ = stream.take(64 * 1024).read_to_end(&mut response);
+    let text = String::from_utf8_lossy(&response);
+    let (head, body) = text
+        .split_once("\r\n\r\n")
+        .unwrap_or_else(|| panic!("session listing must have a body; got:\n{text}"));
+    assert!(
+        head.starts_with("HTTP/1.1 200"),
+        "session listing must return 200; got:\n{head}"
+    );
+    let value: serde_json::Value = serde_json::from_str(body).expect("session listing JSON");
+    value["sessions"]
+        .as_array()
+        .expect("sessions array")
+        .iter()
+        .filter_map(|session| {
+            Some((
+                session["id"].as_str()?.to_owned(),
+                session["title"].as_str()?.to_owned(),
+            ))
+        })
+        .collect()
+}
+
 fn bounded_output(cmd: Command) -> (ExitStatus, String, String) {
     let mut proc = Proc::spawn(cmd);
     let status = proc
@@ -677,6 +722,8 @@ fn native_daemon_spawns_when_none_running() {
     let mut proc = Proc::spawn_pty(cmd, home.pty_pid());
 
     proc.stdout.wait_for("OpenCode RK", Duration::from_secs(30));
+    // Input is only meaningful once the composer frame is painted.
+    proc.stdout.wait_for("Ask anything", Duration::from_secs(30));
     wait_for_descriptor(&home, Duration::from_secs(20));
 
     let (pid, origin, token) = read_real_descriptor(&home);
@@ -783,13 +830,35 @@ fn tui_attaches_to_running_serve_daemon_without_origin() {
     let mut proc = Proc::spawn_pty(cmd, home.pty_pid());
 
     let transcript = proc.stdout.wait_for("OpenCode RK", Duration::from_secs(30));
+    let transcript = {
+        proc.stdout.wait_for("Ask anything", Duration::from_secs(30));
+        format!("{transcript}{}", proc.stdout.text())
+    };
     assert!(
         !transcript.contains("offline"),
         "tui must attach, not degrade offline; transcript:\n{transcript}"
     );
+    // The full-screen route renders Home plus its tab strip; the legacy
+    // `session: <title> (live)` row belonged to the retired line-mode frame and
+    // is not part of this route. Attachment is evidenced on the live daemon
+    // instead: the attached client authenticates with the discovered bearer
+    // and creates its bound session on that SAME daemon.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut sessions = list_sessions(&origin, &token);
+    while sessions.len() < 2 && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(50));
+        sessions = list_sessions(&origin, &token);
+    }
     assert!(
-        transcript.contains("NativeTuiLiveProbe") && transcript.contains("(live)"),
-        "tui must render the live bound session state; transcript:\n{transcript}"
+        sessions
+            .iter()
+            .any(|(_, title)| title == "NativeTuiLiveProbe"),
+        "the seeded session must keep living on the discovered daemon: {sessions:?}"
+    );
+    assert_eq!(
+        sessions.len(),
+        2,
+        "the attached tui must bind its own session on the discovered daemon: {sessions:?}"
     );
 
     // Real reuse evidence: the SAME daemon descriptor is unchanged and healthy.

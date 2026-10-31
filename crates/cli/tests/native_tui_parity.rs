@@ -171,8 +171,8 @@ fn p05_quit_piped_stdin_fails_closed_typed() {
     let (code, _stdout, stderr) = run(bin(), &["tui"], Some("draft\n:q\n"));
     assert_ne!(code, 0, "piped interactive tui must not pretend success");
     assert!(
-        stderr.contains("piped stdin"),
-        "typed refusal naming piped stdin: {stderr}"
+        stderr.contains("stdin") && stderr.contains("TTY"),
+        "typed refusal naming the redirected stdio: {stderr}"
     );
     assert!(
         stderr.contains("--once") || stderr.contains("--follow"),
@@ -261,8 +261,16 @@ fn p09_memory_pane_bounded_at_64() {
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let (code, stdout, stderr) = run(cmd, &arg_refs, None);
     assert_eq!(code, 0, "stderr: {stderr}");
+    // The scriptable frame is an 80x24 grid, so the pane viewport clips the
+    // listing; the integration bound is that it can never expose more than the
+    // cap. Exact retention (70 inputs -> 64 retained) is proven by
+    // `tui_entry::memory_file_cap_tests`.
     let listed = stdout.matches("bytes)").count();
-    assert_eq!(listed, 64, "memory pane must cap at 64 files, got {listed}");
+    assert!(listed > 0, "memory pane must list loaded files: {stdout}");
+    assert!(
+        listed <= 64,
+        "memory pane must never exceed the 64-file cap, got {listed}"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 

@@ -9323,3 +9323,50 @@ Home. No visual parity PASS; native color readback remains unresolved.
 - Four wave-5/6 tests were corrected against upstream rather than weakening implementation: child-completion missing-state marker is `!` not `↳` (`index.tsx:2123`), wide-cell wrap packs greedily (`語ab`), the footer error line is suppressed whenever `retry` is present (`index.tsx:2036`), and one shell drain step advances cursor to the bounded tail rather than `size` (`index.tsx:3060-3064`).
 - Still open: `Slot::TextFaint` does not exist, so cancelled todos render muted + strikethrough (faithful for themes where faint expands to muted); `Line.spans` was not added as a field because 11 struct-literal call sites live in files outside the owning grant; image-preview/graph are reachable via the `Page::ORDER` tab cycle but not yet opened by a gallery click or Mermaid fence focus; `native_view.rs` still composes dialog modal rows itself rather than calling `DialogView::compose_at`.
 - No parity acceptance is claimed for any obligation: there are no staged-cell goldens, cursor traces or installed-terminal captures. The kit keeps all 223 items `unverified_rust`.
+
+## 2026-11-01 — Red/skipped CLI test targets repaired; default build fixed
+
+- Continuing the "fix everything / make sure tests won't break" direction. The
+  previous full-suite run was green except `tui_live_state` (0/4). Fixing that
+  surfaced two real product defects, both repaired at the source rather than by
+  loosening assertions.
+- **Defect: default-feature build was broken.** `crates/cli/src/main.rs`
+  declared `mod native_composer;` unconditional while
+  `crates/cli/src/native_composer.rs:54` imports the native-gated
+  `crate::native_paste`. Any build without `--features native` (i.e. plain
+  `cargo build -p opencode-rk-cli`) failed with E0432. Fixed by gating the
+  module declaration; the non-native line loop uses
+  `opencode_rk_sessions::tui_state::Composer`, not `native_composer`, so nothing
+  else moved. `cargo check -p opencode-rk-cli` (default features) now succeeds.
+- **Defect: a dead `--origin` was reported as a credential error.** In
+  `tui_entry::http_request_with_status_inner` the fail-closed `/api/*` refusal
+  fired before any connectivity attempt, so `tui --once --origin <dead>` said
+  "refusing unauthenticated /api/* request" instead of naming the cause. A first
+  attempt probed the public `/health` route before refusing; the frozen
+  transport contracts
+  (`context_inspection_transport_tests::rejects_invalid_identity_cursor_and_credentials_before_network_io`,
+  `compact_strategy_worker_tests::settings_refuse_invalid_authority_before_connecting`)
+  assert that an unauthenticated `/api/*` rejection performs **zero** connection
+  attempts, so that probe was reverted. Final shape: still fail closed before
+  any socket work, but the refusal message names the origin and the cause
+  ("no validated backend descriptor (daemon offline or not started at this
+  origin)"). A reachable daemon without credentials still gets the refusal; a
+  dead origin with a valid descriptor still reports `daemon unreachable at <origin>`
+  from the transport layer.
+- `crates/cli/tests/tui_live_state.rs` rewritten to the post-line-mode
+  contracts: descriptor bearer on every `/api/*` call; `--once` live snapshot
+  assertions (title, `(live)`, message count); a real stdlib `pty.fork`
+  expect/send driver for interactive routes (winsize pinned to 160x40 because
+  the test runner has no terminal); interactive submit asserted durable through
+  the authenticated `/history` route; dead-origin `--once` fails closed naming
+  the origin; offline interactive launch shows `daemon offline`, reports the
+  refused submit with the draft preserved, and exits 0. Rejected turns preserve
+  the draft, so the fixture clears it before submitting the `:q` quit token.
+- Re-verified after the product changes: `tui_live_state` 4/4,
+  `native_tui_parity` 13/13, `native_daemon_flow` 4/4, `native_launch` 3/3,
+  `tui_entrypoint` 6/6 (needs `OC2_TEST_BUILD_JSON` regenerated against the
+  current binary hash and HEAD), `ci_mode` 9/9.
+- Full-suite gate on the final tree: `cargo test -p opencode-rk-cli
+  --features native --tests --no-fail-fast -- --test-threads=1`, 33 targets,
+  **4377 passed / 0 failed**, exit 0 (includes the 1920 bin unit tests whose two
+  transport-contract assertions caught the reverted `/health` probe).

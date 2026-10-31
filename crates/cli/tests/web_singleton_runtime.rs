@@ -77,7 +77,7 @@ fn free_loopback() -> SocketAddr {
 fn wait_for_health(address: SocketAddr) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        if let Ok(response) = request(address, "GET", "/health", None) {
+        if let Ok(response) = request(address, "GET", "/health", None, None) {
             if response.contains("200 OK") && response.contains("\"status\":\"ok\"") {
                 return;
             }
@@ -95,19 +95,44 @@ fn request(
     method: &str,
     path: &str,
     body: Option<&str>,
+    bearer: Option<&str>,
 ) -> std::io::Result<String> {
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(250))?;
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     let body = body.unwrap_or("");
+    let authorization = bearer
+        .map(|token| format!("Authorization: Bearer {token}\r\n"))
+        .unwrap_or_default();
     write!(
         stream,
-        "{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        "{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n{authorization}Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
         body.len()
     )?;
     stream.flush()?;
     let mut response = String::new();
     stream.read_to_string(&mut response)?;
     Ok(response)
+}
+
+/// `/api/*` requires the bearer the backend publishes in its own descriptor;
+/// `/health` stays unauthenticated for readiness probing.
+fn read_bearer(home: &TestHome) -> String {
+    let descriptor = home.path().join("runtime/backend.json");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Ok(raw) = fs::read(&descriptor) {
+            if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&raw) {
+                if let Some(token) = value["auth_token"].as_str() {
+                    return token.to_owned();
+                }
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "backend must publish an authenticated descriptor at {descriptor:?}"
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
 }
 
 fn wait_for_exit(child: &mut Child, timeout: Duration) -> Option<std::process::ExitStatus> {
@@ -132,12 +157,14 @@ fn web_006_t01_and_t05_same_data_dir_has_one_backend_but_other_data_dir_isolated
 
     let mut first = ChildGuard::spawn(&home, first_address);
     wait_for_health(first_address);
+    let bearer = read_bearer(&home);
 
     let created = request(
         first_address,
         "POST",
         "/api/sessions",
         Some(r#"{"title":"singleton-visible"}"#),
+        Some(&bearer),
     )
     .expect("create session through first client origin");
     assert!(
@@ -157,7 +184,7 @@ fn web_006_t01_and_t05_same_data_dir_has_one_backend_but_other_data_dir_isolated
         TcpStream::connect_timeout(&second_address, Duration::from_millis(150)).is_err(),
         "the duplicate invocation must not own a second HTTP listener"
     );
-    let sessions = request(first_address, "GET", "/api/sessions", None)
+    let sessions = request(first_address, "GET", "/api/sessions", None, Some(&bearer))
         .expect("existing backend remains reachable");
     assert!(
         sessions.contains("singleton-visible"),
@@ -166,8 +193,15 @@ fn web_006_t01_and_t05_same_data_dir_has_one_backend_but_other_data_dir_isolated
 
     let mut isolated = ChildGuard::spawn(&other_home, second_address);
     wait_for_health(second_address);
-    let isolated_sessions = request(second_address, "GET", "/api/sessions", None)
-        .expect("isolated backend session list");
+    let isolated_bearer = read_bearer(&other_home);
+    let isolated_sessions = request(
+        second_address,
+        "GET",
+        "/api/sessions",
+        None,
+        Some(&isolated_bearer),
+    )
+    .expect("isolated backend session list");
     assert!(
         !isolated_sessions.contains("singleton-visible"),
         "a different data directory must have isolated state"

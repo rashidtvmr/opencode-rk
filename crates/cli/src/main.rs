@@ -55,6 +55,7 @@ mod native_command_palette;
 mod native_settings;
 #[cfg(feature = "native")]
 mod native_children;
+#[cfg(feature = "native")]
 mod native_composer;
 #[cfg(feature = "native")]
 mod native_completion;
@@ -388,6 +389,24 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         None => {
             use std::io::IsTerminal as _;
+            // `--once` is the scriptable alias for `tui --once`: it renders a
+            // single bounded frame and exits, so it neither needs a TTY nor
+            // enters raw mode or starts a daemon. Routing it through the TTY
+            // decision would refuse a perfectly valid `oc2 --once > frame.txt`.
+            if cli.once {
+                let data = resolve_data_dir(cli.data_dir)?;
+                let args = TuiArgs {
+                    once: true,
+                    origin: None,
+                    session: cli.session,
+                    follow: false,
+                    follow_for: None,
+                    poll_ms: 1000,
+                    submit_keymap: None,
+                    memory: vec![],
+                };
+                return tui_entry::run_with_dir(args, Some(&data), None);
+            }
             let probe = app_start::TtyProbe {
                 stdin_is_tty: Some(std::io::stdin().is_terminal()),
                 stdout_is_tty: Some(std::io::stdout().is_terminal()),
