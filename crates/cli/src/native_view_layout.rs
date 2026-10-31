@@ -627,6 +627,270 @@ const WIDE_RANGES: &[(u32, u32)] = &[
     (0x30000, 0x3FFFD),
 ];
 
+// ---------------------------------------------------------------------------
+// Session-frame geometry contract (work package P03).
+//
+// Upstream pin `450e7b92412c780a7b5a75226bb8d49aaca24e22`:
+//
+// * `packages/tui/src/ui/layout.ts:1-27` — the session width model:
+//   `SESSION_SIDEBAR_WIDTH = 42`, `SESSION_TABS_COMPACT_WIDTH = 5`,
+//   `SESSION_TABS_COMPACT_BREAKPOINT = 12`, `SESSION_SIDEBAR_MAX_WIDTH = 72`,
+//   `SESSION_CONTENT_MIN_WIDTH = 44`, `SESSION_CONTENT_PREFERRED_WIDTH = 64`,
+//   `SESSION_PANEL_SPLIT_MIN_WIDTH = 108`, `sessionTabsFitVertically`,
+//   `clampSessionTabsWidth`, `clampSessionPaneWidth`.
+// * `packages/tui/src/component/session-frame.tsx:107-140` — the right-pane
+//   predicates: `wide = dimensions().width - verticalTabsWidth > 120`, the
+//   child-session sidebar suppression, the `auto` config gate and the
+//   `rightPane()` precedence `panel -> sidebar -> terminal -> sidebar`.
+// * `packages/tui/src/component/session-frame.tsx:325-398` — the docked right
+//   box is `SESSION_SIDEBAR_WIDTH` for the sidebar and `paneResize.size()`
+//   for a terminal/panel; a non-wide sidebar is an absolute overlay instead.
+// * `packages/tui/src/routes/session/index.tsx:260` — view content width is
+//   `(width ?? terminalWidth - verticalTabsWidth) - 4`.
+// * `packages/tui/src/routes/session/index.tsx:1511-1517` — the session column
+//   pads left/right by `terminalWidth < 44 ? 1 : 2` and reserves
+//   `paddingBottom={1}`.
+// * `packages/tui/src/routes/session/index.tsx:1527-1537` — the transcript
+//   scrollbox reserves `paddingRight` 1 plus a 1-column `paddingLeft` track
+//   when `showScrollbar` is on.
+// * `packages/tui/src/routes/session/index.tsx:1570-1589` — one `height={1}`
+//   row below the transcript is always reserved for the jump/loading action.
+// * `packages/tui/src/routes/session/sidebar.tsx:20-76` — the 42-column sidebar
+//   pads 1/1/2/2, pins a `flexShrink={0}` title, scrolls the middle with an
+//   ABSOLUTE 1-column scrollbar (`position: "absolute"`, `right: 0`) over the
+//   content's reserved `paddingRight={1}`, and pins a footer.
+//
+// These are pure scalars/predicates; the rectangle model lives in
+// `native_layout::SessionRegions` and the row composition in
+// `native_shell_frame`. This module must stay self-contained because
+// `tests/native_state_platform_alias.rs` compiles it through `#[path]`.
+// ---------------------------------------------------------------------------
+
+/// Fixed docked sidebar width (`ui/layout.ts:1`).
+pub const SESSION_SIDEBAR_WIDTH: u16 = 42;
+/// Narrowest rail width (`ui/layout.ts:2`).
+pub const SESSION_TABS_COMPACT_WIDTH: u16 = 5;
+/// A rail narrower than this renders in compact form
+/// (`ui/layout.ts:3`, `component/session-tabs.tsx:562`).
+pub const SESSION_TABS_COMPACT_BREAKPOINT: u16 = 12;
+/// Widest rail the clamp will produce (`ui/layout.ts:4`).
+pub const SESSION_SIDEBAR_MAX_WIDTH: u16 = 72;
+/// Session content minimum (`ui/layout.ts:5`).
+pub const SESSION_CONTENT_MIN_WIDTH: u16 = 44;
+/// Session content preferred width (`ui/layout.ts:6`).
+pub const SESSION_CONTENT_PREFERRED_WIDTH: u16 = 64;
+/// Docked panel split minimum: preferred + minimum content
+/// (`ui/layout.ts:9`).
+pub const SESSION_PANEL_SPLIT_MIN_WIDTH: u16 = SESSION_CONTENT_PREFERRED_WIDTH + SESSION_CONTENT_MIN_WIDTH;
+/// Horizontal inset total: 2 left + 2 right (`routes/session/index.tsx:260`).
+pub const SESSION_CONTENT_PADDING: u16 = 4;
+/// `wide` is a strict comparison against this width
+/// (`component/session-frame.tsx:107`, `routes/session/index.tsx:257`).
+pub const SESSION_WIDE_THRESHOLD: u16 = 120;
+/// The narrow-terminal single-column inset (`routes/session/index.tsx:1515`).
+pub const SESSION_NARROW_INSET: u16 = 1;
+/// The normal left/right inset (`routes/session/index.tsx:1515-1516`).
+pub const SESSION_WIDE_INSET: u16 = 2;
+/// Terminal width below which the inset collapses to one column
+/// (`routes/session/index.tsx:1515`).
+pub const SESSION_NARROW_INSET_BREAKPOINT: u16 = 44;
+/// Sidebar outer padding: `paddingTop`/`paddingBottom`
+/// (`routes/session/sidebar.tsx:26-27`).
+pub const SESSION_SIDEBAR_PAD_VERTICAL: u16 = 1;
+/// Sidebar outer padding: `paddingLeft`/`paddingRight`
+/// (`routes/session/sidebar.tsx:28-29`).
+pub const SESSION_SIDEBAR_PAD_HORIZONTAL: u16 = 2;
+/// Sidebar content reserves one right padding column that the ABSOLUTE
+/// scrollbar overlays (`routes/session/sidebar.tsx:56-69`).
+pub const SESSION_SIDEBAR_SCROLL_RESERVE: u16 = 1;
+/// Transcript scrollbar cells: the viewport `paddingRight` (1) plus the
+/// 1-column track (`routes/session/index.tsx:1527-1532`).
+pub const SESSION_TRANSCRIPT_SCROLLBAR_CELLS: u16 = 2;
+/// The always-present action row below the transcript
+/// (`routes/session/index.tsx:1570`).
+pub const SESSION_RESERVED_ACTION_ROWS: u16 = 1;
+
+/// `sessionTabsFitVertically(total, width)` (`ui/layout.ts:11-13`): vertical
+/// tabs fit only when the session keeps its preferred 64-column width beside
+/// the rail.
+#[must_use]
+pub const fn session_tabs_fit_vertically(total: u16, width: u16) -> bool {
+    total >= width.saturating_add(SESSION_CONTENT_PREFERRED_WIDTH)
+}
+
+/// `clampSessionTabsWidth(width, total)` (`ui/layout.ts:15-20`):
+/// `max(5, min(width, 72, total - 44))`.
+#[must_use]
+pub fn clamp_session_tabs_width(width: u16, total: u16) -> u16 {
+    let ceiling = width
+        .min(SESSION_SIDEBAR_MAX_WIDTH)
+        .min(total.saturating_sub(SESSION_CONTENT_MIN_WIDTH));
+    ceiling.max(SESSION_TABS_COMPACT_WIDTH)
+}
+
+/// `clampSessionPaneWidth(width, total)` (`ui/layout.ts:22-26`):
+/// `max(min(24, floor(total/2)), min(width, max(floor(total/2), total - 44)))`.
+#[must_use]
+pub fn clamp_session_pane_width(width: u16, total: u16) -> u16 {
+    let half = 1.max(total / 2);
+    let lower = 24.min(half);
+    let upper = half.max(total.saturating_sub(SESSION_CONTENT_MIN_WIDTH));
+    lower.max(width.min(upper))
+}
+
+/// A rail narrower than [`SESSION_TABS_COMPACT_BREAKPOINT`] renders compact
+/// (`component/session-tabs.tsx:562-564`): stride 2 instead of 3.
+#[must_use]
+pub const fn session_tabs_compact(width: u16) -> bool {
+    width < SESSION_TABS_COMPACT_BREAKPOINT
+}
+
+/// `wide = dimensions().width - verticalTabsWidth > 120`
+/// (`component/session-frame.tsx:107`). Strict at exactly 120.
+#[must_use]
+pub const fn session_wide(width: u16, vertical_tabs_width: u16) -> bool {
+    width.saturating_sub(vertical_tabs_width) > SESSION_WIDE_THRESHOLD
+}
+
+/// Configured sidebar mode (`config.session.sidebar`, default `auto`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SidebarMode {
+    /// Visible automatically on wide viewports.
+    Auto,
+    /// Never visible automatically; only an explicit open shows it.
+    Hide,
+}
+
+impl SidebarMode {
+    /// Parse the persisted config value; anything other than `hide` is
+    /// `auto`, matching `(config.data.session?.sidebar ?? "auto")`
+    /// (`component/session-frame.tsx:112`).
+    #[must_use]
+    pub fn parse(value: &str) -> SidebarMode {
+        if value == "hide" {
+            SidebarMode::Hide
+        } else {
+            SidebarMode::Auto
+        }
+    }
+}
+
+/// `sidebarVisible()` (`component/session-frame.tsx:108-113`): child sessions
+/// never show the sidebar; an explicit open always shows it; otherwise only
+/// `auto` + `wide`.
+#[must_use]
+pub fn sidebar_visible(child_session: bool, sidebar_open: bool, mode: SidebarMode, wide: bool) -> bool {
+    if child_session {
+        return false;
+    }
+    if sidebar_open {
+        return true;
+    }
+    mode == SidebarMode::Auto && wide
+}
+
+/// Which single pane occupies the right column
+/// (`component/session-frame.tsx:114-120`, `rightPane()`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RightPane {
+    None,
+    Panel,
+    Sidebar,
+    Terminal,
+}
+
+/// `rightPane()` precedence (`component/session-frame.tsx:115-120`): an active
+/// panel wins over everything, then an explicitly open (and visible) sidebar,
+/// then a selected terminal, then the automatic sidebar. Exactly one pane is
+/// returned, so no two right panes can be painted at once.
+#[must_use]
+pub fn right_pane(
+    panel_open: bool,
+    sidebar_open: bool,
+    sidebar_visible: bool,
+    terminal_selected: bool,
+) -> RightPane {
+    if panel_open {
+        return RightPane::Panel;
+    }
+    if sidebar_open && sidebar_visible {
+        return RightPane::Sidebar;
+    }
+    if terminal_selected {
+        return RightPane::Terminal;
+    }
+    if sidebar_visible {
+        return RightPane::Sidebar;
+    }
+    RightPane::None
+}
+
+/// Docked right-pane width (`component/session-frame.tsx:329-331`): the
+/// sidebar is always [`SESSION_SIDEBAR_WIDTH`], a terminal/panel uses the
+/// (clamped) pane-resize size, and no pane reserves nothing.
+#[must_use]
+pub const fn right_pane_width(pane: RightPane, pane_resize: u16) -> u16 {
+    match pane {
+        RightPane::None => 0,
+        RightPane::Sidebar => SESSION_SIDEBAR_WIDTH,
+        RightPane::Panel | RightPane::Terminal => pane_resize,
+    }
+}
+
+/// Default pane width before any resize: `max(1, floor(available / 2))`
+/// (`component/session-frame.tsx:44-45`, `defaultPaneWidth`).
+#[must_use]
+pub const fn default_pane_width(available: u16) -> u16 {
+    let half = available / 2;
+    if half == 0 {
+        1
+    } else {
+        half
+    }
+}
+
+/// Left/right inset of the session column: `width < 44 ? 1 : 2`
+/// (`routes/session/index.tsx:1515-1516`). Note upstream keys this on the
+/// TERMINAL width, not the session column width, so the caller must pass the
+/// terminal width.
+#[must_use]
+pub const fn session_horizontal_inset(terminal_width: u16) -> u16 {
+    if terminal_width < SESSION_NARROW_INSET_BREAKPOINT {
+        SESSION_NARROW_INSET
+    } else {
+        SESSION_WIDE_INSET
+    }
+}
+
+/// View content width: `(width ?? terminalWidth - verticalTabsWidth) - 4`
+/// (`routes/session/index.tsx:260`). The `- 4` is the view's own 1+1 or 2+2
+/// padding and is applied by the view, never folded into pane geometry.
+#[must_use]
+pub const fn session_content_width(session_width: u16) -> u16 {
+    session_width.saturating_sub(SESSION_CONTENT_PADDING)
+}
+
+/// Cells the transcript loses while the scrollbar is shown
+/// (`routes/session/index.tsx:1527-1532`): one viewport padding column plus
+/// the one-column track. Hidden reserves nothing.
+#[must_use]
+pub const fn transcript_scrollbar_reservation(shown: bool) -> u16 {
+    if shown {
+        SESSION_TRANSCRIPT_SCROLLBAR_CELLS
+    } else {
+        0
+    }
+}
+
+/// Cells the sidebar loses to its ABSOLUTE scrollbar
+/// (`routes/session/sidebar.tsx:56-69`): zero, because the bar is painted over
+/// the content's constant `paddingRight={1}`. Headings therefore never reflow
+/// when the bar appears.
+#[must_use]
+pub const fn sidebar_scrollbar_reservation(_shown: bool) -> u16 {
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -996,5 +1260,154 @@ mod tests {
             "a lone regional indicator is dropped, never a half flag"
         );
         assert_eq!(cells(&half), 40);
+    }
+
+    // -----------------------------------------------------------------------
+    // LAY-02..LAY-07, LAY-11: session width model (P03).
+    // -----------------------------------------------------------------------
+
+    /// LAY-02. `routes/session/index.tsx:1515-1516`: the route inset flips from
+    /// 1 to 2 at terminal width 44 (strict `< 44`), and the content width is
+    /// the session column minus the 4 inset cells (`index.tsx:260`).
+    #[test]
+    fn lay_02_route_horizontal_inset_switches_between_43_and_44() {
+        for (width, inset) in [(1u16, 1u16), (43, 1), (44, 2), (120, 2), (200, 2)] {
+            assert_eq!(
+                session_horizontal_inset(width),
+                inset,
+                "{width}: terminalWidth < 44 ? 1 : 2"
+            );
+            let painted = width.saturating_sub(inset * 2);
+            assert!(
+                painted <= width,
+                "{width}: prompt/footer content stays inside the viewport"
+            );
+        }
+        // Painted prompt/footer width: 43-2 = 41, then 44-4 = 40 (the inset
+        // costs one more column each side even though the terminal grew).
+        assert_eq!(43 - session_horizontal_inset(43) * 2, 41);
+        assert_eq!(44 - session_horizontal_inset(44) * 2, 40);
+        // The view's own content model always subtracts 4 (index.tsx:260) —
+        // `contentWidth` uses the constant, not the width-dependent inset.
+        assert_eq!(session_content_width(43), 39);
+        assert_eq!(session_content_width(44), 40);
+        assert_eq!(session_content_width(116), 112, "120-wide docked column - 4");
+        assert_eq!(session_content_width(0), 0, "tiny viewport saturates");
+    }
+
+    /// LAY-03 and LAY-05. `ui/layout.ts:11-13`: vertical tabs fit when
+    /// `total >= rail + 64`. Default rail 42 crosses at 105/106, rail 60 at
+    /// 123/124, narrow rail 5 at 68/69.
+    #[test]
+    fn lay_03_lay_05_vertical_eligibility_thresholds() {
+        for (rail, below, above) in [(42u16, 105u16, 106u16), (60, 123, 124), (5, 68, 69)] {
+            assert!(
+                !session_tabs_fit_vertically(below, rail),
+                "rail {rail}: width {below} (< {rail} + 64) stays horizontal"
+            );
+            assert!(
+                session_tabs_fit_vertically(above, rail),
+                "rail {rail}: width {above} (>= {rail} + 64) goes vertical"
+            );
+        }
+        assert_eq!(SESSION_PANEL_SPLIT_MIN_WIDTH, 108, "64 + 44");
+    }
+
+    /// LAY-04. `ui/layout.ts:15-20` clamp bounds 5/72/min-content 44 and the
+    /// compact transition at width 11/12 (`session-tabs.tsx:562`).
+    #[test]
+    fn lay_04_rail_clamp_and_compact_breakpoint() {
+        assert_eq!(clamp_session_tabs_width(1, 200), SESSION_TABS_COMPACT_WIDTH);
+        assert_eq!(clamp_session_tabs_width(10, 200), 10);
+        assert_eq!(clamp_session_tabs_width(100, 200), SESSION_SIDEBAR_MAX_WIDTH);
+        // total - 44 wins when the viewport is narrow: 60 - 44 = 16.
+        assert_eq!(clamp_session_tabs_width(40, 60), 16);
+        // Below the content minimum the ceiling saturates at the compact floor.
+        assert_eq!(clamp_session_tabs_width(40, 30), SESSION_TABS_COMPACT_WIDTH);
+        assert!(session_tabs_compact(11), "11 < 12 renders compact");
+        assert!(!session_tabs_compact(12), "12 is the first full rail width");
+    }
+
+    /// LAY-06. `component/session-frame.tsx:107-113`: with no vertical rail the
+    /// auto sidebar appears strictly above 120 (120 -> hidden, 121 -> 42 wide).
+    #[test]
+    fn lay_06_auto_sidebar_threshold_without_vertical_rail() {
+        assert!(!session_wide(120, 0), "120 is not wide (strict >)");
+        assert!(session_wide(121, 0), "121 is the first wide width");
+        assert!(!sidebar_visible(false, false, SidebarMode::Auto, session_wide(120, 0)));
+        assert!(sidebar_visible(false, false, SidebarMode::Auto, session_wide(121, 0)));
+        assert_eq!(SESSION_SIDEBAR_WIDTH, 42, "auto sidebar docks at 42 columns");
+        // Explicit open and config "hide" both override the auto rule.
+        assert!(sidebar_visible(false, true, SidebarMode::Hide, false));
+        assert!(!sidebar_visible(false, false, SidebarMode::Hide, true));
+        assert!(!sidebar_visible(true, true, SidebarMode::Auto, true), "child sessions never");
+        assert_eq!(SidebarMode::parse("hide"), SidebarMode::Hide);
+        assert_eq!(SidebarMode::parse("auto"), SidebarMode::Auto);
+        assert_eq!(SidebarMode::parse(""), SidebarMode::Auto);
+    }
+
+    /// LAY-07. `component/session-frame.tsx:107`: the threshold subtracts the
+    /// default 42-column rail, so 162/163 is the crossing (162-42 = 120).
+    #[test]
+    fn lay_07_auto_sidebar_threshold_with_default_vertical_rail() {
+        assert!(!session_wide(162, SESSION_SIDEBAR_WIDTH));
+        assert!(session_wide(163, SESSION_SIDEBAR_WIDTH));
+        assert!(!sidebar_visible(false, false, SidebarMode::Auto, session_wide(162, 42)));
+        assert!(sidebar_visible(false, false, SidebarMode::Auto, session_wide(163, 42)));
+        // The same 120-column available area is not wide however it was reached.
+        assert!(!session_wide(120, 0));
+        assert!(!session_wide(162, 42));
+        // Tiny viewports saturate rather than wrap.
+        assert!(!session_wide(0, 0));
+        assert!(!session_wide(30, 42));
+    }
+
+    /// LAY-11. `component/session-frame.tsx:115-120` precedence: panel, then an
+    /// explicitly open visible sidebar, then a terminal, then the automatic
+    /// sidebar; exactly one pane result exists for every input.
+    #[test]
+    fn lay_11_right_pane_precedence_is_single_valued() {
+        assert_eq!(right_pane(true, true, true, true), RightPane::Panel);
+        assert_eq!(right_pane(false, true, true, true), RightPane::Sidebar);
+        assert_eq!(right_pane(false, false, true, true), RightPane::Terminal);
+        assert_eq!(right_pane(false, false, true, false), RightPane::Sidebar);
+        assert_eq!(right_pane(false, false, false, false), RightPane::None);
+        // An explicitly open but invisible (child session) sidebar falls through.
+        assert_eq!(right_pane(false, true, false, true), RightPane::Terminal);
+        assert_eq!(right_pane(false, true, false, false), RightPane::None);
+        // Dock widths: sidebar is always 42, terminal/panel use the resize size.
+        assert_eq!(right_pane_width(RightPane::Sidebar, 37), 42);
+        assert_eq!(right_pane_width(RightPane::Terminal, 37), 37);
+        assert_eq!(right_pane_width(RightPane::Panel, 37), 37);
+        assert_eq!(right_pane_width(RightPane::None, 37), 0);
+        assert_eq!(default_pane_width(120), 60);
+        assert_eq!(default_pane_width(1), 1);
+        assert_eq!(default_pane_width(0), 1);
+    }
+
+    /// LAY-16. Scrollbar reservations: the transcript loses the viewport
+    /// padding plus the track (2 cells) while shown and nothing while hidden
+    /// (`index.tsx:1527-1532`); the sidebar's absolute bar costs 0 columns
+    /// because the content already reserves `paddingRight={1}`
+    /// (`sidebar.tsx:56-69`).
+    #[test]
+    fn lay_16_scrollbar_reservations() {
+        assert_eq!(transcript_scrollbar_reservation(true), 2);
+        assert_eq!(transcript_scrollbar_reservation(false), 0);
+        assert_eq!(sidebar_scrollbar_reservation(true), 0);
+        assert_eq!(sidebar_scrollbar_reservation(false), 0);
+        assert_eq!(SESSION_SIDEBAR_SCROLL_RESERVE, 1);
+        // The sidebar content width is a function of the 42-column box only,
+        // so headings cannot reflow when the bar toggles.
+        let content = SESSION_SIDEBAR_WIDTH - SESSION_SIDEBAR_PAD_HORIZONTAL * 2;
+        assert_eq!(content, 38);
+        assert_eq!(content - SESSION_SIDEBAR_SCROLL_RESERVE, 37);
+    }
+
+    /// LAY-15. `index.tsx:1570` always reserves one row below the transcript,
+    /// independent of the jump action's state.
+    #[test]
+    fn lay_15_reserved_action_row_is_constant() {
+        assert_eq!(SESSION_RESERVED_ACTION_ROWS, 1);
     }
 }
