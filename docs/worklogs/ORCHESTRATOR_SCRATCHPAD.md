@@ -9575,18 +9575,19 @@ builds. Two already worked; one had a real root cause and is fixed.
   delegate further). While viewing a CHILD session, upstream's family count
   also includes running siblings; we cannot compute that from the child's own
   endpoint, so no count is painted rather than an invented one.
-- **Installed proof** (release built from this tree, `target/release/oc2`
-  sha256 `8de5fbb7754e4f41345dd9c8facd2b16fc50f31e031bee395c2d375b3030dee6`,
-  160x40 PTY): fake Responses provider drives the parent turn into a
-  background `task` call and holds the child's stream open, so the child is
-  `running`. Footer row 38 painted
-  `  /private/var/…/oc2-subagent-footer-c3y2c64g · 1 subagent`. An SGR press
+- **Installed proof** (release built from `6e12794d`, `target/release/oc2`
+  sha256 `8002d09e1cf92230ddaf249482897187a6e603873c58bdd82d669388d38f142d`,
+  installed over `/Users/mymac/.local/bin/oc2` with backup
+  `oc2.before-8de5fbb7`; 160x40 PTY): fake Responses provider drives the
+  parent turn into a background `task` call and holds the child's stream
+  open, so the child is `running`. Footer row 38 painted
+  `  /private/var/…/oc2-subagent-footer-537z13ve · 1 subagent`. An SGR press
   on the label's own cell opened the Subagents dialog showing
   `> [Running] └─ explore — probe child`; `/exit` exit 0.
   `/tmp/oc2-verify/verify_subagent_footer.py` PASS; captures
-  `subagent-footer.raw` sha256 `95eb315ce9fa4893f7a94da23749a0b42662dbc5ae019bd060f10b1504b0c728`,
+  `subagent-footer.raw` sha256 `e896613b050c9f7409cb585513cd327c3e97141a8542f9be9124a99e886314b4`,
   `subagent-footer-after-click.raw` sha256
-  `896275c99371d446ae3e1a38b80af8262b53d7e728eb8ee5f64a45e1b4bd1243`.
+  `eafb767dca130ab1c637e246a8172d91f70e297b3f8211d44329152cfe91e835`.
   Earlier capture from the pre-fix release (`adfd64a9…`) painted nothing
   after the reloaded turn: the reloaded `/history` transcript is plain
   `Text` parts, so the delegation gate was false; the `children` fact on that
