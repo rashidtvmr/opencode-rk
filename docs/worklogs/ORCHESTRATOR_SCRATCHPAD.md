@@ -9711,3 +9711,38 @@ builds. Two already worked; one had a real root cause and is fixed.
   the client today, and pinned upstream has no Mermaid→graph route
   (`packages/merman/src/markdown.ts:284`); `Page::Graph` is a local extension.
   A truthful image preview needs a composer-attachment package first.
+
+## 2026-11-01 — Assistant-footer turn duration (landed, `733529eb`)
+
+- **Contract**: upstream `AssistantFooter` (`packages/tui/src/routes/session/
+  index.tsx:2058-2060`) renders ` · {Locale.duration(ms)}` at
+  `terminal.width < 28 || >= 36`; `turnDuration`
+  (`routes/session/rows.ts:430-438`) is
+  `max(0, message.time.completed - input.time.created)` where `input` is the
+  nearest preceding user/synthetic record (`inputIndex`, `:469-482`), and the
+  falsy `<Show when={duration()}>` hides a zero span.
+- **Fact source**: the server stamps the assistant `MessageRecord` when the
+  turn completes (`crates/server/src/lib.rs:2706-2715`, `:3001-3006`) and the
+  user record when it starts, both carried on the live frames and stored
+  history rows. No local clock is read.
+- **Wiring**: `AssistantFacts.duration_ms`; `created_at_ms`/`turn_duration_ms`
+  helpers parse through `opencode_rk_contracts::Timestamp`;
+  `project_history` and `project_history_entries` derive the span from the
+  nearest preceding user/system record; the `TurnWorker` stream reader tracks
+  the `user_message` frame and fills the terminal frame's facts;
+  `native_footer::render_assistant_footer` renders the span with the 28/36
+  band. `AssistantFooter::from_facts` propagates it.
+- **Honest absence**: zero, negative, missing or unparseable stamps → no
+  span; messages without stored execution facts get no footer at all, so the
+  legacy metadata row behaviour is unchanged.
+- **Validation**: focused 35 tests + full CLI bin unit suite
+  (1957 passed) with `--features native --test-threads=1`; release build
+  (`target/release/{oc2,opencode-rk}`); installed journey
+  `/tmp/oc2-verify/verify_execution_facts.py` now holds the fake provider
+  reply 1.1 s and asserts both the reloaded footer and the live frame footer
+  paint `· openai/gpt-5.6 · 1.1s` at 160 columns (`/exit` 0 both legs).
+  Raw frames: `/tmp/oc2-verify/execution-facts{,-live}.raw`.
+- **Next truthful gaps**: no agent span (no producer records an agent per
+  message); tokens-per-second needs per-step `time.streamed`, which is not
+  stored; the non-stream cancel site still reports `bad_gateway` instead of
+  the typed `cancelled` code.
