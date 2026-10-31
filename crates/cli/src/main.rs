@@ -147,6 +147,8 @@ mod native_graph;
 #[cfg(feature = "native")]
 mod native_shell_frame;
 #[cfg(feature = "native")]
+mod native_host;
+#[cfg(feature = "native")]
 mod native_config_import;
 #[cfg(feature = "native")]
 mod native_import_dialog;
