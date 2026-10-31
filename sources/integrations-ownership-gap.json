@@ -38,12 +38,20 @@
     "INT-009": null
   },
   "taskBindingState": {
-    "INT-001": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
-    "INT-003": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
-    "INT-005": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
-    "INT-006": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
-    "INT-007": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
-    "INT-009": {"controllerStatus":"not-started","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null}
+    "INT-001": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":"tasks/INT-001.md","worklog":"worklog/INT-001.md"},
+    "INT-003": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":"tasks/INT-003.md","worklog":"worklog/INT-003.md"},
+    "INT-005": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":"tasks/INT-005.md","worklog":"worklog/INT-005.md"},
+    "INT-006": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":"tasks/INT-006.md","worklog":"worklog/INT-006.md"},
+    "INT-007": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":"tasks/INT-007.md","worklog":"worklog/INT-007.md"},
+    "INT-009": {"controllerStatus":"not-started","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":"tasks/INT-009.md","worklog":"worklog/INT-009.md"}
+  },
+  "reviewedTaskEvidence": {
+    "INT-001": {"taskCard":"tasks/INT-001.md","worklog":"worklog/INT-001.md","decision":"local-implementation-exists-unaccepted; parent remains unresolved","reviewedOn":"2026-10-31"},
+    "INT-003": {"taskCard":"tasks/INT-003.md","worklog":"worklog/INT-003.md","decision":"local-implementation-exists-unaccepted; parent remains unresolved","reviewedOn":"2026-10-31"},
+    "INT-005": {"taskCard":"tasks/INT-005.md","worklog":"worklog/INT-005.md","decision":"local-implementation-exists-unaccepted; parent remains unresolved","reviewedOn":"2026-10-31"},
+    "INT-006": {"taskCard":"tasks/INT-006.md","worklog":"worklog/INT-006.md","decision":"local-implementation-exists-unaccepted; parent remains unresolved","reviewedOn":"2026-10-31"},
+    "INT-007": {"taskCard":"tasks/INT-007.md","worklog":"worklog/INT-007.md","decision":"local-implementation-exists-unaccepted; parent remains unresolved","reviewedOn":"2026-10-31"},
+    "INT-009": {"taskCard":"tasks/INT-009.md","worklog":"worklog/INT-009.md","decision":"local-implementation-exists-unaccepted; parent remains unresolved","reviewedOn":"2026-10-31"}
   },
   "surfaceRulePatterns": [
     "packages/core/src/integration.ts",

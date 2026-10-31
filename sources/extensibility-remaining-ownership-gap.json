@@ -44,12 +44,20 @@
     "EXT-012": null
   },
   "taskBindingState": {
-    "EXT-004": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
-    "EXT-006": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
-    "EXT-009": {"controllerStatus":"in-progress","ralphStory":"TBD - see source audit","requirementIds":["REQ-005"],"taskCard":null,"worklog":null},
-    "EXT-010": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
-    "EXT-011": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
-    "EXT-012": {"controllerStatus":"in-progress","ralphStory":"TBD - see source audit","requirementIds":["REQ-005"],"taskCard":null,"worklog":null}
+    "EXT-004": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":"tasks/EXT-004.md","worklog":"worklog/EXT-004.md"},
+    "EXT-006": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":"tasks/EXT-006.md","worklog":"worklog/EXT-006.md"},
+    "EXT-009": {"controllerStatus":"in-progress","ralphStory":"TBD - see source audit","requirementIds":["REQ-005"],"taskCard":"tasks/EXT-009.md","worklog":"worklog/EXT-009.md"},
+    "EXT-010": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":"tasks/EXT-010.md","worklog":"worklog/EXT-010.md"},
+    "EXT-011": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":"tasks/EXT-011.md","worklog":"worklog/EXT-011.md"},
+    "EXT-012": {"controllerStatus":"in-progress","ralphStory":"TBD - see source audit","requirementIds":["REQ-005"],"taskCard":"tasks/EXT-012.md","worklog":"worklog/EXT-012.md"}
+  },
+  "reviewedTaskEvidence": {
+    "EXT-004": {"taskCard":"tasks/EXT-004.md","worklog":"worklog/EXT-004.md","decision":"local-implementation-exists-unaccepted; parent remains unresolved","reviewedOn":"2026-10-31"},
+    "EXT-006": {"taskCard":"tasks/EXT-006.md","worklog":"worklog/EXT-006.md","decision":"local-implementation-exists-unaccepted; parent remains unresolved","reviewedOn":"2026-10-31"},
+    "EXT-009": {"taskCard":"tasks/EXT-009.md","worklog":"worklog/EXT-009.md","decision":"local-implementation-exists-unaccepted; parent remains unresolved","reviewedOn":"2026-10-31"},
+    "EXT-010": {"taskCard":"tasks/EXT-010.md","worklog":"worklog/EXT-010.md","decision":"local-implementation-exists-unaccepted; parent remains unresolved","reviewedOn":"2026-10-31"},
+    "EXT-011": {"taskCard":"tasks/EXT-011.md","worklog":"worklog/EXT-011.md","decision":"local-implementation-exists-unaccepted; parent remains unresolved","reviewedOn":"2026-10-31"},
+    "EXT-012": {"taskCard":"tasks/EXT-012.md","worklog":"worklog/EXT-012.md","decision":"local-implementation-exists-unaccepted; parent remains unresolved","reviewedOn":"2026-10-31"}
   },
   "requirementTopology": {
     "REQ-005": {

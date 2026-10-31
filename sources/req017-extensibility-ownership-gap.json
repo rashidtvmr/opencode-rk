@@ -37,8 +37,8 @@
       "requirementIds": [
         "REQ-017"
       ],
-      "taskCard": null,
-      "worklog": null
+      "taskCard": "tasks/EXT-001.md",
+      "worklog": "worklog/EXT-001.md"
     },
     "EXT-002": {
       "controllerStatus": "in-progress",
@@ -46,8 +46,22 @@
       "requirementIds": [
         "REQ-017"
       ],
-      "taskCard": null,
-      "worklog": null
+      "taskCard": "tasks/EXT-002.md",
+      "worklog": "worklog/EXT-002.md"
+    }
+  },
+  "reviewedTaskEvidence": {
+    "EXT-001": {
+      "taskCard": "tasks/EXT-001.md",
+      "worklog": "worklog/EXT-001.md",
+      "decision": "local-implementation-exists-unaccepted; parent remains unresolved",
+      "reviewedOn": "2026-10-31"
+    },
+    "EXT-002": {
+      "taskCard": "tasks/EXT-002.md",
+      "worklog": "worklog/EXT-002.md",
+      "decision": "local-implementation-exists-unaccepted; parent remains unresolved",
+      "reviewedOn": "2026-10-31"
     }
   },
   "surfaceRulePatterns": [

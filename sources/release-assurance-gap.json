@@ -23,8 +23,8 @@
       "requirementIds": [
         "REQ-003"
       ],
-      "taskCard": null,
-      "worklog": null
+      "taskCard": "tasks/REL-001.md",
+      "worklog": "worklog/REL-001.md"
     },
     "REL-002": {
       "ralphStory": "TBD - see source audit",
@@ -32,16 +32,36 @@
         "REQ-004",
         "REQ-035"
       ],
-      "taskCard": null,
-      "worklog": null
+      "taskCard": "tasks/REL-002.md",
+      "worklog": "worklog/REL-002.md"
     },
     "REL-003": {
       "ralphStory": "TBD - see source audit",
       "requirementIds": [
         "REQ-035"
       ],
-      "taskCard": null,
-      "worklog": null
+      "taskCard": "tasks/REL-003.md",
+      "worklog": "worklog/REL-003.md"
+    }
+  },
+  "reviewedTaskEvidence": {
+    "REL-001": {
+      "taskCard": "tasks/REL-001.md",
+      "worklog": "worklog/REL-001.md",
+      "decision": "local-implementation-exists-unaccepted; parent remains unresolved",
+      "reviewedOn": "2026-10-31"
+    },
+    "REL-002": {
+      "taskCard": "tasks/REL-002.md",
+      "worklog": "worklog/REL-002.md",
+      "decision": "local-implementation-exists-unaccepted; parent remains unresolved",
+      "reviewedOn": "2026-10-31"
+    },
+    "REL-003": {
+      "taskCard": "tasks/REL-003.md",
+      "worklog": "worklog/REL-003.md",
+      "decision": "local-implementation-exists-unaccepted; parent remains unresolved",
+      "reviewedOn": "2026-10-31"
     }
   },
   "requirementTopology": {

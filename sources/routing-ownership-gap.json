@@ -34,6 +34,20 @@
     "ROUTE-009": "generic-disc-002-placeholder-no-task-card-or-worklog",
     "ROUTE-010": "generic-disc-002-placeholder-no-task-card-or-worklog"
   },
+  "reviewedTaskEvidence": {
+    "EXT-005": {
+      "taskCard": "tasks/EXT-005.md",
+      "worklog": "worklog/EXT-005.md",
+      "decision": "local-implementation-exists-unaccepted; parent remains unresolved",
+      "reviewedOn": "2026-10-31"
+    },
+    "WEB-004": {
+      "taskCard": "tasks/WEB-004.md",
+      "worklog": "worklog/WEB-004.md",
+      "decision": "local-implementation-exists-unaccepted; parent remains unresolved",
+      "reviewedOn": "2026-10-31"
+    }
+  },
   "surfaceAmbiguity": {
     "indistinguishablePair": [
       "ROUTE-008",

@@ -33,6 +33,8 @@
       "id": "AUTO-004",
       "implementationCommits": [],
       "localEvidencePaths": [
+        "tasks/AUTO-004.md",
+        "worklog/AUTO-004.md",
         "requirements/user-requirements.json",
         "FEATURES.md",
         "worklog/AUTO-003.md"
@@ -44,9 +46,9 @@
       ],
       "surfaceEvidenceGaps": [],
       "surfaceIds": [],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/AUTO-004.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/AUTO-004.md"
     },
     {
       "category": "explicit-blocker",
@@ -55,6 +57,8 @@
       "id": "AUTO-005",
       "implementationCommits": [],
       "localEvidencePaths": [
+        "tasks/AUTO-005.md",
+        "worklog/AUTO-005.md",
         "requirements/user-requirements.json",
         "FEATURES.md",
         "worklog/AUTO-003.md"
@@ -67,9 +71,9 @@
       ],
       "surfaceEvidenceGaps": [],
       "surfaceIds": [],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/AUTO-005.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/AUTO-005.md"
     },
     {
       "category": "explicit-blocker",
@@ -78,6 +82,8 @@
       "id": "AUTO-006",
       "implementationCommits": [],
       "localEvidencePaths": [
+        "tasks/AUTO-006.md",
+        "worklog/AUTO-006.md",
         "requirements/user-requirements.json",
         "FEATURES.md",
         "worklog/AUTO-003.md"
@@ -89,9 +95,9 @@
       ],
       "surfaceEvidenceGaps": [],
       "surfaceIds": [],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/AUTO-006.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/AUTO-006.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -104,7 +110,10 @@
       ],
       "id": "EXT-001",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/EXT-001.md",
+        "worklog/EXT-001.md"
+      ],
       "reasonKey": "extensibility-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [
@@ -114,9 +123,9 @@
       "surfaceIds": [
         "opencode.extensibility"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/EXT-001.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/EXT-001.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -129,7 +138,10 @@
       ],
       "id": "EXT-002",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/EXT-002.md",
+        "worklog/EXT-002.md"
+      ],
       "reasonKey": "extensibility-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [
@@ -139,9 +151,9 @@
       "surfaceIds": [
         "opencode.extensibility"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/EXT-002.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/EXT-002.md"
     },
     {
       "category": "local-implemented-stale",
@@ -189,7 +201,10 @@
       ],
       "id": "EXT-004",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/EXT-004.md",
+        "worklog/EXT-004.md"
+      ],
       "reasonKey": "extensibility-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -197,9 +212,9 @@
       "surfaceIds": [
         "opencode.extensibility"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/EXT-004.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/EXT-004.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -218,7 +233,10 @@
       ],
       "id": "EXT-005",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/EXT-005.md",
+        "worklog/EXT-005.md"
+      ],
       "reasonKey": "extensibility-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [
@@ -229,9 +247,9 @@
         "opencode.extensibility",
         "opencode.legacy-compatibility"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/EXT-005.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/EXT-005.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -244,7 +262,10 @@
       ],
       "id": "EXT-006",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/EXT-006.md",
+        "worklog/EXT-006.md"
+      ],
       "reasonKey": "extensibility-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -252,9 +273,9 @@
       "surfaceIds": [
         "opencode.extensibility"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/EXT-006.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/EXT-006.md"
     },
     {
       "category": "local-implemented-stale",
@@ -300,7 +321,10 @@
       ],
       "id": "EXT-008",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/EXT-008.md",
+        "worklog/EXT-008.md"
+      ],
       "reasonKey": "plugin-hook-contract-mismatch",
       "reopenPolicy": "material-new-pinned-evidence-required",
       "requirementIds": [
@@ -310,9 +334,9 @@
       "surfaceIds": [
         "opencode.extensibility"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/EXT-008.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/EXT-008.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -325,7 +349,10 @@
       ],
       "id": "EXT-009",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/EXT-009.md",
+        "worklog/EXT-009.md"
+      ],
       "reasonKey": "extensibility-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [
@@ -335,9 +362,9 @@
       "surfaceIds": [
         "opencode.extensibility"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/EXT-009.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/EXT-009.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -350,7 +377,10 @@
       ],
       "id": "EXT-010",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/EXT-010.md",
+        "worklog/EXT-010.md"
+      ],
       "reasonKey": "extensibility-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -358,9 +388,9 @@
       "surfaceIds": [
         "opencode.extensibility"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/EXT-010.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/EXT-010.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -373,7 +403,10 @@
       ],
       "id": "EXT-011",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/EXT-011.md",
+        "worklog/EXT-011.md"
+      ],
       "reasonKey": "extensibility-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -381,9 +414,9 @@
       "surfaceIds": [
         "opencode.extensibility"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/EXT-011.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/EXT-011.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -396,7 +429,10 @@
       ],
       "id": "EXT-012",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/EXT-012.md",
+        "worklog/EXT-012.md"
+      ],
       "reasonKey": "extensibility-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [
@@ -406,9 +442,9 @@
       "surfaceIds": [
         "opencode.extensibility"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/EXT-012.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/EXT-012.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -423,7 +459,10 @@
       ],
       "id": "INT-001",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/INT-001.md",
+        "worklog/INT-001.md"
+      ],
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -431,9 +470,9 @@
       "surfaceIds": [
         "opencode.integrations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/INT-001.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-001.md"
     },
     {
       "category": "explicit-blocker",
@@ -454,7 +493,10 @@
       ],
       "id": "INT-002",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/INT-002.md",
+        "worklog/INT-002.md"
+      ],
       "reasonKey": "repository-contract-mixes-side-effects",
       "reopenPolicy": "material-new-pinned-evidence-required",
       "requirementIds": [],
@@ -463,9 +505,9 @@
         "opencode.integrations",
         "opencode.repository-operations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/INT-002.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-002.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -480,7 +522,10 @@
       ],
       "id": "INT-003",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/INT-003.md",
+        "worklog/INT-003.md"
+      ],
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -488,9 +533,9 @@
       "surfaceIds": [
         "opencode.integrations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/INT-003.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-003.md"
     },
     {
       "category": "local-implemented-stale",
@@ -540,7 +585,10 @@
       ],
       "id": "INT-005",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/INT-005.md",
+        "worklog/INT-005.md"
+      ],
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -548,9 +596,9 @@
       "surfaceIds": [
         "opencode.integrations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/INT-005.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-005.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -565,7 +613,10 @@
       ],
       "id": "INT-006",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/INT-006.md",
+        "worklog/INT-006.md"
+      ],
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -573,9 +624,9 @@
       "surfaceIds": [
         "opencode.integrations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/INT-006.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-006.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -590,7 +641,10 @@
       ],
       "id": "INT-007",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/INT-007.md",
+        "worklog/INT-007.md"
+      ],
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -598,9 +652,9 @@
       "surfaceIds": [
         "opencode.integrations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/INT-007.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-007.md"
     },
     {
       "category": "local-implemented-stale",
@@ -666,7 +720,10 @@
       ],
       "id": "INT-009",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/INT-009.md",
+        "worklog/INT-009.md"
+      ],
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -674,9 +731,9 @@
       "surfaceIds": [
         "opencode.integrations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/INT-009.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-009.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -696,7 +753,10 @@
       ],
       "id": "INT-010",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/INT-010.md",
+        "worklog/INT-010.md"
+      ],
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -712,9 +772,9 @@
         "opencode.enterprise-remote",
         "opencode.integrations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/INT-010.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-010.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -734,7 +794,10 @@
       ],
       "id": "OPS-001",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/OPS-001.md",
+        "worklog/OPS-001.md"
+      ],
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [
@@ -746,9 +809,9 @@
       "surfaceIds": [
         "opencode.configuration-runtime"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/OPS-001.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/OPS-001.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -763,7 +826,10 @@
       ],
       "id": "OPS-002",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/OPS-002.md",
+        "worklog/OPS-002.md"
+      ],
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -771,9 +837,9 @@
       "surfaceIds": [
         "opencode.repository-operations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/OPS-002.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/OPS-002.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -788,7 +854,10 @@
       ],
       "id": "OPS-003",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/OPS-003.md",
+        "worklog/OPS-003.md"
+      ],
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -796,9 +865,9 @@
       "surfaceIds": [
         "opencode.repository-operations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/OPS-003.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/OPS-003.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -824,7 +893,10 @@
       ],
       "id": "OPS-004",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/OPS-004.md",
+        "worklog/OPS-004.md"
+      ],
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -833,9 +905,9 @@
         "opencode.configuration-runtime",
         "opencode.repository-operations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/OPS-004.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/OPS-004.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -855,7 +927,10 @@
       ],
       "id": "OPS-005",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/OPS-005.md",
+        "worklog/OPS-005.md"
+      ],
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -863,9 +938,9 @@
       "surfaceIds": [
         "opencode.configuration-runtime"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/OPS-005.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/OPS-005.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -880,7 +955,10 @@
       ],
       "id": "OPS-006",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/OPS-006.md",
+        "worklog/OPS-006.md"
+      ],
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -888,9 +966,9 @@
       "surfaceIds": [
         "opencode.repository-operations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/OPS-006.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/OPS-006.md"
     },
     {
       "category": "explicit-blocker",
@@ -912,7 +990,10 @@
       ],
       "id": "OPS-007",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/OPS-007.md",
+        "worklog/OPS-007.md"
+      ],
       "reasonKey": "effect-runtime-cross-surface-ownership",
       "reopenPolicy": "material-new-pinned-evidence-required",
       "requirementIds": [
@@ -924,9 +1005,9 @@
         "opencode.effect-runtime",
         "opencode.repository-operations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/OPS-007.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/OPS-007.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -952,7 +1033,10 @@
       ],
       "id": "OPS-008",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/OPS-008.md",
+        "worklog/OPS-008.md"
+      ],
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -961,9 +1045,9 @@
         "opencode.configuration-runtime",
         "opencode.repository-operations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/OPS-008.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/OPS-008.md"
     },
     {
       "category": "explicit-blocker",
@@ -984,7 +1068,10 @@
       ],
       "id": "OPS-009",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/OPS-009.md",
+        "worklog/OPS-009.md"
+      ],
       "reasonKey": "recorder-cross-surface-side-effects",
       "reopenPolicy": "material-new-pinned-evidence-required",
       "requirementIds": [],
@@ -993,9 +1080,9 @@
         "opencode.provider-recording",
         "opencode.repository-operations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/OPS-009.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/OPS-009.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -1004,6 +1091,8 @@
       "id": "REL-001",
       "implementationCommits": [],
       "localEvidencePaths": [
+        "tasks/REL-001.md",
+        "worklog/REL-001.md",
         "requirements/user-requirements.json",
         "FEATURES.md",
         "PLAN.md",
@@ -1017,9 +1106,9 @@
       ],
       "surfaceEvidenceGaps": [],
       "surfaceIds": [],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/REL-001.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/REL-001.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -1028,6 +1117,8 @@
       "id": "REL-002",
       "implementationCommits": [],
       "localEvidencePaths": [
+        "tasks/REL-002.md",
+        "worklog/REL-002.md",
         "requirements/user-requirements.json",
         "FEATURES.md",
         "PLAN.md",
@@ -1042,9 +1133,9 @@
       ],
       "surfaceEvidenceGaps": [],
       "surfaceIds": [],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/REL-002.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/REL-002.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -1053,6 +1144,8 @@
       "id": "REL-003",
       "implementationCommits": [],
       "localEvidencePaths": [
+        "tasks/REL-003.md",
+        "worklog/REL-003.md",
         "requirements/user-requirements.json",
         "FEATURES.md",
         "PLAN.md",
@@ -1066,9 +1159,9 @@
       ],
       "surfaceEvidenceGaps": [],
       "surfaceIds": [],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/REL-003.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/REL-003.md"
     },
     {
       "category": "local-implemented-stale",
@@ -1457,7 +1550,10 @@
       ],
       "id": "SHARE-001",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/SHARE-001.md",
+        "worklog/SHARE-001.md"
+      ],
       "reasonKey": "sharing-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [
@@ -1467,9 +1563,9 @@
       "surfaceIds": [
         "opencode.sharing"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/SHARE-001.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/SHARE-001.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -1485,7 +1581,10 @@
       ],
       "id": "SHARE-002",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/SHARE-002.md",
+        "worklog/SHARE-002.md"
+      ],
       "reasonKey": "sharing-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -1493,9 +1592,9 @@
       "surfaceIds": [
         "opencode.sharing"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/SHARE-002.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/SHARE-002.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -1513,7 +1612,10 @@
       ],
       "id": "SHARE-003",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/SHARE-003.md",
+        "worklog/SHARE-003.md"
+      ],
       "reasonKey": "sharing-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -1529,9 +1631,9 @@
         "opencode.enterprise-remote",
         "opencode.sharing"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/SHARE-003.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/SHARE-003.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -1547,7 +1649,10 @@
       ],
       "id": "SHARE-004",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/SHARE-004.md",
+        "worklog/SHARE-004.md"
+      ],
       "reasonKey": "sharing-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [
@@ -1557,9 +1662,9 @@
       "surfaceIds": [
         "opencode.sharing"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/SHARE-004.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/SHARE-004.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -1575,7 +1680,10 @@
       ],
       "id": "SHARE-005",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/SHARE-005.md",
+        "worklog/SHARE-005.md"
+      ],
       "reasonKey": "sharing-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [
@@ -1585,9 +1693,9 @@
       "surfaceIds": [
         "opencode.sharing"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/SHARE-005.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/SHARE-005.md"
     },
     {
       "category": "local-implemented-stale",
@@ -2006,7 +2114,10 @@
       ],
       "id": "WEB-001",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/WEB-001.md",
+        "worklog/WEB-001.md"
+      ],
       "reasonKey": "client-architecture-dependency",
       "reopenPolicy": "approved-client-architecture-and-dependencies-required",
       "requirementIds": [],
@@ -2015,9 +2126,9 @@
         "opencode.app-client",
         "opencode.clients-ui"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/WEB-001.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/WEB-001.md"
     },
     {
       "category": "dependency-constrained",
@@ -2037,7 +2148,10 @@
       ],
       "id": "WEB-002",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/WEB-002.md",
+        "worklog/WEB-002.md"
+      ],
       "reasonKey": "client-architecture-dependency",
       "reopenPolicy": "approved-client-architecture-and-dependencies-required",
       "requirementIds": [],
@@ -2046,9 +2160,9 @@
         "opencode.app-client",
         "opencode.clients-ui"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/WEB-002.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/WEB-002.md"
     },
     {
       "category": "dependency-constrained",
@@ -2068,7 +2182,10 @@
       ],
       "id": "WEB-003",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/WEB-003.md",
+        "worklog/WEB-003.md"
+      ],
       "reasonKey": "client-architecture-dependency",
       "reopenPolicy": "approved-client-architecture-and-dependencies-required",
       "requirementIds": [],
@@ -2077,9 +2194,9 @@
         "opencode.clients-ui",
         "opencode.desktop-client"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/WEB-003.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/WEB-003.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -2099,7 +2216,10 @@
       ],
       "id": "WEB-004",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/WEB-004.md",
+        "worklog/WEB-004.md"
+      ],
       "reasonKey": "hosted-remote-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -2115,9 +2235,9 @@
         "opencode.enterprise-remote",
         "opencode.server-control-plane"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/WEB-004.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/WEB-004.md"
     },
     {
       "category": "dependency-constrained",
@@ -2144,7 +2264,10 @@
       ],
       "id": "WEB-005",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/WEB-005.md",
+        "worklog/WEB-005.md"
+      ],
       "reasonKey": "client-architecture-dependency",
       "reopenPolicy": "approved-client-architecture-and-dependencies-required",
       "requirementIds": [],
@@ -2154,9 +2277,9 @@
         "opencode.clients-ui",
         "opencode.desktop-client"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/WEB-005.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/WEB-005.md"
     },
     {
       "category": "local-implemented-stale",
@@ -2465,198 +2588,6 @@
       "taskCard": "tasks/UI-018.md",
       "taskStatus": "NOT STARTED",
       "worklog": null
-    },
-    {
-      "category": "user-directed-product",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [],
-      "id": "WEB-006",
-      "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-006.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
-      "reasonKey": "explicit-user-web-parity-requirement",
-      "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/WEB-006.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
-    },
-    {
-      "category": "user-directed-product",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "WEB-007",
-      "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-007.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
-      "reasonKey": "explicit-user-web-parity-requirement",
-      "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/WEB-007.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
-    },
-    {
-      "category": "user-directed-product",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "WEB-008",
-      "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-008.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
-      "reasonKey": "explicit-user-web-parity-requirement",
-      "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/WEB-008.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
-    },
-    {
-      "category": "user-directed-product",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "WEB-009",
-      "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-009.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
-      "reasonKey": "explicit-user-web-parity-requirement",
-      "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/WEB-009.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
-    },
-    {
-      "category": "user-directed-product",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "WEB-010",
-      "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-010.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
-      "reasonKey": "explicit-user-web-parity-requirement",
-      "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/WEB-010.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
-    },
-    {
-      "category": "user-directed-product",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "WEB-011",
-      "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-011.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
-      "reasonKey": "explicit-user-web-parity-requirement",
-      "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/WEB-011.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
-    },
-    {
-      "category": "user-directed-product",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "WEB-012",
-      "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-012.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
-      "reasonKey": "explicit-user-web-parity-requirement",
-      "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/WEB-012.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
-    },
-    {
-      "category": "user-directed-product",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "WEB-013",
-      "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-013.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
-      "reasonKey": "explicit-user-web-parity-requirement",
-      "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/WEB-013.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
-    },
-    {
-      "category": "user-directed-product",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "WEB-014",
-      "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-014.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
-      "reasonKey": "explicit-user-web-parity-requirement",
-      "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/WEB-014.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
-    },
-    {
-      "category": "user-directed-product",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "WEB-015",
-      "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-015.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
-      "reasonKey": "explicit-user-web-parity-requirement",
-      "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/WEB-015.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
-    },
-    {
-      "category": "user-directed-product",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "WEB-016",
-      "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-016.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
-      "reasonKey": "explicit-user-web-parity-requirement",
-      "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/WEB-016.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
-    },
-    {
-      "category": "user-directed-product",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "WEB-017",
-      "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-017.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
-      "reasonKey": "explicit-user-web-parity-requirement",
-      "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/WEB-017.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
     }
   ],
   "summary": {
@@ -2664,16 +2595,15 @@
       "dependency-constrained": 22,
       "explicit-blocker": 9,
       "local-implemented-stale": 21,
-      "unresolved-decomposition": 34,
-      "user-directed-product": 12
+      "unresolved-decomposition": 34
     },
     "controllerAccepted": 133,
-    "nonAccepted": 98,
+    "nonAccepted": 86,
     "ralphStatusCounts": {
       "accepted": 133,
-      "in-progress": 31,
-      "not-started": 67
+      "in-progress": 30,
+      "not-started": 56
     },
-    "storyCount": 231
+    "storyCount": 219
   }
 }

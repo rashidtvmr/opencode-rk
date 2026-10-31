@@ -8,11 +8,13 @@ compiles and passes. Emits machine-readable JSON so a driver (or a human) can
 re-delegate any lane whose status is not PASS.
 
 Usage:
-    python3 tools/lane_gate.py            # verify all lanes, print JSON + summary
+    python3 tools/lane_gate.py            # verify module artifacts, skip cargo tests
     python3 tools/lane_gate.py --json     # JSON only
     python3 tools/lane_gate.py --run      # also run cargo test for --test lanes
 
-Exit code is 0 only when every lane is PASS.
+Exit code is 0 when every lane is PASS, or when the only non-PASS lanes are test
+lanes reported as NOT-RUN because --run was not requested. Missing or failed
+artifacts always exit non-zero.
 """
 from __future__ import annotations
 
@@ -24,6 +26,10 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 STORAGE = ROOT / "crates" / "storage"
+
+# Statuses that are informational only: the test artifact still has to exist,
+# but its harness was deliberately not executed because --run was absent.
+SKIP_STATUSES = frozenset({"NOT-RUN"})
 
 # A lane is a unit of delegated work: exactly one owned file plus the
 # verification that must hold. `module` lanes need a non-stub Rust file with a
@@ -71,7 +77,7 @@ def check_test(lane: dict, run: bool) -> dict:
     if not path.is_file():
         return {"status": "MISSING", "detail": "test file does not exist"}
     if not run:
-        return {"status": "UNRUN", "detail": "pass --run to execute the harness"}
+        return {"status": "NOT-RUN", "detail": "skipped; pass --run to execute the harness"}
     proc = subprocess.run(
         ["cargo", "test", "-p", "opencode-rk-storage", "--test", lane["target"]],
         cwd=ROOT,
@@ -105,10 +111,18 @@ def main() -> int:
     else:
         print(json.dumps(results, indent=2))
 
-    failed = [r for r in results if r["status"] != "PASS"]
-    if failed and not args.json:
-        print(f"\n{len(failed)} lane(s) need attention: {', '.join(r['lane'] for r in failed)}")
-        print("Re-delegate a failed lane to an allowed worker (see AGENTS.md subagent policy).")
+    failed = [r for r in results if r["status"] != "PASS" and r["status"] not in SKIP_STATUSES]
+    skipped = [r for r in results if r["status"] in SKIP_STATUSES]
+    if not args.json:
+        if skipped:
+            print(
+                f"\n{len(skipped)} test lane(s) skipped, tests were not executed: "
+                f"{', '.join(r['lane'] for r in skipped)}"
+            )
+            print("Pass --run to compile and execute those cargo test targets.")
+        if failed:
+            print(f"\n{len(failed)} lane(s) need attention: {', '.join(r['lane'] for r in failed)}")
+            print("Re-delegate a failed lane to an allowed worker (see AGENTS.md subagent policy).")
     return 0 if not failed else 1
 
 
