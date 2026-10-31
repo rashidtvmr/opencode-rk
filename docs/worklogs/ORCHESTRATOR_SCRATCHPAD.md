@@ -9546,9 +9546,15 @@ builds. Two already worked; one had a real root cause and is fixed.
   included); the rectangle is dropped on resize, tab/route/sidebar change and
   when a listing clears. `tui_entry` polls
   `GET /api/sessions/{id}/children` every 750 ms only when the session's own
-  history delegated (`task`/`subagent` part) or a running child is already
-  known, so a session that never delegated issues no request and the app017
-  startup route surface is unchanged; it parses the payload through
+  history delegated (`task`/`subagent` part), a running child is already
+  known, or the daemon reports a registered child (`should_poll_children`).
+  The count comes from the same `GET /history` page the client already
+  fetches: `list_history_page` now returns `children: children.count(id)`
+  (registry rows for this parent in the current daemon lifetime), because
+  reloaded raw history carries no typed parts and its stored body text is the
+  rendered `[task] {json}` line. A session that never delegated issues no
+  request and the app017 startup route surface is unchanged (the startup
+  fixture body simply omits the field → 0). The payload is parsed through
   `native_children::live::Status` and repaints only on change. A malformed or
   unavailable listing clears the facts instead of leaving a stale count.
 - **Reviewed fixes (independent review round 1)**: label moved from the
@@ -9570,27 +9576,53 @@ builds. Two already worked; one had a real root cause and is fixed.
   also includes running siblings; we cannot compute that from the child's own
   endpoint, so no count is painted rather than an invented one.
 - **Installed proof** (release built from this tree, `target/release/oc2`
-  sha256 `adfd64a9e0258937705b2d2cbd2c0ef40b3cd75ab879d20f8042fd6df1f0af25`,
+  sha256 `8de5fbb7754e4f41345dd9c8facd2b16fc50f31e031bee395c2d375b3030dee6`,
   160x40 PTY): fake Responses provider drives the parent turn into a
   background `task` call and holds the child's stream open, so the child is
-  `running`. Footer row 36 painted
-  `  ┃  GPT-5.6 openai · 1 subagent`. An SGR press on the label's own cell
-  opened the Subagents dialog showing
+  `running`. Footer row 38 painted
+  `  /private/var/…/oc2-subagent-footer-c3y2c64g · 1 subagent`. An SGR press
+  on the label's own cell opened the Subagents dialog showing
   `> [Running] └─ explore — probe child`; `/exit` exit 0.
   `/tmp/oc2-verify/verify_subagent_footer.py` PASS; captures
-  `subagent-footer.raw` sha256 `b99a938c8cbf71e9a222288c9a995ca73b088b702a76ce62d8619abfb9421efa`,
+  `subagent-footer.raw` sha256 `95eb315ce9fa4893f7a94da23749a0b42662dbc5ae019bd060f10b1504b0c728`,
   `subagent-footer-after-click.raw` sha256
-  `e177bc46d23784221a18d5888b261c5ddc5bc81861643fd226c3bc18ecfefb78`.
+  `896275c99371d446ae3e1a38b80af8262b53d7e728eb8ee5f64a45e1b4bd1243`.
+  Earlier capture from the pre-fix release (`adfd64a9…`) painted nothing
+  after the reloaded turn: the reloaded `/history` transcript is plain
+  `Text` parts, so the delegation gate was false; the `children` fact on that
+  same page fixed it without adding a route.
   Fixture authorization is a private `permission-rules.json` equivalent to a
   user choosing "always allow" for `task`; no capability wildcard.
 - **Tests added**: `native_view::live_footer_tests` (painted cells equal the
   hit rectangle, singular/zero forms, vertical tab-reservation offset, Home and
   shell mode never paint it, and a width sweep proving a published hit always
   covers the trailing `2 subagents` cells while an unpainted label leaves no
-  text) and `native_children::live` (running-only counting, self exclusion,
+  text), `native_children::live` (running-only counting, self exclusion,
   nesting, unchanged listings do not repaint, malformed listings never publish
-  new facts). `tui_entry::memory_file_cap_tests::only_a_delegating_transcript_polls_children`
-  pins the `/children` poll gate.
+  new facts), `tui_entry::memory_file_cap_tests::only_a_delegating_transcript_polls_children`
+  (live/reloaded delegation parts) and
+  `…::server_reported_children_keep_the_footer_poll_truthful` (the `/history`
+  fact starts the poll after a reload; absent/malformed means no request).
+  `server/tests/session_history_api.rs::web_014_t03` pins the additive
+  `children` field on the existing route.
+- **Default-build repair**: `cf29c77e` had left the delegation gate tests in a
+  `#[cfg(test)]` module that references native-only types, so
+  `cargo test -p opencode-rk-cli --no-run` (default features) failed to
+  compile. The two gate tests now live in
+  `#[cfg(all(test, feature = "native"))] mod footer_gate_tests`; the
+  memory-cap test stays in the default module. Both default and native test
+  binaries compile and the focused tests pass
+  (`live_footer_tests` 6 + `footer_gate_tests` 2 + `memory_file_cap_tests` 1).
+- **Verification this round**: `app017` (8/8, including the authenticated
+  startup route allowlist) and `session_history_api` (3/3) pass serially.
+  Full workspace serial run (`cargo test --workspace --features
+  opencode-rk-cli/native -- --test-threads=1`, log
+  `/tmp/oc2-verify/full-suite-4.log`): 49 targets, **4623 passed / 0 failed**
+  except the three pre-existing RED contract-freeze stubs in
+  `crates/contracts/tests/net_003_remote_auth.rs` (`todo!()` for NET-003
+  remote control protocol, tracked since `3e590748`, outside this change and
+  outside the 33-target UI baseline). Not a regression; no NET-003 code was
+  removed or weakened.
 - **Known gaps (not claimed)**: the footer slot still shows our workspace
   directory (rail) / metadata (framed) as its base where upstream shows
   usage/cost; background-shell counts (`footer.tsx:24-36`) are not implemented;

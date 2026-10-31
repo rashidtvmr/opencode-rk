@@ -241,6 +241,12 @@ impl Children {
         Ok(self.0.lock().map_err(|_| ApiFailure::internal("child registry unavailable"))?
             .values().filter(|entry| entry.parent == parent).cloned().collect())
     }
+    /// Children registered for `parent` in this daemon lifetime. Always bounded
+    /// by [`MAX_CHILDREN`]; a poisoned registry reports zero rather than
+    /// inventing a count.
+    pub(crate) fn count(&self, parent: SessionId) -> usize {
+        self.rows(parent).map_or(0, |rows| rows.len())
+    }
     pub fn pending(&self, parent: SessionId) -> Vec<(SessionId, PermissionRequest)> {
         self.rows(parent).unwrap_or_default().into_iter().filter_map(|entry| {
             run_owner::active(entry.id).and_then(|owner| owner.pending()).map(|pending| (entry.id, pending))

@@ -159,3 +159,25 @@ async fn web_014_t02_unknown_history_cursor_is_not_found() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn web_014_t03_history_reports_registered_child_count_without_a_second_route() {
+    let (app, _dir) = app();
+    let session_id = create_session(&app).await;
+    append(&app, &session_id, "only message").await;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/sessions/{session_id}/history?limit=2"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let page = body(response).await;
+    assert_eq!(page["messages"].as_array().unwrap().len(), 1);
+    // The footer count gate reads this fact from the page it already fetches;
+    // a session with no registered child reports zero, never a guess.
+    assert_eq!(page["children"], 0);
+}

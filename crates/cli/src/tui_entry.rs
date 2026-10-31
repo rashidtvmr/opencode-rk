@@ -366,6 +366,12 @@ struct LiveSnapshot {
     raw_history: Vec<serde_json::Value>,
     #[cfg(feature = "native")]
     history_next_before: Option<String>,
+    /// Child sessions the daemon reports for this parent in its current
+    /// lifetime (`GET /history` carries `children`). Reloaded raw history has
+    /// no typed parts, so this server fact keeps the footer count truthful
+    /// without a separate polling route.
+    #[cfg(feature = "native")]
+    history_children: usize,
     #[cfg(feature = "native")]
     parent_session: bool,
     #[cfg(feature = "native")]
@@ -1012,6 +1018,8 @@ fn snapshot_from_listing(
         #[cfg(feature = "native")]
         history_next_before: messages_value["next_before"].as_str().map(str::to_owned),
         #[cfg(feature = "native")]
+        history_children: history_child_count(&messages_value),
+        #[cfg(feature = "native")]
         parent_session: target["parent_session_id"]
             .as_str()
             .is_some_and(|id| !id.is_empty()),
@@ -1044,14 +1052,41 @@ fn apply_history_window(window: &crate::native_chat_projection::NativeHistoryWin
 }
 
 /// A session's family can only be non-empty when its own history delegated
-/// through `task`, so the live footer poll needs no request otherwise.
+/// through `task`, so the live footer poll needs no request otherwise. Live
+/// events use `ToolState`; reloaded history projects `ToolCall`/`ToolResult`,
+/// so all three shapes must count.
 #[cfg(feature = "native")]
 fn transcript_has_delegation(messages: &[ChatMessage]) -> bool {
     messages.iter().flat_map(|message| message.parts.iter()).any(|part| match part {
         ChatPart::Subtask { .. } => true,
-        ChatPart::ToolState { name, .. } => name == "task" || name == "subagent",
+        ChatPart::ToolState { name, .. }
+        | ChatPart::ToolCall { name, .. }
+        | ChatPart::ToolResult { name, .. } => is_delegation_tool(name),
         _ => false,
     })
+}
+
+#[cfg(feature = "native")]
+fn is_delegation_tool(name: &str) -> bool {
+    name == "task" || name == "subagent"
+}
+
+/// Server-reported child count from a `/history` payload. Missing or
+/// malformed values mean "not reported" and never fabricate a child.
+#[cfg(feature = "native")]
+fn history_child_count(value: &serde_json::Value) -> usize {
+    value["children"]
+        .as_u64()
+        .map_or(0, |count| usize::try_from(count).unwrap_or(usize::MAX))
+}
+
+/// Whether the footer count may ask `/children`. A known running child keeps
+/// the poll alive; a server-reported child or a live/reloaded delegation part
+/// starts it. Sessions with no family issue no request, so the startup route
+/// surface stays exactly what it was before the count existed.
+#[cfg(feature = "native")]
+fn should_poll_children(running: usize, history_children: usize, messages: &[ChatMessage]) -> bool {
+    running > 0 || history_children > 0 || transcript_has_delegation(messages)
 }
 
 /// Resize the live native frame using the next frame's exact tab reservation,
@@ -1256,6 +1291,13 @@ mod memory_file_cap_tests {
         assert_eq!(loaded.last().map(|file| file.path.as_str()), Some("f063.md"));
         std::fs::remove_dir_all(&dir).unwrap();
     }
+}
+
+/// The footer-count gate only exists on the native path, so its fixtures are
+/// compiled with the feature instead of breaking the default test build.
+#[cfg(all(test, feature = "native"))]
+mod footer_gate_tests {
+    use super::*;
 
     #[test]
     fn only_a_delegating_transcript_polls_children() {
@@ -1265,6 +1307,16 @@ mod memory_file_cap_tests {
                 name: name.into(), id: "c1".into(), status: "completed".into(),
                 args: String::new(), output: String::new(), is_error: false,
             }],
+            agent: None, model: None, assistant_facts: None,
+        };
+        // Reloaded history projects the call and its result instead of a
+        // `ToolState`, and a finished turn leaves only those.
+        let reloaded = |name: &str| ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![
+                ChatPart::ToolCall { name: name.into(), id: "c1".into() },
+                ChatPart::ToolResult { name: name.into(), output: "{}".into(), is_error: false },
+            ],
             agent: None, model: None, assistant_facts: None,
         };
         let subtask = ChatMessage {
@@ -1279,7 +1331,37 @@ mod memory_file_cap_tests {
         assert!(!transcript_has_delegation(&[tool("read")]));
         assert!(transcript_has_delegation(&[tool("task")]));
         assert!(transcript_has_delegation(&[tool("subagent")]));
+        assert!(!transcript_has_delegation(&[reloaded("read")]));
+        assert!(transcript_has_delegation(&[reloaded("task")]));
+        assert!(transcript_has_delegation(&[reloaded("subagent")]));
         assert!(transcript_has_delegation(&[subtask]));
+    }
+
+    #[test]
+    fn server_reported_children_keep_the_footer_poll_truthful() {
+        let plain = [ChatMessage::text(ChatRole::User, "hello")];
+        assert_eq!(history_child_count(&serde_json::json!({})), 0);
+        assert_eq!(history_child_count(&serde_json::json!({"children": null})), 0);
+        assert_eq!(history_child_count(&serde_json::json!({"children": "2"})), 0);
+        assert_eq!(history_child_count(&serde_json::json!({"children": 2})), 2);
+        // No family → no request: the startup route surface is unchanged.
+        assert!(!should_poll_children(0, 0, &plain));
+        // A reloaded transcript carries no typed parts; the server fact starts
+        // the poll so the count survives a reload.
+        assert!(should_poll_children(0, 1, &plain));
+        // A known running child keeps it alive before the next history page.
+        assert!(should_poll_children(1, 0, &plain));
+        // A live delegation part starts it during the turn, when history
+        // refresh is deferred behind the active worker.
+        let live = [ChatMessage {
+            role: ChatRole::Tool,
+            parts: vec![ChatPart::ToolState {
+                name: "task".into(), id: "c1".into(), status: "running".into(),
+                args: String::new(), output: String::new(), is_error: false,
+            }],
+            agent: None, model: None, assistant_facts: None,
+        }];
+        assert!(should_poll_children(0, 0, &live));
     }
 }
 
@@ -5378,6 +5460,13 @@ fn native_loop(
                 }
                 match (history_window.as_mut(), result) {
                     (Some(window), Ok(value)) => {
+                        // Every accepted page carries the same server-scoped
+                        // child count, including pages later discarded by a
+                        // navigation race: the fact is server truth, not a
+                        // window mutation.
+                        if let Some(snapshot) = live.as_mut() {
+                            snapshot.history_children = history_child_count(&value);
+                        }
                         let previous_window = window.clone();
                         // `chat_at_tail` is only the local viewport offset.  A
                         // bounded window can be locally at its tail while
@@ -5572,9 +5661,13 @@ fn native_loop(
         // Children can only exist for a session whose history delegated, so a
         // session that never called `task` issues no `/children` request (the
         // startup route surface stays exactly what it was before the footer
-        // count existed). A known running child keeps the poll alive to
-        // observe its completion.
-        let delegates = live_children.running() > 0 || transcript_has_delegation(&transcript.messages);
+        // count existed). A running child, the server-reported child count on
+        // the reloaded history, or a live delegation part keeps it alive.
+        let delegates = should_poll_children(
+            live_children.running(),
+            live.as_ref().map_or(0, |snapshot| snapshot.history_children),
+            &transcript.messages,
+        );
         if !children_panel.open && delegates && live_children_refresh.elapsed() >= Duration::from_millis(750) {
             live_children_refresh = Instant::now();
             match live.as_ref() {
@@ -10692,7 +10785,7 @@ mod tab_binding_tests {
         let mut completion = crate::native_completion::Completion::default();
         let models = vec![native_setup::Model { id: "child".into(), name: "Child".into(), provider_id: "fixture".into(), context_window: None }];
         let mut selected = None;
-        let snapshot = LiveSnapshot { origin: "http://127.0.0.1:1".into(), session_id: A.into(), title: "A".into(), state: "idle".into(), updated_at: String::new(), message_count: 0, last_text: None, history: vec![], typed_history: vec![], raw_history: vec![], history_next_before: None, parent_session: true, parent_session_id: Some(B.into()), directory: None, session_titles: vec![], session_project_labels: vec![] };
+        let snapshot = LiveSnapshot { origin: "http://127.0.0.1:1".into(), session_id: A.into(), title: "A".into(), state: "idle".into(), updated_at: String::new(), message_count: 0, last_text: None, history: vec![], typed_history: vec![], raw_history: vec![], history_next_before: None, history_children: 0, parent_session: true, parent_session_id: Some(B.into()), directory: None, session_titles: vec![], session_project_labels: vec![] };
         commit_child_route(snapshot, "child draft".into(), 2, 8, 13, Some("fixture/child".into()), &models, &mut selected, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut route, &mut completion);
         assert_eq!(draft, "child draft");
         assert_eq!(cursor, 8);
@@ -11076,6 +11169,7 @@ mod command_consumption_tests {
             typed_history: Vec::new(),
             raw_history: Vec::new(),
             history_next_before: None,
+            history_children: 0,
             parent_session: false,
             parent_session_id: None,
             directory: None,
@@ -11131,7 +11225,7 @@ mod command_consumption_tests {
             session_id: "00000000-0000-0000-0000-000000000001".into(),
             title: "Closed session".into(), state: "idle".into(), updated_at: String::new(),
             message_count: 0, last_text: None, history: Vec::new(), typed_history: Vec::new(),
-            raw_history: Vec::new(), history_next_before: None, parent_session: false, parent_session_id: None, directory: None,
+            raw_history: Vec::new(), history_next_before: None, history_children: 0, parent_session: false, parent_session_id: None, directory: None,
             session_titles: vec![],
             session_project_labels: vec![],
         });

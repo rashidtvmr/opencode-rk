@@ -1172,6 +1172,7 @@ async fn list_history_page(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Query(params): Query<HistoryPageParams>,
+    Extension(children): Extension<task_children::Children>,
 ) -> Result<Json<Value>, ApiFailure> {
     let id = parse_session_id(&id)?;
     let before = params.before.as_deref().map(parse_message_id).transpose()?;
@@ -1185,9 +1186,15 @@ async fn list_history_page(
             }
             other => ApiFailure::internal(other),
         })?;
+    // Raw history records carry no typed parts, so a client that reloads a
+    // transcript cannot tell whether this parent ever delegated. The count of
+    // children registered in this daemon lifetime is the same fact the
+    // `/children` route reports, surfaced here so the footer count needs no
+    // extra startup route.
     Ok(Json(json!({
         "messages": messages,
         "next_before": next_before,
+        "children": children.count(id),
     })))
 }
 
