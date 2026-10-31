@@ -559,9 +559,13 @@ pub fn project_history_entries(messages: &[Value]) -> Vec<(String, ChatMessage)>
     let mut turn_start_ms = None;
     let mut projected = Vec::new();
     for message in &messages[from..] {
+        // Rebase the turn boundary before the id gate: an id-less user/system
+        // record still starts a turn, exactly as the flat projection and
+        // upstream's raw scan do.
+        let chat = project_with_turn_duration(message, &mut turn_start_ms);
         let Some(id) = message.get("id").and_then(Value::as_str) else { continue; };
-        let Some(message) = project_with_turn_duration(message, &mut turn_start_ms) else { continue; };
-        projected.push((id.to_owned(), message));
+        let Some(chat) = chat else { continue; };
+        projected.push((id.to_owned(), chat));
     }
     let overflow = projected.len().saturating_sub(MAX_HISTORY_MESSAGES);
     if overflow > 0 { projected.drain(..overflow); }
@@ -1452,6 +1456,30 @@ mod tests {
         // Equal stamps: zero duration is hidden, exactly like upstream's
         // falsy `<Show when={duration()}>`.
         assert_eq!(history[2].assistant_facts.as_ref().unwrap().duration_ms, None);
+    }
+
+    #[test]
+    fn id_less_input_still_rebases_the_grouped_path_turn_start() {
+        // The grouped path drops id-less records from the render list, but the
+        // boundary follows the raw role (upstream scans raw messages), so a
+        // later assistant must use that record's stamp, not an older input.
+        let records = json!([
+            {"id": "u1", "role": "user", "body": {"storage": "inline", "text": "older"},
+             "created_at": "2026-10-19T00:00:00.000Z"},
+            {"role": "user", "body": {"storage": "inline", "text": "id-less rebase"},
+             "created_at": "2026-10-19T00:00:09.000Z"},
+            {"id": "a1", "role": "assistant", "body": {"storage": "inline", "text": "done"},
+             "created_at": "2026-10-19T00:00:10.000Z",
+             "execution": {"model_id": "m", "stop_reason": "completed"}}
+        ]);
+        let entries = project_history_entries(records.as_array().unwrap());
+        assert_eq!(entries.len(), 2, "id-less input is not rendered");
+        assert_eq!(entries[1].0, "a1");
+        assert_eq!(
+            entries[1].1.assistant_facts.as_ref().unwrap().duration_ms,
+            Some(1_000),
+            "duration starts at the id-less input, not the older identified one"
+        );
     }
 
     #[test]

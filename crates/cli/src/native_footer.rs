@@ -122,6 +122,8 @@ pub fn render_assistant_footer(message: &ChatMessage, width: usize) -> Option<Fo
     // the falsy zero-duration case is already excluded by the fact itself.
     let duration_span = facts
         .duration_ms
+        // Falsy `duration()` (upstream `<Show>` hides a zero) plus the width band.
+        .filter(|ms| *ms > 0)
         .filter(|_| width < WIDTH_DURATION_GAP_LOW || width >= WIDTH_DURATION_GAP_HIGH)
         .map(|ms| format!(" · {}", format_duration(ms)));
     // Throughput remains an explicit gap: it needs real per-step streamed
@@ -403,11 +405,11 @@ mod native_footer_tests {
             "usage": {"output_tokens": 20},
             "stop_reason": "completed"
         }));
-        facts.duration_ms = None;
+        facts.duration_ms = Some(0);
         let message = assistant_message(facts, None, Some("openai/gpt-x"));
-        // A zero-length turn never produces a duration fact (`turn_duration_ms`
-        // returns None for a non-positive delta). At width 27 the model span is
-        // also hidden, leaving no fact at all.
+        // Upstream's `<Show when={duration()}>` treats 0 as falsy, so a zero
+        // duration renders nothing. At width 27 the model span is also hidden,
+        // leaving no fact at all.
         assert!(render_assistant_footer(&message, 27).is_none());
         for width in [36, 80] {
             let rows = render_assistant_footer(&message, width).unwrap();
