@@ -641,6 +641,33 @@ impl NavigationState {
         self.switch(session)
     }
 
+    /// Reorder one open tab to `index`, mirroring upstream `moveSessionTab`
+    /// (`session-tabs-model.ts:93-101`): remove, then splice at the target
+    /// slot, clamped to the last open tab. Per-tab state (draft, cursor,
+    /// scroll, model) travels with the tab. Focus follows the tab it pointed
+    /// at; returns whether the order actually changed.
+    pub fn move_tab(&mut self, session: &SessionRef, index: usize) -> bool {
+        let Some(from) = self.tabs.iter().position(|tab| tab.session == *session) else {
+            return false;
+        };
+        let to = index.min(self.tabs.len().saturating_sub(1));
+        if from == to {
+            return false;
+        }
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to, tab);
+        self.active = if self.active == from {
+            to
+        } else if from < self.active && to >= self.active {
+            self.active - 1
+        } else if from > self.active && to <= self.active {
+            self.active + 1
+        } else {
+            self.active
+        };
+        true
+    }
+
     /// Move one session-tab slot, wrapping at either end. This is the native
     /// counterpart of upstream `session.tab.next`/`previous`; it only changes
     /// the local selection and never creates a tab.
@@ -1733,6 +1760,36 @@ mod tests {
         assert!(nav.recently_closed().is_empty());
         assert_eq!(nav.reopen(None), None);
         assert_eq!(nav.reopen(Some(&s("missing"))), None);
+    }
+
+    #[test]
+    fn tab_24_move_tab_reorders_and_tracks_active() {
+        // session-tabs-model.ts:93-101: remove then splice, index clamped to
+        // the last slot; the focused tab keeps its identity, not its index.
+        let mut nav = NavigationState::new();
+        nav.open(s("one"));
+        nav.open(s("two"));
+        nav.open(s("three"));
+        nav.switch(&s("two")).unwrap();
+        nav.active_mut().unwrap().draft = "kept".to_owned();
+        let ids = |nav: &NavigationState| {
+            nav.tabs().iter().map(|tab| tab.session.clone()).collect::<Vec<_>>()
+        };
+        assert!(nav.move_tab(&s("two"), 2));
+        assert_eq!(ids(&nav), vec![s("one"), s("three"), s("two")]);
+        assert_eq!(nav.active().unwrap().session, s("two"), "focus follows the moved tab");
+        assert_eq!(nav.active().unwrap().draft, "kept", "per-tab state travels");
+        // Moving an inactive tab across the focused one shifts focus with it.
+        assert!(nav.move_tab(&s("one"), 2));
+        assert_eq!(ids(&nav), vec![s("three"), s("two"), s("one")]);
+        assert_eq!(nav.active().unwrap().session, s("two"));
+        // Unknown sessions and same-slot moves are no-ops.
+        assert!(!nav.move_tab(&s("missing"), 0));
+        assert!(!nav.move_tab(&s("three"), 0));
+        // Out-of-range targets clamp to the last slot.
+        assert!(nav.move_tab(&s("three"), 99));
+        assert_eq!(ids(&nav), vec![s("two"), s("one"), s("three")]);
+        assert_eq!(nav.active().unwrap().session, s("two"));
     }
 
     #[test]

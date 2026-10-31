@@ -845,6 +845,41 @@ impl RailFrame {
         matches!(self.hit(x, y), Some(RailHit::Search))
     }
 
+    /// Target slot for a captured drag at screen row `y`, mirroring upstream
+    /// `drag()` (`session-tabs.tsx:685-702`): `floor((y - contentTop +
+    /// scrollTop) / stride)`, clamped to `0..=tab_len-1`. Rows above the rail
+    /// clamp to the first slot; rows on the New control or below clamp to the
+    /// last. Uses the same stride and scroll facts the painted rows were
+    /// built with, so no separate scroll arithmetic is needed.
+    #[must_use]
+    pub fn drag_slot(&self, y: u16, tab_len: usize) -> Option<usize> {
+        if tab_len == 0 {
+            return None;
+        }
+        let compact = self.width >= 5 && self.width < COMPACT_BREAKPOINT;
+        let (content_top, stride) = if compact {
+            (2u16, usize::from(COMPACT_STRIDE))
+        } else {
+            (TOP_PADDING, usize::from(TAB_STRIDE))
+        };
+        if y < content_top {
+            return Some(0);
+        }
+        let logical = self
+            .scroll_cells
+            .saturating_add(usize::from(y - content_top));
+        let slot = if compact {
+            if logical == 0 {
+                0
+            } else {
+                logical.saturating_sub(1) / stride
+            }
+        } else {
+            logical / stride
+        };
+        Some(slot.min(tab_len - 1))
+    }
+
     pub fn compact_cap_role(&self, y: u16) -> Option<CellColor> {
         self.rows.iter().find(|row| row.rect.contains(0, y)).and_then(|row| {
             row.color_spans.first().map(|(_, role)| *role)
@@ -1037,6 +1072,33 @@ mod tests {
             "clipped-detail press must capture its painted row"
         );
         assert!(!close, "clipped detail never exposes close action");
+    }
+
+    #[test]
+    fn tab_15_drag_slot_maps_rows_scroll_and_clamping() {
+        // session-tabs.tsx:685-702: floor((y - contentTop + scrollTop)/stride)
+        // clamped to the open-tab range, sharing the painted stride/scroll.
+        let inputs = sessions(3);
+        let frame = RailFrame::render_cells(&inputs, 42, 10, 0, None, false);
+        assert_eq!(frame.drag_slot(0, 3), Some(0), "above the rail clamps to the first slot");
+        assert_eq!(frame.drag_slot(1, 3), Some(0));
+        assert_eq!(frame.drag_slot(3, 3), Some(0));
+        assert_eq!(frame.drag_slot(4, 3), Some(1));
+        assert_eq!(frame.drag_slot(6, 3), Some(1), "gap rows stay in the upper slot");
+        assert_eq!(frame.drag_slot(7, 3), Some(2));
+        assert_eq!(frame.drag_slot(9, 3), Some(2), "New/below clamps to the last slot");
+        assert_eq!(frame.drag_slot(1, 0), None, "no open tabs has no target");
+
+        let clipped = RailFrame::render_cells(&sessions(32), 42, 40, 0, None, true);
+        assert_eq!(clipped.scroll_cells, 58);
+        assert_eq!(clipped.drag_slot(1, 32), Some(19), "scrolled rows use painted cells");
+
+        let compact = RailFrame::render_cells(&inputs, 6, 10, 0, None, false);
+        assert_eq!(compact.drag_slot(1, 3), Some(0));
+        assert_eq!(compact.drag_slot(2, 3), Some(0));
+        assert_eq!(compact.drag_slot(4, 3), Some(0));
+        assert_eq!(compact.drag_slot(5, 3), Some(1));
+        assert_eq!(compact.drag_slot(9, 3), Some(2));
     }
 
     fn sessions(count: usize) -> Vec<RailInput> {

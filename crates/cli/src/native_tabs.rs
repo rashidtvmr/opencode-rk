@@ -1945,6 +1945,22 @@ impl DragState {
             None => tabs.to_vec(),
         }
     }
+
+    /// Reorder a rendered input snapshot into the preview order so the paint
+    /// and the hit-test snapshot both reflect the pending move
+    /// (`session-tabs.tsx:598-602`). A no-op without a live preview.
+    pub fn project(&self, inputs: &mut [TabInput], tabs: &[SessionRef]) {
+        if self.preview.is_none() {
+            return;
+        }
+        let order = self.ordered(tabs);
+        inputs.sort_by_key(|input| {
+            order
+                .iter()
+                .position(|id| *id == input.session)
+                .unwrap_or(usize::MAX)
+        });
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -3378,6 +3394,29 @@ mod tests {
         assert!(!drag.suppress_click());
         // A second release cannot move again.
         assert_eq!(drag.release().move_to, None);
+    }
+
+    #[test]
+    fn tab_15b_drag_preview_projects_into_the_rendered_input_order() {
+        let ids: Vec<SessionRef> = ["a", "b", "c"]
+            .into_iter()
+            .map(|id| SessionRef(id.into()))
+            .collect();
+        let mut inputs = vec![input("a", "alpha"), input("b", "beta"), input("c", "gamma")];
+        let mut drag = DragState::new();
+        drag.project(&mut inputs, &ids);
+        let order = |inputs: &[TabInput]| {
+            inputs.iter().map(|tab| tab.session.0.clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(order(&inputs), ["a", "b", "c"], "no preview leaves the snapshot alone");
+        drag.press(&ids[0], 0);
+        drag.drag_to(2, ids.len());
+        drag.project(&mut inputs, &ids);
+        assert_eq!(
+            order(&inputs),
+            ["b", "c", "a"],
+            "the painted snapshot follows the pending move",
+        );
     }
 
     #[test]

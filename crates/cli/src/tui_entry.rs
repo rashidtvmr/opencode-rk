@@ -5145,6 +5145,9 @@ fn native_loop(
     let mut tab_hovered: Option<crate::native_navigation::SessionRef> = None;
     // Press capture binds the click to a stable tab and painted rect.
     let mut tab_press: Option<(crate::native_navigation::SessionRef, crate::native_tabs::TabRect, bool, TabOrientation)> = None;
+    // Vertical-rail drag-to-reorder: armed on a session press, previewed while
+    // the left button moves, and persisted once on release.
+    let mut tab_drag = crate::native_tabs::DragState::new();
     let mut add_press: Option<(crate::native_tabs::TabRect, TabOrientation)> = None;
     let mut rail_search_press: Option<(crate::native_tabs::TabRect, TabOrientation)> = None;
     // Promoted Home slot state: pointer-over fact drives the close glyph, a
@@ -6573,7 +6576,13 @@ fn native_loop(
             );
         }
         view.set_tab_reservation(tab_reservation);
-        let tab_inputs = TabStrip::from_navigation(&navigation, &[]);
+        let mut tab_inputs = TabStrip::from_navigation(&navigation, &[]);
+        if tab_drag.preview().is_some() {
+            // Paint (and hit-test) the pending drag order until the move is
+            // persisted on release.
+            let ids: Vec<_> = navigation.tabs().iter().map(|tab| tab.session.clone()).collect();
+            tab_drag.project(&mut tab_inputs, &ids);
+        }
         // Upstream promoted NEW_SESSION_TAB: on the Home route the strip's last
         // item is the Home slot (adaptive member, active) and the idle plus is
         // suppressed; home_hovered gates its close glyph like session tabs.
@@ -7349,6 +7358,13 @@ fn native_loop(
                     if let Some(target)=tab_menu_target_at(&navigation,rendered_tabs.as_ref(),rendered_rail.as_ref(),effective_orientation==TabOrientation::Vertical,x,y) { let menu=crate::native_tab_context_menu::TabContextMenu::new(x,y,target); if menu.is_open() && !menu.items().is_empty(){context_menu=Some(menu);} tab_press=None;add_press=None;tab_hovered=None;home_press=None;tab_home_hovered=false;needs_paint=true;continue; }
                 }
                 if kind != 0 && kind != 2 && kind != 7 {
+                    // Middle/right presses cancel a captured drag without
+                    // persisting it (`session-tabs.tsx:892-909`); left press
+                    // itself (kind 1) is drag motion and must keep the source.
+                    if matches!(kind, 5 | 6 | 8 | 9 | 10) {
+                        tab_drag.release();
+                        tab_drag.clear_suppress();
+                    }
                     tab_press = None;
                     add_press = None;
                     rail_search_press = None;
@@ -7359,6 +7375,20 @@ fn native_loop(
                     && !help_open && !view.command_palette_open() && matches!(dialog, native_setup::Dialog::None)
                     && modifiers == 0
                 {
+                    if kind == 1 && effective_orientation == TabOrientation::Vertical
+                        && tab_drag.dragging().is_some()
+                    {
+                        // Left-drag over the vertical rail: move the preview
+                        // slot, never the persisted order (that lands once on
+                        // release, `session-tabs.tsx:685-702`).
+                        if let Some(rail) = rendered_rail.as_ref() {
+                            if let Some(slot) = rail.drag_slot(y, navigation.tab_len()) {
+                                tab_drag.drag_to(slot, navigation.tab_len());
+                                needs_paint = true;
+                            }
+                        }
+                        continue;
+                    }
                     if kind == 7 {
                         tab_hovered = if effective_orientation == TabOrientation::Vertical {
                             rendered_rail.as_ref().and_then(|rail| match rail.hit(x, y) { Some(crate::native_tab_rail::RailHit::Session(id)) => Some(id), _ => None })
@@ -7433,6 +7463,10 @@ fn native_loop(
                         continue;
                     }
                     if kind == 0 {
+                        // A fresh press supersedes any captured drag; a press
+                        // on a session body re-arms it below.
+                        tab_drag.release();
+                        tab_drag.clear_suppress();
                         tab_press = None;
                         add_press = None;
                         rail_search_press = None;
@@ -7441,6 +7475,13 @@ fn native_loop(
                                 match rail.hit(x, y) {
                                     Some(crate::native_tab_rail::RailHit::Session(_)) => {
                                         if let Some((session, rect, close)) = rail.session_press_target(x, y) {
+                                            // Upstream arms the drag on the tab body itself;
+                                            // the close child keeps its own click semantics.
+                                            if !close {
+                                                if let Some(index) = navigation.tabs().iter().position(|tab| tab.session == session) {
+                                                    tab_drag.press(&session, index);
+                                                }
+                                            }
                                             tab_press = Some((session, crate::native_tabs::TabRect { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, close, effective_orientation));
                                         }
                                     }
@@ -7482,6 +7523,39 @@ fn native_loop(
                         }
                     }
                     if kind == 2 {
+                        if tab_drag.dragging().is_some() {
+                            let release = tab_drag.release();
+                            if let Some(to) = release.move_to {
+                                // One persisted move per drag; the preview is
+                                // settled against the resulting order.
+                                tab_press = None;
+                                if let Some(session) = release.select {
+                                    navigation.move_tab(&session, to);
+                                    let ids: Vec<_> = navigation.tabs().iter().map(|tab| tab.session.clone()).collect();
+                                    tab_drag.settle(&ids);
+                                    tab_drag.clear_suppress();
+                                    let scroll = view.chat_scroll_offset();
+                                    match select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|m| m.qualified()), scroll) {
+                                      Ok(result) => {
+                                        apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route, &mut compact_worker);
+                                        completion.sync(&draft);
+                                        history_pending = false;
+                                        history_active = None;
+                                        history_navigation_request = None;
+                                        blocked_history_scroll = None;
+                                        history_tail_refresh_pending = false;
+                                        history_browsing = false;
+                                      }
+                                      Err(error) => append_transcript(&mut transcript, format!("error: select tab: {error}")),
+                                    }
+                                }
+                                needs_paint = true;
+                                continue;
+                            }
+                            // A press without motion falls through to the
+                            // ordinary click capture below.
+                            tab_drag.clear_suppress();
+                        }
                         let captured = tab_press.take();
                         let captured_add = add_press.take();
                         let captured_search = rail_search_press.take();
