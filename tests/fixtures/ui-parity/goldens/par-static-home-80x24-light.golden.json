@@ -1,0 +1,744 @@
+{
+ "actions": [],
+ "capture": {
+  "adapter": "oc2-pty",
+  "clock_ms": 0,
+  "environment": {
+   "colorterm": "truecolor",
+   "cols": 80,
+   "machine": "arm64",
+   "platform": "darwin",
+   "rows": 24,
+   "term": "xterm-256color"
+  },
+  "expected_rules": [
+   "Root fills the terminal; only upstream-owned insets apply",
+   "Prompt/footer stay pinned while the transcript area is independently scrollable",
+   "Every cell style resolves through the selected theme",
+   "Wide cells keep a continuation column; no cell is silently dropped",
+   "Cursor/focus/action traces are compared together with styled cells"
+  ],
+  "normalized": [
+   "workdir_path"
+  ],
+  "pins": {
+   "opentui_commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+   "opentui_version": "0.6.8",
+   "product": "opencode-rk",
+   "reference_runtime": {
+    "bun": "1.4.4",
+    "solid_js": "1.9.15"
+   },
+   "theme_default": {
+    "mode": "dark",
+    "name": "opencode",
+    "new_designs": false
+   },
+   "upstream_commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+   "upstream_package_version": "2.1.4"
+  },
+  "product": {
+   "executable": "oc2",
+   "name": "opencode-rk",
+   "sha256": "6fd34d772e5e1cf703230d26932941fc0caedd30054c64686dc52991618d305d",
+   "version": "oc2 0.1.0-alpha.1"
+  },
+  "theme": {
+   "mode": "light",
+   "name": "opencode"
+  }
+ },
+ "cursor": {
+  "col": 6,
+  "row": 14,
+  "visible": true
+ },
+ "default_style": {
+  "bg": "#000000",
+  "fg": "#ffffff"
+ },
+ "fixture_id": "par-static-home-80x24-light",
+ "focus": {
+  "source": "terminal_has_no_focus_channel",
+  "value": null
+ },
+ "rows": [
+  {
+   "spans": [
+    {
+     "attrs": [
+      "bold",
+      "underline"
+     ],
+     "bg": "#fafafa",
+     "c": 0,
+     "fg": "#3b7dd8",
+     "n": 35
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 35,
+     "fg": "#1a1a1a",
+     "n": 45
+    }
+   ],
+   "text": "Chat •                           +                                              ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 80
+    }
+   ],
+   "text": "                                                                                ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 80
+    }
+   ],
+   "text": "                                                                                ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 80
+    }
+   ],
+   "text": "                                                                                ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 80
+    }
+   ],
+   "text": "                                                                                ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 80
+    }
+   ],
+   "text": "                                                                                ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 80
+    }
+   ],
+   "text": "                                                                                ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 21
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 21,
+     "fg": "#8a8a8a",
+     "n": 19
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 40,
+     "fg": "#1a1a1a",
+     "n": 1
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#ffffff",
+     "c": 41,
+     "fg": "#1a1a1a",
+     "n": 19
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 60,
+     "fg": "#1a1a1a",
+     "n": 20
+    }
+   ],
+   "text": "                                                      ▄                         ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 21
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 21,
+     "fg": "#8a8a8a",
+     "n": 19
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 40,
+     "fg": "#1a1a1a",
+     "n": 1
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#ffffff",
+     "c": 41,
+     "fg": "#1a1a1a",
+     "n": 19
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 60,
+     "fg": "#1a1a1a",
+     "n": 20
+    }
+   ],
+   "text": "                     █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█                    ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 21
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 21,
+     "fg": "#8a8a8a",
+     "n": 1
+    },
+    {
+     "attrs": [],
+     "bg": "#e2e2e2",
+     "c": 22,
+     "fg": "#8a8a8a",
+     "n": 2
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 24,
+     "fg": "#8a8a8a",
+     "n": 3
+    },
+    {
+     "attrs": [],
+     "bg": "#e2e2e2",
+     "c": 27,
+     "fg": "#8a8a8a",
+     "n": 2
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 29,
+     "fg": "#8a8a8a",
+     "n": 3
+    },
+    {
+     "attrs": [],
+     "bg": "#e2e2e2",
+     "c": 32,
+     "fg": "#8a8a8a",
+     "n": 3
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 35,
+     "fg": "#8a8a8a",
+     "n": 2
+    },
+    {
+     "attrs": [],
+     "bg": "#e2e2e2",
+     "c": 37,
+     "fg": "#8a8a8a",
+     "n": 2
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 39,
+     "fg": "#8a8a8a",
+     "n": 1
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 40,
+     "fg": "#1a1a1a",
+     "n": 1
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#ffffff",
+     "c": 41,
+     "fg": "#1a1a1a",
+     "n": 1
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#c6c6c6",
+     "c": 42,
+     "fg": "#1a1a1a",
+     "n": 3
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#ffffff",
+     "c": 45,
+     "fg": "#1a1a1a",
+     "n": 2
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#c6c6c6",
+     "c": 47,
+     "fg": "#1a1a1a",
+     "n": 2
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#ffffff",
+     "c": 49,
+     "fg": "#1a1a1a",
+     "n": 3
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#c6c6c6",
+     "c": 52,
+     "fg": "#1a1a1a",
+     "n": 2
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#ffffff",
+     "c": 54,
+     "fg": "#1a1a1a",
+     "n": 3
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#c6c6c6",
+     "c": 57,
+     "fg": "#1a1a1a",
+     "n": 3
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 60,
+     "fg": "#1a1a1a",
+     "n": 20
+    }
+   ],
+   "text": "                     █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀                    ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 21
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 21,
+     "fg": "#8a8a8a",
+     "n": 16
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 37,
+     "fg": "#e2e2e2",
+     "n": 2
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 39,
+     "fg": "#8a8a8a",
+     "n": 1
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 40,
+     "fg": "#1a1a1a",
+     "n": 1
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#ffffff",
+     "c": 41,
+     "fg": "#1a1a1a",
+     "n": 19
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 60,
+     "fg": "#1a1a1a",
+     "n": 20
+    }
+   ],
+   "text": "                     ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀                    ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 80
+    }
+   ],
+   "text": "                                                                                ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 80
+    }
+   ],
+   "text": "                                                                                ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 3
+    },
+    {
+     "attrs": [],
+     "bg": "#f5f5f5",
+     "c": 3,
+     "fg": "#1a1a1a",
+     "n": 75
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 78,
+     "fg": "#1a1a1a",
+     "n": 2
+    }
+   ],
+   "text": "   ┃                                                                            ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 3
+    },
+    {
+     "attrs": [],
+     "bg": "#f5f5f5",
+     "c": 3,
+     "fg": "#1a1a1a",
+     "n": 75
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 78,
+     "fg": "#1a1a1a",
+     "n": 2
+    }
+   ],
+   "text": "   ┃  Ask anything… \"Fix a TODO in the codebase\"                                ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 3
+    },
+    {
+     "attrs": [],
+     "bg": "#f5f5f5",
+     "c": 3,
+     "fg": "#1a1a1a",
+     "n": 75
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 78,
+     "fg": "#1a1a1a",
+     "n": 2
+    }
+   ],
+   "text": "   ┃                                                                            ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 3
+    },
+    {
+     "attrs": [],
+     "bg": "#f5f5f5",
+     "c": 3,
+     "fg": "#1a1a1a",
+     "n": 67
+    },
+    {
+     "attrs": [],
+     "bg": "#f5f5f5",
+     "c": 70,
+     "fg": "#8a8a8a",
+     "n": 6
+    },
+    {
+     "attrs": [],
+     "bg": "#f5f5f5",
+     "c": 76,
+     "fg": "#1a1a1a",
+     "n": 2
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 78,
+     "fg": "#1a1a1a",
+     "n": 2
+    }
+   ],
+   "text": "   ┃  unset                                                           [Send]    ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 3
+    },
+    {
+     "attrs": [],
+     "bg": "#f5f5f5",
+     "c": 3,
+     "fg": "#1a1a1a",
+     "n": 1
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 4,
+     "fg": "#f5f5f5",
+     "n": 74
+    },
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 78,
+     "fg": "#1a1a1a",
+     "n": 2
+    }
+   ],
+   "text": "   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 80
+    }
+   ],
+   "text": "   <WORKDIR>                                                   ctrl+p commands  ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 80
+    }
+   ],
+   "text": "                                                                                ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 80
+    }
+   ],
+   "text": "                                                                                ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 80
+    }
+   ],
+   "text": "                                                                                ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 80
+    }
+   ],
+   "text": "                                                                 0.1.0-alpha.1  ",
+   "w": 80
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#ffffff",
+     "c": 0,
+     "fg": "#1a1a1a",
+     "n": 80
+    }
+   ],
+   "text": "                                                                                ",
+   "w": 80
+  }
+ ],
+ "schema": "oc2.ui-parity.golden/v1",
+ "theme": {
+  "mode": "light",
+  "name": "opencode",
+  "new_designs": false,
+  "source": "inferred_from_background"
+ },
+ "viewport": {
+  "cols": 80,
+  "rows": 24
+ }
+}

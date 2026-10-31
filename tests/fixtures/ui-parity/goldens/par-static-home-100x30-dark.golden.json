@@ -1,0 +1,822 @@
+{
+ "actions": [],
+ "capture": {
+  "adapter": "oc2-pty",
+  "clock_ms": 0,
+  "environment": {
+   "colorterm": "truecolor",
+   "cols": 100,
+   "machine": "arm64",
+   "platform": "darwin",
+   "rows": 30,
+   "term": "xterm-256color"
+  },
+  "expected_rules": [
+   "Root fills the terminal; only upstream-owned insets apply",
+   "Prompt/footer stay pinned while the transcript area is independently scrollable",
+   "Every cell style resolves through the selected theme",
+   "Wide cells keep a continuation column; no cell is silently dropped",
+   "Cursor/focus/action traces are compared together with styled cells"
+  ],
+  "normalized": [
+   "workdir_path"
+  ],
+  "pins": {
+   "opentui_commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+   "opentui_version": "0.6.8",
+   "product": "opencode-rk",
+   "reference_runtime": {
+    "bun": "1.4.4",
+    "solid_js": "1.9.15"
+   },
+   "theme_default": {
+    "mode": "dark",
+    "name": "opencode",
+    "new_designs": false
+   },
+   "upstream_commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+   "upstream_package_version": "2.1.4"
+  },
+  "product": {
+   "executable": "oc2",
+   "name": "opencode-rk",
+   "sha256": "6fd34d772e5e1cf703230d26932941fc0caedd30054c64686dc52991618d305d",
+   "version": "oc2 0.1.0-alpha.1"
+  },
+  "theme": {
+   "mode": "dark",
+   "name": "opencode"
+  }
+ },
+ "cursor": {
+  "col": 16,
+  "row": 17,
+  "visible": true
+ },
+ "default_style": {
+  "bg": "#000000",
+  "fg": "#ffffff"
+ },
+ "fixture_id": "par-static-home-100x30-dark",
+ "focus": {
+  "source": "terminal_has_no_focus_channel",
+  "value": null
+ },
+ "rows": [
+  {
+   "spans": [
+    {
+     "attrs": [
+      "bold",
+      "underline"
+     ],
+     "bg": "#141414",
+     "c": 0,
+     "fg": "#fab283",
+     "n": 35
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 35,
+     "fg": "#eeeeee",
+     "n": 65
+    }
+   ],
+   "text": "Chat •                           +                                                                  ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                                    ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                                    ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                                    ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                                    ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                                    ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                                    ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                                    ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                                    ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                                    ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 31
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 31,
+     "fg": "#808080",
+     "n": 19
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 50,
+     "fg": "#eeeeee",
+     "n": 1
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#0a0a0a",
+     "c": 51,
+     "fg": "#eeeeee",
+     "n": 19
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 70,
+     "fg": "#eeeeee",
+     "n": 30
+    }
+   ],
+   "text": "                                                                ▄                                   ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 31
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 31,
+     "fg": "#808080",
+     "n": 19
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 50,
+     "fg": "#eeeeee",
+     "n": 1
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#0a0a0a",
+     "c": 51,
+     "fg": "#eeeeee",
+     "n": 19
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 70,
+     "fg": "#eeeeee",
+     "n": 30
+    }
+   ],
+   "text": "                               █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█                              ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 31
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 31,
+     "fg": "#808080",
+     "n": 1
+    },
+    {
+     "attrs": [],
+     "bg": "#282828",
+     "c": 32,
+     "fg": "#808080",
+     "n": 2
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 34,
+     "fg": "#808080",
+     "n": 3
+    },
+    {
+     "attrs": [],
+     "bg": "#282828",
+     "c": 37,
+     "fg": "#808080",
+     "n": 2
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 39,
+     "fg": "#808080",
+     "n": 3
+    },
+    {
+     "attrs": [],
+     "bg": "#282828",
+     "c": 42,
+     "fg": "#808080",
+     "n": 3
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 45,
+     "fg": "#808080",
+     "n": 2
+    },
+    {
+     "attrs": [],
+     "bg": "#282828",
+     "c": 47,
+     "fg": "#808080",
+     "n": 2
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 49,
+     "fg": "#808080",
+     "n": 1
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 50,
+     "fg": "#eeeeee",
+     "n": 1
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#0a0a0a",
+     "c": 51,
+     "fg": "#eeeeee",
+     "n": 1
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#434343",
+     "c": 52,
+     "fg": "#eeeeee",
+     "n": 3
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#0a0a0a",
+     "c": 55,
+     "fg": "#eeeeee",
+     "n": 2
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#434343",
+     "c": 57,
+     "fg": "#eeeeee",
+     "n": 2
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#0a0a0a",
+     "c": 59,
+     "fg": "#eeeeee",
+     "n": 3
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#434343",
+     "c": 62,
+     "fg": "#eeeeee",
+     "n": 2
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#0a0a0a",
+     "c": 64,
+     "fg": "#eeeeee",
+     "n": 3
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#434343",
+     "c": 67,
+     "fg": "#eeeeee",
+     "n": 3
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 70,
+     "fg": "#eeeeee",
+     "n": 30
+    }
+   ],
+   "text": "                               █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀                              ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 31
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 31,
+     "fg": "#808080",
+     "n": 16
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 47,
+     "fg": "#282828",
+     "n": 2
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 49,
+     "fg": "#808080",
+     "n": 1
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 50,
+     "fg": "#eeeeee",
+     "n": 1
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#0a0a0a",
+     "c": 51,
+     "fg": "#eeeeee",
+     "n": 19
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 70,
+     "fg": "#eeeeee",
+     "n": 30
+    }
+   ],
+   "text": "                               ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀                              ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                                    ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                                    ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 13
+    },
+    {
+     "attrs": [],
+     "bg": "#1e1e1e",
+     "c": 13,
+     "fg": "#eeeeee",
+     "n": 75
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 88,
+     "fg": "#eeeeee",
+     "n": 12
+    }
+   ],
+   "text": "             ┃                                                                                      ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 13
+    },
+    {
+     "attrs": [],
+     "bg": "#1e1e1e",
+     "c": 13,
+     "fg": "#eeeeee",
+     "n": 75
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 88,
+     "fg": "#eeeeee",
+     "n": 12
+    }
+   ],
+   "text": "             ┃  Ask anything… \"Fix a TODO in the codebase\"                                          ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 13
+    },
+    {
+     "attrs": [],
+     "bg": "#1e1e1e",
+     "c": 13,
+     "fg": "#eeeeee",
+     "n": 75
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 88,
+     "fg": "#eeeeee",
+     "n": 12
+    }
+   ],
+   "text": "             ┃                                                                                      ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 13
+    },
+    {
+     "attrs": [],
+     "bg": "#1e1e1e",
+     "c": 13,
+     "fg": "#eeeeee",
+     "n": 67
+    },
+    {
+     "attrs": [],
+     "bg": "#1e1e1e",
+     "c": 80,
+     "fg": "#808080",
+     "n": 6
+    },
+    {
+     "attrs": [],
+     "bg": "#1e1e1e",
+     "c": 86,
+     "fg": "#eeeeee",
+     "n": 2
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 88,
+     "fg": "#eeeeee",
+     "n": 12
+    }
+   ],
+   "text": "             ┃  unset                                                           [Send]              ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 13
+    },
+    {
+     "attrs": [],
+     "bg": "#1e1e1e",
+     "c": 13,
+     "fg": "#eeeeee",
+     "n": 1
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 14,
+     "fg": "#1e1e1e",
+     "n": 74
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 88,
+     "fg": "#eeeeee",
+     "n": 12
+    }
+   ],
+   "text": "             ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀            ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "             <WORKDIR>                                                   ctrl+p commands            ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                                    ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                                    ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                                    ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                                    ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                                    ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                                    ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                     0.1.0-alpha.1  ",
+   "w": 100
+  },
+  {
+   "spans": [
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 0,
+     "fg": "#eeeeee",
+     "n": 100
+    }
+   ],
+   "text": "                                                                                                    ",
+   "w": 100
+  }
+ ],
+ "schema": "oc2.ui-parity.golden/v1",
+ "theme": {
+  "mode": "dark",
+  "name": "opencode",
+  "new_designs": false,
+  "source": "inferred_from_background"
+ },
+ "viewport": {
+  "cols": 100,
+  "rows": 30
+ }
+}

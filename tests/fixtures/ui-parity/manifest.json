@@ -1,0 +1,63 @@
+{
+  "schema": "oc2.ui-parity.manifest/v1",
+  "oc2_bin": "{REPO}/target/release/oc2",
+  "pins": {
+    "product": "opencode-rk",
+    "upstream_commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+    "upstream_package_version": "2.1.4",
+    "opentui_commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+    "opentui_version": "0.6.8",
+    "reference_runtime": {
+      "bun": "1.4.4",
+      "solid_js": "1.9.15"
+    },
+    "theme_default": {
+      "name": "opencode",
+      "mode": "dark",
+      "new_designs": false
+    }
+  },
+  "renderers": {
+    "oc2-pty": {
+      "command": [
+        "{PYTHON}",
+        "{TOOLS}/renderers/oc2_pty.py",
+        "--bin",
+        "{OC2_BIN}"
+      ],
+      "timeout_s": 90,
+      "supports_events": true,
+      "supports_state": false,
+      "styled": true
+    },
+    "oc2-once": {
+      "command": [
+        "{PYTHON}",
+        "{TOOLS}/renderers/oc2_once.py",
+        "--bin",
+        "{OC2_BIN}"
+      ],
+      "timeout_s": 60,
+      "supports_events": false,
+      "supports_state": false,
+      "styled": false
+    },
+    "static": {
+      "command": [
+        "{PYTHON}",
+        "{TOOLS}/renderers/static_json.py"
+      ],
+      "timeout_s": 30,
+      "supports_events": true,
+      "supports_state": true,
+      "styled": true
+    }
+  },
+  "fixtures": [
+    "cases/par-static-home-80x24-dark.json",
+    "cases/par-static-home-80x24-light.json",
+    "cases/par-static-home-100x30-dark.json",
+    "cases/par-static-home-60x20-dark.json",
+    "cases/par-static-home-80x10-dark.json"
+  ]
+}
