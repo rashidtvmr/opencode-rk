@@ -7,6 +7,14 @@
 //! JSON serialization for the native shell.
 //!
 //! No rendering, no IO, no clock, no threads.
+//!
+//! [`GraphView::from_family`] projects the composer's session family
+//! (`packages/tui/src/routes/session/composer/subagents-tab.tsx:41-65` via
+//! `util/session.ts:9-45`) into positioned nodes plus one parent edge per
+//! child. This file is also compiled standalone by
+//! `crates/cli/tests/native_graph.rs`, so it must stay dependency-free: the
+//! tree layout below is a local extension (an explicit x per depth, one row
+//! per family member) and is not an upstream claim.
 
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +24,12 @@ pub const MAX_GRAPH_NODES: usize = 256;
 pub const MAX_GRAPH_EDGES: usize = 512;
 /// Max pan coordinate (both axes).
 pub const MAX_PAN: i32 = 1000;
+/// Horizontal distance between two family depths in [`GraphView::from_family`].
+pub const FAMILY_COLUMN_WIDTH: i32 = 24;
+/// Vertical distance between two family rows in [`GraphView::from_family`].
+pub const FAMILY_ROW_HEIGHT: i32 = 4;
+/// Fixed node height used by the family projection.
+pub const FAMILY_NODE_HEIGHT: u32 = 3;
 
 /// Classification of a node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,6 +82,34 @@ pub enum NavDir {
     Down,
     Left,
     Right,
+}
+
+/// One session in the composer's family projection. `parent` points at the
+/// daemon-supplied parent session id; the projection never invents parents.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FamilyNode {
+    pub id: String,
+    pub parent: Option<String>,
+    pub label: String,
+    pub status: NodeStatus,
+}
+
+impl FamilyNode {
+    #[must_use]
+    pub fn new(id: impl Into<String>, label: impl Into<String>, status: NodeStatus) -> Self {
+        Self {
+            id: id.into(),
+            parent: None,
+            label: label.into(),
+            status,
+        }
+    }
+
+    #[must_use]
+    pub fn with_parent(mut self, parent: impl Into<String>) -> Self {
+        self.parent = Some(parent.into());
+        self
+    }
 }
 
 /// A bounded render frame: `rows` x `cols` grid of characters.
@@ -457,6 +499,48 @@ impl GraphView {
         }
     }
 
+    /// Project a session family into a graph: one node per family member in
+    /// input order, positioned by ancestor depth, plus one solid edge from each
+    /// node to its parent when both are present.
+    ///
+    /// Input order is authoritative (the composer's `sessionFamily` is a
+    /// depth-first walk), so nodes keep their roster order vertically. A
+    /// cyclic `parent` chain cannot place a depth: such nodes become roots at
+    /// depth 0 instead of recursing forever.
+    #[must_use]
+    pub fn from_family(family: &[FamilyNode], frame_w: usize, frame_h: usize) -> Self {
+        let mut nodes = Vec::with_capacity(family.len());
+        let mut edges = Vec::new();
+        for (row, member) in family.iter().enumerate() {
+            let depth = family_depth(family, &member.id);
+            let width = member.label.chars().count() as u32 + 2;
+            nodes.push(NodeView {
+                id: member.id.clone(),
+                kind: if depth == 0 {
+                    NodeKind::Session
+                } else {
+                    NodeKind::Subagent
+                },
+                label: member.label.clone(),
+                status: member.status,
+                x: depth as i32 * FAMILY_COLUMN_WIDTH,
+                y: row as i32 * FAMILY_ROW_HEIGHT,
+                width,
+                height: FAMILY_NODE_HEIGHT,
+            });
+            if let Some(parent) = member.parent.as_deref() {
+                if family.iter().any(|candidate| candidate.id == parent) {
+                    edges.push(EdgeView {
+                        from: parent.to_owned(),
+                        to: member.id.clone(),
+                        style: EdgeStyle::Solid,
+                    });
+                }
+            }
+        }
+        Self::new(nodes, edges, frame_w, frame_h)
+    }
+
     /// Serialize to JSON string.
     #[must_use]
     pub fn to_json(&self) -> String {
@@ -486,5 +570,103 @@ impl GraphView {
             frame_h: snap.frame_h,
             capacity: snap.capacity,
         })
+    }
+}
+
+/// Number of ancestors from the first cycle-free root to `id`; cyclic or
+/// unknown chains report 0.
+fn family_depth(family: &[FamilyNode], id: &str) -> usize {
+    let mut depth = 0usize;
+    let mut current = id;
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(current);
+    while let Some(node) = family.iter().find(|node| node.id == current) {
+        let Some(parent) = node.parent.as_deref() else {
+            return depth;
+        };
+        if !family.iter().any(|candidate| candidate.id == parent) || !seen.insert(parent) {
+            return depth;
+        }
+        depth += 1;
+        if depth > 64 {
+            return 0;
+        }
+        current = parent;
+    }
+    depth
+}
+
+#[cfg(test)]
+mod native_graph_tests {
+    use super::*;
+
+    fn family() -> Vec<FamilyNode> {
+        vec![
+            FamilyNode::new("a", "A", NodeStatus::Running),
+            FamilyNode::new("a1", "A1", NodeStatus::Running).with_parent("a"),
+            FamilyNode::new("a1x", "A1X", NodeStatus::Idle).with_parent("a1"),
+            FamilyNode::new("b", "B", NodeStatus::Done),
+        ]
+    }
+
+    // P11: the composer family projects to graph nodes/edges with parent
+    // identity preserved and roster order authoritative.
+    #[test]
+    fn family_projection_keeps_order_depth_and_parent_edges() {
+        let graph = GraphView::from_family(&family(), 80, 24);
+        assert_eq!(graph.node_count(), 4);
+        assert_eq!(graph.edge_count(), 2);
+        assert_eq!(graph.focused_id(), Some("a"));
+        let json = graph.to_json();
+        let restored = GraphView::from_json(&json).expect("round-trip");
+        assert_eq!(restored.node_count(), 4);
+        assert_eq!(restored.edge_count(), 2);
+    }
+
+    #[test]
+    fn family_projection_positions_by_ancestor_depth() {
+        let graph = GraphView::from_family(&family(), 80, 24);
+        let restored = GraphView::from_json(&graph.to_json()).unwrap();
+        let snapshot: serde_json::Value = serde_json::from_str(&restored.to_json()).unwrap();
+        let nodes = snapshot["nodes"].as_array().unwrap();
+        assert_eq!(nodes[0]["kind"], "Session");
+        assert_eq!(nodes[1]["kind"], "Subagent");
+        assert_eq!(nodes[3]["kind"], "Session");
+        assert_eq!(nodes[0]["x"], 0);
+        assert_eq!(nodes[1]["x"], FAMILY_COLUMN_WIDTH);
+        assert_eq!(nodes[2]["x"], 2 * FAMILY_COLUMN_WIDTH);
+        assert_eq!(nodes[3]["x"], 0);
+        assert_eq!(nodes[2]["y"], 2 * FAMILY_ROW_HEIGHT);
+        assert_eq!(nodes[2]["height"], FAMILY_NODE_HEIGHT);
+    }
+
+    #[test]
+    fn family_projection_skips_parents_outside_the_roster_and_guards_cycles() {
+        let orphan = vec![FamilyNode::new("solo", "Solo", NodeStatus::Idle).with_parent("gone")];
+        let graph = GraphView::from_family(&orphan, 20, 5);
+        assert_eq!(graph.node_count(), 1);
+        assert_eq!(graph.edge_count(), 0);
+        let cyclic = vec![
+            FamilyNode::new("x", "X", NodeStatus::Running).with_parent("y"),
+            FamilyNode::new("y", "Y", NodeStatus::Running).with_parent("x"),
+        ];
+        let graph = GraphView::from_family(&cyclic, 20, 5);
+        // Both stay placeable (depth 0) and the parent edges are preserved.
+        assert_eq!(graph.node_count(), 2);
+        assert_eq!(graph.edge_count(), 2);
+        let empty = GraphView::from_family(&[], 10, 2);
+        assert_eq!(empty.node_count(), 0);
+        assert_eq!(empty.focused_id(), None);
+    }
+
+    // The frame stays exactly the requested size for a family graph, including
+    // when a node lies outside it.
+    #[test]
+    fn family_projection_render_stays_bounded() {
+        let graph = GraphView::from_family(&family(), 12, 4);
+        let frame = graph.render();
+        assert_eq!(frame.rows, 4);
+        assert_eq!(frame.cols, 12);
+        assert!(frame.grid.iter().all(|row| row.len() == 12));
     }
 }
