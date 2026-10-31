@@ -9646,3 +9646,68 @@ builds. Two already worked; one had a real root cause and is fixed.
   facts first (schema + append path + projection + renderer). No partial
   rendering was added: fabricating duration from wall-clock or model from the
   current selection would be invented data.
+
+## 2026-11-01 — Execution facts persisted and replayed (landed)
+
+- **Current SHA**: `c459be9b` on `main-v2` (three commits this round:
+  `b5851a65` facts schema/append/join/projection, `79e0c4e5` provider-auth
+  test isolation, `c459be9b` non-stream turn recording).
+- **Schema**: `message_execution` table keyed by `messages(id)` ON DELETE
+  CASCADE; nullable `provider_id/model_id/stop_reason` and four nullable
+  token counters. Absent facts stay absent (no zero/null fabrication);
+  `cached_tokens = 0` is preserved as a reported value.
+- **Producer**: streaming terminal and forced-stop sites append through
+  `append_assistant_with_reasoning_and_execution`; the non-stream
+  `create_turn` appends text then `record_message_execution` (that response
+  has usage but no stop reason, so none is invented).
+- **Read path**: `attach_execution` joins stored facts onto `/messages` and
+  `/history` rows as a nested `execution` object (`provider_id`, `model_id`,
+  optional `stop_reason`, optional `usage` with only reported counters).
+- **Client**: `AssistantFacts::from_history_record` replays
+  interrupted/error facts and `AssistantFacts::model_label` derives
+  `provider/model` when the row has no explicit model; the reloaded footer
+  paints `· openai/gpt-5.6` from stored facts.
+- **Installed proof**: `/tmp/oc2-verify/verify_execution_facts.py` against
+  `/Users/mymac/.local/bin` — daemon + fake JSON provider, non-stream turn,
+  `/messages` and `/history` both carry the same fact, then a fresh `oc2 tui`
+  paints `· openai/gpt-5.6` under the assistant text with zero new provider
+  requests, `/exit` 0. Raw frame: `/tmp/oc2-verify/execution-facts.raw`.
+- **Validation at `c459be9b`** (serial): storage+sessions `exit=0`
+  (89 suites), server `exit=0` (132 suites), CLI `--features native`
+  `--no-fail-fast` `exit=0` (31 binaries / 33 suites), contracts lib 9/9
+  (the three NET-003 `todo!()` stubs remain intentionally RED).
+- **Harness facts learned the hard way**:
+  - `installed_default_entrypoint` selects its child via `OC2_E2E_BIN`, not
+    `OC2_TEST_BINARY`; `native_daemon_flow`/`tui_entrypoint` hardcode
+    `CARGO_BIN_EXE_opencode-rk`, so the package must be tested with
+    `--features native` or the child falls back to the text REPL.
+  - `OC2_TEST_BUILD_JSON` must attest the exact binary the harness passes
+    (`target/debug/opencode-rk` after `--no-run`); a stale manifest fails with
+    `binary SHA does not match build manifest`.
+  - `native_state_platform_alias` requires the macOS `/private/var` temp
+    alias; do not override `TMPDIR` for the CLI suite. Server `prov_025`
+    still needs a short `TMPDIR` for its disposable unix socket.
+- **Credential pollution incident (repaired)**: `provider_integration` tests
+  `complete_code_succeeds_with_stub_runtime`,
+  `double_complete_returns_not_found_after_first` and
+  `terminal_retention_reclaims_capacity_after_successes_and_failures` ran the
+  real `LegacyCredentialSink` with the inherited `HOME`/`XDG_DATA_HOME` and
+  wrote stub `access-token`/`user-123` into the user's real
+  `~/.local/share/opencode/auth.json`, shadowing `OPENAI_API_KEY` for later
+  runs (`session_turn_api` failed with `authorization: Bearer access-token`).
+  Fix: `AuthDiskFixture` points `XDG_DATA_HOME` at a disposable directory
+  under one lock and restores the prior environment. The polluted `openai`
+  entry was removed from the real auth file; the `9router` key was preserved.
+  Backups: `auth.json.before-fixture-cleanup-20261101T035801` and
+  `…T040134`. The file stays `['9router']` after full suites.
+- **Known gaps (not claimed)**: footer still has no agent/duration/tok-per-s
+  spans (no producer timestamps/agent per message); dock Shell/Terminals tabs
+  remain unregistered; NET-003 remote protocol is unimplemented; no
+  staged-cell goldens for most of the 223 UI checklist items.
+- **Tooling note**: `Agent isolation: "worktree"` bases on a divergent
+  lineage (`967f3b46`) in this repo; create private worktrees from current
+  HEAD manually instead.
+- **Image/graph trigger research (negative)**: no prompt image parts reach
+  the client today, and pinned upstream has no Mermaid→graph route
+  (`packages/merman/src/markdown.ts:284`); `Page::Graph` is a local extension.
+  A truthful image preview needs a composer-attachment package first.
