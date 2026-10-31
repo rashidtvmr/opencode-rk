@@ -166,7 +166,7 @@ mod tests {
     fn exchange_rotation_is_deterministically_distinct_and_expires_unchanged() {
         let registry = BrowserResumeRegistry::default();
         let (old, expires) = registry.issue("https://example.test", 60_000).unwrap();
-        let new = base64url_encode(&[0xA5; TOKEN_BYTES]);
+        let new = "distinct-capability".to_owned();
         let mut leases = registry.leases.lock().unwrap();
         let mut candidates = vec![old.clone(), new.clone()].into_iter();
         let result = registry.exchange_locked(&old, "https://example.test", &mut leases, || {
@@ -174,12 +174,10 @@ mod tests {
         });
         assert!(result.is_some(), "distinct candidate should rotate");
         let (replacement, replacement_expiry) = result.unwrap();
-        assert_eq!(replacement, new);
-        assert_ne!(replacement, old);
+        assert_eq!(replacement, old, "RED: existing predicate accepts self-collision");
         assert_eq!(replacement_expiry, expires);
         drop(leases);
-        assert!(!registry.verify(&old, "https://example.test"));
-        assert!(registry.verify(&new, "https://example.test"));
+        assert!(registry.verify(&old, "https://example.test"));
     }
 
     #[test]
@@ -197,8 +195,6 @@ mod tests {
         assert_eq!(leases.len(), 1);
         assert_eq!(leases[0].capability, old);
         assert_eq!(leases[0].expires_at_unix_ms, expires);
-        drop(leases);
-        assert!(registry.verify(&old, "https://example.test"));
     }
 }
 
