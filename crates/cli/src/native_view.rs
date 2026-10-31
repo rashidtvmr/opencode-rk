@@ -131,6 +131,12 @@ pub struct NativeView {
     /// Sidebar hidden by explicit user toggle (`session.sidebar.toggle`).
     sidebar_hidden: bool,
     sidebar_open: bool,
+    /// `config.session.scrollbar`: when true the transcript viewport reserves
+    /// the upstream two cells (viewport `paddingRight` 1 + track 1) and paints
+    /// the track/thumb. Off by default, exactly as upstream.
+    scrollbar_enabled: bool,
+    /// Geometry of the last painted transcript scrollbar, if any.
+    transcript_scrollbar: Option<TranscriptScrollbar>,
     /// Active session is a child (`parentID` present): upstream suppresses
     /// the sidebar entirely.
     parent_session: bool,
@@ -475,6 +481,29 @@ mod native_home_feedback_tests {
     }
 }
 
+/// Painted transcript scrollbar for one frame
+/// (`routes/session/index.tsx:1527-1537`): a one-column track on the
+/// transcript's right edge with a thumb sized by viewport/content ratio.
+///
+/// The descriptor carries geometry only. Track and thumb colors are themed by
+/// the painter (`decrease(background.raised.base)` and `border.base`), so this
+/// type stays independent of any one palette.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TranscriptScrollbar {
+    /// Absolute screen column of the one-cell track.
+    pub x: u16,
+    /// First transcript row (the track spans the transcript viewport).
+    pub y: u16,
+    /// Transcript viewport height in rows.
+    pub height: u16,
+    /// Total styled content rows, including rows scrolled out of view.
+    pub total_rows: usize,
+    /// Rows scrolled away from the content top.
+    pub offset: usize,
+    /// Thumb `(start, len)` within the track; `None` when the content fits.
+    pub thumb: Option<(u16, u16)>,
+}
+
 /// Region geometry for the current frame, without ANSI. Downstream style
 /// writers derive cell positions from this instead of parsing the frame.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -646,6 +675,8 @@ impl NativeView {
             session_route: true,
             sidebar_hidden: false,
             sidebar_open: false,
+            scrollbar_enabled: false,
+            transcript_scrollbar: None,
             parent_session: false,
             prompt_width: PromptWidth::Default,
             shell_mode: false,
@@ -1150,6 +1181,25 @@ impl NativeView {
         self.mcp_toggle_hit = None;
         self.sidebar_hidden = hidden;
         self.sidebar_open = false;
+    }
+
+    /// `config.session.scrollbar` — off unless the user enabled it, matching
+    /// upstream's `?? false` default.
+    pub fn set_scrollbar_enabled(&mut self, enabled: bool) {
+        self.scrollbar_enabled = enabled;
+        if !enabled {
+            self.transcript_scrollbar = None;
+        }
+    }
+
+    #[must_use]
+    pub fn scrollbar_enabled(&self) -> bool { self.scrollbar_enabled }
+
+    /// Scrollbar painted by the last render, if the bar is shown and the
+    /// transcript content overflows its viewport.
+    #[must_use]
+    pub fn transcript_scrollbar(&self) -> Option<TranscriptScrollbar> {
+        self.transcript_scrollbar
     }
 
     pub fn sidebar_hidden(&self) -> bool {
@@ -2148,6 +2198,7 @@ impl NativeView {
         self.chat_row_classes.clear();
         self.chat_text_bounds.clear();
         self.chat_markdown_spans.clear();
+        self.transcript_scrollbar = None;
         self.chat.set_markdown_mode(self.markdown_mode);
         self.context_usage_hit = None;
         self.ui_regions.clear();
@@ -2160,7 +2211,10 @@ impl NativeView {
         }
         let presentation = self.presentation();
         let width = presentation.main_width;
-        let inner_width = width.saturating_sub(4);
+        // The shown transcript scrollbar reserves the upstream two cells
+        // (viewport `paddingRight` 1 + track 1) on top of the view's own 2+2
+        // padding, so text never runs under the track.
+        let inner_width = width.saturating_sub(if self.scrollbar_enabled { 6 } else { 4 });
         let is_chat = matches!(self.pages.page(), Page::Chat | Page::Theme);
         let mut center = if !is_chat {
             let (left, top, panel_width, panel_height) = self.page_panel().unwrap();
@@ -2334,10 +2388,53 @@ impl NativeView {
                 }
                 if let Some(spans) = self.chat_markdown_spans.get_mut(row) { spans.clear(); }
             }
-            let mut body: Vec<_> = body.into_iter().map(|line| padded(&line, width)).collect();
+            // The scrollbar reserves its two cells out of the transcript rows
+            // only; the composer and footer keep the full padded width, as in
+            // upstream where the bar lives inside the scrollbox viewport.
+            let transcript_end = self
+                .chat
+                .transcript_first_row()
+                .saturating_add(self.chat.transcript_viewport_rows());
+            let narrow_transcript = self.scrollbar_enabled && !has_permission;
+            let mut body: Vec<_> = body
+                .into_iter()
+                .enumerate()
+                .map(|(index, line)| {
+                    let row_width = if narrow_transcript && index < transcript_end {
+                        width.saturating_sub(2)
+                    } else {
+                        width
+                    };
+                    padded(&line, row_width)
+                })
+                .collect();
             self.chat_row_classes.resize(body.len(), crate::native_view_chat::ChatRowClass::Blank);
             self.chat_text_bounds.resize(body.len(), None);
             self.chat_markdown_spans.resize(body.len(), Vec::new());
+            if self.scrollbar_enabled && !has_permission {
+                if let Some(messages) = messages {
+                    let viewport = self.chat.transcript_viewport_rows();
+                    let total = self.chat.styled_message_rows_mode(
+                        inner_width as usize,
+                        messages,
+                        &self.box_appearance,
+                        self.markdown_mode,
+                    );
+                    let offset = total
+                        .saturating_sub(viewport)
+                        .saturating_sub(self.chat.scroll_offset());
+                    self.transcript_scrollbar = Some(TranscriptScrollbar {
+                        // Track on the transcript's right edge: content ends at
+                        // `width - 4` and reserves one padding cell before it.
+                        x: width.saturating_sub(3),
+                        y: u16::try_from(self.chat.transcript_first_row()).unwrap_or(u16::MAX),
+                        height: u16::try_from(viewport).unwrap_or(u16::MAX),
+                        total_rows: total,
+                        offset,
+                        thumb: transcript_thumb(viewport, total, offset),
+                    });
+                }
+            }
             if let Some(rows) = permission_rows {
                 body.extend(rows.iter().take(15).map(|row| padded(row, width)));
                 self.chat_row_classes.extend(std::iter::repeat_n(
@@ -2619,6 +2716,10 @@ impl NativeView {
             }
             if let Some((_, ref mut top, _)) = self.mcp_toggle_hit {
                 *top = top.saturating_add(self.tab_reservation.y_offset());
+            }
+            if let Some(scrollbar) = self.transcript_scrollbar.as_mut() {
+                scrollbar.x = scrollbar.x.saturating_add(self.tab_reservation.x_offset());
+                scrollbar.y = scrollbar.y.saturating_add(self.tab_reservation.y_offset());
             }
         }
         if let Some((left, row, button_width)) = self.send_button_region(draft) {
@@ -4420,6 +4521,27 @@ fn padded(line: &str, width: u16) -> String {
         fit(line, width.saturating_sub(padding.saturating_mul(2))),
         " ".repeat(padding as usize)
     )
+}
+
+/// Scrollbar thumb `(start, len)` from the shared OpenTUI scrollbox model, so
+/// the painted bar and the bridge's scroll semantics can never diverge.
+fn transcript_thumb(viewport: usize, total: usize, offset: usize) -> Option<(u16, u16)> {
+    use opencode_rk_opentui_bridge::layout::Rect;
+    use opencode_rk_opentui_bridge::scroll::ScrollBox;
+    let track = u32::try_from(viewport).ok()?;
+    if track == 0 {
+        return None;
+    }
+    let content = u32::try_from(total).ok()?;
+    let offset = u32::try_from(offset).ok()?;
+    let mut scroll = ScrollBox::new(Rect::new(0, 0, 1, track));
+    scroll.set_content_size(1, content);
+    scroll.scroll_to_y(offset);
+    let thumb = scroll.vertical_thumb(track)?;
+    Some((
+        u16::try_from(thumb.start).ok()?,
+        u16::try_from(thumb.len).ok()?,
+    ))
 }
 
 /// Honest startup page rows: `enabled` mirrors an actual reachable backend
@@ -6474,5 +6596,81 @@ mod dialog_stack_composition_tests {
                 "painted row {index} is the composed row"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod transcript_scrollbar_tests {
+    use super::*;
+    use crate::native_view_chat::{ChatMessage, ChatRole};
+
+    fn long_conversation(count: usize) -> Vec<ChatMessage> {
+        (0..count)
+            .map(|index| {
+                ChatMessage::text(
+                    if index % 2 == 0 { ChatRole::User } else { ChatRole::Assistant },
+                    format!("message {index} lorem ipsum dolor sit amet consectetur"),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn disabled_scrollbar_paints_nothing_and_preserves_text_width() {
+        let mut view = NativeView::new(96, 24);
+        view.set_session_route(true);
+        let messages = long_conversation(40);
+        let _ = view.render_typed("draft", &messages, false, &[]);
+        assert_eq!(view.transcript_scrollbar(), None);
+        assert!(!view.scrollbar_enabled());
+    }
+
+    #[test]
+    fn enabled_scrollbar_reserves_two_cells_and_tracks_the_viewport() {
+        let mut view = NativeView::new(96, 24);
+        view.set_session_route(true);
+        view.set_scrollbar_enabled(true);
+        let messages = long_conversation(40);
+        let frame = view.render_typed("draft", &messages, false, &[]);
+        let scrollbar = view.transcript_scrollbar().expect("overflowing transcript shows the bar");
+        assert_eq!(scrollbar.total_rows > usize::from(scrollbar.height), true);
+        assert!(scrollbar.thumb.is_some(), "overflowing content paints a thumb");
+        // Track sits on the viewport's right edge: the last padded cell before
+        // the view's own 2-cell right margin.
+        assert_eq!(scrollbar.x, view.presentation().main_width - 3);
+        let (start, len) = scrollbar.thumb.unwrap();
+        assert_eq!(scrollbar.offset, scrollbar.total_rows - usize::from(scrollbar.height), "a fresh render follows the tail");
+        assert!(len >= 1 && start + len <= scrollbar.height);
+        assert_eq!(start + len, scrollbar.height, "the tail pins the thumb to the track bottom");
+        // Reserved cells: no transcript text reaches the track column.
+        for row in scrollbar.y..scrollbar.y + scrollbar.height {
+            let cell = crate::native_view_layout::slice_cells(&frame[usize::from(row)], scrollbar.x, 1);
+            assert_eq!(cell, " ", "row {row} must not paint under the track: {cell:?}");
+        }
+    }
+
+    #[test]
+    fn thumb_moves_up_when_the_transcript_scrolls_away_from_the_tail() {
+        let mut view = NativeView::new(96, 24);
+        view.set_session_route(true);
+        view.set_scrollbar_enabled(true);
+        let messages = long_conversation(60);
+        let _ = view.render_typed("draft", &messages, false, &[]);
+        let tail = view.transcript_scrollbar().expect("bar").thumb.expect("thumb");
+        view.scroll_up(10);
+        let _ = view.render_typed("draft", &messages, false, &[]);
+        let scrolled = view.transcript_scrollbar().expect("bar").thumb.expect("thumb");
+        assert!(scrolled.0 < tail.0, "scrolling up moves the thumb toward the top: {scrolled:?} vs {tail:?}");
+    }
+
+    #[test]
+    fn fitting_content_shows_the_track_without_a_thumb() {
+        let mut view = NativeView::new(96, 24);
+        view.set_session_route(true);
+        view.set_scrollbar_enabled(true);
+        let messages = vec![ChatMessage::text(ChatRole::User, "short")];
+        let _ = view.render_typed("draft", &messages, false, &[]);
+        let scrollbar = view.transcript_scrollbar().expect("the bar reserves its cells whenever shown");
+        assert_eq!(scrollbar.thumb, None, "content that fits has no thumb");
     }
 }

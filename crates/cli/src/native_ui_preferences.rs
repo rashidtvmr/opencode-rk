@@ -60,6 +60,30 @@ impl UiPreferences {
         if let Some(text) = inline { apply(text, &mut selected, &mut diagnostics, "inline CLI"); }
         (selected, diagnostics)
     }
+
+    /// `config.session.scrollbar` (`routes/session/index.tsx:243`). Upstream
+    /// defaults to `false`; an explicit non-boolean is reported as the same
+    /// bounded diagnostic style used for the other session settings.
+    pub fn session_scrollbar(cli_path: Option<&Path>, inline: Option<&str>) -> (bool, Vec<String>) {
+        fn apply(text: &str, selected: &mut bool, diagnostics: &mut Vec<String>, label: &str) {
+            if text.len() > MAX_CONFIG_BYTES { diagnostics.push(format!("{label} configuration exceeds size limit")); return; }
+            let clean = match strip_jsonc(text) { Ok(clean) => clean, Err(_) => { diagnostics.push(format!("invalid {label} configuration")); return; } };
+            let value = match serde_json::from_str::<Value>(&clean) {
+                Ok(value) => value,
+                Err(_) => { diagnostics.push(format!("invalid {label} configuration")); return; }
+            };
+            match value.get("session").and_then(|session| session.get("scrollbar")) {
+                Some(Value::Bool(shown)) => *selected = *shown,
+                Some(_) => diagnostics.push("invalid session.scrollbar value".to_owned()),
+                None => {}
+            }
+        }
+        let mut selected = false;
+        let mut diagnostics = Vec::new();
+        if let Some(path) = cli_path { let mut budget = crate::native_ui_budget::ReadBudget::default(); match budget.read(path, MAX_CONFIG_BYTES, "CLI config") { Ok(Some(text)) => apply(&text, &mut selected, &mut diagnostics, "disk CLI"), Ok(None) => {}, Err(_) => diagnostics.push("unable to read bounded global CLI configuration".into()) } }
+        if let Some(text) = inline { apply(text, &mut selected, &mut diagnostics, "inline CLI"); }
+        (selected, diagnostics)
+    }
     /// Load the V2 global/inline CLI theme. The inline document overlays the
     /// global document, matching upstream CLI config merge semantics. Legacy
     /// `tui.json`/kv theme remains the caller's lower-precedence fallback.
@@ -1131,6 +1155,39 @@ mod markdown_mode_tests {
         let (selected, diagnostics) = UiPreferences::markdown_mode(None, Some(&malformed));
         assert_eq!(selected, None);
         assert_eq!(diagnostics, vec!["invalid inline CLI configuration"]);
+        assert!(diagnostics.iter().all(|line| !line.contains(secret)));
+    }
+}
+
+#[cfg(test)]
+mod session_scrollbar_tests {
+    use super::*;
+
+    #[test]
+    fn absent_scrollbar_keeps_the_upstream_off_default() {
+        assert_eq!(UiPreferences::session_scrollbar(None, None), (false, Vec::<String>::new()));
+        assert_eq!(UiPreferences::session_scrollbar(None, Some(r#"{"session":{}}"#)), (false, Vec::<String>::new()));
+    }
+
+    #[test]
+    fn inline_true_overrides_disk_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        fs::write(&path, r#"{"session":{"scrollbar":false}}"#).unwrap();
+        assert_eq!(UiPreferences::session_scrollbar(Some(&path), None), (false, Vec::<String>::new()));
+        assert_eq!(
+            UiPreferences::session_scrollbar(Some(&path), Some(r#"{"session":{"scrollbar":true}}"#)),
+            (true, Vec::<String>::new())
+        );
+    }
+
+    #[test]
+    fn non_boolean_is_a_generic_diagnostic_without_content() {
+        let secret = "SECRET_SCROLLBAR_VALUE";
+        let (selected, diagnostics) =
+            UiPreferences::session_scrollbar(None, Some(&format!(r#"{{"session":{{"scrollbar":"{secret}"}}}}"#)));
+        assert!(!selected);
+        assert_eq!(diagnostics, vec!["invalid session.scrollbar value"]);
         assert!(diagnostics.iter().all(|line| !line.contains(secret)));
     }
 }

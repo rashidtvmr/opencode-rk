@@ -113,6 +113,11 @@ pub struct ChatView {
     scroll: Cell<usize>,
     prompt_cursor: Option<usize>,
     markdown_mode: crate::markdown_runs::MarkdownMode,
+    /// Row of the styled body where the transcript content starts, and how
+    /// many transcript rows the last render exposed. The transcript
+    /// scrollbar is painted against these live values, never recomputed.
+    transcript_first: Cell<usize>,
+    transcript_viewport: Cell<usize>,
 }
 
 impl ChatView {
@@ -2796,6 +2801,8 @@ impl ChatView {
         let first = rows.iter().take(body_h)
             .position(|(_, class)| *class == ChatRowClass::Header)
             .map_or(0, |header| header + 1);
+        self.transcript_first.set(first);
+        self.transcript_viewport.set(transcript_h);
         let mut bounds = vec![None; rows.len()];
         let mut row_spans: Vec<Vec<ChatRunSpan>> = vec![Vec::new(); rows.len()];
         for (index, ((text, class, range), spans)) in visible.into_iter().enumerate() {
@@ -2850,10 +2857,41 @@ impl ChatView {
         messages: &[ChatMessage],
         appearance: &crate::native_box_style::BoxAppearance,
     ) -> usize {
-        messages.iter().enumerate().map(|(index, message)|
-            boxed_message_rows(width, message, starts_styled_group(index, messages), appearance).len()
-        ).sum()
+        self.styled_message_rows_mode(width, messages, appearance, self.markdown_mode)
     }
+
+    /// Total content rows the styled transcript paints for `messages`, using
+    /// the same row model and Markdown mode as the frame. This is the
+    /// scrollbar's content height; callers enable it only when the bar is
+    /// actually shown, so the extra pass never runs by default.
+    pub fn styled_message_rows_mode(
+        &self,
+        width: usize,
+        messages: &[ChatMessage],
+        appearance: &crate::native_box_style::BoxAppearance,
+        markdown_mode: crate::markdown_runs::MarkdownMode,
+    ) -> usize {
+        let mut spans = Vec::new();
+        messages.iter().enumerate().map(|(index, message)| {
+            spans.clear();
+            boxed_message_rows_spans_mode(
+                width,
+                message,
+                starts_styled_group(index, messages),
+                appearance,
+                &mut spans,
+                markdown_mode,
+            ).len()
+        }).sum()
+    }
+
+    /// First styled-body row owned by the transcript in the last render.
+    #[must_use]
+    pub fn transcript_first_row(&self) -> usize { self.transcript_first.get() }
+
+    /// Transcript viewport height in rows from the last render.
+    #[must_use]
+    pub fn transcript_viewport_rows(&self) -> usize { self.transcript_viewport.get() }
 
     /// Anchor the last currently visible transcript row to a message and an
     /// intra-message rendered-row offset. The caller supplies the same full

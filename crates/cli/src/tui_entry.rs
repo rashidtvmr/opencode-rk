@@ -1454,6 +1454,12 @@ struct PaintCtx {
     vertical_rail: Option<crate::native_tab_rail::RailFrame>,
     context_menu: Option<crate::native_tab_context_menu::MenuFrame>,
     rename_dialog: Option<(String, Option<String>)>,
+    /// Transcript scrollbar geometry for this frame, when shown.
+    transcript_scrollbar: Option<crate::native_view::TranscriptScrollbar>,
+    /// `decrease(background.raised.base)` — the track surface upstream paints.
+    scrollbar_track: Rgba,
+    /// `border.base` — the thumb color upstream paints.
+    scrollbar_thumb: Rgba,
 }
 
 #[cfg(all(test, feature = "native"))]
@@ -1849,11 +1855,92 @@ mod surface_paint_regressions {
             vertical_rail: None,
             context_menu: None,
             rename_dialog: None,
+            transcript_scrollbar: None,
+            scrollbar_track: Rgba::rgb(10, 10, 10),
+            scrollbar_thumb: Rgba::rgb(72, 72, 72),
         }).expect("paint native frame");
         let snapshot = renderer.snapshot_text().expect("native text snapshot");
         let actual = snapshot.lines().nth(usize::from(composer.1)).expect("painted border row");
         assert_eq!(actual.trim_end(), lines[usize::from(composer.1)].trim_end(),
             "busy status must not overwrite the composer's outline");
+    }
+
+    #[test]
+    fn transcript_scrollbar_paints_track_and_thumb_in_reserved_cells() {
+        use crate::native_view_chat::{ChatMessage, ChatRole};
+        let mut view = crate::native_view::NativeView::new(80, 24);
+        view.set_session_route(true);
+        view.set_scrollbar_enabled(true);
+        let messages: Vec<_> = (0..40)
+            .map(|index| {
+                ChatMessage::text(
+                    if index % 2 == 0 { ChatRole::User } else { ChatRole::Assistant },
+                    format!("message {index} lorem ipsum dolor sit amet"),
+                )
+            })
+            .collect();
+        let lines = view.render_typed("draft", &messages, false, &[]);
+        let scrollbar = view.transcript_scrollbar().expect("overflowing transcript shows the bar");
+        let mut renderer = NativeRenderer::create_memory(80, 24).expect("memory renderer");
+        native_paint(&mut renderer, &lines, PaintCtx {
+            palette: crate::native_theme_runtime::Palette::opencode_dark(),
+            markdown: None,
+            presentation: view.presentation(),
+            modal_rows: None,
+            modal: view.modal_presentation(),
+            sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
+            chat_row_classes: view.chat_row_classes().to_vec(),
+            chat_markdown_spans: view.chat_markdown_spans().to_vec(),
+            selection: Vec::new(),
+            appearance: crate::native_box_style::BoxAppearance::default(),
+            modal_box: crate::native_box_style::BoxId::Dialog,
+            loading: None,
+            home: false,
+            rail_prompt: view.session_prompt_rail("draft"),
+            composer: None,
+            completion: None,
+            context_usage_styles: view.context_usage_styles().to_vec(),
+            sidebar_span_styles: view.sidebar_span_styles().to_vec(),
+            ui_regions: view.ui_regions(),
+            modal_underlay_rows: view.modal_underlay_rows(),
+            page_panel: view.page_panel(),
+            logo: None,
+            tabs: None,
+            vertical_rail: None,
+            context_menu: None,
+            rename_dialog: None,
+            transcript_scrollbar: Some(scrollbar),
+            scrollbar_track: Rgba::rgb(12, 12, 12),
+            scrollbar_thumb: Rgba::rgb(72, 72, 72),
+        }).expect("paint native frame");
+        let snapshot = renderer.snapshot_text().expect("native text snapshot");
+        let rows: Vec<_> = snapshot.lines().collect();
+        let column = usize::from(scrollbar.x);
+        let (start, len) = scrollbar.thumb.expect("overflowing content has a thumb");
+        let first = usize::from(scrollbar.y);
+        for offset in 0..usize::from(len) {
+            let row = &rows[first + usize::from(start) + offset];
+            assert_eq!(row.chars().nth(column), Some('█'),
+                "thumb cell at row {}: {row:?}", first + usize::from(start) + offset);
+        }
+        let track_end = first + usize::from(scrollbar.height);
+        assert_eq!(track_end <= rows.len(), true);
+        for row in first..track_end {
+            let in_thumb = row >= first + usize::from(start)
+                && row < first + usize::from(start) + usize::from(len);
+            if !in_thumb {
+                let cell = rows[row].chars().nth(column);
+                assert_eq!(cell, Some(' '), "track row {row} keeps the blank surface: {cell:?}");
+            }
+        }
+        // The reserved padding cell before the track never holds transcript
+        // text, and the track itself only ever holds the thumb or a blank.
+        for row in first..track_end {
+            let padding = crate::native_view_layout::slice_cells(&rows[row], scrollbar.x - 1, 1);
+            assert_eq!(padding, " ", "row {row} reserves the padding cell: {padding:?}");
+            let track = rows[row].chars().nth(column);
+            assert!(matches!(track, Some(' ') | Some('█')), "row {row} track cell: {track:?}");
+        }
     }
 
     #[test]
@@ -3189,6 +3276,49 @@ fn native_paint(
         );
         for (x, text, fg, bg, attributes) in spans {
             renderer.draw_text_styled(x, y, &text, fg, Some(bg), attributes)?;
+        }
+    }
+    // Transcript scrollbar (`routes/session/index.tsx:1527-1537`): one track
+    // column on the viewport's right edge with an opaque thumb sized by the
+    // content/viewport ratio. Painted after the transcript text so the two
+    // reserved cells never show stale glyphs.
+    if let Some(scrollbar) = ctx.transcript_scrollbar {
+        let x = u32::from(scrollbar.x);
+        let top = u32::from(scrollbar.y);
+        let height = u32::from(scrollbar.height);
+        if height > 0 && x < cols {
+            for row in top..top.saturating_add(height).min(rows) {
+                let under_modal = modal.is_some_and(|(left, modal_top, width, modal_height)| {
+                    x >= left && x < left.saturating_add(width)
+                        && row >= modal_top && row < modal_top.saturating_add(modal_height)
+                });
+                if under_modal {
+                    continue;
+                }
+                renderer.draw_text_styled(
+                    x, row, " ", ctx.scrollbar_thumb, Some(ctx.scrollbar_track), 0,
+                )?;
+            }
+            if let Some((start, len)) = scrollbar.thumb {
+                for offset in 0..u32::from(len) {
+                    let row = top
+                        .saturating_add(u32::from(start))
+                        .saturating_add(offset);
+                    if row >= rows {
+                        break;
+                    }
+                    let under_modal = modal.is_some_and(|(left, modal_top, width, modal_height)| {
+                        x >= left && x < left.saturating_add(width)
+                            && row >= modal_top && row < modal_top.saturating_add(modal_height)
+                    });
+                    if under_modal {
+                        continue;
+                    }
+                    renderer.draw_text_styled(
+                        x, row, "█", ctx.scrollbar_thumb, Some(ctx.scrollbar_track), 0,
+                    )?;
+                }
+            }
         }
     }
     // logo.ts + component/logo.tsx: two 19-cell halves separated by one
@@ -4755,6 +4885,15 @@ fn native_loop(
         }
     };
     view.set_sidebar_hidden(preferences.sidebar_hidden);
+    let (scrollbar_enabled, scrollbar_diagnostics) =
+        crate::native_ui_preferences::UiPreferences::session_scrollbar(
+            cli_path.as_deref(),
+            inline_cli.as_deref(),
+        );
+    for diagnostic in scrollbar_diagnostics {
+        append_transcript(&mut transcript, format!("error: {diagnostic}"));
+    }
+    view.set_scrollbar_enabled(scrollbar_enabled);
     view.set_prompt_width(match preferences.prompt_width {
         Some(crate::native_ui_preferences::PromptWidth::Auto) => {
             crate::native_view::PromptWidth::Auto
@@ -6207,6 +6346,16 @@ fn native_loop(
             vertical_rail: frame_rail.clone(),
             context_menu: context_menu.as_ref().map(|menu| menu.frame(crate::native_tab_context_menu::Viewport { width: viewport.0, height: viewport.1 })),
             rename_dialog: rename_input.as_ref().map(|(_,title)| (title.clone(), rename_error.clone())),
+            transcript_scrollbar: view.transcript_scrollbar(),
+            scrollbar_track: theme
+                .semantic
+                .as_ref()
+                .map(|semantic| {
+                    let [r, g, b, a] = crate::native_prompt_pane::prompt_surface(semantic).rgba;
+                    Rgba::new(r, g, b, a)
+                })
+                .unwrap_or_else(|| paint_color(theme.palette, crate::native_theme_runtime::Slot::BackgroundPanel)),
+            scrollbar_thumb: paint_color(theme.palette, crate::native_theme_runtime::Slot::Border),
                 },
             )?;
             rendered_tabs = Some(frame_tabs);

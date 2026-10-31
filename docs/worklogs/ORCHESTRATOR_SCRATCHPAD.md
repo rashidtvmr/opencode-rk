@@ -9370,3 +9370,43 @@ Home. No visual parity PASS; native color readback remains unresolved.
   --features native --tests --no-fail-fast -- --test-threads=1`, 33 targets,
   **4377 passed / 0 failed**, exit 0 (includes the 1920 bin unit tests whose two
   transport-contract assertions caught the reverted `/health` probe).
+
+## 2026-11-01 — Transcript scrollbar: config plumbing, geometry and painting
+
+`native_layout::SessionRegions` already computed `transcript_track`, and
+`native_shell_frame` tested the LAY-16 reservation, but nothing on the live
+render path consumed either: `config.session.scrollbar` was never parsed, so
+enabling it changed nothing (upstream `routes/session/index.tsx:243`,
+`:1527-1537`). Package implemented on the live path only; the layout model was
+left untouched.
+
+- **Config**: `UiPreferences::session_scrollbar` reads `session.scrollbar`
+  from the same bounded CLI config as `session.markdown`, defaults to `false`
+  (upstream `?? false`), and reports a generic `invalid session.scrollbar value`
+  diagnostic for non-booleans. Wired in `native_loop` next to
+  `set_sidebar_hidden`.
+- **Reservation**: when enabled, `NativeView` renders the transcript at
+  `main_width - 6` (view 2+2 padding plus the two upstream scrollbar cells) and
+  pads only the transcript rows two cells narrower; composer/footer rows keep
+  the full width, because upstream's bar lives inside the scrollbox viewport,
+  not the composer.
+- **Geometry**: `ChatView` records `transcript_first_row`/`transcript_viewport_rows`
+  during the styled render (free), and `styled_message_rows_mode` gives the
+  full content height with the same row model and Markdown mode as the frame.
+  This extra pass runs only when the bar is shown. The thumb uses the shared
+  `opentui_bridge::scroll::ScrollBox` model, so painted geometry and bridge
+  scroll semantics cannot diverge.
+- **Paint**: `PaintCtx` gained `transcript_scrollbar` plus the two themed
+  colors — track `decrease(background.raised.base)` (reusing
+  `native_prompt_pane::prompt_surface`; literal themes fall back to
+  `backgroundPanel`, matching upstream `decrease` on a literal token) and thumb
+  `border.base`. `native_paint` fills the track column and stamps `█` on the
+  thumb rows after the transcript text, skipping cells under an open modal.
+- Tests: `native_ui_preferences::session_scrollbar_tests` 3/3,
+  `native_view::transcript_scrollbar_tests` 4/4 (reservation, tail-pinned thumb,
+  scroll-up thumb travel, no thumb when content fits),
+  `tui_entry::surface_paint_regressions::transcript_scrollbar_paints_track_and_thumb_in_reserved_cells`
+  (memory-renderer cells). `oc2` unit suite: 1928 passed / 0 failed; default
+  (non-native) build still `cargo check` clean.
+- Not yet claimed: installed-terminal capture of the bar under an alternate
+  theme. The memory-renderer test proves cells and geometry, not a screenshot.
