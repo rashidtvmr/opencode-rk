@@ -9511,6 +9511,17 @@ builds. Two already worked; one had a real root cause and is fixed.
   action is reachable.
 - Focused tests: `native_input_decoder::mouse_protocol_tests` 20/20; default
   (non-native) `cargo check` clean.
+
+- **Vertical rail padding is already correct**: a 120x30 installed capture with
+  `OPENCODE_CLI_CONFIG_CONTENT={"tabs":{"layout":"vertical"}}` renders the
+  pinned 42-wide rail: blank `paddingTop` row 1, title row `   vertical probe`
+  (three-cell number prefix), detail row, one gap row, then ` + New session`
+  (one-cell `paddingLeft`, `+` then title), and the composer starting at the
+  rail's right edge. That matches the committed pinned reference fixture
+  `rail_text_and_busy_indicator_match_pinned_reference_frame`
+  (`native_tab_rail.rs`), so the 2026-10-30 "missing padding" report is not
+  reproducible on this build. Same capture: `/exit` exits 0 in vertical layout
+  (`/tmp/oc2-verify/vertical.raw`).
 - Still open from 9295: model/progress placement review, vertical new-tab
   padding, response background overflow (not reproduced on the current build:
   the 160x40 capture shows the sidebar surface at cols 119-160 and message
