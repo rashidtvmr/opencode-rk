@@ -9746,3 +9746,33 @@ builds. Two already worked; one had a real root cause and is fixed.
   message); tokens-per-second needs per-step `time.streamed`, which is not
   stored; the non-stream cancel site still reports `bad_gateway` instead of
   the typed `cancelled` code.
+
+## 2026-11-01 — Sidebar absolute body scrollbar (landed)
+
+- **Contract**: upstream `routes/session/sidebar.tsx:56-69` paints an
+  ABSOLUTE one-column scrollbox bar (`right: 0`, `height: 100%`) over the
+  body's reserved right padding, with the title and footer boxes pinned
+  outside it; track `background.raised.base`, thumb `theme.scrollbar.base`.
+- **Model**: `native_sidebar::Sidebar::body_viewport` returns
+  `(body_start, viewport, total)`; `StatusView::sidebar_scroll_facts` adds the
+  clamped offset and refuses a bar without real overflow.
+  `NativeView::sidebar_scrollbar` publishes
+  `SidebarScrollbar { x, y, height, total_rows, offset, thumb }` with the
+  thumb from the shared OpenTUI `ScrollBox` model (`scrollbar_thumb`).
+- **Placement**: pane-local column `PADDING_LEFT + body_width(38)` = 39
+  (absolute `sidebar_offset + 39`); body band starts after the pinned header
+  (`sidebar_top + 1` when the box is framed). The desktop body itself is
+  painted by the same `render`/`visible_span` composition as before.
+- **Painting**: `PaintCtx.sidebar_scrollbar`; the thumb cell paints `█` in
+  `Slot::Border` on the sidebar's `backgroundPanel` surface after the body
+  text, skipped under an open modal. The track is the sidebar surface, so no
+  track fill is invented.
+- **Honest absence**: no overflow → no descriptor, no painted cell; narrow or
+  hidden panes → none.
+- **Validation**: 3 new tests (geometry + tail pinning for framed/unframed,
+  absence, painted thumb column) and the full sidebar filter (110 passed),
+  `--features native --test-threads=1`.
+- **Remaining SIDE gaps** (audit 2026-11-01): runtime facts for
+  Context/Limit/footer/onboarding, footer hover menu hit-test, MCP click
+  semantics (open vs toggle), disclosure persistence, onboarding affordances,
+  and staged-cell goldens for SIDE-03..15.

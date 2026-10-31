@@ -1574,6 +1574,8 @@ struct PaintCtx {
     rename_dialog: Option<(String, Option<String>)>,
     /// Transcript scrollbar geometry for this frame, when shown.
     transcript_scrollbar: Option<crate::native_view::TranscriptScrollbar>,
+    /// Sidebar body scrollbar geometry for this frame, when shown.
+    sidebar_scrollbar: Option<crate::native_view::SidebarScrollbar>,
     /// `decrease(background.raised.base)` — the track surface upstream paints.
     scrollbar_track: Rgba,
     /// `border.base` — the thumb color upstream paints.
@@ -1974,6 +1976,7 @@ mod surface_paint_regressions {
             context_menu: None,
             rename_dialog: None,
             transcript_scrollbar: None,
+            sidebar_scrollbar: None,
             scrollbar_track: Rgba::rgb(10, 10, 10),
             scrollbar_thumb: Rgba::rgb(72, 72, 72),
         }).expect("paint native frame");
@@ -2028,6 +2031,7 @@ mod surface_paint_regressions {
             context_menu: None,
             rename_dialog: None,
             transcript_scrollbar: Some(scrollbar),
+            sidebar_scrollbar: None,
             scrollbar_track: Rgba::rgb(12, 12, 12),
             scrollbar_thumb: Rgba::rgb(72, 72, 72),
         }).expect("paint native frame");
@@ -2058,6 +2062,82 @@ mod surface_paint_regressions {
             assert_eq!(padding, " ", "row {row} reserves the padding cell: {padding:?}");
             let track = rows[row].chars().nth(column);
             assert!(matches!(track, Some(' ') | Some('█')), "row {row} track cell: {track:?}");
+        }
+    }
+
+    #[test]
+    fn sidebar_scrollbar_paints_the_thumb_over_the_reserved_padding_column() {
+        let mut view = crate::native_view::NativeView::new(148, 30);
+        view.set_session_route(true);
+        let status: serde_json::Map<String, serde_json::Value> = (0..64)
+            .map(|index| {
+                (
+                    format!("server-{index:02}"),
+                    serde_json::json!({"status":"connected"}),
+                )
+            })
+            .collect();
+        let included: serde_json::Map<String, serde_json::Value> = status
+            .keys()
+            .map(|name| (name.clone(), serde_json::json!(false)))
+            .collect();
+        view.apply_mcp(&serde_json::json!({"status":status,"included":included}))
+            .unwrap();
+        let lines = view.render_typed("draft", &[], false, &[]);
+        let scrollbar = view.sidebar_scrollbar().expect("overflowing sidebar shows the bar");
+        let (start, len) = scrollbar.thumb.expect("overflowing body has a thumb");
+        let mut renderer = NativeRenderer::create_memory(148, 30).expect("memory renderer");
+        native_paint(&mut renderer, &lines, PaintCtx {
+            palette: crate::native_theme_runtime::Palette::opencode_dark(),
+            markdown: None,
+            presentation: view.presentation(),
+            modal_rows: None,
+            modal: view.modal_presentation(),
+            sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
+            chat_row_classes: view.chat_row_classes().to_vec(),
+            chat_markdown_spans: view.chat_markdown_spans().to_vec(),
+            selection: Vec::new(),
+            appearance: crate::native_box_style::BoxAppearance::default(),
+            modal_box: crate::native_box_style::BoxId::Dialog,
+            loading: None,
+            home: false,
+            rail_prompt: view.session_prompt_rail("draft"),
+            composer: None,
+            completion: None,
+            context_usage_styles: view.context_usage_styles().to_vec(),
+            sidebar_span_styles: view.sidebar_span_styles().to_vec(),
+            ui_regions: view.ui_regions(),
+            modal_underlay_rows: view.modal_underlay_rows(),
+            page_panel: view.page_panel(),
+            logo: None,
+            tabs: None,
+            vertical_rail: None,
+            context_menu: None,
+            rename_dialog: None,
+            transcript_scrollbar: None,
+            sidebar_scrollbar: Some(scrollbar),
+            scrollbar_track: Rgba::rgb(12, 12, 12),
+            scrollbar_thumb: Rgba::rgb(72, 72, 72),
+        }).expect("paint native frame");
+        let snapshot = renderer.snapshot_text().expect("native text snapshot");
+        let rows: Vec<_> = snapshot.lines().collect();
+        let column = usize::from(scrollbar.x);
+        let first = usize::from(scrollbar.y);
+        for offset in 0..usize::from(len) {
+            let row = &rows[first + usize::from(start) + offset];
+            assert_eq!(row.chars().nth(column), Some('█'),
+                "thumb cell at row {}: {row:?}", first + usize::from(start) + offset);
+        }
+        // Header and footer bands stay outside the track entirely.
+        let track_end = first + usize::from(scrollbar.height);
+        assert_eq!(track_end <= rows.len(), true);
+        for row in 0..first {
+            assert_ne!(rows[row].chars().nth(column), Some('█'),
+                "pinned header row {row} never holds the thumb");
+        }
+        for row in track_end..usize::from(view.presentation().rows) {
+            assert_ne!(rows[row].chars().nth(column), Some('█'),
+                "footer/shared rows never hold the thumb: row {row}");
         }
     }
 
@@ -3602,6 +3682,34 @@ fn native_paint(
                     }
                     renderer.draw_text_styled(
                         x, row, "█", ctx.scrollbar_thumb, Some(ctx.scrollbar_track), 0,
+                    )?;
+                }
+            }
+        }
+    }
+    // Sidebar body scrollbar (`routes/session/sidebar.tsx:56-69`): ABSOLUTE
+    // one-column bar over the body's reserved padding. The track surface is the
+    // sidebar's own raised background, so only the thumb is painted; this runs
+    // after the body text so the reserved cell never keeps stale glyphs.
+    if let Some(scrollbar) = ctx.sidebar_scrollbar {
+        if let Some((start, len)) = scrollbar.thumb {
+            let x = u32::from(scrollbar.x);
+            let top = u32::from(scrollbar.y);
+            if x < cols {
+                for offset in 0..u32::from(len) {
+                    let row = top.saturating_add(u32::from(start)).saturating_add(offset);
+                    if row >= rows {
+                        break;
+                    }
+                    let under_modal = modal.is_some_and(|(left, modal_top, width, modal_height)| {
+                        x >= left && x < left.saturating_add(width)
+                            && row >= modal_top && row < modal_top.saturating_add(modal_height)
+                    });
+                    if under_modal {
+                        continue;
+                    }
+                    renderer.draw_text_styled(
+                        x, row, "█", ctx.scrollbar_thumb, Some(panel), 0,
                     )?;
                 }
             }
@@ -6693,6 +6801,7 @@ fn native_loop(
             context_menu: context_menu.as_ref().map(|menu| menu.frame(crate::native_tab_context_menu::Viewport { width: viewport.0, height: viewport.1 })),
             rename_dialog: rename_input.as_ref().map(|(_,title)| (title.clone(), rename_error.clone())),
             transcript_scrollbar: view.transcript_scrollbar(),
+            sidebar_scrollbar: view.sidebar_scrollbar(),
             scrollbar_track: theme
                 .semantic
                 .as_ref()

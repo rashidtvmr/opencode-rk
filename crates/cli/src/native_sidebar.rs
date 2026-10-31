@@ -1339,6 +1339,20 @@ impl<'a> Sidebar<'a> {
         self.body_rows(width).len().saturating_sub(capacity)
     }
 
+    /// Body viewport in composed-row coordinates:
+    /// `(body_start_row, viewport_rows, total_body_rows)`.
+    ///
+    /// The pinned header starts the frame and the pinned footer is composed
+    /// last, so the scrolled body is exactly the middle band. The absolute
+    /// scrollbar (`sidebar.tsx:56-69`) spans that band.
+    #[must_use]
+    pub fn body_viewport(&self, width: usize, height: usize) -> (usize, usize, usize) {
+        let header = self.header_rows(width).len();
+        let footer = self.footer_rows(width, height).len();
+        let capacity = height.saturating_sub(header + footer);
+        (header.min(height), capacity, self.body_rows(width).len())
+    }
+
     /// Compose the sidebar: pinned header, scrolled body, pinned footer.
     #[must_use]
     pub fn render(&self, width: usize, height: usize, scroll: usize) -> Vec<SidebarRow> {

@@ -142,6 +142,8 @@ pub struct NativeView {
     scrollbar_enabled: bool,
     /// Geometry of the last painted transcript scrollbar, if any.
     transcript_scrollbar: Option<TranscriptScrollbar>,
+    /// Geometry of the last painted sidebar scrollbar, if any.
+    sidebar_scrollbar: Option<SidebarScrollbar>,
     /// Active session is a child (`parentID` present): upstream suppresses
     /// the sidebar entirely.
     parent_session: bool,
@@ -344,6 +346,78 @@ mod page_spacing_tests {
     }
 
     #[test]
+    fn sidebar_scrollbar_spans_the_body_and_pins_its_tail() {
+        for (framed, expected_top) in [(false, 1u16), (true, 2u16)] {
+            let mut view = NativeView::new(148, 30);
+            view.set_session_route(true);
+            if framed {
+                view.set_box_appearance(crate::native_box_style::BoxAppearance {
+                    preset: crate::native_box_style::RadiusPreset::IosSquircle,
+                    ..Default::default()
+                });
+            }
+            let status: serde_json::Map<String, Value> = (0..64)
+                .map(|index| {
+                    (
+                        format!("server-{index:02}"),
+                        serde_json::json!({"status":"connected"}),
+                    )
+                })
+                .collect();
+            let included: serde_json::Map<String, Value> = status
+                .keys()
+                .map(|name| (name.clone(), serde_json::json!(false)))
+                .collect();
+            view.apply_mcp(&serde_json::json!({"status":status,"included":included}))
+                .unwrap();
+            view.render("draft", &[], false, &[]);
+            let left = view.presentation().sidebar_offset.expect("wide sidebar");
+            let bar = view
+                .sidebar_scrollbar()
+                .expect("overflowing body shows the absolute bar");
+            // One column over the body's reserved right padding: pane-local
+            // 2 (paddingLeft) + 37 (body width of the 38-cell content).
+            assert_eq!(bar.x, left + 39);
+            assert_eq!(bar.y, expected_top, "body starts below the pinned header");
+            assert!(
+                bar.y + bar.height <= 29,
+                "track never covers the shared footer row"
+            );
+            assert_eq!(bar.offset, 0);
+            let (start, len) = bar.thumb.expect("overflowing body has a thumb");
+            assert_eq!(start, 0, "top of content pins the thumb at the track top");
+            assert!(len >= 1 && len < bar.height);
+
+            let x = left + 3;
+            assert!(view.scroll_sidebar_at(x, 2, isize::MAX));
+            view.render("draft", &[], false, &[]);
+            let scrolled = view.sidebar_scrollbar().expect("bar stays");
+            assert!(scrolled.offset > 0);
+            let (start, len) = scrolled.thumb.expect("thumb stays");
+            assert_eq!(
+                start + len,
+                scrolled.height,
+                "the tail pins the thumb to the track bottom"
+            );
+        }
+    }
+
+    #[test]
+    fn sidebar_scrollbar_absent_when_the_body_fits() {
+        let mut view = NativeView::new(148, 30);
+        view.set_session_route(true);
+        view.apply_mcp(&serde_json::json!({"status":{"alpha":{"status":"connected"}},"included":{"alpha":true}}))
+            .unwrap();
+        view.render("draft", &[], false, &[]);
+        assert!(view.sidebar_scrollbar().is_none());
+        // Narrow layouts never compose the pane inline, so no bar exists.
+        let mut narrow = NativeView::new(100, 30);
+        narrow.set_session_route(true);
+        narrow.render("draft", &[], false, &[]);
+        assert!(narrow.sidebar_scrollbar().is_none());
+    }
+
+    #[test]
     fn accepted_projection_invalidates_old_sidebar_coordinates_until_repaint() {
         let mut view = NativeView::new(148, 30);
         view.set_session_route(true);
@@ -532,6 +606,29 @@ pub struct TranscriptScrollbar {
     pub thumb: Option<(u16, u16)>,
 }
 
+/// Painted sidebar scrollbar for one frame (`routes/session/sidebar.tsx:56-69`):
+/// the ABSOLUTE one-column track over the body's reserved right padding, with
+/// the header and footer pinned outside it.
+///
+/// Geometry only. Upstream paints the track with the sidebar's own raised
+/// surface and the thumb with `theme.scrollbar.base`; the painter owns those
+/// colors.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SidebarScrollbar {
+    /// Absolute screen column of the one-cell track.
+    pub x: u16,
+    /// First body row (the track spans the scrolled body only).
+    pub y: u16,
+    /// Body viewport height in rows.
+    pub height: u16,
+    /// Total body rows, including rows scrolled out of view.
+    pub total_rows: usize,
+    /// Rows scrolled away from the body top.
+    pub offset: usize,
+    /// Thumb `(start, len)` within the track.
+    pub thumb: Option<(u16, u16)>,
+}
+
 /// Region geometry for the current frame, without ANSI. Downstream style
 /// writers derive cell positions from this instead of parsing the frame.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -705,6 +802,7 @@ impl NativeView {
             sidebar_open: false,
             scrollbar_enabled: false,
             transcript_scrollbar: None,
+            sidebar_scrollbar: None,
             parent_session: false,
             prompt_width: PromptWidth::Default,
             shell_mode: false,
@@ -1471,6 +1569,14 @@ impl NativeView {
     #[must_use]
     pub fn transcript_scrollbar(&self) -> Option<TranscriptScrollbar> {
         self.transcript_scrollbar
+    }
+
+    /// Sidebar scrollbar painted by the last render, when the composed body
+    /// overflows its viewport. `None` while the body fits or the pane is
+    /// hidden.
+    #[must_use]
+    pub fn sidebar_scrollbar(&self) -> Option<SidebarScrollbar> {
+        self.sidebar_scrollbar
     }
 
     pub fn sidebar_hidden(&self) -> bool {
@@ -2492,6 +2598,7 @@ impl NativeView {
         self.chat_text_bounds.clear();
         self.chat_markdown_spans.clear();
         self.transcript_scrollbar = None;
+        self.sidebar_scrollbar = None;
         self.chat.set_markdown_mode(self.markdown_mode);
         self.context_usage_hit = None;
         self.live_footer_hit = None;
@@ -2810,7 +2917,7 @@ impl NativeView {
                         height: u16::try_from(viewport).unwrap_or(u16::MAX),
                         total_rows: total,
                         offset,
-                        thumb: transcript_thumb(viewport, total, offset),
+                        thumb: scrollbar_thumb(viewport, total, offset),
                     });
                 }
             }
@@ -3048,6 +3155,35 @@ impl NativeView {
                         },
                         sidebar_text_width,
                     ));
+                }
+            }
+            // ABSOLUTE body scrollbar (`sidebar.tsx:56-69`): one column over
+            // the body's reserved right padding, spanning only the scrolled
+            // body (pinned header/footer sit outside it). The track surface is
+            // the sidebar's own raised background, so only the thumb paints.
+            if presentation.sidebar_width > 0 && self.sidebar_wide() {
+                let pane_content = 38usize;
+                let bar_column = crate::native_sidebar::PADDING_LEFT
+                    + crate::native_sidebar::body_width(pane_content);
+                if let Some((body_top, viewport, total, offset)) = self
+                    .status
+                    .sidebar_scroll_facts(pane_content, self.sidebar_content_height)
+                    .filter(|_| bar_column < usize::from(presentation.sidebar_width))
+                {
+                    let y = if sidebar_frame_painted {
+                        sidebar_top.saturating_add(1)
+                    } else {
+                        0
+                    }
+                    .saturating_add(body_top);
+                    self.sidebar_scrollbar = Some(SidebarScrollbar {
+                        x: left.saturating_add(bar_column as u16),
+                        y,
+                        height: viewport,
+                        total_rows: total,
+                        offset,
+                        thumb: scrollbar_thumb(usize::from(viewport), total, offset),
+                    });
                 }
             }
         }
@@ -4944,7 +5080,7 @@ fn dock_span_slot(style: DockStyle) -> Option<crate::native_theme_runtime::Slot>
 
 /// Scrollbar thumb `(start, len)` from the shared OpenTUI scrollbox model, so
 /// the painted bar and the bridge's scroll semantics can never diverge.
-fn transcript_thumb(viewport: usize, total: usize, offset: usize) -> Option<(u16, u16)> {
+pub(crate) fn scrollbar_thumb(viewport: usize, total: usize, offset: usize) -> Option<(u16, u16)> {
     use opencode_rk_opentui_bridge::layout::Rect;
     use opencode_rk_opentui_bridge::scroll::ScrollBox;
     let track = u32::try_from(viewport).ok()?;

@@ -605,6 +605,35 @@ impl StatusView {
             .saturating_add_signed(lines).min(maximum);
     }
 
+    /// Scrollbar facts for the body region of the same frame
+    /// [`Self::render_sidebar_styled`] returns: `(body_top_row, viewport_rows,
+    /// total_body_rows, offset)`. `None` when the body fits or the pane has no
+    /// height, so a bar is never invented without real overflow.
+    #[must_use]
+    pub fn sidebar_scroll_facts(
+        &self,
+        width: usize,
+        height: usize,
+    ) -> Option<(u16, u16, usize, usize)> {
+        if width == 0 || height == 0 {
+            return None;
+        }
+        let height = height.min(MAX_ROWS);
+        self.with_sidebar(|sidebar| {
+            let (top, viewport, total) = sidebar.body_viewport(width, height);
+            let maximum = total.saturating_sub(viewport);
+            (viewport > 0 && maximum > 0).then(|| {
+                let offset = self.sidebar_offset.min(maximum);
+                (
+                    u16::try_from(top).unwrap_or(u16::MAX),
+                    u16::try_from(viewport).unwrap_or(u16::MAX),
+                    total,
+                    offset,
+                )
+            })
+        })
+    }
+
     /// Build the upstream sidebar model over the confirmed facts and hand it to
     /// `render`. Locals live for the whole closure so the model can borrow the
     /// MCP/todo projections without cloning their payloads.
