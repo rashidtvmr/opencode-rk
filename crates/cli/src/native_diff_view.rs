@@ -505,6 +505,770 @@ fn num_digits(n: u32) -> usize {
     }
 }
 
+// ---------------------------------------------------------------------------
+// P15 / DIFF-001..DIFF-005 presentation model.
+//
+// Upstream evidence (pin 450e7b92412c780a7b5a75226bb8d49aaca24e22):
+// - inline auto split: `packages/tui/src/routes/session/index.tsx:3459`
+//   (Edit) and `:3536` (ApplyPatch): `ctx.width > 120 ? "split" : "unified"`.
+// - permission auto split: `packages/tui/src/routes/session/permission.tsx:36`:
+//   `dimensions().width > 120 ? "split" : "unified"`.
+// - dedicated viewer split: `feature-plugins/system/diff-viewer.tsx:45`
+//   (`MIN_SPLIT_WIDTH = 100`) and `:349` (`patchPaneWidth() >= MIN_SPLIT_WIDTH`).
+// - viewer compact/full boundary: `diff-viewer.tsx:51` derives
+//   FULL_LAYOUT_MIN_WIDTH = 30 + 2*2 + floor((64+44)/2) = 88 and `:334` uses
+//   `width() < FULL_LAYOUT_MIN_WIDTH` for the compact layout. (The 87/88 rule
+//   is obligation DIALOG-18, owned by P18; the constant lives here because it
+//   is the same diff-viewer model.)
+// - hunk splitting / row pairing: `component/patch-diff.tsx:39-55,76-97` and
+//   `util/diff.ts:40-84`.
+// - virtualization: `patch-diff.tsx:24-25,40-44,114-201` and
+//   `util/diff.ts:18-38`.
+// - delete + applied-resource fallbacks and wire filtering:
+//   `routes/session/index.tsx:3512-3606,3769-3794`.
+// - severity-1 diagnostics: `routes/session/index.tsx:3703-3722,3811-3825`
+//   and `util/path.ts:4-11`.
+// ---------------------------------------------------------------------------
+
+/// Inline surfaces split only when the measured *content* width is `> 120`.
+pub const INLINE_SPLIT_MIN_EXCLUSIVE: usize = 120;
+/// Permission dialogs split only when the measured *terminal* width is `> 120`.
+pub const PERMISSION_SPLIT_MIN_EXCLUSIVE: usize = 120;
+/// The dedicated diff viewer allows split from a patch pane width of `100`.
+pub const VIEWER_MIN_SPLIT_WIDTH: usize = 100;
+/// Viewer keeps the full layout (file tree + inset cards) from width 88.
+pub const VIEWER_FULL_LAYOUT_MIN_WIDTH: usize = 88;
+/// `patch-diff.tsx:24`
+pub const VIRTUAL_MIN_LINES: usize = 3000;
+/// `patch-diff.tsx:25`
+pub const VIRTUAL_CHUNK_LINES: usize = 128;
+/// `routes/session/index.tsx:3824`
+pub const MAX_DIAGNOSTICS: usize = 3;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiffViewMode {
+    Unified,
+    Split,
+}
+
+/// `config.diffs.view` (`config/index.tsx:126`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiffViewPreference {
+    Auto,
+    Split,
+    Unified,
+}
+
+/// `config.diffs.wrap` (`config/index.tsx:118`); default `Word`
+/// (`routes/session/index.tsx:245`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiffWrapMode {
+    Word,
+    None,
+}
+
+impl DiffWrapMode {
+    #[must_use]
+    pub fn from_config(value: Option<&str>) -> Self {
+        match value {
+            Some("none") => Self::None,
+            _ => Self::Word,
+        }
+    }
+}
+
+/// The three surfaces that choose their own split rule (DIFF-001).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiffSurface {
+    Inline,
+    Permission,
+    Viewer,
+}
+
+/// Resolves unified/split for one surface.
+///
+/// Inline and permission honour an explicit config override at any width;
+/// the viewer never offers split below 100 columns, and defaults to split from
+/// 100 upward (`diff-viewer.tsx:352`).
+#[must_use]
+pub fn resolve_view_mode(
+    surface: DiffSurface,
+    preference: DiffViewPreference,
+    measured_width: usize,
+) -> DiffViewMode {
+    match surface {
+        DiffSurface::Inline => match preference {
+            DiffViewPreference::Unified => DiffViewMode::Unified,
+            DiffViewPreference::Split => DiffViewMode::Split,
+            DiffViewPreference::Auto => {
+                if measured_width > INLINE_SPLIT_MIN_EXCLUSIVE {
+                    DiffViewMode::Split
+                } else {
+                    DiffViewMode::Unified
+                }
+            }
+        },
+        DiffSurface::Permission => match preference {
+            DiffViewPreference::Unified => DiffViewMode::Unified,
+            DiffViewPreference::Split => DiffViewMode::Split,
+            DiffViewPreference::Auto => {
+                if measured_width > PERMISSION_SPLIT_MIN_EXCLUSIVE {
+                    DiffViewMode::Split
+                } else {
+                    DiffViewMode::Unified
+                }
+            }
+        },
+        DiffSurface::Viewer => {
+            if measured_width < VIEWER_MIN_SPLIT_WIDTH {
+                return DiffViewMode::Unified;
+            }
+            match preference {
+                DiffViewPreference::Unified => DiffViewMode::Unified,
+                _ => DiffViewMode::Split,
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewerLayout {
+    Compact,
+    Full,
+}
+
+/// `diff-viewer.tsx:51,334`: width 87 stays compact, width 88 becomes full.
+#[must_use]
+pub fn viewer_layout(measured_width: usize) -> ViewerLayout {
+    if measured_width < VIEWER_FULL_LAYOUT_MIN_WIDTH {
+        ViewerLayout::Compact
+    } else {
+        ViewerLayout::Full
+    }
+}
+
+/// `diff-viewer.tsx:67-70`: the pane available to patches once the file tree
+/// and insets are removed.
+#[must_use]
+pub fn viewer_patch_pane_width(
+    width: usize,
+    show_file_tree: bool,
+    file_tree_width: usize,
+    inset: usize,
+) -> usize {
+    width
+        .saturating_sub(if show_file_tree { file_tree_width } else { 0 })
+        .saturating_sub(inset.saturating_mul(2))
+}
+
+impl DiffLineRole {
+    #[must_use]
+    pub fn color_role(self) -> DiffColorRole {
+        match self {
+            DiffLineRole::Added => DiffColorRole::Added,
+            DiffLineRole::Removed => DiffColorRole::Removed,
+            DiffLineRole::Context => DiffColorRole::Context,
+            DiffLineRole::HunkHeader => DiffColorRole::HunkHeader,
+            DiffLineRole::FileHeader => DiffColorRole::FileHeader,
+            DiffLineRole::DiffHeader => DiffColorRole::DiffHeader,
+            DiffLineRole::NoNewline => DiffColorRole::NoNewline,
+            DiffLineRole::Blank => DiffColorRole::Blank,
+        }
+    }
+
+    /// Added/removed rows use their own line-number background; every other
+    /// row uses the context gutter (`routes/session/index.tsx:3475-3484`).
+    #[must_use]
+    pub fn gutter_color_role(self) -> DiffColorRole {
+        match self {
+            DiffLineRole::Added => DiffColorRole::Added,
+            DiffLineRole::Removed => DiffColorRole::Removed,
+            _ => DiffColorRole::Context,
+        }
+    }
+}
+
+/// One side of a split row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SplitCell {
+    pub line_number: Option<u32>,
+    /// `-`, `+` or ` ` (the diff sign column).
+    pub sign: char,
+    pub text: String,
+    pub role: DiffLineRole,
+}
+
+/// A split row is either a full-width header band or a left/right pair.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SplitRow {
+    Full(DiffLine),
+    Pair {
+        left: Option<SplitCell>,
+        right: Option<SplitCell>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SplitPaintResult {
+    pub rows: Vec<SplitRow>,
+    pub left_width: usize,
+    pub right_width: usize,
+    pub truncated: bool,
+    pub malformed: bool,
+}
+
+fn split_cell(line: &DiffLine) -> SplitCell {
+    let sign = match line.role {
+        DiffLineRole::Removed => '-',
+        DiffLineRole::Added => '+',
+        _ => ' ',
+    };
+    SplitCell {
+        line_number: line.old_line.or(line.new_line),
+        sign,
+        text: line.content.clone(),
+        role: line.role,
+    }
+}
+
+/// Renders a patch as paired split rows. Headers span the full pane; context
+/// lines appear on both sides; a change block pairs removed and added lines by
+/// position, exactly like a unified hunk read column-wise.
+#[must_use]
+pub fn paint_rows_split(patch: &str, max_rows: usize, pane_width: usize) -> SplitPaintResult {
+    let classified = classify_patch(patch);
+    let inner = pane_width.saturating_sub(1);
+    let left_width = inner / 2;
+    let right_width = inner - left_width;
+    let mut rows = Vec::new();
+    let mut hit_cap = false;
+    let mut index = 0usize;
+    while index < classified.lines.len() {
+        if rows.len() >= max_rows {
+            hit_cap = true;
+            break;
+        }
+        let line = &classified.lines[index];
+        match line.role {
+            DiffLineRole::Removed | DiffLineRole::Added => {
+                let start = index;
+                while index < classified.lines.len()
+                    && matches!(
+                        classified.lines[index].role,
+                        DiffLineRole::Removed | DiffLineRole::Added
+                    )
+                {
+                    index += 1;
+                }
+                let mut removed: Vec<&DiffLine> = Vec::new();
+                let mut added: Vec<&DiffLine> = Vec::new();
+                for change in &classified.lines[start..index] {
+                    if change.role == DiffLineRole::Removed {
+                        removed.push(change);
+                    } else {
+                        added.push(change);
+                    }
+                }
+                for pair in 0..removed.len().max(added.len()) {
+                    if rows.len() >= max_rows {
+                        hit_cap = true;
+                        break;
+                    }
+                    rows.push(SplitRow::Pair {
+                        left: removed.get(pair).map(|line| split_cell(line)),
+                        right: added.get(pair).map(|line| split_cell(line)),
+                    });
+                }
+            }
+            DiffLineRole::Context => {
+                let old = line.old_line.map(|number| SplitCell {
+                    line_number: Some(number),
+                    sign: ' ',
+                    text: line.content.clone(),
+                    role: DiffLineRole::Context,
+                });
+                let new = line.new_line.map(|number| SplitCell {
+                    line_number: Some(number),
+                    sign: ' ',
+                    text: line.content.clone(),
+                    role: DiffLineRole::Context,
+                });
+                rows.push(SplitRow::Pair { left: old, right: new });
+                index += 1;
+            }
+            _ => {
+                rows.push(SplitRow::Full(line.clone()));
+                index += 1;
+            }
+        }
+    }
+    SplitPaintResult {
+        rows,
+        left_width,
+        right_width,
+        truncated: classified.truncated || hit_cap,
+        malformed: classified.malformed,
+    }
+}
+
+/// One hunk of a patch, as `PatchDiff` renders it (`util/diff.ts:40-54`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PatchHunkView {
+    /// The `@@ ... @@` header line, present for hunks after the first.
+    pub header: Option<String>,
+    /// The hunk patch including the file prefix, ready for a diff renderable.
+    pub patch: String,
+    /// Renderable rows (paired change runs count once).
+    pub rows: usize,
+    /// `patch-diff.tsx:79-85` paints a full-width header band before every
+    /// hunk after the first. Upstream has no scroll-pinned header in the
+    /// pinned revision (its `sticky*` options belong to scroll boxes), so this
+    /// is the hunk band, not a sticky overlay.
+    pub band_before: bool,
+}
+
+/// Splits a patch into hunk views. A patch with zero or one hunk header is
+/// returned as a single view, exactly like `splitPatchHunks`.
+#[must_use]
+pub fn split_patch_hunks(patch: &str) -> Vec<PatchHunkView> {
+    let starts = hunk_header_starts(patch);
+    if starts.len() <= 1 {
+        return vec![PatchHunkView {
+            header: None,
+            patch: patch.to_string(),
+            rows: starts.first().map_or(0, |&start| split_rows(&patch[start..])),
+            band_before: false,
+        }];
+    }
+    let prefix = &patch[..starts[0]];
+    starts
+        .iter()
+        .enumerate()
+        .map(|(index, &start)| {
+            let end = starts.get(index + 1).copied().unwrap_or(patch.len());
+            let line_end = patch[start..].find('\n').map(|offset| start + offset);
+            let header_end = line_end.unwrap_or(end);
+            let header = patch[start..header_end].to_string();
+            PatchHunkView {
+                header: Some(header),
+                patch: format!("{prefix}{}", &patch[start..end]),
+                rows: split_rows(&patch[start..end]),
+                band_before: index > 0,
+            }
+        })
+        .collect()
+}
+
+fn hunk_header_starts(patch: &str) -> Vec<usize> {
+    let mut starts = Vec::new();
+    let mut offset = 0usize;
+    for line in patch.split_inclusive('\n') {
+        if is_hunk_header_at(line.as_bytes()) {
+            starts.push(offset);
+        }
+        offset += line.len();
+    }
+    starts
+}
+
+/// `util/diff.ts:56-84`: context rows count once, `\` markers do not count,
+/// and a removed/added run counts `max(deletions, additions)`.
+fn split_rows(hunk: &str) -> usize {
+    let lines: Vec<&str> = hunk
+        .strip_suffix('\n')
+        .unwrap_or(hunk)
+        .split('\n')
+        .skip(1)
+        .collect();
+    let mut rows = 0usize;
+    let mut index = 0usize;
+    while index < lines.len() {
+        let prefix = lines[index].chars().next();
+        match prefix {
+            Some(' ') | None => {
+                rows += 1;
+                index += 1;
+            }
+            Some('\\') => index += 1,
+            _ => {
+                let mut additions = 0usize;
+                let mut deletions = 0usize;
+                while index < lines.len() {
+                    match lines[index].chars().next() {
+                        Some('+') => additions += 1,
+                        Some('-') => deletions += 1,
+                        _ => break,
+                    }
+                    index += 1;
+                }
+                rows += additions.max(deletions);
+            }
+        }
+    }
+    rows
+}
+
+/// A chunk of an added-file patch (`util/diff.ts:7-11,18-38`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AddedPatchChunk {
+    pub patch: String,
+    pub lines: Vec<String>,
+    pub rows: usize,
+}
+
+/// Splits a new-file patch into `size`-line chunks. Returns `None` for
+/// anything with context or removed lines.
+#[must_use]
+pub fn split_added_patch(patch: &str, size: usize) -> Option<Vec<AddedPatchChunk>> {
+    if size == 0 {
+        return None;
+    }
+    let (header_start, header_end, count) = find_new_file_header(patch)?;
+    let body = &patch[header_end..];
+    let body = body.strip_suffix('\n').unwrap_or(body);
+    let mut lines: Vec<String> = body.split('\n').map(str::to_string).collect();
+    let marker = match lines.last() {
+        Some(line) if line.starts_with("\\ No newline at end of file") => lines.pop(),
+        _ => None,
+    };
+    if lines.len() != count || lines.iter().any(|line| !line.starts_with('+')) {
+        return None;
+    }
+    let prefix = &patch[..header_start];
+    let chunk_count = count.div_ceil(size);
+    Some(
+        (0..chunk_count)
+            .map(|index| {
+                let start = index * size;
+                let slice: Vec<String> = lines
+                    .iter()
+                    .skip(start)
+                    .take(size)
+                    .cloned()
+                    .collect();
+                let suffix = match &marker {
+                    Some(marker) if start + size >= count => format!("\n{marker}"),
+                    _ => String::new(),
+                };
+                AddedPatchChunk {
+                    patch: format!(
+                        "{prefix}@@ -0,0 +{},{} @@\n{}{suffix}",
+                        start + 1,
+                        slice.len(),
+                        slice.join("\n")
+                    ),
+                    rows: slice.len(),
+                    lines: slice,
+                }
+            })
+            .collect(),
+    )
+}
+
+fn find_new_file_header(patch: &str) -> Option<(usize, usize, usize)> {
+    let prefix = "@@ -0,0 +1,";
+    let mut offset = 0usize;
+    for line in patch.split_inclusive('\n') {
+        if line.ends_with('\n') && line.starts_with(prefix) {
+            let rest = &line[prefix.len()..];
+            let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+            if digits > 0 && rest[digits..].starts_with(" @@") {
+                let count = rest[..digits].parse::<usize>().ok()?;
+                return Some((offset, offset + line.len(), count));
+            }
+        }
+        offset += line.len();
+    }
+    None
+}
+
+/// A patch eligible for virtualization plus its exact chunks
+/// (`patch-diff.tsx:40-44`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VirtualAddedPatch {
+    pub chunks: Vec<AddedPatchChunk>,
+    pub total_rows: usize,
+}
+
+#[must_use]
+pub fn line_count(chunks: &[AddedPatchChunk]) -> usize {
+    chunks.iter().map(|chunk| chunk.rows).sum()
+}
+
+/// Virtualization applies only to scroll-aware callers and only when the
+/// split added-file patch exceeds 3000 rendered rows (strictly).
+#[must_use]
+pub fn virtual_added_patch(patch: &str, scroll_aware: bool) -> Option<VirtualAddedPatch> {
+    if !scroll_aware {
+        return None;
+    }
+    let chunks = split_added_patch(patch, VIRTUAL_CHUNK_LINES)?;
+    let total_rows = line_count(&chunks);
+    if total_rows <= VIRTUAL_MIN_LINES {
+        return None;
+    }
+    Some(VirtualAddedPatch { chunks, total_rows })
+}
+
+/// Inclusive chunk indexes rendered for a viewport, with one chunk of
+/// overscan on each side (`patch-diff.tsx:164-181`).
+#[must_use]
+pub fn visible_chunk_range(
+    chunk_count: usize,
+    scroll_top: usize,
+    viewport_height: usize,
+) -> (usize, usize) {
+    if chunk_count == 0 {
+        return (0, 0);
+    }
+    let first = scroll_top / VIRTUAL_CHUNK_LINES;
+    let last = scroll_top.saturating_add(viewport_height) / VIRTUAL_CHUNK_LINES;
+    (
+        first.saturating_sub(1),
+        last.saturating_add(1).min(chunk_count - 1),
+    )
+}
+
+/// Placeholder height for an offscreen chunk (`patch-diff.tsx:180`).
+#[must_use]
+pub fn placeholder_height(chunk: &AddedPatchChunk) -> usize {
+    chunk.rows
+}
+
+// --- wire metadata (`routes/session/index.tsx:3769-3794`) -----------------
+
+#[derive(Clone, Debug, Default)]
+pub struct WirePatchFile {
+    pub file_type: Option<String>,
+    pub status: Option<String>,
+    pub file: Option<String>,
+    pub relative_path: Option<String>,
+    pub file_path: Option<String>,
+    pub patch: Option<String>,
+    pub additions: Option<f64>,
+    pub deletions: Option<f64>,
+    pub move_path: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PatchFileMetadata {
+    pub file_type: String,
+    pub relative_path: String,
+    pub file_path: String,
+    pub patch: String,
+    pub additions: f64,
+    pub deletions: f64,
+    pub move_path: Option<String>,
+}
+
+impl PatchFileMetadata {
+    /// `routes/session/index.tsx:3547-3549`
+    #[must_use]
+    pub fn path_label(&self) -> &'static str {
+        match self.file_type.as_str() {
+            "add" => "# Created",
+            "delete" => "# Deleted",
+            _ => "← Patched",
+        }
+    }
+
+    #[must_use]
+    pub fn is_delete(&self) -> bool {
+        self.file_type == "delete"
+    }
+
+    /// `routes/session/index.tsx:3555-3557`
+    #[must_use]
+    pub fn deleted_summary(&self) -> String {
+        format!(
+            "-{} line{}",
+            js_number(self.deletions),
+            if self.deletions == 1.0 { "" } else { "s" }
+        )
+    }
+}
+
+fn js_number(value: f64) -> String {
+    if value.is_finite() && value.fract() == 0.0 {
+        format!("{}", value as i64)
+    } else {
+        format!("{value}")
+    }
+}
+
+fn finite(value: Option<f64>) -> Option<f64> {
+    value.filter(|value| value.is_finite())
+}
+
+/// Filters malformed wire entries exactly like `parseApplyPatchFiles`: a
+/// missing type/path/patch/count or a non-finite count is dropped, not
+/// rendered as fabricated content.
+#[must_use]
+pub fn parse_patch_files(items: &[WirePatchFile]) -> Vec<PatchFileMetadata> {
+    items
+        .iter()
+        .filter_map(|wire| {
+            let file_type = wire
+                .file_type
+                .clone()
+                .or_else(|| match wire.status.as_deref() {
+                    Some("added") => Some("add".to_string()),
+                    Some("deleted") => Some("delete".to_string()),
+                    Some("modified") => Some("update".to_string()),
+                    _ => None,
+                })?;
+            let relative_path = wire
+                .file
+                .clone()
+                .or_else(|| wire.relative_path.clone())?;
+            let file_path = wire
+                .file_path
+                .clone()
+                .or_else(|| Some(relative_path.clone()))?;
+            let patch = wire.patch.clone()?;
+            let additions = finite(wire.additions)?;
+            let deletions = finite(wire.deletions)?;
+            Some(PatchFileMetadata {
+                file_type,
+                relative_path,
+                file_path,
+                patch,
+                additions,
+                deletions,
+                move_path: wire.move_path.clone(),
+            })
+        })
+        .collect()
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct WireApplied {
+    pub kind: Option<String>,
+    pub resource: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppliedResource {
+    pub kind: String,
+    pub resource: String,
+}
+
+/// `routes/session/index.tsx:3587-3590`: only entries that carry both a type
+/// and a resource are shown.
+#[must_use]
+pub fn parse_applied(items: &[WireApplied]) -> Vec<AppliedResource> {
+    items
+        .iter()
+        .filter_map(|wire| {
+            Some(AppliedResource {
+                kind: wire.kind.clone()?,
+                resource: wire.resource.clone()?,
+            })
+        })
+        .collect()
+}
+
+#[must_use]
+pub fn applied_label(kind: &str) -> &'static str {
+    match kind {
+        "add" => "# Created",
+        "delete" => "# Deleted",
+        _ => "← Patched",
+    }
+}
+
+// --- diagnostics (`routes/session/index.tsx:3703-3722,3811-3825`) ---------
+
+#[derive(Clone, Debug, Default)]
+pub struct WireDiagnostic {
+    pub severity: Option<f64>,
+    pub line: Option<f64>,
+    pub character: Option<f64>,
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Diagnostic {
+    pub line: f64,
+    pub character: f64,
+    pub message: String,
+}
+
+/// Only severity 1 with a finite position and a non-empty message is valid,
+/// and no more than three are shown.
+#[must_use]
+pub fn parse_diagnostics(items: &[WireDiagnostic]) -> Vec<Diagnostic> {
+    items
+        .iter()
+        .filter_map(|wire| {
+            if wire.severity != Some(1.0) {
+                return None;
+            }
+            let line = finite(wire.line)?;
+            let character = finite(wire.character)?;
+            let message = wire.message.clone().filter(|message| !message.is_empty())?;
+            Some(Diagnostic {
+                line,
+                character,
+                message,
+            })
+        })
+        .take(MAX_DIAGNOSTICS)
+        .collect()
+}
+
+/// `routes/session/index.tsx:3720`: one-based positions.
+#[must_use]
+pub fn format_diagnostic(diagnostic: &Diagnostic) -> String {
+    format!(
+        "Error [{}:{}] {}",
+        js_number(diagnostic.line + 1.0),
+        js_number(diagnostic.character + 1.0),
+        diagnostic.message
+    )
+}
+
+/// `util/path.ts:4-11`: only Windows needs rewriting in the TUI; the lexical
+/// drive-relative form is normalised here. `realpathSync` (which also resolves
+/// links) is filesystem IO and is not part of this pure model.
+#[must_use]
+pub fn normalize_path(input: &str, platform: &str) -> String {
+    if platform != "win32" {
+        return input.to_string();
+    }
+    let replaced = input.replace('/', "\\");
+    let (prefix, rest) = if replaced.len() >= 2 && replaced.as_bytes()[1] == b':' {
+        (&replaced[..2], &replaced[2..])
+    } else {
+        ("", replaced.as_str())
+    };
+    let mut parts: Vec<&str> = Vec::new();
+    for part in rest.split('\\') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            other => parts.push(other),
+        }
+    }
+    format!("{prefix}\\{}", parts.join("\\"))
+}
+
+/// Looks a diagnostics map up by normalised file path and parses it.
+#[must_use]
+pub fn diagnostics_for_file(
+    map: &[(String, Vec<WireDiagnostic>)],
+    file_path: &str,
+    platform: &str,
+) -> Vec<Diagnostic> {
+    let target = normalize_path(file_path, platform);
+    map.iter()
+        .find(|(key, _)| normalize_path(key, platform) == target)
+        .map(|(_, items)| parse_diagnostics(items))
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1005,5 +1769,339 @@ index abc123..def456 100644
             row.continuation && row.old_line.is_none() && row.new_line.is_none()
                 && row.color == DiffColorRole::Added
         }));
+    }
+
+    // DIFF-001: the three surfaces use different measured widths and
+    // operators (`routes/session/index.tsx:3459,3536`,
+    // `routes/session/permission.tsx:36`,
+    // `feature-plugins/system/diff-viewer.tsx:45,349`).
+    #[test]
+    fn diff001_surface_split_boundaries_match_upstream() {
+        use DiffSurface::{Inline, Permission, Viewer};
+        use DiffViewMode::{Split, Unified};
+        use DiffViewPreference::{Auto, Split as ForceSplit, Unified as ForceUnified};
+
+        assert_eq!(resolve_view_mode(Inline, Auto, 120), Unified);
+        assert_eq!(resolve_view_mode(Inline, Auto, 121), Split);
+        assert_eq!(resolve_view_mode(Permission, Auto, 120), Unified);
+        assert_eq!(resolve_view_mode(Permission, Auto, 121), Split);
+        assert_eq!(resolve_view_mode(Viewer, Auto, 99), Unified);
+        assert_eq!(resolve_view_mode(Viewer, Auto, 100), Split);
+
+        // Explicit overrides: inline/permission honour them at any width,
+        // while the viewer cannot offer split below its minimum.
+        assert_eq!(resolve_view_mode(Inline, ForceSplit, 40), Split);
+        assert_eq!(resolve_view_mode(Inline, ForceUnified, 400), Unified);
+        assert_eq!(resolve_view_mode(Permission, ForceUnified, 400), Unified);
+        assert_eq!(resolve_view_mode(Viewer, ForceSplit, 99), Unified);
+        assert_eq!(resolve_view_mode(Viewer, ForceUnified, 400), Unified);
+        assert_eq!(resolve_view_mode(Viewer, ForceSplit, 100), Split);
+
+        // `diff-viewer.tsx:51,334`: 87 compact, 88 full.
+        assert_eq!(viewer_layout(87), ViewerLayout::Compact);
+        assert_eq!(viewer_layout(88), ViewerLayout::Full);
+        // `diff-viewer.tsx:67-70`: patch pane excludes tree and two insets.
+        assert_eq!(viewer_patch_pane_width(200, true, 50, 2), 146);
+        assert_eq!(viewer_patch_pane_width(99, false, 0, 0), 99);
+    }
+
+    fn two_hunk_patch() -> &'static str {
+        concat!(
+            "--- a/src/deeply/nested/module_with_a_long_name.rs\n",
+            "+++ b/src/deeply/nested/module_with_a_long_name.rs\n",
+            "@@ -1234,3 +1234,3 @@ fn first()\n",
+            " context a\n",
+            "-old value\n",
+            "+new value\n",
+            " context b\n",
+            "@@ -2000,1 +2000,2 @@ fn second()\n",
+            " context c\n",
+            "+extra line\n",
+        )
+    }
+
+    // DIFF-002: add/edit/delete/move metadata, multiple hunk bands, long
+    // paths, four-digit gutters, wrap/source modes and the split row
+    // pairing/color roles.
+    #[test]
+    fn diff002_roles_split_pairing_and_hunk_bands() {
+        let wire = vec![WirePatchFile {
+            file_type: None,
+            status: Some("modified".into()),
+            file: Some("src/deeply/nested/module_with_a_long_name.rs".into()),
+            relative_path: None,
+            file_path: None,
+            patch: Some(two_hunk_patch().into()),
+            additions: Some(2.0),
+            deletions: Some(1.0),
+            move_path: Some("src/renamed.rs".into()),
+        }];
+        let parsed = parse_patch_files(&wire);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].file_type, "update");
+        assert_eq!(parsed[0].path_label(), "← Patched");
+        assert_eq!(
+            parsed[0].relative_path,
+            "src/deeply/nested/module_with_a_long_name.rs"
+        );
+        assert_eq!(parsed[0].file_path, parsed[0].relative_path);
+        assert_eq!(parsed[0].move_path.as_deref(), Some("src/renamed.rs"));
+
+        let hunks = split_patch_hunks(two_hunk_patch());
+        assert_eq!(hunks.len(), 2);
+        assert!(!hunks[0].band_before);
+        assert!(hunks[1].band_before, "hunks after the first get a band");
+        assert_eq!(
+            hunks[1].header.as_deref(),
+            Some("@@ -2000,1 +2000,2 @@ fn second()")
+        );
+        assert_eq!(hunks[0].rows, 3, "context + paired change + context");
+        assert_eq!(hunks[1].rows, 2, "context + paired change");
+        assert!(hunks[1].patch.starts_with("--- a/src/"));
+
+        let split = paint_rows_split(two_hunk_patch(), 100, 120);
+        assert!(!split.malformed);
+        assert_eq!(split.left_width, 59);
+        assert_eq!(split.right_width, 60);
+        let pairs: Vec<_> = split
+            .rows
+            .iter()
+            .filter_map(|row| match row {
+                SplitRow::Pair { left, right } => Some((left, right)),
+                SplitRow::Full(_) => None,
+            })
+            .collect();
+        // context a (both), removed/added pair, context b (both),
+        // context c (both), added-only pair.
+        assert_eq!(pairs.len(), 5);
+        assert_eq!(pairs[1].0.as_ref().unwrap().line_number, Some(1235));
+        assert_eq!(pairs[1].0.as_ref().unwrap().sign, '-');
+        assert_eq!(pairs[1].0.as_ref().unwrap().role, DiffLineRole::Removed);
+        assert_eq!(pairs[1].0.as_ref().unwrap().role.gutter_color_role(), DiffColorRole::Removed);
+        assert_eq!(pairs[1].1.as_ref().unwrap().line_number, Some(1235));
+        assert_eq!(pairs[1].1.as_ref().unwrap().sign, '+');
+        assert_eq!(pairs[1].1.as_ref().unwrap().role, DiffLineRole::Added);
+        assert_eq!(pairs[1].1.as_ref().unwrap().role.color_role(), DiffColorRole::Added);
+        assert!(pairs[4].0.is_none());
+        assert_eq!(pairs[4].1.as_ref().unwrap().sign, '+');
+
+        let widths = paint_rows_with_gutter_wrapped(
+            "@@ -1234 +1234 @@\n-old\n+new\n",
+            10,
+            80,
+        );
+        let row = widths
+            .rows
+            .iter()
+            .find(|row| row.role == DiffLineRole::Added)
+            .unwrap();
+        assert_eq!(row.line_number_width, 4);
+
+        // Source modes (`config.DiffSource`: working/branch/committed/turn)
+        // do not change row pairing; the same patch model feeds all of them.
+        let working = paint_rows_split(two_hunk_patch(), 100, 120);
+        let committed = paint_rows_split(two_hunk_patch(), 100, 120);
+        assert_eq!(working.rows, committed.rows);
+    }
+
+    fn added_file_patch(count: usize) -> String {
+        let mut patch = String::from("--- /dev/null\n+++ b/big.json\n");
+        patch.push_str(&format!("@@ -0,0 +1,{count} @@\n"));
+        for index in 0..count {
+            patch.push_str(&format!("+line {index}\n"));
+        }
+        patch
+    }
+
+    // DIFF-003: virtualization is gated on a scroll-aware caller and on more
+    // than 3000 added lines; chunks are 128 rows with exact placeholders.
+    #[test]
+    fn diff003_added_file_virtualization_boundaries() {
+        let at_limit = added_file_patch(VIRTUAL_MIN_LINES);
+        assert!(split_added_patch(&at_limit, VIRTUAL_CHUNK_LINES).is_some());
+        assert!(
+            virtual_added_patch(&at_limit, true).is_none(),
+            "3000 rows is not greater than the 3000-line threshold"
+        );
+        assert!(virtual_added_patch(&at_limit, false).is_none());
+
+        let over = added_file_patch(VIRTUAL_MIN_LINES + 1);
+        let virtual_patch = virtual_added_patch(&over, true).expect("3001 rows virtualize");
+        assert_eq!(virtual_patch.total_rows, 3001);
+        assert_eq!(virtual_patch.chunks.len(), 24);
+        assert_eq!(virtual_patch.chunks[0].rows, 128);
+        assert_eq!(virtual_patch.chunks[23].rows, 57);
+        assert!(virtual_patch.chunks[0]
+            .patch
+            .starts_with("--- /dev/null\n+++ b/big.json\n@@ -0,0 +1,128 @@\n"));
+        assert!(virtual_patch.chunks[23]
+            .patch
+            .starts_with("--- /dev/null\n+++ b/big.json\n@@ -0,0 +2945,57 @@\n"));
+        assert_eq!(placeholder_height(&virtual_patch.chunks[23]), 57);
+
+        // Scroll to the start of chunk 23 (line 2944): the rendered window is
+        // chunk 22..23 after one chunk of overscan on each side.
+        assert_eq!(visible_chunk_range(24, 2944, 10), (22, 23));
+        assert_eq!(visible_chunk_range(24, 0, 10), (0, 1));
+        assert_eq!(visible_chunk_range(1, 0, 10), (0, 0));
+
+        // Non-added patches, added patches with context, and a wrong header
+        // count are never split.
+        assert!(split_added_patch(two_hunk_patch(), 128).is_none());
+        assert!(split_added_patch(
+            "--- a/x\n+++ b/x\n@@ -0,0 +1,2 @@\n+one\n context\n",
+            128
+        )
+        .is_none());
+        assert!(split_added_patch(
+            "--- a/x\n+++ b/x\n@@ -0,0 +1,2 @@\n+one\n",
+            128
+        )
+        .is_none());
+    }
+
+    // DIFF-004: deleted counts, applied-resource fallback, and malformed wire
+    // metadata filtering (`routes/session/index.tsx:3555-3557,3588-3606,
+    // 3769-3794`).
+    #[test]
+    fn diff004_deleted_and_applied_fallback_filtering() {
+        let deleted = PatchFileMetadata {
+            file_type: "delete".into(),
+            relative_path: "src/gone.rs".into(),
+            file_path: "src/gone.rs".into(),
+            patch: String::new(),
+            additions: 0.0,
+            deletions: 1.0,
+            move_path: None,
+        };
+        assert_eq!(deleted.deleted_summary(), "-1 line");
+        let deleted_many = PatchFileMetadata {
+            deletions: 7.0,
+            ..deleted.clone()
+        };
+        assert_eq!(deleted_many.deleted_summary(), "-7 lines");
+        assert_eq!(deleted.path_label(), "# Deleted");
+        assert_eq!(applied_label("add"), "# Created");
+        assert_eq!(applied_label("delete"), "# Deleted");
+        assert_eq!(applied_label("update"), "← Patched");
+
+        let malformed = vec![
+            WirePatchFile::default(),
+            WirePatchFile {
+                file_type: Some("add".into()),
+                file: Some("missing-patch.rs".into()),
+                additions: Some(1.0),
+                deletions: Some(0.0),
+                ..WirePatchFile::default()
+            },
+            WirePatchFile {
+                file_type: Some("add".into()),
+                file: Some("infinite.rs".into()),
+                patch: Some(String::new()),
+                additions: Some(f64::INFINITY),
+                deletions: Some(0.0),
+                ..WirePatchFile::default()
+            },
+            WirePatchFile {
+                file_type: None,
+                status: Some("added".into()),
+                file: Some("kept.rs".into()),
+                patch: Some("@@ -0,0 +1,1 @@\n+x\n".into()),
+                additions: Some(1.0),
+                deletions: Some(0.0),
+                ..WirePatchFile::default()
+            },
+        ];
+        let parsed = parse_patch_files(&malformed);
+        assert_eq!(parsed.len(), 1, "malformed metadata is filtered, not crashed");
+        assert_eq!(parsed[0].file_path, "kept.rs");
+
+        let applied = parse_applied(&[
+            WireApplied {
+                kind: Some("update".into()),
+                resource: Some("src/a.rs".into()),
+            },
+            WireApplied {
+                kind: Some("add".into()),
+                resource: None,
+            },
+            WireApplied::default(),
+        ]);
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0].resource, "src/a.rs");
+    }
+
+    // DIFF-005: severity-1 only, at most three, one-based, with Windows path
+    // normalisation (`index.tsx:3703-3722,3811-3825`, `util/path.ts:4-11`).
+    #[test]
+    fn diff005_severity_one_diagnostics() {
+        let items = vec![
+            WireDiagnostic {
+                severity: Some(1.0),
+                line: Some(4.0),
+                character: Some(0.0),
+                message: Some("first".into()),
+            },
+            WireDiagnostic {
+                severity: Some(2.0),
+                line: Some(1.0),
+                character: Some(1.0),
+                message: Some("warning".into()),
+            },
+            WireDiagnostic {
+                severity: Some(1.0),
+                line: None,
+                character: Some(1.0),
+                message: Some("missing line".into()),
+            },
+            WireDiagnostic {
+                severity: Some(1.0),
+                line: Some(1.0),
+                character: Some(1.0),
+                message: Some(String::new()),
+            },
+            WireDiagnostic {
+                severity: Some(1.0),
+                line: Some(7.0),
+                character: Some(3.0),
+                message: Some("second".into()),
+            },
+            WireDiagnostic {
+                severity: Some(1.0),
+                line: Some(8.0),
+                character: Some(0.0),
+                message: Some("third".into()),
+            },
+            WireDiagnostic {
+                severity: Some(1.0),
+                line: Some(9.0),
+                character: Some(0.0),
+                message: Some("fourth".into()),
+            },
+        ];
+        let parsed = parse_diagnostics(&items);
+        assert_eq!(parsed.len(), MAX_DIAGNOSTICS);
+        assert_eq!(format_diagnostic(&parsed[0]), "Error [5:1] first");
+        assert_eq!(format_diagnostic(&parsed[1]), "Error [8:4] second");
+        assert_eq!(format_diagnostic(&parsed[2]), "Error [9:1] third");
+
+        assert_eq!(normalize_path("src/a.rs", "linux"), "src/a.rs");
+        assert_eq!(
+            normalize_path("C:/repo/./src/../src/a.rs", "win32"),
+            "C:\\repo\\src\\a.rs"
+        );
+        let map = vec![(
+            "C:/repo/src/a.rs".to_string(),
+            vec![WireDiagnostic {
+                severity: Some(1.0),
+                line: Some(0.0),
+                character: Some(0.0),
+                message: Some("boom".into()),
+            }],
+        )];
+        let found = diagnostics_for_file(&map, "C:\\repo\\src\\a.rs", "win32");
+        assert_eq!(found.len(), 1);
+        assert_eq!(format_diagnostic(&found[0]), "Error [1:1] boom");
+        assert!(diagnostics_for_file(&map, "C:\\other.rs", "win32").is_empty());
     }
 }
