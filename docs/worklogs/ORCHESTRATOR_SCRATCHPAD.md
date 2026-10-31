@@ -9410,3 +9410,109 @@ left untouched.
   (non-native) build still `cargo check` clean.
 - Not yet claimed: installed-terminal capture of the bar under an alternate
   theme. The memory-renderer test proves cells and geometry, not a screenshot.
+
+## 2026-11-01 — Markdown tokens on the live path (landed on main-v2)
+
+User report at 9295 said streamed replies were plain white. Three independent
+defects stacked on the same live path; all three are now fixed and committed as
+`3c2ec8e0` (`feat(tui): paint upstream Markdown tokens in streamed replies`).
+
+- **Theme resolution**: upstream `listThemes()` (`packages/tui/src/theme/index.ts`)
+  makes the builtin `opencode` theme the V2 document, overriding the legacy
+  `DEFAULT_THEMES` entry of the same name. `load_native_theme_with_budget` now
+  returns `RuntimeTheme::builtin_default(mode)` for `opencode` instead of a
+  legacy asset. Separately, `RuntimeTheme::from_asset` built bundled legacy
+  themes with `semantic: None` because the pinned assets are V1 documents. New
+  `semantic_from_json` performs the same 1:1 markdown/syntax/diff role copy as
+  upstream `migrateV1` and synthesises no hue scales (see residual gap below).
+  Resolution is best-effort so partial custom legacy themes keep loading; a test
+  asserts all 33 shipped assets (Dark and Light) resolve `semantic.is_some()`.
+- **Span alignment**: `padded()` adds `(width/2).min(2)` leading spaces to every
+  body row, but `chat_markdown_spans` were recorded pre-padding, so every run
+  painted two cells left of its text. `render_content` now shifts span
+  start/end by that padding before padding the line.
+- **Role painting**: `ChatRunSpan.flags` widened from `u8` to `u16`; all
+  `markdown_runs` flag constants widened to match and `flow_role_flags` emits
+  BOLD|HEADING, BOLD|HEADING|HEADING1, BOLD, ITALIC, STRIKE, CODE,
+  CODE|CODE_BLOCK, LINK, LINK|LINK_TEXT, QUOTE, LIST and RULE. `native_paint`
+  now calls `markdown_run_color` (priority CODE, HEADING/HEADING1, BOLD, ITALIC,
+  LINK_TEXT, LINK, QUOTE, RULE, LIST, STRIKE) and `run_attributes`
+  (bold, italic, h1 underline), and only inline code gets the code background.
+  `MarkdownPalette` gained `muted` for strikethrough, as upstream maps it to
+  `text.muted`.
+- Tests: `surface_paint_regressions` gained a live-view span test (code span
+  addresses painted cells; HEADING covers "Heading"; exact BOLD span for
+  "bold"), a theme-loader token test (V2 dark code `#7fd88f`, code_block
+  `#eeeeee`; dracula `#50fa7b`/`#bd93f9`/`#ff79c6`), and a flag-to-token
+  mapping test. `oc2` unit suite **1932 passed / 0 failed**; default
+  (non-native) `cargo check` clean.
+- Full 33-target native suite on the parent commit had two failures, both caused
+  by my own environment, not the product: `OC2_E2E_REVISION` unset, and
+  `OC2_TEST_NATIVE_LIBRARY` pointed at a nonexistent `libopentui_native.dylib`
+  (correct file is `libopentui.dylib`). Re-run with the correct env and a
+  regenerated `OC2_TEST_BUILD_JSON`: both targets pass (10 and 6 tests).
+- **Installed-terminal evidence** against release `27984c18`, installed to
+  `/Users/mymac/.local/bin/oc2` (previous installed `e35ce588` preserved as
+  `oc2.before-e35ce588`; no daemon restart, no user database touched). 160x40
+  PTY, fake Responses provider streaming a Markdown reply, `/exit` exit 0:
+  heading purple `(157,124,216)`, strong orange `(245,167,66)`, inline and
+  block code green `(127,216,143)`, list markers/link `(250,178,131)`; bold
+  SGR x15 and underline SGR present. The same capture earlier counted 0 green
+  code cells, so this is a behavioural delta, not just a compiled change.
+  `verify_markdown.py`: `code green paints: 4`, PASS.
+- Scrollbar re-checked on the same release after the theme switch:
+  `verify_scrollbar.py` PASS, 9 thumb cells with `session.scrollbar=true`,
+  0 with false, `/exit` exit 0. Observed track background `(30,30,30)` =
+  `#1e1e1e`, which is upstream `decrease` from `background.raised.base` gray
+  700 `#141414`; thumb `#484848` = `border.base`. This answers the earlier
+  "not yet claimed" note for the default V2 theme; an alternate **custom**
+  theme capture is still not claimed.
+- Residual gap, recorded rather than claimed: legacy V1 themes have no
+  synthesised `hueScale`/`neutralScale`, so `theme.increase`/`decrease` are
+  identity on them. Markdown/syntax/diff roles are exact; scrollbar track on a
+  hand-written legacy theme uses the literal fallback.
+- Still open from the 9295 user report: hover presence/placement, model
+  name and progress placement, vertical new-tab padding, new-tab action,
+  response background overflowing past borders, and visible/clickable subagent
+  progress. `/exit` contract supersession is recorded above and remains a
+  separate repair.
+
+## 2026-11-01 — Hover motion, root `/exit`, `+` affordance (installed proof)
+
+Three items from the user's 2026-10-30 report were re-checked against installed
+builds. Two already worked; one had a real root cause and is fixed.
+
+- **Hover was structurally absent** — not a paint bug. `native_loop` called
+  `renderer.enable_mouse(false)` (inherited from the pre-input memory-renderer
+  path), so the terminal never sent pointer-motion events even though the loop
+  already handles `kind == 7` (tab hover facts, context-menu `PointerMove`).
+  Upstream sets `renderer.useMouse = true` (`app.tsx:631`) and OpenTUI defaults
+  `enableMouseMovement = true` (core `chunk-node-*.js:7249`), which enables
+  motion tracking. Changed the live call to `enable_mouse(true)` with the
+  source references in a comment. This is a one-line behavioural fix, not a
+  new mechanism.
+- **Installed proof of hover** (release `148cb3de`, 160x40 PTY, SGR motion
+  `\x1b[<35;x;1M`): moving the pointer over the session tab replaced its tail
+  with the hover close glyph `✕` in the next frame, and moving to `(2,20)`
+  cleared it. `verify_hover.py` PASS, `/exit` exit 0. Capture
+  `/tmp/oc2-verify/hover-on.raw` sha256 `9f282336...`.
+- **Root-window `/exit` works**: launching `oc2 tui --origin <daemon>` with no
+  `--session` rendered Home and exited 0 on `/exit` (`verify_home_exit.py`).
+  The earlier user report predates the loop-level exit route comment/code at
+  `tui_entry.rs:~8590`; no further change was needed. Capture
+  `/tmp/oc2-verify/home-exit-after.raw` sha256 `8c98f7a7...`.
+- **`+` affordance works**: clicking the painted `+` in a bound session's tab
+  row opened the Home tab (`New session`), leaving the original tab intact;
+  `/exit` exit 0 (`verify_new_tab_click.py`, release `27984c18` before the
+  mouse-motion change). Capture `/tmp/oc2-verify/newtab-after.raw` sha256
+  `b5478743...`. Geometry of the Home slot vs upstream remains a separate
+  parity question (the slot renders `+ New session`, matching upstream's
+  `label="+", title="New session"` composition); this entry only claims the
+  action is reachable.
+- Focused tests: `native_input_decoder::mouse_protocol_tests` 20/20; default
+  (non-native) `cargo check` clean.
+- Still open from 9295: model/progress placement review, vertical new-tab
+  padding, response background overflow (not reproduced on the current build:
+  the 160x40 capture shows the sidebar surface at cols 119-160 and message
+  surfaces confined to the transcript inset, not the screen edges), and
+  visible/clickable subagent progress.

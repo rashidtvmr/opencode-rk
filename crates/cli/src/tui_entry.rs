@@ -4684,7 +4684,10 @@ fn native_loop(
     renderer.setup_terminal()?;
     // Native owns mouse input; otherwise the terminal selects the entire
     // painted rectangular buffer, including Home whitespace and decoration.
-    renderer.enable_mouse(false)?;
+    // Motion tracking stays on: upstream sets `renderer.useMouse = true`
+    // (`app.tsx:631`) with OpenTUI's default `enableMouseMovement = true`, and
+    // tab/context-menu hover is driven by the pointer-move events it delivers.
+    renderer.enable_mouse(true)?;
     let _ = renderer.enable_kitty_keyboard(1);
     renderer.set_title("OpenCode RK")?;
     let mut draft = String::new();
