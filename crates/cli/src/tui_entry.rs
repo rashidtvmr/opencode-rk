@@ -1414,6 +1414,10 @@ struct PaintCtx {
     completion: Option<crate::native_completion::Panel>,
     ui_regions: Vec<crate::native_ui_style::Region>,
     context_usage_styles: Vec<(u16, u16, u16, crate::native_theme_runtime::Slot)>,
+    /// Absolute `(x, y, cells, slot, attributes)` sidebar spans. The sidebar
+    /// publishes one role per row, so per-span colour and the cancelled-todo
+    /// strikethrough only reach the painter through this channel.
+    sidebar_span_styles: Vec<(u16, u16, u16, crate::native_theme_runtime::Slot, u32)>,
     modal_underlay_rows: Vec<String>,
     page_panel: Option<(u16, u16, u16, u16)>,
     logo: Option<(u16, u16)>,
@@ -1814,6 +1818,7 @@ mod surface_paint_regressions {
             composer: Some(composer),
             completion: None,
             context_usage_styles: view.context_usage_styles().to_vec(),
+            sidebar_span_styles: view.sidebar_span_styles().to_vec(),
             ui_regions: view.ui_regions(),
             modal_underlay_rows: view.modal_underlay_rows(),
             page_panel: view.page_panel(),
@@ -3030,6 +3035,23 @@ fn native_paint(
                         },
                     ) {
                         fg = paint_color(ctx.palette, *slot);
+                    }
+                }
+                // Sidebar spans win over the row role for the cells they
+                // cover: the row role is a whole-row fallback, these are the
+                // dot/name/status and strikethrough ranges upstream paints
+                // separately (`feature-plugins/sidebar/mcp.tsx:62-85`).
+                if sidebar && !in_modal {
+                    if let Some((_, _, _, slot, attrs)) =
+                        ctx.sidebar_span_styles.iter().find(|(left, row, width, _, _)| {
+                            u32::from(*row) == y
+                                && x >= u32::from(*left)
+                                && x.saturating_add(u32::from(cells))
+                                    <= u32::from(*left).saturating_add(u32::from(*width))
+                        })
+                    {
+                        fg = paint_color(ctx.palette, *slot);
+                        attributes |= *attrs;
                     }
                 }
                 if in_modal && styled_region.is_none()
@@ -6151,6 +6173,7 @@ fn native_loop(
                     } else { None },
                     ui_regions: if help_open { help_regions.clone() } else { view.ui_regions() },
                     context_usage_styles: if help_open { Vec::new() } else { view.context_usage_styles().to_vec() },
+                    sidebar_span_styles: if help_open { Vec::new() } else { view.sidebar_span_styles().to_vec() },
                     modal_underlay_rows: view.modal_underlay_rows(),
                     page_panel: if help_open { help_panel } else { view.page_panel() },
                     logo: if help_open {

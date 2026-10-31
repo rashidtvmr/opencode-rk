@@ -82,6 +82,11 @@ pub struct NativeView {
     compaction: crate::native_compaction_settings::CompactionSettingsView,
     context: crate::native_context::ContextView,
     context_usage_styles: Vec<(u16, u16, u16, crate::native_theme_runtime::Slot)>,
+    /// Per-span sidebar styling in absolute frame coordinates
+    /// `(x, y, cells, slot, attributes)`. The sidebar rows carry one role for
+    /// the whole row, so dot/name/status and struck-through todo colours have
+    /// no other channel to the painter.
+    sidebar_span_styles: Vec<(u16, u16, u16, crate::native_theme_runtime::Slot, u32)>,
     command_palette: crate::native_command_palette::CommandPalette,
     status: StatusView,
     /// Held from day one; `DialogView::request/answer` wiring is explicitly
@@ -166,6 +171,46 @@ mod page_spacing_tests {
         let mut view = NativeView::new(148, 30); view.set_session_route(true);
         view.apply_mcp(&serde_json::json!({"a":{"status":"connected"},"b":{"status":"disabled"},"c":{"status":"needs_auth"}})).unwrap(); let _ = view.render("", &[], false, &[]);
         assert!(view.mcp_toggle_hit.is_some()); view.scroll_sidebar_at(view.presentation().sidebar_offset.unwrap() + 1, 2, 1); assert!(view.mcp_toggle_hit.is_none()); let _ = view.render("", &[], false, &[]); assert!(view.mcp_toggle_hit.is_some()); view.resize(160, 30); assert!(view.mcp_toggle_hit.is_none());
+    }
+
+    #[test]
+    fn sidebar_span_styles_land_on_the_painted_mcp_row() {
+        use crate::native_theme_runtime::Slot;
+        let mut view = NativeView::new(148, 30);
+        view.set_session_route(true);
+        view.apply_mcp(&serde_json::json!({
+            "status": {"alpha": {"status": "connected"}},
+            "included": {"alpha": true}
+        }))
+        .unwrap();
+        let frame = view.render("draft", &[], false, &[]);
+        let y = frame
+            .iter()
+            .position(|line| line.contains("alpha"))
+            .unwrap() as u16;
+        let left = view.presentation().sidebar_offset.unwrap();
+        let spans = view.sidebar_span_styles();
+        assert!(!spans.is_empty(), "the sidebar must publish spans");
+        // The dot is the first cell of the row and is the status colour, not
+        // the row role; name and status follow it.
+        let dot = spans
+            .iter()
+            .find(|(x, row, cells, slot, _)| *row == y && *cells == 1 && *slot == Slot::TextMuted && u32::from(*x) >= u32::from(left))
+            .or_else(|| spans.iter().find(|(_, row, _, _, _)| *row == y))
+            .expect("a span on the MCP row");
+        assert_eq!(dot.1, y, "span rows must match the painted row");
+        assert!(
+            u32::from(dot.0) >= u32::from(left),
+            "spans are translated into absolute frame columns"
+        );
+        assert!(
+            spans.iter().any(|(_, row, _, slot, attributes)| *row == y && (*slot == Slot::Text || *attributes != 0)),
+            "name/status spans must carry their own styling"
+        );
+        // Hidden panes publish nothing, so the painter cannot style stale cells.
+        view.set_sidebar_hidden(true);
+        let _ = view.render("draft", &[], false, &[]);
+        assert!(view.sidebar_span_styles().is_empty());
     }
 
     #[test]
@@ -512,6 +557,7 @@ impl NativeView {
         self.ui_regions.clone()
     }
     pub fn context_usage_styles(&self) -> &[(u16, u16, u16, crate::native_theme_runtime::Slot)] { &self.context_usage_styles }
+    pub fn sidebar_span_styles(&self) -> &[(u16, u16, u16, crate::native_theme_runtime::Slot, u32)] { &self.sidebar_span_styles }
     pub fn set_overlay_roles(&mut self, roles: Vec<crate::native_ui_style::Role>) {
         self.overlay_roles = roles;
     }
@@ -575,6 +621,7 @@ impl NativeView {
             compaction: crate::native_compaction_settings::CompactionSettingsView::new(),
             context: crate::native_context::ContextView::new(),
             context_usage_styles: Vec::new(),
+            sidebar_span_styles: Vec::new(),
             status: StatusView::default(),
             dialogs: DialogView::default(),
             command_palette: crate::native_command_palette::CommandPalette::default(),
@@ -2045,6 +2092,7 @@ impl NativeView {
         self.context_usage_hit = None;
         self.ui_regions.clear();
         self.context_usage_styles.clear();
+        self.sidebar_span_styles.clear();
         self.modal_underlay_rows.clear();
         let height = self.render_height();
         if self.layout.cols == 0 || height == 0 {
@@ -2393,6 +2441,36 @@ impl NativeView {
             } else {
                 sidebar_styled.len().min(height)
             };
+            // Per-span sidebar styling, resolved against the same
+            // (width, height) the painted rows came from so row indices line
+            // up. Spans are row-local; translate them once here.
+            for (index, span) in
+                self.status
+                    .sidebar_span_styles_at(38, self.sidebar_content_height)
+            {
+                if index >= region_count {
+                    break;
+                }
+                let start = span.start_cell.min(usize::from(sidebar_text_width)) as u16;
+                let cells = span
+                    .cells
+                    .min(usize::from(sidebar_text_width.saturating_sub(start)))
+                    as u16;
+                if cells == 0 {
+                    continue;
+                }
+                self.sidebar_span_styles.push((
+                    left.saturating_add(sidebar_inset).saturating_add(start),
+                    if sidebar_frame_painted {
+                        sidebar_top.saturating_add(1).saturating_add(index as u16)
+                    } else {
+                        index as u16
+                    },
+                    cells,
+                    span.slot,
+                    span.attributes,
+                ));
+            }
             for (index, line) in sidebar_styled.iter().enumerate().take(region_count) {
                 self.ui_regions.push(crate::native_ui_style::Region {
                     // `sidebar_inset` is local to the right pane; add the
