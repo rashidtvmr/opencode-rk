@@ -46,7 +46,17 @@
 //! Geometry scalars are consumed from [`crate::native_view_layout`] (P03), not
 //! re-derived here, so there is one source of truth for the clamp, the split
 //! threshold and the 120-cell wide test.
+//!
+//! LAY-13 wiring: the handle is PLACED from the single frame descriptor in
+//! [`crate::native_shell_frame::FrameDescriptor`] — its `available` box, docked
+//! `right` width and terminal `cols` — so painting, hover and hit testing share
+//! the upstream `left = availableWidth() - paneResize.size() - 1` arithmetic
+//! (`component/session-frame.tsx:381-384`). [`PaneResize::sync_frame`] adopts
+//! `panels.width()` and the terminal width from the same descriptor
+//! (`component/session-frame.tsx:41-45`); the dock width stays a projection of
+//! `size()`, so a clamped frame never rewrites the persisted size.
 
+use crate::native_shell_frame::ShellFrame;
 use crate::native_view_layout::{
     clamp_session_pane_width, default_pane_width, session_wide, RightPane,
     SESSION_PANEL_SPLIT_MIN_WIDTH, SESSION_SIDEBAR_WIDTH, SESSION_WIDE_THRESHOLD,
@@ -157,6 +167,107 @@ impl PaneResizeHandle {
         let clipped = if self.left < 0 { 0 } else { self.left as u16 };
         CellRect::new(clipped, self.top, self.width, height)
     }
+
+    /// Point test for the 2-cell target (`ui/pane-resize-handle.tsx:12-22`):
+    /// the box is `width={2}` and the full available height, so a pointer one
+    /// cell outside either edge is not a resize grab.
+    #[must_use]
+    pub fn hit(self, x: u16, y: u16, height: u16) -> bool {
+        self.hit_rect(height).contains(x, y)
+    }
+}
+
+/// The resize handle placed on a composed frame: the 2-cell target, the
+/// 1-cell highlight and the stack order, all in terminal coordinates.
+///
+/// Upstream mounts `PaneResizeHandle` inside the session-frame root box (the
+/// box that starts at the rail's right edge) with `top={0}` and
+/// `height="100%"`, and passes `left={availableWidth() - paneResize.size() - 1}`
+/// (`component/session-frame.tsx:381-384`). Because the frame's right edge is
+/// the terminal's right edge, that left column is also the absolute column the
+/// pointer handlers use (`component/session-frame.tsx:43-44`), so one rect
+/// serves painting, hover and hit testing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PaneHandleTarget {
+    /// The 2-cell grab target.
+    pub target: CellRect,
+    /// The 1-cell highlight inside [`PaneHandleTarget::target`].
+    pub highlight: CellRect,
+    /// Stack order (`zIndex={10}`).
+    pub z_index: u16,
+}
+
+impl PaneHandleTarget {
+    /// True when the pointer is on the 2-cell grab target.
+    #[must_use]
+    pub const fn hit(&self, x: u16, y: u16) -> bool {
+        self.target.contains(x, y)
+    }
+
+    /// The highlight paints only while hovered or resizing
+    /// (`ui/pane-resize-handle.tsx:27-29`).
+    #[must_use]
+    pub const fn paints_highlight(&self, hovered: bool, resizing: bool) -> bool {
+        hovered || resizing
+    }
+
+    /// Highlight cells: always one, the other target cell stays unpainted.
+    #[must_use]
+    pub const fn highlight_cells(&self) -> u16 {
+        self.highlight.width
+    }
+}
+
+/// Place the resize handle on a composed frame
+/// (`component/session-frame.tsx:381-384`).
+///
+/// The frame's [`FrameDescriptor`] is the single geometry source: the target
+/// spans the frame box's full height, its two columns straddle the boundary
+/// between the last session cell and the docked right pane, and it only exists
+/// for a docked terminal/panel when the frame is not fullscreen and at least
+/// [`PANE_HANDLE_MIN_AVAILABLE`] columns remain.
+#[must_use]
+pub fn frame_resize_handle(
+    frame: &ShellFrame,
+    fullscreen: bool,
+    highlight: HandleHighlight,
+) -> Option<PaneHandleTarget> {
+    let descriptor = &frame.descriptor;
+    let handle = pane_resize_handle(
+        descriptor.pane,
+        fullscreen,
+        descriptor.available.w,
+        descriptor.right.w,
+        highlight,
+    )?;
+    // `left` is frame-local upstream; shift by the rail reservation and clip
+    // to the terminal so a degenerate frame cannot paint outside.
+    let absolute = |local: i32| {
+        u16::try_from(i32::from(descriptor.available.x).saturating_add(local).max(0))
+            .unwrap_or(u16::MAX)
+            .min(descriptor.cols)
+    };
+    let left = absolute(handle.left);
+    let target = CellRect::new(
+        left,
+        descriptor.available.y,
+        handle.width.min(descriptor.cols.saturating_sub(left)),
+        descriptor.available.h,
+    );
+    let highlight_left = absolute(handle.highlight_left);
+    let highlight_rect = CellRect::new(
+        highlight_left,
+        descriptor.available.y,
+        handle
+            .highlight_width
+            .min(descriptor.cols.saturating_sub(highlight_left)),
+        descriptor.available.h,
+    );
+    Some(PaneHandleTarget {
+        target,
+        highlight: highlight_rect,
+        z_index: handle.z_index,
+    })
 }
 
 /// The handle exists only for a docked terminal/panel when `available >= 3`
@@ -202,7 +313,6 @@ pub struct PaneResize {
     terminal_width: u16,
     preferred: u16,
     requested: Option<u16>,
-    default_value: u16,
     hovered: bool,
     resizing: bool,
     moved: bool,
@@ -223,7 +333,6 @@ impl PaneResize {
             terminal_width,
             preferred: value,
             requested: Some(value),
-            default_value,
             hovered: false,
             resizing: false,
             moved: false,
@@ -238,6 +347,26 @@ impl PaneResize {
     pub fn set_geometry(&mut self, pane_width: u16, terminal_width: u16) {
         self.pane_width = pane_width;
         self.terminal_width = terminal_width;
+    }
+
+    /// Adopt a composed frame's geometry: `panels.width()` as the clamp basis
+    /// and the terminal width for the pointer math
+    /// (`component/session-frame.tsx:42-44`). The docked width is a projection
+    /// of [`PaneResize::size`], never a new persisted value: upstream flows
+    /// `layout.paneWidth -> preferredSize -> size() -> dock`, and a shrunken
+    /// frame must not overwrite the stored size it only clamped for display
+    /// (`ui/pane-resize.ts:5,16-21`, `component/session-frame.tsx:41-45`).
+    pub fn sync_frame(&mut self, frame: &ShellFrame) {
+        let descriptor = frame.descriptor;
+        self.set_geometry(descriptor.available.w, descriptor.cols);
+    }
+
+    /// `defaultValue: defaultPaneWidth()` (`component/session-frame.tsx:45`):
+    /// a live accessor over the CURRENT panel width, so the double-click reset
+    /// follows a terminal resize instead of the width at construction.
+    #[must_use]
+    pub fn default_value(&self) -> u16 {
+        default_pane_width(self.pane_width)
     }
 
     /// The reactive `createEffect` that copies an external value into the
@@ -319,6 +448,16 @@ impl PaneResize {
         self.hovered = false;
     }
 
+    /// `now - lastBoundaryClick < 300` (`ui/pane-resize.ts:52`): whether a
+    /// release armed the double-click latch and the window is still open. The
+    /// latch is consulted only on the next press, so a stale latch must never
+    /// turn a later single click into a reset.
+    #[must_use]
+    pub fn double_click_armed(&self, now_ms: u64) -> bool {
+        self.last_boundary_click_ms
+            .is_some_and(|last| now_ms.saturating_sub(last) < PANE_DOUBLE_CLICK_MS)
+    }
+
     /// Mouse-down handler (`ui/pane-resize.ts:49-65`). Returns whether the
     /// event was handled (left button only). A second left click within
     /// [`PANE_DOUBLE_CLICK_MS`] of a drag-less release resets to the default
@@ -327,14 +466,12 @@ impl PaneResize {
         if button != PaneMouseButton::Left {
             return false;
         }
-        if let Some(last) = self.last_boundary_click_ms {
-            if now_ms.saturating_sub(last) < PANE_DOUBLE_CLICK_MS {
-                self.last_boundary_click_ms = None;
-                self.resizing = false;
-                self.hovered = false;
-                self.commit(self.default_value);
-                return true;
-            }
+        if self.double_click_armed(now_ms) {
+            self.last_boundary_click_ms = None;
+            self.resizing = false;
+            self.hovered = false;
+            self.commit(self.default_value());
+            return true;
         }
         self.moved = false;
         self.resizing = true;
@@ -722,10 +859,20 @@ impl PaneFocusGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::native_shell_frame::{ShellFrame, ShellFrameInput, compose_shell};
 
     fn resize() -> PaneResize {
         // 120-wide panel, 160-wide terminal, persisted 60.
         PaneResize::new(120, 160, Some(60))
+    }
+
+    /// A composed frame with a docked panel of `pane` columns.
+    fn frame_with_panel(cols: u16, rows: u16, rail: u16, pane: u16) -> ShellFrame {
+        let mut input = ShellFrameInput::new(cols, rows);
+        input.tabs_width = rail;
+        input.panel_open = true;
+        input.pane_width = pane;
+        compose_shell(&input)
     }
 
     // ---- LAY-13: handle target and highlight ----------------------------
@@ -934,6 +1081,230 @@ mod tests {
         assert!(pane.contains(100, 60));
         assert!(!pane.contains(98, 60));
         assert!(!pane.contains(101, 60));
+    }
+
+    // ---- LAY-13: frame placement, hit target and live default ----------
+
+    /// LAY-13. `component/session-frame.tsx:381-384` +
+    /// `ui/pane-resize-handle.tsx:12-30`: the handle is a 2-cell target that
+    /// straddles the session/dock boundary, spans the frame box height, keeps
+    /// exactly one highlighted cell, and its hit band is the same 2 columns
+    /// `PaneResize::contains` uses.
+    #[test]
+    fn lay13_frame_handle_target_is_two_cells_on_the_dock_boundary() {
+        let frame = frame_with_panel(160, 24, 0, 50);
+        let handle =
+            frame_resize_handle(&frame, false, HandleHighlight::Right).expect("panel handle");
+        assert_eq!(handle.z_index, 10, "zIndex 10");
+        assert_eq!(handle.target.width, 2, "2-cell grab target");
+        assert_eq!(handle.highlight_cells(), 1, "1-cell highlight");
+        assert_eq!(handle.target.height, 24, "height=100% of the frame box");
+        assert_eq!(handle.target.y, 0);
+        assert_eq!(handle.target.x, 109, "160 - 50 - 1");
+        assert_eq!(frame.descriptor.right.x, 110, "the dock starts on cell 110");
+        assert_eq!(
+            handle.target.x + handle.target.width,
+            frame.descriptor.right.x + 1,
+            "the target covers the last session cell and the pane's first cell"
+        );
+        assert_eq!(handle.highlight.x, 110, "highlight=\"right\"");
+        assert!(handle.hit(109, 0));
+        assert!(handle.hit(110, 23));
+        assert!(!handle.hit(108, 0), "one cell left is outside the target");
+        assert!(!handle.hit(111, 0), "the pane's second cell is outside");
+        assert!(!handle.hit(109, 24), "the row below the frame is outside");
+        assert!(!handle.paints_highlight(false, false));
+        assert!(handle.paints_highlight(true, false));
+        assert!(handle.paints_highlight(false, true));
+        // The painted target and the pointer band cannot disagree.
+        let pane = PaneResize::new(frame.descriptor.available.w, 160, Some(50));
+        assert_eq!(pane.size(), 50);
+        for x in 104..=116 {
+            assert_eq!(
+                handle.hit(x, 0),
+                pane.contains(x, pane.size()),
+                "{x}: hit band must equal contains()"
+            );
+        }
+        // A left highlight paints the session-side cell instead.
+        let left = frame_resize_handle(&frame, false, HandleHighlight::Left).unwrap();
+        assert_eq!(left.highlight.x, 109);
+        assert_eq!(left.target, handle.target, "same grab target");
+    }
+
+    /// LAY-13. `app.tsx:1422-1434` puts the rail beside the frame box, so the
+    /// handle's left column shifts by the rail while its height spans the frame
+    /// box below a horizontal tab strip.
+    #[test]
+    fn lay13_frame_handle_follows_the_rail_and_the_strip() {
+        let frame = frame_with_panel(200, 30, 42, 50);
+        let handle = frame_resize_handle(&frame, false, HandleHighlight::Right).unwrap();
+        let d = frame.descriptor;
+        assert_eq!(d.available.x, 42, "the rail reservation");
+        assert_eq!(d.right.x, 150);
+        assert_eq!(handle.target.x, 149, "the last session cell");
+        assert_eq!(handle.target.x + 1, d.right.x);
+        assert_eq!(handle.target.y, d.available.y);
+        assert_eq!(handle.target.height, d.available.h);
+
+        // Horizontal tabs: the frame box starts below the strip.
+        let mut input = ShellFrameInput::new(200, 30);
+        input.tabs_height = 2;
+        input.panel_open = true;
+        input.pane_width = 50;
+        let stripped = compose_shell(&input);
+        let handle = frame_resize_handle(&stripped, false, HandleHighlight::Right).unwrap();
+        assert_eq!(handle.target.y, 2, "below the tab strip");
+        assert_eq!(handle.target.height, 28);
+    }
+
+    /// LAY-13. `component/session-frame.tsx:381-382`: no handle while
+    /// fullscreen, for a sidebar right pane, or below 3 available columns.
+    #[test]
+    fn lay13_frame_handle_hidden_fullscreen_sidebar_or_too_narrow() {
+        let frame = frame_with_panel(160, 24, 0, 50);
+        assert!(
+            frame_resize_handle(&frame, true, HandleHighlight::Right).is_none(),
+            "fullscreen hides the handle"
+        );
+        let mut input = ShellFrameInput::new(160, 24);
+        input.sidebar.open = true;
+        let sidebar = compose_shell(&input);
+        assert_eq!(sidebar.descriptor.pane, RightPane::Sidebar);
+        assert!(frame_resize_handle(&sidebar, false, HandleHighlight::Right).is_none());
+        let narrow = frame_with_panel(160, 24, 158, 50);
+        assert_eq!(narrow.descriptor.available.w, 2);
+        assert!(
+            frame_resize_handle(&narrow, false, HandleHighlight::Right).is_none(),
+            "availableWidth() < 3"
+        );
+    }
+
+    /// LAY-13. Release persistence (`ui/pane-resize.ts:31-39`,
+    /// `component/session-frame.tsx:50-55`): a drag commits the clamped width,
+    /// the committed value survives a frame reflow/remount and is clamped by
+    /// the new available width, and the reflowed frame places the handle from
+    /// that restored width.
+    #[test]
+    fn lay13_release_persists_the_committed_size_across_a_frame_reflow() {
+        let wide = frame_with_panel(160, 24, 0, 50);
+        let mut pane = PaneResize::new(
+            wide.descriptor.available.w,
+            wide.descriptor.cols,
+            Some(50),
+        );
+        pane.sync_frame(&wide);
+        assert_eq!(pane.size(), 50);
+        pane.on_mouse_down(PaneMouseButton::Left, 1_000);
+        assert!(pane.on_mouse_drag(60)); // from_mouse(60) = 99
+        assert!(pane.on_mouse_up(60, 1_100));
+        let committed = pane.last_commit().expect("a drag commits");
+        assert_eq!(committed, 99);
+
+        // Remount at a narrower frame with the persisted value. The dock is
+        // composed from `paneResize.size()` (`component/session-frame.tsx:330`),
+        // so the frame carries the value as the remounted shell clamps it.
+        let persisted = clamp_session_pane_width(committed, 140);
+        let mut input = ShellFrameInput::new(140, 20);
+        input.panel_open = true;
+        input.pane_width = persisted;
+        let narrow = compose_shell(&input);
+        let mut restored = PaneResize::new(0, 0, Some(committed));
+        restored.sync_frame(&narrow);
+        assert_eq!(
+            restored.size(),
+            persisted,
+            "the release persisted and the narrower frame clamps it"
+        );
+        assert_eq!(restored.size(), 96);
+        let handle = frame_resize_handle(&narrow, false, HandleHighlight::Right).unwrap();
+        assert_eq!(
+            handle.target.x + 1,
+            narrow.descriptor.right.x,
+            "the handle is placed from the restored dock width"
+        );
+        assert_eq!(narrow.descriptor.right.w, 96);
+
+        // The clamp is display-only: the stored size survives the reflow, so a
+        // later wider frame restores the committed width instead of the shrunken
+        // one (`ui/pane-resize.ts:5,21`).
+        assert_eq!(restored.preferred(), committed);
+        restored.set_geometry(200, 200);
+        assert_eq!(restored.size(), committed);
+    }
+
+    /// LAY-13. The double-click reset uses the LIVE `defaultPaneWidth()`
+    /// (`component/session-frame.tsx:45`), so a terminal resize between the two
+    /// clicks still resets to half of the CURRENT panels width, and the 300 ms
+    /// window closes and is consumed exactly once.
+    #[test]
+    fn lay13_double_click_resets_to_the_live_frame_default() {
+        let mut pane = PaneResize::new(120, 160, Some(60));
+        assert_eq!(pane.default_value(), 60);
+        assert!(!pane.double_click_armed(0), "no latch before a release");
+
+        // First click inside the boundary band: no drag, no value change.
+        pane.on_mouse_down(PaneMouseButton::Left, 1_000);
+        assert!(!pane.double_click_armed(1_000), "a press does not arm it");
+        assert!(pane.on_mouse_up(100, 1_050));
+        assert_eq!(pane.commits(), 0);
+        assert!(pane.double_click_armed(1_050), "the release arms the latch");
+        assert!(pane.double_click_armed(1_349), "349 - 50 < 300");
+        assert!(!pane.double_click_armed(1_350), "300 ms closes the window");
+        assert_eq!(pane.preferred(), 60);
+
+        // A reflow between the clicks moves the default to 40; the reset must
+        // adopt the live value, not the width captured at construction.
+        pane.set_geometry(80, 160);
+        assert_eq!(pane.default_value(), 40, "defaultPaneWidth(80)");
+        assert_eq!(pane.preferred(), 60, "the stored size is unchanged so far");
+
+        assert!(pane.on_mouse_down(PaneMouseButton::Left, 1_300));
+        assert!(!pane.resizing(), "the reset never starts a drag");
+        assert!(!pane.hovered());
+        assert_eq!(pane.preferred(), 40, "reset to the CURRENT default");
+        assert_eq!(pane.size(), 40);
+        assert!(!pane.double_click_armed(1_301), "the latch is consumed");
+        // A third press starts an ordinary drag instead of chaining resets.
+        assert!(pane.on_mouse_down(PaneMouseButton::Left, 1_320));
+        assert!(pane.resizing());
+    }
+
+    /// LAY-13. Dragging past either frame edge clamps to the split limits and
+    /// the handle then sits on the new boundary
+    /// (`ui/pane-resize.ts:66-72`, `component/session-frame.tsx:384`).
+    #[test]
+    fn lay13_drag_beyond_frame_bounds_clamps_and_the_handle_follows() {
+        let frame = frame_with_panel(200, 30, 42, 50);
+        let mut pane = PaneResize::new(
+            frame.descriptor.available.w,
+            frame.descriptor.cols,
+            Some(50),
+        );
+        pane.sync_frame(&frame);
+        // Left past the rail: from_mouse(42) = 157, clamped to the upper bound.
+        pane.on_mouse_down(PaneMouseButton::Left, 1_000);
+        assert!(pane.on_mouse_drag(42));
+        assert_eq!(pane.preferred(), 114, "total - SESSION_CONTENT_MIN_WIDTH");
+        assert!(pane.on_mouse_up(42, 1_100));
+        assert_eq!(pane.last_commit(), Some(114));
+        let mut input = ShellFrameInput::new(200, 30);
+        input.tabs_width = 42;
+        input.panel_open = true;
+        input.pane_width = pane.size();
+        let after = compose_shell(&input);
+        assert_eq!(after.descriptor.right.w, 114);
+        let handle = frame_resize_handle(&after, false, HandleHighlight::Right).unwrap();
+        assert_eq!(handle.target.x + 1, after.descriptor.right.x);
+        assert_eq!(handle.target.x, 85);
+
+        // Right past the terminal edge: from_mouse saturates to 0.
+        pane.on_mouse_down(PaneMouseButton::Left, 2_000);
+        assert!(pane.on_mouse_drag(u16::MAX));
+        assert_eq!(pane.preferred(), 24, "the 24-column lower bound");
+        assert!(pane.on_mouse_drag_end(u16::MAX, 2_100));
+        assert_eq!(pane.last_commit(), Some(24));
+        assert_eq!(pane.commits(), 2, "one commit per drag");
     }
 
     // ---- LAY-10: panel 107/108 threshold and tab visibility ------------

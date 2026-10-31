@@ -31,6 +31,7 @@
 //! flag or combining-only atom is ever emitted.
 
 use std::cmp::{max, min};
+use std::collections::BTreeMap;
 
 /// Fixed inline sidebar width when the wide layout is active (upstream
 /// `session/index.tsx`: an inline box of exactly 42 columns).
@@ -891,6 +892,468 @@ pub const fn sidebar_scrollbar_reservation(_shown: bool) -> u16 {
     0
 }
 
+// ---------------------------------------------------------------------------
+// Scroll anchors, tab switch and restore-after-reflow (LAY-17).
+//
+// Upstream pin `450e7b92412c780a7b5a75226bb8d49aaca24e22`:
+//
+// * `routes/session/anchors.ts:4` — `AnchorTarget` is
+//   `{type:"part", ref:{messageID,partID}}` or `{type:"group", groupID}`;
+//   `:11-15` `anchorKey` canonicalises it and `:19-25` `entryRef` maps a whole
+//   non-assistant message to the synthetic `"message"` body part; `:53-92`
+//   `createTimelineAnchors` registers mounted rows with their content `y`,
+//   drops destroyed/zero-height rows and lists them sorted by `y`.
+// * `routes/session/index.tsx:542-571` — `saveScrollAnchor`: at the bottom the
+//   stored anchor is CLEARED (sticky bottom); otherwise the deepest mounted
+//   anchor whose `screenY = node.y - scroll.viewport.y` is at or above the
+//   target's inset (1 for a group header or an assistant message, else 0) is
+//   stored; with no mounted rows the previous anchor survives (unmount).
+// * `routes/session/index.tsx:572-620` — `restoreScrollPosition`: no anchor
+//   scrolls to the bottom; an anchor whose target no longer mounts clears the
+//   anchor and scrolls to the bottom; otherwise
+//   `target = scrollTop + node.y - scroll.viewport.y - anchor.screenY` and a
+//   target past `scrollHeight - viewport.height` adds navigation slack
+//   (`routes/session/message-navigation.ts:8-16`) so the semantic anchor keeps
+//   its saved screen row.
+// * `routes/session/index.tsx:409-417,1470-1488` — `holdAnchor`: a disclosure
+//   toggle re-scrolls to `layoutTop(node) - held.top`, i.e. the same "keep the
+//   toggled header on its viewport row through the reflow" rule.
+// * `context/session-tabs.tsx:45-48` — `ScrollAnchor` is `{target, screenY}`;
+//   `:395-411` the map is keyed by the route's session id (a child session
+//   keeps its OWN anchor) but an entry is only valid while `root(sessionID)`
+//   is an open tab, and an identical `(key, screenY)` pair is not rewritten;
+//   `:350-355` closing a tab deletes the anchors of the whole session family.
+//
+// The model is a pure function of caller-owned rows plus an injectable reflow
+// (no clock, no scrollbox, no rendering). It lives in this self-contained
+// module so a width reflow and a tab switch restore through one arithmetic and
+// `tests/native_state_platform_alias.rs` keeps compiling it standalone.
+// ---------------------------------------------------------------------------
+
+/// Vertical inset of a group header or an assistant message anchor
+/// (`routes/session/index.tsx:557-561`): such a row counts as "at the top"
+/// while it sits on the first row BELOW the scroll viewport's top edge.
+pub const ANCHOR_THREAD_INSET: u16 = 1;
+
+/// Identity of a scroll anchor target (`routes/session/anchors.ts:4`).
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum AnchorTarget {
+    /// One rendered message part (`{type:"part", ref}`).
+    Part {
+        /// Owning message id.
+        message_id: String,
+        /// Part id inside that message.
+        part_id: String,
+    },
+    /// One collapsible timeline group (`{type:"group", groupID}`).
+    Group {
+        /// Canonical group id (`anchors.ts:27-31`).
+        group_id: String,
+    },
+}
+
+impl AnchorTarget {
+    /// A message-part target (`anchors.ts:19-25`).
+    #[must_use]
+    pub fn part(message_id: &str, part_id: &str) -> AnchorTarget {
+        AnchorTarget::Part {
+            message_id: message_id.to_owned(),
+            part_id: part_id.to_owned(),
+        }
+    }
+
+    /// A group target (`routes/session/anchor-view.tsx:39-53`).
+    #[must_use]
+    pub fn group(group_id: &str) -> AnchorTarget {
+        AnchorTarget::Group {
+            group_id: group_id.to_owned(),
+        }
+    }
+
+    /// Canonical identity key (`anchors.ts:11-15`, `anchorKey`).
+    ///
+    /// Same shape as upstream's `JSON.stringify` tuple: `["part",msg,part]`
+    /// or `["group",id]`. Only equality matters to the model, but keeping the
+    /// upstream spelling makes saved anchors comparable with a port that
+    /// persists them.
+    #[must_use]
+    pub fn key(&self) -> String {
+        match self {
+            AnchorTarget::Part {
+                message_id,
+                part_id,
+            } => format!("[\"part\",{message_id:?},{part_id:?}]"),
+            AnchorTarget::Group { group_id } => format!("[\"group\",{group_id:?}]"),
+        }
+    }
+
+    /// True for a timeline group header (`anchors.ts:4`).
+    #[must_use]
+    pub fn is_group(&self) -> bool {
+        matches!(self, AnchorTarget::Group { .. })
+    }
+}
+
+/// Default inset rule: a group header and an assistant message keep one row
+/// under the viewport's top edge, every other anchor may sit on the edge
+/// itself (`routes/session/index.tsx:557-561`). Callers that also know the
+/// message role pass their own closure to [`capture_scroll_anchor`].
+#[must_use]
+pub fn default_anchor_inset(target: &AnchorTarget) -> u16 {
+    if target.is_group() {
+        ANCHOR_THREAD_INSET
+    } else {
+        0
+    }
+}
+
+/// A saved viewport anchor (`context/session-tabs.tsx:45-48`):
+/// `{target, screenY}`. `screen_y` is the row inside the scroll viewport the
+/// semantic target must keep after a tab switch or a reflow.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScrollAnchor {
+    /// Semantic target.
+    pub target: AnchorTarget,
+    /// Rows from the top of the scroll viewport (0 = the viewport's first row).
+    pub screen_y: u16,
+}
+
+/// One mounted anchor row: the semantic target plus its content `y`
+/// (`anchors.ts:53-92`, already filtered to mounted, non-zero-height rows).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MountedAnchor {
+    /// Semantic target.
+    pub target: AnchorTarget,
+    /// Row offset of the target's top inside the scroll content.
+    pub y: u16,
+}
+
+/// `saveScrollAnchor()` (`routes/session/index.tsx:542-571`).
+///
+/// Sticky bottom wins: while the reader follows the bottom the anchor is
+/// cleared (`None`). Otherwise the deepest mounted row that is still at or
+/// above its inset is chosen (a timeline lists rows in `y` order, so that is
+/// the last qualifying row and therefore the largest `screenY`); with nothing
+/// qualifying the first mounted row is used. An empty list also yields `None`;
+/// the only upstream case that keeps the stored anchor is an unmounting save
+/// with no mounted children, which the caller skips before capturing
+/// (`routes/session/index.tsx:546-547`).
+#[must_use]
+pub fn capture_scroll_anchor(
+    mounted: &[MountedAnchor],
+    scroll_top: u16,
+    away_from_bottom: bool,
+    inset: impl Fn(&AnchorTarget) -> u16,
+) -> Option<ScrollAnchor> {
+    if !away_from_bottom || mounted.is_empty() {
+        return None;
+    }
+    // `anchors.list()` is sorted by `node.y` (`anchors.ts:55-60`); select
+    // explicitly by `y` so the model never depends on registration order.
+    let mut first: Option<usize> = None;
+    let mut best: Option<usize> = None;
+    for (index, row) in mounted.iter().enumerate() {
+        if first.is_none_or(|current| row.y < mounted[current].y) {
+            first = Some(index);
+        }
+        if row.y.saturating_sub(scroll_top) > inset(&row.target) {
+            continue;
+        }
+        // Deepest qualifying row wins; ties keep the earliest registration,
+        // matching the strict `>` in `saveScrollAnchor` (`index.tsx:566`).
+        if best.is_none_or(|current| row.y > mounted[current].y) {
+            best = Some(index);
+        }
+    }
+    let index = best.or(first)?;
+    Some(ScrollAnchor {
+        target: mounted[index].target.clone(),
+        screen_y: mounted[index].y.saturating_sub(scroll_top),
+    })
+}
+
+/// Per-session saved anchors (`context/session-tabs.tsx:92,395-411`).
+///
+/// Keyed by the route's session id, so a child session keeps an anchor
+/// independent of its root tab. Validity is checked against the ROOT tab
+/// (`context/session-tabs.tsx:396-397,401-402`), and closing a tab removes the
+/// anchors of the root plus all of its children (`:350-355`).
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TabScrollAnchors {
+    entries: BTreeMap<String, ScrollAnchor>,
+}
+
+impl TabScrollAnchors {
+    /// No stored anchors.
+    #[must_use]
+    pub fn new() -> TabScrollAnchors {
+        TabScrollAnchors {
+            entries: BTreeMap::new(),
+        }
+    }
+
+    /// Raw stored anchor (`sessionTabs.scrollAnchor(sessionID)`,
+    /// `context/session-tabs.tsx:395-399`). Re-validation against the root tab
+    /// happens when the entry is written ([`TabScrollAnchors::set`]), since
+    /// this model does not own the tab list.
+    #[must_use]
+    pub fn get(&self, session_id: &str) -> Option<&ScrollAnchor> {
+        self.entries.get(session_id)
+    }
+
+    /// `sessionTabs.setScrollAnchor(sessionID, anchor)`
+    /// (`context/session-tabs.tsx:400-411`).
+    ///
+    /// `root_session_id` is `data.session.root(session_id)` and `tab_open`
+    /// answers whether that root still has a tab. A `None` anchor or a closed
+    /// root tab deletes the entry; an identical `(target key, screenY)` pair is
+    /// not rewritten. Returns whether the stored map changed.
+    pub fn set(
+        &mut self,
+        session_id: &str,
+        root_session_id: &str,
+        anchor: Option<ScrollAnchor>,
+        tab_open: impl Fn(&str) -> bool,
+    ) -> bool {
+        match anchor {
+            Some(anchor) if tab_open(root_session_id) => {
+                if let Some(current) = self.entries.get(session_id) {
+                    if current.target.key() == anchor.target.key()
+                        && current.screen_y == anchor.screen_y
+                    {
+                        return false;
+                    }
+                }
+                self.entries.insert(session_id.to_owned(), anchor);
+                true
+            }
+            _ => self.entries.remove(session_id).is_some(),
+        }
+    }
+
+    /// Forget one session's anchor (tab close, `context/session-tabs.tsx:353`).
+    pub fn clear(&mut self, session_id: &str) -> bool {
+        self.entries.remove(session_id).is_some()
+    }
+
+    /// Forget a closed tab's whole family — the root plus every child
+    /// (`context/session-tabs.tsx:350-355`). Returns how many anchors were
+    /// removed.
+    pub fn close_family(&mut self, family: &[&str]) -> usize {
+        family
+            .iter()
+            .filter(|id| self.entries.remove(**id).is_some())
+            .count()
+    }
+
+    /// Stored anchors.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// True when nothing is stored.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+/// Post-reflow geometry of the anchored row, produced by the injectable
+/// reflow (the layout is a pure function of the wrap width, so the caller owns
+/// the row measurement).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReflowedAnchor {
+    /// Total scrollable content height after the reflow, in rows, EXCLUDING
+    /// any navigation slack appended by a previous restore
+    /// (`routes/session/message-navigation.ts:14` subtracts `currentSlack`
+    /// before measuring, so the caller passes the un-slacked height).
+    pub content_height: u16,
+    /// Scroll viewport height after the reflow, in rows.
+    pub viewport_height: u16,
+    /// Content `y` of the anchored row after the reflow; `None` when the
+    /// target no longer mounts.
+    pub anchor_y: Option<u16>,
+}
+
+/// Result of `restoreScrollPosition()` (`routes/session/index.tsx:572-620`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ScrollRestore {
+    /// Scroll offset to apply before the slack exists.
+    pub scroll_top: u16,
+    /// Extra content rows the caller must append below the transcript so the
+    /// saved screen row stays reachable
+    /// (`routes/session/message-navigation.ts:8-16`); 0 when not needed.
+    pub slack: u16,
+    /// Scroll offset to apply once [`ScrollRestore::slack`] rows are part of
+    /// the content — the position upstream settles on after its retry.
+    pub settled_scroll_top: u16,
+    /// True when the settled position is the bottom of the content.
+    pub at_bottom: bool,
+    /// True when the reader stays scrolled up from the bottom.
+    pub away_from_bottom: bool,
+    /// True when the stored anchor was dropped because its target vanished.
+    pub cleared: bool,
+}
+
+impl ScrollRestore {
+    /// Scroll offset that puts the anchor back on its saved screen row: the
+    /// settled position. For a slack-free restore it equals
+    /// [`ScrollRestore::scroll_top`].
+    #[must_use]
+    pub fn desired_scroll_top(&self) -> u16 {
+        self.settled_scroll_top
+    }
+}
+
+/// `restoreScrollPosition()` (`routes/session/index.tsx:572-620`).
+///
+/// * no anchor -> stick to the bottom (`scrollTop = scrollHeight - viewport`);
+/// * a target that no longer mounts -> `cleared`, then stick to the bottom;
+/// * otherwise `target = anchor_y - screen_y`, and a target past the maximum
+///   scroll offset keeps the row reachable through [`ScrollRestore::slack`].
+///
+/// The screen-row invariant the caller can assert is
+/// `anchor_y - desired_scroll_top() == screen_y` for every mounted anchor.
+#[must_use]
+pub fn restore_scroll(anchor: Option<&ScrollAnchor>, reflowed: ReflowedAnchor) -> ScrollRestore {
+    let content = i32::from(reflowed.content_height);
+    let viewport = i32::from(reflowed.viewport_height);
+    let maximum = content - viewport;
+    let bottom = ScrollRestore {
+        scroll_top: u16::try_from(maximum.max(0)).unwrap_or(u16::MAX),
+        slack: 0,
+        settled_scroll_top: u16::try_from(maximum.max(0)).unwrap_or(u16::MAX),
+        at_bottom: true,
+        away_from_bottom: false,
+        cleared: false,
+    };
+    let Some(anchor) = anchor else {
+        return bottom;
+    };
+    let Some(anchor_y) = reflowed.anchor_y else {
+        return ScrollRestore {
+            cleared: true,
+            ..bottom
+        };
+    };
+    let target = i32::from(anchor_y) - i32::from(anchor.screen_y);
+    // `messageNavigationSlack` (`message-navigation.ts:14-15`):
+    // `max(0, ceil(top + viewportHeight - contentHeight))`.
+    let slack = (target + viewport - content).max(0);
+    let settled = u16::try_from(target.max(0)).unwrap_or(u16::MAX);
+    // Before the slack is appended only `max(0, maximum)` is reachable; then
+    // the retry scrolls to the target itself.
+    let scroll_top = if target > maximum {
+        u16::try_from(maximum.max(0)).unwrap_or(u16::MAX)
+    } else {
+        settled
+    };
+    let limit = maximum + slack;
+    let at_bottom = i32::from(settled) >= limit;
+    ScrollRestore {
+        scroll_top,
+        slack: u16::try_from(slack).unwrap_or(u16::MAX),
+        settled_scroll_top: settled,
+        at_bottom,
+        away_from_bottom: !at_bottom,
+        cleared: false,
+    }
+}
+
+/// Restore one session's scroll through the injected reflow.
+///
+/// `reflow` receives the saved target (or `None` while no anchor is stored)
+/// and returns the geometry at the CURRENT width, so a tab switch and a
+/// terminal resize both go through `restore_scroll`. A cleared anchor is
+/// removed from `anchors`, matching `sessionTabs.setScrollAnchor(id, undefined)`
+/// (`routes/session/index.tsx:587-591`).
+pub fn restore_tab_scroll(
+    anchors: &mut TabScrollAnchors,
+    session_id: &str,
+    reflow: impl FnOnce(Option<&AnchorTarget>) -> ReflowedAnchor,
+) -> ScrollRestore {
+    let stored = anchors.get(session_id).cloned();
+    let reflowed = reflow(stored.as_ref().map(|anchor| &anchor.target));
+    let restore = restore_scroll(stored.as_ref(), reflowed);
+    if restore.cleared {
+        anchors.clear(session_id);
+    }
+    restore
+}
+
+/// Injectable reflow for tests and for callers that own only row text: each
+/// anchor row wraps to `ceil(cells / width)` rows using the same display-cell
+/// measure [`fit`] uses. Narrowing the width therefore makes rows taller, moves
+/// every later anchor down and changes the required `scrollTop` while the saved
+/// screen row stays constant.
+#[derive(Clone, Debug, Default)]
+pub struct ReflowTimeline {
+    rows: Vec<(AnchorTarget, String)>,
+}
+
+impl ReflowTimeline {
+    /// A timeline from `(target, text)` rows in visual order.
+    #[must_use]
+    pub fn new(rows: Vec<(AnchorTarget, String)>) -> ReflowTimeline {
+        ReflowTimeline { rows }
+    }
+
+    /// Append one row.
+    pub fn push(&mut self, target: AnchorTarget, text: impl Into<String>) {
+        self.rows.push((target, text.into()));
+    }
+
+    /// Wrapped row height of `text` at `width` display cells (at least 1).
+    #[must_use]
+    pub fn row_height(text: &str, width: u16) -> u16 {
+        if width == 0 {
+            return 1;
+        }
+        let cells = visit_unpadded_cells(text, usize::MAX, |_, _| {});
+        let width = usize::from(width);
+        let height = cells.div_ceil(width);
+        u16::try_from(height.max(1)).unwrap_or(u16::MAX)
+    }
+
+    /// Content `y` of `target` at `width`, or `None` when it is not in the
+    /// timeline (an unmounted target).
+    #[must_use]
+    pub fn content_y(&self, target: &AnchorTarget, width: u16) -> Option<u16> {
+        let mut y: u16 = 0;
+        for (row, text) in &self.rows {
+            if row == target {
+                return Some(y);
+            }
+            y = y.saturating_add(ReflowTimeline::row_height(text, width));
+        }
+        None
+    }
+
+    /// Total content height at `width`.
+    #[must_use]
+    pub fn content_height(&self, width: u16) -> u16 {
+        self.rows.iter().fold(0u16, |y, (_, text)| {
+            y.saturating_add(ReflowTimeline::row_height(text, width))
+        })
+    }
+
+    /// Geometry for `target` at `width` (`viewport_height` rows visible).
+    #[must_use]
+    pub fn geometry(
+        &self,
+        target: &AnchorTarget,
+        width: u16,
+        viewport_height: u16,
+    ) -> ReflowedAnchor {
+        ReflowedAnchor {
+            content_height: self.content_height(width),
+            viewport_height,
+            anchor_y: self.content_y(target, width),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1409,5 +1872,322 @@ mod tests {
     #[test]
     fn lay_15_reserved_action_row_is_constant() {
         assert_eq!(SESSION_RESERVED_ACTION_ROWS, 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // LAY-17: scroll anchor, tab switch and restore after reflow.
+    // -----------------------------------------------------------------------
+
+    fn timeline() -> ReflowTimeline {
+        ReflowTimeline::new(vec![
+            (AnchorTarget::part("m1", "p1"), "alpha ".repeat(30)),
+            (AnchorTarget::group("g1"), "beta ".repeat(40)),
+            (AnchorTarget::part("m2", "p2"), "gamma ".repeat(20)),
+        ])
+    }
+
+    /// LAY-17. `anchors.ts:11-15`: the semantic key is the upstream JSON tuple,
+    /// so the same part/group identity always maps to the same anchor.
+    #[test]
+    fn lay17_anchor_key_is_the_upstream_tuple() {
+        assert_eq!(
+            AnchorTarget::part("m1", "p1").key(),
+            "[\"part\",\"m1\",\"p1\"]"
+        );
+        assert_eq!(AnchorTarget::group("g1").key(), "[\"group\",\"g1\"]");
+        assert_ne!(
+            AnchorTarget::part("m1", "p1").key(),
+            AnchorTarget::part("m1", "p2").key(),
+            "part identity includes the part id"
+        );
+        assert_eq!(default_anchor_inset(&AnchorTarget::group("g")), 1);
+        assert_eq!(default_anchor_inset(&AnchorTarget::part("m", "p")), 0);
+        assert!(AnchorTarget::group("g").is_group());
+        assert!(!AnchorTarget::part("m", "p").is_group());
+    }
+
+    /// LAY-17. `index.tsx:542-571`: sticky bottom clears the anchor, the
+    /// deepest row at or above its inset wins (a group header keeps the row
+    /// below the viewport edge), and with nothing qualifying the first mounted
+    /// row is stored instead.
+    #[test]
+    fn lay17_capture_prefers_deepest_visible_row_then_first() {
+        let mounted = [
+            MountedAnchor {
+                target: AnchorTarget::part("m1", "p1"),
+                y: 0,
+            },
+            MountedAnchor {
+                target: AnchorTarget::group("g1"),
+                y: 4,
+            },
+            MountedAnchor {
+                target: AnchorTarget::part("m2", "p2"),
+                y: 9,
+            },
+        ];
+        let anchor = capture_scroll_anchor(&mounted, 3, true, default_anchor_inset)
+            .expect("a scrolled-up transcript stores an anchor");
+        assert_eq!(anchor.target, AnchorTarget::group("g1"));
+        assert_eq!(anchor.screen_y, 1, "the group header sits one row down");
+        // The same rows from the top: the part on row 0 wins at inset 0.
+        let anchor = capture_scroll_anchor(&mounted, 0, true, default_anchor_inset).unwrap();
+        assert_eq!(anchor.target, AnchorTarget::part("m1", "p1"));
+        assert_eq!(anchor.screen_y, 0);
+        // At the bottom the anchor is cleared (sticky bottom).
+        assert_eq!(
+            capture_scroll_anchor(&mounted, 3, false, default_anchor_inset),
+            None
+        );
+        assert_eq!(capture_scroll_anchor(&[], 0, true, default_anchor_inset), None);
+        // No row starts at or above the inset (older rows unmounted): the
+        // first mounted row is stored instead of losing the position.
+        let tail = [
+            MountedAnchor {
+                target: AnchorTarget::part("m9", "p9"),
+                y: 3,
+            },
+            MountedAnchor {
+                target: AnchorTarget::part("m10", "p10"),
+                y: 7,
+            },
+        ];
+        let anchor = capture_scroll_anchor(&tail, 0, true, default_anchor_inset).unwrap();
+        assert_eq!(anchor.target, AnchorTarget::part("m9", "p9"));
+        assert_eq!(anchor.screen_y, 3);
+    }
+
+    /// LAY-17. Switching tabs and narrowing the viewport reflows every row;
+    /// the stored semantic anchor is restored to the SAME screen row even
+    /// though the pixel offset changes, and the anchor is not rewritten when
+    /// re-captured after the reflow.
+    #[test]
+    fn lay17_tab_switch_and_reflow_keep_anchor_and_screen_y() {
+        let timeline = timeline();
+        let mut anchors = TabScrollAnchors::new();
+
+        // Wide layout: group header lands on screen row 1 after scrolling.
+        let mounted = [
+            MountedAnchor {
+                target: AnchorTarget::part("m1", "p1"),
+                y: 0,
+            },
+            MountedAnchor {
+                target: AnchorTarget::group("g1"),
+                y: 5,
+            },
+            MountedAnchor {
+                target: AnchorTarget::part("m2", "p2"),
+                y: 10,
+            },
+        ];
+        let saved = capture_scroll_anchor(&mounted, 4, true, default_anchor_inset).unwrap();
+        assert_eq!(saved.target, AnchorTarget::group("g1"));
+        assert_eq!(saved.screen_y, 1);
+        assert!(anchors.set("s1", "s1", Some(saved.clone()), |id| id == "s1"));
+
+        // Reflow to a narrow viewport: rows wrap taller, the anchor moves from
+        // content row 5 to content row 9.
+        assert_eq!(timeline.content_y(&saved.target, 20), Some(9));
+        assert_eq!(timeline.content_height(20), 25);
+        let restored = restore_tab_scroll(&mut anchors, "s1", |target| {
+            timeline.geometry(target.expect("stored anchor"), 20, 8)
+        });
+        assert_eq!(restored.scroll_top, 8, "9 - screen row 1");
+        assert_eq!(restored.slack, 0);
+        assert!(!restored.at_bottom && restored.away_from_bottom);
+        assert!(!restored.cleared);
+        assert_eq!(
+            timeline.content_y(&saved.target, 20).unwrap() - restored.desired_scroll_top(),
+            saved.screen_y,
+            "the semantic anchor kept its screen row"
+        );
+        assert!(anchors.get("s1").is_some(), "the anchor survives the reflow");
+
+        // Re-capturing at the new width yields the identical anchor, so the
+        // tab-switch save is a no-op rather than drifting a row each time.
+        let mounted_after = [
+            MountedAnchor {
+                target: AnchorTarget::part("m1", "p1"),
+                y: 0,
+            },
+            MountedAnchor {
+                target: AnchorTarget::group("g1"),
+                y: 9,
+            },
+            MountedAnchor {
+                target: AnchorTarget::part("m2", "p2"),
+                y: 19,
+            },
+        ];
+        let again =
+            capture_scroll_anchor(&mounted_after, restored.settled_scroll_top, true, default_anchor_inset)
+                .unwrap();
+        assert_eq!(again, saved);
+        assert!(
+            !anchors.set("s1", "s1", Some(again), |id| id == "s1"),
+            "an identical (target, screenY) pair is not rewritten"
+        );
+
+        // A second tab keeps its own anchor; restoring it leaves tab 1 alone.
+        let other = capture_scroll_anchor(&mounted_after, 19, true, default_anchor_inset).unwrap();
+        assert_eq!(other.target, AnchorTarget::part("m2", "p2"));
+        assert!(anchors.set("s2", "s2", Some(other), |id| id == "s1" || id == "s2"));
+        let first_before = anchors.get("s1").cloned();
+        let second = restore_tab_scroll(&mut anchors, "s2", |target| {
+            timeline.geometry(target.expect("stored anchor"), 40, 8)
+        });
+        assert_eq!(
+            timeline.content_y(&AnchorTarget::part("m2", "p2"), 40),
+            Some(10)
+        );
+        assert_eq!(second.settled_scroll_top, 10, "10 - screen row 0");
+        assert_eq!(second.slack, 5, "the row must stay reachable: taller slack");
+        assert!(second.at_bottom, "after the slack the row is the last content");
+        assert_eq!(
+            timeline.content_y(&AnchorTarget::part("m2", "p2"), 40).unwrap()
+                - second.desired_scroll_top(),
+            0,
+            "screen row preserved through the slack"
+        );
+        assert_eq!(anchors.get("s1").cloned(), first_before, "tabs stay independent");
+    }
+
+    /// LAY-17. `index.tsx:584-592`: a target that no longer mounts clears the
+    /// stored anchor and sticks to the bottom; a tab with no anchor starts at
+    /// the bottom without disturbing any other tab.
+    #[test]
+    fn lay17_vanished_anchor_clears_and_sticks_to_bottom() {
+        let mut anchors = TabScrollAnchors::new();
+        anchors.set(
+            "s1",
+            "s1",
+            Some(ScrollAnchor {
+                target: AnchorTarget::part("gone", "p0"),
+                screen_y: 0,
+            }),
+            |_| true,
+        );
+        let restore = restore_tab_scroll(&mut anchors, "s1", |_| ReflowedAnchor {
+            content_height: 30,
+            viewport_height: 10,
+            anchor_y: None,
+        });
+        assert!(restore.cleared);
+        assert!(restore.at_bottom && !restore.away_from_bottom);
+        assert_eq!(restore.scroll_top, 20, "scrollHeight - viewport");
+        assert_eq!(restore.desired_scroll_top(), 20);
+        assert!(anchors.get("s1").is_none(), "the stale anchor is dropped");
+
+        // Another tab is untouched by the fallback.
+        anchors.set(
+            "s2",
+            "s2",
+            Some(ScrollAnchor {
+                target: AnchorTarget::group("g1"),
+                screen_y: 1,
+            }),
+            |_| true,
+        );
+        let restore = restore_tab_scroll(&mut anchors, "s3", |_| ReflowedAnchor {
+            content_height: 12,
+            viewport_height: 12,
+            anchor_y: None,
+        });
+        assert!(!restore.cleared);
+        assert!(restore.at_bottom);
+        assert_eq!(restore.scroll_top, 0, "content fits the viewport");
+        assert!(anchors.get("s2").is_some());
+    }
+
+    /// LAY-17. `context/session-tabs.tsx:395-411`: a child session stores its
+    /// own anchor keyed by its own id, validity follows the root tab, and
+    /// closing a tab removes the whole family.
+    #[test]
+    fn lay17_child_anchor_is_independent_but_dies_with_the_root_tab() {
+        let mut anchors = TabScrollAnchors::new();
+        let child = ScrollAnchor {
+            target: AnchorTarget::part("m-child", "p1"),
+            screen_y: 2,
+        };
+        let root = ScrollAnchor {
+            target: AnchorTarget::part("m-root", "p1"),
+            screen_y: 0,
+        };
+        assert!(anchors.set("child", "root", Some(child.clone()), |id| id == "root"));
+        assert!(anchors.set("root", "root", Some(root.clone()), |id| id == "root"));
+        assert_eq!(anchors.get("child"), Some(&child));
+        assert_eq!(anchors.get("root"), Some(&root));
+        assert_eq!(anchors.len(), 2, "the child anchor is independent");
+
+        // Closing the root tab invalidates child writes as well.
+        assert!(!anchors.set("child2", "root", Some(child.clone()), |_| false));
+        assert!(anchors.get("child2").is_none());
+
+        assert_eq!(anchors.close_family(&["root", "child", "grandchild"]), 2);
+        assert!(anchors.is_empty(), "the family's anchors are gone");
+        // A cleared value is accepted and reported as a change exactly once.
+        assert!(anchors.set("root", "root", Some(root.clone()), |_| true));
+        assert!(anchors.set("root", "root", None, |_| true));
+        assert!(!anchors.set("root", "root", None, |_| true));
+    }
+
+    /// LAY-17. `message-navigation.ts:8-16`: when the anchor is the last
+    /// content, the restore appends slack so the saved screen row is still
+    /// reachable instead of silently clamping the reader to a different row.
+    #[test]
+    fn lay17_restore_adds_slack_to_reach_the_saved_screen_row() {
+        let timeline = ReflowTimeline::new(vec![
+            (AnchorTarget::part("m1", "p1"), "a".repeat(10)),
+            (AnchorTarget::part("m2", "p2"), "b".repeat(240)),
+        ]);
+        let target = AnchorTarget::part("m2", "p2");
+        let geometry = timeline.geometry(&target, 80, 8);
+        assert_eq!(geometry.content_height, 4, "content shorter than the viewport");
+        assert_eq!(geometry.anchor_y, Some(1));
+        let anchor = ScrollAnchor {
+            target: target.clone(),
+            screen_y: 0,
+        };
+        let restore = restore_scroll(Some(&anchor), geometry);
+        assert_eq!(restore.scroll_top, 0, "nothing scrollable before the slack");
+        assert_eq!(restore.slack, 5, "top + viewport - contentHeight");
+        assert_eq!(restore.desired_scroll_top(), 1);
+        assert_eq!(
+            u16::from(geometry.content_height + restore.slack),
+            9,
+            "the slack makes the saved row reachable"
+        );
+        assert!(restore.at_bottom && !restore.away_from_bottom);
+        // The screen-row invariant holds for every mounted anchor.
+        assert_eq!(
+            geometry.anchor_y.unwrap() - restore.desired_scroll_top(),
+            anchor.screen_y
+        );
+    }
+
+    /// LAY-17. Reflow measurement: heights come from the same display-cell
+    /// measure as [`fit`], so wide glyphs and empty rows reflow like content.
+    #[test]
+    fn lay17_reflow_timeline_measures_wrapped_heights() {
+        assert_eq!(ReflowTimeline::row_height("abc", 3), 1);
+        assert_eq!(ReflowTimeline::row_height("abcd", 3), 2);
+        assert_eq!(ReflowTimeline::row_height("", 4), 1);
+        assert_eq!(
+            ReflowTimeline::row_height("\u{6F22}\u{6F22}", 2),
+            2,
+            "two wide glyphs take two rows at width 2"
+        );
+        assert_eq!(ReflowTimeline::row_height("abc", 0), 1, "zero width saturates");
+        let timeline = timeline();
+        assert_eq!(timeline.content_y(&AnchorTarget::group("g1"), 40), Some(5));
+        assert_eq!(timeline.content_y(&AnchorTarget::group("g1"), 20), Some(9));
+        assert_eq!(timeline.content_height(40), 13);
+        assert_eq!(timeline.content_height(20), 25);
+        assert_eq!(
+            timeline.content_y(&AnchorTarget::part("absent", "p"), 40),
+            None,
+            "an unmounted target has no content y"
+        );
     }
 }

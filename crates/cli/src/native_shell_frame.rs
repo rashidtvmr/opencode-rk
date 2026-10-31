@@ -30,7 +30,7 @@
 //! panel content is owned by P04/P11, so their dock is reserved as blank cells
 //! rather than painted by a second pane.
 
-use crate::native_layout::{FrameSpec, SessionRegions};
+use crate::native_layout::{FrameSpec, Rect, SessionRegions};
 use crate::native_view_layout::{
     RightPane, SidebarMode, fit, right_pane, session_wide, sidebar_visible, slice_cells,
     visit_unpadded_cells,
@@ -165,6 +165,8 @@ impl<'a> ShellFrameInput<'a> {
 pub struct ShellFrame {
     /// Painted rows, each exactly the terminal width in display cells.
     pub rows: Vec<String>,
+    /// The single frame descriptor that produced the rows.
+    pub descriptor: FrameDescriptor,
     /// The geometry that produced the rows.
     pub regions: SessionRegions,
     /// `dimensions().width - verticalTabsWidth > 120`.
@@ -173,6 +175,167 @@ pub struct ShellFrame {
     pub right: RightPane,
     /// Resolved `sidebarVisible()`.
     pub sidebar_visible: bool,
+}
+
+/// The single frame descriptor: every geometry fact the painter, the resize
+/// handle and the chrome layers need, computed exactly once per frame.
+///
+/// Upstream derives these from flex layout rather than arithmetic, so the
+/// numbers follow the same source of truth:
+///
+/// * the rail reservation is a sibling of the session frame in a row flex box
+///   (`app.tsx:1422-1434`), so [`FrameDescriptor::available`] is the frame box
+///   the resize handle and the right dock are placed in;
+/// * the right dock is one box of `SESSION_SIDEBAR_WIDTH` for the sidebar and
+///   `paneResize.size()` for a terminal/panel (`session-frame.tsx:323-331`);
+/// * the session content insets by 1 (<44 terminal) or 2 and reserves one
+///   bottom padding row plus an always-present action row
+///   (`routes/session/index.tsx:1514-1520,1570`);
+/// * the transcript scrollbar reserves the viewport `paddingRight` plus a
+///   one-column track while shown (`routes/session/index.tsx:1527-1537`);
+/// * the sidebar pads 1/1/2/2 and its content reserves one right column under
+///   the ABSOLUTE scrollbar (`routes/session/sidebar.tsx:26-29,56-69`).
+///
+/// Consumers must read these fields instead of subtracting rectangles again.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FrameDescriptor {
+    /// Terminal width in cells.
+    pub cols: u16,
+    /// Rows the frame emits.
+    pub rows: u16,
+    /// `dimensions().width - verticalTabsWidth > 120`.
+    pub wide: bool,
+    /// The single resolved right pane.
+    pub pane: RightPane,
+    /// Resolved `sidebarVisible()`.
+    pub sidebar_visible: bool,
+    /// Tab reservation: the vertical rail or the horizontal strip.
+    pub rail: Rect,
+    /// Frame box after the rail: the resize handle spans it and the right dock
+    /// sits on its right edge (`session-frame.tsx:381-384`).
+    pub available: Rect,
+    /// Docked right box; zero when there is no docked pane.
+    pub right: Rect,
+    /// Sidebar box (docked or absolute overlay).
+    pub sidebar: Rect,
+    /// True when the sidebar is painted as an absolute overlay.
+    pub sidebar_overlay: bool,
+    /// Left inset of the session content (`index.tsx:1515-1516`).
+    pub inset_left: u16,
+    /// Right inset of the session content.
+    pub inset_right: u16,
+    /// Painted content width (transcript viewport, scrollbar cells included).
+    pub content_width: u16,
+    /// Cells the transcript scrollbar reserves while it is shown.
+    pub scrollbar_cells: u16,
+    /// Sidebar outer left padding (`sidebar.tsx:28`).
+    pub sidebar_pad_left: u16,
+    /// Sidebar content box width, padding excluded.
+    pub sidebar_inner_width: u16,
+    /// Sidebar text width under the reserved scrollbar column.
+    pub sidebar_text_width: u16,
+    /// Sidebar outer right padding (`sidebar.tsx:29`).
+    pub sidebar_pad_right: u16,
+    /// Rows of the always-reserved action strip (`index.tsx:1570`).
+    pub action_rows: u16,
+    /// Rows of the reserved `paddingBottom={1}` strip (`index.tsx:1514`).
+    pub bottom_pad_rows: u16,
+    /// The full region model these scalars were derived from.
+    pub regions: SessionRegions,
+}
+
+impl FrameDescriptor {
+    /// Resolve the whole frame geometry from one [`ShellFrameInput`].
+    #[must_use]
+    pub fn new(input: &ShellFrameInput<'_>) -> FrameDescriptor {
+        let cols = input.cols;
+        let rows = input.rows;
+        let wide = session_wide(cols, input.tabs_width);
+        let sidebar_visible = sidebar_visible(
+            input.sidebar.child_session,
+            input.sidebar.open,
+            input.sidebar.mode,
+            wide,
+        );
+        let pane = right_pane(
+            input.panel_open,
+            input.sidebar.open,
+            sidebar_visible,
+            input.terminal_selected,
+        );
+        let spec = FrameSpec {
+            cols,
+            rows,
+            tabs_width: input.tabs_width,
+            tabs_height: input.tabs_height,
+            right: pane,
+            pane_width: input.pane_width,
+            wide,
+            composer_height: u16::try_from(input.composer.len()).unwrap_or(u16::MAX),
+            sidebar_title_height: u16::from(!input.sidebar.title.is_empty()),
+            sidebar_footer_height: u16::try_from(input.sidebar.footer.len()).unwrap_or(u16::MAX),
+            scrollbar: input.scrollbar,
+        };
+        let regions = SessionRegions::compute(&spec);
+        let inset_left = regions
+            .transcript_text
+            .x
+            .saturating_sub(regions.session.x)
+            .min(regions.session.w);
+        let content_width = regions.transcript.w.min(regions.session.w);
+        let inset_right = regions
+            .session
+            .w
+            .saturating_sub(inset_left)
+            .saturating_sub(content_width);
+        // The sidebar content box is pinned by the title/footer rects
+        // (`sidebar.tsx:32,74`); derive its pads once so no row recomputes.
+        let sidebar_pad_left = regions
+            .sidebar_title
+            .x
+            .saturating_sub(regions.sidebar.x)
+            .min(regions.sidebar.w);
+        let sidebar_inner_width = regions
+            .sidebar_title
+            .w
+            .min(regions.sidebar.w.saturating_sub(sidebar_pad_left));
+        let sidebar_text_width = regions.sidebar_text_width().min(sidebar_inner_width);
+        let sidebar_pad_right = regions
+            .sidebar
+            .w
+            .saturating_sub(sidebar_pad_left)
+            .saturating_sub(sidebar_inner_width);
+        FrameDescriptor {
+            cols,
+            rows,
+            wide,
+            pane,
+            sidebar_visible,
+            rail: regions.tabs,
+            available: regions.available,
+            right: regions.right,
+            sidebar: regions.sidebar,
+            sidebar_overlay: regions.sidebar_overlay,
+            inset_left,
+            inset_right,
+            content_width,
+            scrollbar_cells: regions.transcript.w.saturating_sub(regions.transcript_text.w),
+            sidebar_pad_left,
+            sidebar_inner_width,
+            sidebar_text_width,
+            sidebar_pad_right,
+            action_rows: regions.jump.h,
+            bottom_pad_rows: regions.bottom_pad.h,
+            regions,
+        }
+    }
+
+    /// Painted content columns: `inset_left + content_width + inset_right`
+    /// always equals the session column width.
+    #[must_use]
+    pub fn content_rect(&self) -> Rect {
+        self.regions.transcript_text
+    }
 }
 
 /// Append-only row builder that tracks its current cell position.
@@ -221,71 +384,46 @@ fn cells(line: &str) -> u16 {
 /// The paint order matches upstream: tab reservation, session column, docked
 /// right pane, then (when not wide) the absolute sidebar overlay. Every row is
 /// normalized to exactly `cols` cells, so no pane can overflow the viewport.
+/// All geometry comes from one [`FrameDescriptor`]; nothing is recomputed here.
 #[must_use]
 pub fn compose_shell(input: &ShellFrameInput<'_>) -> ShellFrame {
-    let cols = input.cols;
-    let rows = input.rows;
-    let wide = session_wide(cols, input.tabs_width);
-    let visible = sidebar_visible(
-        input.sidebar.child_session,
-        input.sidebar.open,
-        input.sidebar.mode,
-        wide,
-    );
-    let right = right_pane(
-        input.panel_open,
-        input.sidebar.open,
-        visible,
-        input.terminal_selected,
-    );
-
-    let spec = FrameSpec {
-        cols,
-        rows,
-        tabs_width: input.tabs_width,
-        tabs_height: input.tabs_height,
-        right,
-        pane_width: input.pane_width,
-        wide,
-        composer_height: u16::try_from(input.composer.len()).unwrap_or(u16::MAX),
-        sidebar_title_height: u16::from(!input.sidebar.title.is_empty()),
-        sidebar_footer_height: u16::try_from(input.sidebar.footer.len()).unwrap_or(u16::MAX),
-        scrollbar: input.scrollbar,
-    };
-    let regions = SessionRegions::compute(&spec);
-
-    let drawn = bounded_rows(cols, rows);
+    let descriptor = FrameDescriptor::new(input);
+    let drawn = bounded_rows(descriptor.cols, descriptor.rows);
     let mut out = Vec::with_capacity(usize::from(drawn));
     for y in 0..drawn {
-        let session_segment = session_row(&regions, input, y);
+        let session_segment = session_row(&descriptor, input, y);
         let mut row = Row::new();
-        row.pad_to(regions.session.x);
-        if regions.sidebar_overlay && y >= regions.sidebar.y && y < regions.sidebar.y + regions.sidebar.h {
+        row.pad_to(descriptor.regions.session.x);
+        if descriptor.sidebar_overlay
+            && y >= descriptor.sidebar.y
+            && y < descriptor.sidebar.y + descriptor.sidebar.h
+        {
             // Absolute overlay (`session-frame.tsx:385-397`): it covers the
             // rightmost sidebar columns of the session column.
-            let cut = regions
+            let cut = descriptor
                 .sidebar
                 .x
-                .saturating_sub(regions.session.x)
-                .min(regions.session.w);
+                .saturating_sub(descriptor.regions.session.x)
+                .min(descriptor.regions.session.w);
             row.text(&slice_cells(&session_segment, 0, cut), cut);
-            row.text(&sidebar_row(&regions, input, y), regions.sidebar.w);
+            row.text(&sidebar_row(&descriptor, input, y), descriptor.sidebar.w);
         } else {
-            row.text(&session_segment, regions.session.w);
-            if regions.right.w > 0 {
-                row.text(&right_row(&regions, input, right, y), regions.right.w);
+            row.text(&session_segment, descriptor.regions.session.w);
+            if descriptor.right.w > 0 {
+                row.text(&right_row(&descriptor, input, y), descriptor.right.w);
             }
         }
         // Trust-boundary normalization: any arithmetic slip still yields an
         // exactly-wide row instead of overlapping the next pane.
-        out.push(fit(&row.cells, cols));
+        out.push(fit(&row.cells, descriptor.cols));
     }
     ShellFrame {
         rows: out,
-        regions,
-        wide,
-        right,
-        sidebar_visible: visible,
+        descriptor,
+        regions: descriptor.regions,
+        wide: descriptor.wide,
+        right: descriptor.pane,
+        sidebar_visible: descriptor.sidebar_visible,
     }
 }
 
@@ -300,42 +438,26 @@ fn bounded_rows(cols: u16, rows: u16) -> u16 {
     rows.min(budget.max(1))
 }
 
-/// One session-column row, exactly `regions.session.w` cells wide.
-fn session_row(regions: &SessionRegions, input: &ShellFrameInput<'_>, y: u16) -> String {
-    let content = content_row(regions, input, y);
-    let content_w = content_cells(regions);
-    let inset_l = regions
-        .transcript_text
-        .x
-        .saturating_sub(regions.session.x)
-        .min(regions.session.w);
-    let inset_r = regions
-        .session
-        .w
-        .saturating_sub(inset_l)
-        .saturating_sub(content_w);
+/// One session-column row, exactly `regions.session.w` cells wide:
+/// `inset_left + content + inset_right`.
+fn session_row(descriptor: &FrameDescriptor, input: &ShellFrameInput<'_>, y: u16) -> String {
+    let content = content_row(descriptor, input, y);
     let mut row = Row::new();
-    row.blank(inset_l);
-    row.text(&content, content_w);
-    row.blank(inset_r);
+    row.blank(descriptor.inset_left);
+    row.text(&content, descriptor.content_width);
+    row.blank(descriptor.inset_right);
     row.cells
-}
-
-/// Width of the painted content area: the transcript scroll viewport, which
-/// already includes the scrollbar reservation (the two reserved columns are
-/// painted blank here and styled by the chrome layer).
-fn content_cells(regions: &SessionRegions) -> u16 {
-    regions.transcript.w
 }
 
 /// The content segment for one row: transcript, reserved action row, composer
 /// or blank.
-fn content_row(regions: &SessionRegions, input: &ShellFrameInput<'_>, y: u16) -> String {
-    let width = content_cells(regions);
+fn content_row(descriptor: &FrameDescriptor, input: &ShellFrameInput<'_>, y: u16) -> String {
+    let regions = &descriptor.regions;
+    let width = descriptor.content_width;
     if regions.transcript.h > 0 && y >= regions.transcript.y && y < regions.transcript.y + regions.transcript.h {
         let index = usize::from(y - regions.transcript.y).saturating_add(input.transcript_scroll);
         let line = input.transcript.get(index).map_or("", String::as_str);
-        let text_w = regions.transcript_text.w;
+        let text_w = regions.transcript_text.w.min(width);
         let mut row = Row::new();
         row.text(line, text_w);
         row.blank(width.saturating_sub(text_w));
@@ -381,34 +503,30 @@ fn jump_row(action: JumpAction, width: u16) -> String {
 
 /// The docked right pane row. Sidebar content is composed here; terminal and
 /// panel content is owned by P04/P11, so their dock stays blank (one pane).
-fn right_row(regions: &SessionRegions, input: &ShellFrameInput<'_>, right: RightPane, y: u16) -> String {
-    match right {
-        RightPane::Sidebar => sidebar_row(regions, input, y),
-        RightPane::Terminal | RightPane::Panel | RightPane::None => " ".repeat(usize::from(regions.right.w)),
+fn right_row(descriptor: &FrameDescriptor, input: &ShellFrameInput<'_>, y: u16) -> String {
+    match descriptor.pane {
+        RightPane::Sidebar => sidebar_row(descriptor, input, y),
+        RightPane::Terminal | RightPane::Panel | RightPane::None => {
+            " ".repeat(usize::from(descriptor.right.w))
+        }
     }
 }
 
-/// One sidebar box row, exactly `regions.sidebar.w` cells wide:
-/// pad(2) + title/scroll/footer content(width-4) + pad(2).
-fn sidebar_row(regions: &SessionRegions, input: &ShellFrameInput<'_>, y: u16) -> String {
-    let outer = regions.sidebar;
-    if outer.w == 0 {
-        return fit("", outer.w);
+/// One sidebar box row, exactly `descriptor.sidebar.w` cells wide:
+/// `pad_left + content + pad_right`, with the content box and text width taken
+/// from the descriptor rather than recomputed.
+fn sidebar_row(descriptor: &FrameDescriptor, input: &ShellFrameInput<'_>, y: u16) -> String {
+    let regions = &descriptor.regions;
+    if descriptor.sidebar.w == 0 {
+        return fit("", descriptor.sidebar.w);
     }
-    let pad_l = regions
-        .sidebar_title
-        .x
-        .saturating_sub(outer.x)
-        .min(outer.w);
-    let inner_w = regions.sidebar_title.w.min(outer.w.saturating_sub(pad_l));
-    let pad_r = outer.w.saturating_sub(pad_l).saturating_sub(inner_w);
+    let inner_w = descriptor.sidebar_inner_width;
     let mut row = Row::new();
-    row.blank(pad_l);
+    row.blank(descriptor.sidebar_pad_left);
     if regions.sidebar_title.h > 0 && y >= regions.sidebar_title.y && y < regions.sidebar_title.y + regions.sidebar_title.h {
         // Title box: text width minus its `paddingRight={2}` (`sidebar.tsx:32`).
-        let text_w = regions.sidebar_title_width().min(inner_w);
-        row.text(input.sidebar.title, text_w);
-        row.blank(inner_w.saturating_sub(text_w));
+        row.text(input.sidebar.title, descriptor.sidebar_text_width);
+        row.blank(inner_w.saturating_sub(descriptor.sidebar_text_width));
     } else if regions.sidebar_scroll.h > 0
         && y >= regions.sidebar_scroll.y
         && y < regions.sidebar_scroll.y + regions.sidebar_scroll.h
@@ -417,9 +535,8 @@ fn sidebar_row(regions: &SessionRegions, input: &ShellFrameInput<'_>, y: u16) ->
         let line = input.sidebar.content.get(index).map_or("", String::as_str);
         // Constant reserved right padding under the ABSOLUTE bar
         // (`sidebar.tsx:56-69`): headings never reflow when it toggles.
-        let text_w = regions.sidebar_text_width().min(inner_w);
-        row.text(line, text_w);
-        row.blank(inner_w.saturating_sub(text_w));
+        row.text(line, descriptor.sidebar_text_width);
+        row.blank(inner_w.saturating_sub(descriptor.sidebar_text_width));
     } else if regions.sidebar_footer.h > 0
         && y >= regions.sidebar_footer.y
         && y < regions.sidebar_footer.y + regions.sidebar_footer.h
@@ -430,7 +547,7 @@ fn sidebar_row(regions: &SessionRegions, input: &ShellFrameInput<'_>, y: u16) ->
     } else {
         row.blank(inner_w);
     }
-    row.blank(pad_r);
+    row.blank(descriptor.sidebar_pad_right);
     row.cells
 }
 
@@ -438,8 +555,9 @@ fn sidebar_row(regions: &SessionRegions, input: &ShellFrameInput<'_>, y: u16) ->
 mod tests {
     use super::*;
     use crate::native_view_layout::{
-        SESSION_SIDEBAR_MAX_WIDTH, SESSION_TABS_COMPACT_WIDTH, clamp_session_tabs_width,
-        session_tabs_compact, session_tabs_fit_vertically, sidebar_scrollbar_reservation,
+        SESSION_SIDEBAR_MAX_WIDTH, SESSION_SIDEBAR_WIDTH, SESSION_TABS_COMPACT_WIDTH,
+        clamp_session_tabs_width, session_tabs_compact, session_tabs_fit_vertically,
+        sidebar_scrollbar_reservation,
     };
 
     fn s(text: &str) -> String {
@@ -858,5 +976,103 @@ mod tests {
                 }
             }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // LAY-13: one frame descriptor (rail, insets, reservations, dock).
+    // -----------------------------------------------------------------------
+
+    /// LAY-13. `session-frame.tsx:323-331,381-384` +
+    /// `routes/session/index.tsx:1514-1520`: the descriptor carries every
+    /// geometry fact once — rail, available frame box, dock, insets and the
+    /// reserved action/bottom rows — and the bands sum to the viewport, so the
+    /// painter and the resize handle never re-derive them.
+    #[test]
+    fn lay13_descriptor_is_the_single_geometry_source() {
+        let mut input = ShellFrameInput::new(160, 24);
+        input.panel_open = true;
+        input.pane_width = 50;
+        let frame = compose_shell(&input);
+        let d = frame.descriptor;
+        assert_eq!(d.cols, 160);
+        assert_eq!(d.rows, 24);
+        assert_eq!(d.pane, RightPane::Panel);
+        assert_eq!(d.rail, frame.regions.tabs);
+        assert_eq!(d.rail.w, 0, "no rail without vertical tabs");
+        assert_eq!(d.available.x, 0);
+        assert_eq!(d.available.w, 160);
+        assert_eq!(d.right.w, 50, "paneResize.size()");
+        assert_eq!(
+            d.available.x + d.available.w,
+            d.right.x + d.right.w,
+            "the dock ends at the frame's right edge"
+        );
+        assert_eq!(d.inset_left, 2);
+        assert_eq!(d.inset_right, 2);
+        assert_eq!(
+            d.inset_left + d.content_width + d.inset_right,
+            d.regions.session.w,
+            "insets + content fill the session column"
+        );
+        assert_eq!(d.content_width, frame.regions.transcript.w);
+        assert_eq!(d.action_rows, 1, "action strip is always reserved");
+        assert_eq!(d.bottom_pad_rows, 1, "paddingBottom 1");
+        assert_eq!(d.scrollbar_cells, 0);
+
+        // A vertical rail moves the frame box right without changing its math.
+        let mut railed = ShellFrameInput::new(200, 24);
+        railed.tabs_width = 42;
+        railed.terminal_selected = true;
+        railed.pane_width = 50;
+        let frame = compose_shell(&railed);
+        let d = frame.descriptor;
+        assert_eq!(d.rail.w, 42, "the rail is a sibling reservation");
+        assert_eq!(d.rail.h, 24);
+        assert_eq!(d.available.x, 42);
+        assert_eq!(d.available.w, 158);
+        assert_eq!(d.right.w, 50);
+        assert_eq!(d.right.x + d.right.w, 200);
+        assert_eq!(
+            d.inset_left + d.content_width + d.inset_right,
+            d.regions.session.w
+        );
+        for row in &frame.rows {
+            assert_eq!(cells_of(row), 200);
+        }
+    }
+
+    /// LAY-13 / LAY-16. The sidebar pads and the scrollbar reservation are
+    /// resolved once in the descriptor (`sidebar.tsx:26-29,56-69`,
+    /// `routes/session/index.tsx:1527-1537`) instead of per row.
+    #[test]
+    fn lay13_descriptor_resolves_sidebar_pads_and_scrollbar_cells() {
+        let content = [s(&"y".repeat(200))];
+        let mut input = ShellFrameInput::new(160, 12);
+        input.sidebar.open = true;
+        input.sidebar.title = "Heading";
+        input.sidebar.content = &content;
+        let plain = compose_shell(&input).descriptor;
+        assert_eq!(plain.sidebar.w, SESSION_SIDEBAR_WIDTH);
+        assert_eq!(plain.sidebar_pad_left, 2, "paddingLeft 2");
+        assert_eq!(plain.sidebar_pad_right, 2, "paddingRight 2");
+        assert_eq!(plain.sidebar_inner_width, 38);
+        assert_eq!(plain.sidebar_text_width, 37, "one reserved scrollbar column");
+        assert_eq!(
+            plain.sidebar_pad_left + plain.sidebar_inner_width + plain.sidebar_pad_right,
+            plain.sidebar.w
+        );
+        assert_eq!(plain.scrollbar_cells, 0);
+
+        input.scrollbar = true;
+        let scrolled = compose_shell(&input).descriptor;
+        assert_eq!(scrolled.scrollbar_cells, 2, "viewport padding 1 + track 1");
+        assert_eq!(
+            scrolled.content_width, plain.content_width,
+            "the reservation comes out of the content, not the session column"
+        );
+        assert_eq!(
+            scrolled.sidebar_text_width, plain.sidebar_text_width,
+            "the absolute sidebar bar never reflows headings"
+        );
     }
 }
