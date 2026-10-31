@@ -617,4 +617,34 @@ mod tests {
         let escaped = parse_part(PartKind::Prose, r"\**literal**");
         assert_eq!(conceal_inline_row(&escaped.rows[0].text, &escaped.rows[0].runs), r"\**literal**");
     }
+
+    /// MD-004. Upstream `Markdown.ts:466-472`: concealment is a render-time
+    /// style switch that keeps block state, so the source toggle returns the
+    /// exact sanitized row while the source-cell runs (the anchor geometry) are
+    /// unchanged. `session/index.tsx:244` defaults the mode to `"rendered"`.
+    #[test]
+    fn md_004_mode_toggle_preserves_source_bytes_and_cell_geometry() {
+        let parsed = parse_part(PartKind::Prose, "**界** and `x`");
+        let row = &parsed.rows[0];
+        let rendered = display_row(MarkdownMode::Rendered, &row.text, &row.runs);
+        let source = display_row(MarkdownMode::Source, &row.text, &row.runs);
+        assert_eq!(source, "**界** and `x`");
+        assert_eq!(rendered, "界 and x");
+        assert_eq!(MarkdownMode::default(), MarkdownMode::Rendered);
+
+        // Concealment removes only delimiter bytes: no other source bytes or
+        // cell offsets change, and every run survives the toggle.
+        let bold = row.runs.iter().find(|run| run.kind == RunKind::Bold).unwrap();
+        let code = row.runs.iter().find(|run| run.kind == RunKind::Code).unwrap();
+        assert_eq!(bold.start_cell, 2);
+        assert_eq!(bold.end_cell, 4);
+        assert_eq!(code.start_cell, cell_width(r"**界** and `"));
+        assert_eq!(code.end_cell, code.start_cell + 1);
+
+        // A narrow reflow window maps the same run onto shifted cell offsets
+        // without changing its width, so selection anchors stay stable.
+        let window = project_row(&row.text, &row.runs, bold.start_cell, 3, 1);
+        assert_eq!(window[0].start_cell, 3);
+        assert_eq!(window[0].end_cell, 4);
+    }
 }
