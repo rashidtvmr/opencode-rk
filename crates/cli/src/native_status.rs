@@ -536,3 +536,40 @@ mod tests {
         assert!(!line.contains(&"m".repeat(100)), "{line}");
     }
 }
+
+/// Compact live subagent count for the footer rail (upstream `agents.tsx`).
+#[must_use]
+pub(crate) fn subagent_label(children: usize) -> Option<String> {
+    match children {
+        0 => None,
+        1 => Some("1 subagent".to_owned()),
+        n => Some(format!("{n} subagents")),
+    }
+}
+
+/// Compact live shell count for the footer rail (upstream `shell-tab.tsx`).
+#[must_use]
+pub(crate) fn shell_label(children: usize) -> Option<String> {
+    match children {
+        0 => None,
+        1 => Some("1 shell".to_owned()),
+        n => Some(format!("{n} shells")),
+    }
+}
+
+/// Combined live-count span: `2 agents · 1 shell`, or `None` when idle.
+#[must_use]
+pub(crate) fn live_counts_label(subagents: usize, shells: usize) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(agents) = subagent_label(subagents) {
+        parts.push(agents);
+    }
+    if let Some(shells) = shell_label(shells) {
+        parts.push(shells);
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" · "))
+    }
+}

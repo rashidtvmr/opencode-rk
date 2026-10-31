@@ -304,6 +304,16 @@ impl Palette {
         Self { slots }
     }
 
+    /// Build from full RGBA lanes in [`Slot::ALL`] order, preserving alpha
+    /// verbatim. Required by the system theme: upstream `generateSystem` sets
+    /// `background` to the terminal background RGB with alpha **0**, so the
+    /// terminal's own transparency shows through; forcing 0xFF would paint an
+    /// opaque band over the user's terminal.
+    #[must_use]
+    pub fn from_rgba_table(table: [[u8; 4]; ROLE_COUNT]) -> Self {
+        Self { slots: table }
+    }
+
     /// Color for a slot.
     #[must_use]
     pub fn get(&self, slot: Slot) -> [u8; 4] {
@@ -559,6 +569,50 @@ const V2_STEPS: [u16; 9] = [100, 200, 300, 400, 500, 600, 700, 800, 900];
 const V2_STATES: [&str; 5] = ["disabled", "pressed", "focused", "selected", "hovered"];
 const V2_MAX_HUES: usize = 128;
 const V2_DEFAULT_ASSET: &str = include_str!("../assets/opencode-v2.json");
+/// Full TUI syntax-rule count emitted by upstream
+/// `packages/theme/src/tui/syntax.ts` `generateSyntax` (one rule per
+/// `rule(...)` call, in declaration order).
+pub const SYNTAX_RULE_COUNT: usize = 49;
+/// Terminal palette query size (`getPalette({ size: 16 })` in
+/// `packages/tui/src/context/theme.tsx`).
+pub const TERMINAL_PALETTE_SIZE: u16 = 16;
+
+/// Upstream `compileHueSteps` position arithmetic, extracted pure
+/// (`packages/theme/src/tui/resolve.ts` lines 179-185): a non-finite amount
+/// is a no-op (`offset = 0`), a finite amount is truncated toward zero, and
+/// `position + offset` clamps into the nine published steps. Rust's float
+/// `as i64` cast saturates (1e30 does not wrap), matching the JS clamp.
+#[must_use]
+pub fn shifted_step(step: u16, amount: f64) -> u16 {
+    let position = V2_STEPS
+        .iter()
+        .position(|candidate| *candidate == step)
+        .unwrap_or(0) as i64;
+    let offset = if amount.is_finite() {
+        amount.trunc() as i64
+    } else {
+        0
+    };
+    let target = position
+        .saturating_add(offset)
+        .clamp(0, i64::try_from(V2_STEPS.len() - 1).unwrap_or(8));
+    V2_STEPS[usize::try_from(target).unwrap_or(0)]
+}
+
+/// Resolve the mode a theme document renders for a requested preference:
+/// the requested mode when the document provides it, otherwise its first
+/// published mode (`selectThemeMode` in
+/// `packages/theme/src/tui/select.ts`). The *preference* is preserved by the
+/// caller so a later dual-mode selection reuses it.
+#[must_use]
+pub fn select_theme_mode(available: &[ThemeMode], requested: ThemeMode) -> ThemeMode {
+    if available.contains(&requested) {
+        requested
+    } else {
+        available.first().copied().unwrap_or(requested)
+    }
+}
+
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HueSource {
@@ -578,12 +632,71 @@ impl HueColor {
     }
 }
 
+/// Markdown token roles resolved from the V2 document
+/// (`packages/tui/src/theme/assets/v2/opencode.json` `markdown.*`). The
+/// syntax table maps `markup.*` scopes onto these, so a Markdown heading,
+/// link or block quote is painted with exactly the upstream token.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MarkdownPalette {
     /// Resolved upstream `markdown.code` foreground.
     pub code: HueColor,
     /// Resolved upstream `background.base` for inline raw Markdown.
     pub inline_background: HueColor,
+    pub text: HueColor,
+    pub heading: HueColor,
+    pub link: HueColor,
+    pub link_text: HueColor,
+    pub block_quote: HueColor,
+    pub emphasis: HueColor,
+    pub strong: HueColor,
+    pub horizontal_rule: HueColor,
+    pub list_item: HueColor,
+    pub list_enumeration: HueColor,
+    pub image: HueColor,
+    pub image_text: HueColor,
+    pub code_block: HueColor,
+}
+
+/// The nine upstream syntax token colors (`syntax.*`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SyntaxPalette {
+    pub comment: HueColor,
+    pub keyword: HueColor,
+    pub function: HueColor,
+    pub variable: HueColor,
+    pub string: HueColor,
+    pub number: HueColor,
+    pub type_name: HueColor,
+    pub operator: HueColor,
+    pub punctuation: HueColor,
+}
+
+/// Diff token roles (`diff.*`). Content, hunk header, gutter and span
+/// highlight are distinct tokens upstream and stay distinct here.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiffPalette {
+    pub added_text: HueColor,
+    pub removed_text: HueColor,
+    pub context_text: HueColor,
+    pub hunk_header_text: HueColor,
+    pub added_background: HueColor,
+    pub removed_background: HueColor,
+    pub context_background: HueColor,
+    pub added_highlight: HueColor,
+    pub removed_highlight: HueColor,
+    pub line_number_text: HueColor,
+    pub added_line_number_background: HueColor,
+    pub removed_line_number_background: HueColor,
+}
+
+/// One resolved syntax scope rule: foreground, optional background and the
+/// pinned OpenTUI attribute mask (`native_ui_style::ATTR_*`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SyntaxRule {
+    pub scope: &'static [&'static str],
+    pub foreground: HueColor,
+    pub background: Option<HueColor>,
+    pub attributes: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -596,12 +709,27 @@ pub struct SemanticPalette {
     pub text_feedback_error: HueColor,
     pub text_feedback_warning: HueColor,
     pub text_feedback_success: HueColor,
+    /// `text.feedback.info.base` (upstream `comment.todo`/`info` color).
+    pub text_feedback_info: HueColor,
     /// V2 tab status hues: interactive.200 for running and accent.200 for attention.
     pub tab_interactive: HueColor,
     pub tab_attention: HueColor,
     pub background_action_primary: V2StatefulColor,
     pub markdown: MarkdownPalette,
+    /// `syntax.*` token colors.
+    pub syntax: SyntaxPalette,
+    /// `diff.*` token colors.
+    pub diff: DiffPalette,
+    /// `text.action.primary.$focused` — the inverse foreground upstream pins
+    /// for `extmark.paste`.
+    pub text_action_primary_focused: HueColor,
+    /// `hue.accent.200` — upstream's prompt-editor foreground rule.
+    pub prompt: HueColor,
+    /// `categorical` hue names in document order.
     pub categorical: Vec<String>,
+    /// Resolved `categorical[i].200` colors, same order as
+    /// [`Self::categorical`]; upstream indexes the scales directly.
+    pub categorical_colors: Vec<HueColor>,
     hues: HashMap<String, Vec<HueColor>>,
 }
 
@@ -633,14 +761,240 @@ impl SemanticPalette {
         self.decrease(color, 1.0)
     }
 
+    /// Hue scale for a name (nine steps, ascending); `None` when the theme
+    /// does not publish it.
+    #[must_use]
+    pub fn scale(&self, hue: &str) -> Option<&[HueColor]> {
+        self.hues.get(hue).map(Vec::as_slice)
+    }
+
     fn shift(&self, color: &HueColor, amount: f64) -> HueColor {
         let Some(source) = &color.provenance else { return color.clone() };
         let Some(scale) = self.hues.get(&source.hue) else { return color.clone() };
-        let position = V2_STEPS.iter().position(|step| *step == source.step).unwrap_or(0);
-        let delta = if amount.is_finite() { amount.trunc() } else { 0.0 };
-        let delta = delta.clamp(-8.0, 8.0) as i32;
-        let target = (position as i32 + delta).clamp(0, 8) as usize;
-        scale[target].clone()
+        let target = shifted_step(source.step, amount);
+        let position = V2_STEPS
+            .iter()
+            .position(|step| *step == target)
+            .unwrap_or(0);
+        scale[position].clone()
+    }
+
+    /// The full upstream syntax table (`generateSyntax` in
+    /// `packages/theme/src/tui/syntax.ts`), in declaration order: 49 rules
+    /// covering language scopes, prompt/extmark styles, Markdown markup,
+    /// diagnostics and diff lines.
+    #[must_use]
+    pub fn syntax_rules(&self) -> Vec<SyntaxRule> {
+        use crate::native_ui_style::{
+            ATTR_BOLD, ATTR_ITALIC, ATTR_UNDERLINE,
+        };
+        let rule = |scope: &'static [&'static str], foreground: &HueColor, background: Option<&HueColor>, attributes: u32| SyntaxRule {
+            scope,
+            foreground: foreground.clone(),
+            background: background.cloned(),
+            attributes,
+        };
+        let categorical = |index: usize| -> HueColor {
+            self.categorical_colors
+                .get(index)
+                .or_else(|| self.categorical_colors.first())
+                .cloned()
+                .unwrap_or_else(|| HueColor::literal([0, 0, 0, 0]))
+        };
+        vec![
+            rule(&["default"], &self.text_base, None, 0),
+            rule(&["prompt"], &self.prompt, None, 0),
+            rule(&["extmark.file"], &self.text_feedback_warning, None, ATTR_BOLD),
+            rule(&["extmark.agent"], &categorical(0), None, ATTR_BOLD),
+            rule(&["extmark.skill"], &categorical(1), None, ATTR_BOLD),
+            rule(
+                &["extmark.paste"],
+                &self.text_action_primary_focused,
+                Some(&self.text_feedback_warning),
+                ATTR_BOLD,
+            ),
+            rule(&["comment", "comment.documentation"], &self.syntax.comment, None, ATTR_ITALIC),
+            rule(
+                &["string", "symbol", "character.special", "character"],
+                &self.syntax.string,
+                None,
+                0,
+            ),
+            rule(&["number", "boolean", "constant", "float"], &self.syntax.number, None, 0),
+            rule(
+                &[
+                    "keyword.return",
+                    "keyword.conditional",
+                    "keyword.repeat",
+                    "keyword.coroutine",
+                ],
+                &self.syntax.keyword,
+                None,
+                ATTR_ITALIC,
+            ),
+            rule(&["keyword.type"], &self.syntax.type_name, None, ATTR_BOLD | ATTR_ITALIC),
+            rule(&["keyword.function", "function.method"], &self.syntax.function, None, 0),
+            rule(&["keyword"], &self.syntax.keyword, None, ATTR_ITALIC),
+            rule(
+                &[
+                    "keyword.import",
+                    "string.escape",
+                    "string.regexp",
+                    "tag.attribute",
+                    "keyword.export",
+                ],
+                &self.syntax.keyword,
+                None,
+                0,
+            ),
+            rule(
+                &[
+                    "operator",
+                    "keyword.operator",
+                    "punctuation.delimiter",
+                    "keyword.conditional.ternary",
+                ],
+                &self.syntax.operator,
+                None,
+                0,
+            ),
+            rule(
+                &[
+                    "variable",
+                    "variable.parameter",
+                    "function.method.call",
+                    "function.call",
+                    "property",
+                    "parameter",
+                    "field",
+                ],
+                &self.syntax.variable,
+                None,
+                0,
+            ),
+            rule(
+                &["variable.member", "function", "constructor"],
+                &self.syntax.function,
+                None,
+                0,
+            ),
+            rule(&["type", "module", "class", "namespace"], &self.syntax.type_name, None, 0),
+            rule(&["type.definition"], &self.syntax.type_name, None, ATTR_BOLD),
+            rule(&["punctuation", "punctuation.bracket"], &self.syntax.punctuation, None, 0),
+            rule(
+                &[
+                    "variable.builtin",
+                    "type.builtin",
+                    "function.builtin",
+                    "module.builtin",
+                    "constant.builtin",
+                    "variable.super",
+                ],
+                &self.text_feedback_error,
+                None,
+                0,
+            ),
+            rule(
+                &["keyword.directive", "keyword.modifier", "keyword.exception"],
+                &self.syntax.keyword,
+                None,
+                ATTR_ITALIC,
+            ),
+            rule(&["punctuation.special", "tag.delimiter"], &self.syntax.operator, None, 0),
+            rule(
+                &[
+                    "markup.heading",
+                    "markup.heading.2",
+                    "markup.heading.3",
+                    "markup.heading.4",
+                    "markup.heading.5",
+                    "markup.heading.6",
+                ],
+                &self.markdown.heading,
+                None,
+                ATTR_BOLD,
+            ),
+            rule(
+                &["markup.heading.1"],
+                &self.markdown.heading,
+                None,
+                ATTR_BOLD | ATTR_UNDERLINE,
+            ),
+            rule(&["markup.bold", "markup.strong"], &self.markdown.strong, None, ATTR_BOLD),
+            rule(&["markup.italic"], &self.markdown.emphasis, None, ATTR_ITALIC),
+            rule(&["markup.list"], &self.markdown.list_item, None, 0),
+            rule(&["markup.quote"], &self.markdown.block_quote, None, ATTR_ITALIC),
+            rule(&["markup.raw", "markup.raw.block"], &self.markdown.code, None, 0),
+            rule(
+                &["markup.raw.inline"],
+                &self.markdown.code,
+                Some(&self.markdown.inline_background),
+                0,
+            ),
+            rule(
+                &[
+                    "markup.link",
+                    "markup.link.url",
+                    "string.special",
+                    "string.special.url",
+                ],
+                &self.markdown.link,
+                None,
+                ATTR_UNDERLINE,
+            ),
+            rule(&["markup.link.label"], &self.markdown.link_text, None, ATTR_UNDERLINE),
+            rule(&["label"], &self.markdown.link_text, None, 0),
+            rule(&["spell", "nospell"], &self.text_base, None, 0),
+            rule(&["markup.underline"], &self.text_base, None, ATTR_UNDERLINE),
+            rule(
+                &["comment.error"],
+                &self.text_feedback_error,
+                None,
+                ATTR_ITALIC | ATTR_BOLD,
+            ),
+            rule(
+                &["comment.warning"],
+                &self.text_feedback_warning,
+                None,
+                ATTR_ITALIC | ATTR_BOLD,
+            ),
+            rule(
+                &["comment.todo", "comment.note"],
+                &self.text_feedback_info,
+                None,
+                ATTR_ITALIC | ATTR_BOLD,
+            ),
+            rule(&["attribute", "annotation"], &self.text_feedback_warning, None, 0),
+            rule(&["tag"], &self.text_feedback_error, None, 0),
+            rule(
+                &["markup.strikethrough", "markup.list.unchecked", "debug"],
+                &self.text_muted,
+                None,
+                0,
+            ),
+            rule(&["markup.list.checked"], &self.text_feedback_success, None, 0),
+            rule(
+                &["diff.plus"],
+                &self.diff.added_text,
+                Some(&self.diff.added_background),
+                0,
+            ),
+            rule(
+                &["diff.minus"],
+                &self.diff.removed_text,
+                Some(&self.diff.removed_background),
+                0,
+            ),
+            rule(
+                &["diff.delta"],
+                &self.diff.context_text,
+                Some(&self.diff.context_background),
+                0,
+            ),
+            rule(&["error"], &self.text_feedback_error, None, ATTR_BOLD),
+            rule(&["warning"], &self.text_feedback_warning, None, ATTR_BOLD),
+            rule(&["info"], &self.text_feedback_info, None, 0),
+        ]
     }
 }
 
@@ -651,19 +1005,33 @@ pub struct V2StatefulColor {
 }
 
 impl V2StatefulColor {
+    /// First truthy state in upstream `ActionState` order
+    /// `[disabled, pressed, focused, selected, hovered]`, or `"base"`.
     #[must_use]
-    pub fn state(&self, states: &HashMap<String, bool>) -> &HueColor {
+    pub fn active_state(&self, states: &HashMap<String, bool>) -> &'static str {
         V2_STATES
             .iter()
             .find(|name| states.get(**name).copied().unwrap_or(false))
-            .and_then(|name| self.states.get(*name))
-            .unwrap_or(&self.base)
+            .copied()
+            .unwrap_or("base")
+    }
+
+    #[must_use]
+    pub fn state(&self, states: &HashMap<String, bool>) -> &HueColor {
+        match self.states.get(self.active_state(states)) {
+            Some(color) => color,
+            None => &self.base,
+        }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct V2Theme {
+    /// Mode actually rendered (the document's first mode when the requested
+    /// one is absent).
     pub selected_mode: ThemeMode,
+    /// Mode the user asked for; preserved when a one-mode document renders.
+    pub requested_mode: ThemeMode,
     pub palette: Palette,
     pub semantic: SemanticPalette,
 }
@@ -675,8 +1043,12 @@ pub fn v2_theme_from_asset(asset: &Value, mode: ThemeMode) -> Result<V2Theme, Pa
     let modes = ["light", "dark"].into_iter().filter(|name| root.contains_key(*name)).collect::<Vec<_>>();
     if modes.is_empty() { return Err(invalid("document provides no modes".into())); }
     if root.len() > MAX_MAP_KEYS { return Err(PaletteError::TooManyKeys { context: "v2 document" }); }
-    let requested = mode.key();
-    let selected = if root.contains_key(requested) { requested } else { modes[0] };
+    let available = modes
+        .iter()
+        .map(|name| if *name == "dark" { ThemeMode::Dark } else { ThemeMode::Light })
+        .collect::<Vec<_>>();
+    let selected_mode = select_theme_mode(&available, mode);
+    let selected = selected_mode.key();
     let base = root.get("base").and_then(Value::as_object).cloned().unwrap_or_default();
     let selected_obj = root.get(selected).and_then(Value::as_object).ok_or_else(|| invalid("selected mode is not an object".into()))?;
     let mut merged = v2_merge(Value::Object(base.clone()), Value::Object(selected_obj.clone()));
@@ -685,7 +1057,7 @@ pub fn v2_theme_from_asset(asset: &Value, mode: ThemeMode) -> Result<V2Theme, Pa
     resolver.compile_hues()?;
     let palette = resolver.palette()?;
     let semantic = resolver.semantic()?;
-    Ok(V2Theme { selected_mode: if selected == "dark" { ThemeMode::Dark } else { ThemeMode::Light }, palette, semantic })
+    Ok(V2Theme { selected_mode, requested_mode: mode, palette, semantic })
 }
 
 /// Action variants rebuilt with upstream `contextualActions` precedence.
@@ -846,15 +1218,75 @@ impl V2Resolver {
             states.insert(state.to_owned(), self.resolve_color(value, &self.mode, 0)?);
         }
         let categorical = self.mode.get("categorical").and_then(Value::as_array).ok_or_else(|| PaletteError::V2Invalid { message: "categorical list missing".into() })?.iter().map(|v| v.as_str().map(str::to_owned).ok_or_else(|| PaletteError::V2Invalid { message: "invalid categorical hue".into() })).collect::<Result<Vec<_>, _>>()?;
+        // Upstream `categorical` holds hue *scales*; `generateSyntax` indexes
+        // step 200 of the first two. Resolve that published step for each
+        // entry, preserving document order.
+        let categorical_colors = categorical
+            .iter()
+            .map(|name| {
+                self.hues
+                    .get(name)
+                    .and_then(|scale| scale.get(1))
+                    .cloned()
+                    .ok_or_else(|| PaletteError::V2Invalid {
+                        message: format!("categorical hue {name} has no 200 step"),
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let syntax = SyntaxPalette {
+            comment: get(&["syntax", "comment"])?,
+            keyword: get(&["syntax", "keyword"])?,
+            function: get(&["syntax", "function"])?,
+            variable: get(&["syntax", "variable"])?,
+            string: get(&["syntax", "string"])?,
+            number: get(&["syntax", "number"])?,
+            type_name: get(&["syntax", "type"])?,
+            operator: get(&["syntax", "operator"])?,
+            punctuation: get(&["syntax", "punctuation"])?,
+        };
+        let diff = DiffPalette {
+            added_text: get(&["diff", "text", "added"])?,
+            removed_text: get(&["diff", "text", "removed"])?,
+            context_text: get(&["diff", "text", "context"])?,
+            hunk_header_text: get(&["diff", "text", "hunkHeader"])?,
+            added_background: get(&["diff", "background", "added"])?,
+            removed_background: get(&["diff", "background", "removed"])?,
+            context_background: get(&["diff", "background", "context"])?,
+            added_highlight: get(&["diff", "highlight", "added"])?,
+            removed_highlight: get(&["diff", "highlight", "removed"])?,
+            line_number_text: get(&["diff", "lineNumber", "text"])?,
+            added_line_number_background: get(&["diff", "lineNumber", "background", "added"])?,
+            removed_line_number_background: get(&["diff", "lineNumber", "background", "removed"])?,
+        };
+        let markdown = MarkdownPalette {
+            code: get(&["markdown", "code"])?,
+            inline_background: get(&["background", "base"])?,
+            text: get(&["markdown", "text"])?,
+            heading: get(&["markdown", "heading"])?,
+            link: get(&["markdown", "link"])?,
+            link_text: get(&["markdown", "linkText"])?,
+            block_quote: get(&["markdown", "blockQuote"])?,
+            emphasis: get(&["markdown", "emphasis"])?,
+            strong: get(&["markdown", "strong"])?,
+            horizontal_rule: get(&["markdown", "horizontalRule"])?,
+            list_item: get(&["markdown", "listItem"])?,
+            list_enumeration: get(&["markdown", "listEnumeration"])?,
+            image: get(&["markdown", "image"])?,
+            image_text: get(&["markdown", "imageText"])?,
+            code_block: get(&["markdown", "codeBlock"])?,
+        };
         Ok(SemanticPalette {
             background_base: get(&["background", "base"])?, background_raised_base: get(&["background", "raised", "base"])?, background_raised_high: get(&["background", "raised", "high"])?,
             text_base: get(&["text", "base"])?, text_muted: get(&["text", "muted"])?,
             text_feedback_error: get(&["text", "feedback", "error", "base"])?, text_feedback_warning: get(&["text", "feedback", "warning", "base"])?, text_feedback_success: get(&["text", "feedback", "success", "base"])?,
+            text_feedback_info: get(&["text", "feedback", "info", "base"])?,
             tab_interactive: self.resolve_color(&Value::String("$hue.interactive.200".into()), &self.mode, 0)?,
             tab_attention: self.resolve_color(&Value::String("$hue.accent.200".into()), &self.mode, 0)?,
             background_action_primary: V2StatefulColor { base: self.resolve_color(base, &self.mode, 0)?, states },
-            markdown: MarkdownPalette { code: get(&["markdown", "code"])?, inline_background: get(&["background", "base"])? },
-            categorical, hues: self.hues.clone(),
+            markdown, syntax, diff,
+            text_action_primary_focused: get(&["text", "action", "primary", "$focused"])?,
+            prompt: self.resolve_color(&Value::String("$hue.accent.200".into()), &self.mode, 0)?,
+            categorical, categorical_colors, hues: self.hues.clone(),
         })
     }
 }
@@ -1003,6 +1435,9 @@ pub struct RuntimeTheme {
     pub name: String,
     /// Active mode: a runtime decision, not a persisted config field.
     pub mode: ThemeMode,
+    /// Mode the user asked for. Kept when a one-mode theme renders its only
+    /// mode, so selecting a dual-mode theme later reuses the preference.
+    pub requested_mode: ThemeMode,
     /// Palette resolved from the theme definitions for [`Self::mode`].
     pub palette: Palette,
     /// Semantic V2 token view when loaded from a V2 theme document.
@@ -1024,6 +1459,7 @@ impl RuntimeTheme {
         Self {
             name: "opencode".to_owned(),
             mode: v2.as_ref().map_or(mode, |theme| theme.selected_mode),
+            requested_mode: mode,
             palette,
             semantic: v2.map(|theme| theme.semantic),
         }
@@ -1045,14 +1481,798 @@ impl RuntimeTheme {
     pub fn from_asset(name: &str, asset: &Value, mode: ThemeMode) -> Result<Self, PaletteError> {
         if asset.as_object().is_some_and(|object| object.contains_key("base")) {
             let resolved = v2_theme_from_asset(asset, mode)?;
-            return Ok(Self { name: name.to_owned(), mode: resolved.selected_mode, palette: resolved.palette, semantic: Some(resolved.semantic) });
+            return Ok(Self {
+                name: name.to_owned(),
+                mode: resolved.selected_mode,
+                requested_mode: resolved.requested_mode,
+                palette: resolved.palette,
+                semantic: Some(resolved.semantic),
+            });
         }
         Ok(Self {
             name: name.to_owned(),
             mode,
+            requested_mode: mode,
             palette: palette_from_asset(asset, mode)?,
             semantic: None,
         })
+    }
+}
+
+// ── Theme selection: picker preview/cancel + mode lock (THEME-12) ─────
+//
+// Upstream `packages/tui/src/context/theme.tsx`:
+// - init: `lock = config.theme.mode` when dark/light; `mode = lock ??
+//   renderer.themeMode ?? startup`;
+// - the picker previews on movement and persists only on confirmation;
+//   cancel restores and persists the initial selection;
+// - `handleMode` drops renderer THEME_MODE events while a lock exists;
+// - a `theme.mode: "system"` declaration clears the lock (adopting the
+//   renderer mode), a dark/light declaration pins it.
+
+/// Persisted mode preference: follow the terminal, or pin one mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModePreference {
+    System,
+    Locked(ThemeMode),
+}
+
+impl ModePreference {
+    #[must_use]
+    pub fn locked_mode(self) -> Option<ThemeMode> {
+        match self {
+            Self::System => None,
+            Self::Locked(mode) => Some(mode),
+        }
+    }
+}
+
+/// Persisted theme selection: name plus mode preference (mode and name are
+/// distinct settings upstream).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThemePreferences {
+    pub name: String,
+    pub mode: ModePreference,
+}
+
+/// Runtime selection state machine. Pure: persistence is the caller's job,
+/// using the returned [`ThemePreferences`] values.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThemeController {
+    persisted: ThemePreferences,
+    active: String,
+    mode: ThemeMode,
+    lock: Option<ThemeMode>,
+    startup: ThemeMode,
+    picking: Option<ThemePreferences>,
+}
+
+impl ThemeController {
+    /// Initialise exactly like upstream: the lock wins, then the renderer
+    /// mode, then the startup mode.
+    #[must_use]
+    pub fn new(
+        preferences: ThemePreferences,
+        renderer_mode: Option<ThemeMode>,
+        startup: ThemeMode,
+    ) -> Self {
+        let lock = preferences.mode.locked_mode();
+        let mode = lock.or(renderer_mode).unwrap_or(startup);
+        Self {
+            active: preferences.name.clone(),
+            persisted: preferences,
+            mode,
+            lock,
+            startup,
+            picking: None,
+        }
+    }
+
+    #[must_use]
+    pub fn persisted(&self) -> &ThemePreferences {
+        &self.persisted
+    }
+
+    #[must_use]
+    pub fn active_name(&self) -> &str {
+        &self.active
+    }
+
+    #[must_use]
+    pub fn mode(&self) -> ThemeMode {
+        self.mode
+    }
+
+    #[must_use]
+    pub fn mode_locked(&self) -> bool {
+        self.lock.is_some()
+    }
+
+    /// Picker movement: preview immediately, persist nothing. The first
+    /// preview snapshots the pre-picker selection for [`Self::cancel_pick`].
+    pub fn preview(&mut self, name: &str) {
+        if self.picking.is_none() {
+            self.picking = Some(self.persisted.clone());
+        }
+        self.active = name.to_owned();
+    }
+
+    /// Picker confirmation: persist the previewed selection.
+    pub fn confirm_pick(&mut self) -> ThemePreferences {
+        self.picking = None;
+        self.persisted.name = self.active.clone();
+        self.persisted.clone()
+    }
+
+    /// Picker cancellation: restore AND persist the initial selection.
+    pub fn cancel_pick(&mut self) -> ThemePreferences {
+        if let Some(initial) = self.picking.take() {
+            self.persisted = initial;
+            self.active = self.persisted.name.clone();
+        }
+        self.persisted.clone()
+    }
+
+    /// Direct selection (non-picker): persist the name immediately.
+    pub fn set_theme(&mut self, name: &str) -> ThemePreferences {
+        self.active = name.to_owned();
+        self.persisted.name = name.to_owned();
+        self.persisted.clone()
+    }
+
+    /// Pin a mode (theme picker/`theme.mode: "dark"|"light"`). Returns the
+    /// persisted preference; callers that must not persist (config reload
+    /// applying an existing declaration) can ignore it.
+    pub fn lock_mode(&mut self, mode: ThemeMode) -> ThemePreferences {
+        self.lock = Some(mode);
+        self.mode = mode;
+        self.persisted.mode = ModePreference::Locked(mode);
+        self.persisted.clone()
+    }
+
+    /// `setMode(requested)`: refuses modes the theme does not publish.
+    pub fn set_mode_if_supported(
+        &mut self,
+        requested: ThemeMode,
+        available: &[ThemeMode],
+    ) -> Option<ThemePreferences> {
+        if !available.contains(&requested) {
+            return None;
+        }
+        Some(self.lock_mode(requested))
+    }
+
+    /// Release the lock (`theme.mode: "system"`): adopt the renderer mode,
+    /// otherwise keep the current mode.
+    pub fn unlock_mode(&mut self, renderer_mode: Option<ThemeMode>) -> ThemePreferences {
+        self.lock = None;
+        self.mode = renderer_mode.unwrap_or(self.mode);
+        self.persisted.mode = ModePreference::System;
+        self.persisted.clone()
+    }
+
+    /// Renderer THEME_MODE event. Ignored while locked; otherwise applies the
+    /// new mode without persisting it.
+    pub fn on_renderer_mode(&mut self, mode: ThemeMode) -> bool {
+        if self.lock.is_some() {
+            return false;
+        }
+        self.mode = mode;
+        true
+    }
+
+    /// Declared `theme.mode` value from config: `"dark"`/`"light"` pin,
+    /// `"system"` frees. Unknown values change nothing (validated upstream).
+    pub fn on_declared_mode(&mut self, declared: &str, renderer_mode: Option<ThemeMode>) -> bool {
+        match declared {
+            "dark" => {
+                self.lock = Some(ThemeMode::Dark);
+                self.mode = ThemeMode::Dark;
+                self.persisted.mode = ModePreference::Locked(ThemeMode::Dark);
+                true
+            }
+            "light" => {
+                self.lock = Some(ThemeMode::Light);
+                self.mode = ThemeMode::Light;
+                self.persisted.mode = ModePreference::Locked(ThemeMode::Light);
+                true
+            }
+            "system" => {
+                self.lock = None;
+                self.mode = renderer_mode.unwrap_or(self.mode);
+                self.persisted.mode = ModePreference::System;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Startup mode retained for cold-start fallbacks.
+    #[must_use]
+    pub fn startup_mode(&self) -> ThemeMode {
+        self.startup
+    }
+}
+
+// ── System theme cold start / probe (THEME-13) ────────────────────────
+//
+// Upstream `packages/tui/src/context/theme.tsx` + `theme/system.ts`:
+// first paint uses the cached usable palette or the built-in fallback;
+// palette queries begin only after paint, request 16 colors, never run
+// concurrently, and queue at most one follow-up. Mode inference uses the
+// *default background only*; `generateSystem` sets background RGB with
+// alpha 0 so terminal transparency survives.
+
+/// Terminal palette reply (`TerminalColors` upstream).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TerminalPalette {
+    pub default_foreground: Option<[u8; 4]>,
+    pub default_background: Option<[u8; 4]>,
+    pub palette: Vec<[u8; 4]>,
+}
+
+impl TerminalPalette {
+    /// Bounded constructor: at most [`TERMINAL_PALETTE_SIZE`] slots.
+    #[must_use]
+    pub fn new(
+        default_foreground: Option<[u8; 4]>,
+        default_background: Option<[u8; 4]>,
+        palette: Vec<[u8; 4]>,
+    ) -> Self {
+        Self {
+            default_foreground,
+            default_background,
+            palette: palette
+                .into_iter()
+                .take(usize::from(TERMINAL_PALETTE_SIZE))
+                .collect(),
+        }
+    }
+
+    /// `usablePalette`: a background source (default or slot 0) AND a
+    /// foreground source (default or slot 7) must exist.
+    #[must_use]
+    pub fn usable(&self) -> bool {
+        (self.default_background.is_some() || self.palette.first().is_some())
+            && (self.default_foreground.is_some() || self.palette.get(7).is_some())
+    }
+
+    #[must_use]
+    pub fn background(&self) -> Option<[u8; 4]> {
+        self.default_background.or_else(|| self.palette.first().copied())
+    }
+
+    #[must_use]
+    pub fn foreground(&self) -> Option<[u8; 4]> {
+        self.default_foreground.or_else(|| self.palette.get(7).copied())
+    }
+
+    /// `terminalMode`: luminance of the DEFAULT BACKGROUND only. Slot 0 is
+    /// never used to infer the mode.
+    #[must_use]
+    pub fn mode(&self) -> Option<ThemeMode> {
+        self.default_background
+            .map(|background| terminal_mode(background[0], background[1], background[2]))
+    }
+
+    /// `generateSystem(colors, mode)` projected onto the ten native slots.
+    /// Background keeps alpha 0; raised grays and muted text are derived from
+    /// the terminal background exactly like upstream.
+    #[must_use]
+    pub fn system_palette(&self, mode: ThemeMode) -> Option<Palette> {
+        let background = self.background()?;
+        let foreground = self.foreground()?;
+        let is_dark = mode == ThemeMode::Dark;
+        let grays = gray_scale(background, is_dark);
+        let muted = muted_text_color(background, is_dark);
+        let ansi = |index: usize| -> [u8; 4] {
+            self.palette
+                .get(index)
+                .copied()
+                .unwrap_or_else(|| ansi_to_rgba(index))
+        };
+        let transparent = [background[0], background[1], background[2], 0];
+        let mut table = [[0u8; 4]; ROLE_COUNT];
+        for slot in Slot::ALL {
+            table[slot as usize] = match slot {
+                Slot::Background => transparent,
+                Slot::BackgroundPanel => grays[2],
+                Slot::BackgroundElement => grays[3],
+                Slot::Text => foreground,
+                Slot::TextMuted => muted,
+                // primary/accent = cyan, error = red, warning = yellow,
+                // success = green (upstream ansiColors).
+                Slot::Primary => ansi(6),
+                Slot::Border => grays[7],
+                Slot::Error => ansi(1),
+                Slot::Warning => ansi(3),
+                Slot::Success => ansi(2),
+            };
+        }
+        Some(Palette::from_rgba_table(table))
+    }
+}
+
+/// Probe state machine outcomes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProbeOutcome {
+    /// Nothing started (before first paint, already probing, or no queued work).
+    Idle,
+    /// A 16-color query was started; call [`SystemThemeState::palette_reply`]
+    /// or [`SystemThemeState::probe_failed`] when it settles.
+    Started,
+    /// A reply was applied.
+    Usable,
+    /// A reply was unusable and was ignored.
+    Unusable,
+}
+
+/// Cold-start/palette-reply state for the `system` theme.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SystemThemeState {
+    mode: ThemeMode,
+    lock: Option<ThemeMode>,
+    palette: Option<TerminalPalette>,
+    after_paint: bool,
+    probing: bool,
+    queued: bool,
+    startup: ThemeMode,
+}
+
+impl SystemThemeState {
+    /// Cold start: never blocks. Uses the cached palette when usable,
+    /// otherwise the caller renders the built-in `opencode` fallback.
+    #[must_use]
+    pub fn cold_start(
+        cached: Option<TerminalPalette>,
+        lock: Option<ThemeMode>,
+        startup: ThemeMode,
+    ) -> Self {
+        let palette = cached.filter(TerminalPalette::usable);
+        let inferred = palette.as_ref().and_then(TerminalPalette::mode);
+        Self {
+            mode: lock.or(inferred).unwrap_or(startup),
+            lock,
+            palette,
+            after_paint: false,
+            probing: false,
+            queued: false,
+            startup,
+        }
+    }
+
+    #[must_use]
+    pub fn mode(&self) -> ThemeMode {
+        self.mode
+    }
+
+    #[must_use]
+    pub fn locked(&self) -> bool {
+        self.lock.is_some()
+    }
+
+    /// System palette for the current mode; `None` means "render opencode".
+    #[must_use]
+    pub fn system_theme(&self) -> Option<Palette> {
+        self.palette
+            .as_ref()
+            .and_then(|palette| palette.system_palette(self.mode))
+    }
+
+    /// Whether first paint must use the built-in fallback.
+    #[must_use]
+    pub fn uses_fallback(&self) -> bool {
+        self.system_theme().is_none()
+    }
+
+    #[must_use]
+    pub fn cached(&self) -> Option<&TerminalPalette> {
+        self.palette.as_ref()
+    }
+
+    /// First paint completed: palette queries may now start.
+    pub fn after_paint(&mut self) -> ProbeOutcome {
+        self.after_paint = true;
+        self.request_probe()
+    }
+
+    /// Request a probe. Queues one follow-up while another query is running
+    /// and never starts a second concurrent query.
+    pub fn request_probe(&mut self) -> ProbeOutcome {
+        self.queued = true;
+        if !self.after_paint || self.probing {
+            return ProbeOutcome::Idle;
+        }
+        self.queued = false;
+        self.probing = true;
+        ProbeOutcome::Started
+    }
+
+    /// Apply a palette reply. An unusable reply is ignored; a queued refresh
+    /// starts immediately afterwards (upstream `finally` behaviour).
+    pub fn palette_reply(&mut self, colors: TerminalPalette) -> ProbeOutcome {
+        self.probing = false;
+        if !colors.usable() {
+            return self.settle();
+        }
+        let inferred = colors.mode();
+        self.mode = self.lock.or(inferred).unwrap_or(self.mode);
+        self.palette = Some(colors);
+        match self.settle() {
+            ProbeOutcome::Idle => ProbeOutcome::Usable,
+            ProbeOutcome::Started => ProbeOutcome::Started,
+            other => other,
+        }
+    }
+
+    /// The query failed/aborted: clear the in-flight flag, honour any queue.
+    pub fn probe_failed(&mut self) -> ProbeOutcome {
+        self.probing = false;
+        self.settle()
+    }
+
+    fn settle(&mut self) -> ProbeOutcome {
+        if self.queued {
+            self.queued = false;
+            if self.after_paint {
+                self.probing = true;
+                return ProbeOutcome::Started;
+            }
+        }
+        ProbeOutcome::Idle
+    }
+
+    /// Renderer THEME_MODE event: ignored while mode-locked.
+    pub fn on_renderer_mode(&mut self, mode: ThemeMode) -> bool {
+        if self.lock.is_some() {
+            return false;
+        }
+        self.mode = mode;
+        true
+    }
+
+    /// Recognised terminal theme notifications (`DCS ?997;1n` / `?997;2n`)
+    /// refresh the palette; anything else is not ours.
+    pub fn on_theme_notification(&mut self, sequence: &str) -> bool {
+        if sequence != "\x1b[?997;1n" && sequence != "\x1b[?997;2n" {
+            return false;
+        }
+        let _ = self.request_probe();
+        true
+    }
+
+    #[must_use]
+    pub fn startup_mode(&self) -> ThemeMode {
+        self.startup
+    }
+}
+
+/// Upstream `generateGrayScale` (`theme/system.ts`), 1-based indices 1..=12.
+fn gray_scale(background: [u8; 4], is_dark: bool) -> [ [u8; 4]; 13] {
+    let bg = [
+        f64::from(background[0]),
+        f64::from(background[1]),
+        f64::from(background[2]),
+    ];
+    let luminance = 0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2];
+    let mut grays = [[0u8; 4]; 13];
+    for index in 1..=12 {
+        let factor = f64::from(index) / 12.0;
+        let channels = if is_dark && luminance < 10.0 {
+            let gray = (factor * 0.4 * 255.0).floor();
+            [gray, gray, gray]
+        } else if !is_dark && luminance > 245.0 {
+            let gray = (255.0 - factor * 0.4 * 255.0).floor();
+            [gray, gray, gray]
+        } else if luminance == 0.0 {
+            // Light mode on a black background: the ratio is undefined; the
+            // upstream clamp keeps the derived channels at 0.
+            [0.0, 0.0, 0.0]
+        } else {
+            let next = if is_dark {
+                luminance + (255.0 - luminance) * factor * 0.4
+            } else {
+                luminance * (1.0 - factor * 0.4)
+            };
+            let ratio = next / luminance;
+            [
+                (bg[0] * ratio).clamp(0.0, 255.0).floor(),
+                (bg[1] * ratio).clamp(0.0, 255.0).floor(),
+                (bg[2] * ratio).clamp(0.0, 255.0).floor(),
+            ]
+        };
+        grays[usize::try_from(index).unwrap_or(0)] = [
+            channels[0] as u8,
+            channels[1] as u8,
+            channels[2] as u8,
+            0xFF,
+        ];
+    }
+    grays
+}
+
+/// Upstream `generateMutedTextColor`.
+fn muted_text_color(background: [u8; 4], is_dark: bool) -> [u8; 4] {
+    let luminance = 0.299 * f64::from(background[0])
+        + 0.587 * f64::from(background[1])
+        + 0.114 * f64::from(background[2]);
+    let gray = if is_dark {
+        if luminance < 10.0 {
+            180.0
+        } else {
+            (160.0 + luminance * 0.3).floor().min(200.0)
+        }
+    } else if luminance > 245.0 {
+        75.0
+    } else {
+        (100.0 - (255.0 - luminance) * 0.2).floor().max(60.0)
+    };
+    let gray = gray as u8;
+    [gray, gray, gray, 0xFF]
+}
+
+/// Upstream `ansiToRgba` fallback for slots the terminal did not report.
+#[must_use]
+pub fn ansi_to_rgba(code: usize) -> [u8; 4] {
+    const ANSI16: [u32; 16] = [
+        0x000000, 0x800000, 0x008000, 0x808000, 0x000080, 0x800080, 0x008080, 0xc0c0c0,
+        0x808080, 0xff0000, 0x00ff00, 0xffff00, 0x0000ff, 0xff00ff, 0x00ffff, 0xffffff,
+    ];
+    if code < 16 {
+        let value = ANSI16[code];
+        return [(value >> 16) as u8, (value >> 8) as u8, value as u8, 0xFF];
+    }
+    if code < 232 {
+        let index = code - 16;
+        let b = index % 6;
+        let g = (index / 6) % 6;
+        let r = index / 36;
+        let value = |x: usize| if x == 0 { 0u8 } else { (x * 40 + 55) as u8 };
+        return [value(r), value(g), value(b), 0xFF];
+    }
+    if code < 256 {
+        let gray = ((code - 232) * 10 + 8) as u8;
+        return [gray, gray, gray, 0xFF];
+    }
+    [0, 0, 0, 0xFF]
+}
+
+// ── Syntax-style lifecycle during streaming (THEME-14) ────────────────
+//
+// Upstream `createSyntaxStyleMemo` (`context/theme.tsx`): the replaced style
+// joins a `retained` set and is destroyed only after `renderer.idle()`
+// resolves, so a queued frame cannot reference freed native memory. This
+// arena is the same rule for the Rust bridge: `install` never drops the
+// previous value while frames are in flight.
+
+/// Owns the current syntax style plus every replaced style whose release is
+/// pending renderer idleness.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SyntaxStyleArena<T> {
+    current: Option<T>,
+    retained: Vec<T>,
+    frames_in_flight: u32,
+    release_pending: bool,
+}
+
+impl<T> SyntaxStyleArena<T> {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            current: None,
+            retained: Vec::new(),
+            frames_in_flight: 0,
+            release_pending: false,
+        }
+    }
+
+    #[must_use]
+    pub fn current(&self) -> Option<&T> {
+        self.current.as_ref()
+    }
+
+    /// Styles retained until the renderer is idle (replaced but not freed).
+    #[must_use]
+    pub fn retained_count(&self) -> usize {
+        self.retained.len()
+    }
+
+    #[must_use]
+    pub fn is_idle(&self) -> bool {
+        self.frames_in_flight == 0
+    }
+
+    pub fn begin_frame(&mut self) {
+        self.frames_in_flight = self.frames_in_flight.saturating_add(1);
+    }
+
+    /// End a frame. Drains pending releases only when the last in-flight
+    /// frame has finished, mirroring `renderer.idle()`.
+    pub fn end_frame(&mut self) -> usize {
+        self.frames_in_flight = self.frames_in_flight.saturating_sub(1);
+        if self.frames_in_flight == 0 {
+            return self.release_idle();
+        }
+        0
+    }
+
+    /// Install a replacement style. The previous style is retained, never
+    /// dropped here; it is freed by [`Self::release_idle`].
+    pub fn install(&mut self, style: T) -> &T {
+        if let Some(previous) = self.current.replace(style) {
+            self.retained.push(previous);
+            self.release_pending = true;
+        }
+        self.current.as_ref().expect("just installed")
+    }
+
+    /// Renderer became idle: free retained styles. Refuses while any frame is
+    /// still in flight, so a queued frame can never observe a freed style.
+    pub fn release_idle(&mut self) -> usize {
+        if self.frames_in_flight > 0 || !self.release_pending {
+            return 0;
+        }
+        let released = self.retained.len();
+        self.retained.clear();
+        self.release_pending = false;
+        released
+    }
+
+    /// Drop the arena (shutdown): current plus retained are released
+    /// together; callers must ensure the renderer is idle first.
+    pub fn shutdown(&mut self) -> usize {
+        let released = self.retained.len() + usize::from(self.current.is_some());
+        self.retained.clear();
+        self.current = None;
+        self.release_pending = false;
+        released
+    }
+}
+
+// ── Cursor resolution (THEME-15) ──────────────────────────────────────
+//
+// Upstream: `tui.cursor` accepts style block|underline|line|default and
+// blinking; when the object exists its defaults are `block` and `true`,
+// when it is absent OpenTUI receives `undefined` (terminal setting
+// preserved). The composer passes `cursorColor={theme.text.base}`; the
+// disabled cursor uses `background.raised.base`. The color is taken from the
+// theme token directly — never composited with the prompt background.
+
+/// Cursor shapes accepted by `tui.cursor.style`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CursorShape {
+    Block,
+    Underline,
+    Line,
+    /// `"default"`: preserve the terminal's own cursor setting.
+    Default,
+}
+
+impl CursorShape {
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "block" => Some(Self::Block),
+            "underline" => Some(Self::Underline),
+            "line" => Some(Self::Line),
+            "default" => Some(Self::Default),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Block => "block",
+            Self::Underline => "underline",
+            Self::Line => "line",
+            Self::Default => "default",
+        }
+    }
+}
+
+/// Errors from the `tui.cursor` config object.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CursorConfigError {
+    NotAnObject,
+    StyleNotString,
+    UnknownStyle,
+    BlinkingNotBool,
+}
+
+impl fmt::Display for CursorConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotAnObject => write!(f, "cursor configuration is not an object"),
+            Self::StyleNotString => write!(f, "cursor.style is not a string"),
+            Self::UnknownStyle => write!(f, "cursor.style must be block, underline, line or default"),
+            Self::BlinkingNotBool => write!(f, "cursor.blinking is not a boolean"),
+        }
+    }
+}
+
+/// Resolved cursor configuration. `block` + blinking is the documented
+/// default when the object is present but a field is absent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CursorConfig {
+    pub style: CursorShape,
+    pub blinking: bool,
+}
+
+impl CursorConfig {
+    #[must_use]
+    pub const fn new(style: CursorShape, blinking: bool) -> Self {
+        Self { style, blinking }
+    }
+
+    /// Default used when `tui.cursor` is present with no fields.
+    pub const DEFAULT: Self = Self::new(CursorShape::Block, true);
+
+    /// Parse the optional `tui.cursor` value. `Null`/absent is `Ok(None)`
+    /// (OpenTUI receives `undefined`); unknown styles fail closed.
+    ///
+    /// # Errors
+    ///
+    /// [`CursorConfigError`] on malformed shapes.
+    pub fn from_json(value: &Value) -> Result<Option<Self>, CursorConfigError> {
+        match value {
+            Value::Null => Ok(None),
+            Value::Object(object) => {
+                let style = match object.get("style") {
+                    None => CursorShape::Block,
+                    Some(Value::String(name)) => {
+                        CursorShape::parse(name).ok_or(CursorConfigError::UnknownStyle)?
+                    }
+                    Some(_) => return Err(CursorConfigError::StyleNotString),
+                };
+                let blinking = match object.get("blinking") {
+                    None => true,
+                    Some(Value::Bool(value)) => *value,
+                    Some(_) => return Err(CursorConfigError::BlinkingNotBool),
+                };
+                Ok(Some(Self { style, blinking }))
+            }
+            _ => Err(CursorConfigError::NotAnObject),
+        }
+    }
+}
+
+/// Cursor-relevant component state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CursorState {
+    pub focused: bool,
+    pub disabled: bool,
+}
+
+/// Painted cursor: visibility, shape, blink and an explicit color lane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CursorRender {
+    pub visible: bool,
+    pub shape: CursorShape,
+    pub blinking: bool,
+    pub color: [u8; 4],
+}
+
+/// Resolve the composer cursor from configuration + theme. An absent config
+/// renders `default` without a blink override; color is `text.base` when
+/// enabled and `background.raised.base` when disabled, independent of the
+/// prompt surface behind it.
+#[must_use]
+pub fn resolve_cursor(
+    config: Option<CursorConfig>,
+    theme: &SemanticPalette,
+    state: CursorState,
+) -> CursorRender {
+    let config = config.unwrap_or(CursorConfig::new(CursorShape::Default, false));
+    CursorRender {
+        visible: state.focused,
+        shape: config.style,
+        blinking: config.blinking,
+        color: if state.disabled {
+            theme.background_raised_base.rgba
+        } else {
+            theme.text_base.rgba
+        },
     }
 }
 
@@ -1790,5 +3010,597 @@ fn f6_state_key_merge_mode_base_beats_shared_base_state() {
     assert_eq!(action.state(&state_on(&["hovered"])).rgba, hex("#333333"));
     // Mode base also beats shared-base $focused ($hue.interactive.200).
     assert_eq!(action.state(&state_on(&["focused"])).rgba, hex("#333333"));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// P21 — THEME-04/05/08/12/13/14/15
+// Oracle: pinned upstream 450e7b92412c780a7b5a75226bb8d49aaca24e22.
+// Every expected color is hardcoded below with the upstream key that owns it.
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn dark_semantic_palette() -> SemanticPalette {
+    RuntimeTheme::builtin_default(ThemeMode::Dark)
+        .semantic
+        .expect("shipped V2 asset resolves")
+}
+
+fn light_semantic_palette() -> SemanticPalette {
+    RuntimeTheme::builtin_default(ThemeMode::Light)
+        .semantic
+        .expect("shipped V2 asset resolves")
+}
+
+// ── THEME-01 cross-check: bundled native JSON vs hardcoded upstream values ─
+// Resolves `native_theme_assets/opencode.json` (`theme.<role>` references to
+// `defs.*`) rather than the Rust constructor, so the JSON asset itself is
+// verified for every slot in both modes.
+
+#[test]
+fn native_json_asset_resolves_every_slot_to_upstream_values() {
+    let text = crate::native_theme_assets::lookup("opencode").expect("bundled opencode theme");
+    let asset: Value = serde_json::from_str(text).expect("bundled JSON parses");
+    let cases = [
+        // (slot, theme role -> defs name, dark, light)
+        (Slot::Background, "background -> darkStep1/lightStep1", "#0a0a0a", "#ffffff"),
+        (Slot::BackgroundPanel, "backgroundPanel -> darkStep2/lightStep2", "#141414", "#fafafa"),
+        (Slot::BackgroundElement, "backgroundElement -> darkStep3/lightStep3", "#1e1e1e", "#f5f5f5"),
+        (Slot::Text, "text -> darkStep12/lightStep12", "#eeeeee", "#1a1a1a"),
+        (Slot::TextMuted, "textMuted -> darkStep11/lightStep11", "#808080", "#8a8a8a"),
+        (Slot::Primary, "primary -> darkStep9/lightStep9", "#fab283", "#3b7dd8"),
+        (Slot::Border, "border -> darkStep7/lightStep7", "#484848", "#b8b8b8"),
+        (Slot::Error, "error -> darkRed/lightRed", "#e06c75", "#d1383d"),
+        (Slot::Warning, "warning -> darkOrange/lightOrange", "#f5a742", "#d68c27"),
+        (Slot::Success, "success -> darkGreen/lightGreen", "#7fd88f", "#3d9a57"),
+    ];
+    for (slot, key, dark, light) in cases {
+        let resolved_dark = palette_from_asset(&asset, ThemeMode::Dark).expect("dark");
+        let resolved_light = palette_from_asset(&asset, ThemeMode::Light).expect("light");
+        assert_eq!(resolved_dark.get(slot), hex(dark), "dark {key}");
+        assert_eq!(resolved_light.get(slot), hex(light), "light {key}");
+    }
+}
+
+// ── THEME-04: step clamping / negative / fractional / nonfinite amounts ────
+
+#[test]
+fn theme04_shifted_step_matches_compile_hue_steps() {
+    // `packages/theme/src/tui/resolve.ts` shift(): offset =
+    // Number.isFinite(amount) ? Math.trunc(amount) : 0, then clamp the
+    // position into [0, 8].
+    let cases: [(u16, f64, u16, &str); 12] = [
+        (700, 1.9, 800, "trunc(1.9) = +1 position"),
+        (700, 1.999, 800, "still truncates to +1"),
+        (700, 0.9, 700, "trunc(0.9) = 0"),
+        (700, 0.0, 700, "zero offset"),
+        (700, -0.9, 700, "trunc(-0.9) = 0"),
+        (700, -1.0, 600, "negative amount moves down"),
+        (700, -1.9, 600, "trunc(-1.9) = -1"),
+        (100, -3.0, 100, "floor clamp"),
+        (900, 3.0, 900, "ceiling clamp"),
+        (700, f64::NAN, 700, "NaN is a no-op"),
+        (700, f64::INFINITY, 700, "+Inf is a no-op"),
+        (700, f64::NEG_INFINITY, 700, "-Inf is a no-op"),
+    ];
+    for (step, amount, expected, why) in cases {
+        assert_eq!(shifted_step(step, amount), expected, "{why}");
+    }
+    // Saturation (no wrap) for absurd finite amounts, including the semantic
+    // wrappers' sign handling.
+    assert_eq!(shifted_step(700, 1e30), 900);
+    assert_eq!(shifted_step(700, -1e30), 100);
+    let semantic = dark_semantic_palette();
+    let n700 = hue_entry(&semantic, "neutral", 700);
+    assert_eq!(semantic.decrease(&n700, -1.9).provenance.unwrap().step, 800);
+    assert_eq!(semantic.decrease(&n700, 0.9).provenance.unwrap().step, 700);
+    assert_eq!(semantic.increase(&n700, f64::NAN).provenance.unwrap().step, 700);
+    assert_eq!(semantic.increase(&n700, 1e30).provenance.unwrap().step, 900);
+    assert_eq!(semantic.decrease(&n700, 1e30).provenance.unwrap().step, 100);
+}
+
+// ── THEME-05: exhaustive simultaneous-state precedence ───────────────────
+
+#[test]
+fn theme05_all_state_combinations_follow_disabled_pressed_focused_selected_hovered() {
+    for (mode, semantic) in [
+        (ThemeMode::Dark, dark_semantic_palette()),
+        (ThemeMode::Light, light_semantic_palette()),
+    ] {
+        let action = &semantic.background_action_primary;
+        // schema.ts ActionState = ["disabled","pressed","focused","selected","hovered"].
+        let order = ["disabled", "pressed", "focused", "selected", "hovered"];
+        for bits in 0u8..32 {
+            let states: HashMap<String, bool> = order
+                .iter()
+                .enumerate()
+                .map(|(index, name)| ((*name).to_owned(), bits & (1 << index) != 0))
+                .collect();
+            let expected = order
+                .iter()
+                .find(|name| states[**name])
+                .copied()
+                .unwrap_or("base");
+            assert_eq!(action.active_state(&states), expected, "{mode} bits {bits:05b}");
+            let expected_color = action.states.get(expected).unwrap_or(&action.base);
+            assert_eq!(
+                action.state(&states),
+                expected_color,
+                "{mode} bits {bits:05b}: color of {expected}"
+            );
+        }
+    }
+}
+
+// ── THEME-08: syntax scopes, attributes, Markdown, extmarks, categorical ──
+
+#[test]
+fn theme08_syntax_table_matches_upstream_generate_syntax() {
+    use crate::native_ui_style::{ATTR_BOLD, ATTR_ITALIC, ATTR_UNDERLINE};
+    let dark = dark_semantic_palette();
+    let rules = dark.syntax_rules();
+    assert_eq!(rules.len(), SYNTAX_RULE_COUNT);
+    // Declaration order + scopes from `packages/theme/src/tui/syntax.ts`.
+    assert_eq!(rules[0].scope, &["default"]);
+    assert_eq!(rules[1].scope, &["prompt"]);
+    assert_eq!(rules[2].scope, &["extmark.file"]);
+    assert_eq!(rules[3].scope, &["extmark.agent"]);
+    assert_eq!(rules[4].scope, &["extmark.skill"]);
+    assert_eq!(rules[5].scope, &["extmark.paste"]);
+    assert_eq!(rules[6].scope, &["comment", "comment.documentation"]);
+    assert_eq!(rules[35].scope, &["markup.underline"]);
+    assert_eq!(rules[43].scope, &["diff.plus"]);
+    assert_eq!(rules[48].scope, &["info"]);
+    // Attributes.
+    assert_eq!(rules[0].attributes, 0);
+    assert_eq!(rules[2].attributes, ATTR_BOLD, "extmark.file bold");
+    assert_eq!(rules[5].attributes, ATTR_BOLD, "extmark.paste bold");
+    assert_eq!(rules[5].background.as_ref().map(|c| c.rgba), Some(hex("#f5a742")),
+        "extmark.paste background = text.feedback.warning.base");
+    assert_eq!(rules[6].attributes, ATTR_ITALIC, "comment italic");
+    assert_eq!(rules[10].attributes, ATTR_BOLD | ATTR_ITALIC, "keyword.type bold italic");
+    assert_eq!(rules[12].attributes, ATTR_ITALIC, "keyword italic");
+    assert_eq!(rules[23].attributes, ATTR_BOLD, "markup.heading bold");
+    assert_eq!(rules[24].attributes, ATTR_BOLD | ATTR_UNDERLINE, "markup.heading.1 bold underline");
+    assert_eq!(rules[25].attributes, ATTR_BOLD, "markup.bold");
+    assert_eq!(rules[26].attributes, ATTR_ITALIC, "markup.italic");
+    assert_eq!(rules[31].attributes, ATTR_UNDERLINE, "markup.link underline");
+    assert_eq!(rules[35].attributes, ATTR_UNDERLINE, "markup.underline");
+    assert_eq!(rules[46].attributes, ATTR_BOLD, "error bold");
+    // Token routes: prompt = accent.200; extmark.paste foreground =
+    // text.action.primary.$focused (dark neutral.800, light neutral.900).
+    assert_eq!(rules[1].foreground.rgba, hex("#9d7cd8"), "prompt = dark accent.200");
+    assert_eq!(rules[5].foreground.rgba, hex("#0a0a0a"), "paste = dark primary.$focused");
+    let light_rules = light_semantic_palette().syntax_rules();
+    assert_eq!(light_rules[1].foreground.rgba, hex("#d68c27"), "prompt = light accent.200");
+    assert_eq!(light_rules[5].foreground.rgba, hex("#ffffff"), "paste = light primary.$focused");
+    // Backgrounds.
+    assert_eq!(rules[30].background.as_ref().map(|c| c.rgba), Some(hex("#0a0a0a")),
+        "markup.raw.inline background = background.base");
+    assert_eq!(rules[43].background.as_ref().map(|c| c.rgba), Some(hex("#20303b")),
+        "diff.plus background = diff.background.added");
+    assert_eq!(rules[44].background.as_ref().map(|c| c.rgba), Some(hex("#37222c")),
+        "diff.minus background = diff.background.removed");
+    assert_eq!(rules[45].background.as_ref().map(|c| c.rgba), Some(hex("#141414")),
+        "diff.delta background = diff.background.context");
+}
+
+#[test]
+fn theme08_syntax_colors_match_upstream_tokens() {
+    // dark: hue.{gray,red,orange,green,cyan,blue,purple} step 200 + literals.
+    let dark = dark_semantic_palette();
+    let dark_cases = [
+        (dark.syntax.comment.rgba, "#808080", "syntax.comment = $hue.neutral.400"),
+        (dark.syntax.keyword.rgba, "#9d7cd8", "syntax.keyword = $hue.accent.200 (purple.200)"),
+        (dark.syntax.function.rgba, "#fab283", "syntax.function = $hue.interactive.200 (dark orange.200)"),
+        (dark.syntax.variable.rgba, "#e06c75", "syntax.variable = $hue.red.200"),
+        (dark.syntax.string.rgba, "#7fd88f", "syntax.string = $hue.green.200"),
+        (dark.syntax.number.rgba, "#f5a742", "syntax.number literal"),
+        (dark.syntax.type_name.rgba, "#e5c07b", "syntax.type literal"),
+        (dark.syntax.operator.rgba, "#56b6c2", "syntax.operator = $hue.cyan.200"),
+        (dark.syntax.punctuation.rgba, "#eeeeee", "syntax.punctuation = $hue.neutral.200"),
+    ];
+    for (actual, expected, key) in dark_cases {
+        assert_eq!(actual, hex(expected), "dark {key}");
+    }
+    // light overrides number/type only; the rest inherit the shared base.
+    let light = light_semantic_palette();
+    let light_cases = [
+        (light.syntax.comment.rgba, "#8a8a8a", "syntax.comment = $hue.neutral.400 (light)"),
+        (light.syntax.keyword.rgba, "#d68c27", "syntax.keyword = $hue.accent.200 (orange.200)"),
+        (light.syntax.function.rgba, "#3b7dd8", "syntax.function = $hue.interactive.200 (blue.200)"),
+        (light.syntax.variable.rgba, "#d1383d", "syntax.variable = $hue.red.200"),
+        (light.syntax.string.rgba, "#3d9a57", "syntax.string = $hue.green.200"),
+        (light.syntax.number.rgba, "#d68c27", "syntax.number = $hue.accent.200 (light override)"),
+        (light.syntax.type_name.rgba, "#b0851f", "syntax.type literal (light override)"),
+        (light.syntax.operator.rgba, "#318795", "syntax.operator = $hue.cyan.200"),
+        (light.syntax.punctuation.rgba, "#1a1a1a", "syntax.punctuation = $hue.neutral.200"),
+    ];
+    for (actual, expected, key) in light_cases {
+        assert_eq!(actual, hex(expected), "light {key}");
+    }
+}
+
+#[test]
+fn theme08_markdown_roles_match_upstream_tokens() {
+    let dark = dark_semantic_palette();
+    for (actual, expected, key) in [
+        (dark.markdown.text.rgba, "#eeeeee", "markdown.text"),
+        (dark.markdown.heading.rgba, "#9d7cd8", "markdown.heading = accent.200"),
+        (dark.markdown.link.rgba, "#fab283", "markdown.link = interactive.200 (dark orange.200)"),
+        (dark.markdown.link_text.rgba, "#56b6c2", "markdown.linkText = cyan.200"),
+        (dark.markdown.code.rgba, "#7fd88f", "markdown.code = green.200"),
+        (dark.markdown.block_quote.rgba, "#e5c07b", "markdown.blockQuote"),
+        (dark.markdown.emphasis.rgba, "#e5c07b", "markdown.emphasis"),
+        (dark.markdown.strong.rgba, "#f5a742", "markdown.strong"),
+        (dark.markdown.horizontal_rule.rgba, "#808080", "markdown.horizontalRule = neutral.400"),
+        (dark.markdown.list_item.rgba, "#fab283", "markdown.listItem = interactive.200"),
+        (dark.markdown.list_enumeration.rgba, "#56b6c2", "markdown.listEnumeration"),
+        (dark.markdown.image.rgba, "#fab283", "markdown.image = interactive.200"),
+        (dark.markdown.image_text.rgba, "#56b6c2", "markdown.imageText"),
+        (dark.markdown.code_block.rgba, "#eeeeee", "markdown.codeBlock"),
+    ] {
+        assert_eq!(actual, hex(expected), "dark {key}");
+    }
+    let light = light_semantic_palette();
+    for (actual, expected, key) in [
+        (light.markdown.text.rgba, "#1a1a1a", "markdown.text"),
+        (light.markdown.heading.rgba, "#d68c27", "markdown.heading = accent.200"),
+        (light.markdown.link.rgba, "#3b7dd8", "markdown.link = interactive.200"),
+        (light.markdown.link_text.rgba, "#318795", "markdown.linkText = cyan.200"),
+        (light.markdown.code.rgba, "#3d9a57", "markdown.code = green.200"),
+        (light.markdown.block_quote.rgba, "#b0851f", "markdown.blockQuote (light)"),
+        (light.markdown.emphasis.rgba, "#b0851f", "markdown.emphasis (light)"),
+        (light.markdown.strong.rgba, "#d68c27", "markdown.strong = accent.200"),
+        (light.markdown.horizontal_rule.rgba, "#8a8a8a", "markdown.horizontalRule"),
+        (light.markdown.list_item.rgba, "#3b7dd8", "markdown.listItem"),
+        (light.markdown.list_enumeration.rgba, "#318795", "markdown.listEnumeration"),
+        (light.markdown.image.rgba, "#3b7dd8", "markdown.image"),
+        (light.markdown.image_text.rgba, "#318795", "markdown.imageText"),
+        (light.markdown.code_block.rgba, "#1a1a1a", "markdown.codeBlock"),
+    ] {
+        assert_eq!(actual, hex(expected), "light {key}");
+    }
+}
+
+#[test]
+fn theme08_categorical_ordering_and_extmark_colors_match() {
+    let dark = dark_semantic_palette();
+    // base.categorical = ["blue","purple","green","orange","red"].
+    assert_eq!(dark.categorical, ["blue", "purple", "green", "orange", "red"]);
+    assert_eq!(dark.categorical_colors[0].rgba, hex("#5c9cf5"), "blue.200");
+    assert_eq!(dark.categorical_colors[1].rgba, hex("#9d7cd8"), "purple.200");
+    let light = light_semantic_palette();
+    // light.categorical = ["purple","orange","green","blue","red"].
+    assert_eq!(light.categorical, ["purple", "orange", "green", "blue", "red"]);
+    assert_eq!(light.categorical_colors[0].rgba, hex("#7b5bb6"), "purple.200");
+    assert_eq!(light.categorical_colors[1].rgba, hex("#d68c27"), "orange.200");
+    // generateSyntax maps extmark.agent/skill to categorical[0]/[1].
+    let dark_rules = dark.syntax_rules();
+    assert_eq!(dark_rules[3].foreground.rgba, hex("#5c9cf5"));
+    assert_eq!(dark_rules[4].foreground.rgba, hex("#9d7cd8"));
+    let light_rules = light.syntax_rules();
+    assert_eq!(light_rules[3].foreground.rgba, hex("#7b5bb6"));
+    assert_eq!(light_rules[4].foreground.rgba, hex("#d68c27"));
+}
+
+#[test]
+fn theme08_diff_tokens_stay_distinct_in_both_modes() {
+    let dark = dark_semantic_palette().diff;
+    for (actual, expected, key) in [
+        (dark.added_text.rgba, "#4fd6be", "diff.text.added"),
+        (dark.removed_text.rgba, "#c53b53", "diff.text.removed"),
+        (dark.context_text.rgba, "#828bb8", "diff.text.context"),
+        (dark.hunk_header_text.rgba, "#828bb8", "diff.text.hunkHeader"),
+        (dark.added_background.rgba, "#20303b", "diff.background.added"),
+        (dark.removed_background.rgba, "#37222c", "diff.background.removed"),
+        (dark.context_background.rgba, "#141414", "diff.background.context = neutral.700"),
+        (dark.added_highlight.rgba, "#b8db87", "diff.highlight.added"),
+        (dark.removed_highlight.rgba, "#e26a75", "diff.highlight.removed"),
+        (dark.line_number_text.rgba, "#8f8f8f", "diff.lineNumber.text"),
+        (dark.added_line_number_background.rgba, "#1b2b34", "diff.lineNumber.background.added"),
+        (dark.removed_line_number_background.rgba, "#2d1f26", "diff.lineNumber.background.removed"),
+    ] {
+        assert_eq!(actual, hex(expected), "dark {key}");
+    }
+    assert_ne!(dark.added_text.rgba, dark.added_background.rgba);
+    assert_ne!(dark.added_background.rgba, dark.added_line_number_background.rgba);
+    // diff.text.hunkHeader aliases diff.text.context (both #828bb8) but must not
+    // collapse onto the added/removed line colors.
+    assert_eq!(dark.context_text.rgba, dark.hunk_header_text.rgba);
+    assert_ne!(dark.context_text.rgba, dark.added_text.rgba);
+    assert_ne!(dark.context_text.rgba, dark.removed_text.rgba);
+    let light = light_semantic_palette().diff;
+    for (actual, expected, key) in [
+        (light.added_text.rgba, "#1e725c", "diff.text.added"),
+        (light.removed_text.rgba, "#c53b53", "diff.text.removed (shared base)"),
+        (light.context_text.rgba, "#7086b5", "diff.text.context"),
+        (light.added_background.rgba, "#d5e5d5", "diff.background.added"),
+        (light.removed_background.rgba, "#f7d8db", "diff.background.removed"),
+        (light.context_background.rgba, "#fafafa", "diff.background.context = neutral.700"),
+        (light.added_highlight.rgba, "#4db380", "diff.highlight.added"),
+        (light.removed_highlight.rgba, "#f52a65", "diff.highlight.removed"),
+        (light.line_number_text.rgba, "#595959", "diff.lineNumber.text"),
+        (light.added_line_number_background.rgba, "#c5d5c5", "diff.lineNumber.background.added"),
+        (light.removed_line_number_background.rgba, "#e7c8cb", "diff.lineNumber.background.removed"),
+    ] {
+        assert_eq!(actual, hex(expected), "light {key}");
+    }
+}
+
+// ── THEME-12: picker preview/cancel + locked/system mode preferences ─────
+
+#[test]
+fn theme12_picker_preview_cancel_and_confirm_preserve_preferences() {
+    let mut controller = ThemeController::new(
+        ThemePreferences { name: "opencode".to_owned(), mode: ModePreference::System },
+        None,
+        ThemeMode::Dark,
+    );
+    controller.preview("nord");
+    assert_eq!(controller.active_name(), "nord", "movement previews immediately");
+    assert_eq!(controller.persisted().name, "opencode", "preview persists nothing");
+    assert_eq!(controller.cancel_pick().name, "opencode", "cancel restores AND persists initial");
+    assert_eq!(controller.active_name(), "opencode");
+
+    controller.preview("nord");
+    controller.preview("dracula");
+    let confirmed = controller.confirm_pick();
+    assert_eq!(confirmed.name, "dracula");
+    assert_eq!(controller.active_name(), "dracula");
+    assert_eq!(controller.persisted(), &confirmed);
+}
+
+#[test]
+fn theme12_locked_mode_ignores_renderer_and_system_changes_keep_lock() {
+    let mut controller = ThemeController::new(
+        ThemePreferences {
+            name: "opencode".to_owned(),
+            mode: ModePreference::Locked(ThemeMode::Light),
+        },
+        Some(ThemeMode::Dark),
+        ThemeMode::Dark,
+    );
+    assert_eq!(controller.mode(), ThemeMode::Light, "lock beats renderer/startup");
+    assert!(controller.mode_locked());
+    assert!(!controller.on_renderer_mode(ThemeMode::Dark), "locked ignores THEME_MODE");
+    assert_eq!(controller.mode(), ThemeMode::Light);
+
+    // `theme.mode: "system"` frees the lock and adopts the renderer mode.
+    assert!(controller.on_declared_mode("system", Some(ThemeMode::Dark)));
+    assert!(!controller.mode_locked());
+    assert_eq!(controller.mode(), ThemeMode::Dark);
+    assert_eq!(controller.persisted().mode, ModePreference::System);
+    // Now renderer events apply (without persisting).
+    assert!(controller.on_renderer_mode(ThemeMode::Light));
+    assert_eq!(controller.mode(), ThemeMode::Light);
+    assert_eq!(controller.persisted().mode, ModePreference::System);
+    // Declaring a mode pins it again.
+    assert!(controller.on_declared_mode("light", Some(ThemeMode::Dark)));
+    assert!(controller.mode_locked());
+    assert!(!controller.on_declared_mode("sepia", None), "unknown declarations change nothing");
+}
+
+#[test]
+fn theme12_one_mode_theme_preserves_requested_mode_preference() {
+    let mut doc: Value = serde_json::from_str(include_str!("../assets/opencode-v2.json"))
+        .expect("shipped asset parses");
+    doc.as_object_mut().expect("object").remove("light");
+    let theme = RuntimeTheme::from_asset("dark-only", &doc, ThemeMode::Light).expect("resolves");
+    assert_eq!(theme.mode, ThemeMode::Dark, "renders the only published mode");
+    assert_eq!(theme.requested_mode, ThemeMode::Light, "preference preserved");
+    // A later dual-mode selection reuses the preference.
+    assert_eq!(
+        select_theme_mode(&[ThemeMode::Light, ThemeMode::Dark], theme.requested_mode),
+        ThemeMode::Light
+    );
+    // setMode refuses unpublished modes.
+    let mut controller = ThemeController::new(
+        ThemePreferences { name: "dark-only".to_owned(), mode: ModePreference::System },
+        None,
+        ThemeMode::Dark,
+    );
+    assert!(controller
+        .set_mode_if_supported(ThemeMode::Light, &[ThemeMode::Dark])
+        .is_none());
+    assert!(controller
+        .set_mode_if_supported(ThemeMode::Dark, &[ThemeMode::Dark])
+        .is_some());
+}
+
+// ── THEME-13: cold start / cache / palette reply, alpha 0 stays 0 ────────
+
+fn terminal_white_on_black() -> TerminalPalette {
+    TerminalPalette::new(
+        Some(hex("#ffffff")),
+        Some(hex("#0a0a0a")),
+        vec![hex("#000000"), hex("#800000"), hex("#008000"), hex("#808000")],
+    )
+}
+
+#[test]
+fn theme13_cold_start_never_blocks_and_uses_cache_or_fallback() {
+    // Empty cache: first paint uses the opencode fallback and starts no probe.
+    let mut cold = SystemThemeState::cold_start(None, None, ThemeMode::Dark);
+    assert!(cold.uses_fallback());
+    assert_eq!(cold.request_probe(), ProbeOutcome::Idle, "no palette query before paint");
+    assert_eq!(cold.mode(), ThemeMode::Dark);
+    // Usable cache: system palette available immediately, mode inferred.
+    let cached = SystemThemeState::cold_start(
+        Some(terminal_white_on_black()),
+        None,
+        ThemeMode::Light,
+    );
+    assert!(!cached.uses_fallback());
+    assert_eq!(cached.mode(), ThemeMode::Dark, "dark terminal bg wins over startup light");
+    // Unusable cache is ignored (needs fg/bg sources).
+    let unusable = TerminalPalette::new(None, None, vec![hex("#000000")]);
+    assert!(!unusable.usable());
+    assert!(SystemThemeState::cold_start(Some(unusable), None, ThemeMode::Dark).uses_fallback());
+}
+
+#[test]
+fn theme13_probe_is_sixteen_colors_serial_and_queues_one_followup() {
+    assert_eq!(TERMINAL_PALETTE_SIZE, 16);
+    let mut state = SystemThemeState::cold_start(None, None, ThemeMode::Dark);
+    assert_eq!(state.after_paint(), ProbeOutcome::Started);
+    assert_eq!(state.request_probe(), ProbeOutcome::Idle, "no concurrent probe");
+    let reply = state.palette_reply(terminal_white_on_black());
+    assert_eq!(reply, ProbeOutcome::Started, "queued refresh runs after reply");
+    assert_eq!(state.palette_reply(terminal_white_on_black()), ProbeOutcome::Usable);
+    assert_eq!(state.probe_failed(), ProbeOutcome::Idle);
+    // Unusable replies are ignored (no palette swap).
+    let mut state = SystemThemeState::cold_start(None, None, ThemeMode::Dark);
+    state.after_paint();
+    let unusable = TerminalPalette::new(None, None, vec![hex("#ffffff")]);
+    assert_eq!(state.palette_reply(unusable), ProbeOutcome::Idle);
+    assert!(state.uses_fallback());
+    // Recognised terminal notifications queue a refresh; others do not.
+    let mut state = SystemThemeState::cold_start(Some(terminal_white_on_black()), None, ThemeMode::Dark);
+    assert!(!state.on_theme_notification("\x1b[?25h"));
+    assert!(state.on_theme_notification("\x1b[?997;1n"));
+    assert_eq!(state.after_paint(), ProbeOutcome::Started);
+}
+
+#[test]
+fn theme13_system_palette_keeps_zero_alpha_and_infers_from_default_bg_only() {
+    let palette = terminal_white_on_black()
+        .system_palette(ThemeMode::Dark)
+        .expect("usable palette");
+    let background = palette.get(Slot::Background);
+    assert_eq!(&background[..3], &[0x0a, 0x0a, 0x0a], "terminal bg RGB retained");
+    assert_eq!(background[3], 0, "system background alpha stays 0 (transparency)");
+    assert_eq!(palette.get(Slot::Text), hex("#ffffff"), "default foreground preferred");
+    assert_eq!(palette.get(Slot::Primary), ansi_to_rgba(6), "primary = cyan");
+    assert_eq!(palette.get(Slot::Error), ansi_to_rgba(1), "error = red");
+    assert_eq!(palette.get(Slot::Warning), ansi_to_rgba(3), "warning = yellow");
+    assert_eq!(palette.get(Slot::Success), ansi_to_rgba(2), "success = green");
+    assert_ne!(palette.get(Slot::BackgroundPanel), palette.get(Slot::BackgroundElement));
+
+    // Mode inference uses the actual default background; palette slot 0 is
+    // only a data fallback and never decides the mode.
+    let bright_slot0 = TerminalPalette::new(
+        Some(hex("#111111")),
+        Some(hex("#000000")),
+        vec![hex("#ffffff")],
+    );
+    assert_eq!(bright_slot0.mode(), Some(ThemeMode::Dark));
+    let dark_slot0 = TerminalPalette::new(
+        Some(hex("#eeeeee")),
+        Some(hex("#ffffff")),
+        vec![hex("#000000")],
+    );
+    assert_eq!(dark_slot0.mode(), Some(ThemeMode::Light));
+    // No default background: no inference at all.
+    let no_default = TerminalPalette::new(Some(hex("#eeeeee")), None, vec![hex("#ffffff")]);
+    assert_eq!(no_default.mode(), None);
+
+    // A locked mode is never overridden by palette inference.
+    let mut locked = SystemThemeState::cold_start(None, Some(ThemeMode::Light), ThemeMode::Dark);
+    locked.after_paint();
+    locked.palette_reply(terminal_white_on_black());
+    assert_eq!(locked.mode(), ThemeMode::Light);
+
+    // Alpha 0 survives the palette boundary unmodified.
+    assert_eq!(Palette::from_rgba_table([[1, 2, 3, 0]; ROLE_COUNT]).get(Slot::Background)[3], 0);
+}
+
+// ── THEME-14: syntax replacement cannot free before renderer idle ────────
+
+#[test]
+fn theme14_syntax_replacement_is_retained_until_renderer_idle() {
+    use std::rc::Rc;
+    let handle = Rc::new("syntax-style");
+    let mut arena = SyntaxStyleArena::new();
+    arena.install(Rc::clone(&handle));
+    assert_eq!(arena.retained_count(), 0);
+    arena.begin_frame();
+    // Streaming replacement while a frame is in flight.
+    arena.install(Rc::clone(&handle));
+    assert_eq!(arena.retained_count(), 1, "previous style retained, not freed");
+    assert_eq!(Rc::strong_count(&handle), 3, "external + current + retained");
+    assert_eq!(arena.release_idle(), 0, "idle release refused during a frame");
+    assert_eq!(Rc::strong_count(&handle), 3);
+    arena.begin_frame();
+    assert_eq!(arena.end_frame(), 0, "another frame still in flight");
+    assert_eq!(arena.end_frame(), 1, "last frame idle releases the retained style");
+    assert_eq!(Rc::strong_count(&handle), 2, "only current + external remain");
+    arena.end_frame();
+    assert_eq!(arena.release_idle(), 0, "nothing left to release");
+    arena.shutdown();
+    assert_eq!(Rc::strong_count(&handle), 1);
+}
+
+// ── THEME-15: cursor shape/blink/default/disabled/focus ──────────────────
+
+#[test]
+fn theme15_cursor_config_defaults_and_shape_parsing() {
+    // Absent cursor object: OpenTUI receives undefined (terminal setting).
+    assert_eq!(CursorConfig::from_json(&Value::Null), Ok(None));
+    // Present but empty: block + blinking true.
+    assert_eq!(
+        CursorConfig::from_json(&json!({})),
+        Ok(Some(CursorConfig::new(CursorShape::Block, true)))
+    );
+    assert_eq!(
+        CursorConfig::from_json(&json!({"style":"underline","blinking":false})),
+        Ok(Some(CursorConfig::new(CursorShape::Underline, false)))
+    );
+    for (name, shape) in [
+        ("block", CursorShape::Block),
+        ("underline", CursorShape::Underline),
+        ("line", CursorShape::Line),
+        ("default", CursorShape::Default),
+    ] {
+        assert_eq!(CursorShape::parse(name), Some(shape));
+        assert_eq!(shape.as_str(), name);
+    }
+    assert_eq!(
+        CursorConfig::from_json(&json!({"style":"beam"})),
+        Err(CursorConfigError::UnknownStyle)
+    );
+    assert_eq!(
+        CursorConfig::from_json(&json!({"style":4})),
+        Err(CursorConfigError::StyleNotString)
+    );
+    assert_eq!(
+        CursorConfig::from_json(&json!({"blinking":"yes"})),
+        Err(CursorConfigError::BlinkingNotBool)
+    );
+    assert_eq!(
+        CursorConfig::from_json(&json!("block")),
+        Err(CursorConfigError::NotAnObject)
+    );
+}
+
+#[test]
+fn theme15_cursor_color_is_theme_token_independent_of_prompt_background() {
+    let semantic = dark_semantic_palette();
+    let config = CursorConfig::new(CursorShape::Block, true);
+    // Enabled: composer cursorColor = theme.text.base.
+    let enabled = resolve_cursor(Some(config), &semantic, CursorState { focused: true, disabled: false });
+    assert_eq!(enabled.color, semantic.text_base.rgba);
+    assert_eq!(enabled.color, hex("#eeeeee"), "text.base = $hue.neutral.200");
+    assert!(enabled.visible);
+    // Disabled: background.raised.base, NOT the prompt surface.
+    let disabled = resolve_cursor(Some(config), &semantic, CursorState { focused: true, disabled: true });
+    assert_eq!(disabled.color, hex("#141414"), "background.raised.base = neutral.700");
+    assert_ne!(disabled.color, semantic.background_base.rgba);
+    // The color is the token itself even when the prompt background differs.
+    let mut shifted = semantic.clone();
+    shifted.background_base = HueColor::literal(hex("#123456"));
+    let still = resolve_cursor(Some(config), &shifted, CursorState { focused: true, disabled: false });
+    assert_eq!(still.color, enabled.color);
+    // Focus governs visibility; shape/blink survive an unfocused frame.
+    let unfocused = resolve_cursor(
+        Some(CursorConfig::new(CursorShape::Line, false)),
+        &semantic,
+        CursorState { focused: false, disabled: false },
+    );
+    assert!(!unfocused.visible);
+    assert_eq!(unfocused.shape, CursorShape::Line);
+    assert!(!unfocused.blinking);
+    // Absent config: default shape, no blink override.
+    let default = resolve_cursor(None, &semantic, CursorState { focused: true, disabled: false });
+    assert_eq!(default.shape, CursorShape::Default);
+    assert!(!default.blinking);
 }
 }

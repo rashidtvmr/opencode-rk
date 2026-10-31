@@ -9,6 +9,11 @@ use tokio::sync::mpsc;
 
 use crate::native_assistant_facts::AssistantFacts;
 
+/// Per-tool transcript rows for the 14 tool specializations and the
+/// generic/plugin/MCP fallback (see the module docs for upstream pins).
+#[path = "native_tool_rows.rs"]
+pub(crate) mod native_tool_rows;
+
 const MAX_FRAME: usize = 1024 * 1024;
 const MAX_TEXT: usize = 64 * 1024;
 const MAX_TOTAL: usize = 256 * 1024;

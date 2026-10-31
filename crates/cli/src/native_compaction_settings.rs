@@ -139,6 +139,36 @@ impl CompactionSettingsView {
         Ok(())
     }
 
+    /// Whether a compaction run is active in this session (`run_active`).
+    #[must_use]
+    pub fn run_active(&self) -> Option<bool> {
+        self.metadata.as_ref().map(|metadata| metadata.run_active)
+    }
+
+    /// Native checkpoint capability availability reported by the ACK.
+    #[must_use]
+    pub fn native_availability(&self) -> Option<&str> {
+        self.metadata
+            .as_ref()
+            .map(|metadata| metadata.native.as_str())
+    }
+
+    /// Verified native checkpoint model identity, when the ACK supplies one.
+    #[must_use]
+    pub fn native_checkpoint_model(&self) -> Option<&str> {
+        self.metadata
+            .as_ref()
+            .and_then(|metadata| metadata.checkpoint_model.as_deref())
+    }
+
+    /// `strategy; boundary <message-id>` checkpoint summary.
+    #[must_use]
+    pub fn checkpoint(&self) -> Option<&str> {
+        self.metadata
+            .as_ref()
+            .map(|metadata| metadata.checkpoint.as_str())
+    }
+
     /// Only Apply yields a request body. Until an authenticated ACK is loaded,
     /// configured and effective values remain unchanged.
     pub fn key(&mut self, key: u8) -> Option<String> {
@@ -365,4 +395,85 @@ fn fit_rows(rows: Vec<String>, offset: usize, width: usize, height: usize) -> Ve
         .take(height)
         .map(|row| crate::native_view_layout::fit(&row, width.min(u16::MAX as usize) as u16))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn response(availability: &str, model: Value, run_active: bool, checkpoint: Value) -> String {
+        serde_json::json!({
+            "scope": "session",
+            "capabilities": {
+                "native": {
+                    "availability": availability,
+                    "model": model,
+                    "retention": "provider-owned"
+                },
+                "fallback": {
+                    "availability": "responses-summary",
+                    "retention": "keep_recent_turns"
+                }
+            },
+            "configured": {
+                "enabled": true,
+                "threshold_tokens": 100_000,
+                "keep_recent_turns": 20,
+                "strategy": "native"
+            },
+            "effective": {
+                "enabled": true,
+                "threshold_tokens": 100_000,
+                "keep_recent_turns": 20,
+                "strategy": "native"
+            },
+            "overridden_by_environment": [],
+            "checkpoint": checkpoint,
+            "run_active": run_active
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn compaction_provider_native_provenance_is_exposed_without_mislabeling_usage() {
+        let mut view = CompactionSettingsView::new();
+        view.load_response(&response(
+            "verified-for-checkpoint-model",
+            Value::String("anthropic/claude-compact".into()),
+            true,
+            serde_json::json!({
+                "strategy": "native",
+                "boundary_message_id": "msg_boundary_1"
+            }),
+        ))
+        .unwrap();
+        assert_eq!(view.run_active(), Some(true));
+        assert_eq!(
+            view.native_availability(),
+            Some("verified-for-checkpoint-model")
+        );
+        assert_eq!(
+            view.native_checkpoint_model(),
+            Some("anthropic/claude-compact")
+        );
+        assert_eq!(view.checkpoint(), Some("native; boundary msg_boundary_1"));
+        let rendered = view.render(160, 24).join("\n");
+        assert!(
+            rendered.contains("Native: verified-for-checkpoint-model (anthropic/claude-compact)")
+        );
+        assert!(rendered.contains("run active: true"));
+        assert!(rendered.contains("native; boundary msg_boundary_1"));
+        assert!(rendered.contains("Threshold is estimated"));
+    }
+
+    #[test]
+    fn compaction_unverified_native_and_inactive_run_are_exposed() {
+        let mut view = CompactionSettingsView::new();
+        view.load_response(&response("unverified", Value::Null, false, Value::Null))
+            .unwrap();
+        assert_eq!(view.run_active(), Some(false));
+        assert_eq!(view.native_availability(), Some("unverified"));
+        assert_eq!(view.native_checkpoint_model(), None);
+        assert_eq!(view.checkpoint(), Some("none"));
+    }
 }

@@ -109,6 +109,44 @@ mod native_ui_preferences;
 #[cfg(feature = "native")]
 mod native_ui_style;
 #[cfg(feature = "native")]
+mod native_toast;
+#[cfg(feature = "native")]
+mod native_overlay_stack;
+#[cfg(feature = "native")]
+mod native_progress;
+#[cfg(feature = "native")]
+mod native_sidebar;
+#[cfg(feature = "native")]
+mod native_status_rail;
+#[cfg(feature = "native")]
+mod native_paste;
+#[cfg(feature = "native")]
+mod native_message_rows;
+#[cfg(feature = "native")]
+mod native_prompt_pane;
+#[cfg(feature = "native")]
+mod native_markdown_flow;
+#[cfg(feature = "native")]
+mod native_dock;
+#[cfg(feature = "native")]
+mod native_diff_inline;
+#[cfg(feature = "native")]
+mod native_home;
+#[cfg(feature = "native")]
+mod native_pane_resize;
+#[cfg(feature = "native")]
+mod native_modal_layer;
+#[cfg(feature = "native")]
+mod native_mermaid;
+#[cfg(feature = "native")]
+mod native_math;
+#[cfg(feature = "native")]
+mod native_image_preview;
+#[cfg(feature = "native")]
+mod native_graph;
+#[cfg(feature = "native")]
+mod native_shell_frame;
+#[cfg(feature = "native")]
 mod native_config_import;
 #[cfg(feature = "native")]
 mod native_import_dialog;

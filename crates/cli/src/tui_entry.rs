@@ -27,7 +27,7 @@ mod native_setup;
 mod native_transcript;
 #[cfg(feature = "native")]
 #[path = "native_turn.rs"]
-mod native_turn;
+pub(crate) mod native_turn;
 #[cfg(feature = "native")]
 use crate::native_chat_history::NativeChatHistory;
 #[cfg(feature = "native")]

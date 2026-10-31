@@ -7,6 +7,14 @@ pub const MAX_PATHS: usize = 64;
 pub const MAX_PATH_BYTES: usize = 32 * 1024;
 pub const MAX_READ_BYTES: usize = 2 * 1024 * 1024;
 
+/// Concurrent animated rows (session spinner, compaction spinner, tool rows)
+/// allowed to request repaint timers. Beyond this the row paints static
+/// animations-off frames instead of adding timers.
+pub const MAX_ACTIVE_ANIMATIONS: usize = 64;
+
+/// Coalesced repaint requests one render tick may service.
+pub const MAX_REPAINTS_PER_TICK: usize = MAX_ACTIVE_ANIMATIONS;
+
 #[derive(Default)]
 pub struct ReadBudget {
     paths: usize,
@@ -64,9 +72,162 @@ pub fn check_paths(paths: &[PathBuf]) -> Result<(), String> {
     Ok(())
 }
 
+/// Identifies one animation slot so `release` is idempotent and cannot free
+/// another row's slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AnimationToken(u64);
+
+/// Bounds animated rows and repaint requests for one presentation tick.
+///
+/// Upstream stops a spinner timer when its node is hidden/culled; the Rust
+/// wiring should release the token at the same points so culling restores
+/// animation capacity. An exhausted slot budget is not an error: the row
+/// falls back to the progress spinner's `animations = false` paint (`⋯`).
+#[derive(Clone, Debug)]
+pub struct AnimationBudget {
+    limit: usize,
+    active: Vec<u64>,
+    next_id: u64,
+    refused: bool,
+    repaint_limit: usize,
+    repaints: usize,
+}
+
+impl Default for AnimationBudget {
+    fn default() -> Self {
+        Self::new(MAX_ACTIVE_ANIMATIONS)
+    }
+}
+
+impl AnimationBudget {
+    #[must_use]
+    pub fn new(limit: usize) -> Self {
+        Self::with_repaint_limit(limit, MAX_REPAINTS_PER_TICK)
+    }
+
+    #[must_use]
+    pub fn with_repaint_limit(limit: usize, repaint_limit: usize) -> Self {
+        Self {
+            limit,
+            active: Vec::new(),
+            next_id: 0,
+            refused: false,
+            repaint_limit,
+            repaints: 0,
+        }
+    }
+
+    /// Reserve one animation slot. `None` means the row must paint the static
+    /// fallback; the refusal is recorded for diagnostics.
+    pub fn acquire(&mut self) -> Option<AnimationToken> {
+        if self.active.len() >= self.limit {
+            self.refused = true;
+            return None;
+        }
+        let id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1);
+        self.active.push(id);
+        Some(AnimationToken(id))
+    }
+
+    /// Release a slot. Returns false for an unknown or already-released token.
+    pub fn release(&mut self, token: AnimationToken) -> bool {
+        match self.active.iter().position(|id| *id == token.0) {
+            Some(index) => {
+                self.active.remove(index);
+                true
+            }
+            None => false,
+        }
+    }
+
+    #[must_use]
+    pub fn active(&self) -> usize {
+        self.active.len()
+    }
+
+    #[must_use]
+    pub fn limit(&self) -> usize {
+        self.limit
+    }
+
+    /// True when no further animations can start right now.
+    #[must_use]
+    pub fn is_exhausted(&self) -> bool {
+        self.active.len() >= self.limit
+    }
+
+    /// Whether any acquire/repaint request was refused since construction.
+    #[must_use]
+    pub fn had_refusal(&self) -> bool {
+        self.refused
+    }
+
+    /// Start a presentation tick; the repaint allowance is per tick.
+    pub fn begin_tick(&mut self) {
+        self.repaints = 0;
+    }
+
+    /// Request one coalesced repaint. False means the request joins an
+    /// already-scheduled paint for this tick rather than adding another.
+    pub fn request_repaint(&mut self) -> bool {
+        if self.repaints >= self.repaint_limit {
+            self.refused = true;
+            return false;
+        }
+        self.repaints += 1;
+        true
+    }
+
+    #[must_use]
+    pub fn repaints_this_tick(&self) -> usize {
+        self.repaints
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn animation_slots_exhaustion_and_release_restore_capacity() {
+        let mut budget = AnimationBudget::new(2);
+        assert!(!budget.is_exhausted());
+        let first = budget.acquire().expect("first slot");
+        let second = budget.acquire().expect("second slot");
+        assert_eq!(budget.active(), 2);
+        assert!(budget.is_exhausted());
+        assert!(budget.acquire().is_none(), "third slot is refused");
+        assert!(budget.had_refusal());
+        assert!(budget.release(first));
+        assert_eq!(budget.active(), 1);
+        assert!(!budget.is_exhausted());
+        assert!(!budget.release(first), "release is idempotent");
+        assert!(budget.release(second));
+        assert_eq!(budget.active(), 0);
+    }
+
+    #[test]
+    fn zero_animation_budget_is_immediately_exhausted() {
+        let mut budget = AnimationBudget::new(0);
+        assert!(budget.is_exhausted());
+        assert!(budget.acquire().is_none());
+        assert!(budget.had_refusal());
+    }
+
+    #[test]
+    fn repaint_requests_coalesce_per_tick_then_reset() {
+        let mut budget = AnimationBudget::with_repaint_limit(4, 2);
+        budget.begin_tick();
+        assert!(budget.request_repaint());
+        assert!(budget.request_repaint());
+        assert!(!budget.request_repaint(), "third request joins this paint");
+        assert_eq!(budget.repaints_this_tick(), 2);
+        assert!(budget.had_refusal());
+        budget.begin_tick();
+        assert!(budget.request_repaint(), "new tick restores allowance");
+        assert_eq!(budget.repaints_this_tick(), 1);
+    }
 
     #[test]
     fn missing_paths_still_consume_the_probe_budget() {

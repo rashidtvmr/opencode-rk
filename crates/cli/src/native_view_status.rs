@@ -40,6 +40,15 @@ use opencode_rk_contracts::SessionId;
 use serde_json::Value;
 use opencode_rk_sessions::{validate_todos, Todo};
 
+// The composed information sidebar lives in its own module (upstream
+// `routes/session/sidebar.tsx` + `feature-plugins/sidebar/*`). It is
+// registered here rather than in `main.rs` so the whole P07 composition stays
+// on this package's owned file set; the canonical path is
+// `crate::native_view_status::native_sidebar`. Do not also declare
+// `mod native_sidebar;` in `main.rs`: the same file cannot be loaded twice.
+#[path = "native_sidebar.rs"]
+pub mod native_sidebar;
+
 #[cfg(test)]
 mod measured_context_regression {
     use super::StatusView;
@@ -218,6 +227,32 @@ pub struct StatusView {
     todos_stale: Option<String>,
     sidebar_offset: usize,
     mcp_open: Option<bool>,
+    /// Todo disclosure state (`todo.tsx:7`); at most two rows stay expanded
+    /// regardless of a persisted collapse.
+    todo_open: Option<bool>,
+    /// Confirmed session cost in USD (`context.tsx:14`); the row appears only
+    /// for a positive amount.
+    sidebar_cost: Option<f64>,
+    /// Confirmed five disjoint provider token classes. When absent the
+    /// sidebar falls back to the authoritative measured total in `context`
+    /// (whose cached/reasoning values are already included in input/output).
+    sidebar_classes: Option<native_sidebar::UsageClasses>,
+    /// Confirmed usage limit of the selected model (`limit.tsx:12-21`).
+    /// `None` = no limit applies to the selected model, so `Limit` is hidden
+    /// (never rendered as an invented "unlimited" limit).
+    sidebar_limit: Option<native_sidebar::LimitSection>,
+    /// Confirmed working directory / VCS branch for the pinned footer
+    /// (`footer.tsx:87-92`).
+    footer: Option<SidebarFooter>,
+    /// Getting-started facts (`footer.tsx:18-23`); `None` = not observed.
+    sidebar_onboarding: Option<native_sidebar::Onboarding>,
+}
+
+/// Confirmed location facts for the pinned sidebar footer.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct SidebarFooter {
+    directory: String,
+    branch: Option<String>,
 }
 
 #[cfg(test)]
@@ -314,19 +349,18 @@ impl StatusView {
         self.render_sidebar_styled(width, height).into_iter().map(|line| line.text).collect()
     }
 
+    /// Styled sidebar rows. Headings are `SidebarHeading` (base text, bold)
+    /// exactly as `sidebar.tsx` paints them; the diagnostic `Status` page keeps
+    /// `Role::Heading` (primary accent) for its own headings.
     pub fn render_sidebar_styled(&self, width: usize, height: usize) -> Vec<crate::native_ui_style::Line> {
-        self.sidebar_rows(width, height).into_iter().map(|mut row| {
-            // The normal session sidebar uses base text with bold weight;
-            // action-accent headings belong to the separate diagnostic pages.
-            if row.line.role == crate::native_ui_style::Role::Heading {
-                row.line.role = crate::native_ui_style::Role::SidebarHeading;
-            }
-            row.line
-        }).collect()
+        self.sidebar_rows(width, height)
+            .into_iter()
+            .map(|row| row.line)
+            .collect()
     }
 
     pub fn toggle_mcp_sidebar(&mut self) -> bool {
-        if self.mcp.len() <= 2 { return false; }
+        if self.mcp.len() <= native_sidebar::COLLAPSE_THRESHOLD { return false; }
         self.mcp_open = Some(!self.mcp_sidebar_open());
         self.sidebar_offset = 0;
         true
@@ -334,84 +368,119 @@ impl StatusView {
 
     #[must_use]
     pub fn mcp_sidebar_open(&self) -> bool {
-        self.mcp.len() <= 2 || self.mcp_open.unwrap_or(true)
+        self.mcp.len() <= native_sidebar::COLLAPSE_THRESHOLD || self.mcp_open.unwrap_or(true)
     }
 
+    /// Toggle the Todo disclosure. At most two todos always stay expanded, so
+    /// a collapse persisted from a longer list cannot hide them (`SIDE-11`).
+    pub fn toggle_todo_sidebar(&mut self) -> bool {
+        if self.todos.as_deref().map_or(0, |todos| todos.len()) <= native_sidebar::COLLAPSE_THRESHOLD {
+            return false;
+        }
+        self.todo_open = Some(!self.todo_sidebar_open());
+        self.sidebar_offset = 0;
+        true
+    }
+
+    #[must_use]
+    pub fn todo_sidebar_open(&self) -> bool {
+        self.todos.as_deref().map_or(0, |todos| todos.len()) <= native_sidebar::COLLAPSE_THRESHOLD
+            || self.todo_open.unwrap_or(true)
+    }
+
+    /// Scroll only the (unpinned) body; the title and footer stay pinned
+    /// (`sidebar.tsx:32-76`). The offset is clamped to the real body overflow.
     pub fn scroll_sidebar(&mut self, lines: isize, height: usize) {
         if height == 0 { return; }
-        let count = self.sidebar_rows(1, MAX_ROWS).len();
-        let maximum = count.saturating_sub(height);
+        let width = native_sidebar::content_width(native_sidebar::SESSION_SIDEBAR_WIDTH);
+        let maximum = self.with_sidebar(|sidebar| sidebar.scroll_limit(width, height));
         self.sidebar_offset = self.sidebar_offset.min(maximum)
             .saturating_add_signed(lines).min(maximum);
     }
 
+    /// Build the upstream sidebar model over the confirmed facts and hand it to
+    /// `render`. Locals live for the whole closure so the model can borrow the
+    /// MCP/todo projections without cloning their payloads.
+    fn with_sidebar<R>(&self, render: impl FnOnce(&native_sidebar::Sidebar<'_>) -> R) -> R {
+        let mcp_items: Vec<native_sidebar::McpItem<'_>> = self
+            .mcp
+            .iter()
+            .map(|entry| native_sidebar::McpItem {
+                name: entry.name.as_str(),
+                status: match &entry.status {
+                    McpStatus::Connected => native_sidebar::McpDisplayStatus::Connected,
+                    McpStatus::Disabled => native_sidebar::McpDisplayStatus::Disabled,
+                    McpStatus::Failed { .. } => native_sidebar::McpDisplayStatus::Failed,
+                    McpStatus::NeedsAuth => native_sidebar::McpDisplayStatus::NeedsAuth,
+                    McpStatus::NeedsClientRegistration { .. } => {
+                        native_sidebar::McpDisplayStatus::NeedsClientRegistration
+                    }
+                },
+                included: entry.included,
+            })
+            .collect();
+        let todo_rows: Vec<native_sidebar::TodoRow<'_>> = self
+            .todos
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .map(|todo| native_sidebar::TodoRow {
+                content: todo.content.as_str(),
+                status: todo.status.clone(),
+            })
+            .collect();
+        let window = self.context.and_then(|(_, window)| window);
+        let context = match self.sidebar_classes {
+            Some(classes) => native_sidebar::ContextSection::from_classes(classes, window, self.sidebar_cost),
+            None => native_sidebar::ContextSection::new(
+                self.context.map(|(used, _)| used),
+                window,
+                self.sidebar_cost,
+            ),
+        };
+        let sidebar = native_sidebar::Sidebar {
+            title: self.session_title.as_deref(),
+            context,
+            limit: self.sidebar_limit,
+            mcp: (!mcp_items.is_empty()).then(|| native_sidebar::McpSection {
+                items: &mcp_items,
+                open: self.mcp_sidebar_open(),
+            }),
+            todo: (!todo_rows.is_empty()).then(|| native_sidebar::TodoSection {
+                rows: &todo_rows,
+                open: self.todo_sidebar_open(),
+            }),
+            footer: self.footer.as_ref().map(|footer| native_sidebar::Footer {
+                directory: footer.directory.as_str(),
+                branch: footer.branch.as_deref(),
+                hovered: false,
+            }),
+            onboarding: self.sidebar_onboarding,
+        };
+        render(&sidebar)
+    }
+
+    /// Painted sidebar rows in upstream composition order, bounded by
+    /// `width`/`height`/`MAX_ROWS` and by the current body scroll offset.
     fn sidebar_rows(&self, width: usize, height: usize) -> Vec<SidebarRow> {
-        use crate::native_ui_style::{Line, Role};
-        let mut rows = vec![(String::new(), Role::Description, None, false)];
-        if let Some(title) = self.session_title() {
-            rows.push((title.to_owned(), Role::Heading, None, false));
-            rows.push((String::new(), Role::Description, None, false));
-        }
-        if let Some((used, window)) = self.context {
-            if rows.last().is_some_and(|(text, _, _, _)| !text.is_empty()) {
-                rows.push((String::new(), Role::Description, None, false));
-            }
-            rows.push(("Context".to_owned(), Role::Heading, None, false));
-            let digits = used.to_string();
-            let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
-            for (index, digit) in digits.chars().enumerate() {
-                if index > 0 && (digits.len() - index) % 3 == 0 { grouped.push(','); }
-                grouped.push(digit);
-            }
-            rows.push((format!("{grouped} tokens"), Role::Description, None, false));
-            if let Some(window) = window.filter(|window| *window > 0) {
-                let percent = (u128::from(used) * 100 + u128::from(window) / 2) / u128::from(window);
-                rows.push((format!("{percent}% used"), Role::Description, None, false));
-            }
-        }
-        if !self.mcp.is_empty() {
-            if rows.last().is_some_and(|(text, _, _, _)| !text.is_empty()) {
-                rows.push((String::new(), Role::Description, None, false));
-            }
-            let collapsible = self.mcp.len() > 2;
-            let active = self.mcp.iter().filter(|entry| entry.status == McpStatus::Connected).count();
-            let errors = self.mcp.iter().filter(|entry| matches!(entry.status, McpStatus::Failed { .. } | McpStatus::NeedsAuth)).count();
-            let prefix = if collapsible { if self.mcp_sidebar_open() { "▼ " } else { "▶ " } } else { "" };
-            let summary = if collapsible && !self.mcp_sidebar_open() {
-                format!("{prefix}MCP ({} active{})", active, if errors > 0 { format!(", {errors} error{}", if errors == 1 { "" } else { "s" }) } else { String::new() })
-            } else { format!("{prefix}MCP") };
-            rows.push((summary, Role::Heading, None, collapsible));
-            if !collapsible || self.mcp_sidebar_open() {
-                for (index, entry) in self.mcp.iter().enumerate() {
-                    let inclusion = match entry.included { Some(true) => "", Some(false) => " (excluded)", None => "" };
-                    rows.push((format!("• {} {}{inclusion}", entry.name, entry.status.as_str()), Role::Item, Some(index), false));
-                }
-            }
-        }
-        match &self.todos {
-            None => {}
-            Some(todos) if todos.is_empty() => {}
-            Some(todos) => {
-                if rows.last().is_some_and(|(text, _, _, _)| !text.is_empty()) {
-                    rows.push((String::new(), Role::Description, None, false));
-                }
-                rows.push(("Todo".to_owned(), Role::Heading, None, false));
-                for todo in todos {
-                    let marker = match &todo.status {
-                        opencode_rk_sessions::TodoStatus::Pending => "[ ]",
-                        opencode_rk_sessions::TodoStatus::InProgress => "[•]",
-                        opencode_rk_sessions::TodoStatus::Completed => "[✓]",
-                        opencode_rk_sessions::TodoStatus::Cancelled => "[-]",
-                    };
-                    let content = display(Some(&todo.content));
-                    rows.push((format!("{marker} {content}"), Role::Description, None, false));
-                }
-            }
-        }
-        let maximum = rows.len().min(MAX_ROWS).saturating_sub(height);
-        rows.into_iter().take(MAX_ROWS).skip(self.sidebar_offset.min(maximum)).take(height.min(MAX_ROWS)).map(|(text, role, mcp_index, mcp_toggle)| SidebarRow {
-            line: Line { text: fit(&text, width), role, detail_from: None }, mcp_index, mcp_toggle
-        }).collect()
+        if width == 0 || height == 0 { return Vec::new(); }
+        let mut rows: Vec<SidebarRow> = self.with_sidebar(|sidebar| {
+            sidebar
+                .render(width, height, self.sidebar_offset)
+                .into_iter()
+                .map(|row| SidebarRow {
+                    line: crate::native_ui_style::Line {
+                        text: fit(&row.text, width),
+                        role: row.role,
+                        detail_from: None,
+                    },
+                    mcp_index: row.mcp_index,
+                    mcp_toggle: row.mcp_toggle,
+                })
+                .collect()
+        });
+        rows.truncate(MAX_ROWS);
+        rows
     }
 
     /// Caller-confirmed daemon connection observation. Call only after an
@@ -632,6 +701,44 @@ impl StatusView {
         self.context=Some((input.saturating_add(output),window.filter(|limit|*limit>0)));
     }
     pub fn clear_usage(&mut self) {self.usage=None;self.context=None;}
+
+    /// Confirmed session cost in USD for the sidebar `Context` section
+    /// (`context.tsx:14/36-38`). Only a finite positive amount is stored; the
+    /// row is hidden for zero, absent or invalid observations.
+    pub fn set_cost(&mut self, cost: Option<f64>) {
+        self.sidebar_cost = cost.filter(|cost| cost.is_finite() && *cost > 0.0);
+    }
+
+    /// Confirmed five disjoint provider token classes (`util/session.ts:52-55`).
+    /// Callers whose provider projection reports `input`/`output` as inclusive
+    /// totals (the legacy [`Self::set_usage`] contract) must not call this;
+    /// leaving it `None` keeps the measured-total arithmetic.
+    pub fn set_usage_classes(&mut self, classes: Option<native_sidebar::UsageClasses>) {
+        self.sidebar_classes = classes;
+    }
+
+    /// Confirmed usage limit of the selected model (`limit.tsx:12-21`).
+    /// `None` means no limit applies, so the `Limit` section is hidden — never
+    /// rendered as an invented unlimited/quota row.
+    pub fn set_limit(&mut self, limit: Option<native_sidebar::LimitSection>) {
+        self.sidebar_limit = limit;
+    }
+
+    /// Confirmed working directory / VCS branch for the pinned footer
+    /// (`footer.tsx:87-92`). A blank/absent directory hides the footer.
+    pub fn set_working_directory(&mut self, directory: Option<String>, branch: Option<String>) {
+        self.footer = non_empty(directory).map(|directory| SidebarFooter {
+            directory,
+            branch: non_empty(branch),
+        });
+    }
+
+    /// Getting-started facts for the pinned footer (`footer.tsx:18-23`).
+    /// `None` means the integration list was never observed, so no onboarding
+    /// box is claimed.
+    pub fn set_onboarding(&mut self, onboarding: Option<native_sidebar::Onboarding>) {
+        self.sidebar_onboarding = onboarding;
+    }
 
     /// Confirmed connection observation, if any.
     #[must_use]
@@ -1340,10 +1447,10 @@ mod tests {
         let rows = view.render_sidebar(38, 30);
         let alpha = rows.iter().position(|row| row.contains("alpha")).expect("alpha row");
         let beta = rows.iter().position(|row| row.contains("beta")).expect("beta row");
-        assert!(rows[alpha].contains("connected"));
-        assert!(rows[alpha].to_ascii_lowercase().contains("excluded"));
-        assert!(rows[beta].contains("connected"));
-        assert!(!rows[beta].to_ascii_lowercase().contains("excluded"));
+        // `mcp.tsx:20-32` renders its own capitalised labels; the wire
+        // status string is never painted verbatim.
+        assert_eq!(rows[alpha], "• alpha Connected (excluded)");
+        assert_eq!(rows[beta], "• beta Connected");
     }
 
     #[test]
@@ -1954,14 +2061,14 @@ mod mcp_sidebar_behavior_regression {
         let mut view = StatusView::default();
         view.apply_mcp(&three_servers()).unwrap();
         assert!(view.mcp_sidebar_open());
-        assert!(view.render_sidebar(80, 20).iter().any(|row| row.contains("a connected")));
+        assert!(view.render_sidebar(80, 20).iter().any(|row| row.contains("• a Connected")));
         assert!(view.toggle_mcp_sidebar());
         assert!(!view.mcp_sidebar_open());
         assert!(view.render_sidebar(80, 20).iter().any(|row| row.contains("▶ MCP")));
-        assert!(!view.render_sidebar(80, 20).iter().any(|row| row.contains("a connected")));
+        assert!(!view.render_sidebar(80, 20).iter().any(|row| row.contains("• a Connected")));
         assert!(view.toggle_mcp_sidebar());
         assert!(view.mcp_sidebar_open());
-        assert!(view.render_sidebar(80, 20).iter().any(|row| row.contains("a connected")));
+        assert!(view.render_sidebar(80, 20).iter().any(|row| row.contains("• a Connected")));
     }
 
     #[test]
@@ -1979,7 +2086,7 @@ mod mcp_sidebar_behavior_regression {
             view.apply_mcp(&snapshot).unwrap();
             assert!(!view.toggle_mcp_sidebar());
             assert!(view.mcp_sidebar_open());
-            assert!(view.render_sidebar(80, 20).iter().any(|row| row.contains("a connected")));
+            assert!(view.render_sidebar(80, 20).iter().any(|row| row.contains("• a Connected")));
         }
     }
 
@@ -2006,12 +2113,19 @@ mod mcp_sidebar_behavior_regression {
         let todo = initial.iter().position(|row| row.contains("MCP text")).unwrap();
         assert_ne!(view.mcp_sidebar_row_hit(80, 10, title), Some(McpSidebarHit::Toggle));
         assert_ne!(view.mcp_sidebar_row_hit(80, 10, todo), Some(McpSidebarHit::Toggle));
-        // Known source-row layout: blank,title,blank,MCP header; scrolling by 2
-        // clips the title while leaving the real header at visible row 1.
+        // `sidebar.tsx:32-76` pins the title box: scrolling moves only the
+        // body, and the header stays at its original rows.
         view.scroll_sidebar(2, 5);
-        let clipped = view.render_sidebar(80, 5);
-        assert_eq!(clipped.get(1).map(String::as_str), Some("▼ MCP"));
-        assert_eq!(view.mcp_sidebar_row_hit(80, 5, 1), Some(McpSidebarHit::Toggle));
+        let scrolled = view.render_sidebar(80, 5);
+        assert_eq!(scrolled.get(1).map(String::as_str), Some("MCP incident"));
+        assert_eq!(scrolled.get(3).map(String::as_str), Some("• b Error"));
+        assert_ne!(view.mcp_sidebar_row_hit(80, 5, 1), Some(McpSidebarHit::Toggle));
+        // Returning to the top restores the MCP heading as the body's first
+        // visible row, still below the pinned title.
+        view.scroll_sidebar(-2, 5);
+        let top = view.render_sidebar(80, 5);
+        assert_eq!(top.get(3).map(String::as_str), Some("▼ MCP"));
+        assert_eq!(view.mcp_sidebar_row_hit(80, 5, 3), Some(McpSidebarHit::Toggle));
         assert_ne!(view.mcp_sidebar_row_hit(80, 5, 0), Some(McpSidebarHit::Toggle));
     }
 }

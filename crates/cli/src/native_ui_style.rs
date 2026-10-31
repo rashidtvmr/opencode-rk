@@ -3,6 +3,65 @@
 //! theme-aware contrast establish the visual hierarchy.
 use crate::native_theme_runtime::Slot;
 
+// ── Text attributes ───────────────────────────────────────────────────
+//
+// Pinned OpenTUI `TextAttributes` bitmask (`packages/core/src/types.ts`,
+// OpenTUI 0.6.8 @ 8d6065a3e60039d16c6ee697692dcfbc46d3c786). The native
+// bridge forwards this mask unchanged to `bufferDrawText`, so the numeric
+// values are the contract, not an internal choice.
+pub const ATTR_NONE: u32 = 0;
+pub const ATTR_BOLD: u32 = 1;
+pub const ATTR_DIM: u32 = 2;
+pub const ATTR_ITALIC: u32 = 4;
+pub const ATTR_UNDERLINE: u32 = 8;
+pub const ATTR_BLINK: u32 = 16;
+pub const ATTR_INVERSE: u32 = 32;
+pub const ATTR_HIDDEN: u32 = 64;
+pub const ATTR_STRIKETHROUGH: u32 = 128;
+
+/// Every attribute the theme resolver may emit (bold/dim/italic/underline/
+/// reverse). Blink, hidden and strikethrough stay renderer-owned.
+pub const THEME_ATTRIBUTES: u32 =
+    ATTR_BOLD | ATTR_DIM | ATTR_ITALIC | ATTR_UNDERLINE | ATTR_INVERSE;
+
+/// Canonical names in ascending bit order; `reverse` is OpenTUI `INVERSE`.
+pub const ATTRIBUTE_NAMES: [(&str, u32); 5] = [
+    ("bold", ATTR_BOLD),
+    ("dim", ATTR_DIM),
+    ("italic", ATTR_ITALIC),
+    ("underline", ATTR_UNDERLINE),
+    ("reverse", ATTR_INVERSE),
+];
+
+/// Parse attribute names into a mask. `inverse` is accepted as an alias of
+/// `reverse`; unknown names fail closed (`None`) instead of being ignored.
+#[must_use]
+pub fn attributes_from_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Option<u32> {
+    let mut mask = ATTR_NONE;
+    for name in names {
+        let bit = match name {
+            "bold" => ATTR_BOLD,
+            "dim" => ATTR_DIM,
+            "italic" => ATTR_ITALIC,
+            "underline" => ATTR_UNDERLINE,
+            "reverse" | "inverse" => ATTR_INVERSE,
+            _ => return None,
+        };
+        mask |= bit;
+    }
+    Some(mask)
+}
+
+/// Names of every theme attribute present in `mask`, ascending bit order.
+#[must_use]
+pub fn attribute_names(mask: u32) -> Vec<&'static str> {
+    ATTRIBUTE_NAMES
+        .iter()
+        .filter(|(_, bit)| mask & bit != 0)
+        .map(|(name, _)| *name)
+        .collect()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role { Heading, SidebarHeading, Item, Description, Selected, Hint, Error, Warning, Action }
 
@@ -29,17 +88,15 @@ pub struct Region {
 }
 
 pub fn style(role: Role) -> Style {
-    // OpenTUI c01292fd, packages/core/src/types.ts: TextAttributes.BOLD.
-    const BOLD: u32 = 1;
     let (foreground, background, attributes) = match role {
-        Role::Heading => (Slot::Primary, None, BOLD),
-        Role::SidebarHeading => (Slot::Text, None, BOLD),
-        Role::Item => (Slot::Text, None, 0),
-        Role::Description | Role::Hint => (Slot::TextMuted, None, 0),
-        Role::Selected => (Slot::Background, Some(Slot::Primary), BOLD),
-        Role::Error => (Slot::Error, None, BOLD),
-        Role::Warning => (Slot::Warning, None, BOLD),
-        Role::Action => (Slot::Text, Some(Slot::BackgroundPanel), 0),
+        Role::Heading => (Slot::Primary, None, ATTR_BOLD),
+        Role::SidebarHeading => (Slot::Text, None, ATTR_BOLD),
+        Role::Item => (Slot::Text, None, ATTR_NONE),
+        Role::Description | Role::Hint => (Slot::TextMuted, None, ATTR_NONE),
+        Role::Selected => (Slot::Background, Some(Slot::Primary), ATTR_BOLD),
+        Role::Error => (Slot::Error, None, ATTR_BOLD),
+        Role::Warning => (Slot::Warning, None, ATTR_BOLD),
+        Role::Action => (Slot::Text, Some(Slot::BackgroundPanel), ATTR_NONE),
     };
     Style { foreground, background, attributes }
 }
@@ -98,5 +155,43 @@ mod tests {
         assert_eq!(help_top(12, 10), 1);
         assert_eq!(help_top(10, 10), 0);
         for rows in 10..40 { assert!(usize::from(rows - 2 * help_top(rows, 10)) >= 10); }
+    }
+
+    /// THEME-08: pinned OpenTUI `TextAttributes` numeric values.
+    #[test]
+    fn attribute_bits_match_pinned_opentui() {
+        assert_eq!(ATTR_NONE, 0);
+        assert_eq!(ATTR_BOLD, 1);
+        assert_eq!(ATTR_DIM, 2);
+        assert_eq!(ATTR_ITALIC, 4);
+        assert_eq!(ATTR_UNDERLINE, 8);
+        assert_eq!(ATTR_BLINK, 16);
+        assert_eq!(ATTR_INVERSE, 32);
+        assert_eq!(ATTR_HIDDEN, 64);
+        assert_eq!(ATTR_STRIKETHROUGH, 128);
+        assert_eq!(
+            THEME_ATTRIBUTES,
+            ATTR_BOLD | ATTR_DIM | ATTR_ITALIC | ATTR_UNDERLINE | ATTR_INVERSE
+        );
+    }
+
+    /// THEME-08: every required direction is expressible and unknown names
+    /// fail closed instead of silently dropping an attribute.
+    #[test]
+    fn attribute_names_roundtrip_and_alias() {
+        let mask = attributes_from_names(["bold", "dim", "italic", "underline", "reverse"])
+            .expect("known attributes");
+        assert_eq!(mask, THEME_ATTRIBUTES);
+        assert_eq!(
+            attribute_names(mask),
+            vec!["bold", "dim", "italic", "underline", "reverse"]
+        );
+        assert_eq!(
+            attributes_from_names(["inverse"]),
+            Some(ATTR_INVERSE),
+            "inverse aliases reverse"
+        );
+        assert_eq!(attributes_from_names(["blink"]), None, "fail closed");
+        assert_eq!(attribute_names(0), Vec::<&str>::new());
     }
 }

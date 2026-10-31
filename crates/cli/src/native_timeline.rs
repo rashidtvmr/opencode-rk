@@ -338,6 +338,382 @@ fn bound_preview(text: &str) -> String {
     text[..end].to_string()
 }
 
+/// Compaction usage is the request's own token accounting. It is **not** the
+/// resulting context size, which only appears on the next assistant step.
+pub const COMPACTION_USAGE_SEMANTICS: &str =
+    "usage of the compaction request, not the resulting context size (shown on the next assistant step)";
+
+/// Compaction lifecycle from `routes/session/index.tsx` (`CompactionMessage`,
+/// `CompactionQueued`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompactionStatus {
+    Queued,
+    Running,
+    Completed,
+    Failed,
+}
+
+/// Token counters attached to a compaction request.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CompactionTokens {
+    pub input: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    pub output: u64,
+    pub reasoning: u64,
+}
+
+impl CompactionTokens {
+    /// `input + cache.read + cache.write`, `output + reasoning`.
+    #[must_use]
+    pub fn request_usage(&self) -> (u64, u64) {
+        (
+            self.input
+                .saturating_add(self.cache_read)
+                .saturating_add(self.cache_write),
+            self.output.saturating_add(self.reasoning),
+        )
+    }
+}
+
+/// Pure compaction row state: header label, streaming summary, failure text,
+/// cancellation and request usage.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompactionState {
+    status: CompactionStatus,
+    cancelled: bool,
+    provider_native: bool,
+    summary: String,
+    error: String,
+    tokens: Option<CompactionTokens>,
+}
+
+impl Default for CompactionState {
+    fn default() -> Self {
+        Self::queued()
+    }
+}
+
+impl CompactionState {
+    #[must_use]
+    pub fn queued() -> Self {
+        Self {
+            status: CompactionStatus::Queued,
+            cancelled: false,
+            provider_native: false,
+            summary: String::new(),
+            error: String::new(),
+            tokens: None,
+        }
+    }
+
+    #[must_use]
+    pub fn running() -> Self {
+        Self {
+            status: CompactionStatus::Running,
+            ..Self::queued()
+        }
+    }
+
+    #[must_use]
+    pub fn completed(summary: impl Into<String>, provider_native: bool) -> Self {
+        Self {
+            status: CompactionStatus::Completed,
+            cancelled: false,
+            provider_native,
+            summary: summary.into(),
+            error: String::new(),
+            tokens: None,
+        }
+    }
+
+    #[must_use]
+    pub fn failed(message: impl Into<String>) -> Self {
+        Self {
+            status: CompactionStatus::Failed,
+            cancelled: false,
+            provider_native: false,
+            summary: String::new(),
+            error: message.into(),
+            tokens: None,
+        }
+    }
+
+    /// Queued → running. Repeated or out-of-order transitions are rejected.
+    pub fn start(&mut self) -> bool {
+        if self.status != CompactionStatus::Queued {
+            return false;
+        }
+        self.status = CompactionStatus::Running;
+        true
+    }
+
+    /// Running → completed, carrying the final summary and provider-native
+    /// checkpoint flag.
+    pub fn complete(&mut self, summary: impl Into<String>, provider_native: bool) -> bool {
+        if self.status != CompactionStatus::Running {
+            return false;
+        }
+        self.status = CompactionStatus::Completed;
+        self.cancelled = false;
+        self.provider_native = provider_native;
+        self.summary = summary.into();
+        self.error.clear();
+        true
+    }
+
+    /// Running → failed with the error message shown in the body.
+    pub fn fail(&mut self, message: impl Into<String>) -> bool {
+        if self.status != CompactionStatus::Running {
+            return false;
+        }
+        self.status = CompactionStatus::Failed;
+        self.cancelled = false;
+        self.provider_native = false;
+        self.error = message.into();
+        true
+    }
+
+    /// Running → failed with `error.type === "aborted"`: no icon, empty body,
+    /// and a `· cancelled` suffix.
+    pub fn cancel(&mut self) -> bool {
+        if self.status != CompactionStatus::Running {
+            return false;
+        }
+        self.status = CompactionStatus::Failed;
+        self.cancelled = true;
+        self.provider_native = false;
+        self.error.clear();
+        true
+    }
+
+    pub fn set_tokens(&mut self, tokens: CompactionTokens) {
+        self.tokens = Some(tokens);
+    }
+
+    /// Replace the streaming summary (partial text is rendered as it arrives).
+    pub fn set_summary(&mut self, summary: impl Into<String>) {
+        self.summary = summary.into();
+    }
+
+    #[must_use]
+    pub fn status(&self) -> CompactionStatus {
+        self.status
+    }
+
+    #[must_use]
+    pub fn cancelled(&self) -> bool {
+        self.cancelled
+    }
+
+    #[must_use]
+    pub fn provider_native(&self) -> bool {
+        self.provider_native
+    }
+
+    #[must_use]
+    pub fn summary(&self) -> &str {
+        &self.summary
+    }
+
+    #[must_use]
+    pub fn error(&self) -> &str {
+        &self.error
+    }
+
+    #[must_use]
+    pub fn tokens(&self) -> Option<CompactionTokens> {
+        self.tokens
+    }
+
+    /// Header text after the lifecycle icon.
+    #[must_use]
+    pub fn label(&self) -> &'static str {
+        if self.status == CompactionStatus::Queued {
+            return "Compaction queued";
+        }
+        if self.status == CompactionStatus::Completed && self.provider_native {
+            "Provider compaction"
+        } else {
+            "Compaction"
+        }
+    }
+
+    /// Leading glyph: `◇` queued, `✗` failed, spinner supplied by the caller
+    /// while running, none for completed or cancelled.
+    #[must_use]
+    pub fn icon<'a>(&self, running_glyph: Option<&'a str>) -> Option<&'a str> {
+        match self.status {
+            CompactionStatus::Queued => Some("◇"),
+            CompactionStatus::Running => running_glyph.filter(|glyph| !glyph.is_empty()),
+            CompactionStatus::Failed if !self.cancelled => Some("✗"),
+            CompactionStatus::Completed | CompactionStatus::Failed => None,
+        }
+    }
+
+    /// Request usage shown only after running, with cache reads/writes folded
+    /// into input and reasoning into output.
+    #[must_use]
+    pub fn usage(&self) -> Option<(u64, u64)> {
+        if self.status == CompactionStatus::Running {
+            return None;
+        }
+        let (input, output) = self.tokens?.request_usage();
+        if input.saturating_add(output) == 0 {
+            return None;
+        }
+        Some((input, output))
+    }
+
+    #[must_use]
+    pub fn usage_label(&self) -> Option<String> {
+        let (input, output) = self.usage()?;
+        Some(format!(
+            "{} in · {} out",
+            compact_number(input),
+            compact_number(output)
+        ))
+    }
+
+    /// Rendered body: streaming summary until failure, the error message for
+    /// an ordinary failure, and nothing when cancelled.
+    #[must_use]
+    pub fn content(&self) -> &str {
+        match self.status {
+            CompactionStatus::Failed if self.cancelled => "",
+            CompactionStatus::Failed => self.error.trim(),
+            CompactionStatus::Queued | CompactionStatus::Running | CompactionStatus::Completed => {
+                self.summary.trim()
+            }
+        }
+    }
+
+    /// Centered top-rule header, matching the `border={["top"]}` /
+    /// `flexGrow={1}` segments on both sides of the label group.
+    #[must_use]
+    pub fn header(&self, running_glyph: Option<&str>, width: usize) -> String {
+        if width == 0 {
+            return String::new();
+        }
+        let mut text = String::new();
+        if let Some(icon) = self.icon(running_glyph) {
+            text.push_str(icon);
+            text.push(' ');
+        }
+        text.push_str(self.label());
+        if self.cancelled {
+            text.push_str(" · cancelled");
+        }
+        if let Some(usage) = self.usage_label() {
+            text.push_str(" · ");
+            text.push_str(&usage);
+        }
+        center_rule(&text, width)
+    }
+
+    /// Header plus optional indented summary/error body, bounded to
+    /// [`MAX_PAGE`] rows.
+    #[must_use]
+    pub fn render(&self, running_glyph: Option<&str>, width: usize) -> Vec<String> {
+        if width == 0 {
+            return Vec::new();
+        }
+        let mut rows = vec![self.header(running_glyph, width)];
+        let content = self.content();
+        if content.is_empty() {
+            return rows;
+        }
+        rows.push(String::new());
+        let indent = if width > 3 { 3 } else { 0 };
+        let wrap_width = width.saturating_sub(indent).max(1);
+        let mut body = Vec::new();
+        for line in content.split('\n') {
+            wrap_line(line, wrap_width, &mut body);
+            if body.len() >= MAX_PAGE {
+                break;
+            }
+        }
+        for line in body.into_iter().take(MAX_PAGE.saturating_sub(rows.len())) {
+            if indent == 0 {
+                rows.push(line);
+            } else {
+                rows.push(format!("{}{line}", " ".repeat(indent)));
+            }
+        }
+        rows
+    }
+}
+
+fn center_rule(text: &str, width: usize) -> String {
+    let inner = format!(" {text} ");
+    let count = inner.chars().count();
+    if width <= count {
+        return inner.chars().take(width).collect();
+    }
+    let fill = width - count;
+    let left = fill / 2;
+    let right = fill - left;
+    format!("{}{inner}{}", "─".repeat(left), "─".repeat(right))
+}
+
+fn wrap_line(line: &str, width: usize, out: &mut Vec<String>) {
+    if width == 0 {
+        return;
+    }
+    if line.is_empty() {
+        out.push(String::new());
+        return;
+    }
+    let mut current = String::new();
+    let mut current_len = 0usize;
+    for word in line.split_whitespace() {
+        if out.len() >= MAX_PAGE {
+            return;
+        }
+        let word_len = word.chars().count();
+        if word_len > width {
+            if !current.is_empty() {
+                out.push(std::mem::take(&mut current));
+                current_len = 0;
+            }
+            let chars: Vec<char> = word.chars().collect();
+            for chunk in chars.chunks(width) {
+                if out.len() >= MAX_PAGE {
+                    return;
+                }
+                out.push(chunk.iter().collect());
+            }
+            continue;
+        }
+        if current.is_empty() {
+            current.push_str(word);
+            current_len = word_len;
+        } else if current_len + 1 + word_len <= width {
+            current.push(' ');
+            current.push_str(word);
+            current_len += 1 + word_len;
+        } else {
+            out.push(std::mem::take(&mut current));
+            current.push_str(word);
+            current_len = word_len;
+        }
+    }
+    if !current.is_empty() && out.len() < MAX_PAGE {
+        out.push(current);
+    }
+}
+
+/// `Locale.number` used by the compaction usage line.
+fn compact_number(value: u64) -> String {
+    if value >= 999_950 {
+        format!("{:.1}M", value as f64 / 1_000_000.0)
+    } else if value >= 1_000 {
+        format!("{:.1}K", value as f64 / 1_000.0)
+    } else {
+        value.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -606,5 +982,137 @@ mod tests {
         for r in &rows {
             assert!(r.chars().count() <= 5, "row overflow: {r:?}");
         }
+    }
+
+    #[test]
+    fn t12_compaction_transitions_queued_running_completed() {
+        let mut state = CompactionState::queued();
+        assert_eq!(state.status(), CompactionStatus::Queued);
+        assert!(state.start());
+        assert_eq!(state.status(), CompactionStatus::Running);
+        assert!(!state.start(), "running cannot restart");
+        assert!(state.complete("summary text", true));
+        assert_eq!(state.status(), CompactionStatus::Completed);
+        assert!(state.provider_native());
+        assert_eq!(state.label(), "Provider compaction");
+        assert_eq!(state.content(), "summary text");
+        assert!(!state.complete("again", false), "completed is terminal");
+        assert!(!state.fail("late error"));
+        assert_eq!(state.status(), CompactionStatus::Completed);
+    }
+
+    #[test]
+    fn t13_compaction_failed_and_cancelled_states() {
+        let mut failed = CompactionState::running();
+        assert!(failed.fail("provider exploded"));
+        assert_eq!(failed.status(), CompactionStatus::Failed);
+        assert!(!failed.cancelled());
+        assert_eq!(failed.content(), "provider exploded");
+        let header = failed.header(None, 40);
+        assert!(header.contains("✗ Compaction"), "header={header:?}");
+
+        let mut cancelled = CompactionState::running();
+        assert!(cancelled.cancel());
+        assert_eq!(cancelled.status(), CompactionStatus::Failed);
+        assert!(cancelled.cancelled());
+        assert_eq!(cancelled.content(), "", "aborted body is empty");
+        let header = cancelled.header(None, 40);
+        assert!(
+            header.contains("Compaction · cancelled"),
+            "header={header:?}"
+        );
+        assert!(!header.contains('✗'));
+        assert!(!cancelled.cancel(), "cancelled state is terminal");
+    }
+
+    #[test]
+    fn t14_compaction_queued_row_and_header_geometry() {
+        let queued = CompactionState::queued();
+        assert_eq!(queued.label(), "Compaction queued");
+        let header = queued.header(Some("⠋"), 40);
+        assert_eq!(header.chars().count(), 40);
+        assert!(header.starts_with('─') && header.ends_with('─'));
+        assert!(header.contains("◇ Compaction queued"));
+        assert!(
+            !header.contains('⠋'),
+            "queued shows a diamond, not a spinner"
+        );
+
+        let running = CompactionState::running();
+        let header = running.header(Some("⠋"), 40);
+        assert_eq!(header.chars().count(), 40);
+        assert!(header.contains("⠋ Compaction"), "header={header:?}");
+        let off = running.header(Some("⋯"), 40);
+        assert!(off.contains("⋯ Compaction"));
+    }
+
+    #[test]
+    fn t15_compaction_usage_uses_request_tokens_not_context_size() {
+        let mut state = CompactionState::running();
+        state.set_tokens(CompactionTokens {
+            input: 1_000,
+            cache_read: 500,
+            cache_write: 0,
+            output: 2_000,
+            reasoning: 0,
+        });
+        assert_eq!(state.usage(), None, "usage is hidden while running");
+        assert!(!state.header(Some("⠋"), 60).contains(" in · "));
+        state.complete("done", false);
+        assert_eq!(state.usage(), Some((1_500, 2_000)));
+        assert_eq!(state.usage_label().as_deref(), Some("1.5K in · 2.0K out"));
+        let header = state.header(None, 80);
+        assert!(header.contains("· 1.5K in · 2.0K out"), "header={header:?}");
+        assert!(!header.contains("context"));
+        assert!(COMPACTION_USAGE_SEMANTICS.contains("not"));
+
+        let mut zero = CompactionState::completed("done", false);
+        zero.set_tokens(CompactionTokens::default());
+        assert_eq!(zero.usage(), None, "all-zero counters are omitted");
+    }
+
+    #[test]
+    fn t16_compaction_streaming_summary_and_bounded_render() {
+        let mut state = CompactionState::running();
+        state.set_summary("partial summary");
+        assert_eq!(state.content(), "partial summary");
+        let rows = state.render(Some("⠋"), 30);
+        assert!(
+            rows.iter().any(|row| row.starts_with("   partial")),
+            "{rows:?}"
+        );
+        state.set_summary("final streaming summary");
+        assert_eq!(state.content(), "final streaming summary");
+        assert!(state.complete("final streaming summary", false));
+        for row in state.render(None, 16) {
+            assert!(row.chars().count() <= 16, "overflow: {row:?}");
+        }
+
+        let mut failed = CompactionState::running();
+        failed.fail("failure body");
+        let rows = failed.render(None, 40);
+        assert!(rows.iter().any(|row| row.trim() == "failure body"));
+        let cancelled = {
+            let mut state = CompactionState::running();
+            state.cancel();
+            state
+        };
+        assert_eq!(
+            cancelled.render(None, 40).len(),
+            1,
+            "no body when cancelled"
+        );
+    }
+
+    #[test]
+    fn t17_compaction_provider_native_only_labels_completed_rows() {
+        let running = CompactionState::running();
+        assert_eq!(running.label(), "Compaction");
+        let completed = CompactionState::completed("summary", true);
+        assert_eq!(completed.label(), "Provider compaction");
+        let fallback = CompactionState::completed("summary", false);
+        assert_eq!(fallback.label(), "Compaction");
+        let failed = CompactionState::failed("boom");
+        assert_eq!(failed.label(), "Compaction");
     }
 }
