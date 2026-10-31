@@ -1154,7 +1154,7 @@ mod macos_pty {
             !initial.contains("manual") && !initial.contains("serve"),
             "manual serve path\n{initial}"
         );
-        pty.send("\x1b:q\n");
+        pty.send("\x1b:q\r");
         let status = pty.exit();
         assert!(
             status.success(),
@@ -1186,7 +1186,7 @@ mod macos_pty {
         );
         assert!(health(&addr), "daemon health failed");
 
-        first.send("\x1b:q\n");
+        first.send("\x1b:q\r");
         assert!(
             first.exit().success(),
             "first client exit failed\n{}",
@@ -1204,7 +1204,7 @@ mod macos_pty {
         );
         assert_eq!(field(&second_desc, "auth_token"), Some(token));
         assert!(health(&addr), "second client daemon unhealthy");
-        second.send("\x1b:q\n");
+        second.send("\x1b:q\r");
         assert!(
             second.exit().success(),
             "second client exit failed\n{}",
@@ -1219,7 +1219,7 @@ mod macos_pty {
         let mut pty = Pty::spawn(&binary(), &root, &addr, None);
         pty.wait_for_native_frame();
         let provider_frame = pty.open_provider_dialog();
-        pty.send("\x1b:q\n");
+        pty.send("\x1b:q\r");
         let status = pty.exit();
         let text = pty.text();
         assert!(status.success(), "setup exit: {status}\n{text}");
@@ -1267,7 +1267,7 @@ mod macos_pty {
             !frame.to_ascii_lowercase().contains("legacy"),
             "fallback claim in native frame\n{frame}"
         );
-        pty.send("\x1b:q\n");
+        pty.send("\x1b:q\r");
         let status = pty.exit();
         let final_text = pty.text();
         assert!(
@@ -1304,7 +1304,7 @@ mod macos_pty {
         let mut first = Pty::spawn(&bin, &first_root, &first_addr, None);
         let first_frame =
             normalize_dynamic_frame(&strip_terminal_controls(&first.wait_for_native_frame()));
-        first.send("\x1b:q\n");
+        first.send("\x1b:q\r");
         assert!(
             first.exit().success(),
             "first deterministic run failed\n{}",
@@ -1316,7 +1316,7 @@ mod macos_pty {
         let mut second = Pty::spawn(&bin, &second_root, &second_addr, None);
         let second_frame =
             normalize_dynamic_frame(&strip_terminal_controls(&second.wait_for_native_frame()));
-        second.send("\x1b:q\n");
+        second.send("\x1b:q\r");
         assert!(
             second.exit().success(),
             "second deterministic run failed\n{}",
