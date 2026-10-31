@@ -297,6 +297,12 @@ impl<T> Arena<T> {
         Ok(slot)
     }
 
+    /// True when called from the thread that created the arena.
+    #[must_use]
+    pub fn is_owner_thread(&self) -> bool {
+        self.owner == std::thread::current().id()
+    }
+
     /// Borrow a live resource.
     pub fn get(&self, handle: GenHandle) -> Result<&T, ResourceError> {
         self.check_owner()?;
@@ -320,6 +326,55 @@ impl<T> Arena<T> {
     /// True when `handle` still resolves (owner thread only).
     pub fn contains(&self, handle: GenHandle) -> bool {
         self.check_owner().is_ok() && self.resolve(handle).is_ok()
+    }
+
+    /// Borrow a live resource together with the handle it came from.
+    ///
+    /// The returned [`Borrowed`] cannot outlive `&self`, so the borrow is
+    /// ended by the borrow checker before any later `&mut self` call (remove,
+    /// swap) can invalidate the handle.
+    pub fn borrow(&self, handle: GenHandle) -> Result<Borrowed<'_, T>, ResourceError> {
+        self.check_owner()?;
+        let slot = self.resolve(handle)?;
+        let value = self.slots[slot]
+            .value
+            .as_ref()
+            .ok_or(ResourceError::StaleHandle)?;
+        Ok(Borrowed { handle, value })
+    }
+
+    /// Replace the value behind `handle`, bumping its generation.
+    ///
+    /// Returns the new handle and the previous value. The old handle is stale
+    /// immediately: a callback that captured it (for example an asynchronous
+    /// highlight completion) can no longer reach the replacement. When the
+    /// slot has exhausted [`GENERATION_MAX`] the old slot is retired and the
+    /// value moves to a fresh slot, so no stale handle can alias it.
+    pub fn swap(&mut self, handle: GenHandle, value: T) -> Result<(GenHandle, T), ResourceError> {
+        self.check_owner()?;
+        let slot = self.resolve(handle)?;
+        if self.slots[slot].generation >= GENERATION_MAX {
+            // The retired slot is never reused, so a re-home needs a free slot
+            // of its own. Check before mutating: a full arena must fail closed
+            // with both the old and the new value still owned elsewhere.
+            if self.free.is_empty() && self.slots.len() >= MAX_RESOURCES {
+                return Err(ResourceError::Full);
+            }
+            let previous = self.slots[slot]
+                .value
+                .take()
+                .ok_or(ResourceError::StaleHandle)?;
+            self.slots[slot].generation = GENERATION_MAX;
+            self.len -= 1;
+            let next = self.insert(value)?;
+            return Ok((next, previous));
+        }
+        let entry = &mut self.slots[slot];
+        let previous = entry.value.replace(value).ok_or(ResourceError::StaleHandle)?;
+        entry.generation += 1;
+        let next =
+            GenHandle::new(slot as u32, entry.generation).ok_or(ResourceError::StaleHandle)?;
+        Ok((next, previous))
     }
 
     /// Remove and return the value, bumping the slot generation.
@@ -729,5 +784,147 @@ mod tests {
         let shared = shared.try_unwrap().expect_err("still shared");
         drop(alias);
         assert_eq!(shared.try_unwrap().ok(), Some(5));
+    }
+
+    // -----------------------------------------------------------------------
+    // FFI-03 lifetime behaviour: borrows, replacement, failed construction.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn arena_borrow_pairs_value_with_handle() {
+        let mut arena = Arena::new();
+        let handle = arena.insert(String::from("node")).unwrap();
+        {
+            let borrowed = arena.borrow(handle).expect("live borrow");
+            assert_eq!(borrowed.handle(), handle);
+            assert_eq!(borrowed.get(), "node");
+        }
+        // A borrow of a stale handle fails before any reference is produced.
+        arena.remove(handle).unwrap();
+        assert_eq!(
+            arena.borrow(handle).map(|b| b.handle()),
+            Err(ResourceError::StaleHandle)
+        );
+        // Borrowing through `Arena` is owner-thread only, like every other op.
+        let (arena, observed) = std::thread::scope(|scope| {
+            scope
+                .spawn(move || {
+                    let observed = arena.borrow(handle).map(|b| b.handle());
+                    (arena, observed)
+                })
+                .join()
+                .unwrap()
+        });
+        assert_eq!(observed, Err(ResourceError::WrongThread));
+        assert!(arena.is_owner_thread());
+    }
+
+    #[test]
+    fn arena_swap_invalidates_the_previous_handle() {
+        let mut arena = Arena::new();
+        let first = arena.insert("old").unwrap();
+        let (second, previous) = arena.swap(first, "new").expect("swap");
+        assert_eq!(previous, "old");
+        assert_eq!(second.slot(), first.slot(), "in-place replacement");
+        assert_ne!(second, first, "generation bumped");
+        assert_eq!(arena.len(), 1, "swap is not an insert");
+        assert_eq!(arena.get(second), Ok(&"new"));
+        // The replaced handle can never reach the replacement.
+        assert_eq!(arena.get(first), Err(ResourceError::StaleHandle));
+        assert_eq!(arena.remove(first), Err(ResourceError::StaleHandle));
+    }
+
+    #[test]
+    fn arena_swap_rehomes_when_generation_is_exhausted() {
+        let mut arena = Arena::new();
+        let handle = arena.insert("old").unwrap();
+        let slot = handle.slot();
+        arena.slots[slot as usize].generation = GENERATION_MAX;
+        let last = GenHandle::new(slot, GENERATION_MAX).unwrap();
+        let (next, previous) = arena.swap(last, "new").expect("swap retires");
+        assert_eq!(previous, "old");
+        assert_ne!(next.slot(), slot, "exhausted slot is never reused");
+        assert_eq!(arena.len(), 1);
+        assert_eq!(arena.get(next), Ok(&"new"));
+        assert_eq!(arena.get(last), Err(ResourceError::StaleHandle));
+        assert_eq!(arena.get(handle), Err(ResourceError::StaleHandle));
+    }
+
+    #[test]
+    fn arena_swap_rejects_null_and_foreign_handles() {
+        let mut arena = Arena::new();
+        assert_eq!(arena.swap(GenHandle::INVALID, 1u8), Err(ResourceError::NullHandle));
+        assert_eq!(
+            arena.swap(GenHandle::new(7, 1).unwrap(), 1u8),
+            Err(ResourceError::StaleHandle)
+        );
+        assert!(arena.is_empty(), "failed swaps never allocate");
+        let live = arena.insert(1u8).unwrap();
+        let (next, previous) = arena.swap(live, 2).unwrap();
+        assert_eq!(previous, 1);
+        assert_eq!(next.generation(), live.generation() + 1);
+    }
+
+    #[test]
+    fn arena_swap_fails_closed_at_capacity_when_slot_is_exhausted() {
+        let mut arena: Arena<u32> = Arena::new();
+        let mut last = GenHandle::INVALID;
+        for i in 0..MAX_RESOURCES {
+            let handle = arena.insert(i as u32).unwrap();
+            last = handle;
+        }
+        let slot = last.slot();
+        arena.slots[slot as usize].generation = GENERATION_MAX;
+        let exhausted = GenHandle::new(slot, GENERATION_MAX).unwrap();
+        // No free slot and the exhausted slot may not be reused: the swap must
+        // leave the arena untouched rather than drop either value.
+        assert_eq!(arena.swap(exhausted, 7), Err(ResourceError::Full));
+        assert_eq!(arena.len(), MAX_RESOURCES);
+        assert!(arena.contains(exhausted));
+    }
+
+    #[test]
+    fn constructing_panic_leaves_arena_usable() {
+        let mut arena: Arena<u8> = Arena::new();
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            try_construct(&mut arena, || -> Option<u8> { panic!("native ctor failed") })
+        }));
+        assert!(outcome.is_err());
+        // `build` runs before any slot mutation, so a panicking/native-failed
+        // constructor leaves no partial resource behind.
+        assert!(arena.is_empty());
+        let handle = try_construct(&mut arena, || Some(3u8)).expect("arena recovers");
+        assert_eq!(arena.get(handle), Ok(&3));
+    }
+
+    #[test]
+    fn failed_construction_on_other_thread_is_wrong_thread() {
+        let mut arena: Arena<u8> = Arena::new();
+        let (arena, observed) = std::thread::scope(|scope| {
+            scope
+                .spawn(move || {
+                    let observed = try_construct(&mut arena, || Some(1u8));
+                    (arena, observed)
+                })
+                .join()
+                .unwrap()
+        });
+        assert_eq!(observed, Err(ResourceError::WrongThread));
+        assert!(arena.is_empty());
+        assert!(arena.is_owner_thread());
+    }
+
+    #[test]
+    fn resource_error_is_a_std_error() {
+        let boxed: Box<dyn std::error::Error> = Box::new(ResourceError::StaleHandle);
+        assert_eq!(boxed.to_string(), "stale resource handle");
+        assert_eq!(
+            ResourceError::Construct.to_string(),
+            "resource construction failed"
+        );
+        assert_eq!(
+            ResourceError::WrongThread.to_string(),
+            "resource used from non-owner thread"
+        );
     }
 }

@@ -1,17 +1,22 @@
 pub mod buffer;
 pub mod color;
 pub mod editor;
+pub mod diff;
 pub mod events;
+pub mod frame;
 pub mod handle;
+pub mod highlight;
 pub mod image;
 pub mod input;
 pub mod layout;
 pub mod markdown;
+pub mod native_identity;
 pub mod renderer;
 pub mod safe_renderer;
 pub mod scene;
 pub mod scroll;
 pub mod shapes;
+pub mod terminal_input;
 pub mod text;
 pub mod world;
 
