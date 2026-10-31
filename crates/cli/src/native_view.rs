@@ -151,6 +151,16 @@ pub struct NativeView {
     composer_variant: Option<String>,
     composer_model: Option<(String, String)>,
     composer_effort: Option<String>,
+    /// Running family members other than the active session
+    /// (`prompt/footer.tsx:22-28` `subagents()`); painted in the prompt footer
+    /// row as `N subagent(s)`.
+    live_subagents: usize,
+    /// First running subagent, the navigation target of the footer live
+    /// label (`session.child.first`, `routes/session/index.tsx:1391-1398`).
+    live_first_child: Option<String>,
+    /// Painted bounds `(x, y, cells)` of the footer live label in frame
+    /// coordinates, so the label admits a pointer hit exactly where it drew.
+    live_footer_hit: Option<(u16, u16, u16)>,
     chat_row_classes: Vec<crate::native_view_chat::ChatRowClass>,
     chat_text_bounds: Vec<Option<(u16, u16)>>,
     chat_markdown_spans: Vec<Vec<crate::native_view_chat::ChatRunSpan>>,
@@ -688,6 +698,9 @@ impl NativeView {
             composer_variant: None,
             composer_model: None,
             composer_effort: None,
+            live_subagents: 0,
+            live_first_child: None,
+            live_footer_hit: None,
             chat_row_classes: Vec::new(),
             chat_text_bounds: Vec::new(),
             chat_markdown_spans: Vec::new(),
@@ -713,6 +726,7 @@ impl NativeView {
             self.mcp_hit.clear();
             self.mcp_toggle_hit = None;
             self.context_usage_hit = None;
+            self.live_footer_hit = None;
         }
         self.tab_reservation = reservation;
     }
@@ -731,6 +745,7 @@ impl NativeView {
         self.mcp_hit.clear();
         self.mcp_toggle_hit = None;
         self.context_usage_hit = None;
+        self.live_footer_hit = None;
         self.sidebar_content_height = 0;
         self.layout = Layout::new(cols, rows);
     }
@@ -874,6 +889,34 @@ impl NativeView {
                 .collect::<String>();
             (!cleaned.trim().is_empty()).then_some(cleaned)
         });
+    }
+
+    /// Live subagent facts for the prompt footer (`prompt/footer.tsx:22-28`):
+    /// the count of running family members and the first one's session id.
+    /// The caller supplies observed `/children` rows; this view never derives
+    /// children from local guesses.
+    pub fn set_live_children(&mut self, running: usize, first: Option<String>) {
+        self.live_subagents = running;
+        self.live_first_child = first.filter(|_| running > 0);
+    }
+
+    /// Footer live label hit `(x, y, cells)` from the last painted frame.
+    #[must_use]
+    pub fn live_footer_hit(&self) -> Option<(u16, u16, u16)> {
+        self.live_footer_hit
+    }
+
+    /// Subagent target under the pointer, when the live label was admitted.
+    #[must_use]
+    pub fn live_footer_action(&self, x: u16, y: u16) -> Option<&str> {
+        let (left, top, cells) = self.live_footer_hit?;
+        (y == top && x >= left && x < left.saturating_add(cells))
+            .then_some(self.live_first_child.as_deref())
+            .flatten()
+    }
+
+    fn live_subagent_label(&self) -> Option<String> {
+        crate::native_status::subagent_label(self.live_subagents)
     }
 
     fn render_height(&self) -> usize {
@@ -1140,6 +1183,47 @@ impl NativeView {
         format("", &model)
     }
 
+    /// Prompt-footer slot text for this frame plus the `(start_cell, cells)`
+    /// of a live count when one fits.
+    ///
+    /// Upstream paints the live span in the `prompt.footer` row BELOW the
+    /// prompt box (`prompt/footer.tsx:80-96`) and leaves the in-box
+    /// `PromptMetadataRow` to agent/model facts; this row is that slot. A
+    /// label that would be clipped is not painted, so the count is never
+    /// truncated mid-word and its hit rectangle always covers painted cells.
+    fn composer_footer_row(
+        &self,
+        row_width: u16,
+        inner_width: u16,
+        rail: bool,
+    ) -> (String, Option<(u16, u16)>) {
+        let base = if rail {
+            footer_directory(&self.workspace, inner_width)
+        } else {
+            self.composer_metadata()
+        };
+        let Some(label) = self.live_subagent_label().filter(|_| !self.shell_mode) else {
+            return (base, None);
+        };
+        let width = usize::from(row_width);
+        // The padding `padded` will add in front of this row, and the interior
+        // width it fits the text into.
+        let padding = (width / 2).min(2);
+        let interior = width.saturating_sub(2 * padding);
+        let start = prompt_metadata_cells(&base).saturating_add(3);
+        let cells = prompt_metadata_cells(&label);
+        if start.saturating_add(cells) > interior {
+            return (base, None);
+        }
+        (
+            format!("{base} · {label}"),
+            Some((
+                (padding + start).min(usize::from(u16::MAX)) as u16,
+                cells.min(usize::from(u16::MAX)) as u16,
+            )),
+        )
+    }
+
     // ---------- route / sidebar facts (set from the input loop) ----------
 
     /// Main-column route: `true` shows the active session (transcript +
@@ -1161,7 +1245,7 @@ impl NativeView {
             self.mcp_hit.clear();
             self.mcp_toggle_hit = None;
             self.context_usage_hit = None;
-            self.context_usage_hit = None;
+            self.live_footer_hit = None;
         }
         self.session_route = session_route;
     }
@@ -1170,6 +1254,7 @@ impl NativeView {
     pub fn toggle_sidebar(&mut self) {
         self.mcp_hit.clear();
         self.mcp_toggle_hit = None;
+        self.live_footer_hit = None;
         let visible = self.sidebar_visible();
         self.sidebar_hidden = visible;
         self.sidebar_open = !visible;
@@ -1179,6 +1264,7 @@ impl NativeView {
     pub fn set_sidebar_hidden(&mut self, hidden: bool) {
         self.mcp_hit.clear();
         self.mcp_toggle_hit = None;
+        self.live_footer_hit = None;
         self.sidebar_hidden = hidden;
         self.sidebar_open = false;
     }
@@ -1212,6 +1298,7 @@ impl NativeView {
         if self.parent_session != parent_session {
             self.mcp_hit.clear();
             self.mcp_toggle_hit = None;
+            self.live_footer_hit = None;
         }
         self.parent_session = parent_session;
     }
@@ -2201,6 +2288,7 @@ impl NativeView {
         self.transcript_scrollbar = None;
         self.chat.set_markdown_mode(self.markdown_mode);
         self.context_usage_hit = None;
+        self.live_footer_hit = None;
         self.ui_regions.clear();
         self.context_usage_styles.clear();
         self.sidebar_span_styles.clear();
@@ -2382,7 +2470,10 @@ impl NativeView {
             if prompt.rail && !has_permission {
                 let row = body.len().saturating_sub(2);
                 let inset = if inner_width < 40 { " " } else { "  " };
-                body[row] = format!("┃{inset}{}", self.composer_metadata());
+                // In-box `PromptMetadataRow` (`component/prompt/index.tsx:1856`);
+                // the live count belongs to the footer slot below it.
+                let metadata = self.composer_metadata();
+                body[row] = format!("┃{inset}{metadata}");
                 if let Some(class) = self.chat_row_classes.get_mut(row) {
                     *class = crate::native_view_chat::ChatRowClass::Metadata;
                 }
@@ -2454,9 +2545,16 @@ impl NativeView {
                 // Permission prompt replaces the composer — no composer
                 // metadata / blank separator row beneath it (upstream Switch).
             } else if height >= 4 {
-                body.push(if prompt.rail {
-                    padded(&footer_directory(&self.workspace, inner_width), width)
-                } else { padded(&self.composer_metadata(), width) });
+                let (footer, live) = self.composer_footer_row(width, inner_width, prompt.rail);
+                let row = body.len();
+                body.push(padded(&footer, width));
+                if let Some((x, cells)) = live {
+                    self.live_footer_hit = Some((
+                        x,
+                        u16::try_from(row).unwrap_or(u16::MAX),
+                        cells,
+                    ));
+                }
                 body.push(String::new());
                 self.chat_row_classes.extend([
                     crate::native_view_chat::ChatRowClass::Metadata,
@@ -2722,6 +2820,10 @@ impl NativeView {
             }
             for hit in &mut self.mcp_hit {
                 hit.3 = hit.3.saturating_add(self.tab_reservation.y_offset());
+            }
+            if let Some(hit) = self.live_footer_hit.as_mut() {
+                hit.0 = hit.0.saturating_add(self.tab_reservation.x_offset());
+                hit.1 = hit.1.saturating_add(self.tab_reservation.y_offset());
             }
             if let Some((_, ref mut top, _)) = self.mcp_toggle_hit {
                 *top = top.saturating_add(self.tab_reservation.y_offset());
@@ -6681,5 +6783,135 @@ mod transcript_scrollbar_tests {
         let _ = view.render_typed("draft", &messages, false, &[]);
         let scrollbar = view.transcript_scrollbar().expect("the bar reserves its cells whenever shown");
         assert_eq!(scrollbar.thumb, None, "content that fits has no thumb");
+    }
+}
+
+#[cfg(test)]
+mod live_footer_tests {
+    use super::*;
+
+    // Upstream `prompt/footer.tsx:22-28,80-96`: the live span reads
+    // `N subagent(s)` and sits at the end of the footer status row, and its
+    // pointer target is the span rectangle (`:84-88`).
+    #[test]
+    fn live_subagent_label_paints_and_hits_its_own_cells() {
+        let mut view = NativeView::new(100, 32);
+        view.set_session_route(true);
+        view.set_composer_model("fixture", "openai");
+        view.set_live_children(2, Some("ses_child".into()));
+        let frame = view.render_typed("draft", &[], false, &[]);
+        let (x, y, cells) = view.live_footer_hit().expect("label admitted");
+        let row = &frame[usize::from(y)];
+        assert!(row.contains("2 subagents"), "footer row: {row:?}");
+        let painted: String = row
+            .chars()
+            .skip(usize::from(x))
+            .take(usize::from(cells))
+            .collect();
+        assert_eq!(painted, "2 subagents");
+        assert_eq!(view.live_footer_action(x, y), Some("ses_child"));
+        assert_eq!(view.live_footer_action(x.saturating_sub(1), y), None);
+        assert_eq!(view.live_footer_action(x, y.saturating_add(1)), None);
+    }
+
+    #[test]
+    fn live_subagent_label_is_singular_and_absent_at_zero() {
+        let mut view = NativeView::new(100, 32);
+        view.set_session_route(true);
+        view.set_composer_model("fixture", "openai");
+        view.set_live_children(1, Some("ses_child".into()));
+        let frame = view.render_typed("draft", &[], false, &[]).join("\n");
+        assert!(frame.contains("1 subagent "), "{frame}");
+        assert!(!frame.contains("1 subagents"));
+
+        view.set_live_children(0, Some("ses_child".into()));
+        let frame = view.render_typed("draft", &[], false, &[]).join("\n");
+        assert!(!frame.contains("subagent"), "no count at zero: {frame}");
+        assert_eq!(view.live_footer_hit(), None);
+    }
+
+    #[test]
+    fn live_label_stays_off_home_and_off_rows_that_would_clip_it() {
+        let mut view = NativeView::new(100, 32);
+        view.set_composer_model("fixture", "openai");
+        view.set_live_children(2, Some("ses_child".into()));
+        view.set_session_route(false);
+        let home = view.render_typed("draft", &[], false, &[]).join("\n");
+        assert!(!home.contains("subagent"), "home prompt has no session footer: {home}");
+        assert_eq!(view.live_footer_hit(), None);
+
+        // A long workspace directory on a narrow main column leaves no room
+        // for the label; it is omitted rather than clipped mid-word, so no
+        // hit rectangle is published over cells that were never painted.
+        let mut narrow = NativeView::new(40, 24);
+        narrow.set_session_route(true);
+        narrow.set_composer_model("fixture", "openai");
+        narrow.set_workspace("/tmp/some/deeply/nested/workspace/path/that/fills/the/row".into());
+        narrow.set_live_children(2, Some("ses_child".into()));
+        let frame = narrow.render_typed("draft", &[], false, &[]);
+        assert!(!frame.join("\n").contains("2 subagents"), "{frame:?}");
+        assert_eq!(narrow.live_footer_hit(), None);
+    }
+
+    #[test]
+    fn published_hit_always_covers_painted_label_cells() {
+        // A hit rectangle must never extend past the cells `padded` actually
+        // painted (its interior is `width - 2 * padding`), and a label that
+        // does not fit is dropped whole, never truncated with a live target.
+        for width in [24u16, 30, 40, 52, 60, 80, 100] {
+            let mut view = NativeView::new(width, 24);
+            view.set_session_route(true);
+            view.set_composer_model("fixture", "openai");
+            view.set_workspace("/tmp/ws-with-a-moderately-long-name".into());
+            view.set_live_children(2, Some("ses_child".into()));
+            let frame = view.render_typed("draft", &[], false, &[]);
+            match view.live_footer_hit() {
+                Some((x, y, cells)) => {
+                    let painted: String = frame[usize::from(y)]
+                        .chars()
+                        .skip(usize::from(x))
+                        .take(usize::from(cells))
+                        .collect();
+                    assert_eq!(painted, "2 subagents", "width {width}: {:?}", frame[usize::from(y)]);
+                }
+                None => assert!(
+                    !frame.join("\n").contains("subagent"),
+                    "width {width}: an unpainted label must not leave text behind: {frame:?}"
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn shell_mode_never_paints_the_subagent_label() {
+        let mut view = NativeView::new(100, 32);
+        view.set_session_route(true);
+        view.set_composer_model("fixture", "openai");
+        view.set_live_children(2, Some("ses_child".into()));
+        view.set_prompt_mode(true);
+        let frame = view.render_typed("draft", &[], false, &[]).join("\n");
+        assert!(!frame.contains("subagent"), "{frame}");
+        assert_eq!(view.live_footer_hit(), None);
+    }
+
+    #[test]
+    fn live_label_hit_follows_the_tab_reservation_offset() {
+        let mut view = NativeView::new(120, 30);
+        view.set_session_route(true);
+        view.set_composer_model("fixture", "openai");
+        view.set_live_children(3, Some("ses_child".into()));
+        view.set_tab_reservation(crate::native_tabs::TabReservation::for_view(
+            crate::native_tabs::TabOrientation::Vertical,
+            120,
+            30,
+        ));
+        let frame = view.render_typed("draft", &[], false, &[]);
+        let (x, y, cells) = view.live_footer_hit().expect("label admitted");
+        let painted: String = frame[usize::from(y)]
+            .chars()
+            .skip(usize::from(x))
+            .take(usize::from(cells))
+            .collect();
+        assert_eq!(painted, "3 subagents", "frame row: {:?}", frame[usize::from(y)]);
     }
 }

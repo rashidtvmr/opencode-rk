@@ -9527,3 +9527,89 @@ builds. Two already worked; one had a real root cause and is fixed.
   the 160x40 capture shows the sidebar surface at cols 119-160 and message
   surfaces confined to the transcript inset, not the screen edges), and
   visible/clickable subagent progress.
+
+## 2026-11-01 — Running-subagent count in the prompt footer (installed proof)
+
+- **Upstream contract**: `feature-plugins/prompt/footer.tsx:22-28` counts
+  family members other than the session whose status is `running` and prints
+  `N subagent(s)`; the span is a pointer target (`:84-88`) that dispatches
+  `session.child.first` (`routes/session/index.tsx:1391-1398`). The pinned
+  checkout is `450e7b92412c780a7b5a75226bb8d49aaca24e22`.
+- **What landed**: `NativeView` now carries observed live-child facts
+  (`set_live_children`) and appends ` · N subagent(s)` to the prompt-footer
+  slot BELOW the composer (`composer_footer_row`) only when the whole label
+  fits that row's real width; the in-box `PromptMetadataRow`
+  (`component/prompt/index.tsx:1856`) stays agent/model-only, so the Home
+  prompt never shows a session footer. The same function publishes the
+  label's painted cell rectangle, so `live_footer_action(x, y)` admits
+  exactly the columns the label occupied (padding and tab-reservation offset
+  included); the rectangle is dropped on resize, tab/route/sidebar change and
+  when a listing clears. `tui_entry` polls
+  `GET /api/sessions/{id}/children` every 750 ms only when the session's own
+  history delegated (`task`/`subagent` part) or a running child is already
+  known, so a session that never delegated issues no request and the app017
+  startup route surface is unchanged; it parses the payload through
+  `native_children::live::Status` and repaints only on change. A malformed or
+  unavailable listing clears the facts instead of leaving a stale count.
+- **Reviewed fixes (independent review round 1)**: label moved from the
+  metadata text to the footer slot (Home leak + upstream placement), width
+  budget now uses `presentation.main_width` instead of terminal columns, and
+  the hit rect is invalidated wherever the other pointer rects are (resize,
+  tab reservation, session route, sidebar). Remaining accepted limitation is
+  the family scope below.
+- **Press behaviour**: pressing the painted label opens the existing
+  subagents surface (same state as `/subagents`), which lists the child and
+  supports detail/stop/retry/open. This is the closest existing surface to
+  upstream's composer dock; the dock itself (`native_dock.rs`,
+  `composer_subagents`) is still NOT wired into the live view, so
+  `session.child.first`'s exact dock-toggle semantics remain unverified.
+- **Known limitation (truthful)**: `rows(parent)` in
+  `server/src/task_children.rs:240-243` returns direct children only. For a
+  parent session that equals upstream's family count (children cannot
+  delegate further). While viewing a CHILD session, upstream's family count
+  also includes running siblings; we cannot compute that from the child's own
+  endpoint, so no count is painted rather than an invented one.
+- **Installed proof** (release built from this tree, `target/release/oc2`
+  sha256 `adfd64a9e0258937705b2d2cbd2c0ef40b3cd75ab879d20f8042fd6df1f0af25`,
+  160x40 PTY): fake Responses provider drives the parent turn into a
+  background `task` call and holds the child's stream open, so the child is
+  `running`. Footer row 36 painted
+  `  ┃  GPT-5.6 openai · 1 subagent`. An SGR press on the label's own cell
+  opened the Subagents dialog showing
+  `> [Running] └─ explore — probe child`; `/exit` exit 0.
+  `/tmp/oc2-verify/verify_subagent_footer.py` PASS; captures
+  `subagent-footer.raw` sha256 `b99a938c8cbf71e9a222288c9a995ca73b088b702a76ce62d8619abfb9421efa`,
+  `subagent-footer-after-click.raw` sha256
+  `e177bc46d23784221a18d5888b261c5ddc5bc81861643fd226c3bc18ecfefb78`.
+  Fixture authorization is a private `permission-rules.json` equivalent to a
+  user choosing "always allow" for `task`; no capability wildcard.
+- **Tests added**: `native_view::live_footer_tests` (painted cells equal the
+  hit rectangle, singular/zero forms, vertical tab-reservation offset, Home and
+  shell mode never paint it, and a width sweep proving a published hit always
+  covers the trailing `2 subagents` cells while an unpainted label leaves no
+  text) and `native_children::live` (running-only counting, self exclusion,
+  nesting, unchanged listings do not repaint, malformed listings never publish
+  new facts). `tui_entry::memory_file_cap_tests::only_a_delegating_transcript_polls_children`
+  pins the `/children` poll gate.
+- **Known gaps (not claimed)**: the footer slot still shows our workspace
+  directory (rail) / metadata (framed) as its base where upstream shows
+  usage/cost; background-shell counts (`footer.tsx:24-36`) are not implemented;
+  `session.child.first` opens the subagents listing rather than the composer
+  dock.
+
+## 2026-11-01 — Assistant completion footer: data gap, not a paint gap
+
+- `ChatMessage.assistant_facts` is `None` for replayed history because the
+  server only persists `id/session_id/role/body/created_at`
+  (`contracts/src/lib.rs:207-214`, `storage/src/lib.rs:1502`). The live frame
+  carries `usage`/`stop_reason` (`server/src/lib.rs:2718-2722`) but
+  `append_assistant_with_reasoning` (`sessions/src/lib.rs:693-729`) drops
+  them; provider/model/timing/cost are never stored per message.
+- Upstream `AssistantFooter` needs `message.model`, `time.completed -
+  input.time.created` and per-step `time.streamed/created`
+  (`routes/session/index.tsx:2016-2029`, `rows.ts:430-463`) and does NOT
+  render per-message cost.
+- Therefore a truthful footer after history reload requires persisting
+  facts first (schema + append path + projection + renderer). No partial
+  rendering was added: fabricating duration from wall-clock or model from the
+  current selection would be invented data.

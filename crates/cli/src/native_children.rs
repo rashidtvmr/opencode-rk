@@ -2164,3 +2164,132 @@ mod composer_subagents {
         }
     }
 }
+
+/// Running-child facts for the prompt footer live label
+/// (`packages/tui/src/feature-plugins/prompt/footer.tsx:22-28`): family
+/// members other than this session whose status is `running`.
+pub mod live {
+    use serde_json::Value;
+
+    /// Last observed listing. An unavailable or malformed listing is cleared
+    /// rather than left stale, so the painted count is always observed data.
+    #[derive(Clone, Debug, Default, PartialEq, Eq)]
+    pub struct Status {
+        session: Option<String>,
+        running: usize,
+        first: Option<String>,
+    }
+
+    impl Status {
+        /// Bind a listing to `session`. Returns `Ok(true)` when the painted
+        /// facts changed.
+        pub fn apply(&mut self, session: &str, value: &Value) -> Result<bool, String> {
+            let rows = value["children"]
+                .as_array()
+                .ok_or("invalid child listing")?;
+            if rows.len() > 128 {
+                return Err("child listing exceeds limit".into());
+            }
+            let mut running = 0usize;
+            let mut first: Option<&str> = None;
+            for row in rows {
+                let id = row["session_id"].as_str().ok_or("child id missing")?;
+                id.parse::<opencode_rk_contracts::SessionId>()
+                    .map_err(|_| "invalid child id".to_owned())?;
+                if id == session || row["state"].as_str() != Some("running") {
+                    continue;
+                }
+                running += 1;
+                first.get_or_insert(id);
+            }
+            let next = Self {
+                session: Some(session.to_owned()),
+                running,
+                first: first.map(str::to_owned),
+            };
+            let changed = *self != next;
+            *self = next;
+            Ok(changed)
+        }
+
+        /// Drop the facts (daemon unavailable, malformed listing or no active
+        /// session). Returns whether anything was painted before.
+        pub fn clear(&mut self) -> bool {
+            let changed = *self != Self::default();
+            *self = Self::default();
+            changed
+        }
+
+        #[must_use]
+        pub fn running(&self) -> usize {
+            self.running
+        }
+
+        #[must_use]
+        pub fn first(&self) -> Option<&str> {
+            self.first.as_deref()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use serde_json::json;
+
+        const PARENT: &str = "11111111-1111-1111-1111-111111111111";
+        const A: &str = "22222222-2222-2222-2222-222222222222";
+        const B: &str = "33333333-3333-3333-3333-333333333333";
+        const C: &str = "44444444-4444-4444-4444-444444444444";
+        const A1: &str = "55555555-5555-5555-5555-555555555555";
+
+        #[test]
+        fn counts_only_running_family_members_other_than_the_session() {
+            let mut status = Status::default();
+            let listing = json!({"children": [
+                {"session_id": PARENT, "state": "running"},
+                {"session_id": A, "state": "running"},
+                {"session_id": B, "state": "idle"},
+                {"session_id": C, "state": "running"},
+            ]});
+            assert_eq!(status.apply(PARENT, &listing), Ok(true));
+            assert_eq!(status.running(), 2);
+            assert_eq!(status.first(), Some(A));
+            // Unchanged listings do not request a repaint.
+            assert_eq!(status.apply(PARENT, &listing), Ok(false));
+        }
+
+        #[test]
+        fn nesting_does_not_double_count_and_empty_listing_clears() {
+            let mut status = Status::default();
+            let listing = json!({"children": [
+                {"session_id": A, "state": "running"},
+                {"session_id": A1, "parent_id": A, "state": "running"},
+            ]});
+            assert_eq!(status.apply(PARENT, &listing), Ok(true));
+            assert_eq!(status.running(), 2);
+            assert_eq!(status.first(), Some(A));
+
+            let empty = json!({"children": []});
+            assert_eq!(status.apply(PARENT, &empty), Ok(true));
+            assert_eq!(status.running(), 0);
+            assert_eq!(status.first(), None);
+            // The listing is still bound to its session, so clearing the
+            // binding is a change; a second clear is not.
+            assert!(status.clear());
+            assert!(!status.clear());
+        }
+
+        #[test]
+        fn malformed_listing_is_rejected_without_changing_facts() {
+            let mut status = Status::default();
+            let listing = json!({"children": [{"session_id": A, "state": "running"}]});
+            assert_eq!(status.apply(PARENT, &listing), Ok(true));
+            assert!(status.apply(PARENT, &json!({"rows": []})).is_err());
+            assert!(status.apply(PARENT, &json!({"children": [{"state": "running"}]})).is_err());
+            assert!(status.apply(PARENT, &json!({"children": [{"session_id": "bad id"}]})).is_err());
+            assert_eq!(status.running(), 1, "rejections never publish new facts");
+            assert!(status.clear());
+            assert_eq!(status, Status::default());
+        }
+    }
+}

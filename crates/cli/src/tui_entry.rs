@@ -1043,6 +1043,17 @@ fn apply_history_window(window: &crate::native_chat_projection::NativeHistoryWin
     transcript.reset(lines, crate::native_chat_projection::project_history(window.messages()));
 }
 
+/// A session's family can only be non-empty when its own history delegated
+/// through `task`, so the live footer poll needs no request otherwise.
+#[cfg(feature = "native")]
+fn transcript_has_delegation(messages: &[ChatMessage]) -> bool {
+    messages.iter().flat_map(|message| message.parts.iter()).any(|part| match part {
+        ChatPart::Subtask { .. } => true,
+        ChatPart::ToolState { name, .. } => name == "task" || name == "subagent",
+        _ => false,
+    })
+}
+
 /// Resize the live native frame using the next frame's exact tab reservation,
 /// preserving a browsing transcript's semantic rendered-row anchor.
 #[cfg(feature = "native")]
@@ -1244,6 +1255,31 @@ mod memory_file_cap_tests {
         assert_eq!(loaded.first().map(|file| file.path.as_str()), Some("f000.md"));
         assert_eq!(loaded.last().map(|file| file.path.as_str()), Some("f063.md"));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn only_a_delegating_transcript_polls_children() {
+        let tool = |name: &str| ChatMessage {
+            role: ChatRole::Tool,
+            parts: vec![ChatPart::ToolState {
+                name: name.into(), id: "c1".into(), status: "completed".into(),
+                args: String::new(), output: String::new(), is_error: false,
+            }],
+            agent: None, model: None, assistant_facts: None,
+        };
+        let subtask = ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![ChatPart::Subtask {
+                agent: "explore".into(), description: "probe".into(), background: true,
+            }],
+            agent: None, model: None, assistant_facts: None,
+        };
+        assert!(!transcript_has_delegation(&[]));
+        assert!(!transcript_has_delegation(&[ChatMessage::text(ChatRole::User, "hello")]));
+        assert!(!transcript_has_delegation(&[tool("read")]));
+        assert!(transcript_has_delegation(&[tool("task")]));
+        assert!(transcript_has_delegation(&[tool("subagent")]));
+        assert!(transcript_has_delegation(&[subtask]));
     }
 }
 
@@ -4979,6 +5015,11 @@ fn native_loop(
     }
     let mut children_panel = crate::native_children::Panel::default();
     let mut children_refresh = Instant::now();
+    // Running children for the prompt-footer live label
+    // (`prompt/footer.tsx:22-28`). Kept as observed facts: an unavailable or
+    // malformed listing clears them instead of leaving a stale count.
+    let mut live_children = crate::native_children::live::Status::default();
+    let mut live_children_refresh = Instant::now() - Duration::from_secs(1);
     let mut todos_refresh = Instant::now();
     let mut memory_binding: Option<(String, u64)> = None;
     let mut memory_page_observed = false;
@@ -5527,6 +5568,41 @@ fn native_loop(
                 }
             }
             needs_paint = true;
+        }
+        // Children can only exist for a session whose history delegated, so a
+        // session that never called `task` issues no `/children` request (the
+        // startup route surface stays exactly what it was before the footer
+        // count existed). A known running child keeps the poll alive to
+        // observe its completion.
+        let delegates = live_children.running() > 0 || transcript_has_delegation(&transcript.messages);
+        if !children_panel.open && delegates && live_children_refresh.elapsed() >= Duration::from_millis(750) {
+            live_children_refresh = Instant::now();
+            match live.as_ref() {
+                Some(snapshot) => {
+                    let result = http_request(&snapshot.origin, "GET", &format!("/api/sessions/{}/children", snapshot.session_id), None, auth)
+                        .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).map_err(|_| "invalid child listing JSON".to_owned()))
+                        .and_then(|value| live_children.apply(&snapshot.session_id, &value));
+                    match result {
+                        Ok(true) => {
+                            view.set_live_children(live_children.running(), live_children.first().map(str::to_owned));
+                            needs_paint = true;
+                        }
+                        Ok(false) => {}
+                        Err(_) => {
+                            if live_children.clear() {
+                                view.set_live_children(0, None);
+                                needs_paint = true;
+                            }
+                        }
+                    }
+                }
+                None => {
+                    if live_children.clear() {
+                        view.set_live_children(0, None);
+                        needs_paint = true;
+                    }
+                }
+            }
         }
         if view.page() == crate::native_view_pages::Page::Commands {
             if !configured_commands_loaded {
@@ -7420,6 +7496,30 @@ fn native_loop(
                     }
                     if !children_panel.open {
                         view.set_dialog_size(crate::native_view::DialogSize::Medium);
+                    }
+                    needs_paint = true;
+                    continue;
+                }
+                if kind == 0 && modifiers == 0 && !help_open
+                    && !view.command_palette_open()
+                    && !permission_editor.open && !appearance.open
+                    && matches!(dialog, native_setup::Dialog::None)
+                    && import_dialog.as_ref().is_none_or(|import| !import.is_open())
+                    && view.live_footer_action(x, y).is_some()
+                {
+                    // Upstream `session.child.first` opens the helper surface
+                    // for the family (`routes/session/index.tsx:1391-1398`);
+                    // the existing subagents listing is that surface here.
+                    if let Some(snapshot) = live.as_ref() {
+                        children_panel.show(&snapshot.session_id);
+                        children_panel.bind_lease(&snapshot.session_id, binding_generation, auth.as_deref());
+                        children_refresh = Instant::now() - Duration::from_secs(1);
+                        view.close_command_palette();
+                        view.close_page();
+                        help_open = false;
+                        let _ = appearance.cancel();
+                        dialog = native_setup::Dialog::None;
+                        view.set_dialog_size(crate::native_view::DialogSize::Large);
                     }
                     needs_paint = true;
                     continue;
