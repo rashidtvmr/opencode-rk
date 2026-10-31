@@ -68,6 +68,44 @@
 //! what is blocking input. Pinned upstream 95daf question/permission UI is
 //! only needed if the integration owner wants affordances beyond these
 //! existing native contracts.
+//!
+//! Modal ownership (DIALOG-19/20). `native_modal_layer` is not a parallel
+//! model: [`DialogView`] *owns* a [`crate::native_modal_layer::ModalLayer`] and
+//! derives from it everything the shell previously had to track twice.
+//!
+//! * Opening is `dialog.replace()` (`packages/tui/src/ui/dialog.tsx:396-419`):
+//!   the first open saves and blurs the shell focus, every previous entry is
+//!   closed, `replace()` resets `size` to medium and `centered` to false, and
+//!   exactly one entry is installed. `open_request` therefore calls
+//!   [`crate::native_modal_layer::ModalLayer::replace`] last, after every
+//!   validation check passed, so a refused request leaves the stack (and the
+//!   focus guard) untouched.
+//! * Closing is `dialog.clear()` (`:389-398`): all entries close, `size` and
+//!   `centered` reset, and a 1 ms refocus is requested. [`DialogView::close`]
+//!   and an accepted ACK both route through it; the pending decision keeps the
+//!   entry (and therefore focus) exactly as before.
+//! * Focus trapping is the `modal` keymap layer, active exactly while the
+//!   stack is non-empty (`:320-324,345-347`), i.e.
+//!   [`crate::native_modal_layer::ModalLayer::shell_keys_blocked`].
+//! * Dismissal ordering comes from the activation order, so a file menu that
+//!   pushed itself on top of the dialog (`feature-plugins/system/
+//!   diff-viewer-file-menu.tsx:23-30`) is dismissed first and the dialog only
+//!   on the next Escape (`ui/dialog.tsx:349-363`).
+//! * The painter reads [`DialogView::compose`]: the top entry, its panel rect
+//!   (`dialogWidth` `:30-34`, `maxWidth = width - 2` `:80-81`,
+//!   `alignItems="center"` `:63`, `paddingTop = centered ? 0 : height / 4`
+//!   `:67`, panel `paddingTop = 1` `:83`) and the content rows inside that
+//!   rect, all from one derivation.
+//!
+//! The stack and the painted entry are the same object; a dialog whose content
+//! is gone cannot stay painted, and a painted dialog always has a stack entry.
+
+use crate::native_modal_layer::{
+    BackdropRelease, Clock, DialogEntry, DialogPaint, DialogRect, DialogSize, ModalFocus, ModalKey,
+    ModalLayer, ModalRoute, PanelRelease,
+};
+use crate::native_modal_layer::ChromeLayer;
+
 
 /// Upper bound on choices in one dialog (UTF-8 bytes per choice text is
 /// bounded separately by [`MAX_CHOICE_LEN`]).
@@ -351,7 +389,13 @@ struct OpenDialog {
 }
 
 /// Focus-owning dialog overlay state. `Default` is a closed view.
-#[derive(Debug, Default)]
+///
+/// The visible dialog is a [`ModalLayer`] entry, not a second flag: opening,
+/// closing, focus trapping, dismissal ordering and the painted rect/rows all
+/// derive from [`DialogView::modal`]. `ui/dialog.tsx:306-439` exposes the same
+/// split — a stack plus `size`/`centered` store that the provider renders from
+/// (`:461-479`).
+#[derive(Debug)]
 pub struct DialogView {
     phase: Phase,
     dialog: Option<OpenDialog>,
@@ -363,7 +407,25 @@ pub struct DialogView {
     attempt_counter: u64,
     /// Attempt of the in-flight decision; meaningful while pending.
     pending_attempt: u64,
+    /// Dialog stack, focus guard, dismissal order and paint geometry
+    /// (`ui/dialog.tsx:306-439`). The stack is the single "is a dialog
+    /// visible" authority; `phase` only carries the decision lifecycle.
+    modal: ModalLayer,
+    /// Monotonic stack-entry identity. Upstream's stack entry carries the
+    /// caller's optional `key` (`ui/dialog.tsx:311`); the numeric entry id
+    /// belongs to the presentation, so it is minted here.
+    open_sequence: u64,
+    /// Shell focus target saved by the first open and restored after the last
+    /// close (`ui/dialog.tsx:326-343,396-404`).
+    focus: ModalFocus,
 }
+
+impl Default for DialogView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 
 /// Replace every control character (C0/C1, including newline and ESC) with
 /// a space, then trim. Single-line fields only — no line can be injected.
@@ -484,6 +546,34 @@ impl DialogLayoutMetrics {
     }
 }
 
+/// One frame of the painted dialog, derived from the modal stack: the entry
+/// that owns the frame, its geometry and the rows inside it.
+///
+/// `rows`/`hits`/`footer_row` are exactly what
+/// [`DialogView::render_styled_with_metrics`] returns for the same width and
+/// budget, so a painter can use this struct alone (which dialog, where, what
+/// text) instead of reading the stack and the content separately.
+///
+/// No `Clone`/`Debug`/`PartialEq`: [`crate::native_ui_style::Line`] carries
+/// none of them, and the frame is a per-frame paint value, not stored state.
+pub struct DialogFrame {
+    /// Top stack entry (`ui/dialog.tsx:472-479`).
+    pub entry: DialogEntry,
+    /// `dialogWidth(size)` class currently in use (`ui/dialog.tsx:30-34,432`).
+    pub size: DialogSize,
+    /// Backdrop vertical centering (`ui/dialog.tsx:64,67`).
+    pub centered: bool,
+    /// The panel rect the rows belong to.
+    pub panel: DialogRect,
+    /// Content rows, already clipped to the panel's inner width.
+    pub rows: Vec<crate::native_ui_style::Line>,
+    /// Choice index addressable at each row (`None` for non-choice rows).
+    pub hits: Vec<Option<usize>>,
+    /// Rendered confirm footer row, when the footer is live.
+    pub footer_row: Option<usize>,
+}
+
+
 impl DialogView {
     /// Current native dialogs are action overlays, not upstream DialogSelect
     /// lists. The production caller must not opt them into the select viewport
@@ -502,28 +592,57 @@ impl DialogView {
     /// Closed view (no dialog, input passes through).
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            phase: Phase::Closed,
+            dialog: None,
+            selection: None,
+            question_capable: false,
+            rejected: false,
+            attempt_counter: 0,
+            pending_attempt: 0,
+            modal: ModalLayer::new(),
+            open_sequence: 0,
+            focus: ModalFocus::new(0),
+        }
     }
 
     /// True while a dialog is visible — including the pending-decision
     /// phase. While true, the shell must route keys/paste here and never to
     /// the composer.
+    ///
+    /// Derived from the modal stack, so the painted dialog and the
+    /// input-owning dialog can never disagree.
     #[must_use]
     pub fn is_open(&self) -> bool {
-        self.phase != Phase::Closed
+        self.modal.is_open()
     }
 
     /// True while a decision is in flight awaiting a backend ack.
     #[must_use]
     pub fn pending(&self) -> bool {
-        self.phase == Phase::Pending
+        self.phase == Phase::Pending && self.is_open()
     }
 
     /// Whether input must be intercepted (busy input/paste cannot submit
     /// the underlying composer while a dialog is visible).
-    #[must_use]
     pub fn intercepts_input(&self) -> bool {
-        self.is_open()
+        self.shell_keys_blocked()
+    }
+
+    /// The `modal` keymap layer is enabled exactly while the stack is
+    /// non-empty (`ui/dialog.tsx:320-324,345-347`): every shell key, not only
+    /// Escape, is trapped.
+    #[must_use]
+    pub fn shell_keys_blocked(&self) -> bool {
+        self.modal.shell_keys_blocked()
+    }
+
+    /// The modal stack this view owns. Read-only: the mutation paths are the
+    /// view's own open/close/dismiss methods, so the stack can never disagree
+    /// with the dialog content it paints.
+    #[must_use]
+    pub fn modal(&self) -> &ModalLayer {
+        &self.modal
     }
 
     /// Caller-reported capability: the question backend exists. Defaults to
@@ -537,6 +656,245 @@ impl DialogView {
     #[must_use]
     pub fn question_capable(&self) -> bool {
         self.question_capable
+    }
+
+    // ---- presentation, focus and dismissal, all owned by the modal stack ----
+
+    /// Dialog size class (`dialogWidth(size)`, `ui/dialog.tsx:30-34`). Medium
+    /// until a caller changes it, like the upstream store default (`:350`).
+    #[must_use]
+    pub fn dialog_size(&self) -> DialogSize {
+        self.modal.size()
+    }
+
+    /// `dialog.setSize()` (`ui/dialog.tsx:432-434`).
+    ///
+    /// Upstream callers apply it *after* opening, from an effect
+    /// (`plugin/api.tsx:338-339`, `ui/dialog-prompt.tsx:106`), because
+    /// `replace()` resets the store to medium (`:406-408`). A size set while
+    /// closed is therefore overwritten by the next [`DialogView::open_request`];
+    /// use [`DialogView::open_request_sized`] to open and size in one step.
+    pub fn set_dialog_size(&mut self, size: DialogSize) {
+        self.modal.set_size(size);
+    }
+
+    /// Whether the panel is vertically centered (`ui/dialog.tsx:64,67`).
+    #[must_use]
+    pub fn centered(&self) -> bool {
+        self.modal.centered()
+    }
+
+    /// `dialog.setCentered()` (`ui/dialog.tsx:435-437`).
+    pub fn set_centered(&mut self, centered: bool) {
+        self.modal.set_centered(centered);
+    }
+
+    /// Shell focus target saved by the first open
+    /// (`ui/dialog.tsx:396-400`). Only consulted by the *next* open: upstream
+    /// reads `renderer.currentFocusedRenderable` at that moment.
+    pub fn set_focus_target(&mut self, focus: ModalFocus) {
+        self.focus = focus;
+    }
+
+    /// The saved shell focus while a dialog owns focus
+    /// (`ui/dialog.tsx:396-404`).
+    #[must_use]
+    pub fn saved_focus(&self) -> Option<ModalFocus> {
+        self.modal.saved_focus()
+    }
+
+    /// True while the saved focus target is blurred (`ui/dialog.tsx:402-403`).
+    #[must_use]
+    pub fn focused_blurred(&self) -> bool {
+        self.modal.focused_blurred()
+    }
+
+    /// The 1 ms refocus timer (`ui/dialog.tsx:326-343`). Returns the focus to
+    /// restore once the stack is empty, the target is alive and it is still
+    /// attached; `None` before the deadline or when nothing is restorable.
+    pub fn take_refocus(&mut self, now_ms: u64) -> Option<ModalFocus> {
+        self.modal.take_refocus(now_ms)
+    }
+
+    /// [`DialogView::take_refocus`] reading the deadline from an injected
+    /// clock.
+    pub fn take_refocus_at(&mut self, clock: &impl Clock) -> Option<ModalFocus> {
+        self.modal.take_refocus_at(clock)
+    }
+
+    /// Entries on the dialog stack (upstream exposes the same slice,
+    /// `ui/dialog.tsx:420-422`). At most one entry exists in production —
+    /// `replace()` is the only open path — but the stack is the authority.
+    #[must_use]
+    pub fn stack(&self) -> &[DialogEntry] {
+        self.modal.stack()
+    }
+
+    /// Entry painted this frame; `None` when closed
+    /// (`ui/dialog.tsx:472-479` paints only `stack.at(-1)`).
+    #[must_use]
+    pub fn top_dialog(&self) -> Option<DialogEntry> {
+        self.modal.top_entry()
+    }
+
+    /// Dialogs painted this frame (0 or 1, see
+    /// [`crate::native_modal_layer::ModalLayer::painted_dialogs`]).
+    #[must_use]
+    pub fn painted_dialogs(&self) -> u8 {
+        self.modal.painted_dialogs()
+    }
+
+    /// Record that a chrome layer became interactive, so dismissal order
+    /// follows activation rather than paint order
+    /// (`diff-viewer-file-menu.tsx:23-30`, `ui/dialog.tsx:320-324`).
+    pub fn activate_chrome(&mut self, layer: ChromeLayer) {
+        self.modal.activate(layer);
+    }
+
+    /// Record that a chrome layer stopped being interactive.
+    pub fn deactivate_chrome(&mut self, layer: ChromeLayer) {
+        self.modal.deactivate(layer);
+    }
+
+    /// Interactive layers in activation order (oldest first).
+    #[must_use]
+    pub fn activations(&self) -> &[ChromeLayer] {
+        self.modal.activations()
+    }
+
+    /// Layer that owns Escape/Ctrl+C right now.
+    #[must_use]
+    pub fn top_interactive(&self) -> Option<ChromeLayer> {
+        self.modal.top_interactive()
+    }
+
+    /// Escape routed through the activation order: an open file menu is
+    /// dismissed before the dialog (`diff-viewer-file-menu.tsx:27,51-55`,
+    /// `ui/dialog.tsx:349-363`), and a selection is cleared instead of
+    /// closing anything.
+    ///
+    /// Unlike upstream, a pending decision is never abandoned by Escape: the
+    /// key is reported as [`ModalKey::Ignored`] while the ACK is in flight,
+    /// because this module's contract is that a dispatched deny/approve
+    /// cannot be discarded locally (see the module docs).
+    pub fn escape_route(&mut self, has_selection: bool) -> ModalRoute {
+        if self.pending() {
+            return ModalRoute {
+                layer: Some(ChromeLayer::Dialog),
+                key: ModalKey::Ignored,
+            };
+        }
+        let route = self.modal.escape_route(has_selection);
+        self.reconcile_closed_route(route)
+    }
+
+    /// Ctrl+C routed through the activation order, with the same precedence
+    /// and the same pending guard (`ui/dialog.tsx:364-384`).
+    pub fn ctrl_c_route(&mut self, has_selection: bool, editor_has_text: bool) -> ModalRoute {
+        if self.pending() {
+            return ModalRoute {
+                layer: Some(ChromeLayer::Dialog),
+                key: ModalKey::Ignored,
+            };
+        }
+        let route = self.modal.ctrl_c_route(has_selection, editor_has_text);
+        self.reconcile_closed_route(route)
+    }
+
+    /// Backdrop mouse-down: a drag that ends with a selection must not close
+    /// the dialog (`ui/dialog.tsx:51-53`).
+    pub fn backdrop_mouse_down(&mut self, has_selection: bool) {
+        self.modal.backdrop_mouse_down(has_selection);
+    }
+
+    /// Backdrop mouse-up (`ui/dialog.tsx:54-60`). Closes the stack like
+    /// `clear()`. A pending decision keeps the dialog: the release is
+    /// swallowed exactly once, the same reading as an armed selection drag.
+    pub fn backdrop_mouse_up(&mut self) -> BackdropRelease {
+        if self.pending() {
+            return BackdropRelease::Suppressed;
+        }
+        let release = self.modal.backdrop_mouse_up();
+        if release == BackdropRelease::Closed {
+            self.drop_content();
+        }
+        release
+    }
+
+    /// Panel mouse-up (`ui/dialog.tsx:73-79`): a selection release bubbles to
+    /// copy-on-select, anything else stops at the panel.
+    pub fn panel_mouse_up(&mut self, has_selected_text: bool) -> PanelRelease {
+        self.modal.panel_mouse_up(has_selected_text)
+    }
+
+    /// Panel rect and paint order of the painted dialog, derived from the
+    /// stack. `content_height` is the body budget the caller computed; `None`
+    /// when no dialog is open (`ui/dialog.tsx:48-90,472-479`).
+    #[must_use]
+    pub fn paint(
+        &self,
+        terminal_width: u16,
+        terminal_height: u16,
+        content_height: usize,
+    ) -> Option<DialogPaint> {
+        let content_height = u16::try_from(content_height).unwrap_or(u16::MAX);
+        self.modal.paint(terminal_width, terminal_height, content_height)
+    }
+
+    /// Everything the painter needs for the top dialog from one derivation:
+    /// which entry is on top, its panel rect and the content rows inside that
+    /// rect. `None` when nothing is open.
+    ///
+    /// This is the accessor a composition root should prefer over calling
+    /// [`DialogView::render_with_metrics`] and the geometry helpers
+    /// separately: the entry, the rect and the rows cannot come from
+    /// different dialogs.
+    #[must_use]
+    pub fn compose(
+        &self,
+        terminal_width: u16,
+        terminal_height: u16,
+        content_height: usize,
+    ) -> Option<DialogFrame> {
+        let paint = self.paint(terminal_width, terminal_height, content_height)?;
+        Some(self.frame_over(paint.panel, content_height))
+    }
+
+    /// [`DialogView::compose`] with a caller-supplied panel rect, for
+    /// composition roots that own a capture-backed origin instead of the
+    /// source-derived one (`native_view.rs` keeps the pinned capture origin).
+    /// Presentation (`size`, `centered`) still comes from the stack.
+    #[must_use]
+    pub fn compose_at(&self, panel: DialogRect, content_height: usize) -> Option<DialogFrame> {
+        self.modal.top_entry()?;
+        Some(self.frame_over(panel, content_height))
+    }
+
+    fn frame_over(&self, panel: DialogRect, content_height: usize) -> DialogFrame {
+        // `DialogLayout` re-applies the shared side padding inside the panel
+        // (`ui/dialog.tsx:163-166`), so the body width is the panel minus
+        // `DIALOG_INSET` on each side.
+        let width = usize::from(
+            panel
+                .width
+                .saturating_sub(2 * crate::native_modal_layer::DIALOG_INSET),
+        );
+        let metrics = DialogLayoutMetrics::new(
+            width,
+            content_height,
+            usize::from(panel.height),
+            self.production_viewport_policy(),
+        );
+        let (rows, hits, footer_row) = self.layout(metrics);
+        DialogFrame {
+            entry: self.modal.top_entry().expect("frame builder requires an entry"),
+            size: self.modal.size(),
+            centered: self.modal.centered(),
+            panel,
+            rows,
+            hits,
+            footer_row,
+        }
     }
 
     /// Dismiss the dialog. A pending decision holds focus: `close` is a
@@ -642,6 +1000,31 @@ impl DialogView {
         self.selection = None;
         self.rejected = false;
         self.phase = Phase::Open;
+        // `dialog.replace()` (`ui/dialog.tsx:396-419`) runs last, once every
+        // check above passed: it saves and blurs the shell focus on the first
+        // open, closes any previous entry, resets `size` to medium and
+        // `centered` to false, and installs exactly one entry. A refused
+        // request therefore never touches the stack or the focus guard.
+        self.open_sequence = self.open_sequence.saturating_add(1);
+        let entry_id = self.open_sequence;
+        self.modal
+            .replace(entry_id, DialogSize::Medium, false, None, self.focus);
+        Ok(())
+    }
+
+    /// `dialog.show()` followed by `dialog.set()` (`plugin/api.tsx:334-341`):
+    /// open through [`DialogView::open_request`], then apply the requested
+    /// presentation. This is the form to use when the caller already knows the
+    /// size, because `replace()` resets the store (`ui/dialog.tsx:406-408`).
+    pub fn open_request_sized(
+        &mut self,
+        request: DialogRequest,
+        size: DialogSize,
+        centered: bool,
+    ) -> Result<(), DialogError> {
+        self.open_request(request)?;
+        self.set_dialog_size(size);
+        self.set_centered(centered);
         Ok(())
     }
 
@@ -824,7 +1207,7 @@ impl DialogView {
     /// current attempt. A matching rejected ACK reopens the choice; the
     /// next intent then carries a different, higher attempt.
     pub fn ack(&mut self, ack: DialogAck) -> Result<AckOutcome, DialogError> {
-        if self.phase == Phase::Closed {
+        if !self.is_open() {
             return Err(DialogError::NotOpen);
         }
         if self.phase == Phase::Open {
@@ -970,6 +1353,13 @@ impl DialogView {
         if height == 0 {
             return (Vec::new(), Vec::new(), None);
         }
+        // Visibility is decided by the modal stack, not by leftover content:
+        // the provider paints only the top entry of a non-empty stack
+        // (`packages/tui/src/ui/dialog.tsx:472-480`), so a dialog whose entry
+        // was removed must paint nothing even before its content is dropped.
+        if !self.modal.is_open() {
+            return (Vec::new(), Vec::new(), None);
+        }
         let mut hits = vec![None; height];
         let mut footer_row: Option<usize> = None;
         let mut lines = Vec::new();
@@ -1072,10 +1462,12 @@ impl DialogView {
     }
 
     fn require_interactive(&self) -> Result<(), DialogError> {
+        if !self.is_open() {
+            return Err(DialogError::NotOpen);
+        }
         match self.phase {
-            Phase::Closed => Err(DialogError::NotOpen),
             Phase::Pending => Err(DialogError::PendingDecision),
-            Phase::Open => Ok(()),
+            _ => Ok(()),
         }
     }
 
@@ -1107,11 +1499,33 @@ impl DialogView {
         self.selection = None;
     }
 
+    /// Close through the modal layer: `clear()` closes every entry, resets
+    /// `size`/`centered` and requests the 1 ms refocus
+    /// (`ui/dialog.tsx:389-398`).
     fn reset(&mut self) {
+        self.modal.clear();
+        self.drop_content();
+    }
+
+    /// Drop the painted content after the stack already closed an entry (an
+    /// Escape/Ctrl+C route or a backdrop release popped it). The modal layer
+    /// owns the stack mutation; this only mirrors it on the content side so
+    /// the two cannot disagree.
+    fn drop_content(&mut self) {
         self.phase = Phase::Closed;
         self.dialog = None;
         self.selection = None;
         self.rejected = false;
+        self.pending_attempt = 0;
+    }
+
+    fn reconcile_closed_route(&mut self, route: ModalRoute) -> ModalRoute {
+        if route.layer == Some(ChromeLayer::Dialog) && route.key == ModalKey::Closed {
+            // `pop_top()` already closed the entry (and refocused when it
+            // emptied the stack); only the content remains to drop.
+            self.drop_content();
+        }
+        route
     }
 }
 
@@ -6471,5 +6885,509 @@ mod form_tests {
         inactive.set_active(true);
         assert!(inactive.handle_key(FormKey::Tab));
         assert_eq!(inactive.tab(), 1);
+    }
+}
+
+/// The dialog view owns a `ModalLayer`; these lock the derivation so a future
+/// edit cannot reintroduce a second "is this open" flag or a paint path that
+/// reads geometry from somewhere other than the stack.
+///
+/// Upstream: `packages/tui/src/ui/dialog.tsx:306-439` (stack, `size`/
+/// `centered` store, focus save/restore, `modal` keymap layer) and `:461-479`
+/// (the provider paints only `stack.at(-1)`).
+#[cfg(test)]
+mod modal_integration_tests {
+    use super::*;
+    use crate::native_modal_layer::{
+        ManualClock, DIALOG_INSET, MODAL_BACKDROP_ALPHA, MODAL_Z_INDEX,
+    };
+
+    fn request() -> DialogRequest {
+        DialogRequest {
+            id: "req-1".to_string(),
+            session_id: "ses-1".to_string(),
+            kind: DialogKind::Permission,
+            title: "Run shell command".to_string(),
+            choices: vec!["allow once".to_string(), "deny".to_string()],
+            message: None,
+            disabled: Vec::new(),
+            error: None,
+        }
+    }
+
+    fn answer_attempt(view: &mut DialogView) -> u64 {
+        view.next();
+        view.answer().expect("selection answers").attempt()
+    }
+
+    #[test]
+    fn opening_installs_exactly_one_entry_and_closing_clears_it() {
+        let mut view = DialogView::new();
+        assert!(DialogView::default().stack().is_empty());
+        assert!(view.stack().is_empty());
+        assert!(!view.is_open());
+        assert_eq!(view.painted_dialogs(), 0);
+
+        view.open_request(request()).expect("valid");
+        assert_eq!(view.stack().len(), 1);
+        assert_eq!(view.painted_dialogs(), 1);
+        assert_eq!(view.top_dialog(), Some(view.stack()[0]));
+        assert_eq!(view.top_dialog(), view.stack().last().copied());
+        assert!(view.modal().is_open());
+        assert!(view.shell_keys_blocked());
+        assert!(view.intercepts_input());
+        // Opening is not a close (`onClose` runs for previous entries only).
+        assert_eq!(view.modal().closed(), 0);
+
+        // A second open is refused and must not touch the stack.
+        assert_eq!(view.open_request(request()), Err(DialogError::AlreadyOpen));
+        assert_eq!(view.stack().len(), 1);
+        assert_eq!(view.modal().closed(), 0);
+
+        view.close();
+        assert!(view.stack().is_empty());
+        assert!(!view.is_open());
+        assert!(!view.shell_keys_blocked());
+        assert_eq!(view.modal().closed(), 1);
+        assert_eq!(view.painted_dialogs(), 0);
+        // Nothing to paint when the stack is empty.
+        assert!(view.paint(100, 30, 10).is_none());
+        assert!(view.compose(100, 30, 10).is_none());
+    }
+
+    #[test]
+    fn refused_open_leaves_the_stack_and_focus_guard_untouched() {
+        let mut view = DialogView::new();
+        view.set_focus_target(ModalFocus::new(9));
+        let unknown = DialogRequest {
+            choices: vec!["do not approve".to_string()],
+            ..request()
+        };
+        assert_eq!(
+            view.open_request(unknown),
+            Err(DialogError::UnknownPermissionChoice)
+        );
+        let too_long = DialogRequest {
+            id: "i".repeat(MAX_ID_LEN + 1),
+            ..request()
+        };
+        assert_eq!(view.open_request(too_long), Err(DialogError::IdTooLong));
+        // `replace()` never ran (`ui/dialog.tsx:396-419`), so nothing was
+        // saved, blurred, closed or installed.
+        assert!(view.stack().is_empty());
+        assert!(view.modal().saved_focus().is_none());
+        assert!(!view.modal().focused_blurred());
+        assert_eq!(view.modal().closed(), 0);
+        assert_eq!(view.modal().refocus_requests(), 0);
+        assert!(!view.shell_keys_blocked());
+        // The refused view is still usable.
+        view.open_request(request()).expect("valid after refusals");
+        assert_eq!(view.stack().len(), 1);
+    }
+
+    #[test]
+    fn first_open_saves_and_blurs_focus_and_close_restores_it_after_1ms() {
+        let mut view = DialogView::new();
+        let focus = ModalFocus::new(7);
+        view.set_focus_target(focus);
+        view.open_request(request()).expect("valid");
+        assert!(view.focused_blurred());
+        assert_eq!(view.saved_focus(), Some(focus));
+        assert_eq!(view.modal().refocus_requests(), 0);
+
+        view.close();
+        assert_eq!(view.modal().refocus_requests(), 1);
+        // Not before the 1 ms timer (`ui/dialog.tsx:326-343`).
+        assert!(view.take_refocus(0).is_none());
+        assert_eq!(view.take_refocus(1), Some(focus));
+        assert!(!view.focused_blurred());
+        assert!(view.saved_focus().is_none());
+        // One restore per close.
+        assert!(view.take_refocus(2).is_none());
+
+        // Reopening before the timer fires restores nothing (`:330-332`).
+        view.open_request(request()).expect("valid");
+        view.close();
+        view.open_request(request()).expect("valid");
+        assert!(view.take_refocus(5).is_none());
+        assert_eq!(view.stack().len(), 1);
+    }
+
+    #[test]
+    fn destroyed_or_detached_focus_is_not_restored() {
+        let mut view = DialogView::new();
+        let mut destroyed = ModalFocus::new(3);
+        destroyed.destroyed = true;
+        view.set_focus_target(destroyed);
+        view.open_request(request()).expect("valid");
+        view.close();
+        assert!(view.take_refocus(1).is_none());
+
+        let mut detached = ModalFocus::new(4);
+        detached.attached = false;
+        view.set_focus_target(detached);
+        view.open_request(request()).expect("valid");
+        view.close();
+        assert!(view.take_refocus(2).is_none());
+    }
+
+    #[test]
+    fn pending_decision_holds_the_entry_against_every_close_path() {
+        let mut view = DialogView::new();
+        view.open_request(request()).expect("valid");
+        let attempt = answer_attempt(&mut view);
+        assert!(view.pending());
+        assert!(view.is_open());
+        assert_eq!(view.stack().len(), 1);
+
+        // A dispatched decision cannot be discarded locally.
+        view.close();
+        assert!(view.is_open());
+        assert!(view.pending());
+        view.backdrop_mouse_down(false);
+        assert_eq!(view.backdrop_mouse_up(), BackdropRelease::Suppressed);
+        assert!(view.is_open());
+        let escape = view.escape_route(false);
+        assert_eq!(
+            escape,
+            ModalRoute {
+                layer: Some(ChromeLayer::Dialog),
+                key: ModalKey::Ignored
+            }
+        );
+        let ctrl_c = view.ctrl_c_route(false, false);
+        assert_eq!(
+            ctrl_c,
+            ModalRoute {
+                layer: Some(ChromeLayer::Dialog),
+                key: ModalKey::Ignored
+            }
+        );
+        assert_eq!(view.stack().len(), 1);
+
+        // The matching ACK closes through `clear()`.
+        assert_eq!(
+            view.ack(DialogAck {
+                request_id: "req-1".to_string(),
+                session_id: "ses-1".to_string(),
+                accepted: true,
+                attempt,
+            }),
+            Ok(AckOutcome::Closed)
+        );
+        assert!(view.stack().is_empty());
+        assert!(!view.is_open());
+        assert!(!view.pending());
+        assert_eq!(view.modal().closed(), 1);
+    }
+
+    #[test]
+    fn rejected_ack_keeps_the_entry_open_and_close_still_clears_it() {
+        let mut view = DialogView::new();
+        view.open_request(request()).expect("valid");
+        let attempt = answer_attempt(&mut view);
+        assert_eq!(
+            view.ack(DialogAck {
+                request_id: "req-1".to_string(),
+                session_id: "ses-1".to_string(),
+                accepted: false,
+                attempt,
+            }),
+            Ok(AckOutcome::Rejected)
+        );
+        assert!(view.is_open());
+        assert!(!view.pending());
+        assert_eq!(view.stack().len(), 1);
+        assert_eq!(view.modal().closed(), 0);
+        // The reopened choice is answerable again, with a higher attempt.
+        let retry = answer_attempt(&mut view);
+        assert_eq!(retry, attempt + 1);
+        assert_eq!(
+            view.ack(DialogAck {
+                request_id: "req-1".to_string(),
+                session_id: "ses-1".to_string(),
+                accepted: false,
+                attempt: retry,
+            }),
+            Ok(AckOutcome::Rejected)
+        );
+        assert_eq!(view.stack().len(), 1);
+
+        // `close()` after an open (non-pending) decision clears the entry.
+        view.close();
+        assert!(view.stack().is_empty());
+        assert_eq!(view.modal().closed(), 1);
+    }
+
+    #[test]
+    fn escape_dismisses_a_chrome_layer_before_the_dialog() {
+        let mut view = DialogView::new();
+        view.open_request(request()).expect("valid");
+        // The diff file menu pushes its own keymap layer on top
+        // (`diff-viewer-file-menu.tsx:23-30`).
+        view.activate_chrome(ChromeLayer::DiffFileMenu);
+        assert_eq!(view.activations(), &[ChromeLayer::Dialog, ChromeLayer::DiffFileMenu]);
+        assert_eq!(view.top_interactive(), Some(ChromeLayer::DiffFileMenu));
+
+        let route = view.escape_route(false);
+        assert_eq!(route.layer, Some(ChromeLayer::DiffFileMenu));
+        assert_eq!(route.key, ModalKey::Closed);
+        assert!(view.is_open(), "the dialog survives the menu dismissal");
+        assert_eq!(view.top_interactive(), Some(ChromeLayer::Dialog));
+
+        let route = view.escape_route(false);
+        assert_eq!(route.layer, Some(ChromeLayer::Dialog));
+        assert_eq!(route.key, ModalKey::Closed);
+        assert!(view.stack().is_empty());
+        assert!(!view.is_open());
+        assert_eq!(view.modal().closed(), 1);
+        // The content went with the entry, so no stale dialog can be queried.
+        assert_eq!(view.answer(), Err(DialogError::NotOpen));
+        assert!(view.compose(100, 30, 10).is_none());
+    }
+
+    #[test]
+    fn escape_clears_a_selection_without_closing_the_entry() {
+        let mut view = DialogView::new();
+        view.open_request(request()).expect("valid");
+        let route = view.escape_route(true);
+        assert_eq!(route.layer, Some(ChromeLayer::Dialog));
+        assert_eq!(route.key, ModalKey::SelectionCleared);
+        assert!(view.is_open());
+        assert_eq!(view.modal().selection_clears(), 1);
+        assert_eq!(view.modal().closed(), 0);
+    }
+
+    #[test]
+    fn ctrl_c_clears_the_editor_before_closing_the_entry() {
+        let mut view = DialogView::new();
+        view.open_request(request()).expect("valid");
+        let route = view.ctrl_c_route(true, true);
+        assert_eq!(route.key, ModalKey::SelectionCleared);
+        assert!(view.is_open());
+        let route = view.ctrl_c_route(false, true);
+        assert_eq!(route.key, ModalKey::EditorCleared);
+        assert!(view.is_open());
+        assert_eq!(view.modal().editor_clears(), 1);
+        let route = view.ctrl_c_route(false, false);
+        assert_eq!(route.key, ModalKey::Closed);
+        assert!(!view.is_open());
+        assert_eq!(view.modal().closed(), 1);
+    }
+
+    #[test]
+    fn compose_returns_the_top_entry_rect_and_rows_together() {
+        let mut view = DialogView::new();
+        view.open_request(request()).expect("valid");
+        let frame = view.compose(100, 30, 10).expect("open dialog composes");
+        assert_eq!(Some(frame.entry), view.top_dialog());
+        // `alignItems="center"` (`:63`) and `paddingTop = height / 4` plus the
+        // panel's own `paddingTop={1}` (`:67,83`).
+        assert_eq!(
+            frame.panel,
+            DialogRect { x: 20, y: 8, width: 60, height: 11 }
+        );
+        assert_eq!(frame.rows.len(), 10);
+        assert_eq!(frame.hits.len(), 10);
+        assert_eq!(frame.size, DialogSize::Medium);
+        assert!(!frame.centered);
+        // The rows are the same rows the standalone renderer produces at the
+        // inset body width, so paint and hit testing cannot diverge.
+        let inset_width = usize::from(60u16 - 2 * DIALOG_INSET);
+        let standalone = view.render_styled_with_metrics(DialogLayoutMetrics::new(
+            inset_width,
+            10,
+            11,
+            DialogViewportPolicy::ContentBudget,
+        ));
+        assert_eq!(frame.rows.len(), standalone.len());
+        for (frame_row, standalone_row) in frame.rows.iter().zip(standalone.iter()) {
+            assert_eq!(frame_row.text, standalone_row.text);
+            assert_eq!(frame_row.role, standalone_row.role);
+        }
+        assert_eq!(
+            frame.footer_row,
+            standalone.iter().position(|row| row.text.contains("click here confirm"))
+        );
+    }
+
+    #[test]
+    fn compose_geometry_follows_size_and_centered_from_the_stack() {
+        let mut view = DialogView::new();
+        view.open_request_sized(request(), DialogSize::Large, true)
+            .expect("valid");
+        assert_eq!(view.dialog_size(), DialogSize::Large);
+        assert!(view.centered());
+        let frame = view.compose(100, 40, 10).expect("centered frame");
+        assert_eq!(frame.size, DialogSize::Large);
+        assert!(frame.centered);
+        assert_eq!(frame.panel.width, 88);
+        assert_eq!(frame.panel.x, 6);
+        // `justifyContent="center"` with `paddingTop={0}`: (40 - 11) / 2.
+        assert_eq!(frame.panel.y, 14);
+
+        let paint = view.paint(100, 40, 10).expect("paint");
+        assert_eq!(paint.z_index, MODAL_Z_INDEX);
+        assert_eq!(paint.backdrop_alpha, MODAL_BACKDROP_ALPHA);
+        assert_eq!(
+            paint.backdrop,
+            DialogRect { x: 0, y: 0, width: 100, height: 40 }
+        );
+        assert_eq!(paint.panel, frame.panel);
+
+        // `maxWidth={dimensions().width - 2}` caps the large presets too.
+        view.set_dialog_size(DialogSize::XLarge);
+        let narrow = view.compose(100, 40, 10).expect("capped frame");
+        assert_eq!(narrow.panel.width, 98);
+        assert_eq!(narrow.panel.x, 1);
+    }
+
+    #[test]
+    fn compose_rows_are_inset_by_the_shared_dialog_inset() {
+        let mut view = DialogView::new();
+        view.open_request(DialogRequest {
+            title: "T".repeat(200),
+            ..request()
+        })
+        .expect("valid");
+        let frame = view.compose(100, 30, 10).expect("frame");
+        assert_eq!(frame.panel.width, 60);
+        // `DialogLayout` padding is `DIALOG_INSET` per side
+        // (`ui/dialog.tsx:163-166`).
+        let inner = usize::from(60u16 - 2 * DIALOG_INSET);
+        assert!(frame.rows.iter().all(|row| row.text.chars().count() <= inner));
+        assert_eq!(frame.rows[0].text.chars().count(), inner);
+    }
+
+    #[test]
+    fn compose_at_uses_the_caller_rect_and_still_reads_the_stack() {
+        let closed = DialogView::new();
+        assert!(closed
+            .compose_at(DialogRect { x: 0, y: 0, width: 40, height: 8 }, 8)
+            .is_none());
+
+        let mut view = DialogView::new();
+        view.open_request_sized(request(), DialogSize::Large, true)
+            .expect("valid");
+        // A composition root with its own capture-backed origin.
+        let panel = DialogRect { x: 30, y: 5, width: 40, height: 12 };
+        let frame = view.compose_at(panel, 8).expect("frame");
+        assert_eq!(frame.panel, panel);
+        assert_eq!(frame.rows.len(), 8);
+        let inner = usize::from(40u16 - 2 * DIALOG_INSET);
+        assert!(frame.rows.iter().all(|row| row.text.chars().count() <= inner));
+        // Presentation still comes from the stack, not from the rect.
+        assert_eq!(frame.size, DialogSize::Large);
+        assert!(frame.centered);
+    }
+
+    #[test]
+    fn replace_and_clear_reset_presentation_like_upstream() {
+        let mut view = DialogView::new();
+        view.open_request_sized(request(), DialogSize::Large, true)
+            .expect("valid");
+        view.close();
+        // `clear()` resets the store (`ui/dialog.tsx:389-398`).
+        assert_eq!(view.dialog_size(), DialogSize::Medium);
+        assert!(!view.centered());
+
+        // A presentation set while closed is overwritten by `replace()`
+        // (`:406-408`); upstream callers re-apply it after opening.
+        view.set_dialog_size(DialogSize::XLarge);
+        view.set_centered(true);
+        view.open_request(request()).expect("valid");
+        assert_eq!(view.dialog_size(), DialogSize::Medium);
+        assert!(!view.centered());
+    }
+
+    #[test]
+    fn open_request_sized_applies_presentation_after_replace() {
+        let mut view = DialogView::new();
+        view.open_request_sized(request(), DialogSize::Large, true)
+            .expect("valid");
+        // `dialog.show()` then `dialog.set()` (`plugin/api.tsx:334-341`).
+        assert_eq!(view.dialog_size(), DialogSize::Large);
+        assert!(view.centered());
+        assert_eq!(view.stack().len(), 1);
+
+        // A refused request never applies the presentation either.
+        let mut pending = DialogView::new();
+        let refused = DialogRequest {
+            choices: vec!["nope".to_string()],
+            ..request()
+        };
+        assert_eq!(
+            pending.open_request_sized(refused, DialogSize::Large, true),
+            Err(DialogError::UnknownPermissionChoice)
+        );
+        assert_eq!(pending.dialog_size(), DialogSize::Medium);
+        assert!(!pending.centered());
+    }
+
+    #[test]
+    fn backdrop_release_closes_the_entry_but_a_selection_drag_does_not() {
+        let mut view = DialogView::new();
+        view.open_request(request()).expect("valid");
+        // Panel release: a selection bubbles to copy-on-select, anything else
+        // stops at the panel (`ui/dialog.tsx:73-79`).
+        assert_eq!(view.panel_mouse_up(true), PanelRelease::Bubbled);
+        assert!(view.is_open());
+        assert_eq!(view.panel_mouse_up(false), PanelRelease::Stopped);
+        assert!(view.is_open());
+        // An armed backdrop release is swallowed once (`:51-60`).
+        view.backdrop_mouse_down(true);
+        assert_eq!(view.backdrop_mouse_up(), BackdropRelease::Suppressed);
+        assert!(view.is_open());
+        // A plain backdrop click closes the whole stack.
+        view.backdrop_mouse_down(false);
+        assert_eq!(view.backdrop_mouse_up(), BackdropRelease::Closed);
+        assert!(view.stack().is_empty());
+        assert!(!view.is_open());
+        assert_eq!(view.modal().closed(), 1);
+        assert!(view.answer().is_err());
+    }
+
+    #[test]
+    fn refocus_reads_the_injected_clock() {
+        let mut view = DialogView::new();
+        let focus = ModalFocus::new(2);
+        view.set_focus_target(focus);
+        view.open_request(request()).expect("valid");
+        view.close();
+        let mut clock = ManualClock::new(0);
+        assert!(view.take_refocus_at(&clock).is_none());
+        clock.advance(1);
+        assert_eq!(view.take_refocus_at(&clock).map(|saved| saved.id), Some(2));
+    }
+
+    #[test]
+    fn chrome_frame_composes_over_the_stack_the_view_owns() {
+        use crate::native_modal_layer::ChromeModel;
+
+        let mut view = DialogView::new();
+        view.open_request(request()).expect("valid");
+        let chrome = ChromeModel::new();
+        let frame = chrome.frame_with(view.modal());
+        assert!(frame.paints(ChromeLayer::Dialog));
+        assert_eq!(frame.input_owner, Some(ChromeLayer::Dialog));
+        assert_eq!(frame.backdrop, Some((ChromeLayer::Dialog, MODAL_BACKDROP_ALPHA)));
+
+        // The menu opened through the view's ordering is painted above the
+        // dialog and owns Escape (`diff-viewer-file-menu.tsx:23-30`).
+        view.activate_chrome(ChromeLayer::DiffFileMenu);
+        let frame = chrome.frame_with(view.modal());
+        assert!(frame.paints(ChromeLayer::DiffFileMenu));
+        assert_eq!(frame.input_owner, Some(ChromeLayer::DiffFileMenu));
+        // Dismissing it through the same route restores the dialog's keys.
+        assert_eq!(
+            view.escape_route(false).layer,
+            Some(ChromeLayer::DiffFileMenu)
+        );
+        let frame = chrome.frame_with(view.modal());
+        assert!(!frame.paints(ChromeLayer::DiffFileMenu));
+        assert_eq!(frame.input_owner, Some(ChromeLayer::Dialog));
+
+        view.close();
+        assert!(!chrome.frame_with(view.modal()).paints(ChromeLayer::Dialog));
     }
 }

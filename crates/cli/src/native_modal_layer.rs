@@ -157,6 +157,15 @@ impl ModalFocus {
     }
 }
 
+/// The shell focus target before any dialog opened. [`ModalLayer::replace`]
+/// overwrites it on the first open, so this default is only the "nothing was
+/// focused" reading of a fresh layer.
+impl Default for ModalFocus {
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
 /// Key handled by the modal layer (`ui/dialog.tsx:349-384`).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum ModalKey {
@@ -357,6 +366,26 @@ impl ModalLayer {
     #[must_use]
     pub fn key(&self) -> Option<u64> {
         self.stack.last().and_then(|entry| entry.key)
+    }
+
+    /// Top stack entry (`store.stack.at(-1)`, `ui/dialog.tsx:428-430`). Only
+    /// this entry is painted (`ui/dialog.tsx:472-479`), so it is also the
+    /// entry any derived rect/content belongs to.
+    #[must_use]
+    pub fn top_entry(&self) -> Option<DialogEntry> {
+        self.stack.last().copied()
+    }
+
+    /// `setSize()` (`ui/dialog.tsx:432-434`). Takes effect immediately, also
+    /// while an entry is open — upstream callers set it from an effect after
+    /// `replace()` (`plugin/api.tsx:338`, `ui/dialog-prompt.tsx:106`).
+    pub fn set_size(&mut self, size: DialogSize) {
+        self.size = size;
+    }
+
+    /// `setCentered()` (`ui/dialog.tsx:435-437`).
+    pub fn set_centered(&mut self, centered: bool) {
+        self.centered = centered;
     }
 
     /// `onClose` invocations observed so far.
@@ -944,7 +973,8 @@ impl ChromeModel {
         self.startup.tick(now);
         self.reconnecting.tick(now);
         self.toast.advance(delta);
-        for layer in self.active_layers() {
+        let file_menu = self.file_menu_visible(&self.modal);
+        for layer in self.active_layers_with(&self.modal, file_menu) {
             self.note_mount(layer);
         }
         self.frame()
@@ -953,11 +983,35 @@ impl ChromeModel {
     /// Current frame without advancing time.
     #[must_use]
     pub fn frame(&self) -> ChromeFrame {
-        let active = self.active_layers();
+        self.frame_with(&self.modal)
+    }
+
+    /// Current frame composed against an externally owned dialog stack.
+    ///
+    /// A composition root that owns a `DialogView` (which owns the dialog
+    /// stack, `ui/dialog.tsx:306-439`) and this model (which owns the
+    /// transient overlays) must not run two stacks: paint order, the dim
+    /// backdrop and the key owner all read the same stack. This is the
+    /// accessor for that composition; [`ChromeModel::frame`] keeps the
+    /// model-owned stack for callers without a dialog view.
+    ///
+    /// The file menu counts as mounted when either this model opened it or
+    /// the external stack has the `DiffFileMenu` layer activated, so a caller
+    /// can open it through the dialog view's own ordering
+    /// (`DialogView::activate_chrome`) without flipping this flag too.
+    ///
+    /// Keys for this composition are routed by the stack owner, not here:
+    /// use `DialogView::escape_route` / `DialogView::ctrl_c_route` so the
+    /// activation order of the shared stack decides who closes first
+    /// (`diff-viewer-file-menu.tsx:23-30`, `ui/dialog.tsx:349-384`).
+    #[must_use]
+    pub fn frame_with(&self, modal: &ModalLayer) -> ChromeFrame {
+        let file_menu = self.file_menu_visible(modal);
+        let active = self.active_layers_with(modal, file_menu);
         let mut paint: Vec<ChromeLayer> = active
             .iter()
             .copied()
-            .filter(|layer| *layer != ChromeLayer::DiffFileMenu || self.file_menu)
+            .filter(|layer| *layer != ChromeLayer::DiffFileMenu || file_menu)
             .collect();
         paint.sort_by_key(|layer| {
             (
@@ -972,7 +1026,7 @@ impl ChromeModel {
             .find(|layer| matches!(layer, ChromeLayer::Dialog | ChromeLayer::Reconnecting));
         let backdrop = backdrop_layer.map(|layer| (layer, MODAL_BACKDROP_ALPHA));
         ChromeFrame {
-            input_owner: self.modal.top_interactive(),
+            input_owner: modal.top_interactive(),
             toast_visible: self.toast.current().is_some(),
             pending: self.toast.pending(),
             backdrop,
@@ -980,15 +1034,19 @@ impl ChromeModel {
         }
     }
 
-    fn active_layers(&self) -> Vec<ChromeLayer> {
+    fn file_menu_visible(&self, modal: &ModalLayer) -> bool {
+        self.file_menu || modal.activations().contains(&ChromeLayer::DiffFileMenu)
+    }
+
+    fn active_layers_with(&self, modal: &ModalLayer, file_menu: bool) -> Vec<ChromeLayer> {
         let mut active = Vec::new();
         if self.toast.current().is_some() {
             active.push(ChromeLayer::Toast);
         }
-        if self.file_menu {
+        if file_menu {
             active.push(ChromeLayer::DiffFileMenu);
         }
-        if self.modal.is_open() {
+        if modal.is_open() {
             active.push(ChromeLayer::Dialog);
         }
         if self.startup.visible() {
@@ -1221,6 +1279,67 @@ mod tests {
     fn footer_stacks_below_60_cells() {
         assert!(dialog_footer_narrow(59));
         assert!(!dialog_footer_narrow(60));
+    }
+
+    #[test]
+    fn default_focus_is_the_no_focus_reading() {
+        assert_eq!(ModalFocus::default(), ModalFocus::new(0));
+        assert!(ModalFocus::default().attached);
+        assert!(!ModalFocus::default().destroyed);
+    }
+
+    #[test]
+    fn set_size_and_centered_update_the_painted_entry_in_place() {
+        let mut layer = ModalLayer::new();
+        open(&mut layer, 1);
+        assert_eq!(layer.top_entry(), layer.stack().last().copied());
+        assert_eq!(layer.top_entry().map(|entry| entry.id), Some(1));
+
+        // `setSize` / `setCentered` (`ui/dialog.tsx:432-437`) write the store
+        // the provider renders from, without touching the stack.
+        layer.set_size(DialogSize::XLarge);
+        layer.set_centered(true);
+        let paint = layer.paint(140, 40, 8).expect("paint");
+        assert_eq!(paint.size, DialogSize::XLarge);
+        assert_eq!(paint.panel.width, 116);
+        assert_eq!(paint.panel.x, 12);
+        assert!(paint.centered);
+        assert_eq!(layer.stack().len(), 1);
+        assert_eq!(layer.closed(), 0);
+
+        // `clear()` resets the presentation and leaves nothing to expose.
+        layer.clear();
+        assert_eq!(layer.top_entry(), None);
+        assert_eq!(layer.size(), DialogSize::Medium);
+        assert!(!layer.centered());
+    }
+
+    #[test]
+    fn external_frame_paints_the_stack_it_is_given() {
+        let chrome = ChromeModel::new();
+        let mut stack = ModalLayer::new();
+        assert!(!chrome.frame_with(&stack).paints(ChromeLayer::Dialog));
+        // The model's own (empty) stack is untouched by the external one.
+        assert!(!chrome.frame().paints(ChromeLayer::Dialog));
+
+        open(&mut stack, 1);
+        let frame = chrome.frame_with(&stack);
+        assert!(frame.paints(ChromeLayer::Dialog));
+        assert_eq!(frame.input_owner, Some(ChromeLayer::Dialog));
+        assert_eq!(frame.backdrop, Some((ChromeLayer::Dialog, MODAL_BACKDROP_ALPHA)));
+        assert!(frame.shell_keys_blocked());
+
+        // A file menu opened on the external stack is painted above the
+        // dialog and owns the keys, without flipping `ChromeModel`'s flag.
+        stack.activate(ChromeLayer::DiffFileMenu);
+        let frame = chrome.frame_with(&stack);
+        assert!(frame.paints(ChromeLayer::DiffFileMenu));
+        assert_eq!(frame.input_owner, Some(ChromeLayer::DiffFileMenu));
+        stack.deactivate(ChromeLayer::DiffFileMenu);
+        assert!(!chrome.frame_with(&stack).paints(ChromeLayer::DiffFileMenu));
+
+        stack.clear();
+        assert!(!chrome.frame_with(&stack).paints(ChromeLayer::Dialog));
     }
 
     // ---------- deterministic clock / layer composition (DIALOG-19) ----------
