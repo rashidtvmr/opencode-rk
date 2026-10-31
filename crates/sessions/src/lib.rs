@@ -789,6 +789,20 @@ impl SessionService {
         }
         Ok(message)
     }
+    /// Attach the execution facts of an already-appended message. Callers that
+    /// cannot choose the append variant (the non-stream turn appends text
+    /// only) record the fact after the durable append instead.
+    pub async fn record_message_execution(
+        &self,
+        message_id: MessageId,
+        execution: MessageExecutionInput,
+    ) -> Result<(), SessionError> {
+        let storage = Arc::clone(&self.storage);
+        let execution = execution.for_message(message_id);
+        run_blocking(move || storage.append_message_execution(&execution))
+            .await
+            .map_err(SessionError::from)
+    }
     /// Execution facts for exactly `message_ids` (order unspecified).
     pub async fn message_execution(
         &self,

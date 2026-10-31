@@ -2071,6 +2071,12 @@ async fn create_turn(
         session: id,
         message_id: assistant_message.id,
     });
+    // The non-stream response reports usage but no stop reason, so only what
+    // the provider actually returned is recorded.
+    let _ = state
+        .sessions
+        .record_message_execution(assistant_message.id, turn_execution(&body.model, None, usage))
+        .await;
     auto_compaction::schedule_after_successful_turn(&state.sessions, &provider, &owner, id, provider_id, model_id, usage, &request_context).await;
 
     Ok((

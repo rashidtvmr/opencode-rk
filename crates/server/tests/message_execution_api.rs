@@ -1,7 +1,12 @@
 //! The two message-listing routes carry the execution facts a completed turn
 //! reported, and nothing when none were stored.
 
-use std::sync::Arc;
+use std::{
+    io::{Read, Write},
+    net::TcpListener,
+    sync::{Arc, Mutex, OnceLock},
+    thread,
+};
 
 use axum::{
     body::{to_bytes, Body},
@@ -133,6 +138,175 @@ async fn messages_without_stored_facts_carry_no_execution_key() {
         let assistant = find(messages, &fixture.assistant_id);
         assert!(assistant.get("execution").is_none(), "{uri}: {assistant}");
     }
+}
+
+/// `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `HOME` and `XDG_DATA_HOME` are
+/// process-global; hold one lock and point the credential lookup at a
+/// disposable directory so no persisted auth can shadow the fixture key.
+static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+struct EnvFixture {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    _dir: TempDir,
+    saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
+}
+
+impl EnvFixture {
+    fn new(overrides: &[(&'static str, String)]) -> Self {
+        let lock = ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = tempfile::tempdir().unwrap();
+        let mut saved = Vec::new();
+        for (key, value) in [
+            ("HOME", dir.path().to_string_lossy().into_owned()),
+            ("XDG_DATA_HOME", dir.path().to_string_lossy().into_owned()),
+        ]
+        .into_iter()
+        .chain(overrides.iter().map(|(k, v)| (*k, v.clone())))
+        {
+            saved.push((key, std::env::var_os(key)));
+            std::env::set_var(key, value);
+        }
+        Self {
+            _lock: lock,
+            _dir: dir,
+            saved,
+        }
+    }
+}
+
+impl Drop for EnvFixture {
+    fn drop(&mut self) {
+        for (key, value) in self.saved.drain(..) {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+}
+
+fn spawn_provider(usage: Value) -> (String, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        let mut expected = None;
+        loop {
+            let read = stream.read(&mut buffer).unwrap();
+            assert!(read > 0, "provider request ended early");
+            request.extend_from_slice(&buffer[..read]);
+            if expected.is_none() {
+                if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&request[..end]);
+                    let length = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(str::trim)
+                                .map(str::parse::<usize>)
+                        })
+                        .transpose()
+                        .unwrap()
+                        .unwrap_or(0);
+                    expected = Some(end + 4 + length);
+                }
+            }
+            if expected.is_some_and(|len| request.len() >= len) {
+                break;
+            }
+        }
+        let response = json!({
+            "id": "resp_exec_api",
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "nonstream answer"}]
+            }],
+            "usage": usage,
+        })
+        .to_string();
+        let wire = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            response.len(),
+            response
+        );
+        stream.write_all(wire.as_bytes()).unwrap();
+    });
+    (format!("http://{address}/v1"), handle)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn nonstream_turn_records_the_usage_it_reported() {
+    let (base_url, provider) = spawn_provider(json!({
+        "input_tokens": 12,
+        "output_tokens": 4,
+        "total_tokens": 16
+    }));
+    let _env = EnvFixture::new(&[
+        ("OPENAI_BASE_URL", base_url),
+        ("OPENAI_API_KEY", "fixture-secret".into()),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Arc::new(Storage::open_in_memory(dir.path().join("blobs")).unwrap());
+    let sessions = SessionService::new(Arc::clone(&storage));
+    let app = router(AppState {
+        sessions: sessions.clone(),
+        catalog: Arc::new(Catalog::default()),
+    });
+
+    let created = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/sessions")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({"title": "nonstream facts"}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created: Value = serde_json::from_slice(&to_bytes(created.into_body(), 32 * 1024).await.unwrap()).unwrap();
+    let session_id = created["session"]["id"].as_str().unwrap().to_owned();
+
+    let turn = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/sessions/{session_id}/turns"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"text": "Hello agent", "model": "openai/gpt-5.6"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(turn.status(), StatusCode::CREATED);
+    let turn: Value = serde_json::from_slice(&to_bytes(turn.into_body(), 64 * 1024).await.unwrap()).unwrap();
+    let assistant_id = turn["assistant_message"]["id"].as_str().unwrap().to_owned();
+    provider.join().unwrap();
+
+    let body = get(&app, &format!("/api/sessions/{session_id}/messages?limit=50")).await;
+    let assistant = find(body["messages"].as_array().unwrap(), &assistant_id);
+    assert_eq!(
+        assistant["execution"],
+        json!({
+            "provider_id": "openai",
+            "model_id": "gpt-5.6",
+            "usage": {"input_tokens": 12, "output_tokens": 4},
+        }),
+        "a non-stream turn records its reported usage and no invented stop reason"
+    );
 }
 
 #[tokio::test]
