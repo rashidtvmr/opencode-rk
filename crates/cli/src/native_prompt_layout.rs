@@ -1,4 +1,9 @@
-//! Bounded word wrapping shared by prompt text and insertion cursors.
+//! Bounded word wrapping shared by prompt text and insertion cursors, plus the
+//! prompt surface geometry pinned by upstream
+//! `450e7b92412c780a7b5a75226bb8d49aaca24e22`:
+//! `component/prompt/index.tsx:1674` (editor max rows), `:1681-1698`
+//! (left-only border, responsive horizontal inset, one-row top padding) and
+//! `:1855-1898` (metadata block and the separate half-block lip).
 use crate::native_view_layout::visit_unpadded_cells;
 const MAX_BYTES: usize = crate::native_view_chat::MAX_DRAFT_BYTES;
 
@@ -135,6 +140,57 @@ fn is_wrap_whitespace(c: char) -> bool {
         | 0x202f | 0x205f | 0x3000 | 0x200b)
 }
 
+/// Horizontal inner padding of the raised prompt surface.
+///
+/// Upstream `component/prompt/index.tsx:1691-1692`:
+/// `paddingLeft/Right = dimensions().width < 44 ? 1 : 2`. The threshold uses
+/// the **terminal** width, not the prompt's own width.
+pub(crate) fn prompt_inset(terminal_width: u16) -> u16 {
+    if terminal_width < 44 { 1 } else { 2 }
+}
+
+/// Text column inside the prompt surface.
+///
+/// `pane_width` covers the whole prompt box, including the one-cell left
+/// border (`index.tsx:1681-1689`). The inner box is `width="100%"`
+/// (`:1690-1698`), so the text column is
+/// `pane - 1 left border - 2 * inset`. This is deliberately non-monotonic at
+/// the 44-column threshold: a 43-column prompt has 40 text cells, a 44-column
+/// prompt only 39, because the inset doubles there.
+pub(crate) fn prompt_text_width(pane_width: u16, terminal_width: u16) -> usize {
+    let inset = usize::from(prompt_inset(terminal_width));
+    usize::from(pane_width).saturating_sub(1 + 2 * inset)
+}
+
+/// Textarea row cap: `max(6, floor(terminalHeight / 3))`
+/// (`component/prompt/index.tsx:1674` closure at the `maxHeight` prop,
+/// `:1774`).
+pub(crate) fn editor_max_rows(terminal_height: u16) -> usize {
+    usize::from(terminal_height / 3).max(6)
+}
+
+/// Visible editor rows: minimum 1 (`index.tsx:1773`), grows until the cap and
+/// then scrolls inside the textarea.
+pub(crate) fn editor_rows(input_rows: usize, terminal_height: u16) -> usize {
+    input_rows.clamp(1, editor_max_rows(terminal_height))
+}
+
+/// Rows owned by the raised surface itself: one top padding row, the editor
+/// rows, and the metadata block (its own one-row top padding plus one row).
+///
+/// `index.tsx:1690-1698` (`paddingTop={1}`) and `:1855-1870`
+/// (`<box ... paddingTop={1}>` around `PromptMetadataRow`).
+pub(crate) fn surface_rows(input_rows: usize) -> usize {
+    input_rows + 3
+}
+
+/// Rows of the whole prompt block: surface plus the separate one-row
+/// half-block lip (`index.tsx:1873-1898`). The status rail
+/// (`:1899-1983`) is a sibling, outside this block.
+pub(crate) fn prompt_rows(input_rows: usize) -> usize {
+    surface_rows(input_rows) + 1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -243,5 +299,59 @@ mod tests {
         let rows = wrap_prompt("hello", 5, 5);
         assert_eq!(rows.window_start(0), 0);
         assert_eq!(rows.window_start(1), 0);
+    }
+}
+
+#[cfg(test)]
+mod prompt_geometry_tests {
+    //! CP-04 geometry, pinned at `component/prompt/index.tsx:1674,1691-1698,
+    //! 1773-1774,1855-1898`. The 40/43/44-column boundary is where the
+    //! responsive inset changes the text column.
+
+    use super::*;
+
+    #[test]
+    fn prompt_inset_flips_at_the_strict_44_column_threshold() {
+        for (terminal, inset) in [(40, 1), (43, 1), (44, 2), (80, 2), (200, 2)] {
+            assert_eq!(prompt_inset(terminal), inset, "terminal={terminal}");
+        }
+    }
+
+    #[test]
+    fn prompt_text_width_is_non_monotonic_across_the_44_column_boundary() {
+        // 43 -> 43 - 1 - 2*1 = 40 text cells; 44 -> 44 - 1 - 2*2 = 39.
+        for (columns, text) in [(40, 37), (43, 40), (44, 39), (45, 40)] {
+            assert_eq!(
+                prompt_text_width(columns, columns),
+                text,
+                "columns={columns}"
+            );
+        }
+        assert_eq!(prompt_text_width(0, 0), 0);
+        assert_eq!(prompt_text_width(1, 43), 0);
+    }
+
+    #[test]
+    fn editor_grows_to_the_height_third_cap_then_scrolls() {
+        // max(6, floor(height / 3)); heights from the CP-04 fixtures.
+        for (height, cap) in [(12, 6), (24, 8), (40, 13)] {
+            assert_eq!(editor_max_rows(height), cap, "height={height}");
+            assert_eq!(editor_rows(0, height), 1, "one-row minimum at {height}");
+            assert_eq!(editor_rows(1, height), 1);
+            assert_eq!(editor_rows(cap - 1, height), cap - 1);
+            assert_eq!(editor_rows(cap, height), cap);
+            assert_eq!(editor_rows(usize::MAX, height), cap, "cap then scrolls");
+        }
+    }
+
+    #[test]
+    fn surface_owns_top_padding_editor_and_metadata_block_and_lip_is_separate() {
+        // One-row prompt: pad, text, metadata pad, metadata = 4; lip = 1;
+        // the status rail stays outside.
+        assert_eq!(surface_rows(1), 4);
+        assert_eq!(prompt_rows(1), 5);
+        for rows in [1, 6, 8, 13] {
+            assert_eq!(prompt_rows(rows), rows + 4);
+        }
     }
 }
