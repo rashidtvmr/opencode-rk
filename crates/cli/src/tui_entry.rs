@@ -3410,7 +3410,12 @@ fn native_paint(
                         if let Some(slot) = style.background { bg = paint_color(ctx.palette, slot); }
                         attributes = style.attributes;
                 }
-                if !in_modal && !composer && !sidebar && in_page {
+                // Context pages publish their own usage spans; the composer
+                // dock publishes dock spans on the chat route, where
+                // `in_page` is false by construction. The vec is empty for
+                // every other chat cell, so dropping the page gate cannot
+                // color transcript content.
+                if !in_modal && !composer && !sidebar {
                     if let Some((_, _, _, slot)) = ctx.context_usage_styles.iter().find(
                         |(left, row, width, _)| {
                             u32::from(*row) == y
@@ -5677,13 +5682,13 @@ fn native_loop(
                         .and_then(|value| live_children.apply(&snapshot.session_id, &value));
                     match result {
                         Ok(true) => {
-                            view.set_live_children(live_children.running(), live_children.first().map(str::to_owned));
+                            view.set_live_children_status(&live_children);
                             needs_paint = true;
                         }
                         Ok(false) => {}
                         Err(_) => {
                             if live_children.clear() {
-                                view.set_live_children(0, None);
+                                view.clear_live_children_status();
                                 needs_paint = true;
                             }
                         }
@@ -5691,7 +5696,7 @@ fn native_loop(
                 }
                 None => {
                     if live_children.clear() {
-                        view.set_live_children(0, None);
+                        view.clear_live_children_status();
                         needs_paint = true;
                     }
                 }
@@ -6900,6 +6905,45 @@ fn native_loop(
                 continue;
             }
         }
+        // Composer layer keys while the auxiliary dock is open
+        // (`composer/index.tsx:72-82`): escape/ctrl+c close, left/right switch
+        // tabs (inert with the single Subagents tab). Every other key falls
+        // through to the composer text path, so typing is never stolen.
+        if view.dock_open()
+            && !page_open
+            && !help_open
+            && !children_panel.open
+            && !appearance.open
+            && !permission_editor.open
+            && !view.dialogs.intercepts_input()
+            && !view.command_palette_open()
+            && matches!(dialog, native_setup::Dialog::None)
+            && import_dialog.as_ref().is_none_or(|import| !import.is_open())
+        {
+            match &event {
+                native_input_decoder::InputEvent::Escape => {
+                    let _ = view.dock_key(crate::native_dock::DockKey::Escape);
+                    needs_paint = true;
+                    continue;
+                }
+                native_input_decoder::InputEvent::Byte(3) => {
+                    let _ = view.dock_key(crate::native_dock::DockKey::CtrlC);
+                    needs_paint = true;
+                    continue;
+                }
+                native_input_decoder::InputEvent::ArrowLeft => {
+                    let _ = view.dock_key(crate::native_dock::DockKey::Left);
+                    needs_paint = true;
+                    continue;
+                }
+                native_input_decoder::InputEvent::ArrowRight => {
+                    let _ = view.dock_key(crate::native_dock::DockKey::Right);
+                    needs_paint = true;
+                    continue;
+                }
+                _ => {}
+            }
+        }
         // Completion owns navigation before composer/session shortcuts, but
         // never before a credential, permission or other modal surface.
         if !page_open && !help_open && !children_panel.open && !appearance.open && !permission_editor.open
@@ -7593,6 +7637,19 @@ fn native_loop(
                     needs_paint = true;
                     continue;
                 }
+                // The dock paints exactly one pointer target (the right-aligned
+                // `esc`), and only while open. Admit it before the footer label
+                // so the two surfaces can never share a cell.
+                if kind == 0 && modifiers == 0 && !help_open
+                    && !view.command_palette_open()
+                    && !permission_editor.open && !appearance.open
+                    && matches!(dialog, native_setup::Dialog::None)
+                    && import_dialog.as_ref().is_none_or(|import| !import.is_open())
+                    && view.dock_click(x, y)
+                {
+                    needs_paint = true;
+                    continue;
+                }
                 if kind == 0 && modifiers == 0 && !help_open
                     && !view.command_palette_open()
                     && !permission_editor.open && !appearance.open
@@ -7600,20 +7657,10 @@ fn native_loop(
                     && import_dialog.as_ref().is_none_or(|import| !import.is_open())
                     && view.live_footer_action(x, y).is_some()
                 {
-                    // Upstream `session.child.first` opens the helper surface
-                    // for the family (`routes/session/index.tsx:1391-1398`);
-                    // the existing subagents listing is that surface here.
-                    if let Some(snapshot) = live.as_ref() {
-                        children_panel.show(&snapshot.session_id);
-                        children_panel.bind_lease(&snapshot.session_id, binding_generation, auth.as_deref());
-                        children_refresh = Instant::now() - Duration::from_secs(1);
-                        view.close_command_palette();
-                        view.close_page();
-                        help_open = false;
-                        let _ = appearance.cancel();
-                        dialog = native_setup::Dialog::None;
-                        view.set_dialog_size(crate::native_view::DialogSize::Large);
-                    }
+                    // Upstream `session.child.first` toggles the composer dock
+                    // (`routes/session/index.tsx:1395-1396`): a child session
+                    // or an open dock closes, otherwise it opens on Subagents.
+                    view.toggle_dock();
                     needs_paint = true;
                     continue;
                 }

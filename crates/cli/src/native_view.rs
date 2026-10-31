@@ -11,6 +11,11 @@
 //! Honest-capability rule: labels/`Unavailable` lines are emitted from real
 //! connection/backend facts only — never dummy data.
 
+use crate::native_children::{SubagentSession, SubagentsTab};
+use crate::native_dock::{
+    ComposerDock, DockBlock, DockBody, DockBodyRow, DockKey, DockKeyOutcome, DockStatusCell,
+    DockStyle, DockTabId, MAX_DOCK_ROWS,
+};
 use crate::native_modal_layer::DialogRect;
 use crate::native_view_chat::ChatView;
 use crate::native_tabs::TabReservation;
@@ -161,6 +166,19 @@ pub struct NativeView {
     /// Painted bounds `(x, y, cells)` of the footer live label in frame
     /// coordinates, so the label admits a pointer hit exactly where it drew.
     live_footer_hit: Option<(u16, u16, u16)>,
+    /// Composer auxiliary dock (`routes/session/composer/index.tsx`). Only the
+    /// always-mounted Subagents tab is registered: the Shell and Terminals tabs
+    /// have no live session facts here, so advertising them would promise keys
+    /// and rows this page cannot honor.
+    dock: ComposerDock,
+    /// Subagents tab state fed from the observed `/children` listing.
+    dock_tab: SubagentsTab,
+    /// Session the retained child rows belong to.
+    dock_session: Option<String>,
+    /// Retained `/children` rows (running and inactive), in server order.
+    live_child_rows: Vec<crate::native_children::live::ChildRow>,
+    /// Painted dock pointer targets `(x, y, cells)` in frame coordinates.
+    dock_hit: Vec<(u16, u16, u16)>,
     chat_row_classes: Vec<crate::native_view_chat::ChatRowClass>,
     chat_text_bounds: Vec<Option<(u16, u16)>>,
     chat_markdown_spans: Vec<Vec<crate::native_view_chat::ChatRunSpan>>,
@@ -701,6 +719,15 @@ impl NativeView {
             live_subagents: 0,
             live_first_child: None,
             live_footer_hit: None,
+            dock: {
+                let mut dock = ComposerDock::new();
+                dock.register(DockTabId::Subagents);
+                dock
+            },
+            dock_tab: SubagentsTab::new(),
+            dock_session: None,
+            live_child_rows: Vec::new(),
+            dock_hit: Vec::new(),
             chat_row_classes: Vec::new(),
             chat_text_bounds: Vec::new(),
             chat_markdown_spans: Vec::new(),
@@ -917,6 +944,158 @@ impl NativeView {
 
     fn live_subagent_label(&self) -> Option<String> {
         crate::native_status::subagent_label(self.live_subagents)
+    }
+
+    /// Install the retained `/children` facts: the footer count/navigation
+    /// target plus the structural rows the Subagents dock renders. The caller
+    /// passes exactly what the server reported; no row is synthesized.
+    pub fn set_live_children_status(
+        &mut self,
+        status: &crate::native_children::live::Status,
+    ) {
+        self.set_live_children(status.running(), status.first().map(str::to_owned));
+        let session = status.session().map(str::to_owned);
+        if session == self.dock_session && status.rows() == self.live_child_rows.as_slice() {
+            return;
+        }
+        // Rows bound to another session must never paint under this route; the
+        // dock is a per-session surface (`Composer` is mounted per session).
+        if session != self.dock_session {
+            self.dock.close();
+        }
+        self.dock_session = session;
+        self.live_child_rows = status.rows().to_vec();
+        self.sync_dock_rows();
+        self.dock_hit.clear();
+    }
+
+    /// Drop the retained child facts (daemon unavailable or listing rejected).
+    pub fn clear_live_children_status(&mut self) {
+        self.set_live_children(0, None);
+        self.dock.close();
+        self.dock_session = None;
+        self.live_child_rows.clear();
+        self.sync_dock_rows();
+        self.dock_hit.clear();
+    }
+
+    fn sync_dock_rows(&mut self) {
+        let Some(session) = self.dock_session.clone() else {
+            self.dock_tab.set_sessions("", "", Vec::new());
+            return;
+        };
+        let mut sessions = Vec::with_capacity(self.live_child_rows.len() + 1);
+        if !self
+            .live_child_rows
+            .iter()
+            .any(|row| row.session_id == session)
+        {
+            // `subagent_family` needs the root session present to project the
+            // tree; the root itself is never painted as an entry, so its state
+            // is only a structural placeholder.
+            sessions.push(SubagentSession::new(session.clone(), "unknown"));
+        }
+        for row in &self.live_child_rows {
+            let mut entry = SubagentSession::new(row.session_id.clone(), row.state.clone());
+            if let Some(parent) = &row.parent_id {
+                entry = entry.with_parent(parent.clone());
+            }
+            if let Some(agent) = &row.agent {
+                entry = entry.with_agent(agent.clone());
+            }
+            if let Some(description) = &row.description {
+                entry = entry.with_title(description.clone());
+            }
+            sessions.push(entry);
+        }
+        self.dock_tab.set_sessions(&session, &session, sessions);
+        self.dock_tab.set_viewport(MAX_DOCK_ROWS);
+    }
+
+    /// Whether the auxiliary dock currently owns the slot above the composer.
+    #[must_use]
+    pub fn dock_open(&self) -> bool {
+        self.dock.visible()
+    }
+
+    /// Active dock tab while open.
+    #[must_use]
+    pub fn dock_active_tab(&self) -> Option<DockTabId> {
+        self.dock.active()
+    }
+
+    /// Upstream `session.child.first` (`routes/session/index.tsx:1391-1398`):
+    /// a child session or an already-open store closes, otherwise the dock
+    /// opens on the Subagents tab.
+    pub fn toggle_dock(&mut self) {
+        if self.dock.store_open() || self.parent_session {
+            self.dock.close();
+        } else {
+            self.dock.open(Some(DockTabId::Subagents));
+        }
+        self.dock_hit.clear();
+    }
+
+    /// Composer layer keys (`composer/index.tsx:72-82`). Only called while the
+    /// dock is open, so composer text input is never stolen.
+    pub fn dock_key(&mut self, key: DockKey) -> DockKeyOutcome {
+        let outcome = self.dock.key(key);
+        if !matches!(outcome, DockKeyOutcome::Ignored) {
+            self.dock_hit.clear();
+        }
+        outcome
+    }
+
+    /// Painted dock pointer targets `(x, y, cells)` in frame coordinates.
+    #[must_use]
+    pub fn dock_hits(&self) -> &[(u16, u16, u16)] {
+        &self.dock_hit
+    }
+
+    /// Admit a dock click. The only pointer target the dock paints is the
+    /// right-aligned `esc` affordance (`composer/index.tsx:123-125`).
+    pub fn dock_click(&mut self, x: u16, y: u16) -> bool {
+        if !self.dock.visible() {
+            return false;
+        }
+        let hit = self.dock_hit.iter().any(|(left, row, cells)| {
+            y == *row && x >= *left && x < left.saturating_add(*cells)
+        });
+        if !hit {
+            return false;
+        }
+        self.dock.close();
+        self.dock_hit.clear();
+        true
+    }
+
+    fn dock_block_for(&self, width: u16) -> Option<DockBlock> {
+        if !self.dock.is_active(DockTabId::Subagents) {
+            return None;
+        }
+        let body = {
+            let rows = self.dock_tab.visible_rows();
+            if rows.is_empty() {
+                DockBody::Empty(self.dock_tab.empty_text())
+            } else {
+                DockBody::Rows(
+                    rows.into_iter()
+                        .map(|row| {
+                            let (style, bold) = SubagentsTab::row_style(&row);
+                            let mut entry = DockBodyRow::new(row.label, style, bold);
+                            if !row.status.is_empty() {
+                                entry = entry.with_status(DockStatusCell::new(
+                                    row.status,
+                                    row.status_style,
+                                ));
+                            }
+                            entry
+                        })
+                        .collect(),
+                )
+            }
+        };
+        self.dock.block(width, MAX_DOCK_ROWS, &body)
     }
 
     fn render_height(&self) -> usize {
@@ -1246,6 +1425,12 @@ impl NativeView {
             self.mcp_toggle_hit = None;
             self.context_usage_hit = None;
             self.live_footer_hit = None;
+            self.dock_hit.clear();
+            // The dock belongs to the session route; leaving it must not keep
+            // the composer layer consuming keys over Home.
+            if !session_route {
+                self.dock.close();
+            }
         }
         self.session_route = session_route;
     }
@@ -1299,6 +1484,13 @@ impl NativeView {
             self.mcp_hit.clear();
             self.mcp_toggle_hit = None;
             self.live_footer_hit = None;
+            self.dock_hit.clear();
+        }
+        // A child session never keeps the dock open: its `onClose` navigates to
+        // the parent, and the footer command closes unconditionally
+        // (`routes/session/index.tsx:1395-1396`).
+        if parent_session {
+            self.dock.close();
         }
         self.parent_session = parent_session;
     }
@@ -1345,6 +1537,12 @@ impl NativeView {
         if height >= 4 { height - 2 } else { height }
     }
 
+    /// Rows the auxiliary dock currently consumes above the composer.
+    fn painted_dock_height(&self, width: u16) -> usize {
+        self.dock_block_for(width)
+            .map_or(0, |block| usize::from(block.height()))
+    }
+
     /// Composer box coordinates shared with the painter. The box is derived
     /// from route and bounded draft rows, never from visible text matching.
     pub fn composer_region(&self, draft: &str) -> Option<(u16, u16, u16, u16)> {
@@ -1356,7 +1554,10 @@ impl NativeView {
         // Upstream child sessions replace the main composer with return-parent UI.
         if self.parent_session { return None; }
         if self.session_route {
-            let body_height = self.session_body_height();
+            // The dock takes its rows out of the shared body budget, exactly
+            // like the composer slot sharing the scrollbox (`index.tsx:1591-1611`).
+            let dock_height = self.painted_dock_height(width.saturating_sub(4));
+            let body_height = self.session_body_height().saturating_sub(dock_height);
             // Shared with the actual ChatComposer renderer; Home's legacy
             // rail remains a separate layout path.
             let layout = crate::native_view_chat::session_composer_layout(
@@ -1369,9 +1570,12 @@ impl NativeView {
             Some((
                 self.tab_reservation.x_offset().saturating_add(2),
                 // The shared body budget includes the header; the composer
-                // starts immediately after its remaining transcript rows.
+                // starts immediately after its remaining transcript rows, and
+                // the dock rows spliced above it push it back down by their
+                // own height.
                 body_height
                     .saturating_sub(composer_height)
+                    .saturating_add(dock_height)
                     .saturating_add(usize::from(self.tab_reservation.y_offset())) as u16,
                 width - 4,
                 composer_height as u16,
@@ -1519,7 +1723,9 @@ impl NativeView {
             return None;
         }
         let (left, top, width, height) = self.composer_region(draft)?;
-        let body_height = self.session_body_height();
+        let body_height = self
+            .session_body_height()
+            .saturating_sub(self.painted_dock_height(width));
         let frame = self
             .box_appearance
             .effective(crate::native_box_style::BoxId::ChatComposer);
@@ -2289,6 +2495,7 @@ impl NativeView {
         self.chat.set_markdown_mode(self.markdown_mode);
         self.context_usage_hit = None;
         self.live_footer_hit = None;
+        self.dock_hit.clear();
         self.ui_regions.clear();
         self.context_usage_styles.clear();
         self.sidebar_span_styles.clear();
@@ -2412,10 +2619,21 @@ impl NativeView {
                     .map(|rows| rows.iter().take(15).count())
                     .unwrap_or(0)
             });
+            // Composer auxiliary dock (`routes/session/composer/index.tsx`).
+            // Its rows share the body budget with the transcript and the
+            // composer, so both renderers below are given the reduced height.
+            let dock = if has_permission {
+                None
+            } else {
+                self.dock_block_for(width.saturating_sub(4))
+            };
+            let dock_height = dock.as_ref().map_or(0, |block| usize::from(block.height()));
             let body_height = if let Some(permission_height) = permission_height {
                 // The shared shell footer is still a non-prompt sibling.
                 height.saturating_sub(1).saturating_sub(permission_height)
-            } else { self.session_body_height() };
+            } else {
+                self.session_body_height().saturating_sub(dock_height)
+            };
             let mut body = if let Some(messages) = messages {
                 let (rows, markdown_spans) = if has_permission {
                     self.chat.render_styled_without_prompt_with_spans_mode(inner_width as usize, body_height,
@@ -2478,6 +2696,67 @@ impl NativeView {
                     *class = crate::native_view_chat::ChatRowClass::Metadata;
                 }
                 if let Some(spans) = self.chat_markdown_spans.get_mut(row) { spans.clear(); }
+            }
+            // Dock rows sit in the slot directly above the composer, exactly
+            // where the composer started before the dock claimed its rows.
+            // Inserting them here (before `padded`) keeps the rail metadata at
+            // `len - 2` and the footer at `len`, and keeps the composer rows
+            // bottom-anchored.
+            if let Some(block) = dock.as_ref() {
+                let insert = body.len().saturating_sub(prompt.height);
+                let dock_padding = (width / 2).min(2);
+                let x_shift = u32::from(self.tab_reservation.x_offset())
+                    .saturating_add(u32::from(dock_padding));
+                let y_shift = u32::from(self.tab_reservation.y_offset());
+                let mut dock_rows = Vec::with_capacity(block.rows.len());
+                for (offset, row) in block.rows.iter().enumerate() {
+                    let row_index = insert.saturating_add(offset);
+                    for span in &row.spans {
+                        let Some(slot) = dock_span_slot(span.style) else { continue; };
+                        let cells = u16::try_from(
+                            crate::native_view_layout::visit_unpadded_cells(
+                                &span.text,
+                                usize::from(u16::MAX),
+                                |_, _| {},
+                            ),
+                        )
+                        .unwrap_or(u16::MAX);
+                        if cells == 0 {
+                            continue;
+                        }
+                        // `context_usage_styles` are absolute and never shifted,
+                        // so the tab reservation is folded in here.
+                        self.context_usage_styles.push((
+                            u16::try_from(x_shift.saturating_add(u32::from(span.x)))
+                                .unwrap_or(u16::MAX),
+                            u16::try_from(y_shift.saturating_add(row_index as u32))
+                                .unwrap_or(u16::MAX),
+                            cells,
+                            slot,
+                        ));
+                    }
+                    dock_rows.push(row.text.clone());
+                }
+                if let Some((start, end)) = self.dock.esc_hit(block.width) {
+                    let cells = end.saturating_sub(start).saturating_add(1);
+                    // The title row is the dock block's second row
+                    // (`paddingTop` then the tab row).
+                    self.dock_hit.push((
+                        u16::try_from(x_shift.saturating_add(u32::from(start)))
+                            .unwrap_or(u16::MAX),
+                        u16::try_from(y_shift.saturating_add(insert as u32 + 1))
+                            .unwrap_or(u16::MAX),
+                        cells,
+                    ));
+                }
+                let class = crate::native_view_chat::ChatRowClass::Metadata;
+                self.chat_row_classes
+                    .splice(insert..insert, std::iter::repeat_n(class, dock_rows.len()));
+                self.chat_text_bounds
+                    .splice(insert..insert, std::iter::repeat_n(None, dock_rows.len()));
+                self.chat_markdown_spans
+                    .splice(insert..insert, std::iter::repeat_n(Vec::new(), dock_rows.len()));
+                body.splice(insert..insert, dock_rows);
             }
             // The scrollbar reserves its two cells out of the transcript rows
             // only; the composer and footer keep the full padded width, as in
@@ -4632,6 +4911,35 @@ fn padded(line: &str, width: u16) -> String {
         fit(line, width.saturating_sub(padding.saturating_mul(2))),
         " ".repeat(padding as usize)
     )
+}
+
+/// Foreground slot for a painted dock span. `DockSurface` is a background
+/// fill, which the native painter does not own in this package, so it maps to
+/// no foreground span. Bold is likewise not published by this channel.
+fn dock_span_slot(style: DockStyle) -> Option<crate::native_theme_runtime::Slot> {
+    use crate::native_theme_runtime::Slot;
+    match style {
+        DockStyle::DockSurface => None,
+        DockStyle::TabActive
+        | DockStyle::HintLabel
+        | DockStyle::TerminalBase
+        | DockStyle::ShellBase
+        | DockStyle::SubagentBase
+        | DockStyle::QueueCount => Some(Slot::Text),
+        DockStyle::TabInactive
+        | DockStyle::Esc
+        | DockStyle::HintShortcut
+        | DockStyle::SubagentStatusMuted
+        | DockStyle::EmptyBody
+        | DockStyle::QueuePreview => Some(Slot::TextMuted),
+        DockStyle::TerminalActive
+        | DockStyle::TerminalCurrent
+        | DockStyle::ShellActive
+        | DockStyle::SubagentActive
+        | DockStyle::SubagentCurrent
+        | DockStyle::SubagentStatusActive => Some(Slot::Primary),
+        DockStyle::Border => Some(Slot::Border),
+    }
 }
 
 /// Scrollbar thumb `(start, len)` from the shared OpenTUI scrollbox model, so
@@ -6913,5 +7221,234 @@ mod live_footer_tests {
             .take(usize::from(cells))
             .collect();
         assert_eq!(painted, "3 subagents", "frame row: {:?}", frame[usize::from(y)]);
+    }
+}
+
+#[cfg(test)]
+mod composer_dock_tests {
+    use super::*;
+    use crate::native_dock::{DockKey, DockKeyOutcome, DockTabId};
+    use serde_json::json;
+
+    const ROOT: &str = "11111111-1111-1111-1111-111111111111";
+    const A: &str = "22222222-2222-2222-2222-222222222222";
+    const B: &str = "33333333-3333-3333-3333-333333333333";
+
+    fn status(children: serde_json::Value) -> crate::native_children::live::Status {
+        let mut status = crate::native_children::live::Status::default();
+        status
+            .apply(ROOT, &json!({ "children": children }))
+            .expect("fixture listing");
+        status
+    }
+
+    fn children() -> serde_json::Value {
+        json!([
+            {
+                "session_id": A,
+                "parent_id": ROOT,
+                "description": "first child",
+                "agent": "explore",
+                "state": "running"
+            },
+            {
+                "session_id": B,
+                "parent_id": ROOT,
+                "description": "second child",
+                "agent": "build",
+                "state": "running"
+            }
+        ])
+    }
+
+    fn view_with(children: serde_json::Value) -> NativeView {
+        let mut view = NativeView::new(120, 40);
+        view.set_session_route(true);
+        view.set_model(Some("fixture-model".into()));
+        view.set_live_children_status(&status(children));
+        view
+    }
+
+    // A closed dock is the pre-dock frame cell-for-cell: it publishes no hit
+    // rectangle and does not move the composer.
+    #[test]
+    fn closed_dock_leaves_session_rows_and_composer_geometry_unchanged() {
+        let mut view = view_with(children());
+        let before = view.render_typed("draft", &[], false, &[]);
+        let composer_before = view.composer_region("draft");
+        view.toggle_dock();
+        assert!(view.dock_open());
+        view.toggle_dock();
+        assert!(!view.dock_open());
+        let after = view.render_typed("draft", &[], false, &[]);
+        assert_eq!(after, before);
+        assert_eq!(view.composer_region("draft"), composer_before);
+        assert!(view.dock_hits().is_empty());
+    }
+
+    // Two family rows add an eight-row block (padding, title, gap, two rows,
+    // gap, hint, padding) directly above the bottom-anchored composer, and the
+    // transcript viewport gives up exactly those rows.
+    #[test]
+    fn open_dock_sits_directly_above_the_composer_and_shrinks_the_transcript() {
+        let mut view = view_with(children());
+        let _ = view.render_typed("", &[], false, &[]);
+        let (_, composer_top_before, _, composer_height_before) =
+            view.composer_region("").expect("composer");
+        let viewport_before = view.chat.transcript_viewport_rows();
+
+        view.toggle_dock();
+        let frame = view.render_typed("", &[], false, &[]);
+        let (_, composer_top, _, composer_height) =
+            view.composer_region("").expect("composer");
+        assert_eq!(composer_top, composer_top_before, "the composer stays bottom-anchored");
+        assert_eq!(composer_height, composer_height_before);
+
+        let dock_height = 8;
+        let dock_top = usize::from(composer_top) - dock_height;
+        assert!(
+            frame[dock_top + 1].contains("Subagents"),
+            "dock title begins on its second row (padding, then tabs): {:?}",
+            frame[dock_top + 1]
+        );
+        assert!(
+            frame[dock_top].trim_start().starts_with('┃'),
+            "every dock row carries its left border: {:?}",
+            frame[dock_top]
+        );
+        assert!(
+            frame[usize::from(composer_top) - 1].trim_start().starts_with('┃'),
+            "the dock row directly above the composer carries its left border: {:?}",
+            frame[usize::from(composer_top) - 1]
+        );
+        assert!(
+            frame[usize::from(composer_top)].trim_start().starts_with('┃'),
+            "the composer is still painted below the dock: {:?}",
+            frame[usize::from(composer_top)]
+        );
+        assert_eq!(
+            viewport_before - view.chat.transcript_viewport_rows(),
+            dock_height,
+            "the transcript viewport gives up exactly the dock rows"
+        );
+    }
+
+    // An empty family paints the upstream literal and invents no row.
+    #[test]
+    fn empty_family_renders_its_empty_body_row_without_inventing_entries() {
+        let mut view = view_with(json!([]));
+        view.toggle_dock();
+        let frame = view.render_typed("", &[], false, &[]);
+        let text = frame.join("\n");
+        assert!(text.contains(" No active subagents"), "{text}");
+        assert!(!text.contains("Running"), "no fabricated status cell: {text}");
+        let (_, composer_top, _, _) = view.composer_region("").expect("composer");
+        // Empty body block: padding, title, gap, the empty line, gap, hint,
+        // padding = seven rows.
+        let dock_top = usize::from(composer_top) - 7;
+        assert!(
+            frame[dock_top + 1].contains("Subagents"),
+            "{:?}",
+            frame[dock_top + 1]
+        );
+        assert!(view.dock_open());
+    }
+
+    // The rail metadata row is still the second-to-last body row and the
+    // footer still follows the body, with the dock spliced above both.
+    #[test]
+    fn rail_metadata_row_stays_on_the_second_to_last_body_row_with_the_dock() {
+        let mut view = view_with(children());
+        view.toggle_dock();
+        let frame = view.render_typed("draft", &[], false, &[]);
+        let (_, top, _, height) = view.composer_region("draft").expect("composer");
+        let metadata_row = usize::from(top) + usize::from(height) - 2;
+        assert_eq!(metadata_row, frame.len() - 4, "body.len() - 2");
+        assert!(
+            frame[metadata_row].trim_start().starts_with('┃'),
+            "rail metadata row: {:?}",
+            frame[metadata_row]
+        );
+        assert!(frame[metadata_row].contains("fixture-model"));
+        assert_eq!(
+            view.chat_row_classes()[metadata_row],
+            crate::native_view_chat::ChatRowClass::Metadata
+        );
+    }
+
+    // The footer live label is the upstream `session.child.first` trigger: it
+    // opens the Subagents tab, then closes, and a child session always closes.
+    #[test]
+    fn footer_live_label_toggles_the_dock_and_parent_sessions_close() {
+        let mut view = view_with(children());
+        let _ = view.render_typed("draft", &[], false, &[]);
+        let (x, y, _) = view.live_footer_hit().expect("live label");
+        assert!(view.live_footer_action(x, y).is_some());
+
+        view.toggle_dock();
+        assert!(view.dock_open());
+        assert_eq!(view.dock_active_tab(), Some(DockTabId::Subagents));
+
+        view.toggle_dock();
+        assert!(!view.dock_open());
+
+        view.toggle_dock();
+        assert!(view.dock_open());
+        view.set_parent_session(true);
+        assert!(!view.dock_open(), "a parent session closes the dock");
+
+        view.set_parent_session(false);
+        view.toggle_dock();
+        assert!(view.dock_open());
+        view.set_parent_session(true);
+        assert!(!view.dock_open());
+    }
+
+    // The dock publishes one bounded rectangle (the right-aligned `esc`), it
+    // never overlaps the send or usage targets, and escape closes.
+    #[test]
+    fn dock_hits_are_disjoint_and_escape_closes() {
+        let mut view = view_with(children());
+        view.toggle_dock();
+        let frame = view.render_typed("draft", &[], false, &[]);
+        let hits = view.dock_hits().to_vec();
+        assert_eq!(hits.len(), 1, "only the esc affordance is clickable");
+        let (x, y, cells) = hits[0];
+        // The right-aligned `esc` is a positioned span, not part of the row's
+        // left-aligned text, so its paint proof is the foreground-span channel.
+        let painted = view.context_usage_styles().iter().any(|(sx, sy, scells, slot)| {
+            *sy == y
+                && *sx == x
+                && *scells == cells
+                && *slot == crate::native_theme_runtime::Slot::TextMuted
+        });
+        assert!(painted, "the esc hit must cover a painted muted span");
+        assert!(
+            frame[usize::from(y)].contains("Subagents"),
+            "the esc sits on the title row: {:?}",
+            frame[usize::from(y)]
+        );
+
+        let (send_x, send_y, send_width) = view.send_button_region("draft").expect("send");
+        let overlaps_send = y == send_y
+            && x < send_x.saturating_add(send_width)
+            && send_x < x.saturating_add(cells);
+        assert!(!overlaps_send, "dock hit overlaps the send button");
+        if let Some((usage_x, usage_y, usage_width)) = view.context_usage_region() {
+            let overlaps_usage = y == usage_y
+                && x < usage_x.saturating_add(usage_width)
+                && usage_x < x.saturating_add(cells);
+            assert!(!overlaps_usage, "dock hit overlaps the context usage label");
+        }
+
+        assert!(view.dock_click(x, y));
+        assert!(!view.dock_open());
+        assert!(view.dock_hits().is_empty());
+
+        view.toggle_dock();
+        let _ = view.render_typed("draft", &[], false, &[]);
+        assert_eq!(view.dock_key(DockKey::Escape), DockKeyOutcome::Closed);
+        assert!(!view.dock_open());
+        assert!(view.dock_hits().is_empty());
     }
 }

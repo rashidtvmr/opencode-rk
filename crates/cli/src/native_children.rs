@@ -2171,6 +2171,47 @@ mod composer_subagents {
 pub mod live {
     use serde_json::Value;
 
+    /// One retained `/children` row. Unlike the footer count this keeps the
+    /// structural facts (parent, agent, description, state) the composer dock
+    /// needs; nothing is synthesized when the server did not report a field.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct ChildRow {
+        pub session_id: String,
+        pub parent_id: Option<String>,
+        pub agent: Option<String>,
+        pub description: Option<String>,
+        pub state: String,
+    }
+
+    impl ChildRow {
+        fn from_value(row: &Value) -> Result<Self, String> {
+            let session_id = row["session_id"].as_str().ok_or("child id missing")?;
+            session_id
+                .parse::<opencode_rk_contracts::SessionId>()
+                .map_err(|_| "invalid child id".to_owned())?;
+            let string = |key: &str| {
+                row[key]
+                    .as_str()
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned)
+            };
+            Ok(Self {
+                session_id: session_id.to_owned(),
+                parent_id: string("parent_id"),
+                agent: string("agent"),
+                description: string("description"),
+                // Missing state is reported as "unknown", exactly the literal
+                // the server uses when the child state is unavailable.
+                state: string("state").unwrap_or_else(|| "unknown".to_owned()),
+            })
+        }
+
+        #[must_use]
+        pub fn is_running(&self) -> bool {
+            self.state == "running"
+        }
+    }
+
     /// Last observed listing. An unavailable or malformed listing is cleared
     /// rather than left stale, so the painted count is always observed data.
     #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -2178,34 +2219,39 @@ pub mod live {
         session: Option<String>,
         running: usize,
         first: Option<String>,
+        rows: Vec<ChildRow>,
     }
 
     impl Status {
         /// Bind a listing to `session`. Returns `Ok(true)` when the painted
         /// facts changed.
         pub fn apply(&mut self, session: &str, value: &Value) -> Result<bool, String> {
-            let rows = value["children"]
+            let values = value["children"]
                 .as_array()
                 .ok_or("invalid child listing")?;
-            if rows.len() > 128 {
+            if values.len() > 128 {
                 return Err("child listing exceeds limit".into());
             }
+            let mut rows = Vec::with_capacity(values.len());
             let mut running = 0usize;
-            let mut first: Option<&str> = None;
-            for row in rows {
-                let id = row["session_id"].as_str().ok_or("child id missing")?;
-                id.parse::<opencode_rk_contracts::SessionId>()
-                    .map_err(|_| "invalid child id".to_owned())?;
-                if id == session || row["state"].as_str() != Some("running") {
+            let mut first: Option<String> = None;
+            for value in values {
+                let row = ChildRow::from_value(value)?;
+                if row.session_id == session || !row.is_running() {
+                    rows.push(row);
                     continue;
                 }
                 running += 1;
-                first.get_or_insert(id);
+                if first.is_none() {
+                    first = Some(row.session_id.clone());
+                }
+                rows.push(row);
             }
             let next = Self {
                 session: Some(session.to_owned()),
                 running,
-                first: first.map(str::to_owned),
+                first,
+                rows,
             };
             let changed = *self != next;
             *self = next;
@@ -2228,6 +2274,18 @@ pub mod live {
         #[must_use]
         pub fn first(&self) -> Option<&str> {
             self.first.as_deref()
+        }
+
+        /// Session the listing is bound to, if any.
+        #[must_use]
+        pub fn session(&self) -> Option<&str> {
+            self.session.as_deref()
+        }
+
+        /// Retained listing rows in server order (running and inactive).
+        #[must_use]
+        pub fn rows(&self) -> &[ChildRow] {
+            &self.rows
         }
     }
 
