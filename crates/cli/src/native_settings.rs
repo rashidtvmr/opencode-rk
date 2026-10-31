@@ -1,5 +1,12 @@
 #![forbid(unsafe_code)]
 //! Native settings surface. Only settings with a live producer/consumer are shown.
+//!
+//! Parity evidence (pinned upstream `450e7b92412c780a7b5a75226bb8d49aaca24e22`):
+//! search weighting/title-first ranking and the 0.7 threshold mirror
+//! `component/dialog-config.tsx:410-458`; numeric step/min/max and the save
+//! lock mirror `dialog-config.tsx:228-235,289-297,321-330,427-447`; the
+//! experiments empty view and toggle lock mirror
+//! `component/dialog-experiments.tsx:30-96`.
 
 use crate::native_navigation::TabOrientation;
 
@@ -30,6 +37,9 @@ pub struct SettingsDialog {
     sidebar_hidden: bool,
     tabs: TabOrientation,
     query: String,
+    /// Mirrors `saving()` in `dialog-config.tsx:427-447`: while a config
+    /// update is in flight every further value change is ignored.
+    saving: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -48,6 +58,7 @@ impl Default for SettingsDialog {
             sidebar_hidden: false,
             tabs: TabOrientation::Horizontal,
             query: String::new(),
+            saving: false,
         }
     }
 }
@@ -64,6 +75,7 @@ impl SettingsDialog {
         self.sidebar_hidden = sidebar_hidden;
         self.tabs = tabs;
         self.query.clear();
+        self.saving = false;
     }
 
     pub fn close(&mut self) {
@@ -264,7 +276,8 @@ impl SettingsDialog {
     }
 
     fn cycle(&self, _direction: i8) -> Option<SettingsAction> {
-        if !self.open {
+        // `if (saving()) return` (`dialog-config.tsx:427-428`).
+        if !self.open || self.saving {
             return None;
         }
         let visible = self.visible_indices();
@@ -287,11 +300,28 @@ impl SettingsDialog {
         self.tabs = value;
     }
 
-    pub fn activate(&self) -> Option<SettingsAction> {
-        self.cycle(1)
+    /// `setSaving(true)` before the config write; concurrent changes are
+    /// ignored until [`Self::finish_save`] (`dialog-config.tsx:427-447`).
+    #[must_use]
+    pub const fn is_saving(&self) -> bool {
+        self.saving
     }
 
-    pub fn hit_row(
+    pub fn begin_save(&mut self) -> bool {
+        if !self.open || self.saving {
+            return false;
+        }
+        self.saving = true;
+        true
+    }
+
+    pub fn finish_save(&mut self) {
+        self.saving = false;
+    }
+
+    pub fn activate(&self) -> Option<SettingsAction> {
+        self.cycle(1)
+    }    pub fn hit_row(
         &self,
         x: u16,
         y: usize,
@@ -364,6 +394,119 @@ impl SettingsDialog {
             .take(height)
             .map(|line| crate::native_view_layout::fit(&line, width))
             .collect()
+    }
+}
+
+/// Numeric settings bounds declared by `dialog-config.tsx:228-235,289-297,321-330`.
+/// A numeric setting steps by `step` and saturates at `min`/`max`; there is no
+/// wraparound (only enumerated `values` wrap).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NumericLimit {
+    pub step: f64,
+    pub min: f64,
+    pub max: f64,
+}
+
+/// Scroll speed: `step: 0.25, min: 0.25, max: 10`
+/// (`dialog-config.tsx:228-236`).
+pub const SCROLL_SPEED: NumericLimit = NumericLimit {
+    step: 0.25,
+    min: 0.25,
+    max: 10.0,
+};
+
+/// Leader timeout (ms): `step: 250, min: 250, max: 10000`
+/// (`dialog-config.tsx:289-297`).
+pub const LEADER_TIMEOUT: NumericLimit = NumericLimit {
+    step: 250.0,
+    min: 250.0,
+    max: 10_000.0,
+};
+
+/// Alert volume: `step: 0.1, min: 0, max: 1`
+/// (`dialog-config.tsx:321-330`).
+pub const ALERT_VOLUME: NumericLimit = NumericLimit {
+    step: 0.1,
+    min: 0.0,
+    max: 1.0,
+};
+
+impl NumericLimit {
+    /// `Math.min(max, Math.max(min, current + direction * step))`
+    /// (`dialog-config.tsx:428-435`). A malformed range leaves the value
+    /// untouched instead of panicking.
+    #[must_use]
+    pub fn next(self, current: f64, direction: i8) -> f64 {
+        if self.min > self.max || !current.is_finite() {
+            return current;
+        }
+        let next = current + f64::from(direction) * self.step;
+        next.max(self.min).min(self.max)
+    }
+}
+
+/// Empty-view copy for the experiments picker
+/// (`dialog-experiments.tsx:68-75`).
+pub const EXPERIMENTS_EMPTY_MESSAGE: &str = "No experiments available";
+
+/// Experiments picker state (`dialog-experiments.tsx:30-96`): the filter row
+/// is only rendered when experiments exist, the empty view replaces the list
+/// otherwise, and toggling is locked while a config write is in flight.
+#[derive(Clone, Debug, Default)]
+pub struct ExperimentsDialog {
+    experiments: usize,
+    saving: bool,
+}
+
+impl ExperimentsDialog {
+    #[must_use]
+    pub const fn new(experiments: usize) -> Self {
+        Self {
+            experiments,
+            saving: false,
+        }
+    }
+
+    #[must_use]
+    pub const fn count(&self) -> usize {
+        self.experiments
+    }
+
+    /// `renderFilter={experiments.length > 0}`
+    /// (`dialog-experiments.tsx:68`).
+    #[must_use]
+    pub const fn render_filter(&self) -> bool {
+        self.experiments > 0
+    }
+
+    /// `emptyView` is only shown once the list is empty
+    /// (`dialog-experiments.tsx:71-75`).
+    #[must_use]
+    pub const fn empty_message(&self) -> Option<&'static str> {
+        if self.experiments == 0 {
+            Some(EXPERIMENTS_EMPTY_MESSAGE)
+        } else {
+            None
+        }
+    }
+
+    /// `if (saving()) return; if (!experiment) return`
+    /// (`dialog-experiments.tsx:50-53`).
+    pub fn begin_toggle(&mut self) -> bool {
+        if self.saving || self.experiments == 0 {
+            return false;
+        }
+        self.saving = true;
+        true
+    }
+
+    pub fn finish_toggle(&mut self) {
+        self.saving = false;
+    }
+
+    #[must_use]
+    pub const fn is_saving(&self) -> bool {
+        self.saving
     }
 }
 
@@ -614,5 +757,51 @@ mod tests {
                 }
             }
         }
+    }
+
+    // DIALOG-16: numeric settings clamp to their declared min/max instead of
+    // wrapping, and a value change is ignored while a save is in flight
+    // (dialog-config.tsx:228-235,289-297,321-330,427-447).
+    #[test]
+    fn numeric_limits_clamp_and_saves_lock_further_changes() {
+        assert_eq!(SCROLL_SPEED.next(3.0, 1), 3.25);
+        assert_eq!(SCROLL_SPEED.next(10.0, 1), 10.0);
+        assert_eq!(SCROLL_SPEED.next(0.25, -1), 0.25);
+        assert_eq!(LEADER_TIMEOUT.next(2_000.0, 1), 2_250.0);
+        assert_eq!(LEADER_TIMEOUT.next(10_000.0, 1), 10_000.0);
+        assert_eq!(LEADER_TIMEOUT.next(250.0, -1), 250.0);
+        assert!((ALERT_VOLUME.next(0.4, 1) - 0.5).abs() < 1e-9);
+        assert_eq!(ALERT_VOLUME.next(1.0, 1), 1.0);
+        assert_eq!(ALERT_VOLUME.next(0.0, -1), 0.0);
+        let malformed = NumericLimit { step: 1.0, min: 5.0, max: 1.0 };
+        assert_eq!(malformed.next(3.0, 1), 3.0);
+
+        let mut dialog = open();
+        assert!(dialog.begin_save());
+        assert!(dialog.is_saving());
+        assert_eq!(dialog.right(), None);
+        assert_eq!(dialog.activate(), None);
+        dialog.finish_save();
+        assert_eq!(
+            dialog.right(),
+            Some(SettingsAction::ApplySidebar(true))
+        );
+    }
+
+    // DIALOG-16: the experiments picker hides its filter when empty and shows
+    // the empty view instead; toggles are save-locked
+    // (dialog-experiments.tsx:50-76).
+    #[test]
+    fn experiments_empty_state_and_save_lock_match() {
+        let empty = ExperimentsDialog::new(0);
+        assert!(!empty.render_filter());
+        assert_eq!(empty.empty_message(), Some("No experiments available"));
+        let mut populated = ExperimentsDialog::new(2);
+        assert!(populated.render_filter());
+        assert_eq!(populated.empty_message(), None);
+        assert!(populated.begin_toggle());
+        assert!(!populated.begin_toggle(), "a save in flight ignores toggles");
+        populated.finish_toggle();
+        assert!(populated.begin_toggle());
     }
 }

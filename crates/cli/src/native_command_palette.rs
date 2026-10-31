@@ -6,11 +6,25 @@
 //! caller must dispatch an intent through the existing native TUI path; in
 //! particular `/sessions`, `/models`, `/connect`, and `/new` keep their real
 //! fetch/setup/session-create semantics and acknowledgements.
+//!
+//! DIALOG-11 evidence (pinned upstream
+//! `450e7b92412c780a7b5a75226bb8d49aaca24e22`,
+//! `packages/tui/src/component/command-palette.tsx:7-74`): suggested rows are
+//! duplicated only while the filter is empty, filtering uses
+//! `title*2 + category + searchText`, the threshold is `0.7`
+//! (`command-palette.tsx:71`), and footer hints document only bindings this
+//! native component actually handles — no shortcut label is invented when the
+//! native client has no matching binding.
+
 
 use crate::native_view_layout::fit;
 
 pub const MAX_QUERY_CHARS: usize = 256;
 const MAX_ENTRIES: usize = 16;
+/// `filterThreshold={0.7}` on the pinned palette
+/// (`command-palette.tsx:71`). The threshold is applied to the same weighted
+/// score as `DialogSelect` (title ×2, category + searchText ×1).
+pub const FILTER_THRESHOLD: f32 = 0.7;
 
 #[cfg(test)]
 mod filtered_command_regressions {
@@ -270,12 +284,13 @@ impl CommandPalette {
         let mut filtered: Vec<_> = regular
             .into_iter()
             .filter_map(|item| {
+                let quality = search_quality(&needle, &item)?;
+                if quality < FILTER_THRESHOLD {
+                    return None;
+                }
                 let title = fuzzy_score(&needle, item.title);
                 let category = fuzzy_score(&needle, item.category);
                 let command = fuzzy_score(&needle, item.command_name);
-                if title.is_none() && category.is_none() && command.is_none() {
-                    return None;
-                }
                 Some((title.unwrap_or(0) * 2 + category.unwrap_or(0) + command.unwrap_or(0), item))
             })
             .collect();
@@ -415,8 +430,52 @@ impl CommandPalette {
     }
 }
 
-fn fuzzy_score(needle: &str, value: &str) -> Option<usize> {
-    let haystack: Vec<_> = value.to_lowercase().chars().collect();
+/// Weighted fuzzy quality used for the 0.7 palette threshold. Title weighs
+/// twice, category and the command id (`searchText`) once each, mirroring
+/// `DialogSelect`'s `scoreFn` (`dialog-select.tsx:220-227`). `None` means no
+/// field matched at all.
+#[must_use]
+pub fn search_quality(query: &str, item: &PaletteEntry) -> Option<f32> {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return Some(1.0);
+    }
+    let query: Vec<char> = needle.chars().collect();
+    let title = character_quality(&query, item.title);
+    let category = character_quality(&query, item.category);
+    let search = character_quality(&query, item.command_name);
+    if title.is_none() && category.is_none() && search.is_none() {
+        return None;
+    }
+    Some(title.unwrap_or(0.0) * 2.0 + category.unwrap_or(0.0) + search.unwrap_or(0.0))
+}
+
+/// Greedy case-insensitive subsequence quality in `0.0..=1.0`; adjacent and
+/// word-boundary characters score higher.
+fn character_quality(query: &[char], value: &str) -> Option<f32> {
+    if query.is_empty() {
+        return Some(1.0);
+    }
+    let haystack: Vec<char> = value.to_lowercase().chars().collect();
+    let mut cursor = 0usize;
+    let mut previous: Option<usize> = None;
+    let mut score = 0.0f32;
+    for &needle in query {
+        let position = haystack.get(cursor..)?.iter().position(|c| *c == needle)? + cursor;
+        score += 1.0;
+        if position == 0 || !haystack[position - 1].is_alphanumeric() {
+            score += 0.5;
+        }
+        if previous.is_some_and(|index| index + 1 == position) {
+            score += 0.5;
+        }
+        previous = Some(position);
+        cursor = position + 1;
+    }
+    Some((score / (query.len() as f32 * 2.0)).clamp(0.0, 1.0))
+}
+
+fn fuzzy_score(needle: &str, value: &str) -> Option<usize> {    let haystack: Vec<_> = value.to_lowercase().chars().collect();
     let query: Vec<_> = needle.to_lowercase().chars().collect();
     let first = *query.first()?;
     haystack
@@ -527,8 +586,7 @@ mod tests {
     }
 
     #[test]
-    fn styled_rows_use_insets_and_keep_selected_rows_bounded() {
-        let mut palette = CommandPalette::default();
+    fn styled_rows_use_insets_and_keep_selected_rows_bounded() {        let mut palette = CommandPalette::default();
         palette.open(true);
 
         let rows = palette.render_styled(12, 30);
@@ -550,5 +608,54 @@ mod tests {
 
         let narrow = palette.render_styled(1, 7);
         assert!(narrow.iter().all(|line| line.text.chars().count() <= 1));
+    }
+
+    // DIALOG-11: suggestions are duplicated only before filtering, the 0.7
+    // threshold gates weak matches, and no shortcut hint is invented for a
+    // command the native client cannot trigger directly
+    // (command-palette.tsx:48-71).
+    #[test]
+    fn filter_threshold_and_hint_coherence_match() {
+        assert_eq!(FILTER_THRESHOLD, 0.7);
+        let weak = PaletteEntry {
+            id: "weak",
+            title: "Zoo",
+            category: "Zoo",
+            command_name: "mode",
+            route: "/weak",
+            key_label: None,
+            action: PaletteAction::Route("/weak"),
+        };
+        assert!(search_quality("e", &weak).expect("searchText matches") < FILTER_THRESHOLD);
+        let strong = PaletteEntry { title: "Echo", ..weak };
+        assert!(search_quality("e", &strong).expect("title matches") >= FILTER_THRESHOLD);
+
+        let mut palette = CommandPalette::default();
+        palette.open(true);
+        let all = palette.visible();
+        let suggested: Vec<_> = all
+            .iter()
+            .filter(|row| row.id.starts_with("suggested:"))
+            .collect();
+        assert!(!suggested.is_empty());
+        assert!(suggested.iter().all(|row| all
+            .iter()
+            .any(|regular| !regular.id.starts_with("suggested:")
+                && regular.command_name == row.command_name)));
+        palette.push_query('s');
+        let filtered = palette.visible();
+        assert!(!filtered.is_empty());
+        assert!(filtered
+            .iter()
+            .all(|row| !row.id.starts_with("suggested:")));
+        assert!(filtered
+            .iter()
+            .all(|row| search_quality("s", row).is_some_and(|q| q >= FILTER_THRESHOLD)));
+        assert!(filtered.iter().all(|row| row.key_label.is_none()));
+        let rendered = palette.render(80, 20);
+        assert_eq!(
+            rendered.last().map(|line| line.trim().to_owned()),
+            Some("↑/↓ move · Enter select · Esc close".to_owned())
+        );
     }
 }
