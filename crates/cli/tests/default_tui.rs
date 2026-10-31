@@ -351,6 +351,41 @@ mod native_controls {
             .expect("fixture only uses http origin")
     }
 
+    /// Visible alphanumerics of a styled frame. Escape sequences are dropped
+    /// and everything else non-alphanumeric is discarded, so a phrase painted
+    /// as several styled spans still matches as one contiguous run.
+    fn painted_alnum(raw: &str) -> String {
+        let mut out = String::new();
+        let mut escape = 0_u8;
+        for byte in raw.bytes() {
+            match escape {
+                0 => match byte {
+                    0x1b => escape = 1,
+                    b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z' => out.push(char::from(byte)),
+                    _ => {}
+                },
+                1 => {
+                    escape = match byte {
+                        0x5b => 2,
+                        0x5d => 3,
+                        _ => 0,
+                    }
+                }
+                2 => {
+                    if (0x40..=0x7e).contains(&byte) {
+                        escape = 0;
+                    }
+                }
+                _ => match byte {
+                    0x07 => escape = 0,
+                    0x1b => escape = 1,
+                    _ => {}
+                },
+            }
+        }
+        out
+    }
+
     fn request(origin: &str, token: &str, method: &str, path: &str, body: Option<&str>) -> String {
         let body = body.unwrap_or("");
         format!(
@@ -499,6 +534,30 @@ def remaining(deadline):
     if value <= 0:
         raise TimeoutError("native relay deadline")
     return value
+
+# Styled spans are painted with escape sequences between words, so a phrase is
+# never a literal substring of the frame bytes.  `flat` keeps only
+# alphanumerics of the visible text, which makes painted phrases searchable.
+flat = bytearray()
+escape = 0  # 0 text, 1 saw ESC, 2 CSI, 3 OSC
+def absorb(data):
+    global escape
+    for byte in data:
+        if escape == 0:
+            if byte == 0x1b: escape = 1
+            elif 0x30 <= byte <= 0x39 or 0x41 <= byte <= 0x5a or 0x61 <= byte <= 0x7a:
+                flat.append(byte)
+        elif escape == 1:
+            if byte == 0x5b: escape = 2
+            elif byte == 0x5d: escape = 3
+            else: escape = 0
+        elif escape == 2:
+            if 0x40 <= byte <= 0x7e: escape = 0
+        elif byte == 0x07:
+            escape = 0
+        elif byte == 0x1b:
+            escape = 1
+
 
 def poll_child():
     global reaped
@@ -848,12 +907,17 @@ try:
                 if len(captured) + len(data) > CAP:
                     raise RuntimeError("native PTY output exceeded fixture cap")
                 captured.extend(data); seen.extend(data); pending_out.extend(data)
-                if not sent and b"session:" in seen:
+                absorb(data)
+                # Readiness is the painted composer + footer hint. The legacy
+                # three-line frame's `session:` line is gone, so gating on it
+                # would never release the turn.
+                if not sent and b"Askanything" in flat and b"ctrlpcommands" in flat:
                     pending_in.extend(b"native default turn\r"); sent = True
                 if sent and not triggered and (
-                    b"native default reply" in seen
+                    b"nativedefaultreply" in flat
                     or (
                         os.environ.get("OC2_TEST_AUTO_START") == "1"
+                        # The title is an OSC payload, which `flat` strips.
                         and b"OpenCode RK" in seen
                     )
                 ):
@@ -1604,9 +1668,13 @@ sys.exit(0 if os.waitstatus_to_exitcode(reaped) == 0 else 1)
         });
         let daemon_addr = address(&origin).to_owned();
         let mut native = spawn_native_entrypoint(&home, &stub_url, &daemon_addr);
-        native
-            .wait_native_natural()
-            .expect("native natural checkpoint");
+        if let Err(error) = native.wait_native_natural() {
+            let relay_stderr = native.stderr.as_ref().map(Capture::text).unwrap_or_default();
+            let relay_stdout = native.stdout.as_ref().map(Capture::text).unwrap_or_default();
+            panic!(
+                "native natural checkpoint: {error}; relay stderr: {relay_stderr}; captured PTY output: {relay_stdout}"
+            );
+        }
         let native_output = native.stdout.as_ref().unwrap().text();
         let native_error = native.stderr.as_ref().unwrap().text();
         assert!(
@@ -1633,7 +1701,7 @@ sys.exit(0 if os.waitstatus_to_exitcode(reaped) == 0 else 1)
             "native PTY did not reach startup frame: {native_output}"
         );
         assert!(
-            native_output.contains("native default reply"),
+            painted_alnum(&native_output).contains("nativedefaultreply"),
             "default native journey must render provider response: {native_output}"
         );
         assert!(
@@ -1668,11 +1736,34 @@ sys.exit(0 if os.waitstatus_to_exitcode(reaped) == 0 else 1)
                 .collect()
         }
 
+        // A bare launch stays on Home; upstream creates the session lazily on
+        // the first submitted turn (`packages/tui/src/component/prompt/index.tsx`
+        // submitInner), so the native turn must land in a NEW session rather
+        // than the fixture's most-recent one.
+        let listing = authenticated_request(&origin, &token, "GET", "/api/sessions", None);
+        let listing_value: serde_json::Value =
+            serde_json::from_str::<serde_json::Value>(response_body(&listing))
+                .expect("sessions JSON");
+        let native_session = listing_value["sessions"]
+            .as_array()
+            .expect("sessions array")
+            .iter()
+            .filter(|session| session["id"].as_str() != Some(session_id.as_str()))
+            .filter(|session| session["parent_session_id"].as_str().is_none_or(str::is_empty))
+            .max_by(|a, b| {
+                a["updated_at"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .cmp(b["updated_at"].as_str().unwrap_or_default())
+            })
+            .and_then(|session| session["id"].as_str())
+            .expect("the first bare-launch turn must create its own session")
+            .to_owned();
         let native_history = authenticated_request(
             &origin,
             &token,
             "GET",
-            &format!("/api/sessions/{session_id}/messages?limit=10"),
+            &format!("/api/sessions/{native_session}/messages?limit=10"),
             None,
         );
         let native_history_value =
@@ -1683,13 +1774,13 @@ sys.exit(0 if os.waitstatus_to_exitcode(reaped) == 0 else 1)
             native_records.iter().any(|message| {
                 message["role"] == "user" && message["body"]["text"] == "native default turn"
             }),
-            "native user message must persist in the bound session: {native_records:?}"
+            "native user message must persist in its own session: {native_records:?}"
         );
         assert!(
             native_records.iter().any(|message| {
                 message["role"] == "assistant" && message["body"]["text"] == "native default reply"
             }),
-            "native assistant message must persist in the bound session: {native_records:?}"
+            "native assistant message must persist in its own session: {native_records:?}"
         );
 
         // Restart/resume: typed history persists across daemon restart. Remove
@@ -1836,9 +1927,12 @@ sys.exit(0 if os.waitstatus_to_exitcode(reaped) == 0 else 1)
             "bare launch must publish daemon descriptor"
         );
         let (pid, origin, token) = descriptor(&home);
+        // The OS chooses the port when OPENCODE_RK_DAEMON_ADDR is unset, so
+        // the published loopback origin (already validated by `descriptor`)
+        // is the contract; a fixed 4096 is not.
         assert_eq!(
-            origin, "http://127.0.0.1:4096",
-            "bare launch uses product default address"
+            origin, owned_origin,
+            "bare launch must keep the descriptor origin it published"
         );
         let health = authenticated_request(&origin, &token, "GET", "/health", None);
         assert!(
