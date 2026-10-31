@@ -86,6 +86,14 @@
 //!    preservation on ACK, and the `PageState` ack. `Chat` stays the default
 //!    and `close()` target and now carries no static route (home page), so
 //!    `from_route("/sessions")` is unambiguous.
+//! 5. v5 (pages-v5, P05 home route): additive [`HOME_PAGE`] / [`Page::is_home`]
+//!    and [`PageState::home_shell`], which resolve the routeless home page to
+//!    the pinned `routes/home.tsx` geometry in [`crate::native_home`]. The
+//!    upstream home route has no path: `packages/tui/src/context/route.tsx:34`
+//!    makes `{ type: "home" }` the default, and
+//!    `packages/tui/src/app.tsx:1402-1443` renders `<Home />` in the main
+//!    column. No page row list is fabricated for home and no existing render
+//!    output changes.
 
 /// Maximum rows retained after `set_rows` (first 512 kept, deterministically).
 pub const MAX_ROWS: usize = 512;
@@ -97,6 +105,11 @@ pub const MAX_ID_BYTES: usize = 256;
 pub const MAX_QUERY_BYTES: usize = 512;
 /// Default frontend theme marker; matches `native_palette::Theme` defaults.
 pub const DEFAULT_THEME: &str = "dark";
+
+/// The routeless home page. `packages/tui/src/context/route.tsx:34` makes
+/// `{ type: "home" }` the default route, so the home route has no static path
+/// and is the shell's default/close target.
+pub const HOME_PAGE: Page = Page::Chat;
 
 /// Theme markers the existing surfaces actually support: the
 /// `native_palette::Theme::parse` set (`dark`/`light`/`nocolor`) plus the
@@ -209,6 +222,13 @@ impl Page {
             Page::Memory => "Memory",
             Page::Compaction => "Compaction",
         }
+    }
+
+    /// Whether this page is the home route (`routes/home.tsx`): the routeless
+    /// default page.
+    #[must_use]
+    pub const fn is_home(self) -> bool {
+        matches!(self, Self::Chat)
     }
 
     /// Selection lists give typing to their search field, never the composer.
@@ -657,6 +677,29 @@ impl PageState {
     #[must_use]
     pub fn page(&self) -> Page {
         self.current
+    }
+
+    /// Whether the shell currently shows the home route.
+    #[must_use]
+    pub fn is_home(&self) -> bool {
+        self.current.is_home()
+    }
+
+    /// Home route geometry for the main column, or `None` on any page that
+    /// replaced it. Delegates to [`crate::native_home::layout`], the pinned
+    /// `packages/tui/src/routes/home.tsx:83-105` model (logo block, prompt
+    /// placement, footer band); the caller owns the update-notification and
+    /// prompt row counts.
+    #[must_use]
+    pub fn home_shell(
+        &self,
+        cols: u16,
+        rows: u16,
+        inputs: crate::native_home::HomeInputs,
+    ) -> Option<crate::native_home::HomeLayout> {
+        self.current
+            .is_home()
+            .then(|| crate::native_home::layout(cols, rows, inputs))
     }
 
     /// The stored frontend theme marker (no persistence from here).
@@ -1721,5 +1764,41 @@ mod tests {
             }
         ));
         assert!(state.pending().is_none());
+    }
+
+    // ── v5 (P05 home route / page shell) ────────────────────────────────
+
+    #[test]
+    fn lay18_home_page_shell_is_the_routeless_default() {
+        // Home is the default, routeless page (`context/route.tsx:34`).
+        let mut state = PageState::new();
+        assert_eq!(state.page(), HOME_PAGE);
+        assert_eq!(HOME_PAGE, Page::Chat);
+        assert!(state.is_home());
+        assert!(Page::Chat.is_home());
+        assert!(!Page::Sessions.is_home());
+        assert_eq!(HOME_PAGE.route(), None);
+        assert_eq!(Page::from_route("/"), None, "home has no static path");
+        assert!(!HOME_PAGE.accepts_search(), "home has no row-list search field");
+
+        // The shell resolves the pinned routes/home.tsx geometry for the main
+        // column (80x24 -> 75-cell prompt, 3-row footer band).
+        let inputs = crate::native_home::HomeInputs { prompt_rows: 3, notification_rows: 0 };
+        let home = state.home_shell(80, 24, inputs).expect("home shell");
+        assert_eq!(home.prompt_width, crate::native_home::PROMPT_MAX_WIDTH);
+        assert_eq!(home.footer_rows, 3);
+
+        // Any other page replaces the home shell...
+        state.open(Page::Sessions);
+        assert!(!state.is_home());
+        assert!(state
+            .home_shell(80, 24, crate::native_home::HomeInputs::default())
+            .is_none());
+        // ...and closing (the documented home target) restores it.
+        state.close();
+        assert!(state.is_home());
+        assert!(state
+            .home_shell(80, 24, crate::native_home::HomeInputs::default())
+            .is_some());
     }
 }
