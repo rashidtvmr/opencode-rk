@@ -582,6 +582,32 @@ pub enum ChatRowClass {
     ToolResult,
     /// Errored tool result header or output row.
     ToolError,
+    /// Agent/model/location switch notice body, muted
+    /// (`packages/tui/src/routes/session/index.tsx:2094`, `:2097-2101`).
+    SwitchNotice,
+    /// Location-switched notice, whose directory is painted in
+    /// `Theme.text.feedback.info.base` (`index.tsx:2080-2081`), and the
+    /// default synthetic child-completion color (`index.tsx:2128-2133`).
+    NoticeInfo,
+    /// Failed child-completion notice, `Theme.text.feedback.error.base`
+    /// (`index.tsx:2129`).
+    NoticeError,
+    /// Cancelled child-completion notice, `Theme.text.feedback.warning.base`
+    /// (`index.tsx:2130`).
+    NoticeWarning,
+    /// `◇ Compaction queued` divider: muted label and glyph between
+    /// `Theme.border.base` rules (`index.tsx:2239-2252`).
+    CompactionQueued,
+    /// Queued-prompt dock rows: `Theme.border.base` left rail over
+    /// `Theme.background.raised.base` (`index.tsx:2489-2512`).
+    QueueDock,
+    /// Revert card rows: `Theme.background.raised.base` over a
+    /// `Theme.background.raised.base` rail (`index.tsx:2280-2322`).
+    RevertCard,
+    /// One option row of a session select (message actions
+    /// `routes/session/dialog-message.tsx:29-90`, pending steer
+    /// `routes/session/index.tsx:2403-2406`).
+    MenuOption,
     /// Transcript header (workspace / busy / scroll suffix).
     Header,
     /// Padding row keeping transcript content bottom-anchored.
@@ -1618,6 +1644,443 @@ fn rebase_part_spans(
     }
 }
 
+// ── native_markdown_flow block layout ────────────────────────────────
+//
+// Upstream renders assistant prose through a single Markdown renderable with
+// `internalBlockMode="top-level"`, grid tables and `conceal={mode ===
+// "rendered"}` (`packages/tui/src/routes/session/message-parts.tsx:183-196`).
+// The block model lives in [`crate::native_markdown_flow`]; this section is
+// the transcript-side consumer:
+//
+// * every non-user text part is tokenized by that flow, so block identity is
+//   the same one upstream reconciles (`Markdown.ts:1995-2085`);
+// * paragraph and fenced-code blocks keep this module's pinned row geometry
+//   (fence rows, eight-column code tabs, lossless cluster escapes, explicit
+//   overflow markers) because those rows are already covered by frozen
+//   regression tests;
+// * headings, lists, blockquotes, horizontal rules and grid tables are laid
+//   out by the flow (`Markdown.ts:856-1005`, `1159-1170`, `1430-1461`) and
+//   wrapped here on display-cell boundaries so the painter's `visit_cells`
+//   slicing agrees with the row text;
+// * fenced code is routed by info string: `mermaid` to
+//   [`crate::native_mermaid`], `latex|math|tex` to [`crate::native_math`]
+//   and unified diffs to [`crate::native_diff_inline`]. The first two are
+//   fail-closed: no painter/engine is configured in this client, so their
+//   own `Fallback` outcome *is* the plain code block with the source
+//   preserved (`packages/merman/src/markdown.ts:268-320`,
+//   `packages/latex/src/markdown.ts:27-51`).
+
+/// Flow options pinned to the chat use site
+/// (`message-parts.tsx:183-196`): grid tables with one cell of horizontal
+/// padding, and concealment only in rendered Markdown mode. OSC-8 hyperlinks
+/// are not emitted because [`crate::native_transcript::strip_ansi`] removes
+/// them, matching `MarkdownOptions::default`.
+fn flow_options(mode: crate::markdown_runs::MarkdownMode) -> crate::native_markdown_flow::MarkdownOptions {
+    let mut options = crate::native_markdown_flow::MarkdownOptions::default();
+    options.conceal = mode == crate::markdown_runs::MarkdownMode::Rendered;
+    options
+}
+
+/// Map one upstream `markup.*` role (`packages/theme/src/tui/syntax.ts:46-71`)
+/// onto the transcript's style bits. Roles whose upstream styling is a color
+/// only (list markers, rules, quotes, strikethrough) carry no bit here; the
+/// paint layer owns those colors.
+fn flow_role_flags(role: crate::native_markdown_flow::MarkdownRole) -> u8 {
+    use crate::markdown_runs::{BOLD, CODE, CODE_BLOCK, ITALIC, LINK};
+    use crate::native_markdown_flow::MarkdownRole;
+    match role {
+        MarkdownRole::Strong | MarkdownRole::Heading | MarkdownRole::Heading1 => BOLD,
+        MarkdownRole::Emphasis => ITALIC,
+        MarkdownRole::InlineCode => CODE,
+        MarkdownRole::CodeBlock => CODE | CODE_BLOCK,
+        MarkdownRole::Link | MarkdownRole::LinkUrl | MarkdownRole::LinkLabel => LINK,
+        MarkdownRole::Text
+        | MarkdownRole::Strikethrough
+        | MarkdownRole::BlockQuote
+        | MarkdownRole::ListMarker
+        | MarkdownRole::Rule => 0,
+    }
+}
+
+/// One wrapped display row of a flow row: text plus its cell spans.
+#[derive(Debug)]
+struct FlowRowChunk {
+    text: String,
+    spans: Vec<ChatRunSpan>,
+}
+
+fn push_chunk_spans(spans: &mut Vec<ChatRunSpan>, start: usize, end: usize, flags: u8) {
+    if start >= end || flags == 0 {
+        return;
+    }
+    let start = start.min(usize::from(u16::MAX)) as u16;
+    let end = end.min(usize::from(u16::MAX)) as u16;
+    if start >= end {
+        return;
+    }
+    if let Some(last) = spans.last_mut() {
+        if last.flags == flags && last.end == start {
+            last.end = end;
+            return;
+        }
+    }
+    spans.push(ChatRunSpan { start, end, flags });
+}
+
+/// Wrap one flow row to `content_width` display cells without splitting a
+/// grapheme cluster, mirroring the segmentation
+/// [`crate::native_view_layout::visit_unpadded_cells`] (and therefore the
+/// painter) uses. Flow span cell offsets are preserved because wrapping is
+/// purely cell-consecutive.
+fn wrap_flow_row(row: &crate::native_markdown_flow::FlowRow, content_width: usize) -> Vec<FlowRowChunk> {
+    use crate::native_markdown_flow::cells;
+    let mut text = String::new();
+    let mut styled: Vec<(usize, usize, u8)> = Vec::new();
+    let mut cell = 0usize;
+    for span in &row.spans {
+        let start = cell;
+        cell = cell.saturating_add(cells(&span.text));
+        text.push_str(&span.text);
+        let flags = flow_role_flags(span.role);
+        if flags == 0 || cell <= start {
+            continue;
+        }
+        if let Some(last) = styled.last_mut() {
+            if last.2 == flags && last.1 == start {
+                last.1 = cell;
+                continue;
+            }
+        }
+        styled.push((start, cell, flags));
+    }
+    if text.is_empty() {
+        return vec![FlowRowChunk { text: String::new(), spans: Vec::new() }];
+    }
+    // A zero width means "do not wrap", matching `render_lines`.
+    if content_width == 0 {
+        let mut spans = Vec::new();
+        for (start, end, flags) in styled {
+            push_chunk_spans(&mut spans, start, end, flags);
+        }
+        return vec![FlowRowChunk { text, spans }];
+    }
+    let mut clusters: Vec<(String, usize)> = Vec::new();
+    crate::native_view_layout::visit_unpadded_cells(&text, text.len().max(1), |glyph, width| {
+        clusters.push((glyph.to_owned(), width));
+    });
+    let mut chunks: Vec<FlowRowChunk> = Vec::new();
+    let mut current = String::new();
+    let mut used = 0usize;
+    let mut row_start = 0usize;
+    let mut spans: Vec<ChatRunSpan> = Vec::new();
+    let mut retire = |chunks: &mut Vec<FlowRowChunk>, current: &mut String, used: &mut usize,
+                      row_start: &mut usize, spans: &mut Vec<ChatRunSpan>, styled: &[(usize, usize, u8)]| {
+        for (start, end, flags) in styled {
+            let start = (*start).max(*row_start);
+            let end = (*end).min(*row_start + *used);
+            if start < end {
+                push_chunk_spans(spans, start - *row_start, end - *row_start, *flags);
+            }
+        }
+        chunks.push(FlowRowChunk { text: std::mem::take(current), spans: std::mem::take(spans) });
+        *row_start += *used;
+        *used = 0;
+    };
+    for (glyph, width) in clusters {
+        if used > 0 && used + width > content_width {
+            retire(&mut chunks, &mut current, &mut used, &mut row_start, &mut spans, &styled);
+        }
+        current.push_str(&glyph);
+        used += width;
+        if used >= content_width {
+            retire(&mut chunks, &mut current, &mut used, &mut row_start, &mut spans, &styled);
+        }
+    }
+    if !current.is_empty() {
+        retire(&mut chunks, &mut current, &mut used, &mut row_start, &mut spans, &styled);
+    }
+    if chunks.is_empty() {
+        chunks.push(FlowRowChunk { text: String::new(), spans: Vec::new() });
+    }
+    chunks
+}
+
+/// Drop the trailing newline(s) a paragraph or heading token carries, so the
+/// line-oriented renderer below does not invent a trailing blank row.
+fn trim_block_newlines(raw: &str) -> &str {
+    raw.trim_end_matches(['\n', '\r'])
+}
+
+/// Language tokens that route a fence to [`crate::native_diff_inline`]. This
+/// is an OC2 extension: the pinned TUI registers only Mermaid and LaTeX fence
+/// handlers (`packages/tui/src/plugin/builtins.ts:14-15`), so an unhandled
+/// `diff` fence renders as a plain code block there
+/// (`Markdown.ts:1171-1186`); highlighting its gutter here is additive and
+/// never replaces the preserved source.
+fn is_diff_fence_language(language: Option<&str>) -> bool {
+    matches!(language.map(str::trim), Some("diff" | "udiff"))
+}
+
+/// True when `source` carries at least one unified-diff hunk header, the
+/// precondition for gutter/line-number rendering. Anything else fails closed
+/// to the plain code block.
+fn looks_like_unified_diff(source: &str) -> bool {
+    source.lines().take(crate::native_diff_view::MAX_DIFF_LINES).any(|line| {
+        let line = line.trim_start();
+        line.starts_with("@@") && line[2..].contains(" +")
+    })
+}
+
+/// Paint a unified diff fence through [`crate::native_diff_inline`] with the
+/// gutter already composed into each row (`native_diff_view.rs:148-186`).
+/// Returns `false` when the fence must keep its plain code block.
+fn push_diff_fence(rows: &mut Vec<(String, ChatRowClass)>, width: usize, prefix: &str, source: &str) -> bool {
+    if !looks_like_unified_diff(source) {
+        return false;
+    }
+    let budget = MAX_MESSAGE_ROWS.saturating_sub(rows.len()).max(1);
+    let measured = if width == 0 {
+        source.len().max(1)
+    } else {
+        width.saturating_sub(row_cells(prefix)).max(1)
+    };
+    let painted = crate::native_diff_inline::paint_inline_patch(
+        source,
+        crate::native_diff_view::DiffViewMode::Unified,
+        crate::native_diff_view::DiffWrapMode::Word,
+        measured,
+        budget,
+    );
+    if painted.is_empty() {
+        return false;
+    }
+    // Fail closed rather than drop or re-flow a row we cannot render as a
+    // unified diff line.
+    if painted
+        .iter()
+        .any(|row| !matches!(row, crate::native_diff_inline::InlineDiffRow::Unified(_)))
+    {
+        return false;
+    }
+    // Every source line paints at least one row, so this is exact.
+    let truncated = source.split('\n').count() > budget;
+    for row in painted {
+        let crate::native_diff_inline::InlineDiffRow::Unified(line) = row else {
+            continue;
+        };
+        if rows.len() >= MAX_MESSAGE_ROWS {
+            break;
+        }
+        let class = match line.role {
+            crate::native_diff_view::DiffLineRole::Added => ChatRowClass::DiffAdded,
+            crate::native_diff_view::DiffLineRole::Removed => ChatRowClass::DiffRemoved,
+            _ => ChatRowClass::Metadata,
+        };
+        rows.push((truncate_row(&format!("{prefix}{}", line.text), width), class));
+    }
+    if truncated {
+        push_markdown_overflow(rows, width, prefix, ChatRowClass::Metadata);
+    }
+    true
+}
+
+/// Pinned code-block geometry for one fence: opening/closing rows, eight
+/// column tab stops, lossless cluster escapes and the explicit overflow
+/// marker. Shared by every fence that fails closed.
+fn paint_plain_code_block(
+    rows: &mut Vec<(String, ChatRowClass)>,
+    width: usize,
+    prefix: &str,
+    class: ChatRowClass,
+    raw: &str,
+    mode: crate::markdown_runs::MarkdownMode,
+    spans: &mut Vec<(usize, Vec<ChatRunSpan>)>,
+    start: usize,
+) {
+    let before = rows.len();
+    push_markdown_wrapped_mode(rows, width, raw, prefix, class, mode);
+    for (offset, row_spans) in
+        markdown_part_row_spans_mode(raw, width, prefix, &rows[before..], mode).into_iter().enumerate()
+    {
+        if !row_spans.is_empty() {
+            spans.push((before - start + offset, row_spans));
+        }
+    }
+}
+
+/// Route one fenced code block by its info-string language.
+///
+/// Mermaid (`packages/tui/src/plugin/builtins.ts:15,29`,
+/// `packages/merman/src/plugin.ts:5-14`) and LaTeX
+/// (`packages/tui/src/plugin/builtins.ts:14,30`,
+/// `packages/latex/src/plugin.ts:7-12`) own dedicated renderers upstream. This
+/// client configures neither a [`crate::native_mermaid::DiagramPainter`] nor a
+/// [`crate::native_math::MathLayoutEngine`], so those renderers return their
+/// `Fallback` outcome and the fence paints as the plain code block with its
+/// source preserved — exactly their documented fail-closed contract.
+#[allow(clippy::too_many_arguments)]
+fn paint_fence_block(
+    rows: &mut Vec<(String, ChatRowClass)>,
+    width: usize,
+    prefix: &str,
+    class: ChatRowClass,
+    mode: crate::markdown_runs::MarkdownMode,
+    block_id: usize,
+    raw: &str,
+    source: &str,
+    language: Option<&str>,
+    spans: &mut Vec<(usize, Vec<ChatRunSpan>)>,
+    start: usize,
+) {
+    if let Some(fence) = crate::native_mermaid::MermaidFence::from_code_block(language, source, block_id) {
+        let mut renderer = crate::native_mermaid::MermaidRenderer::without_painter(
+            crate::native_mermaid::MermaidTheme::dark("oc2-native"),
+        );
+        match renderer.render(&fence, width) {
+            crate::native_mermaid::MermaidOutcome::Fallback(fallback) => {
+                // One row per preserved source line is the plain code-block
+                // contract (`Markdown.ts:1171-1186`).
+                debug_assert_eq!(fallback.source, fence.source);
+            }
+            crate::native_mermaid::MermaidOutcome::Rendered(frame) => {
+                // Unreachable without a painter; a frame carries geometry but
+                // no glyph cells, so keep the code block rather than invent a
+                // diagram.
+                debug_assert!(frame.height > 0);
+            }
+        }
+        paint_plain_code_block(rows, width, prefix, class, raw, mode, spans, start);
+        return;
+    }
+    if let Some(fence) =
+        crate::native_math::MathFence::from_code_block(language, source, raw, block_id, false)
+    {
+        let mut renderer = crate::native_math::MathRenderer::without_engine(
+            crate::native_math::MathTheme::new("text.base", "text.muted"),
+        );
+        match renderer.render(&fence, width) {
+            crate::native_math::MathOutcome::Fallback(fallback) => {
+                debug_assert_eq!(fallback.source, fence.source);
+            }
+            crate::native_math::MathOutcome::Rendered(frame) => {
+                debug_assert!(frame.layout.height > 0);
+            }
+        }
+        paint_plain_code_block(rows, width, prefix, class, raw, mode, spans, start);
+        return;
+    }
+    if is_diff_fence_language(language) && push_diff_fence(rows, width, prefix, source) {
+        return;
+    }
+    paint_plain_code_block(rows, width, prefix, class, raw, mode, spans, start);
+}
+
+/// Render one non-user Markdown part as flow blocks. Returns style spans with
+/// row offsets relative to the first row this call pushed.
+fn push_block_markdown(
+    rows: &mut Vec<(String, ChatRowClass)>,
+    width: usize,
+    text: &str,
+    prefix: &str,
+    class: ChatRowClass,
+    markdown_mode: crate::markdown_runs::MarkdownMode,
+) -> Vec<(usize, Vec<ChatRunSpan>)> {
+    use crate::native_markdown_flow::{BlockBody, BlockKind, MarkdownFlow};
+    let start = rows.len();
+    let input_truncated = text.len() > MAX_INPUT_ROW_BYTES;
+    // Sanitize over the complete bounded part before tokenizing so escape
+    // state that spans a newline cannot leak a payload byte into the flow.
+    let sanitized = strip_ansi(clip_utf8_prefix_bytes(text, MAX_INPUT_ROW_BYTES));
+    let mut flow = MarkdownFlow::new(flow_options(markdown_mode));
+    flow.set_content(&sanitized);
+    let mut spans: Vec<(usize, Vec<ChatRunSpan>)> = Vec::new();
+    if flow.blocks().is_empty() {
+        // No block structure (empty or whitespace-only part): keep the pinned
+        // per-line geometry, including its one empty row.
+        paint_plain_code_block(rows, width, prefix, class, &sanitized, markdown_mode, &mut spans, start);
+        if input_truncated {
+            push_markdown_overflow(rows, width, prefix, class);
+        }
+        return spans;
+    }
+    let content_width = if width == 0 { 0 } else { width.saturating_sub(row_cells(prefix)).max(1) };
+    let flow_rows = flow.render(content_width);
+    let blocks = flow.blocks();
+    let mut previous_end = 0usize;
+    for (index, block) in blocks.iter().enumerate() {
+        if rows.len() >= MAX_MESSAGE_ROWS {
+            break;
+        }
+        // Blank source lines between flow blocks keep the pinned row spacing:
+        // the Space tokens the flow skips are the blank lines the legacy
+        // line-oriented painter emitted as empty rows.
+        let gap_start = previous_end.min(sanitized.len());
+        let gap_end = block.source_start.min(sanitized.len()).max(gap_start);
+        for _ in 0..sanitized[gap_start..gap_end].matches('\n').count() {
+            if rows.len() >= MAX_MESSAGE_ROWS {
+                break;
+            }
+            rows.push((truncate_row(prefix, width), class));
+        }
+        previous_end = block.source_end.min(sanitized.len());
+        if rows.len() >= MAX_MESSAGE_ROWS {
+            break;
+        }
+        // A trailing newline at the end of the part is a trailing blank row,
+        // exactly as the whole-part line painter produced it; between blocks
+        // it is only the terminator of the block's last line.
+        let raw = if index + 1 == blocks.len() {
+            block.source_raw.as_str()
+        } else {
+            trim_block_newlines(&block.source_raw)
+        };
+        match &block.kind {
+            BlockKind::Code { lang } => {
+                let source = match &block.body {
+                    BlockBody::Code { lines, .. } => lines.join("\n"),
+                    _ => String::new(),
+                };
+                paint_fence_block(
+                    rows, width, prefix, class, markdown_mode, block.id,
+                    raw, &source, lang.as_deref(), &mut spans, start,
+                );
+            }
+            BlockKind::Paragraph => {
+                paint_plain_code_block(rows, width, prefix, class, raw, markdown_mode, &mut spans, start);
+            }
+            BlockKind::Heading(_)
+            | BlockKind::List { .. }
+            | BlockKind::BlockQuote
+            | BlockKind::Rule
+            | BlockKind::Table => {
+                for row in flow_rows.iter().filter(|row| row.block == block.id) {
+                    for chunk in wrap_flow_row(row, content_width) {
+                        if rows.len() >= MAX_MESSAGE_ROWS {
+                            break;
+                        }
+                        rows.push((truncate_row(&format!("{prefix}{}", chunk.text), width), class));
+                        if !chunk.spans.is_empty() {
+                            spans.push((rows.len() - 1 - start, chunk.spans));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Blank source lines after the last block.
+    let tail = previous_end.min(sanitized.len());
+    for _ in 0..sanitized[tail..].matches('\n').count() {
+        if rows.len() >= MAX_MESSAGE_ROWS {
+            break;
+        }
+        rows.push((truncate_row(prefix, width), class));
+    }
+    if input_truncated || flow.truncated() {
+        push_markdown_overflow(rows, width, prefix, class);
+    }
+    spans
+}
+
 /// Display rows of one typed message: optional group separator, optional
 /// agent/model metadata row, then its parts in order. Tool results are
 /// labeled `[result]`/`[error]` with indented output — the view never
@@ -1677,30 +2140,27 @@ fn typed_message_rows_with_prefix_spans_mode(
         }
         match part {
             ChatPart::Text(text) => {
-                let push = |rows: &mut Vec<(String, ChatRowClass)>, width, text: &str, prefix: &str, class| {
-                    if message.role == ChatRole::User {
-                        push_wrapped(rows, width, text, prefix, class);
-                    } else {
-                        push_markdown_wrapped_mode(rows, width, text, prefix, class, markdown_mode);
-                    }
-                };
                 let part_prefix = prefix.unwrap_or_else(|| text_prefix(message.role));
+                let class = match message.role {
+                    ChatRole::User => ChatRowClass::UserCard,
+                    ChatRole::Assistant => ChatRowClass::AssistantCard,
+                    ChatRole::System => ChatRowClass::SystemCard,
+                    ChatRole::Tool => ChatRowClass::ToolResult,
+                };
                 let before = rows.len();
-                push(
-                    &mut rows,
-                    width,
-                    text,
-                    part_prefix,
-                    match message.role {
-                        ChatRole::User => ChatRowClass::UserCard,
-                        ChatRole::Assistant => ChatRowClass::AssistantCard,
-                        ChatRole::System => ChatRowClass::SystemCard,
-                        ChatRole::Tool => ChatRowClass::ToolResult,
-                    },
-                );
-                if message.role != ChatRole::User {
-                    for (offset, spans) in markdown_part_row_spans_mode(text, width, part_prefix, &rows[before..], markdown_mode).into_iter().enumerate() {
-                        if !spans.is_empty() { spans_out.push((before + offset, spans)); }
+                if message.role == ChatRole::User {
+                    // A user card is literal text, never Markdown
+                    // (`routes/session/index.tsx:2429-2465`).
+                    push_wrapped(&mut rows, width, text, part_prefix, class);
+                } else {
+                    // Block layout, fence routing and style spans all come
+                    // from [`crate::native_markdown_flow`].
+                    for (offset, spans) in
+                        push_block_markdown(&mut rows, width, text, part_prefix, class, markdown_mode)
+                    {
+                        if !spans.is_empty() {
+                            spans_out.push((before + offset, spans));
+                        }
                     }
                 }
             }
@@ -2386,6 +2846,1028 @@ impl ChatView {
         let absolute = start + anchor.row;
         Some(total.saturating_sub(absolute.saturating_add(1)).saturating_add(screen_row_from_bottom))
     }
+}
+
+// ── MSG-007: message action menu ─────────────────────────────────────
+//
+// Clicking a user message opens the `Message Actions` select
+// (`packages/tui/src/routes/session/index.tsx:2414-2430`,
+// `packages/tui/src/routes/session/dialog-message.tsx:16-93`). Two upstream
+// facts drive this model:
+//
+//  * the menu captures `props.message.id` when it opens, because "the dialog
+//    outlives this row, whose props go stale when a resync drops the message"
+//    (`index.tsx:2414-2415`), so every effect addresses the captured id;
+//  * its `message()` memo re-reads the *current* message for that same id on
+//    every handler (`dialog-message.tsx:23`), so a resync refreshes the
+//    snapshot without retargeting the menu.
+//
+// Selection is a pure request/effect boundary: this view never stages a
+// revert, writes the clipboard or forks a session — it reports what the
+// caller must do.
+
+/// One option of the upstream "Message Actions" select
+/// (`dialog-message.tsx:30-89`), in upstream order and with upstream titles
+/// and descriptions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MessageAction {
+    JumpTo,
+    Revert,
+    Copy,
+    Fork,
+}
+
+impl MessageAction {
+    /// Upstream option order: Jump to, Revert, Copy, Fork
+    /// (`dialog-message.tsx:29-90`).
+    pub const ALL: [Self; 4] = [Self::JumpTo, Self::Revert, Self::Copy, Self::Fork];
+
+    /// Upstream option title (`dialog-message.tsx:31,37,55,81`).
+    #[must_use]
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::JumpTo => "Jump to",
+            Self::Revert => "Revert",
+            Self::Copy => "Copy",
+            Self::Fork => "Fork",
+        }
+    }
+
+    /// Upstream option description (`dialog-message.tsx:33,39,57,83`).
+    #[must_use]
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::JumpTo => "view message in session",
+            Self::Revert => "undo messages and file changes",
+            Self::Copy => "message text to clipboard",
+            Self::Fork => "create a new session",
+        }
+    }
+}
+
+/// One caller-visible consequence of choosing a message action. The view
+/// performs no IO; each variant is a request the caller executes and then
+/// reports back by closing the menu.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MessageActionEffect {
+    /// Dismiss the menu (`dialog.clear()`, `dialog-message.tsx:34,51`).
+    CloseMenu,
+    /// Scroll the captured message into view, the meaning of the "view
+    /// message in session" option (`dialog-message.tsx:31-34`).
+    JumpToMessage { message_id: String },
+    /// Replace the composer with the reverted user message
+    /// (`dialog-message.tsx:42-47`, `prompt/codec.ts:12-28`). Only produced for
+    /// a user snapshot.
+    RestorePrompt { message_id: String, text: String },
+    /// `session.revert.stage({sessionID, messageID})`
+    /// (`dialog-message.tsx:48-50`). Produced for every snapshot state: the
+    /// handler stages with the captured id even when the memo currently
+    /// resolves no message (`dialog-message.tsx:41-49`).
+    StageRevert { message_id: String },
+    /// `clipboard.write(text)` with the raw message text
+    /// (`dialog-message.tsx:61-73`). `truncated` reports that the copy bound
+    /// clipped the text. No `CloseMenu` accompanies it: upstream clears the
+    /// dialog only after the write resolves (`dialog-message.tsx:72-77`), so
+    /// the caller closes the menu on success.
+    CopyToClipboard { text: String, truncated: bool },
+    /// Open the fork picker for the captured message
+    /// (`dialog-message.tsx:87`, `routes/session/dialog-fork.tsx:16-30`).
+    ForkSession { message_id: String },
+}
+
+/// Result of [`MessageActionMenu::select`]. `effects` is empty when the
+/// upstream handler would do nothing (the menu then stays open).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MessageActionOutcome {
+    pub effects: Vec<MessageActionEffect>,
+}
+
+impl MessageActionOutcome {
+    /// True when the menu should be dismissed as part of this outcome.
+    #[must_use]
+    pub fn closes_menu(&self) -> bool {
+        self.effects.iter().any(|effect| matches!(effect, MessageActionEffect::CloseMenu))
+    }
+}
+
+/// State of the "Message Actions" select: the captured session/message
+/// identity plus the current message snapshot.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MessageActionMenu {
+    session_id: Option<String>,
+    message_id: Option<String>,
+    snapshot: Option<ChatMessage>,
+}
+
+impl MessageActionMenu {
+    /// Copy bound in bytes. Upstream hands the clipboard an unbounded string;
+    /// this view keeps the request bounded so a hostile projection cannot
+    /// force an unbounded allocation.
+    pub const MAX_COPY_BYTES: usize = 64 * 1024;
+
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Open the menu for one message. The id pair is captured here and is the
+    /// identity every later effect uses, even if the projection drops the
+    /// message (`index.tsx:2414-2417`).
+    pub fn open(
+        &mut self,
+        session_id: impl Into<String>,
+        message_id: impl Into<String>,
+        message: Option<&ChatMessage>,
+    ) {
+        self.session_id = Some(session_id.into());
+        self.message_id = Some(message_id.into());
+        self.snapshot = message.cloned();
+    }
+
+    /// Close the menu. Upstream also clears on a successful copy
+    /// (`dialog-message.tsx:74`), which is the caller's decision because the
+    /// clipboard write is IO.
+    pub fn close(&mut self) {
+        self.session_id = None;
+        self.message_id = None;
+        self.snapshot = None;
+    }
+
+    #[must_use]
+    pub fn is_open(&self) -> bool {
+        self.message_id.is_some()
+    }
+
+    #[must_use]
+    pub fn session_id(&self) -> Option<&str> {
+        self.session_id.as_deref()
+    }
+
+    /// The captured message id — never re-derived from the projection.
+    #[must_use]
+    pub fn message_id(&self) -> Option<&str> {
+        self.message_id.as_deref()
+    }
+
+    #[must_use]
+    pub fn snapshot(&self) -> Option<&ChatMessage> {
+        self.snapshot.as_ref()
+    }
+
+    /// Refresh the message snapshot after the caller's projection resynced.
+    ///
+    /// Upstream's `message()` memo re-reads by the captured id
+    /// (`dialog-message.tsx:23`), so a resync that drops the message clears
+    /// the snapshot while the menu keeps its captured identity. This never
+    /// panics and never retargets the menu at a different message.
+    pub fn resync(&mut self, messages: &[(String, ChatMessage)]) {
+        let Some(id) = self.message_id.as_deref() else {
+            return;
+        };
+        self.snapshot = messages
+            .iter()
+            .find(|(message_id, _)| message_id == id)
+            .map(|(_, message)| message.clone());
+    }
+
+    /// Options in upstream order (`dialog-message.tsx:29-90`).
+    #[must_use]
+    pub const fn options(&self) -> [MessageAction; 4] {
+        MessageAction::ALL
+    }
+
+    /// Menu rows: one row per option, `"  {title}  {description}"`, so the
+    /// renderer can show the select without a dialog chrome (`DialogSelect`
+    /// renders each option's title and description, `ui/dialog-select.tsx`).
+    #[must_use]
+    pub fn render_rows(&self, width: usize) -> Vec<(String, ChatRowClass)> {
+        if !self.is_open() {
+            return Vec::new();
+        }
+        MessageAction::ALL
+            .iter()
+            .map(|action| {
+                let row = format!("  {}  {}", action.title(), action.description());
+                (truncate_row(&row, width), ChatRowClass::MenuOption)
+            })
+            .collect()
+    }
+
+    /// Resolve one option against the current snapshot.
+    ///
+    /// * Jump to — upstream only clears the dialog (`dialog-message.tsx:34`);
+    ///   the jump itself is reported so the caller can align the message.
+    /// * Revert — restore the prompt only for a user snapshot, then always
+    ///   stage the revert with the captured id (`dialog-message.tsx:40-52`).
+    /// * Copy — do nothing when the snapshot is gone (`dialog-message.tsx:60`),
+    ///   otherwise copy the raw text; the menu closes only on a successful
+    ///   write (`dialog-message.tsx:72-77`).
+    /// * Fork — do nothing unless the snapshot is a user message
+    ///   (`dialog-message.tsx:85-88`).
+    #[must_use]
+    pub fn select(&self, action: MessageAction) -> MessageActionOutcome {
+        let Some(message_id) = self.message_id.clone() else {
+            return MessageActionOutcome::default();
+        };
+        let mut effects = Vec::new();
+        match action {
+            MessageAction::JumpTo => {
+                effects.push(MessageActionEffect::JumpToMessage { message_id });
+                effects.push(MessageActionEffect::CloseMenu);
+            }
+            MessageAction::Revert => {
+                if let Some(message) = self.snapshot.as_ref().filter(|message| message.role == ChatRole::User) {
+                    effects.push(MessageActionEffect::RestorePrompt {
+                        message_id: message_id.clone(),
+                        text: message_copy_text(message),
+                    });
+                }
+                effects.push(MessageActionEffect::StageRevert { message_id });
+                effects.push(MessageActionEffect::CloseMenu);
+            }
+            MessageAction::Copy => {
+                let Some(message) = self.snapshot.as_ref() else {
+                    return MessageActionOutcome::default();
+                };
+                let (text, truncated) = bounded_copy(message_copy_text(message));
+                effects.push(MessageActionEffect::CopyToClipboard { text, truncated });
+            }
+            MessageAction::Fork => {
+                if !self.snapshot.as_ref().is_some_and(|message| message.role == ChatRole::User) {
+                    return MessageActionOutcome::default();
+                }
+                effects.push(MessageActionEffect::ForkSession { message_id });
+                effects.push(MessageActionEffect::CloseMenu);
+            }
+        }
+        MessageActionOutcome { effects }
+    }
+}
+
+fn chat_part_text(part: &ChatPart) -> Option<&str> {
+    match part {
+        ChatPart::Text(text) => Some(text),
+        _ => None,
+    }
+}
+
+/// The raw text upstream copies for a message
+/// (`dialog-message.tsx:61-71`): a user message's own `text`, an assistant
+/// message's `text` parts joined by a newline, and for any other message type
+/// its `text` field when it has one, else the empty string. This view splits
+/// text into parts, so user/assistant parts are joined the same way and
+/// system/tool messages use their first text part.
+fn message_copy_text(message: &ChatMessage) -> String {
+    match message.role {
+        ChatRole::User | ChatRole::Assistant => message
+            .parts
+            .iter()
+            .filter_map(chat_part_text)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        ChatRole::System | ChatRole::Tool => {
+            message.parts.iter().find_map(chat_part_text).unwrap_or_default().to_owned()
+        }
+    }
+}
+
+/// Bound a raw copy request on a cluster boundary; raw text is not sanitized
+/// because upstream hands the clipboard exactly the message string
+/// (`dialog-message.tsx:73`).
+fn bounded_copy(text: String) -> (String, bool) {
+    if text.len() <= MessageActionMenu::MAX_COPY_BYTES {
+        return (text, false);
+    }
+    (
+        clip_utf8_prefix_bytes(&text, MessageActionMenu::MAX_COPY_BYTES).to_owned(),
+        true,
+    )
+}
+
+// ── MSG-009: queue dock, pending steer, revert card and notices ──────
+
+/// Delivery state of a message that has not been consumed by the run loop
+/// yet. Upstream reads it per user message (`index.tsx:2373`) and uses it for
+/// two things: the left-rail color of the pending row
+/// (`index.tsx:2382-2384`) and which menu a click opens
+/// (`index.tsx:2398-2430`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PendingDelivery {
+    /// `"steer"`: the message steers the running turn.
+    Steer,
+    /// `"queue"`: the message waits for the next turn.
+    Queue,
+}
+
+/// One option of the upstream "Pending steer" select
+/// (`index.tsx:2401-2414`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PendingAction {
+    MoveToQueue,
+    Delete,
+}
+
+impl PendingAction {
+    /// Upstream option order (`index.tsx:2403-2406`).
+    pub const ALL: [Self; 2] = [Self::MoveToQueue, Self::Delete];
+
+    /// Upstream option title (`index.tsx:2404-2405`).
+    #[must_use]
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::MoveToQueue => "Move to queue",
+            Self::Delete => "Delete",
+        }
+    }
+}
+
+/// Request produced by the "Pending steer" select. Upstream calls
+/// `session.inbox.update({delivery})` for "Move to queue" and
+/// `session.inbox.cancel` for "Delete" (`index.tsx:752-758`, `:2408-2416`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PendingSteerEffect {
+    MoveToQueue { message_id: String },
+    Cancel { message_id: String },
+}
+
+/// State of the "Pending steer" select
+/// (`index.tsx:2400-2419`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PendingSteerMenu {
+    message_id: Option<String>,
+}
+
+impl PendingSteerMenu {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Open for one pending-steer message. Upstream passes the row's message
+    /// id to `mutatePending` (`index.tsx:2408-2409`).
+    pub fn open(&mut self, message_id: impl Into<String>) {
+        self.message_id = Some(message_id.into());
+    }
+
+    pub fn close(&mut self) {
+        self.message_id = None;
+    }
+
+    #[must_use]
+    pub fn is_open(&self) -> bool {
+        self.message_id.is_some()
+    }
+
+    #[must_use]
+    pub fn message_id(&self) -> Option<&str> {
+        self.message_id.as_deref()
+    }
+
+    /// Options in upstream order (`index.tsx:2403-2406`).
+    #[must_use]
+    pub const fn options(&self) -> [PendingAction; 2] {
+        PendingAction::ALL
+    }
+
+    /// One row per option (`ui/dialog-select.tsx` renders title-only options).
+    #[must_use]
+    pub fn render_rows(&self, width: usize) -> Vec<(String, ChatRowClass)> {
+        if !self.is_open() {
+            return Vec::new();
+        }
+        PendingAction::ALL
+            .iter()
+            .map(|action| (truncate_row(&format!("  {}", action.title()), width), ChatRowClass::MenuOption))
+            .collect()
+    }
+
+    /// Resolve one option. The menu must be cleared only after the caller's
+    /// mutation succeeds (`index.tsx:2371-2373`), so no effect closes it.
+    #[must_use]
+    pub fn select(&self, action: PendingAction) -> Option<PendingSteerEffect> {
+        let message_id = self.message_id.clone()?;
+        Some(match action {
+            PendingAction::MoveToQueue => PendingSteerEffect::MoveToQueue { message_id },
+            PendingAction::Delete => PendingSteerEffect::Cancel { message_id },
+        })
+    }
+}
+
+/// Which menu a click on a message opens. Upstream opens "Pending steer" when
+/// the message's delivery is `"steer"` (`index.tsx:2398-2418`) and the
+/// "Message Actions" menu otherwise (`index.tsx:2414-2430`, including a
+/// `"queue"` delivery).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SessionMessageMenu {
+    Actions(MessageActionMenu),
+    PendingSteer(PendingSteerMenu),
+}
+
+/// Build the menu upstream would open for this message click.
+#[must_use]
+pub fn menu_for_message(
+    delivery: Option<PendingDelivery>,
+    session_id: &str,
+    message_id: &str,
+    message: Option<&ChatMessage>,
+) -> SessionMessageMenu {
+    if delivery == Some(PendingDelivery::Steer) {
+        let mut menu = PendingSteerMenu::new();
+        menu.open(message_id);
+        SessionMessageMenu::PendingSteer(menu)
+    } else {
+        let mut menu = MessageActionMenu::new();
+        menu.open(session_id, message_id, message);
+        SessionMessageMenu::Actions(menu)
+    }
+}
+
+/// One prompt waiting in the run queue.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueuedPrompt {
+    pub id: String,
+    pub text: String,
+}
+
+/// The queued-prompt dock shown above the composer
+/// (`index.tsx:2485-2513`): a `┃` rail over `Theme.background.raised.base`,
+/// one padding row above and below, two cells of left padding and one of
+/// right padding, and one blank row of bottom margin. It is only shown when
+/// the composer is closed, the session is not disabled and at least one
+/// prompt is queued (`index.tsx:1591-1592`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct QueueDock {
+    prompts: Vec<QueuedPrompt>,
+}
+
+impl QueueDock {
+    /// Bound on displayed queued prompts.
+    pub const MAX_PROMPTS: usize = 128;
+
+    #[must_use]
+    pub fn new(prompts: impl IntoIterator<Item = QueuedPrompt>) -> Self {
+        let mut dock = Self::default();
+        for prompt in prompts {
+            dock.push(prompt);
+        }
+        dock
+    }
+
+    pub fn push(&mut self, prompt: QueuedPrompt) {
+        if self.prompts.len() < Self::MAX_PROMPTS {
+            self.prompts.push(prompt);
+        }
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.prompts.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.prompts.is_empty()
+    }
+
+    #[must_use]
+    pub fn prompts(&self) -> &[QueuedPrompt] {
+        &self.prompts
+    }
+
+    /// `"{n} queued"`, with `" · {next}"` when the head prompt has text. The
+    /// head prompt is flattened the way upstream flattens it
+    /// (`index.tsx:2487`, `:2508-2511`): newlines become spaces.
+    #[must_use]
+    pub fn summary(&self) -> Option<String> {
+        let head = self.prompts.first()?;
+        let next = bounded_label(&head.text);
+        let mut summary = format!("{} queued", self.prompts.len());
+        if !next.is_empty() {
+            summary.push_str(" · ");
+            summary.push_str(&next);
+        }
+        Some(summary)
+    }
+
+    /// Dock rows, including the trailing margin row. Empty when nothing is
+    /// queued (`index.tsx:1591`).
+    #[must_use]
+    pub fn render_rows(&self, width: usize) -> Vec<(String, ChatRowClass)> {
+        let Some(summary) = self.summary() else {
+            return Vec::new();
+        };
+        let rail = USER_RAIL.to_string();
+        vec![
+            (rail.clone(), ChatRowClass::QueueDock),
+            (
+                truncate_row(&format!("{USER_RAIL}  {summary}"), width),
+                ChatRowClass::QueueDock,
+            ),
+            (rail, ChatRowClass::QueueDock),
+            (String::new(), ChatRowClass::Separator),
+        ]
+    }
+}
+
+/// Status of one file in the revert card. Upstream maps it to a one-letter
+/// label (`component/dialog-workspace-file-changes.tsx:23-28`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RevertFileStatus {
+    Added,
+    Modified,
+    Deleted,
+}
+
+impl RevertFileStatus {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Added => "A",
+            Self::Modified => "M",
+            Self::Deleted => "D",
+        }
+    }
+}
+
+/// One file changed by the reverted messages.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RevertFileChange {
+    pub file: String,
+    pub status: RevertFileStatus,
+    pub additions: usize,
+    pub deletions: usize,
+}
+
+/// The revert card (`index.tsx:2254-2324`): `┃` rail over
+/// `Theme.background.raised.base`, one row of top margin, one padding row
+/// above and below, `"{n} message(s) reverted"`, an optional file block with
+/// its own padding row above and below, and the redo hint.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RevertCard {
+    pub count: usize,
+    pub files: Vec<RevertFileChange>,
+    /// Caller-supplied binding label for the redo shortcut, rendered before
+    /// `"or /redo to restore"` (`index.tsx:2320-2322`).
+    pub redo_key: String,
+}
+
+impl RevertCard {
+    /// Bound on displayed files.
+    pub const MAX_FILES: usize = 128;
+
+    #[must_use]
+    pub fn new(count: usize, files: impl IntoIterator<Item = RevertFileChange>) -> Self {
+        let mut card = Self { count, files: Vec::new(), redo_key: String::new() };
+        for file in files {
+            if card.files.len() < Self::MAX_FILES {
+                card.files.push(file);
+            }
+        }
+        card
+    }
+
+    /// Card rows, including the leading margin row and trailing padding row.
+    #[must_use]
+    pub fn render_rows(&self, width: usize) -> Vec<(String, ChatRowClass)> {
+        let rail = USER_RAIL.to_string();
+        let mut rows = Vec::with_capacity(8 + self.files.len());
+        rows.push((String::new(), ChatRowClass::Blank));
+        rows.push((rail.clone(), ChatRowClass::RevertCard));
+        rows.push((
+            truncate_row(
+                &format!(
+                    "{USER_RAIL}  {} message{} reverted",
+                    self.count,
+                    plural(self.count)
+                ),
+                width,
+            ),
+            ChatRowClass::RevertCard,
+        ));
+        if !self.files.is_empty() {
+            rows.push((rail.clone(), ChatRowClass::RevertCard));
+            for file in &self.files {
+                rows.push((truncate_row(&self.file_row(file, width), width), ChatRowClass::RevertCard));
+            }
+            rows.push((rail.clone(), ChatRowClass::RevertCard));
+        }
+        let hint = format!("{USER_RAIL}  {}or /redo to restore", redo_label(&self.redo_key));
+        rows.push((truncate_row(&hint, width), ChatRowClass::RevertCard));
+        rows.push((rail, ChatRowClass::RevertCard));
+        rows
+    }
+
+    /// `"{A|M|D} {path} {+n} {-n}"` with the path capped at the upstream
+    /// `ctx.width - 5 - additions width - deletions width` budget
+    /// (`index.tsx:2303-2319`).
+    fn file_row(&self, file: &RevertFileChange, width: usize) -> String {
+        let additions = if file.additions > 0 { format!("+{}", file.additions) } else { String::new() };
+        let deletions = if file.deletions > 0 { format!("-{}", file.deletions) } else { String::new() };
+        let add_cells = if additions.is_empty() { 0 } else { row_cells(&additions) + 1 };
+        let del_cells = if deletions.is_empty() { 0 } else { row_cells(&deletions) + 1 };
+        let mut path = bounded_label(&file.file);
+        if width > 0 {
+            let max = width.saturating_sub(5 + add_cells + del_cells).max(2);
+            if row_cells(&path) > max {
+                path = truncate_width(&path, max);
+            }
+        }
+        let mut row = format!("{USER_RAIL}  {} {path}", file.status.label());
+        if !additions.is_empty() {
+            row.push(' ');
+            row.push_str(&additions);
+        }
+        if !deletions.is_empty() {
+            row.push(' ');
+            row.push_str(&deletions);
+        }
+        row
+    }
+}
+
+/// `"{key} "` when the caller supplied a redo binding, else `""` so the hint
+/// reads `/redo to restore`. Upstream renders the binding then the literal
+/// text (`index.tsx:2320-2322`).
+fn redo_label(redo_key: &str) -> String {
+    let key = bounded_label(redo_key);
+    if key.is_empty() {
+        String::new()
+    } else {
+        format!("{key} ")
+    }
+}
+
+/// A fully-qualified model reference, matching upstream's
+/// `{providerID, id, variant}` triple (`util/model.ts:1-9`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelRef {
+    pub provider_id: String,
+    pub id: String,
+    pub variant: Option<String>,
+}
+
+impl ModelRef {
+    #[must_use]
+    pub fn new(provider_id: impl Into<String>, id: impl Into<String>) -> Self {
+        Self { provider_id: provider_id.into(), id: id.into(), variant: None }
+    }
+
+    #[must_use]
+    pub fn with_variant(mut self, variant: impl Into<String>) -> Self {
+        self.variant = Some(variant.into());
+        self
+    }
+
+    /// `provider/id[/variant]` (`util/model.ts:7-9`).
+    #[must_use]
+    pub fn format_ref(&self) -> String {
+        let mut parts = vec![self.provider_id.clone(), self.id.clone()];
+        if let Some(variant) = self.variant.as_deref().filter(|variant| !variant.is_empty()) {
+            parts.push(variant.to_owned());
+        }
+        parts.join("/")
+    }
+}
+
+/// Upstream's model-switch label (`util/model.ts:11-25`):
+///
+/// * the same provider and id as the previous model switches *variant*;
+/// * a known display name switches to that name, with `" (variant)"` appended
+///   when a non-default variant is set;
+/// * otherwise the label falls back to the raw `provider/id[/variant]` ref.
+#[must_use]
+pub fn model_switch_label(
+    model: &ModelRef,
+    previous: Option<&ModelRef>,
+    display_name: Option<&str>,
+) -> String {
+    if previous.is_some_and(|previous| {
+        previous.provider_id == model.provider_id && previous.id == model.id
+    }) {
+        return format!(
+            "Switched variant to {}",
+            model.variant.as_deref().unwrap_or("default")
+        );
+    }
+    let Some(display) = display_name.map(bounded_label).filter(|name| !name.is_empty()) else {
+        return format!("Switched model to {}", model.format_ref());
+    };
+    let variant = model
+        .variant
+        .as_deref()
+        .filter(|variant| !variant.is_empty() && *variant != "default")
+        .map(|variant| format!(" ({variant})"))
+        .unwrap_or_default();
+    format!("Switched model to {display}{variant}")
+}
+
+/// A session-timeline notice other than a child completion.
+///
+/// * `LocationSwitched` — `"↳ Moved to {directory}"`, three cells of left
+///   padding, the marker muted and the directory in
+///   `Theme.text.feedback.info.base` (`index.tsx:2077-2087`);
+/// * `AgentSwitched` — `"Switched agent [from {Previous}] to {Agent}"` with
+///   both names title-cased, muted (`index.tsx:2088-2101`);
+/// * `ModelSwitched` — [`model_switch_label`], muted
+///   (`index.tsx:2092-2094`);
+/// * `CompactionQueued` — a `◇ Compaction queued` label between
+///   `Theme.border.base` rules (`index.tsx:2239-2252`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TranscriptNotice {
+    LocationSwitched { directory: String },
+    AgentSwitched { agent: String, previous: Option<String> },
+    ModelSwitched {
+        model: ModelRef,
+        previous: Option<ModelRef>,
+        display_name: Option<String>,
+    },
+    CompactionQueued,
+}
+
+impl TranscriptNotice {
+    /// The notice's own label, without the row's left padding.
+    #[must_use]
+    pub fn label(&self) -> String {
+        match self {
+            Self::LocationSwitched { directory } => {
+                format!("↳ Moved to {}", bounded_label(directory))
+            }
+            Self::AgentSwitched { agent, previous } => {
+                let raw = bounded_label(agent);
+                let agent = titlecase(&raw);
+                // Upstream compares the raw names before title-casing them
+                // (`index.tsx:2088-2091`).
+                match previous.as_deref().map(bounded_label).filter(|previous| !previous.is_empty()) {
+                    Some(previous) if previous != raw => {
+                        format!("Switched agent from {} to {agent}", titlecase(&previous))
+                    }
+                    _ => format!("Switched agent to {agent}"),
+                }
+            }
+            Self::ModelSwitched { model, previous, display_name } => {
+                model_switch_label(model, previous.as_ref(), display_name.as_deref())
+            }
+            Self::CompactionQueued => String::new(),
+        }
+    }
+
+    /// One transcript row. Compaction notices are a full-width divider; every
+    /// other notice is indented three cells (`index.tsx:2078`, `:2097`).
+    #[must_use]
+    pub fn row(&self, width: usize) -> (String, ChatRowClass) {
+        match self {
+            Self::CompactionQueued => (compaction_queued_row(width), ChatRowClass::CompactionQueued),
+            Self::LocationSwitched { .. } => (
+                truncate_row(&format!("   {}", self.label()), width),
+                ChatRowClass::NoticeInfo,
+            ),
+            Self::AgentSwitched { .. } | Self::ModelSwitched { .. } => (
+                truncate_row(&format!("   {}", self.label()), width),
+                ChatRowClass::SwitchNotice,
+            ),
+        }
+    }
+
+    #[must_use]
+    pub fn render_rows(&self, width: usize) -> Vec<(String, ChatRowClass)> {
+        vec![self.row(width)]
+    }
+}
+
+/// `─ ◇ Compaction queued ─` with the label centred in a full-width row
+/// (`index.tsx:2239-2252`). The label block is two cells of outer gap, two
+/// cells of padding, the glyph, one gap and the text: 23 cells.
+fn compaction_queued_row(width: usize) -> String {
+    const LABEL: &str = "  ◇ Compaction queued  ";
+    const LABEL_CELLS: usize = 23;
+    if width == 0 {
+        return LABEL.to_owned();
+    }
+    if width <= LABEL_CELLS {
+        return truncate_row(LABEL, width);
+    }
+    let remaining = width - LABEL_CELLS;
+    let left = remaining / 2;
+    let right = remaining - left;
+    format!("{}{LABEL}{}", "─".repeat(left), "─".repeat(right))
+}
+
+/// Lifecycle state of a synthetic child (subagent or shell) completion
+/// notice (`index.tsx:2108-2155`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ChildCompletionState {
+    Completed,
+    Error,
+    Cancelled,
+    /// Any other upstream `state` string; an empty string renders `finished`
+    /// (`index.tsx:2122-2125`).
+    Other(String),
+}
+
+impl ChildCompletionState {
+    /// `completed → finished`, `error → failed`, otherwise the raw state
+    /// (`index.tsx:2122-2125`).
+    #[must_use]
+    pub fn status(&self) -> String {
+        match self {
+            Self::Completed => "finished".to_owned(),
+            Self::Error => "failed".to_owned(),
+            Self::Cancelled => "cancelled".to_owned(),
+            Self::Other(state) if state.is_empty() => "finished".to_owned(),
+            Self::Other(state) => state.clone(),
+        }
+    }
+
+    #[must_use]
+    pub fn from_state(state: Option<&str>) -> Self {
+        match state {
+            Some("completed") => Self::Completed,
+            Some("error") => Self::Error,
+            Some("cancelled") => Self::Cancelled,
+            other => Self::Other(other.unwrap_or_default().to_owned()),
+        }
+    }
+}
+
+/// Source of a synthetic completion notice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChildCompletionSource {
+    Subagent,
+    Shell,
+}
+
+/// A synthetic child-completion notice
+/// (`index.tsx:2108-2155`):
+///
+/// * heading `"↳"` when completed, `"!"` otherwise, then the title-cased
+///   agent (or `Subagent`) / `Shell`, then the status;
+/// * one muted suffix `" · {description}"` truncated to
+///   `width - 3 - heading`; shell descriptions collapse whitespace, subagent
+///   descriptions are kept as written;
+/// * three cells of left margin;
+/// * error rows use `Theme.text.feedback.error.base`, cancelled rows
+///   `Theme.text.feedback.warning.base`, everything else
+///   `Theme.text.feedback.info.base` (`index.tsx:2128-2133`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChildCompletionNotice {
+    pub source: ChildCompletionSource,
+    pub agent: Option<String>,
+    pub state: ChildCompletionState,
+    pub description: String,
+    /// Subagent child session id; upstream navigates to it on click
+    /// (`index.tsx:2134-2153`).
+    pub child_id: Option<String>,
+}
+
+impl ChildCompletionNotice {
+    /// `"Shell"` for shell completions, otherwise the title-cased agent or
+    /// `"Subagent"` (`index.tsx:2112-2114`).
+    #[must_use]
+    pub fn actor(&self) -> String {
+        match self.source {
+            ChildCompletionSource::Shell => "Shell".to_owned(),
+            ChildCompletionSource::Subagent => {
+                titlecase(&bounded_label(self.agent.as_deref().unwrap_or("Subagent")))
+            }
+        }
+    }
+
+    /// `"↳ {actor} {status}"`, or `"! {actor} {status}"` when not completed
+    /// (`index.tsx:2126`).
+    #[must_use]
+    pub fn heading(&self) -> String {
+        let icon = if self.state == ChildCompletionState::Completed { "↳" } else { "!" };
+        format!("{icon} {} {}", self.actor(), self.state.status())
+    }
+
+    /// The notice row. `width == 0` disables truncation like every other row
+    /// helper in this module.
+    #[must_use]
+    pub fn row(&self, width: usize) -> (String, ChatRowClass) {
+        let raw = clip_utf8_prefix_bytes(&self.description, MAX_INPUT_ROW_BYTES);
+        let description = match self.source {
+            ChildCompletionSource::Shell => raw.split_whitespace().collect::<Vec<_>>().join(" "),
+            ChildCompletionSource::Subagent => sanitize_inline(raw),
+        };
+        let heading = self.heading();
+        let budget = if width == 0 {
+            usize::MAX
+        } else {
+            width.saturating_sub(3).saturating_sub(row_cells(&heading))
+        };
+        let suffix = if description.is_empty() {
+            String::new()
+        } else {
+            truncate_width(&format!(" · {description}"), budget)
+        };
+        let class = match self.state {
+            ChildCompletionState::Error => ChatRowClass::NoticeError,
+            ChildCompletionState::Cancelled => ChatRowClass::NoticeWarning,
+            _ => ChatRowClass::NoticeInfo,
+        };
+        (truncate_row(&format!("   {heading}{suffix}"), width), class)
+    }
+}
+
+/// Bound on notices kept by [`TranscriptSurfaces`].
+pub const MAX_SURFACE_NOTICES: usize = 64;
+
+/// The non-message transcript surfaces MSG-009 covers: the revert card, child
+/// completion notices, switch notices and the queue dock.
+///
+/// Upstream interleaves these with the message list (the revert card follows
+/// the reverted rows, `index.tsx:2254-2324`; notices are session messages;
+/// the dock sits above the composer, `index.tsx:1591-1592`). This aggregate
+/// exposes each surface separately so the caller can place them, and
+/// [`Self::render_rows`] returns them in screen order (revert card, child
+/// notices, notices, queue dock) bounded by [`MAX_VIEW_ROWS`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TranscriptSurfaces {
+    pub notices: Vec<TranscriptNotice>,
+    pub child_notices: Vec<ChildCompletionNotice>,
+    pub queue: QueueDock,
+    pub revert: Option<RevertCard>,
+}
+
+impl TranscriptSurfaces {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push_notice(&mut self, notice: TranscriptNotice) {
+        if self.notices.len() < MAX_SURFACE_NOTICES {
+            self.notices.push(notice);
+        }
+    }
+
+    pub fn push_child_notice(&mut self, notice: ChildCompletionNotice) {
+        if self.child_notices.len() < MAX_SURFACE_NOTICES {
+            self.child_notices.push(notice);
+        }
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.notices.is_empty()
+            && self.child_notices.is_empty()
+            && self.queue.is_empty()
+            && self.revert.is_none()
+    }
+
+    /// Every surface row in screen order, bounded by [`MAX_VIEW_ROWS`].
+    #[must_use]
+    pub fn render_rows(&self, width: usize) -> Vec<(String, ChatRowClass)> {
+        let mut rows = Vec::new();
+        if let Some(card) = &self.revert {
+            rows.extend(card.render_rows(width));
+        }
+        for notice in &self.child_notices {
+            rows.push(notice.row(width));
+        }
+        for notice in &self.notices {
+            rows.push(notice.row(width));
+        }
+        rows.extend(self.queue.render_rows(width));
+        rows.truncate(MAX_VIEW_ROWS);
+        rows
+    }
+}
+
+/// Upstream `Locale.titlecase` (`util/locale.ts:3-5`): uppercase every word
+/// character that starts a run, where a word character is ASCII alphanumeric
+/// or `_`.
+fn titlecase(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut boundary = true;
+    for ch in text.chars() {
+        let word = ch.is_ascii_alphanumeric() || ch == '_';
+        if boundary && word {
+            out.extend(ch.to_uppercase());
+        } else {
+            out.push(ch);
+        }
+        boundary = !word;
+    }
+    out
+}
+
+/// Upstream `Locale.truncateWidth` (`util/locale.ts:77-82`): empty at zero
+/// width, `…` at one cell, otherwise a cell-exact prefix plus `…`.
+fn truncate_width(text: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    if row_cells(text) <= width {
+        return text.to_owned();
+    }
+    if width == 1 {
+        return "…".to_owned();
+    }
+    let mut out = String::new();
+    crate::native_view_layout::visit_unpadded_cells(text, width - 1, |glyph, _| out.push_str(glyph));
+    out.push('…');
+    out
 }
 
 #[cfg(test)]
@@ -4382,5 +5864,503 @@ mod footer_v3_consumer_tests {
             .collect();
         let rows = typed_message_rows(80, &message, false);
         assert!(rows.len() <= MAX_MESSAGE_ROWS, "row cap respected: {}", rows.len());
+    }
+
+    // ── flow / fence routing ─────────────────────────────────────────
+
+    #[test]
+    fn flow_block_layout_drives_headings_lists_quotes_rules_and_tables() {
+        use crate::markdown_runs::MarkdownMode;
+        let text = "# Title\n\n- one\n- two\n\n> quoted\n\n---\n\n| a | b |\n| - | - |\n| 1 | 2 |";
+        let mut rows = Vec::new();
+        let spans = push_block_markdown(
+            &mut rows, 40, text, "", ChatRowClass::AssistantCard, MarkdownMode::Rendered,
+        );
+        let texts: Vec<&str> = rows.iter().map(|(row, _)| row.as_str()).collect();
+        assert!(texts.contains(&"Title"), "{texts:?}");
+        assert!(texts.contains(&"- one") && texts.contains(&"- two"), "{texts:?}");
+        assert!(texts.iter().any(|row| row.starts_with("│ quoted")), "{texts:?}");
+        assert!(
+            texts.iter().any(|row| !row.is_empty() && row.chars().all(|ch| ch == '─')),
+            "{texts:?}"
+        );
+        assert!(texts.iter().any(|row| row.contains('┌')), "{texts:?}");
+        // Heading style comes from the flow's role, not from re-parsing text.
+        let title = texts.iter().position(|row| *row == "Title").unwrap();
+        let title_spans = spans.iter().find(|(index, _)| *index == title).map(|(_, spans)| spans);
+        assert!(
+            title_spans.is_some_and(|spans| spans.iter().any(|span| span.flags & crate::markdown_runs::BOLD != 0)),
+            "heading carries its bold run: {title_spans:?}"
+        );
+        // Blocks are separated by the source's blank lines, exactly once.
+        assert_eq!(texts[1], "", "one blank row between heading and list: {texts:?}");
+    }
+
+    #[test]
+    fn mermaid_and_math_fences_fail_closed_to_the_plain_code_block() {
+        use crate::markdown_runs::MarkdownMode;
+        for text in [
+            "```mermaid\ngraph TD\n  A --> B\n```",
+            "```latex\nx^2\n```",
+            "```math\n\\frac{1}{2}\n```",
+            "```tex\ny\n```",
+        ] {
+            let mut rows = Vec::new();
+            push_block_markdown(
+                &mut rows, 60, text, "", ChatRowClass::AssistantCard, MarkdownMode::Rendered,
+            );
+            assert!(
+                rows.first().is_some_and(|(row, _)| row.starts_with("```")),
+                "fence delimiter preserved for {text:?}: {rows:?}"
+            );
+            assert!(
+                rows.last().is_some_and(|(row, _)| row == "```"),
+                "closing delimiter preserved for {text:?}: {rows:?}"
+            );
+            assert!(rows.iter().all(|(_, class)| *class == ChatRowClass::AssistantCard));
+        }
+    }
+
+    #[test]
+    fn unified_diff_fence_paints_gutter_rows_and_other_diffs_fail_closed() {
+        use crate::markdown_runs::MarkdownMode;
+        let text = "```diff\n@@ -1,2 +1,2 @@\n-old\n+new\n ctx\n```";
+        let mut rows = Vec::new();
+        push_block_markdown(
+            &mut rows, 80, text, "", ChatRowClass::AssistantCard, MarkdownMode::Rendered,
+        );
+        assert!(
+            rows.iter().any(|(row, class)| *class == ChatRowClass::DiffRemoved && row.contains("-old")),
+            "{rows:?}"
+        );
+        assert!(
+            rows.iter().any(|(row, class)| *class == ChatRowClass::DiffAdded && row.contains("+new")),
+            "{rows:?}"
+        );
+        assert!(
+            rows.iter().any(|(row, class)| *class == ChatRowClass::Metadata && row.contains("@@")),
+            "{rows:?}"
+        );
+        // The diff surface replaces the fence rows; it never paints them.
+        assert!(!rows.iter().any(|(row, _)| row.contains("```")), "{rows:?}");
+        // Gutter line numbers are composed into the row text.
+        let removed = rows.iter().find(|(_, class)| *class == ChatRowClass::DiffRemoved).unwrap();
+        assert!(removed.0.trim_start().starts_with('1'), "{}", removed.0);
+
+        // A `diff` fence without a hunk header fails closed to the code block.
+        let plain = "```diff\nnot a patch\n```";
+        let mut rows = Vec::new();
+        push_block_markdown(
+            &mut rows, 80, plain, "", ChatRowClass::AssistantCard, MarkdownMode::Rendered,
+        );
+        assert_eq!(rows.len(), 3, "{rows:?}");
+        assert!(rows[0].0.starts_with("```diff"), "{rows:?}");
+        assert_eq!(rows[1].0, "not a patch");
+    }
+
+    #[test]
+    fn flow_rows_wrap_on_cell_boundaries_without_splitting_clusters() {
+        use crate::native_markdown_flow::{FlowRow, RowSpan};
+        let row = FlowRow {
+            block: 0,
+            spans: vec![RowSpan::new("日本語abc", crate::native_markdown_flow::MarkdownRole::Text)],
+        };
+        let chunks = wrap_flow_row(&row, 4);
+        assert!(chunks.iter().all(|chunk| row_cells(&chunk.text) <= 4), "{chunks:?}");
+        assert_eq!(
+            chunks.iter().map(|chunk| chunk.text.as_str()).collect::<Vec<_>>().join(""),
+            "日本語abc"
+        );
+        // Wide clusters are never split across rows, but narrow clusters pack
+        // greedily onto the remainder of a row that starts with a wide one.
+        assert_eq!(chunks[0].text, "日本");
+        assert_eq!(chunks[1].text, "語ab");
+        assert_eq!(chunks[2].text, "c");
+    }
+
+    // ── MSG-007: message action menu ─────────────────────────────────
+
+    #[test]
+    fn message_action_options_match_upstream_titles_and_descriptions() {
+        assert_eq!(
+            MessageAction::ALL.map(MessageAction::title),
+            ["Jump to", "Revert", "Copy", "Fork"]
+        );
+        assert_eq!(
+            MessageAction::ALL.map(MessageAction::description),
+            [
+                "view message in session",
+                "undo messages and file changes",
+                "message text to clipboard",
+                "create a new session",
+            ]
+        );
+    }
+
+    #[test]
+    fn message_actions_restore_the_prompt_copy_raw_text_and_fork_by_captured_id() {
+        let user = ChatMessage::text(ChatRole::User, "hello");
+        let mut menu = MessageActionMenu::new();
+        menu.open("ses_1", "msg_1", Some(&user));
+
+        assert_eq!(
+            menu.select(MessageAction::Revert).effects,
+            vec![
+                MessageActionEffect::RestorePrompt {
+                    message_id: "msg_1".to_owned(),
+                    text: "hello".to_owned(),
+                },
+                MessageActionEffect::StageRevert { message_id: "msg_1".to_owned() },
+                MessageActionEffect::CloseMenu,
+            ]
+        );
+
+        let copy = menu.select(MessageAction::Copy);
+        assert_eq!(
+            copy.effects,
+            vec![MessageActionEffect::CopyToClipboard {
+                text: "hello".to_owned(),
+                truncated: false,
+            }]
+        );
+        // Upstream closes only after the clipboard write resolves.
+        assert!(!copy.closes_menu());
+
+        assert_eq!(
+            menu.select(MessageAction::Fork).effects,
+            vec![
+                MessageActionEffect::ForkSession { message_id: "msg_1".to_owned() },
+                MessageActionEffect::CloseMenu,
+            ]
+        );
+
+        assert_eq!(
+            menu.select(MessageAction::JumpTo).effects,
+            vec![
+                MessageActionEffect::JumpToMessage { message_id: "msg_1".to_owned() },
+                MessageActionEffect::CloseMenu,
+            ]
+        );
+        assert!(menu.select(MessageAction::JumpTo).closes_menu());
+    }
+
+    #[test]
+    fn message_action_menu_resync_never_retargets_and_never_panics() {
+        let user = ChatMessage::text(ChatRole::User, "hello");
+        let assistant = ChatMessage::text(ChatRole::Assistant, "reply");
+        let mut menu = MessageActionMenu::new();
+        menu.open("ses_1", "msg_1", Some(&user));
+
+        // The message is dropped from the projection: the snapshot clears but
+        // the captured identity stays (index.tsx:2414-2415).
+        menu.resync(&[("msg_2".to_owned(), assistant.clone())]);
+        assert_eq!(menu.message_id(), Some("msg_1"));
+        assert!(menu.snapshot().is_none());
+        assert!(menu.select(MessageAction::Copy).effects.is_empty());
+        assert!(menu.select(MessageAction::Fork).effects.is_empty());
+        assert_eq!(
+            menu.select(MessageAction::Revert).effects,
+            vec![
+                MessageActionEffect::StageRevert { message_id: "msg_1".to_owned() },
+                MessageActionEffect::CloseMenu,
+            ]
+        );
+
+        // A resync that still carries the id refreshes the snapshot in place.
+        menu.resync(&[("msg_1".to_owned(), assistant.clone())]);
+        assert_eq!(menu.snapshot(), Some(&assistant));
+        assert!(menu.select(MessageAction::Fork).effects.is_empty(), "assistant is not forkable");
+        assert!(menu.select(MessageAction::Revert).effects
+            .iter()
+            .all(|effect| !matches!(effect, MessageActionEffect::RestorePrompt { .. })));
+
+        // Assistant copy joins its text parts with a newline.
+        let mut multi = ChatMessage::text(ChatRole::Assistant, "one");
+        multi.parts.push(ChatPart::Text("two".to_owned()));
+        multi.parts.push(ChatPart::Thinking("hidden".to_owned()));
+        menu.resync(&[("msg_1".to_owned(), multi)]);
+        assert_eq!(
+            menu.select(MessageAction::Copy).effects,
+            vec![MessageActionEffect::CopyToClipboard {
+                text: "one\ntwo".to_owned(),
+                truncated: false,
+            }]
+        );
+
+        // Resync while closed is inert.
+        let mut closed = MessageActionMenu::new();
+        closed.resync(&[("msg_1".to_owned(), user)]);
+        assert!(!closed.is_open());
+        assert!(closed.select(MessageAction::Revert).effects.is_empty());
+    }
+
+    #[test]
+    fn message_action_copy_is_bounded_and_reports_truncation() {
+        let long = "a".repeat(MessageActionMenu::MAX_COPY_BYTES + 16);
+        let message = ChatMessage::text(ChatRole::User, long);
+        let mut menu = MessageActionMenu::new();
+        menu.open("ses", "msg", Some(&message));
+        let MessageActionOutcome { effects } = menu.select(MessageAction::Copy);
+        let [MessageActionEffect::CopyToClipboard { text, truncated }] = effects.as_slice() else {
+            panic!("expected one copy effect: {effects:?}");
+        };
+        assert!(truncated);
+        assert_eq!(text.len(), MessageActionMenu::MAX_COPY_BYTES);
+    }
+
+    // ── MSG-009: queue dock, pending steer, revert card, notices ─────
+
+    #[test]
+    fn queue_dock_renders_the_upstream_rail_and_flattened_next_prompt() {
+        let dock = QueueDock::new([
+            QueuedPrompt { id: "a".to_owned(), text: "first\nline".to_owned() },
+            QueuedPrompt { id: "b".to_owned(), text: "second".to_owned() },
+        ]);
+        assert_eq!(dock.summary().as_deref(), Some("2 queued · first line"));
+        let rows = dock.render_rows(40);
+        assert_eq!(rows.len(), 4, "{rows:?}");
+        assert_eq!(rows[0], ("┃".to_owned(), ChatRowClass::QueueDock));
+        assert_eq!(rows[1].0, "┃  2 queued · first line");
+        assert_eq!(rows[2].0, "┃");
+        // One row of bottom margin (index.tsx:2492).
+        assert_eq!(rows[3].0, "");
+        assert_eq!(rows[3].1, ChatRowClass::Separator);
+        // No prompts, no dock (index.tsx:1591).
+        assert!(QueueDock::default().render_rows(40).is_empty());
+        // The prompt count is capped.
+        let many = QueueDock::new((0..QueueDock::MAX_PROMPTS + 8).map(|index| QueuedPrompt {
+            id: index.to_string(),
+            text: format!("prompt {index}"),
+        }));
+        assert_eq!(many.len(), QueueDock::MAX_PROMPTS);
+    }
+
+    #[test]
+    fn revert_card_matches_upstream_padding_file_budget_and_redo_hint() {
+        let mut card = RevertCard::new(
+            2,
+            [
+                RevertFileChange {
+                    file: "src/a.rs".to_owned(),
+                    status: RevertFileStatus::Added,
+                    additions: 3,
+                    deletions: 0,
+                },
+                RevertFileChange {
+                    file: "src/b.rs".to_owned(),
+                    status: RevertFileStatus::Deleted,
+                    additions: 0,
+                    deletions: 4,
+                },
+            ],
+        );
+        card.redo_key = "ctrl+r".to_owned();
+        let rows = card.render_rows(40);
+        assert_eq!(rows.len(), 9, "{rows:?}");
+        assert_eq!(rows[0].0, "", "margin top");
+        assert_eq!(rows[1].0, "┃", "padding top");
+        assert_eq!(rows[2].0, "┃  2 messages reverted");
+        assert_eq!(rows[3].0, "┃", "files padding top");
+        assert_eq!(rows[4].0, "┃  A src/a.rs +3");
+        assert_eq!(rows[5].0, "┃  D src/b.rs -4");
+        assert_eq!(rows[6].0, "┃", "files padding bottom");
+        assert_eq!(rows[7].0, "┃  ctrl+r or /redo to restore");
+        assert_eq!(rows[8].0, "┃", "padding bottom");
+        assert!(rows.iter().all(|(_, class)| *class == ChatRowClass::RevertCard || *class == ChatRowClass::Blank));
+
+        assert_eq!(
+            RevertCard::new(1, Vec::<RevertFileChange>::new()).render_rows(40)[2].0,
+            "┃  1 message reverted"
+        );
+        // Without a redo binding the hint still reads as upstream renders it.
+        assert_eq!(
+            RevertCard::new(1, Vec::<RevertFileChange>::new()).render_rows(40)[3].0,
+            "┃  or /redo to restore"
+        );
+
+        // The path budget is `width - 5 - additions - deletions`, min 2
+        // (index.tsx:2309-2317).
+        let narrow = RevertCard::new(
+            1,
+            [RevertFileChange {
+                file: "a/very/long/file/name.rs".to_owned(),
+                status: RevertFileStatus::Modified,
+                additions: 120,
+                deletions: 7,
+            }],
+        );
+        let rows = narrow.render_rows(20);
+        let file_row = rows.iter().find(|(row, _)| row.contains('M')).unwrap();
+        assert!(row_cells(&file_row.0) <= 20, "{file_row:?}");
+        assert!(file_row.0.contains('…'), "path is ellipsized: {file_row:?}");
+    }
+
+    #[test]
+    fn transcript_notices_match_upstream_switch_labels_and_compaction_divider() {
+        let location = TranscriptNotice::LocationSwitched { directory: "/tmp/project".to_owned() };
+        assert_eq!(location.row(40), ("   ↳ Moved to /tmp/project".to_owned(), ChatRowClass::NoticeInfo));
+
+        let switched = TranscriptNotice::AgentSwitched {
+            agent: "build".to_owned(),
+            previous: Some("plan".to_owned()),
+        };
+        assert_eq!(switched.row(40).0, "   Switched agent from Plan to Build");
+        assert_eq!(switched.row(40).1, ChatRowClass::SwitchNotice);
+        let same = TranscriptNotice::AgentSwitched {
+            agent: "build".to_owned(),
+            previous: Some("build".to_owned()),
+        };
+        assert_eq!(same.row(40).0, "   Switched agent to Build");
+        let none = TranscriptNotice::AgentSwitched { agent: "build".to_owned(), previous: None };
+        assert_eq!(none.row(40).0, "   Switched agent to Build");
+
+        // `switchLabel` (util/model.ts:11-25).
+        let model = ModelRef::new("anthropic", "claude");
+        assert_eq!(model_switch_label(&model, None, None), "Switched model to anthropic/claude");
+        assert_eq!(model_switch_label(&model, None, Some("Claude")), "Switched model to Claude");
+        let variant = ModelRef::new("anthropic", "claude").with_variant("high");
+        assert_eq!(model_switch_label(&variant, Some(&model), None), "Switched variant to high");
+        assert_eq!(
+            model_switch_label(&variant, None, Some("Claude")),
+            "Switched model to Claude (high)"
+        );
+        assert_eq!(variant.format_ref(), "anthropic/claude/high");
+        let default_variant = ModelRef::new("anthropic", "claude").with_variant("default");
+        assert_eq!(model_switch_label(&default_variant, None, Some("Claude")), "Switched model to Claude");
+
+        // The divider spans the full width and keeps the 23-cell label block
+        // (index.tsx:2239-2252).
+        let divider = TranscriptNotice::CompactionQueued.row(40);
+        assert_eq!(divider.1, ChatRowClass::CompactionQueued);
+        assert_eq!(row_cells(&divider.0), 40);
+        assert!(divider.0.contains("  ◇ Compaction queued  "), "{divider:?}");
+        assert!(divider.0.starts_with('─') && divider.0.ends_with('─'), "{divider:?}");
+        // Narrower than the label: no dashes, clipped label.
+        assert_eq!(row_cells(&TranscriptNotice::CompactionQueued.row(10).0), 10);
+    }
+
+    #[test]
+    fn child_completion_notices_pick_state_colors_and_truncate_the_suffix() {
+        let completed = ChildCompletionNotice {
+            source: ChildCompletionSource::Subagent,
+            agent: Some("explore".to_owned()),
+            state: ChildCompletionState::from_state(Some("completed")),
+            description: "scanned the tree".to_owned(),
+            child_id: Some("ses_child".to_owned()),
+        };
+        assert_eq!(completed.heading(), "↳ Explore finished");
+        assert_eq!(
+            completed.row(80),
+            ("   ↳ Explore finished · scanned the tree".to_owned(), ChatRowClass::NoticeInfo)
+        );
+        // Suffix budget is `width - 3 - heading` (index.tsx:2127).
+        let (narrow, _) = completed.row(24);
+        assert_eq!(row_cells(&narrow), 24, "{narrow:?}");
+        assert!(narrow.ends_with('…'), "{narrow:?}");
+
+        let failed = ChildCompletionNotice {
+            state: ChildCompletionState::from_state(Some("error")),
+            ..completed.clone()
+        };
+        assert_eq!(failed.heading(), "! Explore failed");
+        assert_eq!(failed.row(80).1, ChatRowClass::NoticeError);
+
+        let cancelled = ChildCompletionNotice {
+            state: ChildCompletionState::from_state(Some("cancelled")),
+            ..completed.clone()
+        };
+        assert_eq!(cancelled.heading(), "! Explore cancelled");
+        assert_eq!(cancelled.row(80).1, ChatRowClass::NoticeWarning);
+
+        // Shell completions use "Shell", collapse whitespace and keep the raw
+        // state as the status (index.tsx:2112-2125).
+        let shell = ChildCompletionNotice {
+            source: ChildCompletionSource::Shell,
+            agent: None,
+            state: ChildCompletionState::from_state(Some("running")),
+            description: "  npm   test \n ok ".to_owned(),
+            child_id: None,
+        };
+        assert_eq!(shell.heading(), "! Shell running");
+        assert_eq!(shell.row(80).0, "   ! Shell running · npm test ok");
+
+        // A missing state renders `finished` but keeps the `!` marker: the
+        // heading icon is `state === "completed" ? "↳" : "!"`, so an absent
+        // state is not completed (`index.tsx:2123-2127`).
+        let missing = ChildCompletionNotice {
+            state: ChildCompletionState::from_state(None),
+            ..completed
+        };
+        assert_eq!(missing.heading(), "! Explore finished");
+    }
+
+    #[test]
+    fn message_click_opens_pending_steer_only_for_steer_delivery() {
+        let user = ChatMessage::text(ChatRole::User, "steer me");
+        let steer = menu_for_message(Some(PendingDelivery::Steer), "ses", "msg", Some(&user));
+        let SessionMessageMenu::PendingSteer(mut pending) = steer else {
+            panic!("steer delivery opens Pending steer");
+        };
+        assert_eq!(pending.message_id(), Some("msg"));
+        assert_eq!(
+            pending.select(PendingAction::MoveToQueue),
+            Some(PendingSteerEffect::MoveToQueue { message_id: "msg".to_owned() })
+        );
+        assert_eq!(
+            pending.select(PendingAction::Delete),
+            Some(PendingSteerEffect::Cancel { message_id: "msg".to_owned() })
+        );
+        let rows = pending.render_rows(24);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, "  Move to queue");
+        assert_eq!(rows[1].0, "  Delete");
+        assert_eq!(PendingAction::ALL.map(PendingAction::title), ["Move to queue", "Delete"]);
+        // The menu stays open until the caller's mutation succeeds.
+        assert!(pending.is_open());
+        pending.close();
+        assert!(pending.select(PendingAction::Delete).is_none());
+
+        // Queue delivery (and no delivery) opens the message actions menu.
+        for delivery in [Some(PendingDelivery::Queue), None] {
+            let menu = menu_for_message(delivery, "ses", "msg", Some(&user));
+            let SessionMessageMenu::Actions(mut actions) = menu else {
+                panic!("queue delivery opens Message Actions");
+            };
+            assert_eq!(actions.message_id(), Some("msg"));
+            assert_eq!(actions.session_id(), Some("ses"));
+            assert_eq!(actions.render_rows(80).len(), 4);
+            actions.close();
+            assert!(actions.render_rows(80).is_empty());
+        }
+    }
+
+    #[test]
+    fn transcript_surfaces_render_in_screen_order_and_stay_bounded() {
+        let mut surfaces = TranscriptSurfaces::new();
+        assert!(surfaces.is_empty());
+        surfaces.revert = Some(RevertCard::new(1, Vec::<RevertFileChange>::new()));
+        surfaces.push_child_notice(ChildCompletionNotice {
+            source: ChildCompletionSource::Shell,
+            agent: None,
+            state: ChildCompletionState::Completed,
+            description: "done".to_owned(),
+            child_id: None,
+        });
+        surfaces.push_notice(TranscriptNotice::LocationSwitched { directory: "/w".to_owned() });
+        surfaces.queue.push(QueuedPrompt { id: "q".to_owned(), text: "next".to_owned() });
+        let rows = surfaces.render_rows(40);
+        let revert = rows.iter().position(|(row, _)| row.contains("reverted")).unwrap();
+        let child = rows.iter().position(|(row, _)| row.contains("Shell finished")).unwrap();
+        let notice = rows.iter().position(|(row, _)| row.contains("Moved to")).unwrap();
+        let dock = rows.iter().position(|(row, _)| row.contains("1 queued")).unwrap();
+        assert!(revert < child && child < notice && notice < dock, "{rows:?}");
+        assert!(!surfaces.is_empty());
+
+        // Notices are bounded.
+        for _ in 0..MAX_SURFACE_NOTICES + 8 {
+            surfaces.push_notice(TranscriptNotice::CompactionQueued);
+        }
+        assert_eq!(surfaces.notices.len(), MAX_SURFACE_NOTICES);
+        assert!(surfaces.render_rows(40).len() <= MAX_VIEW_ROWS);
     }
 }
