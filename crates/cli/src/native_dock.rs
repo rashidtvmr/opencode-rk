@@ -942,6 +942,19 @@ impl ComposerDock {
             row.text.push_str(&line.text);
             row.spans.extend(line.spans);
         }
+        // The right-aligned `esc` is off-flow in `title_line`, so the composed
+        // row is padded out to its cell offset here; publishing only the span
+        // would recolour cells that never receive the glyphs.
+        if let Some((start, _)) = self.esc_hit(width) {
+            let filled = visit_unpadded_cells(&row.text, usize::from(u16::MAX), |_, _| {}) as u16;
+            if filled <= start {
+                row.text.extend(std::iter::repeat_n(
+                    ' ',
+                    usize::from(start.saturating_sub(filled)),
+                ));
+                row.text.push_str(DOCK_ESC_LABEL);
+            }
+        }
         row
     }
 
@@ -1737,11 +1750,14 @@ mod native_dock_tests {
         // paddingTop + tab row + gap + empty body + gap + hint + paddingBottom.
         assert_eq!(block.height(), 7);
         assert_eq!(block.body_rows, 1);
+        // The right-aligned `esc` is padded to its absolute column so the
+        // composed row carries the glyphs, not only the span.
+        let title_with_esc = format!("{:width$}esc", "┃  Subagents  Shell", width = 35);
         assert_eq!(
             block.text_rows(),
             vec![
                 "┃",
-                "┃  Subagents  Shell",
+                title_with_esc.as_str(),
                 "┃",
                 // The literal itself starts with a space (`shell-tab.tsx:116`),
                 // so its `N` lands at DOCK_TEXT_X.
@@ -1777,6 +1793,14 @@ mod native_dock_tests {
         let esc = title.spans.last().unwrap();
         assert_eq!(esc.style, DockStyle::Esc);
         assert_eq!(esc.x, 40 - DOCK_PADDING_RIGHT - 3);
+        // The span column and the composed glyphs agree: the `esc` exists in
+        // the painted row, not only in the style channel.
+        let cells: Vec<char> = title.text.chars().collect();
+        let start = usize::from(esc.x);
+        assert_eq!(
+            cells[start..start + 3].iter().collect::<String>(),
+            DOCK_ESC_LABEL
+        );
         // The empty state has no row padding, so it starts one cell earlier.
         let empty = &block.rows[3];
         assert_eq!(empty.spans[1].style, DockStyle::EmptyBody);

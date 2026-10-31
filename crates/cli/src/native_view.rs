@@ -7414,6 +7414,14 @@ mod composer_dock_tests {
         let hits = view.dock_hits().to_vec();
         assert_eq!(hits.len(), 1, "only the esc affordance is clickable");
         let (x, y, cells) = hits[0];
+        // The hit rect must cover real painted glyphs: the right-aligned `esc`
+        // is off-flow in the dock line, so the composed row has to carry it.
+        let painted_cells: String = frame[usize::from(y)]
+            .chars()
+            .skip(usize::from(x))
+            .take(usize::from(cells))
+            .collect();
+        assert_eq!(painted_cells, crate::native_dock::DOCK_ESC_LABEL);
         // The right-aligned `esc` is a positioned span, not part of the row's
         // left-aligned text, so its paint proof is the foreground-span channel.
         let painted = view.context_usage_styles().iter().any(|(sx, sy, scells, slot)| {
