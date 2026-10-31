@@ -44,6 +44,9 @@
 //! auto-resending are integrator responsibilities, not view state.
 
 use crate::native_assistant_facts::AssistantFacts;
+use crate::native_prompt_pane::{
+    PromptMetadataInput, PromptMode, PromptPane, PromptPaneInput, PromptPaneRowKind, PromptPaneStyle,
+};
 use crate::native_transcript::{TranscriptLine, render_lines, strip_ansi};
 use std::cell::Cell;
 
@@ -125,6 +128,69 @@ impl ChatView {
         self.prompt_cursor.filter(|cursor| *cursor <= draft.len() && draft.is_char_boundary(*cursor))
             .unwrap_or(draft.len())
     }
+
+    /// Compose the composer/prompt block through
+    /// [`crate::native_prompt_pane::PromptPane`]. The chat renderer uses this
+    /// for its own rows; callers that paint the composer (NativeView's
+    /// `render_content`) use it to obtain the exact prompt rows and the
+    /// insertion cursor cell instead of re-deriving prompt geometry.
+    ///
+    /// The view supplies its own insertion offset; every other fact comes
+    /// from `input`. `input.height` is the chat body budget (header +
+    /// transcript + composer), matching the render entry points.
+    pub(crate) fn prompt_pane<'a>(&self, mut input: PromptPaneInput<'a>) -> PromptPane<'a> {
+        input.cursor = self.prompt_cursor(input.draft);
+        PromptPane::compose(input)
+    }
+
+    /// The prompt block the chat renderer paints, with no transcript facts
+    /// needed: same width/height/appearance arguments as
+    /// [`ChatView::render_styled_with_spans_mode`].
+    fn rendered_prompt_pane<'a>(
+        &self,
+        width: usize,
+        height: usize,
+        draft: &'a str,
+        busy: bool,
+        appearance: &crate::native_box_style::BoxAppearance,
+    ) -> PromptPane<'a> {
+        self.prompt_pane(PromptPaneInput::composer(
+            appearance,
+            width,
+            height,
+            draft,
+            u16::try_from(width).unwrap_or(u16::MAX),
+            PromptMode::Normal,
+            busy,
+            PromptMetadataInput::default(),
+        ))
+    }
+
+    /// The same block forced into the explicit-outline presentation.
+    fn framed_prompt_pane<'a>(
+        &self,
+        width: usize,
+        height: usize,
+        draft: &'a str,
+        busy: bool,
+        frame: crate::native_box_style::EffectiveBox,
+    ) -> PromptPane<'a> {
+        self.prompt_pane(PromptPaneInput {
+            width,
+            height,
+            draft,
+            cursor: draft.len(),
+            mode: PromptMode::Normal,
+            terminal_width: u16::try_from(width).unwrap_or(u16::MAX),
+            busy,
+            interrupt_armed: false,
+            placeholder: None,
+            metadata: PromptMetadataInput::default(),
+            frame,
+            allow_rail: false,
+        })
+    }
+
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -623,11 +689,25 @@ pub type StyledChatRow = (String, ChatRowClass, Option<(u16, u16)>);
 /// The shared ChatComposer allocation decision used by both the painter and
 /// NativeView's hit-region projection. Home's legacy rail does not use this
 /// helper; this is specifically the session ChatComposer path.
+///
+/// Values are produced by [`crate::native_prompt_pane::prompt_geometry`], the
+/// single owner of composer geometry; this type only keeps the existing
+/// field names for the paint/hit-region callers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ComposerLayout {
     pub framed: bool,
     pub rail: bool,
     pub height: usize,
+}
+
+impl From<crate::native_prompt_pane::PromptPaneGeometry> for ComposerLayout {
+    fn from(geometry: crate::native_prompt_pane::PromptPaneGeometry) -> Self {
+        Self {
+            framed: geometry.style == PromptPaneStyle::Framed,
+            rail: geometry.style == PromptPaneStyle::Rail,
+            height: geometry.height,
+        }
+    }
 }
 
 #[must_use]
@@ -637,18 +717,15 @@ pub(crate) fn composer_layout(
     draft: &str,
     frame: crate::native_box_style::EffectiveBox,
 ) -> ComposerLayout {
-    let height = height.min(MAX_VIEW_ROWS);
-    let pad = usize::from(frame.padding);
-    let framed = frame.has_border()
-        && width > 2 + 2 * pad
-        && height > 3 + 2 * pad;
-    let overhead = if framed { 2 + 2 * pad } else { 0 };
-    let text_width = width.saturating_sub(overhead + 2);
-    let input = crate::native_prompt_layout::wrap_prompt(draft, text_width, draft.len());
-    let height = input.rows.len().clamp(1, ((height.saturating_sub(overhead)) / 2).max(1)) + overhead;
-    ComposerLayout { framed, rail: false, height }
+    // Framed-only projection: the rail presentation is selected by
+    // `session_composer_layout` because it also owns the appearance. Upstream
+    // textarea/box geometry is pinned in `native_prompt_pane`.
+    crate::native_prompt_pane::prompt_geometry(width, height, draft, frame, false).into()
 }
 
+/// Session composer geometry. Delegates to
+/// [`crate::native_prompt_pane::prompt_geometry`] so the chat renderer, the
+/// painter and the hit-region projection share one layout decision.
 pub(crate) fn session_composer_layout(
     width: usize,
     height: usize,
@@ -656,22 +733,14 @@ pub(crate) fn session_composer_layout(
     appearance: &crate::native_box_style::BoxAppearance,
 ) -> ComposerLayout {
     let style = appearance.effective(crate::native_box_style::BoxId::ChatComposer);
-    let height = height.min(MAX_VIEW_ROWS);
-    let draft = clip_utf8_prefix_bytes(draft, MAX_DRAFT_BYTES);
-    if height == 0 {
-        return ComposerLayout { framed: false, rail: false, height: 0 };
-    }
-    if !appearance.home_composer_outline() && style.has_border()
-        && style.padding == 0 && width > 5 && height >= 6
-    {
-        let max_input = ((height + 2) / 3).max(6).min(height - 4);
-        let inset = if width < 40 { 1 } else { 2 };
-        let input = crate::native_prompt_layout::wrap_prompt(draft,
-            width.saturating_sub(1 + 2 * inset), draft.len()).rows.len().min(max_input).max(1);
-        ComposerLayout { framed: false, rail: true, height: input + 4 }
-    } else {
-        composer_layout(width, height, draft, style)
-    }
+    crate::native_prompt_pane::prompt_geometry(
+        width,
+        height,
+        draft,
+        style,
+        !appearance.home_composer_outline(),
+    )
+    .into()
 }
 
 #[cfg(test)]
@@ -2501,11 +2570,8 @@ impl ChatView {
             return self.render_typed_classified(width, height, workspace, messages, draft, busy);
         }
         let pad = usize::from(frame.padding);
-        let overhead = 2 + 2 * pad;
         let frame_h = layout.height;
         let body_h = height - frame_h;
-        let content_h = frame_h - overhead;
-        let content_w = width - 2 - 2 * pad;
         let header_h = usize::from(body_h > 0);
         let window = self.typed_window(width, body_h - header_h, messages);
         let mut rows = Vec::with_capacity(height);
@@ -2520,21 +2586,26 @@ impl ChatView {
             );
         }
         let draft = clip_utf8_prefix_bytes(draft, MAX_DRAFT_BYTES);
-        let input = crate::native_prompt_layout::wrap_prompt(draft, content_w.saturating_sub(2), self.prompt_cursor(draft));
-        let start = input.window_start(content_h);
-        let mut text_rows: Vec<_> = input.rows.iter().skip(start).take(content_h)
-            .enumerate().map(|(index, text)| format!("{}{text}", if index + start == 0 { "> " } else { "  " })).collect();
-        while text_rows.len() < content_h {
-            text_rows.push(String::new());
-        }
+        // The pane owns the editor rows (prefix, scroll window, placeholder);
+        // this method only adds the outline glyphs around them.
+        let pane = self.framed_prompt_pane(width, height, draft, busy, frame);
         let Some(border) = crate::native_box_style::TextFrame::new(frame, width, pad) else {
             return self.render_typed_classified(width, height, workspace, messages, draft, busy);
         };
-        rows.push((border.edge(false), ChatRowClass::Composer));
-        for _ in 0..pad { rows.push((border.blank(), ChatRowClass::Composer)); }
-        for row in text_rows { rows.push((border.row(&row), ChatRowClass::Composer)); }
-        for _ in 0..pad { rows.push((border.blank(), ChatRowClass::Composer)); }
-        rows.push((border.edge(true), ChatRowClass::Composer));
+        let mut top_edge = true;
+        for row in pane.rows() {
+            let text = match row.kind {
+                PromptPaneRowKind::FrameEdge => {
+                    let text = border.edge(!top_edge);
+                    top_edge = false;
+                    text
+                }
+                PromptPaneRowKind::FramePadding => border.blank(),
+                PromptPaneRowKind::Editor | PromptPaneRowKind::Placeholder => border.row(&row.text),
+                _ => continue,
+            };
+            rows.push((text, ChatRowClass::Composer));
+        }
         rows
     }
 
@@ -2631,44 +2702,37 @@ impl ChatView {
         let height = height.min(MAX_VIEW_ROWS);
         let width = width.min(u16::MAX as usize);
         let draft = clip_utf8_prefix_bytes(draft, MAX_DRAFT_BYTES);
-        let prompt = session_composer_layout(width, height, draft, appearance);
+        // The composer block — rows, metadata/placeholder row and cursor — is
+        // owned by `native_prompt_pane`. `render_content` calls
+        // `ChatView::prompt_pane` with the real metadata facts; this render
+        // path only needs its rows.
+        let pane = self.rendered_prompt_pane(width, height, draft, busy, appearance);
         let mut rows = if !show_prompt {
             let mut rows = vec![(String::new(), ChatRowClass::Blank); height];
             if let Some(header) = rows.first_mut() {
                 *header = (render_header(width, workspace, busy, self.scroll.get()), ChatRowClass::Header);
             }
             rows
-        } else if prompt.rail {
-            let mut rows = vec![(String::new(), ChatRowClass::Blank); height - prompt.height];
+        } else if pane.geometry().style == PromptPaneStyle::Rail {
+            let mut rows = vec![(String::new(), ChatRowClass::Blank); height.saturating_sub(pane.height())];
             if let Some(header) = rows.first_mut() {
                 *header = (render_header(width, workspace, busy, self.scroll.get()), ChatRowClass::Header);
             }
-            let blank = format!("┃{}", " ".repeat(width - 1));
-            rows.push((blank.clone(), ChatRowClass::Composer));
-            let inset = if width < 40 { 1 } else { 2 };
-            let text_width = width.saturating_sub(1 + 2 * inset);
-            let input = crate::native_prompt_layout::wrap_prompt(draft, text_width, self.prompt_cursor(draft));
-            let start = input.window_start(prompt.height - 4);
-            for line in input.rows.iter().skip(start).take(prompt.height - 4) {
-                rows.push((format!("┃{}{}", " ".repeat(inset),
-                    crate::native_view_layout::slice_cells(&line.replace('\t', " "), 0, text_width as u16)), ChatRowClass::Composer));
-            }
-            rows.push((blank.clone(), ChatRowClass::Composer));
-            rows.push((blank, ChatRowClass::Composer));
-            rows.push((format!("╹{}", "▀".repeat(width - 1)), ChatRowClass::Composer));
+            rows.extend(pane.rows().iter().map(|row| (
+                row.text.clone(),
+                if row.kind == PromptPaneRowKind::Metadata {
+                    ChatRowClass::Metadata
+                } else {
+                    ChatRowClass::Composer
+                },
+            )));
             rows
-        } else if !prompt.framed {
-            let mut rows = vec![(String::new(), ChatRowClass::Blank); height.saturating_sub(prompt.height)];
+        } else if pane.geometry().style == PromptPaneStyle::Plain {
+            let mut rows = vec![(String::new(), ChatRowClass::Blank); height.saturating_sub(pane.height())];
             if let Some(header) = rows.first_mut() {
                 *header = (render_header(width, workspace, busy, self.scroll.get()), ChatRowClass::Header);
             }
-            let text_width = width.saturating_sub(2);
-            let input = crate::native_prompt_layout::wrap_prompt(draft, text_width, self.prompt_cursor(draft));
-            let start = input.window_start(prompt.height);
-            for (index, line) in input.rows.iter().skip(start).take(prompt.height).enumerate() {
-                let prefix = if index + start == 0 { "> " } else { "  " };
-                rows.push((truncate_row(&format!("{prefix}{line}"), width), ChatRowClass::Composer));
-            }
+            rows.extend(pane.rows().iter().map(|row| (row.text.clone(), ChatRowClass::Composer)));
             rows
         } else { self.render_typed_classified_framed(
             width,
@@ -5709,6 +5773,171 @@ mod tests {
             format!("> {single}"),
             "height-1 prompt priority with exact 32 KiB line"
         );
+    }
+
+    // Composer delegation — `native_prompt_pane` owns the block.
+
+    #[test]
+    fn session_composer_layout_is_the_prompt_pane_geometry() {
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        for height in [0usize, 3, 4, 5, 6, 20] {
+            for width in [0usize, 5, 6, 39, 40, 80] {
+                for draft in ["", "one\ntwo\nthree"] {
+                    let layout = session_composer_layout(width, height, draft, &appearance);
+                    let pane = ChatView::new().prompt_pane(PromptPaneInput::composer(
+                        &appearance,
+                        width,
+                        height,
+                        draft,
+                        u16::try_from(width).unwrap_or(u16::MAX),
+                        PromptMode::Normal,
+                        false,
+                        PromptMetadataInput::default(),
+                    ));
+                    assert_eq!(layout.height, pane.height(), "{width}x{height}");
+                    assert_eq!(layout.rail, pane.style() == PromptPaneStyle::Rail);
+                    assert_eq!(layout.framed, pane.style() == PromptPaneStyle::Framed);
+                    assert_eq!(pane.rows().len(), pane.height());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn default_session_composer_is_a_rail_and_explicit_outline_is_framed() {
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let rail = session_composer_layout(80, 20, "draft", &appearance);
+        assert!(rail.rail && !rail.framed);
+        assert_eq!(rail.height, 5);
+
+        let mut outline = crate::native_box_style::BoxAppearance::default();
+        outline.frame_mode = crate::native_box_style::FrameMode::Outline;
+        let framed = session_composer_layout(80, 20, "draft", &outline);
+        assert!(framed.framed && !framed.rail);
+        assert_eq!(framed.height, 3);
+
+        // The framed-only projection never selects the rail presentation.
+        let frame = appearance.effective(crate::native_box_style::BoxId::ChatComposer);
+        let projected = composer_layout(80, 20, "draft", frame);
+        assert!(!projected.rail && projected.framed);
+    }
+
+    #[test]
+    fn rail_render_rows_are_the_prompt_pane_rows() {
+        let mut view = ChatView::new();
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let draft = "hello";
+        let pane = view.prompt_pane(PromptPaneInput::composer(
+            &appearance,
+            60,
+            20,
+            draft,
+            60,
+            PromptMode::Normal,
+            false,
+            PromptMetadataInput::default(),
+        ));
+        let rows = view.render_styled(60, 20, "ws", &[], draft, false, &appearance);
+        assert_eq!(rows.len(), 20);
+        let origin = rows.len() - pane.height();
+        let painted: Vec<&str> = rows[origin..].iter().map(|(text, _, _)| text.as_str()).collect();
+        let composed: Vec<&str> = pane.rows().iter().map(|row| row.text.as_str()).collect();
+        assert_eq!(painted, composed);
+        assert_eq!(rows[origin].1, ChatRowClass::Composer);
+        let metadata = pane.metadata_row().expect("rail metadata row");
+        assert_eq!(rows[origin + metadata].1, ChatRowClass::Metadata);
+        // Everything above the block is blank apart from the header.
+        assert_eq!(rows[0].1, ChatRowClass::Header);
+        assert!(rows[1..origin]
+            .iter()
+            .all(|(text, class, _)| *class == ChatRowClass::Blank && text.is_empty()));
+    }
+
+    #[test]
+    fn prompt_pane_cursor_is_relative_to_the_block_origin() {
+        let mut view = ChatView::new();
+        view.set_prompt_cursor(3);
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let pane = view.prompt_pane(PromptPaneInput::composer(
+            &appearance,
+            60,
+            18,
+            "hello",
+            60,
+            PromptMode::Normal,
+            false,
+            PromptMetadataInput::default(),
+        ));
+        let rows = view.render_styled(60, 18, "ws", &[], "hello", false, &appearance);
+        let origin = rows.len() - pane.height();
+        let (column, row) = pane.cursor_cell().expect("valid insertion offset");
+        assert_eq!(rows[origin + row].0.chars().nth(column), Some('l'));
+
+        // The view clamps an out-of-range offset to the tail, matching
+        // `prompt_cursor` and therefore the rendered window.
+        let mut tail = PromptPaneInput::composer(
+            &appearance,
+            60,
+            18,
+            "hello",
+            60,
+            PromptMode::Normal,
+            false,
+            PromptMetadataInput::default(),
+        );
+        tail.cursor = 99;
+        assert_eq!(ChatView::new().prompt_pane(tail).cursor_cell(), Some((3 + 5, 1)));
+    }
+
+    #[test]
+    fn prompt_pane_cursor_stays_inside_a_scrolled_block() {
+        let view = ChatView::new();
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let draft = "line\n".repeat(12);
+        let pane = view.prompt_pane(PromptPaneInput::composer(
+            &appearance,
+            80,
+            20,
+            &draft,
+            80,
+            PromptMode::Normal,
+            false,
+            PromptMetadataInput::default(),
+        ));
+        let (_, row) = pane.cursor_cell().expect("tail caret");
+        assert!(row < pane.height(), "caret row {row} outside {}", pane.height());
+        assert_eq!(pane.row(row).unwrap().kind, PromptPaneRowKind::Editor);
+    }
+
+    #[test]
+    fn explicit_outline_render_uses_the_pane_editor_rows() {
+        let view = ChatView::new();
+        let mut appearance = crate::native_box_style::BoxAppearance::default();
+        appearance.frame_mode = crate::native_box_style::FrameMode::Outline;
+        let frame = appearance.effective(crate::native_box_style::BoxId::ChatComposer);
+        let pane = view.prompt_pane(PromptPaneInput {
+            width: 40,
+            height: 12,
+            draft: "draft",
+            cursor: "draft".len(),
+            mode: PromptMode::Normal,
+            terminal_width: 40,
+            busy: false,
+            interrupt_armed: false,
+            placeholder: None,
+            metadata: PromptMetadataInput::default(),
+            frame,
+            allow_rail: false,
+        });
+        let rows = view.render_styled(40, 12, "ws", &[], "draft", false, &appearance);
+        assert_eq!(rows.len(), 12);
+        let origin = rows.len() - pane.height();
+        assert_eq!(rows[origin].0.chars().next(), Some('┌'));
+        assert!(rows[origin + 1].0.contains("> draft"));
+        assert_eq!(rows.last().unwrap().0.chars().next(), Some('└'));
+        assert!(rows[origin..]
+            .iter()
+            .all(|(_, class, _)| *class == ChatRowClass::Composer));
     }
 }
 

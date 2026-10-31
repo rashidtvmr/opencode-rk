@@ -37,13 +37,37 @@
 //!   fade-in: 0.16 s smoothstep tween; a mounted-once WeakSet key means a
 //!   remount jumps to the final alpha instead of replaying the reveal.
 //!
+//! # The composer pane is this module's authority
+//!
+//! `component/prompt/index.tsx:1678-1898` composes exactly one block:
+//!
+//! ```text
+//! outer box (:1680)
+//! ├ main box, left border SplitBorder + bottomLeft "╹" (:1681-1689)
+//! │ └ raised surface, paddingTop 1, responsive inset (:1690-1698)
+//! │   ├ optional image strip (:1699-1766) — native_image_preview owns it
+//! │   ├ textarea minHeight 1, maxHeight max(6, floor(h/3)) (:1767-1854)
+//! │   └ metadata block: paddingTop 1 + row (:1855-1870)
+//! ├ height-1 lip "╹"/"▀" (:1873-1898)
+//! └ footer slot (:1899-1983) — location, or spinner + interrupt hint
+//! ```
+//!
+//! [`PromptPane`] returns that block as rows, the metadata row, the
+//! placeholder row and the insertion cursor cell, so no other module
+//! re-derives prompt geometry. Rows reserved by the block are
+//! `prompt_rows(input_rows)` (`native_prompt_layout`): the lip is inside the
+//! block, the footer is its sibling.
+//!
 //! Everything here is pure layout/style state; the painter and the terminal
 //! live in the existing view modules.
 #![allow(dead_code)]
 
-use crate::native_prompt_layout::{prompt_inset, prompt_text_width, prompt_rows, surface_rows};
+use crate::native_box_style::EffectiveBox;
+use crate::native_prompt_layout::{
+    prompt_inset, prompt_text_width, prompt_rows, surface_rows, wrap_prompt,
+};
 use crate::native_theme_runtime::{HueColor, SemanticPalette};
-use crate::native_view_layout::{fit, visit_unpadded_cells};
+use crate::native_view_layout::{fit, slice_cells, visit_unpadded_cells};
 
 // ── border and raised surface ─────────────────────────────────────────
 
@@ -240,6 +264,25 @@ pub(crate) struct PromptMetadataInput<'a> {
     pub variant: Option<&'a str>,
     /// Workspace usage limit text, not context usage (`index.tsx:1863`).
     pub limit: Option<&'a str>,
+    /// Approved oc2 extension: the observed reasoning effort, rendered after
+    /// the variant with the same `· <value>` shape. Upstream has no effort
+    /// token at this pin, so it is absent from parity comparisons.
+    pub effort: Option<&'a str>,
+}
+
+impl<'a> Default for PromptMetadataInput<'a> {
+    fn default() -> Self {
+        Self {
+            mode: PromptMode::Normal,
+            agent: None,
+            auto: false,
+            model: "",
+            provider: "",
+            variant: None,
+            limit: None,
+            effort: None,
+        }
+    }
 }
 
 /// The chosen candidate: exactly what the row renders.
@@ -251,6 +294,7 @@ pub(crate) struct PromptMetadataLayout<'a> {
     pub provider: Option<&'a str>,
     pub variant: Option<&'a str>,
     pub limit: Option<&'a str>,
+    pub effort: Option<&'a str>,
 }
 
 /// A styled text node of the row, in upstream order.
@@ -265,6 +309,8 @@ pub(crate) enum MetadataRole {
     /// Muted `·` before the variant (`metadata.tsx:75`).
     VariantSeparator,
     Variant,
+    /// Approved extension: `· <effort>` after the variant.
+    Effort,
     Limit,
 }
 
@@ -300,7 +346,7 @@ pub(crate) fn metadata_style(role: MetadataRole, muted: bool, limit_danger: bool
         }
         MetadataRole::Model => style(if muted { MetadataFg::Muted } else { MetadataFg::Base }),
         MetadataRole::Provider => style(MetadataFg::Muted),
-        MetadataRole::Variant => MetadataStyle { fg: MetadataFg::Warning, bold: true },
+        MetadataRole::Variant | MetadataRole::Effort => MetadataStyle { fg: MetadataFg::Warning, bold: true },
         MetadataRole::Limit => style(if limit_danger { MetadataFg::Error } else { MetadataFg::Muted }),
     }
 }
@@ -319,6 +365,7 @@ fn candidate<'a>(
         provider,
         variant: input.variant,
         limit: input.limit,
+        effort: input.effort,
     }
 }
 
@@ -341,6 +388,7 @@ pub(crate) fn metadata_layout<'a>(
             provider: None,
             variant: None,
             limit: None,
+            effort: None,
         };
     }
 
@@ -367,8 +415,9 @@ pub(crate) fn metadata_layout<'a>(
     // truncate the model to at least a nine-cell budget.
     let prefix = agent.map_or_else(String::new, |agent| format!("{agent} · "));
     let suffix = format!(
-        "{}{}",
+        "{}{}{}",
         input.variant.map_or_else(String::new, |variant| format!(" · {variant}")),
+        input.effort.map_or_else(String::new, |effort| format!(" · {effort}")),
         input.limit.map_or_else(String::new, |limit| format!("  {limit}")),
     );
     let budget = 9usize.max(
@@ -377,7 +426,15 @@ pub(crate) fn metadata_layout<'a>(
             .saturating_sub(cells(&suffix)),
     );
     let model = strip_space_before_ellipsis(&truncate_width(input.model, budget));
-    PromptMetadataLayout { agent, auto: false, model, provider: None, variant: input.variant, limit: input.limit }
+    PromptMetadataLayout {
+        agent,
+        auto: false,
+        model,
+        provider: None,
+        variant: input.variant,
+        limit: input.limit,
+        effort: input.effort,
+    }
 }
 
 /// Flat text of a layout, exactly as `text()` measures it
@@ -403,6 +460,10 @@ pub(crate) fn metadata_text(layout: &PromptMetadataLayout<'_>) -> String {
     if let Some(variant) = layout.variant {
         parts.push("·".to_owned());
         parts.push(variant.to_owned());
+    }
+    if let Some(effort) = layout.effort {
+        parts.push("·".to_owned());
+        parts.push(effort.to_owned());
     }
     if let Some(limit) = layout.limit {
         parts.push(format!(" {limit}"));
@@ -432,6 +493,10 @@ pub(crate) fn metadata_runs(layout: &PromptMetadataLayout<'_>) -> Vec<(MetadataR
         if let Some(variant) = layout.variant {
             runs.push((MetadataRole::VariantSeparator, "·".to_owned()));
             runs.push((MetadataRole::Variant, variant.to_owned()));
+        }
+        if let Some(effort) = layout.effort {
+            runs.push((MetadataRole::VariantSeparator, "·".to_owned()));
+            runs.push((MetadataRole::Effort, effort.to_owned()));
         }
         if let Some(limit) = layout.limit {
             runs.push((MetadataRole::Limit, format!(" {limit}")));
@@ -686,6 +751,466 @@ pub(crate) fn pane_text_width(pane_width: u16, terminal_width: u16) -> usize {
     prompt_text_width(pane_width, terminal_width)
 }
 
+// ── composer pane: rows, placeholder, cursor, shortcut ────────────────
+//
+// Upstream geometry this block pins:
+// - textarea `minHeight={1}`/`maxHeight={max(6, floor(height/3))}`
+//   (`component/prompt/index.tsx:1674,1773-1774`): the composer grows with
+//   the draft, then scrolls inside the cap.
+// - surface `paddingTop={1}` (`:1690-1698`), metadata block
+//   `paddingTop={1}` (`:1855-1870`), separate lip (`:1873-1898`).
+// - placeholder text and its terminal-width budget (`:1615-1627`).
+// - interrupt shortcut `esc interrupt` / `esc again to interrupt`
+//   (`:138-145`, shown while `status() === "running"` at `:1912-1928`).
+
+/// Which box presentation the composer resolves to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PromptPaneStyle {
+    /// Default session composer: left rail, raised surface, half-block lip
+    /// (`index.tsx:1681-1698,1873-1898`). `> ` is not painted because the
+    /// rail is the marker (`native_view_chat` legacy path is separate).
+    Rail,
+    /// Explicit full outline (`BoxId::ChatComposer` opts in through
+    /// `BoxAppearance`): real border rows around the editor.
+    Framed,
+    /// No border at all: `> ` prompt rows, the legacy fallback.
+    Plain,
+}
+
+/// Geometry of the composer block. All columns/rows are relative to the
+/// block origin; `text_left`/`text_top` locate the first editor cell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PromptPaneGeometry {
+    pub style: PromptPaneStyle,
+    /// Visible editor rows: at least one, capped by the textarea ceiling
+    /// (`index.tsx:1674,1773-1774`) and then scrolled to the cursor.
+    pub input_rows: usize,
+    /// Rows the block reserves, including padding and the lip.
+    pub height: usize,
+    pub text_left: usize,
+    pub text_top: usize,
+    pub text_width: usize,
+}
+
+/// Resolve the composer shape exactly once.
+///
+/// `allow_rail` is `!BoxAppearance::home_composer_outline()` for the session
+/// composer; the framed-only helper passes `false`. The rail needs the
+/// default sharp, zero-padding, bordered composer and a body tall enough for
+/// `input + 4` rows (`native_prompt_layout::prompt_rows`).
+pub(crate) fn prompt_geometry(
+    width: usize,
+    height: usize,
+    draft: &str,
+    frame: EffectiveBox,
+    allow_rail: bool,
+) -> PromptPaneGeometry {
+    let height = height.min(crate::native_view_chat::MAX_VIEW_ROWS);
+    let width = width.min(u16::MAX as usize);
+    let pad = usize::from(frame.padding);
+    if height == 0 {
+        return PromptPaneGeometry {
+            style: PromptPaneStyle::Plain,
+            input_rows: 0,
+            height: 0,
+            text_left: 0,
+            text_top: 0,
+            text_width: 0,
+        };
+    }
+    if allow_rail && frame.has_border() && frame.padding == 0 && width > 5 && height >= 6 {
+        // `index.tsx:1691-1692`: the inset keyed on the terminal width is
+        // supplied by the pane width here; the painter uses the same value.
+        let max_input = ((height + 2) / 3).max(6).min(height - 4);
+        let inset = if width < 40 { 1 } else { 2 };
+        let text_width = width.saturating_sub(1 + 2 * inset);
+        let input = wrap_prompt(draft, text_width.max(1), draft.len())
+            .rows
+            .len()
+            .min(max_input)
+            .max(1);
+        return PromptPaneGeometry {
+            style: PromptPaneStyle::Rail,
+            input_rows: input,
+            height: input + 4,
+            text_left: 1 + inset,
+            text_top: 1,
+            text_width,
+        };
+    }
+    let framed = frame.has_border() && width > 2 + 2 * pad && height > 3 + 2 * pad;
+    let overhead = if framed { 2 + 2 * pad } else { 0 };
+    let text_width = width.saturating_sub(overhead + 2);
+    let input = wrap_prompt(draft, text_width.max(1), draft.len())
+        .rows
+        .len()
+        .clamp(1, ((height.saturating_sub(overhead)) / 2).max(1));
+    PromptPaneGeometry {
+        style: if framed { PromptPaneStyle::Framed } else { PromptPaneStyle::Plain },
+        input_rows: input,
+        height: input + overhead,
+        text_left: if framed { 3 + pad } else { 2 },
+        text_top: if framed { 1 + pad } else { 0 },
+        text_width,
+    }
+}
+
+/// Role of one composer row. The chat painter maps these onto its own row
+/// classes; nothing is recovered by parsing glyphs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PromptPaneRowKind {
+    /// One-row top padding inside the raised surface (`index.tsx:1693`).
+    SurfacePadding,
+    /// An editor row, scrolled to the insertion row.
+    Editor,
+    /// Editor row showing the textarea placeholder because the draft is
+    /// empty (`index.tsx:1769-1770`).
+    Placeholder,
+    /// Metadata block top padding (`index.tsx:1855`).
+    MetadataPadding,
+    /// The metadata row itself (`index.tsx:1856-1869`).
+    Metadata,
+    /// The separate half-block lip (`index.tsx:1873-1898`).
+    Lip,
+    /// A real outline edge; the painter supplies the glyphs.
+    FrameEdge,
+    /// Outline inner padding; the painter supplies the blanks.
+    FramePadding,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PromptPaneRow {
+    pub text: String,
+    pub kind: PromptPaneRowKind,
+}
+
+/// Everything the chat renderer and painter need from the composer.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PromptPaneInput<'a> {
+    pub width: usize,
+    /// Body rows available to the chat frame (header + transcript + block).
+    pub height: usize,
+    pub draft: &'a str,
+    /// Byte insertion offset into `draft`.
+    pub cursor: usize,
+    pub mode: PromptMode,
+    /// Terminal columns: the metadata text budget uses the terminal width,
+    /// not the prompt's own width (`metadata.tsx:28`).
+    pub terminal_width: u16,
+    /// `status() === "running"` (`index.tsx:1912`).
+    pub busy: bool,
+    /// `store.interrupt > 0` (`index.tsx:1920`).
+    pub interrupt_armed: bool,
+    /// Already selected placeholder candidate (`placeholders.normal` /
+    /// `placeholders.shell`); `None` keeps the row blank.
+    pub placeholder: Option<&'a str>,
+    pub metadata: PromptMetadataInput<'a>,
+    pub frame: EffectiveBox,
+    pub allow_rail: bool,
+}
+
+impl<'a> PromptPaneInput<'a> {
+    /// Session-composer input: resolves the `BoxId::ChatComposer` frame and
+    /// the rail/outline decision from the caller's appearance.
+    pub(crate) fn composer(
+        appearance: &crate::native_box_style::BoxAppearance,
+        width: usize,
+        height: usize,
+        draft: &'a str,
+        terminal_width: u16,
+        mode: PromptMode,
+        busy: bool,
+        metadata: PromptMetadataInput<'a>,
+    ) -> Self {
+        Self {
+            width,
+            height,
+            draft,
+            cursor: draft.len(),
+            mode,
+            terminal_width,
+            busy,
+            interrupt_armed: false,
+            placeholder: None,
+            metadata,
+            frame: appearance.effective(crate::native_box_style::BoxId::ChatComposer),
+            allow_rail: !appearance.home_composer_outline(),
+        }
+    }
+}
+
+/// The composed composer block: rows, metadata row, placeholder row and the
+/// insertion cursor cell. `rows` is the only place prompt glyphs are built.
+#[derive(Clone, Debug)]
+pub(crate) struct PromptPane<'a> {
+    geometry: PromptPaneGeometry,
+    rows: Vec<PromptPaneRow>,
+    metadata: PromptMetadataLayout<'a>,
+    metadata_row: Option<usize>,
+    placeholder_row: Option<usize>,
+    cursor: Option<(usize, usize)>,
+    mode: PromptMode,
+    busy: bool,
+    interrupt_armed: bool,
+}
+
+impl<'a> PromptPane<'a> {
+    /// Compose the block. Pure: the draft, cursor and facts are read only.
+    pub(crate) fn compose(input: PromptPaneInput<'a>) -> Self {
+        let draft = crate::native_prompt_layout::bounded_source(input.draft);
+        // An editor offset beyond the visible source, or one that would split
+        // UTF-8, is not a cursor: the caller's view reports no caret for it.
+        let cursor_valid = input.cursor <= draft.len() && draft.is_char_boundary(input.cursor);
+        let geometry = prompt_geometry(input.width, input.height, draft, input.frame, input.allow_rail);
+        let text_width = geometry.text_width.max(1);
+        let wrapped = wrap_prompt(draft, text_width, input.cursor);
+        let window_start = if geometry.input_rows == 0 { 0 } else { wrapped.window_start(geometry.input_rows) };
+        let metadata = metadata_layout(&input.metadata, input.terminal_width);
+        let metadata_text = metadata_text(&metadata);
+        let empty = draft.is_empty();
+        let mut rows: Vec<PromptPaneRow> = Vec::with_capacity(geometry.height);
+        let mut metadata_row = None;
+        let mut placeholder_row = None;
+        match geometry.style {
+            PromptPaneStyle::Rail => {
+                let blank = rail_blank(input.width);
+                let inset = " ".repeat(geometry.text_left.saturating_sub(1));
+                rows.push(PromptPaneRow { text: blank.clone(), kind: PromptPaneRowKind::SurfacePadding });
+                for (index, line) in wrapped
+                    .rows
+                    .iter()
+                    .skip(window_start)
+                    .take(geometry.input_rows)
+                    .enumerate()
+                {
+                    let show_placeholder = empty && index == 0 && input.placeholder.is_some();
+                    let source = if show_placeholder { input.placeholder.unwrap_or_default() } else { line };
+                    let text = slice_cells(source, 0, u16::try_from(text_width).unwrap_or(u16::MAX));
+                    if show_placeholder {
+                        placeholder_row = Some(rows.len());
+                    }
+                    rows.push(PromptPaneRow {
+                        text: format!("{SPLIT_BORDER_VERTICAL}{inset}{text}"),
+                        kind: if show_placeholder { PromptPaneRowKind::Placeholder } else { PromptPaneRowKind::Editor },
+                    });
+                }
+                rows.push(PromptPaneRow { text: blank.clone(), kind: PromptPaneRowKind::MetadataPadding });
+                metadata_row = Some(rows.len());
+                rows.push(PromptPaneRow {
+                    text: if metadata_text.is_empty() {
+                        blank
+                    } else {
+                        format!(
+                            "{SPLIT_BORDER_VERTICAL}{inset}{}",
+                            fit(&metadata_text, u16::try_from(text_width).unwrap_or(u16::MAX))
+                        )
+                    },
+                    kind: PromptPaneRowKind::Metadata,
+                });
+                rows.push(PromptPaneRow {
+                    // Opaque raised surface: the painter re-fills the cell
+                    // background, and upstream only substitutes spaces when
+                    // `promptBg().a === 0` (`index.tsx:1879,1890-1895`).
+                    text: lip_row(
+                        u16::try_from(input.width).unwrap_or(u16::MAX),
+                        [0x14, 0x14, 0x14, 0xff],
+                    ),
+                    kind: PromptPaneRowKind::Lip,
+                });
+            }
+            PromptPaneStyle::Framed => {
+                rows.push(PromptPaneRow { text: String::new(), kind: PromptPaneRowKind::FrameEdge });
+                for _ in 0..usize::from(input.frame.padding) {
+                    rows.push(PromptPaneRow { text: String::new(), kind: PromptPaneRowKind::FramePadding });
+                }
+                for (index, line) in wrapped
+                    .rows
+                    .iter()
+                    .skip(window_start)
+                    .take(geometry.input_rows)
+                    .enumerate()
+                {
+                    let show_placeholder = empty && index == 0 && input.placeholder.is_some();
+                    let source = if show_placeholder { input.placeholder.unwrap_or_default() } else { line };
+                    if show_placeholder {
+                        placeholder_row = Some(rows.len());
+                    }
+                    rows.push(PromptPaneRow {
+                        text: format!("{}{source}", prompt_prefix(window_start + index)),
+                        kind: if show_placeholder { PromptPaneRowKind::Placeholder } else { PromptPaneRowKind::Editor },
+                    });
+                }
+                for _ in 0..usize::from(input.frame.padding) {
+                    rows.push(PromptPaneRow { text: String::new(), kind: PromptPaneRowKind::FramePadding });
+                }
+                rows.push(PromptPaneRow { text: String::new(), kind: PromptPaneRowKind::FrameEdge });
+            }
+            PromptPaneStyle::Plain => {
+                for (index, line) in wrapped
+                    .rows
+                    .iter()
+                    .skip(window_start)
+                    .take(geometry.input_rows)
+                    .enumerate()
+                {
+                    let show_placeholder = empty && index == 0 && input.placeholder.is_some();
+                    let source = if show_placeholder { input.placeholder.unwrap_or_default() } else { line };
+                    if show_placeholder {
+                        placeholder_row = Some(rows.len());
+                    }
+                    rows.push(PromptPaneRow {
+                        text: truncate_cells(
+                            &format!("{}{source}", prompt_prefix(window_start + index)),
+                            input.width,
+                        ),
+                        kind: if show_placeholder { PromptPaneRowKind::Placeholder } else { PromptPaneRowKind::Editor },
+                    });
+                }
+            }
+        }
+        // Cursor cell: upstream draws the insertion caret inside the
+        // textarea, i.e. at the text column of the scrolled editor row.
+        let cursor = match wrapped.cursor {
+            Some((column, row)) if cursor_valid => (geometry.text_width > 0 && geometry.input_rows > 0).then(|| {
+                (
+                    geometry.text_left + column,
+                    geometry.text_top + row.saturating_sub(window_start),
+                )
+            }),
+            _ => None,
+        };
+        Self {
+            geometry,
+            rows,
+            metadata,
+            metadata_row,
+            placeholder_row,
+            cursor,
+            mode: input.mode,
+            busy: input.busy,
+            interrupt_armed: input.interrupt_armed,
+        }
+    }
+
+    pub(crate) fn geometry(&self) -> PromptPaneGeometry {
+        self.geometry
+    }
+
+    pub(crate) fn style(&self) -> PromptPaneStyle {
+        self.geometry.style
+    }
+
+    /// Rows reserved by the block (never more than the body budget).
+    pub(crate) fn height(&self) -> usize {
+        self.geometry.height
+    }
+
+    pub(crate) fn rows(&self) -> &[PromptPaneRow] {
+        &self.rows
+    }
+
+    pub(crate) fn row(&self, index: usize) -> Option<&PromptPaneRow> {
+        self.rows.get(index)
+    }
+
+    pub(crate) fn mode(&self) -> PromptMode {
+        self.mode
+    }
+
+    /// Chosen metadata facts after the terminal-width fitting pass.
+    pub(crate) fn metadata(&self) -> &PromptMetadataLayout<'a> {
+        &self.metadata
+    }
+
+    pub(crate) fn metadata_text(&self) -> String {
+        metadata_text(&self.metadata)
+    }
+
+    pub(crate) fn metadata_runs(&self) -> Vec<(MetadataRole, String)> {
+        metadata_runs(&self.metadata)
+    }
+
+    /// Row index (inside [`PromptPane::rows`]) of the metadata row; `None`
+    /// for presentations that keep metadata in the sibling footer.
+    pub(crate) fn metadata_row(&self) -> Option<usize> {
+        self.metadata_row
+    }
+
+    /// Row index of the placeholder row, when the draft is empty and a
+    /// placeholder candidate was supplied.
+    pub(crate) fn placeholder_row(&self) -> Option<usize> {
+        self.placeholder_row
+    }
+
+    /// Insertion cursor cell `(column, row)` relative to the block origin.
+    /// `None` for an invalid/absent cursor or a pane with no text column.
+    pub(crate) fn cursor_cell(&self) -> Option<(usize, usize)> {
+        self.cursor
+    }
+
+    /// Working-state shortcut (`index.tsx:138-145`, status `running` at
+    /// `:1912-1928`). `None` when idle, where upstream paints the location
+    /// footer instead (`:1946-1964`).
+    pub(crate) fn shortcut_row(&self) -> Option<&'static str> {
+        if !self.busy {
+            return None;
+        }
+        Some(if self.interrupt_armed { "esc again to interrupt" } else { "esc interrupt" })
+    }
+}
+
+/// `┃` followed by pane-width padding (`index.tsx:1683-1688` draws the rail
+/// on every surface row).
+fn rail_blank(width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    format!("{SPLIT_BORDER_VERTICAL}{}", " ".repeat(width.saturating_sub(1)))
+}
+
+/// `"> "` on the first rendered line, `"  "` on continuations (legacy
+/// fallback and the framed extension).
+fn prompt_prefix(index: usize) -> &'static str {
+    if index == 0 { "> " } else { "  " }
+}
+
+fn truncate_cells(text: &str, width: usize) -> String {
+    if width == 0 {
+        return text.to_owned();
+    }
+    let mut row = String::new();
+    visit_unpadded_cells(text, width, |glyph, _| row.push_str(glyph));
+    row
+}
+
+/// Textarea placeholder (`index.tsx:1615-1627`).
+///
+/// Shell mode suggests a shell command, normal mode a prompt; the budget is
+/// `width - 5` below 44 terminal columns and `min(75, width - 4) - 5` above,
+/// and the result is a whole-cluster prefix trimmed at the end.
+pub(crate) fn placeholder_text(
+    mode: PromptMode,
+    candidates: &[&str],
+    index: usize,
+    terminal_width: u16,
+) -> Option<String> {
+    if candidates.is_empty() {
+        return None;
+    }
+    let candidate = candidates[index % candidates.len()];
+    let value = match mode {
+        PromptMode::Shell => format!("Run a command… \"{candidate}\""),
+        PromptMode::Normal => format!("Ask anything… \"{candidate}\""),
+    };
+    let columns = usize::from(terminal_width);
+    let width = if columns < 44 {
+        columns.saturating_sub(5)
+    } else {
+        columns.saturating_sub(4).min(75).saturating_sub(5)
+    };
+    Some(take_width(&value, width.max(1)).trim_end().to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -716,6 +1241,7 @@ mod tests {
             provider,
             variant: None,
             limit: None,
+            effort: None,
         }
     }
 
@@ -803,6 +1329,7 @@ mod tests {
             provider: "OpenAI",
             variant: Some("high"),
             limit: Some("$3.20 left"),
+            effort: None,
         };
         let layout = metadata_layout(&input, 120);
         assert_eq!(
@@ -855,6 +1382,7 @@ mod tests {
             provider: "OpenAI",
             variant: None,
             limit: None,
+            effort: None,
         };
         // 43 -> budget 34; agent/provider are dropped (metadata.tsx:127-128).
         let at_43 = metadata_layout(&input, 43);
@@ -878,6 +1406,7 @@ mod tests {
             provider: "Vendor / Cloud / OpenAI",
             variant: None,
             limit: None,
+            effort: None,
         };
         let wide = metadata_layout(&input, 120);
         assert!(wide.auto, "everything fits at 120 columns");
@@ -919,6 +1448,7 @@ mod tests {
             provider: "OpenAI",
             variant: Some("high"),
             limit: Some("$1 left"),
+            effort: None,
         };
         let fitted = metadata_layout(&input, 44);
         // budget 31 - prefix 8 - suffix (7 + 8) = 8 -> clamped to 9 cells.
@@ -942,6 +1472,7 @@ mod tests {
             provider: "",
             variant: None,
             limit: None,
+            effort: None,
         };
         // Terminal 43 -> budget 34. The 10-cell model fits.
         assert_eq!(metadata_layout(&input, 43).model, "界界界界界");
@@ -1108,6 +1639,7 @@ mod tests {
             provider: "OpenAI",
             variant: Some("high"),
             limit: Some("$1 left"),
+            effort: None,
         };
         let layout = metadata_layout(&input, 120);
         assert_eq!(layout.agent, Some("Shell"));
@@ -1117,5 +1649,261 @@ mod tests {
         assert_eq!(layout.limit, None);
         assert_eq!(metadata_text(&layout), "Shell");
         assert_eq!(metadata_runs(&layout).len(), 1);
+    }
+
+    // Pane composition — the single authority for the composer block.
+
+    fn frame(padding: u8) -> EffectiveBox {
+        EffectiveBox {
+            preset: crate::native_box_style::RadiusPreset::Sharp,
+            radius: 0,
+            border_style: crate::native_box_style::BorderStyle::Single,
+            thickness: 1,
+            padding,
+        }
+    }
+
+    fn borderless() -> EffectiveBox {
+        EffectiveBox {
+            border_style: crate::native_box_style::BorderStyle::None,
+            ..frame(0)
+        }
+    }
+
+    fn composer_input<'a>(
+        width: usize,
+        height: usize,
+        draft: &'a str,
+        frame: EffectiveBox,
+    ) -> PromptPaneInput<'a> {
+        PromptPaneInput {
+            width,
+            height,
+            draft,
+            cursor: draft.len(),
+            mode: PromptMode::Normal,
+            terminal_width: u16::try_from(width).unwrap_or(u16::MAX),
+            busy: false,
+            interrupt_armed: false,
+            placeholder: None,
+            metadata: PromptMetadataInput::default(),
+            frame,
+            allow_rail: true,
+        }
+    }
+
+    #[test]
+    fn pane_rail_block_is_padding_editor_metadata_and_lip() {
+        let pane = PromptPane::compose(composer_input(80, 20, "hello", frame(0)));
+        let geometry = pane.geometry();
+        assert_eq!(geometry.style, PromptPaneStyle::Rail);
+        assert_eq!((geometry.input_rows, geometry.height), (1, 5));
+        assert_eq!((geometry.text_left, geometry.text_top), (3, 1));
+        assert_eq!(geometry.text_width, 75);
+        let kinds: Vec<_> = pane.rows().iter().map(|row| row.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                PromptPaneRowKind::SurfacePadding,
+                PromptPaneRowKind::Editor,
+                PromptPaneRowKind::MetadataPadding,
+                PromptPaneRowKind::Metadata,
+                PromptPaneRowKind::Lip,
+            ]
+        );
+        // The raised surface and the lip span the whole pane width; the
+        // editor row carries the rail, the inset and the clipped text padded
+        // to the text column (the right inset is applied by the painter).
+        assert_eq!(pane.row(0).unwrap().text, format!("┃{}", " ".repeat(79)));
+        assert_eq!(pane.row(1).unwrap().text, format!("┃  {:<75}", "hello"));
+        assert_eq!(pane.row(3).unwrap().text, format!("┃{}", " ".repeat(79)));
+        let lip = &pane.row(4).unwrap().text;
+        assert_eq!(lip.chars().next(), Some('╹'));
+        assert_eq!(cells(lip), 80);
+        // Empty metadata leaves row 3 blank but still addressable.
+        assert_eq!(pane.metadata_text(), "");
+        assert_eq!(pane.metadata_row(), Some(3));
+        assert_eq!(pane.placeholder_row(), None);
+        assert_eq!(pane.cursor_cell(), Some((8, 1)));
+    }
+
+    #[test]
+    fn pane_rail_caps_editor_rows_and_keeps_the_cursor_visible() {
+        // `floor((height + 2) / 3).max(6)` mirrors the retired
+        // `session_composer_layout` cap; 20 rows allows 7 editor rows.
+        let draft = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight";
+        let pane = PromptPane::compose(composer_input(60, 20, draft, frame(0)));
+        assert_eq!(pane.geometry().input_rows, 7);
+        assert_eq!(pane.height(), 11);
+        let editors: Vec<_> = pane
+            .rows()
+            .iter()
+            .filter(|row| row.kind == PromptPaneRowKind::Editor)
+            .collect();
+        assert_eq!(editors.len(), 7);
+        // The window follows the tail cursor: the last row is "eight".
+        assert!(editors.last().unwrap().text.trim_end().ends_with("eight"));
+        assert_eq!(editors.first().unwrap().text.trim_end(), "┃  two");
+        assert!(editors.iter().all(|row| row.text.starts_with("┃  ")));
+        assert_eq!(pane.cursor_cell(), Some((3 + 5, 7)));
+    }
+
+    #[test]
+    fn pane_plain_rows_prefix_the_editor_and_show_the_placeholder() {
+        let input = PromptPaneInput {
+            placeholder: Some("hello world"),
+            ..composer_input(20, 10, "", borderless())
+        };
+        let pane = PromptPane::compose(input);
+        assert_eq!(pane.style(), PromptPaneStyle::Plain);
+        assert_eq!((pane.geometry().text_left, pane.geometry().text_top), (2, 0));
+        assert_eq!(pane.geometry().text_width, 18);
+        assert_eq!(pane.height(), 1);
+        assert_eq!(pane.placeholder_row(), Some(0));
+        assert_eq!(pane.row(0).unwrap().kind, PromptPaneRowKind::Placeholder);
+        assert_eq!(pane.row(0).unwrap().text, "> hello world");
+        assert_eq!(pane.cursor_cell(), Some((2, 0)));
+        // A draft replaces the placeholder row in place.
+        let typed = PromptPane::compose(PromptPaneInput {
+            placeholder: Some("hello world"),
+            ..composer_input(20, 10, "ab", borderless())
+        });
+        assert_eq!(typed.placeholder_row(), None);
+        assert_eq!(typed.row(0).unwrap().text, "> ab");
+    }
+
+    #[test]
+    fn pane_framed_rows_are_edges_padding_and_prefixed_editor_rows() {
+        let pane = PromptPane::compose(composer_input(30, 15, "x", frame(1)));
+        assert_eq!(pane.style(), PromptPaneStyle::Framed);
+        assert_eq!((pane.geometry().text_left, pane.geometry().text_top), (4, 2));
+        assert_eq!(pane.geometry().text_width, 24);
+        assert_eq!(pane.height(), 5);
+        let kinds: Vec<_> = pane.rows().iter().map(|row| row.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                PromptPaneRowKind::FrameEdge,
+                PromptPaneRowKind::FramePadding,
+                PromptPaneRowKind::Editor,
+                PromptPaneRowKind::FramePadding,
+                PromptPaneRowKind::FrameEdge,
+            ]
+        );
+        assert_eq!(pane.row(2).unwrap().text, "> x");
+        assert_eq!(pane.cursor_cell(), Some((5, 2)));
+        // The framed presentation keeps metadata in the sibling footer.
+        assert_eq!(pane.metadata_row(), None);
+    }
+
+    #[test]
+    fn pane_shell_metadata_and_interrupt_shortcut() {
+        let shell = PromptMetadataInput {
+            mode: PromptMode::Shell,
+            ..PromptMetadataInput::default()
+        };
+        let mut input = composer_input(80, 20, "", frame(0));
+        input.metadata = shell;
+        let idle = PromptPane::compose(input);
+        assert_eq!(idle.metadata_text(), "Shell");
+        let row = idle.metadata_row().expect("rail exposes its metadata row");
+        assert!(idle.row(row).unwrap().text.starts_with("┃  Shell"));
+        assert_eq!(idle.shortcut_row(), None, "idle paints the location footer");
+
+        input.busy = true;
+        assert_eq!(PromptPane::compose(input).shortcut_row(), Some("esc interrupt"));
+        input.interrupt_armed = true;
+        assert_eq!(
+            PromptPane::compose(input).shortcut_row(),
+            Some("esc again to interrupt")
+        );
+    }
+
+    #[test]
+    fn pane_placeholder_text_is_selected_and_width_budgeted() {
+        assert_eq!(placeholder_text(PromptMode::Normal, &[], 0, 80), None);
+        assert_eq!(
+            placeholder_text(PromptMode::Normal, &["a"], 0, 80).unwrap(),
+            "Ask anything… \"a\""
+        );
+        assert_eq!(
+            placeholder_text(PromptMode::Shell, &["ls"], 0, 80).unwrap(),
+            "Run a command… \"ls\""
+        );
+        // Below 44 columns the budget is `width - 5` cells.
+        assert_eq!(placeholder_text(PromptMode::Normal, &["a"], 0, 10).unwrap(), "Ask a");
+        // At 44 columns it is `min(75, width - 4) - 5`, which fits here.
+        assert_eq!(
+            placeholder_text(PromptMode::Normal, &["a"], 0, 44).unwrap(),
+            "Ask anything… \"a\""
+        );
+        // Candidates cycle by index.
+        let first = placeholder_text(PromptMode::Normal, &["a", "b"], 0, 80).unwrap();
+        let second = placeholder_text(PromptMode::Normal, &["a", "b"], 1, 80).unwrap();
+        assert!(first.contains("\"a\""));
+        assert!(second.contains("\"b\""));
+    }
+
+    #[test]
+    fn pane_cursor_is_cell_based_for_wide_glyphs() {
+        let mut input = composer_input(80, 20, "界a", frame(0));
+        input.cursor = "界".len();
+        let pane = PromptPane::compose(input);
+        assert_eq!(pane.cursor_cell(), Some((3 + 2, 1)));
+    }
+
+    #[test]
+    fn pane_reports_no_caret_for_offsets_outside_the_visible_source() {
+        let mut input = composer_input(80, 20, "abc", frame(0));
+        input.cursor = 99;
+        assert_eq!(PromptPane::compose(input).cursor_cell(), None);
+        input.draft = "é";
+        input.cursor = 1; // splits the two-byte scalar
+        assert_eq!(PromptPane::compose(input).cursor_cell(), None);
+    }
+
+    #[test]
+    fn pane_zero_height_composes_nothing() {
+        let pane = PromptPane::compose(composer_input(80, 0, "draft", frame(0)));
+        assert_eq!(pane.height(), 0);
+        assert!(pane.rows().is_empty());
+        assert_eq!(pane.cursor_cell(), None);
+    }
+
+    #[test]
+    fn effort_is_appended_after_variant_and_hidden_in_shell_mode() {
+        let input = PromptMetadataInput {
+            mode: PromptMode::Normal,
+            agent: Some("Build"),
+            auto: false,
+            model: "GPT-5",
+            provider: "OpenAI",
+            variant: Some("high"),
+            limit: Some("$1 left"),
+            effort: Some("medium"),
+        };
+        let layout = metadata_layout(&input, 120);
+        assert_eq!(layout.effort, Some("medium"));
+        assert_eq!(
+            metadata_text(&layout),
+            "Build · GPT-5 OpenAI · high · medium  $1 left"
+        );
+        let runs = metadata_runs(&layout);
+        assert_eq!(
+            runs[runs.len() - 2],
+            (MetadataRole::Effort, "medium".to_owned())
+        );
+        assert_eq!(runs.last().unwrap().0, MetadataRole::Limit);
+        assert_eq!(
+            metadata_style(MetadataRole::Effort, false, false),
+            metadata_style(MetadataRole::Variant, false, false),
+            "effort reuses the variant token styling"
+        );
+        // Shell mode has no model row, so effort is not painted.
+        let shell = PromptMetadataInput {
+            mode: PromptMode::Shell,
+            ..input
+        };
+        assert_eq!(metadata_layout(&shell, 120).effort, None);
     }
 }
