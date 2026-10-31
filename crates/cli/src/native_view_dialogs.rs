@@ -2889,6 +2889,2214 @@ pub mod form_overlay {
     }
 }
 
+/// Diff-viewer dialog chrome (DIALOG-18): the full/compact layout boundary,
+/// the split/unified boundary, sticky card headers, reviewed-file collapse
+/// and the 19-column file menu.
+///
+/// Upstream evidence, pin `450e7b92412c780a7b5a75226bb8d49aaca24e22`:
+/// * `packages/tui/src/feature-plugins/system/diff-viewer.tsx:45-52` —
+///   `MIN_SPLIT_WIDTH = 100`, `FILE_TREE_MIN_WIDTH = 30`,
+///   `FILE_TREE_MAX_WIDTH = 40`, `FULL_INSET = 2`,
+///   `FULL_LAYOUT_MIN_WIDTH = 30 + 2*2 + floor(108/2) = 88`,
+///   `FILE_HEADER_HEIGHT = 2`; `packages/tui/src/ui/layout.ts:5-9`
+///   supplies `SESSION_PANEL_SPLIT_MIN_WIDTH = 64 + 44 = 108`.
+/// * `:330-352` — `compact = docked || width < 88`; `inset = compact ? 0 : 2`;
+///   `fileTreeWidth = max(30, min(40, floor(width / 4)))`;
+///   `patchPaneWidth = width - tree - inset*2`;
+///   `splitAvailable = patchPaneWidth >= 100`; the effective view is
+///   `split` only when split is available, otherwise `unified` while the
+///   stored preference survives.
+/// * `:1098` — added and deleted files always render unified
+///   (`status === "modified" ? view() : "unified"`).
+/// * `:1010-1016` — a lifecycle pass sets
+///   `translateY = max(0, min(scrollTop - (parent.y - content.y),
+///   parent.height - header.height))`, i.e. the header sticks to the top but
+///   never leaves its own card. The header is `FILE_HEADER_HEIGHT` rows with
+///   `paddingLeft = compact ? 2 : 1`, `paddingRight = 1`,
+///   `paddingBottom = 1` (`:1064-1066`), and a reviewed card paints a `▀`
+///   gap over the header's bottom padding row (`:1052-1056`).
+/// * `:990-992,1058` — reviewed files collapse their body entirely
+///   (`<Show when={!reviewed()}>`), the card surface becomes
+///   `theme.background.raised.high`, and the review counter is
+///   `reviewed/total` (`:898-901`).
+/// * `:929,1068-1073` — a file without a patch renders
+///   "No patch available for this file."; an empty viewer renders
+///   "No changes to show".
+/// * `:1131-1175` — the compact footer: an optional `▀` transition row when
+///   docked, one row with `paddingLeft = 2`, `paddingRight = 1` carrying the
+///   close shortcut plus " close" (full) or " focus prompt" (docked) and the
+///   help shortcut plus "see all" at the right edge, then a blank row when
+///   docked.
+/// * `:1177-1190` and `diff-viewer-file-menu.tsx:7-87` — the file menu:
+///   width `min(19, cols)` (`:18`), `left = clamp(x, 0, cols - width)`,
+///   `top = clamp(y + 1, 0, rows - 1)` (`:60-62`), one row, `zIndex = 2600`
+///   (`:40,50`), label "Mark complete" / "Mark incomplete" (`:17`),
+///   `escape,ctrl+c` closes (`:27`), `return` runs it, an outside press
+///   closes it (`:51-55`), and running closes *before* toggling
+///   (`:19-22`).
+/// * `:547-573,693` — toggling from the menu of another file must not
+///   navigate; in single-patch mode marking a file complete advances to the
+///   next patch file, and with no next file that file is marked exhausted so
+///   `diff.mark_reviewed` refuses it.
+pub mod diff_dialog {
+    use std::collections::BTreeSet;
+
+    /// `MIN_SPLIT_WIDTH` (`diff-viewer.tsx:45`).
+    pub const MIN_SPLIT_WIDTH: u16 = 100;
+    /// `FILE_TREE_MIN_WIDTH` (`diff-viewer.tsx:46`).
+    pub const FILE_TREE_MIN_WIDTH: u16 = 30;
+    /// `FILE_TREE_MAX_WIDTH` (`diff-viewer.tsx:47`).
+    pub const FILE_TREE_MAX_WIDTH: u16 = 40;
+    /// `FULL_INSET` (`diff-viewer.tsx:48`).
+    pub const FULL_INSET: u16 = 2;
+    /// `SESSION_CONTENT_PREFERRED_WIDTH` (`ui/layout.ts:6`).
+    pub const SESSION_CONTENT_PREFERRED_WIDTH: u16 = 64;
+    /// `SESSION_CONTENT_MIN_WIDTH` (`ui/layout.ts:5`).
+    pub const SESSION_CONTENT_MIN_WIDTH: u16 = 44;
+    /// `SESSION_PANEL_SPLIT_MIN_WIDTH` (`ui/layout.ts:9`).
+    pub const SESSION_PANEL_SPLIT_MIN_WIDTH: u16 =
+        SESSION_CONTENT_PREFERRED_WIDTH + SESSION_CONTENT_MIN_WIDTH;
+    /// Full-layout boundary (`diff-viewer.tsx:50`): 30 + 4 + 54 = 88.
+    pub const FULL_LAYOUT_MIN_WIDTH: u16 =
+        FILE_TREE_MIN_WIDTH + FULL_INSET * 2 + SESSION_PANEL_SPLIT_MIN_WIDTH / 2;
+    /// `FILE_HEADER_HEIGHT` (`diff-viewer.tsx:52`).
+    pub const FILE_HEADER_HEIGHT: u16 = 2;
+    /// File menu width (`diff-viewer-file-menu.tsx:18`).
+    pub const FILE_MENU_WIDTH: u16 = 19;
+    /// File menu portal z-index (`diff-viewer-file-menu.tsx:40,50`).
+    pub const FILE_MENU_Z_INDEX: u16 = 2600;
+    /// Half-row glyph between cards (`diff-viewer.tsx:1000`).
+    pub const CARD_GAP_TOP: char = '▄';
+    /// Half-row glyph closing a reviewed header (`diff-viewer.tsx:1054`).
+    pub const CARD_GAP_BOTTOM: char = '▀';
+    /// Footer transition glyph (`diff-viewer.tsx:1141`, `EmptyBorder`).
+    pub const FOOTER_TRANSITION: char = '▀';
+    /// `diff-viewer.tsx:1073`.
+    pub const NO_PATCH: &str = "No patch available for this file.";
+    /// `diff-viewer.tsx:929`.
+    pub const NO_CHANGES: &str = "No changes to show";
+
+    /// File status from the diff payload (`diff-viewer.tsx:64`).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum DiffStatus {
+        Added,
+        Deleted,
+        Modified,
+    }
+
+    impl DiffStatus {
+        /// Single status cell used by the file tree (`diff-viewer-file-tree.tsx`).
+        #[must_use]
+        pub const fn code(self) -> char {
+            match self {
+                DiffStatus::Added => 'A',
+                DiffStatus::Deleted => 'D',
+                DiffStatus::Modified => 'M',
+            }
+        }
+
+        /// Only modified files honour the split view
+        /// (`diff-viewer.tsx:1098`).
+        #[must_use]
+        pub const fn supports_split(self) -> bool {
+            matches!(self, DiffStatus::Modified)
+        }
+    }
+
+    /// Patch presentation (`diff-viewer.tsx:55`).
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub enum DiffView {
+        Split,
+        #[default]
+        Unified,
+    }
+
+    /// Diff source picker entries (`diff-viewer.tsx:80-85`).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum DiffSource {
+        Branch,
+        Committed,
+        Working,
+        Turn,
+    }
+
+    impl DiffSource {
+        /// `DIFF_SOURCES[...].label`.
+        #[must_use]
+        pub const fn label(self) -> &'static str {
+            match self {
+                DiffSource::Branch => "All",
+                DiffSource::Committed => "Committed",
+                DiffSource::Working => "Uncommitted",
+                DiffSource::Turn => "Last turn",
+            }
+        }
+
+        /// `DIFF_SOURCES[...].description`.
+        #[must_use]
+        pub const fn description(self) -> &'static str {
+            match self {
+                DiffSource::Branch => "Branch + local changes",
+                DiffSource::Committed => "Branch commits only",
+                DiffSource::Working => "Local changes only",
+                DiffSource::Turn => "Latest session turn",
+            }
+        }
+
+        /// `needsBase` (`diff-viewer.tsx:89`).
+        #[must_use]
+        pub const fn needs_base(self) -> bool {
+            matches!(self, DiffSource::Branch | DiffSource::Committed)
+        }
+
+        /// The picker only offers "Last turn" for a session
+        /// (`diff-viewer.tsx:104`).
+        #[must_use]
+        pub const fn sources(session: bool) -> &'static [DiffSource] {
+            if session {
+                &[
+                    DiffSource::Branch,
+                    DiffSource::Committed,
+                    DiffSource::Working,
+                    DiffSource::Turn,
+                ]
+            } else {
+                &[DiffSource::Branch, DiffSource::Committed, DiffSource::Working]
+            }
+        }
+    }
+
+    /// One file in the diff.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct DiffFile {
+        pub path: String,
+        pub additions: u32,
+        pub deletions: u32,
+        pub status: DiffStatus,
+        pub patch: Option<String>,
+    }
+
+    impl DiffFile {
+        #[must_use]
+        pub fn new(
+            path: impl Into<String>,
+            additions: u32,
+            deletions: u32,
+            status: DiffStatus,
+        ) -> Self {
+            Self {
+                path: path.into(),
+                additions,
+                deletions,
+                status,
+                patch: None,
+            }
+        }
+
+        #[must_use]
+        pub fn with_patch(mut self, patch: impl Into<String>) -> Self {
+            self.patch = Some(patch.into());
+            self
+        }
+
+        fn patch_lines(&self) -> Vec<String> {
+            self.patch
+                .as_deref()
+                .map(|patch| {
+                    patch
+                        .replace('\r', "")
+                        .split('\n')
+                        .map(ToOwned::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+    }
+
+    /// Resolved geometry of one diff viewer frame.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct DiffLayout {
+        /// `docked() || width < 88`.
+        pub compact: bool,
+        /// Docked pane rather than a full screen.
+        pub docked: bool,
+        /// Card inset from the pane edges (0 when compact).
+        pub inset: u16,
+        /// Tree width when the tree is shown.
+        pub tree_width: Option<u16>,
+        /// Width of the patch column.
+        pub patch_width: u16,
+        /// Whether split patches fit.
+        pub split_available: bool,
+        /// Effective view for modified files.
+        pub view: DiffView,
+    }
+
+    /// `fileTreeWidth` (`diff-viewer.tsx:343-345`).
+    #[must_use]
+    pub const fn file_tree_width(width: u16) -> u16 {
+        let quarter = width / 4;
+        if quarter < FILE_TREE_MIN_WIDTH {
+            FILE_TREE_MIN_WIDTH
+        } else if quarter > FILE_TREE_MAX_WIDTH {
+            FILE_TREE_MAX_WIDTH
+        } else {
+            quarter
+        }
+    }
+
+    /// `showDiffViewerFileTree(tree && files.length > 0)` combined with
+    /// `!compact` (`diff-viewer.tsx:341`).
+    #[must_use]
+    pub fn file_tree_visible(compact: bool, enabled: bool, files: usize) -> bool {
+        !compact && enabled && files > 0
+    }
+
+    /// `patchPaneWidth` (`diff-viewer.tsx:346`).
+    #[must_use]
+    pub fn patch_pane_width(width: u16, tree_width: Option<u16>, inset: u16) -> u16 {
+        width
+            .saturating_sub(tree_width.unwrap_or(0))
+            .saturating_sub(inset.saturating_mul(2))
+    }
+
+    /// Sticky header translation (`diff-viewer.tsx:1010-1016`):
+    /// `max(0, min(scrollTop - (parent.y - content.y), parent.height - header.height))`.
+    ///
+    /// `card_y` is the card's offset inside the scroll content and
+    /// `card_height` is the whole card (header plus body). The header never
+    /// leaves its own card.
+    #[must_use]
+    pub fn sticky_header_offset(scroll_top: u16, card_y: u16, card_height: u16) -> u16 {
+        let travel = scroll_top.saturating_sub(card_y);
+        travel.min(card_height.saturating_sub(FILE_HEADER_HEIGHT))
+    }
+
+    /// Background role of one rendered row.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum DiffSurface {
+        /// `theme.diff.background.context` — unreviewed card.
+        Context,
+        /// `theme.background.raised.high` — reviewed card.
+        Reviewed,
+        /// The pane surface behind the insets (`theme.background.base`, or
+        /// raised-base while docked).
+        Base,
+    }
+
+    /// One rendered row of the patch column.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct DiffRow {
+        pub text: String,
+        pub surface: DiffSurface,
+        /// Leading/trailing cells painted with the pane surface before the
+        /// card inset.
+        pub inset: u16,
+    }
+
+    impl DiffRow {
+        fn new(text: impl Into<String>, surface: DiffSurface, inset: u16) -> Self {
+            Self {
+                text: text.into(),
+                surface,
+                inset,
+            }
+        }
+    }
+
+    /// File-menu paint rectangle.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct MenuRect {
+        pub x: u16,
+        pub y: u16,
+        pub width: u16,
+        pub height: u16,
+    }
+
+    /// Open file menu anchored at the click that opened it
+    /// (`diff-viewer.tsx:575-585`).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct FileMenu {
+        pub file_index: usize,
+        pub x: u16,
+        pub y: u16,
+    }
+
+    impl FileMenu {
+        /// Clamped one-row menu rectangle
+        /// (`diff-viewer-file-menu.tsx:18,60-62`).
+        #[must_use]
+        pub fn rect(&self, cols: u16, rows: u16) -> MenuRect {
+            let width = FILE_MENU_WIDTH.min(cols);
+            let x = self.x.min(cols.saturating_sub(width));
+            let y = self.y.saturating_add(1).min(rows.saturating_sub(1));
+            MenuRect {
+                x,
+                y,
+                width,
+                height: if rows == 0 { 0 } else { 1 },
+            }
+        }
+    }
+
+    /// Keyboard labels used by the footer; the caller supplies its resolved
+    /// keymap shortcuts (`props.context.keymap.shortcuts(...)`), so no key
+    /// name is invented here.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct DiffKeys {
+        pub close: String,
+        pub help: String,
+    }
+
+    impl Default for DiffKeys {
+        fn default() -> Self {
+            Self {
+                close: "esc".to_owned(),
+                help: "?".to_owned(),
+            }
+        }
+    }
+
+    /// Outcome of toggling a file's reviewed flag.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct ReviewEffect {
+        /// File whose flag changed.
+        pub file_index: usize,
+        /// It is reviewed after the toggle.
+        pub reviewed: bool,
+        /// Single-patch mode advanced to this file.
+        pub advanced: Option<usize>,
+        /// Single-patch mode found no next file; the file is exhausted and
+        /// `diff.mark_reviewed` refuses it until the selection moves.
+        pub exhausted: bool,
+    }
+
+    /// Diff viewer state needed for layout, review state and the file menu.
+    #[derive(Clone, Debug)]
+    pub struct DiffDialog {
+        files: Vec<DiffFile>,
+        reviewed: BTreeSet<String>,
+        selected: Option<usize>,
+        single_patch: bool,
+        tree_enabled: bool,
+        view_override: Option<DiffView>,
+        source: DiffSource,
+        menu: Option<FileMenu>,
+        exhausted: Option<usize>,
+        docked: bool,
+    }
+
+    impl DiffDialog {
+        /// Fresh viewer with the upstream defaults (`tree = true`,
+        /// `single = false`, view follows the split boundary).
+        #[must_use]
+        pub fn new(files: Vec<DiffFile>) -> Self {
+            Self {
+                files,
+                reviewed: BTreeSet::new(),
+                selected: None,
+                single_patch: false,
+                tree_enabled: true,
+                view_override: None,
+                source: DiffSource::Branch,
+                menu: None,
+                exhausted: None,
+                docked: false,
+            }
+        }
+
+        #[must_use]
+        pub fn files(&self) -> &[DiffFile] {
+            &self.files
+        }
+
+        /// Replace the payload; resets selection, review state, the exhausted
+        /// marker and the menu (`diff-viewer.tsx:356-358,493-500`).
+        pub fn set_files(&mut self, files: Vec<DiffFile>) {
+            self.files = files;
+            self.reviewed.clear();
+            self.selected = None;
+            self.exhausted = None;
+            self.menu = None;
+        }
+
+        pub fn set_docked(&mut self, docked: bool) {
+            self.docked = docked;
+        }
+
+        #[must_use]
+        pub const fn docked(&self) -> bool {
+            self.docked
+        }
+
+        pub fn set_tree_enabled(&mut self, enabled: bool) {
+            self.tree_enabled = enabled;
+        }
+
+        #[must_use]
+        pub const fn tree_enabled(&self) -> bool {
+            self.tree_enabled
+        }
+
+        pub fn set_single_patch(&mut self, single: bool) {
+            self.single_patch = single;
+            self.exhausted = None;
+        }
+
+        #[must_use]
+        pub const fn single_patch(&self) -> bool {
+            self.single_patch
+        }
+
+        pub fn set_source(&mut self, source: DiffSource) {
+            self.source = source;
+            self.menu = None;
+        }
+
+        #[must_use]
+        pub const fn source(&self) -> DiffSource {
+            self.source
+        }
+
+        /// Resolve the frame geometry (`diff-viewer.tsx:330-352`).
+        #[must_use]
+        pub fn layout(&self, width: u16) -> DiffLayout {
+            let compact = self.docked || width < FULL_LAYOUT_MIN_WIDTH;
+            let inset = if compact { 0 } else { FULL_INSET };
+            let tree_width = if file_tree_visible(compact, self.tree_enabled, self.files.len()) {
+                Some(file_tree_width(width))
+            } else {
+                None
+            };
+            let patch_width = patch_pane_width(width, tree_width, inset);
+            let split_available = patch_width >= MIN_SPLIT_WIDTH;
+            let view = if split_available {
+                self.view_override.unwrap_or(DiffView::Split)
+            } else {
+                DiffView::Unified
+            };
+            DiffLayout {
+                compact,
+                docked: self.docked,
+                inset,
+                tree_width,
+                patch_width,
+                split_available,
+                view,
+            }
+        }
+
+        /// Effective view for one file: added/deleted files stay unified
+        /// (`diff-viewer.tsx:1098`).
+        #[must_use]
+        pub fn view_for(&self, layout: &DiffLayout, index: usize) -> DiffView {
+            match self.files.get(index) {
+                Some(file) if file.status.supports_split() => layout.view,
+                _ => DiffView::Unified,
+            }
+        }
+
+        /// `diff.toggle_view` (`diff-viewer.tsx:740-748`): refused when split
+        /// is unavailable, and the stored preference is untouched.
+        pub fn toggle_view(&mut self, width: u16) -> bool {
+            let layout = self.layout(width);
+            if !layout.split_available {
+                return false;
+            }
+            let current = self.view_override.unwrap_or(DiffView::Split);
+            self.view_override = Some(match current {
+                DiffView::Split => DiffView::Unified,
+                DiffView::Unified => DiffView::Split,
+            });
+            true
+        }
+
+        #[must_use]
+        pub const fn view_override(&self) -> Option<DiffView> {
+            self.view_override
+        }
+
+        #[must_use]
+        pub fn is_reviewed(&self, index: usize) -> bool {
+            self.files
+                .get(index)
+                .is_some_and(|file| self.reviewed.contains(&file.path))
+        }
+
+        /// `reviewed/total` counter text (`diff-viewer.tsx:898-901`).
+        #[must_use]
+        pub fn review_count(&self) -> String {
+            let done = self
+                .files
+                .iter()
+                .filter(|file| self.reviewed.contains(&file.path))
+                .count();
+            format!("{done}/{}", self.files.len())
+        }
+
+        #[must_use]
+        pub fn selected(&self) -> Option<usize> {
+            self.selected
+        }
+
+        /// Select a file. Selecting clears the exhausted marker
+        /// (`diff-viewer.tsx:374,409`).
+        pub fn select(&mut self, index: usize) -> bool {
+            if index >= self.files.len() {
+                return false;
+            }
+            self.selected = Some(index);
+            self.exhausted = None;
+            true
+        }
+
+        /// File the viewer is anchored to: the explicit selection, else the
+        /// first file (`currentPatchFileIndex` fallback chain).
+        #[must_use]
+        pub fn current(&self) -> Option<usize> {
+            self.selected.or(if self.files.is_empty() {
+                None
+            } else {
+                Some(0)
+            })
+        }
+
+        /// File indexes painted as patches. Single-patch mode paints only the
+        /// selected file (`diff-viewer.tsx:493-500`).
+        #[must_use]
+        pub fn visible_files(&self) -> Vec<usize> {
+            if self.single_patch {
+                self.current().into_iter().collect()
+            } else {
+                (0..self.files.len()).collect()
+            }
+        }
+
+        /// `diff.mark_reviewed` refuses an exhausted file until the selection
+        /// moves (`diff-viewer.tsx:688-695`): the command uses
+        /// `selectedFileIndex() ?? currentPatchFileIndex()`, so the check is
+        /// against the resolved current file, not the explicit selection.
+        #[must_use]
+        pub fn mark_reviewed_blocked(&self) -> bool {
+            self.exhausted.is_some() && self.current() == self.exhausted
+        }
+
+        /// Toggle the reviewed flag (`diff-viewer.tsx:547-573`).
+        ///
+        /// In single-patch mode, marking the current file complete moves to
+        /// the next patch file; when none exists the file becomes exhausted
+        /// and stays selected.
+        pub fn toggle_reviewed(&mut self, index: usize) -> ReviewEffect {
+            let current = self.current();
+            let Some(file) = self.files.get(index) else {
+                return ReviewEffect {
+                    file_index: index,
+                    reviewed: false,
+                    advanced: None,
+                    exhausted: false,
+                };
+            };
+            let path = file.path.clone();
+            let was_reviewed = self.reviewed.contains(&path);
+            if was_reviewed {
+                self.reviewed.remove(&path);
+            } else {
+                self.reviewed.insert(path);
+            }
+            let mut effect = ReviewEffect {
+                file_index: index,
+                reviewed: !was_reviewed,
+                advanced: None,
+                exhausted: false,
+            };
+            // Completing another file from its menu must not navigate away.
+            if current != Some(index) {
+                return effect;
+            }
+            if self.single_patch && !was_reviewed {
+                match self.next_file_index(index) {
+                    Some(next) if next != index => {
+                        self.select(next);
+                        effect.advanced = Some(next);
+                    }
+                    _ => {
+                        self.exhausted = Some(index);
+                        effect.exhausted = true;
+                    }
+                }
+            }
+            effect
+        }
+
+        fn next_file_index(&self, index: usize) -> Option<usize> {
+            if self.files.is_empty() {
+                return None;
+            }
+            Some((index + 1) % self.files.len())
+        }
+
+        /// Open the menu from a right-click on a header
+        /// (`diff-viewer.tsx:575-585`). Only valid file indexes open it.
+        pub fn open_menu(&mut self, file_index: usize, x: u16, y: u16) -> bool {
+            if file_index >= self.files.len() {
+                return false;
+            }
+            self.menu = Some(FileMenu { file_index, x, y });
+            true
+        }
+
+        #[must_use]
+        pub const fn menu(&self) -> Option<FileMenu> {
+            self.menu
+        }
+
+        /// Menu label (`diff-viewer-file-menu.tsx:17`).
+        #[must_use]
+        pub fn menu_label(&self) -> Option<&'static str> {
+            let menu = self.menu?;
+            Some(if self.is_reviewed(menu.file_index) {
+                "Mark incomplete"
+            } else {
+                "Mark complete"
+            })
+        }
+
+        /// Escape / Ctrl+C / outside press (`diff-viewer-file-menu.tsx:27,51-55`).
+        pub fn close_menu(&mut self) {
+            self.menu = None;
+        }
+
+        /// `return` in the menu: close first, then toggle
+        /// (`diff-viewer-file-menu.tsx:19-22`).
+        pub fn run_menu(&mut self) -> Option<ReviewEffect> {
+            let menu = self.menu.take()?;
+            Some(self.toggle_reviewed(menu.file_index))
+        }
+
+        /// Background of the fixed top edge: raised-high when the card at the
+        /// top of the viewport is reviewed, else the diff context surface
+        /// (`diff-viewer.tsx:954-972`).
+        #[must_use]
+        pub fn top_edge_surface(&self, scroll_top: u16) -> DiffSurface {
+            let mut reviewed = false;
+            for index in self.visible_files() {
+                let (header_y, _card_height) = self.card_geometry(index);
+                if header_y <= scroll_top {
+                    reviewed = self.is_reviewed(index);
+                }
+            }
+            if reviewed {
+                DiffSurface::Reviewed
+            } else {
+                DiffSurface::Context
+            }
+        }
+
+        /// Header text: path, tick, additions and deletions
+        /// (`diff-viewer.tsx:1017-1048`). `max_width` is the patch column.
+        #[must_use]
+        pub fn header_text(&self, index: usize, max_width: u16) -> String {
+            let Some(file) = self.files.get(index) else {
+                return String::new();
+            };
+            let reviewed = self.is_reviewed(index);
+            let counts = format!(
+                " +{} -{}{}",
+                file.additions,
+                file.deletions,
+                if reviewed { " ✓" } else { "" }
+            );
+            let budget = usize::from(max_width)
+                .saturating_sub(visible_cells(&counts, usize::from(max_width)))
+                .saturating_sub(1);
+            let path = clip_cells(&file.path, budget);
+            format!("{path}{counts}")
+        }
+
+        fn card_geometry(&self, index: usize) -> (u16, u16) {
+            // Content offsets: one separator row before every card but the
+            // first, two header rows, then the body.
+            let visible = self.visible_files();
+            let mut y = 0u16;
+            for (position, file_index) in visible.iter().enumerate() {
+                let file = &self.files[*file_index];
+                if position > 0 {
+                    y = y.saturating_add(1);
+                }
+                let header_y = y;
+                let body = self.body_height(*file_index, file);
+                y = y
+                    .saturating_add(FILE_HEADER_HEIGHT)
+                    .saturating_add(body);
+                if *file_index == index {
+                    return (header_y, FILE_HEADER_HEIGHT.saturating_add(body));
+                }
+            }
+            (0, 0)
+        }
+
+        fn body_height(&self, index: usize, file: &DiffFile) -> u16 {
+            if self.is_reviewed(index) {
+                return 0;
+            }
+            let lines = file.patch_lines().len();
+            if lines == 0 {
+                1
+            } else {
+                u16::try_from(lines).unwrap_or(u16::MAX)
+            }
+        }
+
+        /// Render the patch column at `width x height`, scrolled by
+        /// `scroll_top` content rows.
+        ///
+        /// The returned rows are the patch column only; the file tree, when
+        /// present, occupies `layout.tree_width` cells to the left and is
+        /// painted by its owner. Wide-cell clipping is left to the painter,
+        /// exactly like [`DialogView::render`].
+        #[must_use]
+        pub fn render(
+            &self,
+            width: u16,
+            height: u16,
+            scroll_top: u16,
+            keys: &DiffKeys,
+        ) -> Vec<DiffRow> {
+            let layout = self.layout(width);
+            let mut rows = Vec::new();
+            if height == 0 {
+                return rows;
+            }
+            if self.files.is_empty() {
+                rows.push(DiffRow::new(
+                    clip_cells(NO_CHANGES, usize::from(layout.patch_width)),
+                    DiffSurface::Base,
+                    layout.inset,
+                ));
+                rows.resize(
+                    usize::from(height),
+                    DiffRow::new("", DiffSurface::Base, layout.inset),
+                );
+                return rows;
+            }
+            let footer = self.footer_rows(&layout, keys);
+            let viewport = usize::from(height.saturating_sub(
+                u16::try_from(footer.len()).unwrap_or(u16::MAX),
+            ));
+            let mut content: Vec<DiffRow> = Vec::new();
+            for (position, index) in self.visible_files().into_iter().enumerate() {
+                let file = &self.files[index];
+                let surface = if self.is_reviewed(index) {
+                    DiffSurface::Reviewed
+                } else {
+                    DiffSurface::Context
+                };
+                if position > 0 {
+                    content.push(DiffRow::new(
+                        CARD_GAP_TOP
+                            .to_string()
+                            .repeat(usize::from(layout.patch_width)),
+                        surface,
+                        layout.inset,
+                    ));
+                }
+                let header = self.header_text(index, layout.patch_width);
+                content.push(DiffRow::new(header, surface, layout.inset));
+                content.push(DiffRow::new(
+                    if self.is_reviewed(index) {
+                        CARD_GAP_BOTTOM
+                            .to_string()
+                            .repeat(usize::from(layout.patch_width))
+                    } else {
+                        String::new()
+                    },
+                    surface,
+                    layout.inset,
+                ));
+                if self.is_reviewed(index) {
+                    continue;
+                }
+                let lines = file.patch_lines();
+                if lines.is_empty() {
+                    let budget = usize::from(layout.patch_width).saturating_sub(if layout.compact {
+                        3
+                    } else {
+                        2
+                    });
+                    content.push(DiffRow::new(
+                        format!("{}{}", body_padding(layout.compact), clip_cells(NO_PATCH, budget)),
+                        surface,
+                        layout.inset,
+                    ));
+                    continue;
+                }
+                for line in lines {
+                    let budget = usize::from(layout.patch_width).saturating_sub(if layout.compact {
+                        3
+                    } else {
+                        2
+                    });
+                    content.push(DiffRow::new(
+                        format!("{}{}", body_padding(layout.compact), clip_cells(&line, budget)),
+                        surface,
+                        layout.inset,
+                    ));
+                }
+            }
+            let start = usize::from(scroll_top).min(content.len());
+            let mut visible: Vec<DiffRow> = content[start..]
+                .iter()
+                .take(viewport)
+                .cloned()
+                .collect();
+            // Sticky header: the card whose header scrolled past the top keeps
+            // its two header rows pinned over the first viewport rows until
+            // its own card ends.
+            if scroll_top > 0 {
+                if let Some(index) = self.pinned_file(scroll_top) {
+                    let surface = if self.is_reviewed(index) {
+                        DiffSurface::Reviewed
+                    } else {
+                        DiffSurface::Context
+                    };
+                    let header = self.header_text(index, layout.patch_width);
+                    if visible.len() > 0 {
+                        visible[0] = DiffRow::new(header, surface, layout.inset);
+                    }
+                    if visible.len() > 1 {
+                        visible[1] = DiffRow::new(
+                            if self.is_reviewed(index) {
+                                CARD_GAP_BOTTOM
+                                    .to_string()
+                                    .repeat(usize::from(layout.patch_width))
+                            } else {
+                                String::new()
+                            },
+                            surface,
+                            layout.inset,
+                        );
+                    }
+                }
+            }
+            rows.extend(visible);
+            rows.resize(
+                viewport.max(rows.len()),
+                DiffRow::new("", DiffSurface::Base, layout.inset),
+            );
+            rows.extend(footer);
+            rows.truncate(usize::from(height));
+            rows
+        }
+
+        /// File whose header is currently pinned by the sticky rule.
+        #[must_use]
+        pub fn pinned_file(&self, scroll_top: u16) -> Option<usize> {
+            if scroll_top == 0 {
+                return None;
+            }
+            let mut pinned = None;
+            for index in self.visible_files() {
+                let (header_y, card_height) = self.card_geometry(index);
+                if header_y >= scroll_top {
+                    break;
+                }
+                let offset = sticky_header_offset(scroll_top, header_y, card_height);
+                let max = card_height.saturating_sub(FILE_HEADER_HEIGHT);
+                if offset < max {
+                    pinned = Some(index);
+                } else {
+                    pinned = None;
+                }
+            }
+            pinned
+        }
+
+        /// Compact footer (`diff-viewer.tsx:1131-1175`). Empty on the full
+        /// layout, where the help widget is painted at the top-right instead.
+        #[must_use]
+        pub fn footer_rows(&self, layout: &DiffLayout, keys: &DiffKeys) -> Vec<DiffRow> {
+            if !layout.compact {
+                return Vec::new();
+            }
+            let width = usize::from(layout.patch_width);
+            let mut rows = Vec::new();
+            if layout.docked {
+                rows.push(DiffRow::new(
+                    FOOTER_TRANSITION.to_string().repeat(width),
+                    DiffSurface::Base,
+                    0,
+                ));
+            }
+            let left = format!(
+                "{}{}",
+                keys.close,
+                if layout.docked { " focus prompt" } else { " close" }
+            );
+            let right = format!("{} see all", keys.help);
+            let row = footer_row(&left, &right, width);
+            rows.push(DiffRow::new(row, DiffSurface::Base, 0));
+            if layout.docked {
+                rows.push(DiffRow::new("", DiffSurface::Base, 0));
+            }
+            rows
+        }
+
+        /// Top-right help widget when the tree is hidden on the full layout
+        /// (`diff-viewer.tsx:1173-1175`).
+        #[must_use]
+        pub fn help_widget(&self, layout: &DiffLayout) -> Option<MenuRect> {
+            if layout.compact || layout.tree_width.is_some() {
+                return None;
+            }
+            Some(MenuRect {
+                x: layout.patch_width.saturating_sub(1),
+                y: 0,
+                width: 1,
+                height: 1,
+            })
+        }
+    }
+
+    fn body_padding(compact: bool) -> &'static str {
+        // `paddingLeft = compact ? 2 : 1` (`diff-viewer.tsx:1064`).
+        if compact {
+            "  "
+        } else {
+            " "
+        }
+    }
+
+    fn footer_row(left: &str, right: &str, width: usize) -> String {
+        // `paddingLeft = 2`, `paddingRight = 1` (`diff-viewer.tsx:1144`).
+        let available = width.saturating_sub(3);
+        let right = clip_cells(right, available);
+        let right_width = visible_cells(&right, available);
+        let left_budget = available.saturating_sub(right_width + 1);
+        let left = clip_cells(left, left_budget);
+        let gap = available
+            .saturating_sub(visible_cells(&left, available) + right_width)
+            .max(1);
+        let row = clip_cells(&format!("  {left}{}{right}", " ".repeat(gap)), width);
+        let cells = visible_cells(&row, width);
+        if cells < width {
+            format!("{row}{}", " ".repeat(width - cells))
+        } else {
+            row
+        }
+    }
+
+    fn clip_cells(text: &str, budget: usize) -> String {
+        let mut out = String::new();
+        crate::native_view_layout::visit_unpadded_cells(text, budget, |glyph, _| {
+            out.push_str(glyph);
+        });
+        out
+    }
+
+    fn visible_cells(text: &str, budget: usize) -> usize {
+        let mut cells = 0usize;
+        crate::native_view_layout::visit_unpadded_cells(text, budget, |_, _| cells += 1);
+        cells
+    }
+}
+
+/// Error-details dialog (DIALOG-20): wrapped, hidden-scrollbar body with a
+/// 20-row cap, 1/20-row scrolling, and the copy/investigate/back controls.
+///
+/// Upstream evidence, pin `450e7b92412c780a7b5a75226bb8d49aaca24e22`:
+/// * `:114-124` — the body is a hidden-scrollbar scrollbox with
+///   `maxHeight={20}`.
+/// * `:71-78` — keys: `up`/`down` scroll by 1, `pageup`/`pagedown` by 20,
+///   `home`/`end` jump to the bounds.
+/// * `:43-62` — the `modal` keymap layer binds `escape` → back, `c` → copy,
+///   `i` → investigate (prefill a new prompt and clear the dialog).
+/// * `:64-69` — footer actions in order: "investigate" (`i`), then
+///   "copy details" (`c`), replaced by "✓ copied" after a successful copy.
+/// * `packages/tui/src/util/error-details.ts:2-27` — the copied text and the
+///   investigation prompt bodies.
+pub mod error_details {
+    /// `maxHeight={20}` (`dialog-error-details.tsx:114-124`).
+    pub const MAX_BODY_HEIGHT: usize = 20;
+    /// `scrollBy(-20)` / `scrollBy(20)` (`:74-75`).
+    pub const PAGE_ROWS: usize = 20;
+    /// Prompt prefill heading (`util/error-details.ts:11`).
+    pub const INVESTIGATE_HEADING: &str =
+        "Investigate why this OpenCode component failed in the current project.";
+    /// Final investigation instruction (`util/error-details.ts:18`).
+    pub const INVESTIGATE_INSTRUCTION: &str = "Inspect the relevant project and global OpenCode configuration, startup or loading behavior, required environment variables or credentials, dependencies, and logs. Identify the root cause and recommend a fix. Do not expose credentials.";
+
+    /// Key routed into the dialog.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum ErrorKey {
+        Up,
+        Down,
+        PageUp,
+        PageDown,
+        Home,
+        End,
+        /// `c` — copy the details.
+        Copy,
+        /// `i` — investigate.
+        Investigate,
+        /// `escape` — back to the caller.
+        Back,
+    }
+
+    /// What the dialog did with a key.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum ErrorOutcome {
+        /// Scrolled and consumed the key.
+        Scrolled,
+        Copy,
+        Investigate,
+        Back,
+        /// The key is not part of this dialog.
+        Ignored,
+    }
+
+    /// One footer action (`dialog-error-details.tsx:64-69`).
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct ErrorAction {
+        pub title: String,
+        pub key: Option<char>,
+    }
+
+    /// State of the error-details dialog.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct ErrorDetails {
+        title: String,
+        source: Option<String>,
+        error: String,
+        context: Option<String>,
+        diagnostic_ref: Option<String>,
+        offset: usize,
+        copied: bool,
+    }
+
+    impl ErrorDetails {
+        #[must_use]
+        pub fn new(
+            title: impl Into<String>,
+            error: impl Into<String>,
+            context: Option<String>,
+            diagnostic_ref: Option<String>,
+        ) -> Self {
+            Self {
+                title: title.into(),
+                source: None,
+                error: error.into(),
+                context,
+                diagnostic_ref,
+                offset: 0,
+                copied: false,
+            }
+        }
+
+        #[must_use]
+        pub fn with_source(mut self, source: impl Into<String>) -> Self {
+            self.source = Some(source.into());
+            self
+        }
+
+        #[must_use]
+        pub fn title(&self) -> &str {
+            &self.title
+        }
+
+        /// `FilePath` row under the header (`dialog-error-details.tsx:100-108`).
+        #[must_use]
+        pub fn source(&self) -> Option<&str> {
+            self.source.as_deref()
+        }
+
+        /// Copied text (`util/error-details.ts:2-9`).
+        #[must_use]
+        pub fn text(&self) -> String {
+            let mut lines = vec![self.title.clone()];
+            if let Some(context) = &self.context {
+                lines.push(context.clone());
+            }
+            lines.push(format!("Error: {}", self.error));
+            if let Some(reference) = &self.diagnostic_ref {
+                lines.push(format!("Reference: {reference}"));
+            }
+            lines.join("\n")
+        }
+
+        /// Prompt prefilled by `i` (`util/error-details.ts:10-19`).
+        #[must_use]
+        pub fn prompt(&self) -> String {
+            let mut parts = vec![
+                INVESTIGATE_HEADING.to_owned(),
+                self.text(),
+            ];
+            if let Some(reference) = &self.diagnostic_ref {
+                parts.push(format!(
+                    "Find the server log entry matching reference {reference} and inspect its original cause. If the server logs are not accessible from this session, say so and ask for the matching log entry; do not infer the cause from the reference alone."
+                ));
+            }
+            parts.push(INVESTIGATE_INSTRUCTION.to_owned());
+            parts.join("\n\n")
+        }
+
+        /// Diagnostic reference row (`dialog-error-details.tsx:125-127`).
+        #[must_use]
+        pub fn diagnostic_ref(&self) -> Option<&str> {
+            self.diagnostic_ref.as_deref()
+        }
+
+        #[must_use]
+        pub const fn copied(&self) -> bool {
+            self.copied
+        }
+
+        pub fn mark_copied(&mut self) {
+            self.copied = true;
+        }
+
+        #[must_use]
+        pub const fn offset(&self) -> usize {
+            self.offset
+        }
+
+        /// Wrapped body rows at `width` cells (`wrapMode="word"`).
+        #[must_use]
+        pub fn body_rows(&self, width: usize) -> Vec<String> {
+            let mut rows = Vec::new();
+            for line in self.error.replace('\r', "").split('\n') {
+                rows.extend(wrap_words(line, width.max(1)));
+            }
+            if rows.is_empty() {
+                rows.push(String::new());
+            }
+            rows
+        }
+
+        /// Visible body window: at most [`MAX_BODY_HEIGHT`] rows starting at
+        /// the current offset.
+        #[must_use]
+        pub fn visible_rows(&self, width: usize) -> Vec<String> {
+            let rows = self.body_rows(width);
+            let window = rows.len().min(MAX_BODY_HEIGHT);
+            let max_offset = rows.len().saturating_sub(window);
+            let start = self.offset.min(max_offset);
+            rows[start..start + window].to_vec()
+        }
+
+        /// Largest valid offset (`scrollTo(scrollHeight)`).
+        #[must_use]
+        pub fn max_offset(&self, width: usize) -> usize {
+            let rows = self.body_rows(width).len();
+            let window = rows.min(MAX_BODY_HEIGHT);
+            rows.saturating_sub(window)
+        }
+
+        fn scroll_by(&mut self, delta: isize, width: usize) -> bool {
+            let max = self.max_offset(width);
+            let next = if delta.is_negative() {
+                self.offset.saturating_sub(delta.unsigned_abs())
+            } else {
+                self.offset.saturating_add(delta.unsigned_abs()).min(max)
+            };
+            let moved = next != self.offset;
+            self.offset = next;
+            moved
+        }
+
+        /// Route a key. `width` is the dialog body width used to resolve the
+        /// bottom bound.
+        pub fn handle(&mut self, key: ErrorKey, width: usize) -> ErrorOutcome {
+            match key {
+                ErrorKey::Up => self.scroll_outcome(-1, width),
+                ErrorKey::Down => self.scroll_outcome(1, width),
+                ErrorKey::PageUp => self.scroll_outcome(-(PAGE_ROWS as isize), width),
+                ErrorKey::PageDown => self.scroll_outcome(PAGE_ROWS as isize, width),
+                ErrorKey::Home => {
+                    self.offset = 0;
+                    ErrorOutcome::Scrolled
+                }
+                ErrorKey::End => {
+                    self.offset = self.max_offset(width);
+                    ErrorOutcome::Scrolled
+                }
+                ErrorKey::Copy => ErrorOutcome::Copy,
+                ErrorKey::Investigate => ErrorOutcome::Investigate,
+                ErrorKey::Back => ErrorOutcome::Back,
+            }
+        }
+
+        fn scroll_outcome(&mut self, delta: isize, width: usize) -> ErrorOutcome {
+            if self.scroll_by(delta, width) {
+                ErrorOutcome::Scrolled
+            } else {
+                ErrorOutcome::Ignored
+            }
+        }
+
+        /// Footer actions in upstream order (`dialog-error-details.tsx:64-69`).
+        #[must_use]
+        pub fn actions(&self) -> Vec<ErrorAction> {
+            vec![
+                ErrorAction {
+                    title: "investigate".to_owned(),
+                    key: Some('i'),
+                },
+                if self.copied {
+                    ErrorAction {
+                        title: "✓ copied".to_owned(),
+                        key: None,
+                    }
+                } else {
+                    ErrorAction {
+                        title: "copy details".to_owned(),
+                        key: Some('c'),
+                    }
+                },
+            ]
+        }
+    }
+
+    fn wrap_words(text: &str, width: usize) -> Vec<String> {
+        let mut rows = Vec::new();
+        let mut current = String::new();
+        for word in text.split_whitespace() {
+            if current.is_empty() {
+                current.push_str(word);
+                continue;
+            }
+            if current.chars().count() + 1 + word.chars().count() <= width {
+                current.push(' ');
+                current.push_str(word);
+            } else {
+                rows.push(std::mem::take(&mut current));
+                current.push_str(word);
+            }
+        }
+        if !current.is_empty() || rows.is_empty() {
+            rows.push(current);
+        }
+        rows
+    }
+}
+
+/// Root crash screen (DIALOG-20): the independent safe palette, the
+/// horizontally selectable Copy/Restart/Quit actions, stack scrolling and the
+/// responsive subtext/footer thresholds.
+///
+/// Upstream evidence, pin `450e7b92412c780a7b5a75226bb8d49aaca24e22`,
+/// `packages/tui/src/component/error-component.tsx`:
+/// * `:19-42` — the palette is defined locally per mode because the theme
+///   context may be the thing that crashed.
+/// * `:69-100` — keys: Ctrl+C exits, Return runs the selected action,
+///   Left/Right and Tab/Shift+Tab move the selection, Up/Down scroll by 1,
+///   PageUp/PageDown by the viewport height, Home/End jump, and the literal
+///   `q`/`c`/`r` shortcuts run Quit/Copy/Restart.
+/// * `:104-106` — `contentWidth = min(84, max(24, width - 4))`, subtext at
+///   `height >= 18`, footer at `height >= 20`.
+/// * `:55-62,169,172` — Copy/Restart/Quit order, labels
+///   "Copy report"/"✓ Copied"/"Copy failed", keys `c`/`r`/`q`.
+/// * `:183` — the stack panel has `minHeight={3}`.
+/// * `:221-257` — the issue URL carries title/version/os/terminal/reproduce
+///   and truncates the stack so the encoded URL stays under 6000 characters,
+///   appending `\n… (truncated)`.
+pub mod crash {
+    /// `min(84, max(24, width - 4))` (`error-component.tsx:104`).
+    pub const CONTENT_MAX_WIDTH: u16 = 84;
+    /// Lower clamp of the content column (`error-component.tsx:104`).
+    pub const CONTENT_MIN_WIDTH: u16 = 24;
+    /// Subtext threshold (`error-component.tsx:105`).
+    pub const SUBTEXT_MIN_HEIGHT: u16 = 18;
+    /// Footer threshold (`error-component.tsx:106`).
+    pub const FOOTER_MIN_HEIGHT: u16 = 20;
+    /// `minHeight={3}` on the stack panel (`error-component.tsx:183`).
+    pub const STACK_MIN_HEIGHT: u16 = 3;
+    /// Headline (`error-component.tsx:119-121`).
+    pub const HEADLINE: &str = "OpenCode crashed";
+    /// Subtext (`error-component.tsx:123`).
+    pub const SUBTEXT: &str = "An unexpected error stopped the session.";
+    /// Fallback message (`error-component.tsx:44`).
+    pub const UNKNOWN_MESSAGE: &str = "An unknown error occurred.";
+    /// Fallback stack (`error-component.tsx:45`).
+    pub const NO_STACK: &str = "No stack trace available.";
+    /// Issue form (`error-component.tsx:225`).
+    pub const ISSUE_URL: &str =
+        "https://github.com/anomalyco/opencode/issues/new?template=bug-report.yml";
+    /// Practical URL budget (`error-component.tsx:239`).
+    pub const MAX_URL_LENGTH: usize = 6000;
+    /// Truncation marker (`error-component.tsx:240`).
+    pub const TRUNCATION_MARKER: &str = "\n… (truncated)";
+
+    /// Safe palette mode (`error-component.tsx:19-42`).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum CrashMode {
+        Dark,
+        Light,
+    }
+
+    /// The independent crash palette. RGBA, alpha 255.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct CrashPalette {
+        pub bg: [u8; 4],
+        pub element: [u8; 4],
+        pub border_subtle: [u8; 4],
+        pub text: [u8; 4],
+        pub muted: [u8; 4],
+        pub primary: [u8; 4],
+        pub on_primary: [u8; 4],
+        pub error: [u8; 4],
+        pub success: [u8; 4],
+    }
+
+    const DARK: CrashPalette = CrashPalette {
+        bg: [0x0a, 0x0a, 0x0a, 0xff],
+        element: [0x1e, 0x1e, 0x1e, 0xff],
+        border_subtle: [0x3c, 0x3c, 0x3c, 0xff],
+        text: [0xee, 0xee, 0xee, 0xff],
+        muted: [0x80, 0x80, 0x80, 0xff],
+        primary: [0xfa, 0xb2, 0x83, 0xff],
+        on_primary: [0x0a, 0x0a, 0x0a, 0xff],
+        error: [0xe0, 0x6c, 0x75, 0xff],
+        success: [0x7f, 0xd8, 0x8f, 0xff],
+    };
+
+    const LIGHT: CrashPalette = CrashPalette {
+        bg: [0xff, 0xff, 0xff, 0xff],
+        element: [0xf5, 0xf5, 0xf5, 0xff],
+        border_subtle: [0xd4, 0xd4, 0xd4, 0xff],
+        text: [0x1a, 0x1a, 0x1a, 0xff],
+        muted: [0x8a, 0x8a, 0x8a, 0xff],
+        primary: [0x3b, 0x7d, 0xd8, 0xff],
+        on_primary: [0xff, 0xff, 0xff, 0xff],
+        error: [0xd1, 0x38, 0x3d, 0xff],
+        success: [0x3d, 0x9a, 0x57, 0xff],
+    };
+
+    impl CrashMode {
+        /// The palette for this mode.
+        #[must_use]
+        pub const fn palette(self) -> CrashPalette {
+            match self {
+                CrashMode::Dark => DARK,
+                CrashMode::Light => LIGHT,
+            }
+        }
+    }
+
+    /// Copy affordance state (`error-component.tsx:15,47-53`).
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub enum CopyState {
+        #[default]
+        Idle,
+        Copied,
+        Failed,
+    }
+
+    /// One horizontal action (`error-component.tsx:55-62`).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum CrashAction {
+        Copy,
+        Restart,
+        Quit,
+    }
+
+    impl CrashAction {
+        /// Actions in render order (`error-component.tsx:56-62`).
+        #[must_use]
+        pub const fn all() -> [CrashAction; 3] {
+            [CrashAction::Copy, CrashAction::Restart, CrashAction::Quit]
+        }
+
+        /// Shortcut char kept under the button (`error-component.tsx:172`).
+        #[must_use]
+        pub const fn key(self) -> char {
+            match self {
+                CrashAction::Copy => 'c',
+                CrashAction::Restart => 'r',
+                CrashAction::Quit => 'q',
+            }
+        }
+
+        /// Label for the current copy state (`error-component.tsx:58`).
+        #[must_use]
+        pub fn label(self, copy: CopyState) -> &'static str {
+            match self {
+                CrashAction::Copy => match copy {
+                    CopyState::Idle => "Copy report",
+                    CopyState::Copied => "✓ Copied",
+                    CopyState::Failed => "Copy failed",
+                },
+                CrashAction::Restart => "Restart",
+                CrashAction::Quit => "Quit",
+            }
+        }
+    }
+
+    /// Key routed into the crash screen.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum CrashKey {
+        Left,
+        Right,
+        Tab,
+        ShiftTab,
+        Enter,
+        Up,
+        Down,
+        PageUp,
+        PageDown,
+        Home,
+        End,
+        Char(char),
+        CtrlC,
+    }
+
+    /// Crash-screen reaction.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum CrashOutcome {
+        /// Run this action.
+        Run(CrashAction),
+        /// Ctrl+C exits immediately.
+        Exit,
+        /// The selection or scroll position moved.
+        Moved,
+        /// Nothing to scroll; consumed without effect.
+        Ignored,
+    }
+
+    /// Crash screen state.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct CrashScreen {
+        mode: CrashMode,
+        version: String,
+        message: String,
+        stack: String,
+        os: String,
+        terminal: String,
+        selected: usize,
+        copy: CopyState,
+        offset: usize,
+    }
+
+    impl CrashScreen {
+        /// Build from a panic payload. `None` message/stack fall back to the
+        /// upstream placeholders.
+        #[must_use]
+        pub fn new(
+            mode: CrashMode,
+            version: impl Into<String>,
+            message: Option<&str>,
+            stack: Option<&str>,
+            os: impl Into<String>,
+            terminal: impl Into<String>,
+        ) -> Self {
+            Self {
+                mode,
+                version: version.into(),
+                message: message
+                    .filter(|message| !message.is_empty())
+                    .unwrap_or(UNKNOWN_MESSAGE)
+                    .to_owned(),
+                stack: stack
+                    .filter(|stack| !stack.is_empty())
+                    .unwrap_or(NO_STACK)
+                    .to_owned(),
+                os: os.into(),
+                terminal: terminal.into(),
+                selected: 0,
+                copy: CopyState::Idle,
+                offset: 0,
+            }
+        }
+
+        #[must_use]
+        pub const fn palette(&self) -> CrashPalette {
+            self.mode.palette()
+        }
+
+        #[must_use]
+        pub const fn mode(&self) -> CrashMode {
+            self.mode
+        }
+
+        #[must_use]
+        pub fn message(&self) -> &str {
+            &self.message
+        }
+
+        #[must_use]
+        pub fn stack(&self) -> &str {
+            &self.stack
+        }
+
+        #[must_use]
+        pub const fn selected(&self) -> usize {
+            self.selected
+        }
+
+        #[must_use]
+        pub const fn selected_action(&self) -> CrashAction {
+            CrashAction::all()[self.selected % CrashAction::all().len()]
+        }
+
+        #[must_use]
+        pub const fn copy_state(&self) -> CopyState {
+            self.copy
+        }
+
+        #[must_use]
+        pub const fn offset(&self) -> usize {
+            self.offset
+        }
+
+        /// `contentWidth()` (`error-component.tsx:104`).
+        #[must_use]
+        pub fn content_width(cols: u16) -> u16 {
+            CONTENT_MAX_WIDTH.min(CONTENT_MIN_WIDTH.max(cols.saturating_sub(4)))
+        }
+
+        /// `showSubtext()` (`error-component.tsx:105`).
+        #[must_use]
+        pub const fn show_subtext(rows: u16) -> bool {
+            rows >= SUBTEXT_MIN_HEIGHT
+        }
+
+        /// `showFooter()` (`error-component.tsx:106`).
+        #[must_use]
+        pub const fn show_footer(rows: u16) -> bool {
+            rows >= FOOTER_MIN_HEIGHT
+        }
+
+        /// Footer copy hint (`error-component.tsx:204-212`).
+        #[must_use]
+        pub const fn footer_hint(&self) -> &'static str {
+            match self.copy {
+                CopyState::Copied => "Report copied — paste it into a new GitHub issue.",
+                CopyState::Failed => {
+                    "Clipboard write failed. Try again or report the crash manually."
+                }
+                CopyState::Idle => "Copy the report and open a GitHub issue to help us fix this.",
+            }
+        }
+
+        /// Footer version line (`error-component.tsx:213`).
+        #[must_use]
+        pub fn version_line(&self) -> String {
+            format!("OpenCode {}", self.version)
+        }
+
+        /// Stack rows available below the fixed chrome, never under the
+        /// three-row minimum (`error-component.tsx:183`).
+        #[must_use]
+        pub fn stack_viewport(&self, rows: u16) -> usize {
+            let chrome = 1 // headline
+                + 2 // error panel borders
+                + 2 // action row + key row
+                + if Self::show_subtext(rows) { 1 } else { 0 }
+                + if Self::show_footer(rows) { 2 } else { 0 };
+            usize::from(rows.saturating_sub(chrome).max(STACK_MIN_HEIGHT))
+        }
+
+        fn stack_rows(&self) -> Vec<&str> {
+            self.stack.split('\n').collect()
+        }
+
+        /// Largest valid stack offset.
+        #[must_use]
+        pub fn stack_max_offset(&self, rows: u16) -> usize {
+            self.stack_rows().len().saturating_sub(self.stack_viewport(rows))
+        }
+
+        /// Current stack window.
+        #[must_use]
+        pub fn stack_window(&self, rows: u16) -> Vec<&str> {
+            let all = self.stack_rows();
+            let viewport = self.stack_viewport(rows);
+            let start = self.offset.min(self.stack_max_offset(rows));
+            all[start..(start + viewport).min(all.len())].to_vec()
+        }
+
+        fn move_selection(&mut self, delta: isize) -> CrashOutcome {
+            let len = CrashAction::all().len() as isize;
+            let next = (self.selected as isize + delta).rem_euclid(len);
+            self.selected = next as usize;
+            CrashOutcome::Moved
+        }
+
+        fn scroll(&mut self, delta: isize, rows: u16) -> CrashOutcome {
+            let max = self.stack_max_offset(rows);
+            let next = if delta.is_negative() {
+                self.offset.saturating_sub(delta.unsigned_abs())
+            } else {
+                self.offset.saturating_add(delta.unsigned_abs()).min(max)
+            };
+            let moved = next != self.offset;
+            self.offset = next;
+            if moved {
+                CrashOutcome::Moved
+            } else {
+                CrashOutcome::Ignored
+            }
+        }
+
+        /// Route a key (`error-component.tsx:69-100`).
+        pub fn handle(&mut self, key: CrashKey, rows: u16) -> CrashOutcome {
+            match key {
+                CrashKey::CtrlC => CrashOutcome::Exit,
+                CrashKey::Enter => CrashOutcome::Run(self.selected_action()),
+                CrashKey::Left => self.move_selection(-1),
+                CrashKey::Right | CrashKey::Tab => self.move_selection(1),
+                CrashKey::ShiftTab => self.move_selection(-1),
+                CrashKey::Up => self.scroll(-1, rows),
+                CrashKey::Down => self.scroll(1, rows),
+                CrashKey::PageUp => {
+                    let page = self.stack_viewport(rows) as isize;
+                    self.scroll(-page, rows)
+                }
+                CrashKey::PageDown => {
+                    let page = self.stack_viewport(rows) as isize;
+                    self.scroll(page, rows)
+                }
+                CrashKey::Home => {
+                    self.offset = 0;
+                    CrashOutcome::Moved
+                }
+                CrashKey::End => {
+                    self.offset = self.stack_max_offset(rows);
+                    CrashOutcome::Moved
+                }
+                CrashKey::Char('c') => CrashOutcome::Run(CrashAction::Copy),
+                CrashKey::Char('r') => CrashOutcome::Run(CrashAction::Restart),
+                CrashKey::Char('q') => CrashOutcome::Run(CrashAction::Quit),
+                CrashKey::Char(_) => CrashOutcome::Ignored,
+            }
+        }
+
+        /// Record the clipboard outcome (`error-component.tsx:47-53`).
+        pub fn mark_copy(&mut self, copied: bool) {
+            self.copy = if copied {
+                CopyState::Copied
+            } else {
+                CopyState::Failed
+            };
+        }
+
+        /// Issue URL with the stack truncated to fit
+        /// (`error-component.tsx:221-257`).
+        #[must_use]
+        pub fn issue_url(&self) -> String {
+            let head = format!(
+                "The OpenCode TUI crashed with an unexpected error.\n\n**Error:** {}\n\n**Stack trace:**\n",
+                self.message
+            );
+            let marker = TRUNCATION_MARKER;
+            let build = |stack: &str| {
+                let mut url = String::from(ISSUE_URL);
+                url.push_str("&title=");
+                url.push_str(&encode(&format!("TUI crash: {}", self.message)));
+                url.push_str("&opencode-version=");
+                url.push_str(&encode(&self.version));
+                url.push_str("&os=");
+                url.push_str(&encode(&self.os));
+                url.push_str("&terminal=");
+                url.push_str(&encode(&self.terminal));
+                url.push_str("&reproduce=");
+                url.push_str(&encode(
+                    "Reported automatically from the OpenCode crash screen. If you can, describe what you were doing when it crashed.",
+                ));
+                url.push_str("&description=");
+                url.push_str(&encode(&format!("{head}```\n{stack}\n```")));
+                url
+            };
+            let full = build(&self.stack);
+            if full.len() <= MAX_URL_LENGTH {
+                return full;
+            }
+            // Largest raw stack prefix whose encoded URL (with the marker)
+            // still fits.
+            let mut lo = 0usize;
+            let mut hi = self.stack.len();
+            while lo < hi {
+                let mid = (lo + hi + 1) / 2;
+                let candidate = build(&format!("{}{marker}", &self.stack[..mid]));
+                if candidate.len() <= MAX_URL_LENGTH {
+                    lo = mid;
+                } else {
+                    hi = mid - 1;
+                }
+            }
+            build(&format!("{}{marker}", &self.stack[..lo]))
+        }
+    }
+
+    fn encode(text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        for byte in text.bytes() {
+            match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    out.push(byte as char);
+                }
+                b' ' => out.push_str("%20"),
+                _ => out.push_str(&format!("%{byte:02X}")),
+            }
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod error_and_crash_tests {
+    use super::crash::*;
+    use super::error_details::*;
+
+    fn details() -> ErrorDetails {
+        ErrorDetails::new(
+            "Plugin failed",
+            "connect ECONNREFUSED 127.0.0.1:4096\nwhile loading the plugin",
+            Some("plugin: demo".to_owned()),
+            Some("ref-42".to_owned()),
+        )
+        .with_source("~/.config/opencode/plugin.ts")
+    }
+
+    #[test]
+    fn copied_text_and_prompt_match_upstream_order() {
+        let details = details();
+        assert_eq!(
+            details.text(),
+            "Plugin failed\nplugin: demo\nError: connect ECONNREFUSED 127.0.0.1:4096\nwhile loading the plugin\nReference: ref-42"
+        );
+        let prompt = details.prompt();
+        assert!(prompt.starts_with(INVESTIGATE_HEADING));
+        assert!(prompt.contains("Error: connect ECONNREFUSED"));
+        assert!(prompt.contains("reference ref-42"));
+        assert!(prompt.ends_with(INVESTIGATE_INSTRUCTION));
+        assert_eq!(details.source(), Some("~/.config/opencode/plugin.ts"));
+        assert_eq!(details.diagnostic_ref(), Some("ref-42"));
+    }
+
+    #[test]
+    fn body_wraps_by_words_and_caps_at_twenty_rows() {
+        let error = (0..80)
+            .map(|n| format!("word{n}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let details = ErrorDetails::new("t", error, None, None);
+        let rows = details.body_rows(20);
+        assert!(rows.len() > MAX_BODY_HEIGHT);
+        assert!(rows.iter().all(|row| row.chars().count() <= 20));
+        assert_eq!(details.visible_rows(20).len(), MAX_BODY_HEIGHT);
+    }
+
+    #[test]
+    fn scrolling_is_one_twenty_and_bounds_aware() {
+        let error = (0..60).map(|n| format!("line{n}")).collect::<Vec<_>>().join("\n");
+        let mut details = ErrorDetails::new("t", error, None, None);
+        assert_eq!(details.body_rows(10).len(), 60);
+        assert_eq!(details.max_offset(10), 40);
+        assert_eq!(details.handle(ErrorKey::Down, 10), ErrorOutcome::Scrolled);
+        assert_eq!(details.offset(), 1);
+        assert_eq!(details.handle(ErrorKey::PageDown, 10), ErrorOutcome::Scrolled);
+        assert_eq!(details.offset(), 21);
+        assert_eq!(details.handle(ErrorKey::End, 10), ErrorOutcome::Scrolled);
+        assert_eq!(details.offset(), 40);
+        assert_eq!(details.handle(ErrorKey::Down, 10), ErrorOutcome::Ignored);
+        assert_eq!(details.handle(ErrorKey::PageUp, 10), ErrorOutcome::Scrolled);
+        assert_eq!(details.offset(), 20);
+        assert_eq!(details.handle(ErrorKey::Home, 10), ErrorOutcome::Scrolled);
+        assert_eq!(details.offset(), 0);
+        assert_eq!(details.handle(ErrorKey::Up, 10), ErrorOutcome::Ignored);
+        let rows = details.visible_rows(10);
+        assert_eq!(rows.first().map(String::as_str), Some("line0"));
+    }
+
+    #[test]
+    fn copy_investigate_and_back_actions_route_in_source_order() {
+        let mut details = details();
+        assert_eq!(details.handle(ErrorKey::Copy, 40), ErrorOutcome::Copy);
+        assert_eq!(details.handle(ErrorKey::Investigate, 40), ErrorOutcome::Investigate);
+        assert_eq!(details.handle(ErrorKey::Back, 40), ErrorOutcome::Back);
+        assert!(!details.copied());
+        assert_eq!(
+            details.actions(),
+            vec![
+                ErrorAction { title: "investigate".to_owned(), key: Some('i') },
+                ErrorAction { title: "copy details".to_owned(), key: Some('c') },
+            ]
+        );
+        details.mark_copied();
+        assert_eq!(details.actions()[1].title, "✓ copied");
+        assert_eq!(details.actions()[1].key, None);
+    }
+
+    #[test]
+    fn crash_content_width_and_responsive_thresholds() {
+        assert_eq!(CrashScreen::content_width(200), 84);
+        assert_eq!(CrashScreen::content_width(68), 64);
+        assert_eq!(CrashScreen::content_width(20), 24);
+        assert!(!CrashScreen::show_subtext(17));
+        assert!(CrashScreen::show_subtext(18));
+        assert!(!CrashScreen::show_footer(19));
+        assert!(CrashScreen::show_footer(20));
+    }
+
+    #[test]
+    fn crash_palette_is_local_and_mode_specific() {
+        let dark = CrashMode::Dark.palette();
+        let light = CrashMode::Light.palette();
+        assert_ne!(dark.bg, light.bg);
+        assert_eq!(dark.error, [0xe0, 0x6c, 0x75, 0xff]);
+        assert_eq!(light.error, [0xd1, 0x38, 0x3d, 0xff]);
+        assert_eq!(dark.on_primary, [0x0a, 0x0a, 0x0a, 0xff]);
+    }
+
+    #[test]
+    fn crash_actions_move_horizontally_and_run_selected() {
+        let mut screen = CrashScreen::new(CrashMode::Dark, "1.2.3", Some("boom"), None, "macos", "vt");
+        assert_eq!(screen.message(), "boom");
+        assert_eq!(screen.stack(), NO_STACK);
+        assert_eq!(screen.selected_action(), CrashAction::Copy);
+        assert_eq!(screen.handle(CrashKey::Right, 24), CrashOutcome::Moved);
+        assert_eq!(screen.selected_action(), CrashAction::Restart);
+        assert_eq!(screen.handle(CrashKey::Left, 24), CrashOutcome::Moved);
+        assert_eq!(screen.selected_action(), CrashAction::Copy);
+        // Wraps backwards to the last action.
+        assert_eq!(screen.handle(CrashKey::Left, 24), CrashOutcome::Moved);
+        assert_eq!(screen.selected_action(), CrashAction::Quit);
+        assert_eq!(screen.handle(CrashKey::ShiftTab, 24), CrashOutcome::Moved);
+        assert_eq!(screen.selected_action(), CrashAction::Restart);
+        assert_eq!(screen.handle(CrashKey::Enter, 24), CrashOutcome::Run(CrashAction::Restart));
+        assert_eq!(screen.handle(CrashKey::Char('c'), 24), CrashOutcome::Run(CrashAction::Copy));
+        assert_eq!(screen.handle(CrashKey::Char('r'), 24), CrashOutcome::Run(CrashAction::Restart));
+        assert_eq!(screen.handle(CrashKey::Char('q'), 24), CrashOutcome::Run(CrashAction::Quit));
+        assert_eq!(screen.handle(CrashKey::Char('x'), 24), CrashOutcome::Ignored);
+        assert_eq!(screen.handle(CrashKey::CtrlC, 24), CrashOutcome::Exit);
+        // Labels and footer follow the copy state.
+        assert_eq!(CrashAction::Copy.label(screen.copy_state()), "Copy report");
+        screen.mark_copy(true);
+        assert_eq!(CrashAction::Copy.label(screen.copy_state()), "✓ Copied");
+        assert!(screen.footer_hint().contains("paste it into a new GitHub issue"));
+        screen.mark_copy(false);
+        assert_eq!(CrashAction::Copy.label(screen.copy_state()), "Copy failed");
+        assert!(screen.footer_hint().contains("Clipboard write failed"));
+        assert_eq!(screen.version_line(), "OpenCode 1.2.3");
+    }
+
+    #[test]
+    fn crash_stack_scrolls_and_keeps_a_three_row_minimum() {
+        let stack = (0..60).map(|n| format!("frame{n}")).collect::<Vec<_>>().join("\n");
+        let mut screen =
+            CrashScreen::new(CrashMode::Dark, "1", Some("boom"), Some(&stack), "macos", "vt");
+        // Tiny terminal: the panel still reserves three rows.
+        assert_eq!(screen.stack_viewport(1), 3);
+        let viewport = screen.stack_viewport(24);
+        assert!(viewport >= 3);
+        assert_eq!(screen.stack_max_offset(24), 60 - viewport);
+        assert_eq!(screen.handle(CrashKey::Down, 24), CrashOutcome::Moved);
+        assert_eq!(screen.offset(), 1);
+        assert_eq!(screen.handle(CrashKey::PageDown, 24), CrashOutcome::Moved);
+        assert_eq!(screen.offset(), 1 + viewport);
+        assert_eq!(screen.handle(CrashKey::End, 24), CrashOutcome::Moved);
+        assert_eq!(screen.offset(), 60 - viewport);
+        assert_eq!(screen.handle(CrashKey::End, 24), CrashOutcome::Moved);
+        assert_eq!(screen.handle(CrashKey::Up, 24), CrashOutcome::Moved);
+        assert_eq!(screen.handle(CrashKey::Home, 24), CrashOutcome::Moved);
+        assert_eq!(screen.offset(), 0);
+        let window = screen.stack_window(24);
+        assert_eq!(window.first().copied(), Some("frame0"));
+        assert_eq!(window.len(), viewport);
+    }
+
+    #[test]
+    fn crash_issue_url_carries_the_report_and_truncates_the_stack() {
+        let screen = CrashScreen::new(
+            CrashMode::Dark,
+            "1.2.3",
+            Some("boom & bang"),
+            Some("at a\nat b"),
+            "macos",
+            "vt",
+        );
+        let url = screen.issue_url();
+        assert!(url.starts_with(ISSUE_URL));
+        assert!(url.contains("title=TUI%20crash%3A%20boom%20%26%20bang"));
+        assert!(url.contains("opencode-version=1.2.3"));
+        assert!(url.contains("os=macos"));
+        assert!(url.contains("terminal=vt"));
+        assert!(url.contains("at%20a"));
+        assert!(url.len() <= MAX_URL_LENGTH);
+
+        let huge = (0..4_000)
+            .map(|n| format!("frame {n} padding padding padding"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let screen =
+            CrashScreen::new(CrashMode::Dark, "1.2.3", Some("boom"), Some(&huge), "macos", "vt");
+        let url = screen.issue_url();
+        assert!(url.len() <= MAX_URL_LENGTH, "{}", url.len());
+        let marker = "%0A%E2%80%A6%20%28truncated%29";
+        assert!(url.contains(marker), "missing truncation marker");
+    }
+}
+
+#[cfg(test)]
+mod diff_dialog_tests {
+    use super::diff_dialog::*;
+
+    fn file(path: &str, status: DiffStatus, lines: usize) -> DiffFile {
+        let patch = (0..lines)
+            .map(|n| format!("+line {n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        DiffFile::new(path, 3, 1, status).with_patch(patch)
+    }
+
+    fn two_files() -> DiffDialog {
+        DiffDialog::new(vec![
+            file("src/alpha.rs", DiffStatus::Modified, 4),
+            file("src/beta.rs", DiffStatus::Modified, 3),
+        ])
+    }
+
+    #[test]
+    fn full_layout_boundary_is_eighty_eight() {
+        let dialog = two_files();
+        assert!(dialog.layout(87).compact);
+        assert!(!dialog.layout(88).compact);
+        assert_eq!(dialog.layout(87).inset, 0);
+        assert_eq!(dialog.layout(88).inset, 2);
+        // A docked pane is always compact, however wide it is.
+        let mut docked = two_files();
+        docked.set_docked(true);
+        assert!(docked.layout(200).compact);
+        assert_eq!(docked.layout(200).inset, 0);
+    }
+
+    #[test]
+    fn tree_width_is_thirty_to_forty_and_patch_pane_splits_at_100() {
+        assert_eq!(file_tree_width(88), 30);
+        assert_eq!(file_tree_width(120), 30);
+        assert_eq!(file_tree_width(160), 40);
+        assert_eq!(file_tree_width(400), 40);
+        // Tree + insets: the tree grows with the terminal, so the boundary is
+        // 137 -> 99 (unified), 138 -> 100 (split).
+        assert_eq!(file_tree_width(137), 34);
+        assert_eq!(patch_pane_width(137, Some(file_tree_width(137)), 2), 99);
+        assert!(!two_files().layout(137).split_available);
+        assert_eq!(patch_pane_width(138, Some(file_tree_width(138)), 2), 100);
+        assert!(two_files().layout(138).split_available);
+        // No tree on a narrow full screen: 103 -> 99, 104 -> 100.
+        let mut no_tree = two_files();
+        no_tree.set_tree_enabled(false);
+        assert!(!no_tree.layout(103).split_available);
+        assert!(no_tree.layout(104).split_available);
+        assert_eq!(no_tree.layout(104).tree_width, None);
+        // Empty payloads never show the tree.
+        assert!(!DiffDialog::new(Vec::new()).layout(200).tree_width.is_some());
+    }
+
+    #[test]
+    fn added_and_deleted_files_always_render_unified() {
+        let mut dialog = DiffDialog::new(vec![
+            file("new.rs", DiffStatus::Added, 2),
+            file("gone.rs", DiffStatus::Deleted, 2),
+            file("edit.rs", DiffStatus::Modified, 2),
+        ]);
+        dialog.set_tree_enabled(false);
+        let layout = dialog.layout(200);
+        assert!(layout.split_available);
+        assert_eq!(layout.view, DiffView::Split);
+        assert_eq!(dialog.view_for(&layout, 0), DiffView::Unified);
+        assert_eq!(dialog.view_for(&layout, 1), DiffView::Unified);
+        assert_eq!(dialog.view_for(&layout, 2), DiffView::Split);
+    }
+
+    #[test]
+    fn toggle_view_is_refused_below_the_split_boundary() {
+        let mut dialog = two_files();
+        assert!(!dialog.toggle_view(100));
+        assert_eq!(dialog.view_override(), None);
+        assert_eq!(dialog.layout(100).view, DiffView::Unified);
+        assert!(dialog.toggle_view(140));
+        assert_eq!(dialog.layout(140).view, DiffView::Unified);
+        assert!(dialog.toggle_view(140));
+        assert_eq!(dialog.layout(140).view, DiffView::Split);
+    }
+
+    #[test]
+    fn sticky_header_offsets_are_clamped_to_their_own_card() {
+        // 2 header rows + 8 body rows = 10.
+        assert_eq!(sticky_header_offset(0, 0, 10), 0);
+        assert_eq!(sticky_header_offset(1, 0, 10), 1);
+        assert_eq!(sticky_header_offset(8, 0, 10), 8);
+        assert_eq!(sticky_header_offset(50, 0, 10), 8);
+        // A card that starts below the viewport does not stick yet.
+        assert_eq!(sticky_header_offset(5, 10, 10), 0);
+        // A header-only card has no travel.
+        assert_eq!(sticky_header_offset(5, 0, 2), 0);
+    }
+
+    #[test]
+    fn sticky_header_pins_the_card_while_its_body_scrolls() {
+        let dialog = DiffDialog::new(vec![file("src/alpha.rs", DiffStatus::Modified, 20)]);
+        assert_eq!(dialog.pinned_file(0), None);
+        assert_eq!(dialog.pinned_file(3), Some(0));
+        let rows = dialog.render(134, 10, 3, &DiffKeys::default());
+        assert!(rows[0].text.contains("src/alpha.rs"), "{:?}", rows[0]);
+        assert_eq!(rows[0].surface, DiffSurface::Context);
+        // Once the header has reached its card bottom it scrolls away.
+        assert_eq!(dialog.pinned_file(22), None);
+    }
+
+    #[test]
+    fn reviewed_files_collapse_their_body_and_mark_the_card() {
+        let mut dialog = two_files();
+        let effect = dialog.toggle_reviewed(0);
+        assert!(effect.reviewed);
+        assert_eq!(dialog.review_count(), "1/2");
+        let rows = dialog.render(134, 40, 0, &DiffKeys::default());
+        let header = rows
+            .iter()
+            .position(|row| row.text.contains("src/alpha.rs"))
+            .expect("first header");
+        assert_eq!(rows[header].surface, DiffSurface::Reviewed);
+        assert!(rows[header].text.contains('✓'), "{}", rows[header].text);
+        // The header's bottom padding row is the reviewed half-block gap.
+        assert!(rows[header + 1].text.starts_with('▀'), "{:?}", rows[header + 1]);
+        // No patch body for the reviewed file: the next row is the separator.
+        assert_eq!(rows[header + 2].text.chars().next(), Some(CARD_GAP_TOP));
+        // The unreviewed file keeps its body.
+        assert!(rows.iter().any(|row| row.text.contains("+line 0")));
+        // Unreviewing restores the body and the counter.
+        dialog.toggle_reviewed(0);
+        assert_eq!(dialog.review_count(), "0/2");
+        let rows = dialog.render(134, 40, 0, &DiffKeys::default());
+        assert!(!rows[1].text.starts_with('▀'), "{:?}", rows[1]);
+    }
+
+    #[test]
+    fn file_menu_is_nineteen_by_one_and_clamped() {
+        let mut dialog = two_files();
+        assert!(dialog.open_menu(1, 5, 5));
+        assert_eq!(dialog.menu_label(), Some("Mark complete"));
+        let rect = dialog.menu().unwrap().rect(80, 24);
+        assert_eq!((rect.x, rect.y, rect.width, rect.height), (5, 6, 19, 1));
+        // Clamped inside the terminal.
+        assert_eq!(dialog.menu().unwrap().rect(20, 24).width, 19);
+        dialog.open_menu(1, 79, 30);
+        let rect = dialog.menu().unwrap().rect(80, 24);
+        assert_eq!((rect.x, rect.y), (61, 23));
+        dialog.open_menu(1, 0, 30);
+        assert_eq!(dialog.menu().unwrap().rect(80, 24).y, 23);
+        // Unknown indexes never open a menu.
+        assert!(!dialog.open_menu(9, 0, 0));
+        assert_eq!(FILE_MENU_Z_INDEX, 2600);
+    }
+
+    #[test]
+    fn running_the_file_menu_closes_it_before_toggling() {
+        let mut dialog = two_files();
+        dialog.open_menu(0, 0, 0);
+        let effect = dialog.run_menu().expect("menu ran");
+        assert_eq!(dialog.menu(), None);
+        assert!(effect.reviewed);
+        assert!(dialog.is_reviewed(0));
+        // Reopening shows the inverse label.
+        dialog.open_menu(0, 0, 0);
+        assert_eq!(dialog.menu_label(), Some("Mark incomplete"));
+        dialog.close_menu();
+        assert_eq!(dialog.menu(), None);
+        assert!(dialog.run_menu().is_none());
+    }
+
+    #[test]
+    fn single_patch_review_advances_or_exhausts() {
+        let mut dialog = two_files();
+        dialog.set_single_patch(true);
+        let effect = dialog.toggle_reviewed(0);
+        assert_eq!(effect.advanced, Some(1));
+        assert_eq!(dialog.selected(), Some(1));
+        assert_eq!(dialog.visible_files(), vec![1]);
+        // A single-file viewer exhausts instead of advancing.
+        let mut single = DiffDialog::new(vec![file("only.rs", DiffStatus::Modified, 2)]);
+        single.set_single_patch(true);
+        let effect = single.toggle_reviewed(0);
+        assert!(effect.exhausted);
+        assert!(single.mark_reviewed_blocked());
+        single.select(0);
+        assert!(!single.mark_reviewed_blocked());
+        // Menu-driven review of a different file does not navigate.
+        let mut other = two_files();
+        other.set_single_patch(true);
+        other.select(0);
+        other.open_menu(1, 0, 0);
+        let effect = other.run_menu().unwrap();
+        assert!(effect.reviewed);
+        assert_eq!(effect.advanced, None);
+        assert_eq!(other.selected(), Some(0));
+    }
+
+    #[test]
+    fn compact_footer_and_full_help_widget() {
+        let mut dialog = two_files();
+        dialog.set_docked(true);
+        let layout = dialog.layout(120);
+        let footer = dialog.footer_rows(&layout, &DiffKeys::default());
+        assert_eq!(footer.len(), 3);
+        assert!(footer[0].text.chars().all(|c| c == FOOTER_TRANSITION));
+        assert!(footer[1].text.contains("focus prompt"), "{:?}", footer[1]);
+        assert!(footer[1].text.contains("see all"), "{:?}", footer[1]);
+        assert_eq!(footer[2].text, "");
+        // A narrow full screen keeps the footer but not the prompt hint.
+        let mut narrow = two_files();
+        narrow.set_docked(false);
+        let layout = narrow.layout(80);
+        let footer = narrow.footer_rows(&layout, &DiffKeys::default());
+        assert_eq!(footer.len(), 1);
+        assert!(footer[0].text.contains(" close"), "{:?}", footer[0]);
+        assert!(narrow.help_widget(&layout).is_none());
+        // Full layout without the tree: no footer, help widget top-right.
+        let mut full = two_files();
+        full.set_tree_enabled(false);
+        let layout = full.layout(200);
+        assert!(!full.tree_enabled());
+        assert!(full.footer_rows(&layout, &DiffKeys::default()).is_empty());
+        let help = full.help_widget(&layout).expect("help widget");
+        assert_eq!((help.x, help.y, help.width, help.height), (layout.patch_width - 1, 0, 1, 1));
+        // With the tree shown the widget lives in the tree header instead.
+        assert!(two_files().help_widget(&two_files().layout(200)).is_none());
+    }
+
+    #[test]
+    fn no_patch_and_empty_states_render_stable_text() {
+        let dialog = DiffDialog::new(vec![DiffFile::new("bin.dat", 0, 0, DiffStatus::Modified)]);
+        let rows = dialog.render(134, 20, 0, &DiffKeys::default());
+        assert!(rows.iter().any(|row| row.text.contains(NO_PATCH)));
+        let empty = DiffDialog::new(Vec::new());
+        let rows = empty.render(134, 4, 0, &DiffKeys::default());
+        assert_eq!(rows.len(), 4);
+        assert!(rows[0].text.contains(NO_CHANGES));
+        // A zero-height frame paints nothing.
+        assert!(empty.render(134, 0, 0, &DiffKeys::default()).is_empty());
+    }
+
+    #[test]
+    fn review_counter_and_source_picker_match_upstream() {
+        let mut dialog = two_files();
+        assert_eq!(dialog.review_count(), "0/2");
+        dialog.toggle_reviewed(1);
+        assert_eq!(dialog.review_count(), "1/2");
+        assert_eq!(DiffSource::Branch.label(), "All");
+        assert_eq!(DiffSource::Turn.label(), "Last turn");
+        assert_eq!(DiffSource::Working.description(), "Local changes only");
+        assert!(DiffSource::Committed.needs_base());
+        assert!(!DiffSource::Working.needs_base());
+        assert_eq!(DiffSource::sources(false).len(), 3);
+        assert_eq!(DiffSource::sources(true).len(), 4);
+        assert_eq!(DiffStatus::Added.code(), 'A');
+        assert_eq!(DiffStatus::Deleted.code(), 'D');
+        assert_eq!(DiffStatus::Modified.code(), 'M');
+    }
+}
+
 #[cfg(test)]
 mod scoped_input_tests {
     use super::*;

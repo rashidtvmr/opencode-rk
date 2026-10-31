@@ -36,9 +36,49 @@
 //! This module is pure state. The caller owns the renderer, keymap and
 //! timers; [`ModalLayer::take_refocus`] models the 1 ms refocus timeout with
 //! an injected clock.
+//!
+//! Layer composition (DIALOG-19, DIALOG-20). Every transient surface in the
+//! pinned TUI is independently positioned with a z-index, and the ones that
+//! can overlap must paint and dismiss in that order rather than in the order
+//! the caller happens to call them:
+//!
+//! * dialog backdrop `zIndex={3000}` (`ui/dialog.tsx:66`);
+//! * diff file menu portal `zIndex = 2600`
+//!   (`feature-plugins/system/diff-viewer-file-menu.tsx:40,50`), i.e.
+//!   painted below an open dialog but above the diff cards;
+//! * startup hint `zIndex={5000}` (`component/startup-loading.tsx:56`);
+//! * reconnecting and migration `zIndex={10_000}`
+//!   (`component/reconnecting.tsx:11`, `component/migration-overlay.tsx:52`);
+//! * the toast surface declares no z-index (`ui/toast.tsx:47-63`), so it
+//!   paints below all of the above — the audit's D22 note that toasts are not
+//!   guaranteed topmost.
+//!
+//! OpenTUI paints equal z-index layers in insertion order
+//! (`native_overlay_stack` documents the same rule), so [`ChromeModel`]
+//! records first-activation order and sorts by `(z-index, order)`.
+//!
+//! Keyboard dismissal follows *activation* order, not paint order: the diff
+//! file menu pushes its own `menu` keymap layer
+//! (`diff-viewer-file-menu.tsx:23-30`) and the dialog stack pushes `modal`
+//! (`ui/dialog.tsx:320-324`). The most recently activated interactive layer
+//! therefore consumes Escape/Ctrl+C first. Non-interactive overlays
+//! (startup/reconnecting/migration) never take keys — they have no keymap
+//! layer upstream.
+//!
+//! All timing is driven by an injected [`Clock`]; this module never reads an
+//! ambient wall clock, so every timer decision is reproducible from the
+//! caller's event-loop timestamp alone.
+
+use crate::native_overlay_stack::{
+    ConnectionPhase, MigrationOverlay, MigrationStatus, Reconnecting, StartupLoading, Z_OVERLAY,
+    Z_STARTUP, Z_TOAST,
+};
+use crate::native_toast::{Toast, ToastOptions};
 
 /// Backdrop stack order (`ui/dialog.tsx:66`).
 pub const MODAL_Z_INDEX: u16 = 3000;
+/// Diff file-menu portal (`diff-viewer-file-menu.tsx:40,50`).
+pub const FILE_MENU_Z_INDEX: u16 = 2600;
 /// Shared side padding (`ui/dialog.tsx:26`).
 pub const DIALOG_INSET: u16 = 3;
 /// List rows reserve one gutter for the `▌` bar / `●` marker
@@ -161,6 +201,113 @@ pub struct DialogEntry {
     pub key: Option<u64>,
 }
 
+/// A source of monotonically non-decreasing milliseconds.
+///
+/// Every timer in this module takes its reading through this trait so the
+/// decision path is deterministic and testable. The production caller passes
+/// a clock backed by its own event-loop timestamp; tests pass
+/// [`ManualClock`]. No implementation here consults an ambient clock.
+pub trait Clock {
+    fn now_ms(&self) -> u64;
+}
+
+/// Deterministic clock for tests and injectable production clocks.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ManualClock {
+    now_ms: u64,
+}
+
+impl ManualClock {
+    /// Clock reading `start_ms`.
+    #[must_use]
+    pub const fn new(start_ms: u64) -> Self {
+        Self { now_ms: start_ms }
+    }
+
+    /// Move forward by `ms`, saturating.
+    pub fn advance(&mut self, ms: u64) {
+        self.now_ms = self.now_ms.saturating_add(ms);
+    }
+
+    /// Move to an absolute reading; a backwards target is ignored so the
+    /// clock can never run backwards and re-fire a passed deadline.
+    pub fn advance_to(&mut self, now_ms: u64) {
+        self.now_ms = self.now_ms.max(now_ms);
+    }
+}
+
+impl Clock for ManualClock {
+    fn now_ms(&self) -> u64 {
+        self.now_ms
+    }
+}
+
+impl Clock for u64 {
+    fn now_ms(&self) -> u64 {
+        *self
+    }
+}
+
+/// Every surface that can overlap the session in one frame.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum ChromeLayer {
+    /// Toast surface; no z-index upstream, so painted first.
+    Toast,
+    /// Diff viewer file menu (`diff-viewer-file-menu.tsx`).
+    DiffFileMenu,
+    /// Modal dialog backdrop (`ui/dialog.tsx:66`).
+    Dialog,
+    /// Startup loading hint (`startup-loading.tsx:56`).
+    Startup,
+    /// Reconnecting backdrop (`reconnecting.tsx:11`).
+    Reconnecting,
+    /// Migration progress badge (`migration-overlay.tsx:52`).
+    Migration,
+}
+
+impl ChromeLayer {
+    /// Paint z-index for this layer.
+    #[must_use]
+    pub const fn z_index(self) -> u16 {
+        match self {
+            ChromeLayer::Toast => Z_TOAST,
+            ChromeLayer::DiffFileMenu => FILE_MENU_Z_INDEX,
+            ChromeLayer::Dialog => MODAL_Z_INDEX,
+            ChromeLayer::Startup => Z_STARTUP,
+            ChromeLayer::Reconnecting | ChromeLayer::Migration => Z_OVERLAY,
+        }
+    }
+
+    /// Only layers that push a keymap layer upstream can consume keys.
+    #[must_use]
+    pub const fn interactive(self) -> bool {
+        matches!(self, ChromeLayer::Dialog | ChromeLayer::DiffFileMenu)
+    }
+
+    /// Stable machine-readable name.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            ChromeLayer::Toast => "toast",
+            ChromeLayer::DiffFileMenu => "diff_file_menu",
+            ChromeLayer::Dialog => "dialog",
+            ChromeLayer::Startup => "startup",
+            ChromeLayer::Reconnecting => "reconnecting",
+            ChromeLayer::Migration => "migration",
+        }
+    }
+}
+
+/// Which layer consumed a routed key.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ModalRoute {
+    /// Layer that handled the key, or `None` when no interactive layer was
+    /// active (the key belongs to the shell).
+    pub layer: Option<ChromeLayer>,
+    /// What the layer did with it.
+    pub key: ModalKey,
+}
+
 /// Dialog stack and focus guard (`ui/dialog.tsx:306-439`).
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ModalLayer {
@@ -175,6 +322,10 @@ pub struct ModalLayer {
     editor_clears: u32,
     refocus_due_ms: Option<u64>,
     refocus_requested: u32,
+    /// Activation order of the interactive chrome layers. Later entries are
+    /// dismissed first, whatever their z-index (`diff-viewer-file-menu.tsx`
+    /// pushes `menu` on top of the dialog stack's `modal`).
+    activated: Vec<ChromeLayer>,
 }
 
 impl ModalLayer {
@@ -270,11 +421,85 @@ impl ModalLayer {
         self.size = size;
         self.centered = centered;
         self.stack.push(DialogEntry { id, key });
+        self.activate(ChromeLayer::Dialog);
         closed
     }
 
-    /// `clear()` (`ui/dialog.tsx:389-399`): close every entry, reset the
-    /// presentation flags and request a refocus.
+    /// Record that `layer` became interactive. Re-activating an already open
+    /// layer moves it to the top of the dismissal order, matching a keymap
+    /// layer that is pushed again on top.
+    pub fn activate(&mut self, layer: ChromeLayer) {
+        self.activated.retain(|active| *active != layer);
+        self.activated.push(layer);
+    }
+
+    /// Record that `layer` stopped being interactive.
+    pub fn deactivate(&mut self, layer: ChromeLayer) {
+        self.activated.retain(|active| *active != layer);
+    }
+
+    /// Interactive layers in activation order (oldest first).
+    #[must_use]
+    pub fn activations(&self) -> &[ChromeLayer] {
+        &self.activated
+    }
+
+    /// Most recently activated interactive layer — the one that owns keys.
+    /// Non-interactive overlays are skipped: they declare no keymap layer
+    /// upstream (`startup-loading.tsx`, `reconnecting.tsx`,
+    /// `migration-overlay.tsx`).
+    #[must_use]
+    pub fn top_interactive(&self) -> Option<ChromeLayer> {
+        self.activated.iter().rev().copied().find(|layer| layer.interactive())
+    }
+
+    /// Escape routed through the activation order. The diff file menu is
+    /// dismissed first when it was opened last
+    /// (`diff-viewer-file-menu.tsx:27,51-55`); otherwise the dialog's own
+    /// selection-then-close rules apply (`ui/dialog.tsx:349-363`).
+    pub fn escape_route(&mut self, has_selection: bool) -> ModalRoute {
+        match self.top_interactive() {
+            Some(ChromeLayer::DiffFileMenu) => {
+                self.deactivate(ChromeLayer::DiffFileMenu);
+                ModalRoute {
+                    layer: Some(ChromeLayer::DiffFileMenu),
+                    key: ModalKey::Closed,
+                }
+            }
+            Some(ChromeLayer::Dialog) => ModalRoute {
+                layer: Some(ChromeLayer::Dialog),
+                key: self.escape(has_selection),
+            },
+            _ => ModalRoute {
+                layer: None,
+                key: ModalKey::Ignored,
+            },
+        }
+    }
+
+    /// Ctrl+C routed through the activation order, with the same precedence:
+    /// the file menu closes before the dialog reads the key.
+    pub fn ctrl_c_route(&mut self, has_selection: bool, editor_has_text: bool) -> ModalRoute {
+        match self.top_interactive() {
+            Some(ChromeLayer::DiffFileMenu) => {
+                self.deactivate(ChromeLayer::DiffFileMenu);
+                ModalRoute {
+                    layer: Some(ChromeLayer::DiffFileMenu),
+                    key: ModalKey::Closed,
+                }
+            }
+            Some(ChromeLayer::Dialog) => ModalRoute {
+                layer: Some(ChromeLayer::Dialog),
+                key: self.ctrl_c(has_selection, editor_has_text),
+            },
+            _ => ModalRoute {
+                layer: None,
+                key: ModalKey::Ignored,
+            },
+        }
+    }
+
+    /// Close every entry, reset the presentation flags and request a refocus.
     pub fn clear(&mut self) -> u32 {
         let closed = self.close_all();
         self.size = DialogSize::Medium;
@@ -407,10 +632,17 @@ impl ModalLayer {
         Some(focus)
     }
 
+    /// [`ModalLayer::take_refocus`] reading the deadline from an injected
+    /// clock, so the caller never has to thread a raw timestamp through.
+    pub fn take_refocus_at(&mut self, clock: &impl Clock) -> Option<ModalFocus> {
+        self.take_refocus(clock.now_ms())
+    }
+
     fn pop_top(&mut self) {
         if self.stack.pop().is_some() {
             self.closed = self.closed.saturating_add(1);
             if self.stack.is_empty() {
+                self.deactivate(ChromeLayer::Dialog);
                 self.request_refocus();
             }
         }
@@ -420,6 +652,9 @@ impl ModalLayer {
         let closed = self.stack.len() as u32;
         self.stack.clear();
         self.closed = self.closed.saturating_add(closed);
+        if closed > 0 {
+            self.deactivate(ChromeLayer::Dialog);
+        }
         closed
     }
 
@@ -467,6 +702,312 @@ pub fn dialog_panel_y(centered: bool, terminal_height: u16, panel_height: u16) -
 #[must_use]
 pub const fn dialog_footer_narrow(terminal_width: u16) -> bool {
     terminal_width < DIALOG_FOOTER_NARROW_WIDTH
+}
+
+/// One frame's decided chrome: paint order, who owns keys, and the dim
+/// backdrop that actually applies.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ChromeFrame {
+    /// Active layers, bottom first: sorted by `(z-index, mount order)`.
+    pub paint: Vec<ChromeLayer>,
+    /// Interactive layer that owns Escape/Ctrl+C, if any.
+    pub input_owner: Option<ChromeLayer>,
+    /// Whether a toast is on screen.
+    pub toast_visible: bool,
+    /// Queued toasts behind the visible one (`+N more`).
+    pub pending: usize,
+    /// Topmost active full-screen dim, with its alpha.
+    pub backdrop: Option<(ChromeLayer, u8)>,
+}
+
+impl ChromeFrame {
+    /// True when the session shell underneath must not receive keys.
+    #[must_use]
+    pub fn shell_keys_blocked(&self) -> bool {
+        self.input_owner.is_some()
+    }
+
+    /// Whether `layer` is painted this frame.
+    #[must_use]
+    pub fn paints(&self, layer: ChromeLayer) -> bool {
+        self.paint.contains(&layer)
+    }
+}
+
+/// Composition root for every overlapping chrome layer: the dialog stack,
+/// the diff file menu, the startup hint, the reconnecting backdrop, the
+/// migration badge and the toast surface.
+///
+/// Timers advance only through [`ChromeModel::tick`], whose only time source
+/// is the injected [`Clock`]. Status changes arrive as explicit events
+/// (`set_plugins_ready`, `set_connection`, `apply_migration`) exactly like
+/// the upstream effects, which reschedule their timeouts on a change rather
+/// than on every frame.
+pub struct ChromeModel {
+    /// Dialog stack and activation order.
+    pub modal: ModalLayer,
+    startup: StartupLoading,
+    reconnecting: Reconnecting,
+    migration: MigrationOverlay,
+    toast: Toast,
+    ready: bool,
+    phase: ConnectionPhase,
+    last_now: u64,
+    /// Mount order of every layer that has ever been active; OpenTUI paints
+    /// equal z-index layers in insertion order.
+    order: Vec<ChromeLayer>,
+    file_menu: bool,
+}
+
+impl Default for ChromeModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ChromeModel {
+    /// All timers at logical time zero, nothing visible.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            modal: ModalLayer::new(),
+            startup: StartupLoading::new(),
+            reconnecting: Reconnecting::new(),
+            migration: MigrationOverlay::new(),
+            toast: Toast::new(),
+            ready: false,
+            phase: ConnectionPhase::Connecting,
+            last_now: 0,
+            order: Vec::new(),
+            file_menu: false,
+        }
+    }
+
+    /// Toast controller (read-only view).
+    #[must_use]
+    pub fn toast(&self) -> &Toast {
+        &self.toast
+    }
+
+    /// Startup hint controller (read-only view).
+    #[must_use]
+    pub fn startup(&self) -> &StartupLoading {
+        &self.startup
+    }
+
+    /// Reconnecting controller (read-only view).
+    #[must_use]
+    pub fn reconnecting(&self) -> &Reconnecting {
+        &self.reconnecting
+    }
+
+    /// Migration controller (read-only view).
+    #[must_use]
+    pub fn migration(&self) -> &MigrationOverlay {
+        &self.migration
+    }
+
+    /// Mount the transient layers at `now`: the startup hint starts its
+    /// 500 ms grace and the migration overlay schedules its first poll one
+    /// second later (`startup-loading.tsx:42-46`,
+    /// `migration-overlay.tsx:18-27`).
+    pub fn begin(&mut self, now: u64) {
+        self.last_now = self.last_now.max(now);
+        self.startup.update(now, self.ready);
+        self.migration.begin(now);
+    }
+
+    /// `plugins.ready` changed. Only transitions reschedule the hint, so a
+    /// steady `false` never restarts the 500 ms grace.
+    pub fn set_plugins_ready(&mut self, now: u64, ready: bool) {
+        if self.ready == ready {
+            return;
+        }
+        self.ready = ready;
+        self.startup.update(now, ready);
+    }
+
+    /// Connection status changed (`app.tsx:1378-1402`): `connected` hides the
+    /// overlay immediately, otherwise the 5000 ms initial or 1000 ms retry
+    /// grace starts.
+    pub fn set_connection(&mut self, now: u64, phase: ConnectionPhase) {
+        self.phase = phase;
+        self.reconnecting.update(now, phase);
+    }
+
+    /// Current connection phase last reported to the model.
+    #[must_use]
+    pub const fn connection_phase(&self) -> ConnectionPhase {
+        self.phase
+    }
+
+    /// Whether a migration status query is due; the caller performs the IO
+    /// and reports the answer through [`ChromeModel::apply_migration`].
+    pub fn migration_poll_due(&mut self, now: u64) -> bool {
+        self.migration.poll_due(now)
+    }
+
+    /// Apply a migration status. Returns true when this failed run produced
+    /// the single 10-second error toast (`migration-overlay.tsx:28-37`).
+    pub fn apply_migration(&mut self, status: MigrationStatus) -> bool {
+        self.migration.apply(status);
+        match self.migration.take_error_toast() {
+            Some(toast) => {
+                self.toast.show(toast);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Open the diff file menu as an interactive layer.
+    pub fn open_file_menu(&mut self) {
+        self.file_menu = true;
+        self.modal.activate(ChromeLayer::DiffFileMenu);
+        self.note_mount(ChromeLayer::DiffFileMenu);
+    }
+
+    /// Close the diff file menu (`Escape`, `Ctrl+C`, outside press or a run).
+    pub fn close_file_menu(&mut self) {
+        self.file_menu = false;
+        self.modal.deactivate(ChromeLayer::DiffFileMenu);
+    }
+
+    /// Whether the diff file menu is open.
+    #[must_use]
+    pub const fn file_menu_open(&self) -> bool {
+        self.file_menu
+    }
+
+    /// Escape routed across the whole chrome stack: the file menu first when
+    /// it was opened last, then the dialog's selection/close rules
+    /// (`diff-viewer-file-menu.tsx:27,51-55`, `ui/dialog.tsx:349-371`).
+    pub fn escape_route(&mut self, has_selection: bool) -> ModalRoute {
+        if self.file_menu && self.modal.top_interactive() == Some(ChromeLayer::DiffFileMenu) {
+            self.close_file_menu();
+            return ModalRoute {
+                layer: Some(ChromeLayer::DiffFileMenu),
+                key: ModalKey::Closed,
+            };
+        }
+        self.modal.escape_route(has_selection)
+    }
+
+    /// Ctrl+C routed across the whole chrome stack with the same precedence.
+    pub fn ctrl_c_route(&mut self, has_selection: bool, editor_has_text: bool) -> ModalRoute {
+        if self.file_menu && self.modal.top_interactive() == Some(ChromeLayer::DiffFileMenu) {
+            self.close_file_menu();
+            return ModalRoute {
+                layer: Some(ChromeLayer::DiffFileMenu),
+                key: ModalKey::Closed,
+            };
+        }
+        self.modal.ctrl_c_route(has_selection, editor_has_text)
+    }
+
+    /// Show or queue a toast (`ui/toast.tsx:159-167`).
+    pub fn show_toast(&mut self, options: ToastOptions) {
+        self.toast.show(options);
+    }
+
+    /// Hover in pauses the remaining lifetime, hover out resumes it
+    /// (`ui/toast.tsx:127-130,171-181`).
+    pub fn hover_toast(&mut self, hovered: bool) {
+        if hovered {
+            self.toast.pause();
+        } else {
+            self.toast.resume();
+        }
+    }
+
+    /// Activate the toast surface. A release that ends a text selection must
+    /// not activate it (`ui/toast.tsx:59-62`), so `has_selection` returns
+    /// `None` and changes nothing. Otherwise the toast is dismissed *before*
+    /// its action runs (`ui/toast.tsx:183-187`).
+    pub fn activate_toast(&mut self, has_selection: bool) -> Option<String> {
+        if has_selection {
+            return None;
+        }
+        self.toast.activate()
+    }
+
+    /// Dismiss the visible toast without running its action.
+    pub fn dismiss_toast(&mut self) {
+        self.toast.dismiss();
+    }
+
+    /// Advance every timer to the clock reading and return the frame.
+    pub fn tick(&mut self, clock: &impl Clock) -> ChromeFrame {
+        let now = clock.now_ms();
+        let delta = now.saturating_sub(self.last_now);
+        self.last_now = self.last_now.max(now);
+        self.startup.tick(now);
+        self.reconnecting.tick(now);
+        self.toast.advance(delta);
+        for layer in self.active_layers() {
+            self.note_mount(layer);
+        }
+        self.frame()
+    }
+
+    /// Current frame without advancing time.
+    #[must_use]
+    pub fn frame(&self) -> ChromeFrame {
+        let active = self.active_layers();
+        let mut paint: Vec<ChromeLayer> = active
+            .iter()
+            .copied()
+            .filter(|layer| *layer != ChromeLayer::DiffFileMenu || self.file_menu)
+            .collect();
+        paint.sort_by_key(|layer| {
+            (
+                layer.z_index(),
+                self.order.iter().position(|mounted| mounted == layer).unwrap_or(usize::MAX),
+            )
+        });
+        let backdrop_layer = paint
+            .iter()
+            .rev()
+            .copied()
+            .find(|layer| matches!(layer, ChromeLayer::Dialog | ChromeLayer::Reconnecting));
+        let backdrop = backdrop_layer.map(|layer| (layer, MODAL_BACKDROP_ALPHA));
+        ChromeFrame {
+            input_owner: self.modal.top_interactive(),
+            toast_visible: self.toast.current().is_some(),
+            pending: self.toast.pending(),
+            backdrop,
+            paint,
+        }
+    }
+
+    fn active_layers(&self) -> Vec<ChromeLayer> {
+        let mut active = Vec::new();
+        if self.toast.current().is_some() {
+            active.push(ChromeLayer::Toast);
+        }
+        if self.file_menu {
+            active.push(ChromeLayer::DiffFileMenu);
+        }
+        if self.modal.is_open() {
+            active.push(ChromeLayer::Dialog);
+        }
+        if self.startup.visible() {
+            active.push(ChromeLayer::Startup);
+        }
+        if self.reconnecting.visible() {
+            active.push(ChromeLayer::Reconnecting);
+        }
+        if self.migration.visible() {
+            active.push(ChromeLayer::Migration);
+        }
+        active
+    }
+
+    fn note_mount(&mut self, layer: ChromeLayer) {
+        if !self.order.contains(&layer) {
+            self.order.push(layer);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -680,5 +1221,238 @@ mod tests {
     fn footer_stacks_below_60_cells() {
         assert!(dialog_footer_narrow(59));
         assert!(!dialog_footer_narrow(60));
+    }
+
+    // ---------- deterministic clock / layer composition (DIALOG-19) ----------
+
+    const SOURCE: &str = include_str!("native_modal_layer.rs");
+
+    #[test]
+    fn decision_path_never_reads_an_ambient_clock() {
+        // Built from fragments so this assertion does not match itself.
+        for token in [
+            ["System", "Time"].concat(),
+            ["In", "stant::now"].concat(),
+            ["std", "::time"].concat(),
+        ] {
+            assert!(
+                !SOURCE.contains(&token),
+                "decision path must use the injected Clock, found {token}"
+            );
+        }
+    }
+
+    #[test]
+    fn manual_clock_never_runs_backwards() {
+        let mut clock = ManualClock::new(100);
+        clock.advance(50);
+        assert_eq!(clock.now_ms(), 150);
+        clock.advance_to(120);
+        assert_eq!(clock.now_ms(), 150);
+        clock.advance_to(400);
+        assert_eq!(clock.now_ms(), 400);
+        assert_eq!(Clock::now_ms(&7u64), 7);
+    }
+
+    #[test]
+    fn startup_hint_waits_500ms_and_holds_three_seconds() {
+        let mut chrome = ChromeModel::new();
+        let mut clock = ManualClock::new(0);
+        chrome.begin(0);
+        assert!(!chrome.tick(&clock).paints(ChromeLayer::Startup));
+        clock.advance_to(499);
+        assert!(!chrome.tick(&clock).paints(ChromeLayer::Startup));
+        clock.advance_to(500);
+        assert!(chrome.tick(&clock).paints(ChromeLayer::Startup));
+        // Ready at 1000: the hint still holds until 500 + 3000.
+        chrome.set_plugins_ready(1000, true);
+        clock.advance_to(3_499);
+        assert!(chrome.tick(&clock).paints(ChromeLayer::Startup));
+        clock.advance_to(3_500);
+        assert!(!chrome.tick(&clock).paints(ChromeLayer::Startup));
+    }
+
+    #[test]
+    fn startup_ready_before_the_grace_cancels_the_hint() {
+        let mut chrome = ChromeModel::new();
+        let mut clock = ManualClock::new(0);
+        chrome.begin(0);
+        clock.advance_to(300);
+        chrome.set_plugins_ready(300, true);
+        clock.advance_to(5_000);
+        assert!(!chrome.tick(&clock).paints(ChromeLayer::Startup));
+    }
+
+    #[test]
+    fn reconnecting_uses_5s_then_1s_graces_and_hides_immediately() {
+        let mut chrome = ChromeModel::new();
+        let mut clock = ManualClock::new(0);
+        chrome.set_connection(0, ConnectionPhase::Connecting);
+        clock.advance_to(4_999);
+        assert!(!chrome.tick(&clock).paints(ChromeLayer::Reconnecting));
+        clock.advance_to(5_000);
+        assert!(chrome.tick(&clock).paints(ChromeLayer::Reconnecting));
+        chrome.set_connection(5_000, ConnectionPhase::Connected);
+        assert!(!chrome.tick(&clock).paints(ChromeLayer::Reconnecting));
+        chrome.set_connection(5_000, ConnectionPhase::Reconnecting);
+        clock.advance_to(5_999);
+        assert!(!chrome.tick(&clock).paints(ChromeLayer::Reconnecting));
+        clock.advance_to(6_000);
+        assert!(chrome.tick(&clock).paints(ChromeLayer::Reconnecting));
+    }
+
+    #[test]
+    fn migration_polls_at_one_second_then_every_second() {
+        let mut chrome = ChromeModel::new();
+        chrome.begin(0);
+        assert!(!chrome.migration_poll_due(999));
+        assert!(chrome.migration_poll_due(1_000));
+        assert!(!chrome.migration_poll_due(1_999));
+        assert!(chrome.migration_poll_due(2_000));
+    }
+
+    #[test]
+    fn migration_failure_emits_one_ten_second_error_toast() {
+        let mut chrome = ChromeModel::new();
+        let mut clock = ManualClock::new(0);
+        chrome.begin(0);
+        assert!(chrome.apply_migration(MigrationStatus::Error("boom".to_owned())));
+        assert!(!chrome.apply_migration(MigrationStatus::Error("boom".to_owned())));
+        let toast = chrome.toast().current().expect("error toast");
+        assert_eq!(toast.title.as_deref(), Some("Data migration failed"));
+        assert_eq!(toast.duration, 10_000);
+        clock.advance_to(9_999);
+        assert!(chrome.tick(&clock).toast_visible);
+        clock.advance_to(10_000);
+        assert!(!chrome.tick(&clock).toast_visible);
+    }
+
+    #[test]
+    fn toast_replaces_when_idle_and_queues_while_paused() {
+        let mut chrome = ChromeModel::new();
+        let mut clock = ManualClock::new(0);
+        chrome.show_toast(ToastOptions::new(
+            crate::native_toast::ToastVariant::Info,
+            "first",
+        ));
+        chrome.tick(&clock);
+        chrome.hover_toast(true);
+        chrome.show_toast(ToastOptions::new(
+            crate::native_toast::ToastVariant::Info,
+            "second",
+        ));
+        let frame = chrome.tick(&clock);
+        assert_eq!(frame.pending, 1);
+        assert_eq!(chrome.toast().current().map(|t| t.message.as_str()), Some("first"));
+        // The paused toast never expires.
+        clock.advance_to(60_000);
+        chrome.tick(&clock);
+        assert_eq!(chrome.toast().current().map(|t| t.message.as_str()), Some("first"));
+        // Resume and dismiss: the queue head is promoted.
+        chrome.hover_toast(false);
+        chrome.dismiss_toast();
+        assert_eq!(chrome.toast().current().map(|t| t.message.as_str()), Some("second"));
+    }
+
+    #[test]
+    fn toast_activation_dismisses_before_running_the_action() {
+        let mut chrome = ChromeModel::new();
+        chrome.show_toast(
+            ToastOptions::new(crate::native_toast::ToastVariant::Error, "failed")
+                .with_action("retry", || {}),
+        );
+        // A release that ends a selection must not activate.
+        assert_eq!(chrome.activate_toast(true), None);
+        assert!(chrome.toast().current().is_some());
+        assert_eq!(chrome.activate_toast(false).as_deref(), Some("retry"));
+        assert!(chrome.toast().current().is_none());
+    }
+
+    #[test]
+    fn escape_and_ctrl_c_dismiss_the_menu_before_the_dialog() {
+        let mut chrome = ChromeModel::new();
+        open(&mut chrome.modal, 1);
+        chrome.open_file_menu();
+        assert_eq!(chrome.modal.top_interactive(), Some(ChromeLayer::DiffFileMenu));
+        let route = chrome.escape_route(false);
+        assert_eq!(route.layer, Some(ChromeLayer::DiffFileMenu));
+        assert!(!chrome.file_menu_open());
+        assert!(chrome.modal.is_open());
+        let route = chrome.escape_route(false);
+        assert_eq!(route.layer, Some(ChromeLayer::Dialog));
+        assert_eq!(route.key, ModalKey::Closed);
+        assert!(!chrome.modal.is_open());
+
+        open(&mut chrome.modal, 2);
+        chrome.open_file_menu();
+        let route = chrome.ctrl_c_route(false, false);
+        assert_eq!(route.layer, Some(ChromeLayer::DiffFileMenu));
+        assert!(!chrome.file_menu_open());
+        assert!(chrome.modal.is_open());
+    }
+
+    #[test]
+    fn overlapping_layers_paint_by_z_index_and_dialog_owns_keys() {
+        let mut chrome = ChromeModel::new();
+        let mut clock = ManualClock::new(0);
+        chrome.begin(0);
+        chrome.set_connection(0, ConnectionPhase::Connecting);
+        chrome.show_toast(ToastOptions::new(
+            crate::native_toast::ToastVariant::Info,
+            "hello",
+        )
+        .with_duration(60_000));
+        open(&mut chrome.modal, 1);
+        clock.advance_to(5_000);
+        let frame = chrome.tick(&clock);
+        // Toast (no z) < dialog 3000 < startup 5000 < overlay 10000.
+        assert_eq!(
+            frame.paint,
+            vec![
+                ChromeLayer::Toast,
+                ChromeLayer::Dialog,
+                ChromeLayer::Startup,
+                ChromeLayer::Reconnecting,
+            ]
+        );
+        // The reconnect backdrop is the topmost full-screen dim, but it is not
+        // interactive: the dialog keeps the keys.
+        assert_eq!(frame.backdrop, Some((ChromeLayer::Reconnecting, 150)));
+        assert_eq!(frame.input_owner, Some(ChromeLayer::Dialog));
+        assert!(frame.shell_keys_blocked());
+        assert_eq!(ChromeLayer::DiffFileMenu.z_index(), 2600);
+        assert_eq!(ChromeLayer::Dialog.z_index(), 3000);
+    }
+
+    #[test]
+    fn migration_and_reconnect_share_z_but_keep_mount_order() {
+        let mut chrome = ChromeModel::new();
+        let mut clock = ManualClock::new(0);
+        chrome.begin(0);
+        chrome.set_connection(0, ConnectionPhase::Connecting);
+        chrome.apply_migration(MigrationStatus::Running(Some(
+            crate::native_overlay_stack::MigrationProgress {
+                label: "migrating".to_owned(),
+                numerator: Some(1),
+                denominator: Some(2),
+            },
+        )));
+        clock.advance_to(5_000);
+        let frame = chrome.tick(&clock);
+        let reconnect = frame.paint.iter().position(|l| *l == ChromeLayer::Reconnecting);
+        let migration = frame.paint.iter().position(|l| *l == ChromeLayer::Migration);
+        assert!(reconnect.unwrap() < migration.unwrap(), "{:?}", frame.paint);
+        assert_eq!(ChromeLayer::Reconnecting.z_index(), ChromeLayer::Migration.z_index());
+    }
+
+    #[test]
+    fn refocus_reads_the_injected_clock() {
+        let mut layer = ModalLayer::new();
+        open(&mut layer, 1);
+        assert_eq!(layer.escape(false), ModalKey::Closed);
+        let mut clock = ManualClock::new(0);
+        assert!(layer.take_refocus_at(&clock).is_none());
+        clock.advance(1);
+        assert_eq!(layer.take_refocus_at(&clock), Some(focus(7)));
     }
 }
