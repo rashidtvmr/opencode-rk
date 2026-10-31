@@ -10,13 +10,22 @@
 //!   `agent`, `model`, `started_ms`, `streamed_ms` or `completed_ms`.
 //! - `crates/server/src/lib.rs:1975-1989`: `provider_id`/`model_id` exist only
 //!   in turn-creation scope; they are not attached to the frame, so the LIVE
-//!   frame still carries no agent/model/timing. They ARE persisted for the
-//!   message (`message_execution`) and replayed on `/messages` and `/history`
-//!   as the additive `execution` object, which is what
+//!   frame still carries no agent/model. They ARE persisted for the message
+//!   (`message_execution`) and replayed on `/messages` and `/history` as the
+//!   additive `execution` object, which is what
 //!   [`AssistantFacts::from_history_record`] and
 //!   [`AssistantFacts::model_label`] read. Nothing is inferred from the
-//!   selected UI model or `MessageRecord.created_at`; timing and agent remain
-//!   absent because no producer records them.
+//!   selected UI model; the agent remains absent because no producer records
+//!   it.
+//! - Turn duration is the one timing fact the wire does carry authoritatively:
+//!   every `MessageRecord` (the live `user_message`/`assistant_message` frames
+//!   and stored history rows) carries `created_at`, and the server stamps the
+//!   assistant record when the turn completes. [`turn_duration_ms`] derives
+//!   the upstream `turnDuration` value
+//!   (`packages/tui/src/routes/session/rows.ts:430-438`:
+//!   `max(0, completed - input.created)`) from the assistant `created_at` and
+//!   the nearest preceding user/system record's `created_at`. Zero/unknown
+//!   deltas stay absent, matching upstream's falsy-duration hide.
 //! - `crates/server/src/agent_loop.rs:35-57`: `TurnStop` (`stop_reason`) has NO
 //!   cancellation variant — `stop_reason` never encodes an interruption.
 //!
@@ -49,14 +58,14 @@ pub const CANCELLED_CODE: &str = "cancelled";
 
 /// Real execution facts attachable to one assistant [`ChatMessage`]
 /// (`crate::native_view_chat::ChatMessage`). Every field is either populated
-/// from authoritative execution metadata (the live turn stream, or the stored
-/// `execution` object a completed turn wrote) or left absent (`None`/`false`) —
-/// never backfilled from `MessageRecord.created_at`, wall time or the
+/// from authoritative execution metadata (the live turn stream, the stored
+/// `execution` object a completed turn wrote, or the stored turn timestamps)
+/// or left absent (`None`/`false`) — never backfilled from wall time or the
 /// currently selected UI model.
 ///
-/// `agent` and timing are NOT modelled here: no producer records them, so they
-/// stay explicit gaps until one does; when it does, they extend this struct
-/// from that authoritative metadata only.
+/// `agent` is NOT modelled here: no producer records it, so it stays an
+/// explicit gap until one does; when it does, it extends this struct from that
+/// authoritative metadata only.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AssistantFacts {
     /// Backend-reported stop reason (`completed`, `incomplete:...`,
@@ -72,6 +81,13 @@ pub struct AssistantFacts {
     /// `usage.reasoning_tokens` from the frame. Same provenance and rendering
     /// policy as `output_tokens`.
     pub reasoning_tokens: Option<u64>,
+    /// Whole-turn duration, from authoritative stored timestamps: the
+    /// assistant record's completion `created_at` minus the nearest preceding
+    /// user/system record's `created_at` ([`turn_duration_ms`]; upstream
+    /// `turnDuration`, `routes/session/rows.ts:430-438`). Present only when
+    /// both stamps exist and the delta is positive — upstream hides a zero
+    /// duration.
+    pub duration_ms: Option<u64>,
     /// True only when the TYPED error transport code was [`CANCELLED_CODE`] —
     /// the native equivalent of upstream's `"Step interrupted"` suffix
     /// condition. Never derived from message text.
@@ -84,8 +100,9 @@ pub struct AssistantFacts {
 
 impl AssistantFacts {
     /// Facts from one `assistant_message` NDJSON frame: real `usage` tokens and
-    /// `stop_reason` only. `agent`/`model`/timing are absent on the wire and
-    /// remain `None`.
+    /// `stop_reason` only. `agent`/`model` are absent on the wire and remain
+    /// `None`; the turn duration is filled by the stream reader, which sees
+    /// the matching `user_message` frame ([`turn_duration_ms`]).
     #[must_use]
     pub fn from_message_frame(frame: &Value) -> Self {
         Self {
@@ -101,6 +118,7 @@ impl AssistantFacts {
                 .get("usage")
                 .and_then(|usage| usage.get("reasoning_tokens"))
                 .and_then(Value::as_u64),
+            duration_ms: None,
             interrupted: false,
             error_message: None,
         }
@@ -118,6 +136,7 @@ impl AssistantFacts {
             stop_reason: None,
             output_tokens: None,
             reasoning_tokens: None,
+            duration_ms: None,
             interrupted,
             error_message: Some(message),
         }
@@ -144,6 +163,7 @@ impl AssistantFacts {
             reasoning_tokens: usage
                 .and_then(|usage| usage.get("reasoning_tokens"))
                 .and_then(Value::as_u64),
+            duration_ms: None,
             interrupted: false,
             error_message: None,
         };
@@ -172,6 +192,27 @@ impl AssistantFacts {
     }
 }
 
+/// Epoch milliseconds of the RFC3339 stamp at `pointer` in `record`, parsed
+/// through the canonical [`opencode_rk_contracts::Timestamp`]. Missing or
+/// unparseable stamps stay absent rather than becoming a fabricated zero.
+#[must_use]
+pub fn created_at_ms(record: &Value, pointer: &str) -> Option<i64> {
+    let raw = record.pointer(pointer)?;
+    let stamp: opencode_rk_contracts::Timestamp = serde_json::from_value(raw.clone()).ok()?;
+    Some(stamp.as_datetime().timestamp_millis())
+}
+
+/// Whole-turn duration in milliseconds: upstream `turnDuration`
+/// (`packages/tui/src/routes/session/rows.ts:430-438`) is
+/// `Math.max(0, completed - start)` and its footer `<Show when={duration()}>`
+/// hides a falsy zero. `None` when completion precedes the start (or is equal),
+/// so an unknown or degenerate span renders nothing.
+#[must_use]
+pub fn turn_duration_ms(started_ms: i64, completed_ms: i64) -> Option<u64> {
+    let delta = completed_ms.checked_sub(started_ms)?;
+    (delta > 0).then_some(delta as u64)
+}
+
 // ---------------------------------------------------------------------------
 // Completion footer (MSG-008)
 // ---------------------------------------------------------------------------
@@ -193,8 +234,9 @@ impl AssistantFacts {
 // Formatting mirrors `packages/tui/src/util/locale.ts:3-5` (titlecase) and
 // `:29-49` (duration): ms below 1s, one-decimal seconds below 1 min,
 // `m s`, `h m`, `d h` above. Upstream reads model/duration/tps from message
-// metadata this wire does not carry; they are only rendered when supplied by
-// authoritative live metadata, never inferred (see module docs).
+// metadata; the duration is the one such fact this wire carries authoritatively
+// through stored `created_at` stamps (see module docs), while model and tps are
+// only rendered when supplied by authoritative live metadata, never inferred.
 
 /// Width at and above which the model slot is rendered (`index.tsx:2055`).
 pub const FOOTER_MODEL_MIN_WIDTH: u16 = 28;
@@ -297,11 +339,13 @@ pub struct FooterRow {
 }
 
 impl AssistantFooter {
-    /// Footer facts from the execution [`AssistantFacts`]. Agent/model/timing
-    /// stay absent unless the caller adds authoritative live metadata.
+    /// Footer facts from the execution [`AssistantFacts`]. The turn duration
+    /// is the one timing fact the facts carry; agent/model stay absent unless
+    /// the caller adds authoritative live metadata.
     #[must_use]
     pub fn from_facts(facts: &AssistantFacts) -> Self {
         Self {
+            duration_ms: facts.duration_ms,
             interrupted: facts.interrupted,
             error_message: facts.error_message.clone(),
             ..Self::default()
@@ -428,6 +472,28 @@ mod native_assistant_facts_tests {
     fn missing_stop_reason_stays_absent() {
         let facts = AssistantFacts::from_message_frame(&json!({"type": "assistant_message"}));
         assert!(facts.stop_reason.is_none());
+    }
+
+    #[test]
+    fn stored_turn_duration_is_completion_minus_input() {
+        // Upstream `turnDuration` (`rows.ts:430-438`): positive deltas only;
+        // zero/negative spans are hidden by the footer's falsy `<Show>`.
+        assert_eq!(turn_duration_ms(1_000, 2_500), Some(1_500));
+        assert_eq!(turn_duration_ms(1_000, 1_000), None);
+        assert_eq!(turn_duration_ms(2_000, 1_000), None);
+        assert_eq!(turn_duration_ms(i64::MIN, i64::MAX), None, "overflowing span is absent");
+    }
+
+    #[test]
+    fn created_at_ms_reads_top_level_and_frame_records() {
+        let record = json!({"created_at": "2026-10-19T00:00:01.250Z"});
+        assert_eq!(created_at_ms(&record, "/created_at"), Some(1_792_368_001_250));
+        let frame = json!({"message": {"created_at": "2026-10-19T00:00:01.250Z"}});
+        assert_eq!(created_at_ms(&frame, "/message/created_at"), Some(1_792_368_001_250));
+        // Missing, null and malformed stamps never become a fabricated zero.
+        assert_eq!(created_at_ms(&json!({}), "/created_at"), None);
+        assert_eq!(created_at_ms(&json!({"created_at": null}), "/created_at"), None);
+        assert_eq!(created_at_ms(&json!({"created_at": "not a stamp"}), "/created_at"), None);
     }
 
     #[test]

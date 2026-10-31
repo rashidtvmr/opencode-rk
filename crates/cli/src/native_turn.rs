@@ -7,7 +7,7 @@ use std::net::ToSocketAddrs;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-use crate::native_assistant_facts::AssistantFacts;
+use crate::native_assistant_facts::{created_at_ms, turn_duration_ms, AssistantFacts};
 
 /// Per-tool transcript rows for the 14 tool specializations and the
 /// generic/plugin/MCP fallback (see the module docs for upstream pins).
@@ -37,10 +37,11 @@ pub enum Event {
         error: Option<String>,
     },
     /// Terminal assistant message: the finalized text plus the real execution
-    /// facts the `assistant_message` frame carries (usage tokens, stop reason).
-    /// The frame carries no agent/model/timestamps
+    /// facts the `assistant_message` frame carries (usage tokens, stop reason,
+    /// and the turn duration derived from the matching `user_message` frame's
+    /// `created_at`). The frame carries no agent/model
     /// (`crates/server/src/lib.rs:2706-2715`); those stay absent and are never
-    /// inferred from `created_at` or the selected UI model.
+    /// inferred from the selected UI model.
     Assistant {
         text: String,
         facts: AssistantFacts,
@@ -205,6 +206,10 @@ impl TurnWorker {
                 let mut total = 0;
                 let mut retained: usize = 0;
                 let mut terminal = false;
+                // Turn start from the `user_message` acknowledgement, so the
+                // terminal frame can report upstream's `turnDuration`
+                // (`routes/session/rows.ts:430-438`).
+                let mut turn_started_ms: Option<i64> = None;
                 while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
                     total += chunk.len();
                     if total > MAX_TOTAL {
@@ -222,6 +227,13 @@ impl TurnWorker {
                         let value: Value = serde_json::from_slice(&line[..line.len() - 1])
                             .map_err(|e| format!("invalid turn event: {e}"))?;
                         crate::native_debug::event("turn.frame", serde_json::json!({"type":journal_frame_type(&value),"bytes":line.len()}));
+                        let frame_kind = value["type"].as_str().unwrap_or("");
+                        if frame_kind == "user_message" {
+                            turn_started_ms = created_at_ms(&value, "/message/created_at");
+                        }
+                        let completed_ms = (frame_kind == "assistant_message")
+                            .then(|| created_at_ms(&value, "/message/created_at"))
+                            .flatten();
                         if value["type"]=="assistant_message" {
                             if let Some(usage)=value.get("usage") {
                                 if let (Some(input),Some(output))=(usage["input_tokens"].as_u64(),usage["output_tokens"].as_u64()) {
@@ -235,7 +247,15 @@ impl TurnWorker {
                                 tx.send(Event::ReasoningFinal(summary.to_owned())).await.map_err(|_|"UI closed".to_owned())?;
                             }
                         }
-                        if let Some(event) = decode(value, &mut retained)? {
+                        if let Some(mut event) = decode(value, &mut retained)? {
+                            if let Event::Assistant { facts, .. } = &mut event {
+                                facts.duration_ms = match (turn_started_ms, completed_ms) {
+                                    (Some(started_ms), Some(completed_ms)) => {
+                                        turn_duration_ms(started_ms, completed_ms)
+                                    }
+                                    _ => None,
+                                };
+                            }
                             if matches!(event, Event::Assistant { .. } | Event::Error { .. }) {
                                 terminal = true;
                             }
@@ -639,8 +659,8 @@ mod native_error_tests {
     }
 
     /// The terminal assistant event carries the REAL frame facts (usage
-    /// tokens, stop reason) and nothing else: the wire has no agent/model/
-    /// timing, so none is fabricated from `created_at` or selection state.
+    /// tokens, stop reason) and nothing else beyond the stored turn span: the
+    /// wire has no agent/model, so none is fabricated from selection state.
     #[tokio::test]
     async fn terminal_assistant_event_carries_real_frame_facts_only() {
         let events = mock_turn(
@@ -661,10 +681,33 @@ mod native_error_tests {
         assert_eq!(facts.stop_reason.as_deref(), Some("completed"));
         assert!(!facts.interrupted);
         assert!(facts.error_message.is_none());
+        // No `user_message` frame in this stream: the turn start is unknown.
+        assert_eq!(facts.duration_ms, None);
+    }
+
+    /// The terminal event derives the whole-turn duration from the two frames'
+    /// stored `created_at` stamps, like upstream `turnDuration`.
+    #[tokio::test]
+    async fn terminal_assistant_event_derives_turn_duration_from_frame_stamps() {
+        let events = mock_turn(
+            201,
+            concat!(
+                r#"{"type":"user_message","message":{"role":"user","body":{"storage":"inline","text":"go"},"created_at":"2026-10-19T00:00:00.000Z"}}"#,
+                "\n",
+                r#"{"type":"assistant_message","message":{"role":"assistant","body":{"storage":"inline","text":"done"},"created_at":"2026-10-19T00:00:01.250Z"},"stop_reason":"completed"}"#,
+                "\n",
+            ),
+        )
+        .await;
+        let facts = events.iter().find_map(|event| match event {
+            Event::Assistant { facts, .. } => Some(facts),
+            _ => None,
+        });
+        assert_eq!(facts.expect("terminal assistant event").duration_ms, Some(1_250));
     }
 
     /// Missing usage/stop reason stay absent (never a fabricated zero or a
-    /// `created_at`-derived value).
+    /// clock-derived value).
     #[tokio::test]
     async fn terminal_assistant_event_keeps_missing_facts_absent() {
         let events = mock_turn(

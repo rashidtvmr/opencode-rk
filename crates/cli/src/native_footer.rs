@@ -10,10 +10,11 @@
 //!   currently selected UI model.
 //! - model span: ` · {model}` only at `terminal.width >= 28`.
 //! - duration span: ` · {Locale.duration(ms)}` only when a real turn duration
-//!   exists and width is `< 28 || >= 36`. The native protocol emits no
-//!   streamed/started/completed boundaries (`crates/server/src/lib.rs:2706-2715`),
-//!   so no duration ever exists here: the span is an explicit gap, not a
-//!   fixture/wall-clock guess.
+//!   exists and width is `< 28 || >= 36`. The duration is the authoritative
+//!   stored span `assistant.created_at - input.created_at`
+//!   ([`AssistantFacts::duration_ms`], upstream `turnDuration`
+//!   `routes/session/rows.ts:430-438`); a zero/unknown span renders nothing,
+//!   matching upstream's falsy `<Show>`.
 //! - throughput span: ` · {x.toFixed(1)} tok/s` only when upstream
 //!   `config.data.session.tps` is on AND a real throughput exists. No such
 //!   native config key exists (verified absent from `crates/`), and without
@@ -36,7 +37,7 @@
 //! message prefix/inset as ordinary prose rows (upstream's footer `paddingLeft`
 //! and `TextPart` inset are the same three columns).
 
-use crate::native_assistant_facts::AssistantFacts;
+use crate::native_assistant_facts::{format_duration, AssistantFacts};
 use crate::native_view_chat::{ChatMessage, ChatRole, ChatRowClass};
 
 /// Untrusted backend text bound for one footer label (error message, agent,
@@ -48,8 +49,7 @@ pub const MAX_FOOTER_LABEL_BYTES: usize = 256;
 pub const WIDTH_MODEL_MIN: usize = 28;
 /// Width band mirrored from upstream (`index.tsx:2060`): the duration span
 /// renders only at `width < 28 || width >= 36` — i.e. it is hidden in the
-/// `28..=35` band. No duration fact exists in the native protocol today, so
-/// this band is currently unreachable; retained for producer wiring parity.
+/// `28..=35` band.
 pub const WIDTH_DURATION_GAP_LOW: usize = 28;
 pub const WIDTH_DURATION_GAP_HIGH: usize = 36;
 /// Exact interruption suffix text (upstream `index.tsx:2065`: ` · interrupted`).
@@ -118,16 +118,25 @@ pub fn render_assistant_footer(message: &ChatMessage, width: usize) -> Option<Fo
         })
         .flatten()
         .map(|model| format!(" · {model}"));
-    // Duration/throughput spans: explicit gaps (module docs). They become
-    // spans only from real streamed/started timestamps plus the native tps
-    // config — none of which the wire provides today.
+    // Upstream `index.tsx:2060`: `duration() && (width < 28 || width >= 36)` —
+    // the falsy zero-duration case is already excluded by the fact itself.
+    let duration_span = facts
+        .duration_ms
+        .filter(|_| width < WIDTH_DURATION_GAP_LOW || width >= WIDTH_DURATION_GAP_HIGH)
+        .map(|ms| format!(" · {}", format_duration(ms)));
+    // Throughput remains an explicit gap: it needs real per-step streamed
+    // timestamps plus the native tps config — neither exists today.
     let interrupted_span = interrupted.then(|| INTERRUPTED_SPAN.to_owned());
 
     // Upstream composes the metadata line by concatenating the spans: the
     // agent span is unprefixed and every optional span starts with ` · `.
     let mut metadata = String::new();
     metadata.push_str(agent_span.as_deref().unwrap_or(""));
-    for span in model_span.iter().chain(interrupted_span.iter()) {
+    for span in model_span
+        .iter()
+        .chain(duration_span.iter())
+        .chain(interrupted_span.iter())
+    {
         metadata.push_str(span);
     }
 
@@ -362,7 +371,52 @@ mod native_footer_tests {
     }
 
     #[test]
-    fn raw_token_counts_and_duration_are_never_rendered() {
+    fn duration_span_follows_the_28_36_width_band() {
+        // Upstream `index.tsx:2060`: duration renders at `< 28 || >= 36` and is
+        // hidden in the `28..=35` band; model is the inverse at `>= 28`.
+        let mut facts = AssistantFacts::from_message_frame(&serde_json::json!({
+            "usage": {"output_tokens": 20},
+            "stop_reason": "completed"
+        }));
+        facts.duration_ms = Some(1_500);
+        let message = assistant_message(facts, None, Some("openai/gpt-x"));
+        // 27: model hidden, duration shown.
+        assert_eq!(row_texts(&render_assistant_footer(&message, 27).unwrap()), [" · 1.5s"]);
+        // 28..=35: model shown, duration hidden.
+        for width in [28, 35] {
+            assert_eq!(
+                row_texts(&render_assistant_footer(&message, width).unwrap()),
+                [" · openai/gpt-x"],
+                "width {width}"
+            );
+        }
+        // 36: both, in upstream span order (model then duration).
+        assert_eq!(
+            row_texts(&render_assistant_footer(&message, 36).unwrap()),
+            [" · openai/gpt-x · 1.5s"]
+        );
+    }
+
+    #[test]
+    fn zero_duration_renders_nothing_like_upstream_falsy_show() {
+        let mut facts = AssistantFacts::from_message_frame(&serde_json::json!({
+            "usage": {"output_tokens": 20},
+            "stop_reason": "completed"
+        }));
+        facts.duration_ms = None;
+        let message = assistant_message(facts, None, Some("openai/gpt-x"));
+        // A zero-length turn never produces a duration fact (`turn_duration_ms`
+        // returns None for a non-positive delta). At width 27 the model span is
+        // also hidden, leaving no fact at all.
+        assert!(render_assistant_footer(&message, 27).is_none());
+        for width in [36, 80] {
+            let rows = render_assistant_footer(&message, width).unwrap();
+            assert_eq!(row_texts(&rows), [" · openai/gpt-x"], "width {width}");
+        }
+    }
+
+    #[test]
+    fn usage_tokens_without_stored_timing_render_no_duration_or_throughput() {
         // Usage tokens exist as facts but upstream shows no raw count; no
         // timestamps exist so no duration/throughput span can exist.
         let facts = AssistantFacts::from_message_frame(&serde_json::json!({
@@ -417,9 +471,7 @@ mod native_footer_tests {
     #[test]
     fn width_band_constants_match_upstream_assistant_footer() {
         // Upstream `index.tsx:2057-2065`: model at width >= 28, duration hidden
-        // in the 28..=35 band, exact ` · interrupted` suffix span. These
-        // anchors stay pinned even though no duration fact exists on the
-        // native wire today.
+        // in the 28..=35 band, exact ` · interrupted` suffix span.
         assert_eq!(WIDTH_MODEL_MIN, 28);
         assert_eq!(WIDTH_DURATION_GAP_LOW, 28);
         assert_eq!(WIDTH_DURATION_GAP_HIGH, 36);

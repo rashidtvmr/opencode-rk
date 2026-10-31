@@ -571,12 +571,13 @@ pub struct ChatMessage {
     pub parts: Vec<ChatPart>,
     pub agent: Option<String>,
     pub model: Option<String>,
-    /// Real assistant-turn execution facts (stop reason, usage tokens,
-    /// interruption, error) from the native turn stream
+    /// Real assistant-turn execution facts (stop reason, usage tokens, turn
+    /// duration, interruption, error) from the native turn stream
     /// ([`crate::native_assistant_facts::AssistantFacts`]). `None` when the
     /// producer supplied no facts (e.g. replayed history whose schema carries
-    /// none) — never backfilled from `MessageRecord.created_at`, wall time or
-    /// the currently selected UI model.
+    /// none). The duration inside is derived from the stored turn timestamps
+    /// ([`crate::native_assistant_facts::turn_duration_ms`]); nothing is
+    /// backfilled from wall time or the currently selected UI model.
     pub assistant_facts: Option<AssistantFacts>,
 }
 

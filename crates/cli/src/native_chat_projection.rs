@@ -33,14 +33,17 @@
 //! results use the backend's own `is_error` flag only (an `"error: ..."`
 //! output prefix is text and never sets it). A blob body has no inline
 //! payload, so it contributes no fabricated text: a record with no displayable
-//! part projects to `None` instead of a placeholder.
+//! part projects to `None` instead of a placeholder. Turn duration is the only
+//! clock-derived value and it comes from two stored records' `created_at`
+//! stamps (assistant completion minus the nearest preceding user/system
+//! record), never from a local clock.
 //!
 //! Bounds: every retained string is a char-boundary-safe ≤32 KiB prefix, and
 //! one projected message retains at most 32 KiB across its parts.
 
 use serde_json::Value;
 
-use crate::native_assistant_facts::AssistantFacts;
+use crate::native_assistant_facts::{created_at_ms, turn_duration_ms, AssistantFacts};
 use crate::native_view_chat::{ChatMessage, ChatPart, ChatRole};
 
 /// Max bytes retained per message part (matches the chat view's per-row input
@@ -500,6 +503,31 @@ pub fn project_message(message: &Value) -> Option<ChatMessage> {
     })
 }
 
+/// Project one stored record and fill the assistant turn duration from the
+/// neighbouring stored timestamps. `turn_start_ms` tracks the nearest preceding
+/// user/system record (upstream `inputIndex`, `routes/session/rows.ts:469-482`;
+/// native sessions have no idle markers). A record that only carries malformed
+/// data can still start a turn: the boundary follows the raw role, exactly as
+/// upstream scans raw messages.
+fn project_with_turn_duration(message: &Value, turn_start_ms: &mut Option<i64>) -> Option<ChatMessage> {
+    let role = role_of(message);
+    if matches!(role, Some(ChatRole::User) | Some(ChatRole::System)) {
+        *turn_start_ms = created_at_ms(message, "/created_at");
+    }
+    let mut chat = project_message(message)?;
+    if chat.role == ChatRole::Assistant {
+        if let Some(facts) = chat.assistant_facts.as_mut() {
+            // Upstream `turnDuration` (`rows.ts:430-438`): completion minus the
+            // turn input's `created`, hidden when non-positive.
+            facts.duration_ms = match (*turn_start_ms, created_at_ms(message, "/created_at")) {
+                (Some(started_ms), Some(completed_ms)) => turn_duration_ms(started_ms, completed_ms),
+                _ => None,
+            };
+        }
+    }
+    Some(chat)
+}
+
 /// Project a bounded daemon history array: at most [`MAX_HISTORY_SCAN`] raw
 /// entries are examined and at most [`MAX_HISTORY_MESSAGES`] messages are
 /// returned, in original order. Malformed entries are skipped, never replaced
@@ -507,9 +535,10 @@ pub fn project_message(message: &Value) -> Option<ChatMessage> {
 #[must_use]
 pub fn project_history(messages: &[Value]) -> Vec<ChatMessage> {
     let from = messages.len().saturating_sub(MAX_HISTORY_SCAN);
+    let mut turn_start_ms = None;
     let mut projected: Vec<ChatMessage> = Vec::new();
     for message in &messages[from..] {
-        if let Some(message) = project_message(message) {
+        if let Some(message) = project_with_turn_duration(message, &mut turn_start_ms) {
             projected.push(message);
         }
     }
@@ -527,10 +556,11 @@ pub fn project_history(messages: &[Value]) -> Vec<ChatMessage> {
 #[must_use]
 pub fn project_history_entries(messages: &[Value]) -> Vec<(String, ChatMessage)> {
     let from = messages.len().saturating_sub(MAX_HISTORY_SCAN);
+    let mut turn_start_ms = None;
     let mut projected = Vec::new();
     for message in &messages[from..] {
         let Some(id) = message.get("id").and_then(Value::as_str) else { continue; };
-        let Some(message) = project_message(message) else { continue; };
+        let Some(message) = project_with_turn_duration(message, &mut turn_start_ms) else { continue; };
         projected.push((id.to_owned(), message));
     }
     let overflow = projected.len().saturating_sub(MAX_HISTORY_MESSAGES);
@@ -1363,6 +1393,65 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(bare.model.as_deref(), Some("solo-model"));
+    }
+
+    // Turn duration is the stored completion span: the assistant record's
+    // `created_at` minus the nearest preceding user/system record's
+    // `created_at` (upstream `turnDuration`, `rows.ts:430-438`).
+    #[test]
+    fn stored_turn_timestamps_project_the_turn_duration() {
+        let records = json!([
+            {"id": "u1", "role": "user", "body": {"storage": "inline", "text": "start"},
+             "created_at": "2026-10-19T00:00:00.000Z"},
+            {"id": "a1", "role": "assistant", "body": {"storage": "inline", "text": "done"},
+             "created_at": "2026-10-19T00:00:02.500Z",
+             "execution": {"provider_id": "openai", "model_id": "gpt-5.6", "stop_reason": "completed"}},
+            {"id": "u2", "role": "user", "body": {"storage": "inline", "text": "again"},
+             "created_at": "2026-10-19T00:01:00.000Z"},
+            {"id": "s2", "role": "system", "body": {"storage": "inline", "text": "rebase the turn"},
+             "created_at": "2026-10-19T00:01:01.000Z"},
+            {"id": "a2", "role": "assistant", "body": {"storage": "inline", "text": "second"},
+             "created_at": "2026-10-19T00:01:01.250Z",
+             "execution": {"model_id": "solo-model", "stop_reason": "completed"}},
+            {"id": "a3", "role": "assistant", "body": {"storage": "inline", "text": "no facts"},
+             "created_at": "2026-10-19T00:02:00.000Z"}
+        ]);
+        let history = project_history(records.as_array().unwrap());
+        assert_eq!(history.len(), 6);
+        let duration = |index: usize| {
+            history[index]
+                .assistant_facts
+                .as_ref()
+                .and_then(|facts| facts.duration_ms)
+        };
+        assert_eq!(duration(1), Some(2_500), "first turn spans user -> assistant");
+        // The nearest input is the system record, not the older user message.
+        assert_eq!(duration(4), Some(250), "system record rebases the turn start");
+        assert_eq!(duration(5), None, "no stored execution facts, no duration");
+        // The grouped rows path shares the same projection.
+        let entries = project_history_entries(records.as_array().unwrap());
+        assert_eq!(entries[1].1.assistant_facts.as_ref().unwrap().duration_ms, Some(2_500));
+        assert_eq!(entries[4].1.assistant_facts.as_ref().unwrap().duration_ms, Some(250));
+    }
+
+    #[test]
+    fn non_positive_turn_spans_stay_absent() {
+        let records = json!([
+            // No preceding input at all: the turn start is unknown.
+            {"id": "a0", "role": "assistant", "body": {"storage": "inline", "text": "orphan"},
+             "created_at": "2026-10-19T00:00:00.000Z",
+             "execution": {"model_id": "m", "stop_reason": "completed"}},
+            {"id": "u1", "role": "user", "body": {"storage": "inline", "text": "start"},
+             "created_at": "2026-10-19T00:00:05.000Z"},
+            {"id": "a1", "role": "assistant", "body": {"storage": "inline", "text": "done"},
+             "created_at": "2026-10-19T00:00:05.000Z",
+             "execution": {"model_id": "m", "stop_reason": "completed"}}
+        ]);
+        let history = project_history(records.as_array().unwrap());
+        assert_eq!(history[0].assistant_facts.as_ref().unwrap().duration_ms, None);
+        // Equal stamps: zero duration is hidden, exactly like upstream's
+        // falsy `<Show when={duration()}>`.
+        assert_eq!(history[2].assistant_facts.as_ref().unwrap().duration_ms, None);
     }
 
     #[test]
