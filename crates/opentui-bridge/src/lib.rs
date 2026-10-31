@@ -1,17 +1,26 @@
 pub mod buffer;
 pub mod color;
+pub mod editor;
 pub mod events;
 pub mod handle;
+pub mod image;
 pub mod input;
 pub mod layout;
+pub mod markdown;
 pub mod renderer;
 pub mod safe_renderer;
+pub mod scene;
+pub mod scroll;
 pub mod shapes;
 pub mod text;
 pub mod world;
 
 pub use buffer::CellBuffer;
+pub use editor::{Editor, EditorView};
 pub use color::Rgba;
 pub use handle::BridgeHandle;
+pub use image::{Gallery, ImageData, ImageRenderable, ImageState};
+pub use markdown::MarkdownDoc;
 pub use renderer::RendererSpec;
 pub use safe_renderer::{BridgeError, Renderer};
+pub use scroll::ScrollBox;
