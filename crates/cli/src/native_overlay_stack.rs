@@ -168,12 +168,25 @@ impl Rect {
 }
 
 /// Overlay layer kinds, in upstream mount order.
+///
+/// The first four are the app-lifecycle overlays mounted by `app.tsx`. The
+/// last two are the session bottom-stack surfaces that share the toast layer's
+/// z-index:
+/// `component/prompt/autocomplete.tsx:865` is the only bottom-stack surface
+/// that declares a z-index (100) and it is not modelled here; the auxiliary
+/// composer dock (`routes/session/composer/index.tsx:84-155`) and the prompt
+/// footer progress row are ordinary flow children with no `zIndex` prop, so
+/// they paint at 0 like `ui/toast.tsx:47-63`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum OverlayKind {
     Startup,
     Reconnecting,
     Migration,
     Toast,
+    /// Shell-surface progress row (`prompt.footer.status`, no z-index).
+    Progress,
+    /// Auxiliary composer dock (`composer/index.tsx:84-155`, no z-index).
+    Dock,
 }
 
 impl OverlayKind {
@@ -185,14 +198,25 @@ impl OverlayKind {
         Self::Toast,
     ];
 
-    /// Effective z-index (toast declares none).
+    /// Bottom-stack surfaces in upstream document order: the dock sits above
+    /// the prompt, its progress row is inside the prompt footer, and the toast
+    /// surface is a root-level overlay mounted last (`app.tsx:1470-1480`).
+    pub const SHELL_SURFACE: [Self; 3] = [Self::Dock, Self::Progress, Self::Toast];
+
+    /// Effective z-index (toast, progress and dock declare none).
     #[must_use]
     pub fn z_index(self) -> u16 {
         match self {
             Self::Startup => Z_STARTUP,
             Self::Reconnecting | Self::Migration => Z_OVERLAY,
-            Self::Toast => Z_TOAST,
+            Self::Toast | Self::Progress | Self::Dock => Z_TOAST,
         }
+    }
+
+    /// Whether this kind belongs to the session bottom stack.
+    #[must_use]
+    pub fn is_shell_surface(self) -> bool {
+        Self::SHELL_SURFACE.contains(&self)
     }
 }
 
@@ -263,23 +287,69 @@ impl OverlayStack {
         self.layers.iter().find(|layer| layer.kind == kind)
     }
 
+    /// Mount the layer when `rect` is present and unmount it when it is not.
+    ///
+    /// Bottom-stack callers drive every surface from their own state each
+    /// frame; the stack stays the single ordering authority.
+    pub fn sync(&mut self, kind: OverlayKind, rect: Option<Rect>) {
+        match rect {
+            Some(rect) => self.show(kind, rect),
+            None => {
+                self.remove(kind);
+            }
+        }
+    }
+
+    /// Visible layers in paint order, bottom first.
+    ///
+    /// This is the ordered paint list callers blit in sequence: OpenTUI paints
+    /// by z-index first and insertion order second, so equal z-index surfaces
+    /// keep the order in which they were first mounted.
+    #[must_use]
+    pub fn paint_list(&self) -> Vec<PaintItem> {
+        let mut items: Vec<PaintItem> = self
+            .layers
+            .iter()
+            .filter(|layer| layer.visible)
+            .map(|layer| PaintItem {
+                kind: layer.kind,
+                z_index: layer.z_index,
+                order: layer.order,
+                rect: layer.rect,
+            })
+            .collect();
+        items.sort_by_key(|item| (item.z_index, item.order));
+        items
+    }
+
     /// Visible kinds in paint order, bottom first.
     #[must_use]
     pub fn paint_order(&self) -> Vec<OverlayKind> {
-        let mut visible: Vec<&OverlayLayer> =
-            self.layers.iter().filter(|layer| layer.visible).collect();
-        visible.sort_by_key(|layer| (layer.z_index, layer.order));
-        visible.iter().map(|layer| layer.kind).collect()
+        self.paint_list().into_iter().map(|item| item.kind).collect()
     }
 
     /// Topmost visible layer containing a cell.
     #[must_use]
     pub fn top_at(&self, x: u16, y: u16) -> Option<OverlayKind> {
-        self.paint_order().into_iter().rev().find(|kind| {
-            self.layer(*kind)
-                .is_some_and(|layer| layer.rect.contains(x, y))
-        })
+        self.paint_list()
+            .into_iter()
+            .rev()
+            .find(|item| item.rect.contains(x, y))
+            .map(|item| item.kind)
     }
+}
+
+/// One entry of the ordered paint list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PaintItem {
+    /// Layer kind.
+    pub kind: OverlayKind,
+    /// Effective z-index.
+    pub z_index: u16,
+    /// Insertion sequence (mount order).
+    pub order: u64,
+    /// Painted rectangle.
+    pub rect: Rect,
 }
 
 /// `StartupLoading` timer state.
@@ -1047,6 +1117,67 @@ mod tests {
     fn overlay_kind_z_indexes_match_source() {
         let z: Vec<u16> = OverlayKind::ALL.iter().map(|kind| kind.z_index()).collect();
         assert_eq!(z, vec![5_000, 10_000, 10_000, 0]);
+        // The bottom stack declares no z-index anywhere in upstream source.
+        for kind in OverlayKind::SHELL_SURFACE {
+            assert_eq!(kind.z_index(), Z_TOAST);
+            assert!(kind.is_shell_surface());
+        }
+        assert!(!OverlayKind::Startup.is_shell_surface());
+    }
+
+    #[test]
+    fn shell_surface_paint_list_is_the_ordering_authority() {
+        let mut stack = OverlayStack::new();
+        // Mount order differs from document order: the toast arrives first,
+        // the dock and progress row later.
+        stack.show(OverlayKind::Toast, Rect::new(10, 1, 20, 3));
+        stack.show(OverlayKind::Progress, Rect::new(2, 20, 60, 1));
+        stack.show(OverlayKind::Dock, Rect::new(0, 12, 80, 8));
+        let order: Vec<OverlayKind> = stack.paint_list().into_iter().map(|i| i.kind).collect();
+        assert_eq!(
+            order,
+            vec![
+                OverlayKind::Toast,
+                OverlayKind::Progress,
+                OverlayKind::Dock
+            ],
+            "equal z-index surfaces paint in insertion order (OpenTUI)"
+        );
+        // The paint list carries the geometry a caller blits.
+        let list = stack.paint_list();
+        assert_eq!(list[2].rect, Rect::new(0, 12, 80, 8));
+        assert_eq!(list[2].order, 2);
+        // A lifecycle overlay outranks the whole bottom stack.
+        stack.show(OverlayKind::Startup, Rect::new(30, 22, 20, 1));
+        assert_eq!(stack.paint_order().last(), Some(&OverlayKind::Startup));
+        assert_eq!(
+            stack.top_at(0, 12),
+            Some(OverlayKind::Dock),
+            "bottom-stack hit testing follows the paint list"
+        );
+    }
+
+    #[test]
+    fn sync_mounts_and_unmounts_bottom_stack_surfaces() {
+        let mut stack = OverlayStack::new();
+        stack.sync(OverlayKind::Dock, Some(Rect::new(0, 12, 80, 8)));
+        stack.sync(OverlayKind::Progress, Some(Rect::new(2, 20, 60, 1)));
+        assert_eq!(
+            stack.paint_order(),
+            vec![OverlayKind::Dock, OverlayKind::Progress],
+            "the dock mounted first, so it paints first at equal z-index"
+        );
+        // A surface that stops applying is unmounted, not merely hidden, so a
+        // later remount takes a fresh insertion order.
+        stack.sync(OverlayKind::Dock, None);
+        assert_eq!(stack.paint_order(), vec![OverlayKind::Progress]);
+        assert!(stack.layer(OverlayKind::Dock).is_none());
+        stack.sync(OverlayKind::Dock, Some(Rect::new(0, 12, 80, 8)));
+        assert_eq!(
+            stack.paint_order(),
+            vec![OverlayKind::Progress, OverlayKind::Dock],
+            "remounting appends to the insertion order"
+        );
     }
 
     #[test]

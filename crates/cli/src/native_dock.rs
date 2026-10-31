@@ -36,8 +36,24 @@
 //! - selecting closes the composer first, then selects an existing terminal or
 //!   creates one, and any failure shows an error toast
 //!   (`terminals-tab.tsx:14,30-40`).
+//!
+//! The composed block ([`ComposerDock::block`]) is the paint model the shell
+//! consumes. Container row order and geometry come from `index.tsx:86-153`: a
+//! left `SplitBorder` only (`ui/border.ts:15-20`), `background.raised.base`,
+//! padding left 1 / right 2 / top 1 / bottom 1, and an inner
+//! `box gap={1}` holding the tab row, the (single) active tab body and the
+//! hint row. Each tab body is a `<Show when={composer.active(id)}>` whose rows
+//! are `paddingLeft={1} paddingRight={1}` boxes spanning the scrollbox width
+//! (`shell-tab.tsx:114-147`, `subagents-tab.tsx:199-256`), and the empty state
+//! is a bare muted `<text>` without those row paddings
+//! (`shell-tab.tsx:116`, `subagents-tab.tsx:203`).
+//!
+//! There is no `dock.tsx` at this pin: `grep -rn dock packages/tui/src` only
+//! matches `ui/layout.ts`, `util/filetype.ts` and the diff viewer. The
+//! auxiliary dock *is* `routes/session/composer/index.tsx`, and
+//! `feature-plugins/shell/*` does not exist at this pin either.
 
-use crate::native_view_layout::fit;
+use crate::native_view_layout::visit_unpadded_cells;
 
 /// Upstream `scrollbox maxHeight={5}` shared by every dock list
 /// (`shell-tab.tsx:115`, `subagents-tab.tsx:200`, `terminals-tab.tsx:70`).
@@ -58,9 +74,18 @@ pub const DOCK_HINT_GAP: u16 = 2;
 /// Title and hint rows carry their own `paddingLeft={1}` (`index.tsx:98,132`),
 /// and list rows `paddingLeft={1}` (`terminals-tab.tsx:78`).
 pub const DOCK_ROW_PADDING_LEFT: u16 = 1;
+/// List rows carry `paddingRight={1}` (`shell-tab.tsx:124`,
+/// `terminals-tab.tsx:78`, `subagents-tab.tsx:218`).
+pub const DOCK_ROW_PADDING_RIGHT: u16 = 1;
 /// Display column where dock row text starts: 1 border + 1 outer padding +
 /// 1 row padding.
 pub const DOCK_TEXT_X: u16 = 1 + DOCK_PADDING_LEFT + DOCK_ROW_PADDING_LEFT;
+/// Cells reserved on the right of a body row label: the container's
+/// `paddingRight={2}` (`index.tsx:93`) plus the row's own `paddingRight={1}`
+/// (`shell-tab.tsx:124`, `subagents-tab.tsx:218`).
+pub const DOCK_RIGHT_INSET: u16 = DOCK_PADDING_RIGHT + DOCK_ROW_PADDING_RIGHT;
+/// Left border glyph as a string for composed rows (`ui/border.ts:15-20`).
+pub const DOCK_BORDER_LEFT_TEXT: &str = "┃";
 /// Exact right-aligned affordance (`index.tsx:123-125`).
 pub const DOCK_ESC_LABEL: &str = "esc";
 /// Appended hint when more than one tab is registered (`index.tsx:143-150`).
@@ -182,6 +207,14 @@ pub enum DockStyle {
     QueueCount,
     /// `text.muted` first queued prompt preview (`index.tsx:2511-2513`).
     QueuePreview,
+    /// `border.base` left `SplitBorder` column (`index.tsx:90`,
+    /// `ui/border.ts:15-20`).
+    Border,
+    /// `background.raised.base` container surface (`index.tsx:91`).
+    DockSurface,
+    /// `text.muted` empty-tab body line, painted without row padding
+    /// (`shell-tab.tsx:116`, `subagents-tab.tsx:203`).
+    EmptyBody,
 }
 
 /// One styled dock span positioned in display cells.
@@ -252,6 +285,151 @@ impl DockLine {
     }
 }
 
+/// Cells of `text` that fit in `budget` display columns, using the same
+/// segmentation `fit` uses so measurement and truncation cannot disagree
+/// (`shell-tab.tsx:137` `wrapMode="none"` truncates instead of wrapping).
+fn take_cells(text: &str, budget: u16) -> String {
+    let mut out = String::new();
+    visit_unpadded_cells(text, usize::from(budget), |glyph, _| {
+        out.push_str(glyph);
+    });
+    out
+}
+
+/// Row background fill. Painted over `[x, x + width)` before the spans, so the
+/// row's surface token (`background.raised.base` for the container,
+/// `background.action.primary.*` for list rows) covers the full row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DockFill {
+    pub x: u16,
+    pub width: u16,
+    pub style: DockStyle,
+}
+
+/// One composed dock row: the left border plus content spans, with absolute
+/// `x` positions measured in the composed row.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct DockPaintRow {
+    /// Glyphs in paint order, including the leading border when present.
+    /// Trailing `fill` cells are *not* materialised here.
+    pub text: String,
+    /// Painted spans; `x` is absolute in the composed row.
+    pub spans: Vec<DockSpan>,
+    /// Background surface for the row.
+    pub fill: Option<DockFill>,
+}
+
+impl DockPaintRow {
+    /// Display cells occupied by [`Self::text`].
+    #[must_use]
+    pub fn cells(&self) -> u16 {
+        u16::try_from(visit_unpadded_cells(&self.text, usize::from(u16::MAX), |_, _| {}))
+            .unwrap_or(u16::MAX)
+    }
+}
+
+/// Right-aligned status cell of a body row (`subagents-tab.tsx:243-254`:
+/// `Running` for running children, nothing otherwise). It never truncates, so
+/// the label shrinks first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DockStatusCell {
+    pub text: String,
+    pub style: DockStyle,
+}
+
+impl DockStatusCell {
+    #[must_use]
+    pub fn new(text: impl Into<String>, style: DockStyle) -> Self {
+        Self {
+            text: text.into(),
+            style,
+        }
+    }
+}
+
+/// One row of the active tab's list body (`shell-tab.tsx:120-141`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DockBodyRow {
+    pub label: String,
+    pub style: DockStyle,
+    pub bold: bool,
+    pub status: Option<DockStatusCell>,
+}
+
+impl DockBodyRow {
+    #[must_use]
+    pub fn new(label: impl Into<String>, style: DockStyle, bold: bool) -> Self {
+        Self {
+            label: label.into(),
+            style,
+            bold,
+            status: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_status(mut self, status: DockStatusCell) -> Self {
+        self.status = Some(status);
+        self
+    }
+}
+
+/// Body of the helper tab that renders this frame. Only the *active* tab
+/// renders (`<Show when={composer.active(id)}>`, `shell-tab.tsx:114`,
+/// `subagents-tab.tsx:199`), so the caller supplies exactly one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DockBody {
+    /// List rows, clipped to [`MAX_DOCK_ROWS`].
+    Rows(Vec<DockBodyRow>),
+    /// Muted empty-state line painted without row padding
+    /// (`shell-tab.tsx:116`).
+    Empty(String),
+}
+
+impl Default for DockBody {
+    fn default() -> Self {
+        Self::Rows(Vec::new())
+    }
+}
+
+impl DockBody {
+    /// Rows the body contributes at `viewport` rows.
+    #[must_use]
+    pub fn height(&self, viewport: usize) -> usize {
+        match self {
+            Self::Rows(rows) => rows.len().min(viewport.min(MAX_DOCK_ROWS)),
+            Self::Empty(_) => 1,
+        }
+    }
+}
+
+/// Composed dock block: every row the container paints, top to bottom.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct DockBlock {
+    pub width: u16,
+    pub rows: Vec<DockPaintRow>,
+    /// Rows contributed by the active tab body.
+    pub body_rows: usize,
+}
+
+impl DockBlock {
+    #[must_use]
+    pub fn height(&self) -> u16 {
+        u16::try_from(self.rows.len()).unwrap_or(u16::MAX)
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    /// Row text in paint order, for callers that only need the glyphs.
+    #[must_use]
+    pub fn text_rows(&self) -> Vec<&str> {
+        self.rows.iter().map(|row| row.text.as_str()).collect()
+    }
+}
+
 /// Dock chrome geometry, mirrored value-for-value from `index.tsx:87-96`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DockGeometry {
@@ -280,7 +458,7 @@ impl Default for DockGeometry {
             gap: DOCK_GAP,
             title_padding_left: DOCK_ROW_PADDING_LEFT,
             row_padding_left: DOCK_ROW_PADDING_LEFT,
-            row_padding_right: 1,
+            row_padding_right: DOCK_ROW_PADDING_RIGHT,
             tab_gap: DOCK_TAB_GAP,
             hint_gap: DOCK_HINT_GAP,
             max_rows: MAX_DOCK_ROWS,
@@ -357,6 +535,17 @@ impl ComposerDock {
             queued: Vec::new(),
             disabled: false,
         }
+    }
+
+    /// Composer with the two always-mounted tabs registered in JSX order
+    /// (`index.tsx:127-128`: `SubagentsTab`, `ShellTab`). The Terminals tab
+    /// stays off until the route passes `terminals` (`index.tsx:129-131`).
+    #[must_use]
+    pub fn session() -> Self {
+        let mut dock = Self::new();
+        dock.register(DockTabId::Subagents);
+        dock.register(DockTabId::Shell);
+        dock
     }
 
     /// `register` from `composer/context.ts:14-17`: the first registration
@@ -686,6 +875,220 @@ impl ComposerDock {
     pub fn geometry(&self) -> DockGeometry {
         DockGeometry::default()
     }
+
+    /// Compose the whole dock block for a `width`-column region.
+    ///
+    /// Row order is `index.tsx:86-153`, top to bottom:
+    /// `paddingTop` row, tab row, `gap` row, the active tab body,
+    /// `gap` row, hint row, `paddingBottom` row. The two `gap` rows collapse
+    /// into one when the active tab body renders nothing (Solid's `gap`
+    /// separates only rendered children).
+    ///
+    /// `body` is the active tab's content; `viewport` caps the body at
+    /// [`MAX_DOCK_ROWS`] (`shell-tab.tsx:115` `maxHeight={5}`).
+    /// Returns `None` while the composer is closed (the whole box has
+    /// `visible={props.open}`, `index.tsx:86`).
+    #[must_use]
+    pub fn block(&self, width: u16, viewport: usize, body: &DockBody) -> Option<DockBlock> {
+        if !self.effective_open() || width == 0 {
+            return None;
+        }
+        let mut rows = Vec::new();
+        // paddingTop={1}
+        for _ in 0..DOCK_PADDING_TOP {
+            rows.push(chrome_row(width));
+        }
+        rows.push(self.title_paint_row(width));
+        let body_rows = body_rows(width, body, viewport);
+        if body_rows.is_empty() {
+            rows.push(chrome_row(width));
+        } else {
+            rows.push(chrome_row(width));
+            rows.extend(body_rows.iter().cloned());
+            rows.push(chrome_row(width));
+        }
+        rows.push(self.hint_paint_row(width));
+        // paddingBottom={1}
+        for _ in 0..DOCK_PADDING_BOTTOM {
+            rows.push(chrome_row(width));
+        }
+        Some(DockBlock {
+            width,
+            body_rows: body_rows.len(),
+            rows,
+        })
+    }
+
+    fn title_paint_row(&self, width: u16) -> DockPaintRow {
+        let mut row = DockPaintRow {
+            text: DOCK_BORDER_LEFT_TEXT.to_owned(),
+            spans: vec![DockSpan {
+                text: DOCK_BORDER_LEFT_TEXT.to_owned(),
+                style: DockStyle::Border,
+                bold: false,
+                x: 0,
+            }],
+            fill: Some(DockFill {
+                x: 0,
+                width,
+                style: DockStyle::DockSurface,
+            }),
+        };
+        if let Some(line) = self.title_line(width) {
+            row.text.extend(std::iter::repeat_n(
+                ' ',
+                usize::from(DOCK_TEXT_X.saturating_sub(1)),
+            ));
+            row.text.push_str(&line.text);
+            row.spans.extend(line.spans);
+        }
+        row
+    }
+
+    fn hint_paint_row(&self, width: u16) -> DockPaintRow {
+        let mut row = DockPaintRow {
+            text: DOCK_BORDER_LEFT_TEXT.to_owned(),
+            spans: vec![DockSpan {
+                text: DOCK_BORDER_LEFT_TEXT.to_owned(),
+                style: DockStyle::Border,
+                bold: false,
+                x: 0,
+            }],
+            fill: Some(DockFill {
+                x: 0,
+                width,
+                style: DockStyle::DockSurface,
+            }),
+        };
+        if let Some(line) = self.hint_line() {
+            row.text.extend(std::iter::repeat_n(
+                ' ',
+                usize::from(DOCK_TEXT_X.saturating_sub(1)),
+            ));
+            row.text.push_str(&line.text);
+            row.spans.extend(line.spans);
+        }
+        row
+    }
+}
+
+/// One container row that only carries the border and the dock surface
+/// (`paddingTop`/`paddingBottom` and the `box gap={1}` separator rows).
+fn chrome_row(width: u16) -> DockPaintRow {
+    DockPaintRow {
+        text: DOCK_BORDER_LEFT_TEXT.to_owned(),
+        spans: vec![DockSpan {
+            text: DOCK_BORDER_LEFT_TEXT.to_owned(),
+            style: DockStyle::Border,
+            bold: false,
+            x: 0,
+        }],
+        fill: Some(DockFill {
+            x: 0,
+            width,
+            style: DockStyle::DockSurface,
+        }),
+    }
+}
+
+/// Body rows of the active tab, clipped to the scrollbox height.
+fn body_rows(width: u16, body: &DockBody, viewport: usize) -> Vec<DockPaintRow> {
+    match body {
+        DockBody::Rows(rows) => rows
+            .iter()
+            .take(viewport.min(MAX_DOCK_ROWS))
+            .map(|row| body_paint_row(width, row))
+            .collect(),
+        DockBody::Empty(text) => vec![empty_paint_row(width, text)],
+    }
+}
+
+/// One list row: full-width row surface from the container padding edge,
+/// label at [`DOCK_TEXT_X`] truncated to leave [`DOCK_RIGHT_INSET`], then the
+/// optional right-aligned status cell (`shell-tab.tsx:120-141`,
+/// `subagents-tab.tsx:213-256`).
+fn body_paint_row(width: u16, row: &DockBodyRow) -> DockPaintRow {
+    let row_start = DOCK_TEXT_X.saturating_sub(DOCK_ROW_PADDING_LEFT);
+    let mut paint = DockPaintRow {
+        text: DOCK_BORDER_LEFT_TEXT.to_owned(),
+        spans: vec![
+            DockSpan {
+                text: DOCK_BORDER_LEFT_TEXT.to_owned(),
+                style: DockStyle::Border,
+                bold: false,
+                x: 0,
+            },
+        ],
+        fill: Some(DockFill {
+            x: row_start,
+            width: width.saturating_sub(row_start).saturating_sub(DOCK_PADDING_RIGHT),
+            style: row.style,
+        }),
+    };
+    paint
+        .text
+        .extend(std::iter::repeat_n(' ', usize::from(row_start)));
+    let right = width.saturating_sub(DOCK_RIGHT_INSET);
+    let status_cells = row
+        .status
+        .as_ref()
+        .map_or(0, |status| u16::try_from(status.text.chars().count()).unwrap_or(u16::MAX));
+    let status_x = right.saturating_sub(status_cells);
+    let label_budget = status_x.saturating_sub(DOCK_TEXT_X);
+    let label = take_cells(&row.label, label_budget);
+    let label_cells = u16::try_from(label.chars().count()).unwrap_or(u16::MAX);
+    paint.spans.push(DockSpan {
+        text: label.clone(),
+        style: row.style,
+        bold: row.bold,
+        x: DOCK_TEXT_X,
+    });
+    paint.text.push_str(&label);
+    if let Some(status) = &row.status {
+        let gap = status_x.saturating_sub(DOCK_TEXT_X.saturating_add(label_cells));
+        paint
+            .text
+            .extend(std::iter::repeat_n(' ', usize::from(gap)));
+        paint.spans.push(DockSpan {
+            text: status.text.clone(),
+            style: status.style,
+            bold: false,
+            x: status_x,
+        });
+        paint.text.push_str(&status.text);
+    }
+    paint
+}
+
+/// Empty-state line: a bare muted text at the scrollbox origin, i.e. one cell
+/// left of ordinary rows because there is no row `paddingLeft`
+/// (`shell-tab.tsx:116`).
+fn empty_paint_row(width: u16, text: &str) -> DockPaintRow {
+    let x = DOCK_TEXT_X.saturating_sub(DOCK_ROW_PADDING_LEFT);
+    let body = take_cells(text, width.saturating_sub(x).saturating_sub(DOCK_PADDING_RIGHT));
+    let mut row = DockPaintRow {
+        text: DOCK_BORDER_LEFT_TEXT.to_owned(),
+        spans: vec![DockSpan {
+            text: DOCK_BORDER_LEFT_TEXT.to_owned(),
+            style: DockStyle::Border,
+            bold: false,
+            x: 0,
+        }],
+        fill: Some(DockFill {
+            x,
+            width: width.saturating_sub(x).saturating_sub(DOCK_PADDING_RIGHT),
+            style: DockStyle::DockSurface,
+        }),
+    };
+    row.text.extend(std::iter::repeat_n(' ', usize::from(x)));
+    row.spans.push(DockSpan {
+        text: body.clone(),
+        style: DockStyle::EmptyBody,
+        bold: false,
+        x,
+    });
+    row.text.push_str(&body);
+    row
 }
 
 /// One terminal record rendered by the terminals tab
@@ -857,13 +1260,13 @@ impl TerminalsTab {
         rows
     }
 
-    /// Painted label clipped to the row's available cells
-    /// (`paddingLeft={1}`, `paddingRight={1}`, `truncate`
-    /// `terminals-tab.tsx:78-79,103`).
+    /// Painted label clipped to the row's available cells: the container's
+    /// right padding and the row's own `paddingRight={1}` are reserved too
+    /// (`index.tsx:93`, `terminals-tab.tsx:78-79,103`).
     #[must_use]
     pub fn row_text(row: &TerminalRow, width: u16) -> String {
-        let available = width.saturating_sub(DOCK_TEXT_X).saturating_sub(1);
-        fit(&row.label, available)
+        let available = width.saturating_sub(DOCK_TEXT_X).saturating_sub(DOCK_RIGHT_INSET);
+        take_cells(&row.label, available)
     }
 
     /// `composer.terminal.select` (`terminals-tab.tsx:30-40`): close the
@@ -1309,7 +1712,147 @@ mod native_dock_tests {
             style: DockStyle::TerminalBase,
         };
         let text = TerminalsTab::row_text(&row, 12);
-        assert_eq!(text.chars().count(), 12 - usize::from(DOCK_TEXT_X) - 1);
+        assert_eq!(text.chars().count(), 12 - usize::from(DOCK_TEXT_X) - 2 - 1);
         assert!(text.starts_with("a-very"));
+    }
+
+    // Dock row rendering: the composed block carries the container chrome, the
+    // tab row, the active body and the hint row at the pinned geometry
+    // (`index.tsx:86-153`).
+    #[test]
+    fn dock_block_composes_container_chrome_and_tab_row() {
+        let mut dock = ComposerDock::session();
+        assert_eq!(
+            dock.registered_tabs(),
+            vec![DockTabId::Subagents, DockTabId::Shell],
+            "the session dock always registers Subagents then Shell (index.tsx:127-128)"
+        );
+        assert_eq!(dock.block(40, 5, &DockBody::default()), None, "closed dock paints nothing");
+
+        dock.open(Some(DockTabId::Shell));
+        assert_eq!(dock.active(), Some(DockTabId::Shell));
+        let block = dock
+            .block(40, 5, &DockBody::Empty(" No shell commands".into()))
+            .expect("open dock composes a block");
+        // paddingTop + tab row + gap + empty body + gap + hint + paddingBottom.
+        assert_eq!(block.height(), 7);
+        assert_eq!(block.body_rows, 1);
+        assert_eq!(
+            block.text_rows(),
+            vec![
+                "┃",
+                "┃  Subagents  Shell",
+                "┃",
+                // The literal itself starts with a space (`shell-tab.tsx:116`),
+                // so its `N` lands at DOCK_TEXT_X.
+                "┃   No shell commands",
+                "┃",
+                "┃  tabs ←/→",
+                "┃",
+            ]
+        );
+        for (index, row) in block.rows.iter().enumerate() {
+            // Left SplitBorder only (`index.tsx:88-90`).
+            assert_eq!(row.spans[0].style, DockStyle::Border);
+            assert_eq!(row.spans[0].x, 0);
+            let fill = row.fill.expect("every dock row paints a surface");
+            assert_eq!(fill.style, DockStyle::DockSurface);
+            if index == 3 {
+                assert_eq!(fill.x, DOCK_TEXT_X - DOCK_ROW_PADDING_LEFT);
+                assert_eq!(fill.width, 40 - fill.x - DOCK_PADDING_RIGHT);
+            } else {
+                assert_eq!(fill.x, 0);
+                assert_eq!(fill.width, 40);
+            }
+        }
+        // Tab row spans keep their absolute columns and the right `esc`; the
+        // active tab is Shell because `open(Some(Shell))` selected it.
+        let title = &block.rows[1];
+        assert_eq!(title.spans[1].x, DOCK_TEXT_X);
+        assert_eq!(title.spans[1].style, DockStyle::TabInactive);
+        assert!(!title.spans[1].bold);
+        assert_eq!(title.spans[2].x, DOCK_TEXT_X + 9 + DOCK_TAB_GAP);
+        assert_eq!(title.spans[2].style, DockStyle::TabActive);
+        assert!(title.spans[2].bold);
+        let esc = title.spans.last().unwrap();
+        assert_eq!(esc.style, DockStyle::Esc);
+        assert_eq!(esc.x, 40 - DOCK_PADDING_RIGHT - 3);
+        // The empty state has no row padding, so it starts one cell earlier.
+        let empty = &block.rows[3];
+        assert_eq!(empty.spans[1].style, DockStyle::EmptyBody);
+        assert_eq!(empty.spans[1].x, DOCK_TEXT_X - DOCK_ROW_PADDING_LEFT);
+        // Hint row: bold label, muted shortcut, gap 2, plus `tabs ←/→`.
+        let hint = &block.rows[5];
+        assert_eq!(hint.spans[1].text, "tabs");
+        assert_eq!(hint.spans[1].style, DockStyle::HintLabel);
+        assert!(hint.spans[1].bold);
+    }
+
+    #[test]
+    fn dock_block_body_rows_clip_to_the_scrollbox_and_keep_status_column() {
+        let mut dock = ComposerDock::session();
+        dock.open(Some(DockTabId::Shell));
+        let entries: Vec<DockBodyRow> = (0..8)
+            .map(|index| {
+                DockBodyRow::new(
+                    format!("command-number-{index}"),
+                    DockStyle::ShellBase,
+                    false,
+                )
+            })
+            .collect();
+        let body = DockBody::Rows(entries);
+        let block = dock.block(40, 5, &body).unwrap();
+        assert_eq!(block.body_rows, MAX_DOCK_ROWS, "maxHeight={{5}} (shell-tab.tsx:115)");
+        // padding + title + gap + 5 rows + gap + hint + padding.
+        assert_eq!(block.height(), 11);
+        let first = &block.rows[3];
+        assert_eq!(first.spans[1].x, DOCK_TEXT_X);
+        assert_eq!(first.spans[1].style, DockStyle::ShellBase);
+        // Row surface starts at the container padding edge and stops before the
+        // container's right padding (`index.tsx:93`, `shell-tab.tsx:124`).
+        let fill = first.fill.unwrap();
+        assert_eq!(fill.x, 2);
+        assert_eq!(fill.width, 40 - 2 - DOCK_PADDING_RIGHT);
+        assert_eq!(fill.style, DockStyle::ShellBase);
+
+        // A right-aligned status cell reserves its own cells and never truncates.
+        let rows = vec![
+            DockBodyRow::new("Subagent: a very long child title", DockStyle::SubagentBase, false)
+                .with_status(DockStatusCell::new(
+                    "Running",
+                    DockStyle::SubagentStatusMuted,
+                )),
+        ];
+        let block = dock.block(40, 5, &DockBody::Rows(rows)).unwrap();
+        let row = &block.rows[3];
+        let status = row.spans.last().unwrap();
+        assert_eq!(status.text, "Running");
+        assert_eq!(status.x, 40 - DOCK_RIGHT_INSET - 7);
+        let label = &row.spans[1];
+        assert_eq!(
+            label.text.chars().count() as u16,
+            status.x - DOCK_TEXT_X,
+            "the label shrinks to the status column (subagents-tab.tsx:224-241)"
+        );
+        assert!(row.text.starts_with("┃  "));
+        assert!(row.text.ends_with("Running"), "{:?}", row.text);
+        assert_eq!(
+            row.cells(),
+            DOCK_TEXT_X + label.text.chars().count() as u16 + 7,
+            "the label is truncated, not wrapped"
+        );
+    }
+
+    #[test]
+    fn dock_block_without_a_body_collapses_one_gap() {
+        let mut dock = ComposerDock::session();
+        dock.open(Some(DockTabId::Subagents));
+        let block = dock.block(40, 5, &DockBody::Rows(Vec::new())).unwrap();
+        // padding + title + single gap + hint + padding.
+        assert_eq!(block.height(), 5);
+        assert_eq!(block.body_rows, 0);
+        assert_eq!(block.text_rows()[2], "┃");
+        assert_eq!(block.text_rows()[3], "┃  tabs ←/→");
     }
 }

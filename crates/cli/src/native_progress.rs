@@ -583,6 +583,188 @@ fn group_thousands(value: u64) -> String {
     out
 }
 
+/// Delay before the background-action hint may appear
+/// (`routes/session/index.tsx:142` `const BACKGROUND_TOOL_HINT_DELAY = 3_000`).
+pub const BACKGROUND_HINT_DELAY_MS: u64 = 3_000;
+/// Canonical tool names eligible for the hint (`index.tsx:1904-1905`).
+pub const BACKGROUND_ELIGIBLE_TOOLS: [&str; 2] = ["shell", "subagent"];
+/// Exact upstream hint copy (`index.tsx:1920`): the shortcut is a nested
+/// `text.base` span between the muted prefix and suffix.
+pub const BACKGROUND_HINT_PREFIX: &str = "Press ";
+pub const BACKGROUND_HINT_SUFFIX: &str = " to move running work to the background";
+
+/// One tool part of the *current* (last incomplete) assistant message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RunningTool {
+    /// Owning assistant message id.
+    pub message_id: String,
+    /// Tool part id.
+    pub part_id: String,
+    /// Canonical tool name (`shell`/`subagent` are eligible).
+    pub name: String,
+    /// Transport status; only `"running"` qualifies.
+    pub status: String,
+    /// `part.time.ran ?? part.time.created` in Unix milliseconds.
+    pub started_ms: u64,
+}
+
+impl RunningTool {
+    #[must_use]
+    pub fn new(
+        message_id: impl Into<String>,
+        part_id: impl Into<String>,
+        name: impl Into<String>,
+        status: impl Into<String>,
+        started_ms: u64,
+    ) -> Self {
+        Self {
+            message_id: message_id.into(),
+            part_id: part_id.into(),
+            name: name.into(),
+            status: status.into(),
+            started_ms,
+        }
+    }
+
+    /// Whether this part is the hint's subject (`index.tsx:1902-1906`).
+    #[must_use]
+    pub fn is_eligible(&self) -> bool {
+        self.status == "running" && BACKGROUND_ELIGIBLE_TOOLS.contains(&self.name.as_str())
+    }
+}
+
+/// The first eligible running part of the current assistant message
+/// (`index.tsx:1899-1906`: `find` over the message's parts).
+#[must_use]
+pub fn background_candidate(parts: &[RunningTool]) -> Option<&RunningTool> {
+    parts.iter().find(|part| part.is_eligible())
+}
+
+/// The hint's subject identity: upstream's `{ key, started }` where
+/// `key = \`${message.id}:${part.id}\`` (`index.tsx:1908`). A metadata update
+/// that leaves the identity untouched must not re-arm the delay.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkIdentity {
+    pub message_id: String,
+    pub part_id: String,
+    pub started_ms: u64,
+}
+
+impl WorkIdentity {
+    #[must_use]
+    pub fn of(tool: &RunningTool) -> Self {
+        Self {
+            message_id: tool.message_id.clone(),
+            part_id: tool.part_id.clone(),
+            started_ms: tool.started_ms,
+        }
+    }
+
+    /// Upstream composite key (`index.tsx:1908`).
+    #[must_use]
+    pub fn key(&self) -> String {
+        format!("{}:{}", self.message_id, self.part_id)
+    }
+}
+
+/// `createDelayedPresence` for the background hint (`util/delayed-presence.ts`).
+///
+/// The delay is `max(0, 3000 - (now - started))` measured from the work's own
+/// start identity (`index.tsx:1910-1914`), so a tool that was already running
+/// when the view mounted shows immediately and a fresh one waits out the
+/// remainder. Identity equality holds the hint (and its pending timer) in
+/// place, which is how metadata updates avoid flicker; work that finishes or
+/// is replaced by different work disappears at once.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BackgroundHint {
+    identity: Option<WorkIdentity>,
+    visible: bool,
+    deadline: Option<u64>,
+}
+
+impl BackgroundHint {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Feed the current candidate at `now_ms`.
+    ///
+    /// Returns true when the source identity changed (the upstream effect
+    /// re-ran).
+    pub fn update(&mut self, now_ms: u64, candidate: Option<&RunningTool>) -> bool {
+        let next = candidate.map(WorkIdentity::of);
+        if next == self.identity {
+            return false;
+        }
+        self.identity = next;
+        self.visible = false;
+        self.deadline = None;
+        if let Some(identity) = &self.identity {
+            let remaining =
+                BACKGROUND_HINT_DELAY_MS.saturating_sub(now_ms.saturating_sub(identity.started_ms));
+            if remaining == 0 {
+                self.visible = true;
+            } else {
+                self.deadline = Some(now_ms.saturating_add(remaining));
+            }
+        }
+        true
+    }
+
+    /// Fire the pending delay.
+    pub fn tick(&mut self, now_ms: u64) {
+        if let Some(deadline) = self.deadline {
+            if now_ms >= deadline {
+                self.deadline = None;
+                self.visible = true;
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn visible(&self) -> bool {
+        self.visible
+    }
+
+    /// Absolute deadline of the pending delay, if any.
+    #[must_use]
+    pub fn deadline_ms(&self) -> Option<u64> {
+        self.deadline
+    }
+
+    #[must_use]
+    pub fn identity(&self) -> Option<&WorkIdentity> {
+        self.identity.as_ref()
+    }
+
+    /// Hint line, or `None` while hidden or when the shortcut is unbound
+    /// (`index.tsx:1916`: `visible() && shortcut()`).
+    #[must_use]
+    pub fn text(&self, shortcut: &str) -> Option<String> {
+        if !self.visible || shortcut.is_empty() {
+            return None;
+        }
+        Some(format!(
+            "{BACKGROUND_HINT_PREFIX}{shortcut}{BACKGROUND_HINT_SUFFIX}"
+        ))
+    }
+
+    /// Hint spans: muted prefix, `text.base` shortcut, muted suffix
+    /// (`index.tsx:1919-1921`).
+    #[must_use]
+    pub fn spans<'a>(&self, shortcut: &'a str) -> Option<[(&'a str, bool); 3]> {
+        if !self.visible || shortcut.is_empty() {
+            return None;
+        }
+        Some([
+            (BACKGROUND_HINT_PREFIX, true),
+            (shortcut, false),
+            (BACKGROUND_HINT_SUFFIX, true),
+        ])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -795,6 +977,97 @@ mod tests {
             free_limit_notice(None)[1],
             "Upgrade to OpenCode Go → /connect · Switch model → /models"
         );
+    }
+
+    #[test]
+    fn t15_background_hint_waits_three_seconds_from_the_work_start() {
+        let tool = RunningTool::new("m1", "p1", "shell", "running", 0);
+        let mut hint = BackgroundHint::new();
+        assert!(hint.update(0, Some(&tool)));
+        assert!(!hint.visible());
+        assert_eq!(hint.deadline_ms(), Some(BACKGROUND_HINT_DELAY_MS));
+        hint.tick(2_999);
+        assert!(!hint.visible(), "absent before 3 seconds");
+        assert_eq!(hint.text("ctrl+b"), None);
+        hint.tick(3_000);
+        assert!(hint.visible(), "appears at exactly 3 seconds");
+        assert_eq!(
+            hint.text("ctrl+b").as_deref(),
+            Some("Press ctrl+b to move running work to the background")
+        );
+        assert_eq!(
+            hint.spans("ctrl+b"),
+            Some([
+                ("Press ", true),
+                ("ctrl+b", false),
+                (" to move running work to the background", true),
+            ])
+        );
+        // An unbound shortcut renders nothing (`index.tsx:1916`).
+        assert_eq!(hint.text(""), None);
+        assert_eq!(hint.spans(""), None);
+    }
+
+    #[test]
+    fn t15_background_hint_measures_the_remainder_for_late_mounts() {
+        let already_long = RunningTool::new("m1", "p1", "subagent", "running", 0);
+        let mut hint = BackgroundHint::new();
+        hint.update(10_000, Some(&already_long));
+        assert!(
+            hint.visible(),
+            "work older than the delay shows immediately (delay clamps at 0)"
+        );
+        assert_eq!(hint.deadline_ms(), None);
+
+        let young = RunningTool::new("m1", "p1", "shell", "running", 9_000);
+        let mut hint = BackgroundHint::new();
+        hint.update(10_000, Some(&young));
+        assert!(!hint.visible());
+        assert_eq!(hint.deadline_ms(), Some(12_000), "3000 - (10000 - 9000)");
+    }
+
+    #[test]
+    fn t15_background_hint_survives_metadata_updates_and_clears_with_the_work() {
+        let tool = RunningTool::new("m1", "p1", "shell", "running", 0);
+        let mut hint = BackgroundHint::new();
+        hint.update(0, Some(&tool));
+        hint.tick(3_000);
+        assert!(hint.visible());
+        let identity = hint.identity().cloned();
+        // Same message/part/start: no effect re-run, so no flicker.
+        assert!(!hint.update(3_500, Some(&tool)));
+        assert!(hint.visible());
+        assert_eq!(hint.identity().cloned(), identity);
+
+        // Completion removes the hint immediately.
+        assert!(hint.update(4_000, None));
+        assert!(!hint.visible());
+        assert_eq!(hint.identity(), None);
+
+        // Replacement by different work restarts the delay from that work's
+        // own start time, even though the previous hint was visible.
+        let other = RunningTool::new("m2", "p9", "shell", "running", 4_000);
+        assert!(hint.update(4_000, Some(&other)));
+        assert!(!hint.visible(), "a replaced subject must not inherit visibility");
+        hint.tick(7_000);
+        assert!(hint.visible());
+    }
+
+    #[test]
+    fn t15_background_candidate_selects_only_running_shell_or_subagent() {
+        let parts = vec![
+            RunningTool::new("m1", "p0", "read", "running", 0),
+            RunningTool::new("m1", "p1", "shell", "completed", 0),
+            RunningTool::new("m1", "p2", "bash", "running", 0),
+            RunningTool::new("m1", "p3", "subagent", "running", 10),
+            RunningTool::new("m1", "p4", "shell", "running", 20),
+        ];
+        let candidate = background_candidate(&parts).expect("subagent qualifies");
+        assert_eq!(candidate.part_id, "p3", "the first eligible part wins");
+        assert_eq!(WorkIdentity::of(candidate).key(), "m1:p3");
+        assert!(!RunningTool::new("m", "p", "shell", "error", 0).is_eligible());
+        assert!(background_candidate(&[]).is_none());
+        assert!(background_candidate(&parts[..2]).is_none());
     }
 
     #[test]
