@@ -94,6 +94,24 @@
 //!    `packages/tui/src/app.tsx:1402-1443` renders `<Home />` in the main
 //!    column. No page row list is fabricated for home and no existing render
 //!    output changes.
+//! 6. v6 (wave-6 reachability): additive [`Page::ImagePreview`] and
+//!    [`Page::Graph`] route the two previously un-consumed models through this
+//!    same page pattern — `PageState`, `PageRow` and `render_styled`; there is
+//!    no parallel page system. [`PageState::open_image_preview`] wraps
+//!    `crate::native_image_preview::PreviewSurface` (header, aspect-fit body
+//!    box, `No preview` / unsupported-protocol placeholders, mention caption,
+//!    previous/next actions) and [`PageState::open_graph`] wraps
+//!    `crate::native_graph::GraphPanel` (label gutter, depth axis, series rows,
+//!    legend, empty/unsupported/syntax/oversize notes, horizontal drag). Both
+//!    are read-only: `activate()` answers [`PageAction::None`] and neither owns
+//!    a backend request. They carry **no static route** because upstream has
+//!    none — the preview is a dialog (`component/dialog-image-preview.tsx`)
+//!    and the diagram is inline fenced markdown
+//!    (`packages/merman/src/markdown.ts`) — so no slash command is invented;
+//!    the integrator opens them from the gallery cell click
+//!    (`component/prompt/index.tsx:1727-1734`) and the Mermaid fence. The tab
+//!    order grows 15 -> 17 with both variants appended after `Compaction`, and
+//!    the `ORDER` fixture in the tests below is updated accordingly.
 
 /// Maximum rows retained after `set_rows` (first 512 kept, deterministically).
 pub const MAX_ROWS: usize = 512;
@@ -162,6 +180,16 @@ pub const COMMAND_ROUTES: [(&str, &str); 14] = [
 /// A reachable page of the shell. `Chat` is the default and `close()` target
 /// (the home page carries no static route); [`Page::Sessions`] owns
 /// `/sessions` and is fed by the real sessions backend.
+///
+/// [`Page::ImagePreview`] and [`Page::Graph`] are read-only *view* pages: they
+/// render the models owned by `crate::native_image_preview` and
+/// `crate::native_graph` and are opened by
+/// [`PageState::open_image_preview`] / [`PageState::open_graph`] (the
+/// upstream triggers: a gallery cell click, `component/prompt/index.tsx:1727`
+/// and `routes/session/index.tsx:2691`, and a Mermaid fence). They carry no
+/// static route because upstream has none — the preview is a dialog
+/// (`component/dialog-image-preview.tsx`) and the diagram is inline
+/// (`packages/merman/src/markdown.ts`) — so no slash command is invented.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Page {
     Chat,
@@ -179,11 +207,13 @@ pub enum Page {
     Commands,
     Memory,
     Compaction,
+    ImagePreview,
+    Graph,
 }
 
 impl Page {
     /// Tab/page cycling order.
-    pub const ORDER: [Page; 15] = [
+    pub const ORDER: [Page; 17] = [
         Page::Chat,
         Page::Sessions,
         Page::Help,
@@ -199,6 +229,8 @@ impl Page {
         Page::Commands,
         Page::Memory,
         Page::Compaction,
+        Page::ImagePreview,
+        Page::Graph,
     ];
 
     /// Page title (a page always renders rows too — a heading alone never
@@ -221,6 +253,8 @@ impl Page {
             Page::Commands => "Commands",
             Page::Memory => "Memory",
             Page::Compaction => "Compaction",
+            Page::ImagePreview => "Image preview",
+            Page::Graph => "Graph",
         }
     }
 
@@ -256,6 +290,9 @@ impl Page {
             Page::Commands => None,
             Page::Memory => Some("/memory"),
             Page::Compaction => Some("/compaction"),
+            // No upstream route: the preview is a dialog and the graph is
+            // inline diagram content (see the `Page` doc comment).
+            Page::ImagePreview | Page::Graph => None,
         }
     }
 
@@ -285,7 +322,9 @@ impl Page {
             Page::Context => Page::Commands,
             Page::Commands => Page::Memory,
             Page::Memory => Page::Compaction,
-            Page::Compaction => Page::Chat,
+            Page::Compaction => Page::ImagePreview,
+            Page::ImagePreview => Page::Graph,
+            Page::Graph => Page::Chat,
         }
     }
 
@@ -293,7 +332,7 @@ impl Page {
     #[must_use]
     pub const fn prev(self) -> Page {
         match self {
-            Page::Chat => Page::Compaction,
+            Page::Chat => Page::Graph,
             Page::Sessions => Page::Chat,
             Page::Help => Page::Sessions,
             Page::Models => Page::Help,
@@ -308,7 +347,18 @@ impl Page {
             Page::Commands => Page::Context,
             Page::Memory => Page::Commands,
             Page::Compaction => Page::Memory,
+            Page::ImagePreview => Page::Compaction,
+            Page::Graph => Page::ImagePreview,
         }
+    }
+
+    /// Whether this page renders a read-only model surface
+    /// (`crate::native_image_preview` / `crate::native_graph`) instead of a
+    /// selectable row list. Such pages own no search field, no selection and
+    /// no backend intent.
+    #[must_use]
+    pub const fn is_view_surface(self) -> bool {
+        matches!(self, Self::ImagePreview | Self::Graph)
     }
 }
 
@@ -332,7 +382,9 @@ mod searchable_selection_tests {
     #[test]
     fn compaction_settings_page_route_is_reachable() {
         assert_eq!(Page::from_route("/compaction").map(Page::title), Some("Compaction"));
-        assert_eq!(Page::ORDER.len(), 15);
+        // Fixture update (v6): the two read-only view surfaces are appended to
+        // the tab order after Compaction; no existing page moved.
+        assert_eq!(Page::ORDER.len(), 17);
         assert_eq!(
             &Page::ORDER[..14],
             &[
@@ -352,8 +404,20 @@ mod searchable_selection_tests {
                 Page::Memory,
             ][..]
         );
-        assert_eq!(Page::ORDER.last().copied().map(Page::title), Some("Compaction"));
-        assert_eq!(Page::ORDER.last().copied().and_then(Page::route), Some("/compaction"));
+        assert_eq!(Page::ORDER[14], Page::Compaction);
+        assert_eq!(&Page::ORDER[15..], &[Page::ImagePreview, Page::Graph]);
+        assert_eq!(Page::ORDER.last().copied(), Some(Page::Graph));
+        assert_eq!(Page::ORDER[14].route(), Some("/compaction"));
+        // View surfaces carry no static route (upstream has none): they are
+        // reached through `open_image_preview` / `open_graph` and the tab order.
+        for page in [Page::ImagePreview, Page::Graph] {
+            assert!(page.is_view_surface());
+            assert_eq!(page.route(), None);
+            assert!(!page.is_home());
+            assert!(!page.accepts_search());
+            assert!(!Page::Chat.is_view_surface());
+            assert!(!Page::Compaction.is_view_surface());
+        }
         for page in Page::ORDER {
             if let Some(route) = page.route() {
                 assert_eq!(Page::from_route(route), Some(page));
@@ -514,7 +578,8 @@ pub enum Ack {
 // ── State ─────────────────────────────────────────────────────────────
 
 /// Page state: current page, bounded backend rows, byte-safe search, stable
-/// id selection, frontend theme, last error, pending intent.
+/// id selection, frontend theme, last error, pending intent, plus the two
+/// read-only model surfaces (image preview, graph).
 #[derive(Clone, Debug)]
 pub struct PageState {
     current: Page,
@@ -526,6 +591,10 @@ pub struct PageState {
     theme: String,
     error: Option<String>,
     pending: Option<PageAction>,
+    /// Image-preview surface (`crate::native_image_preview`).
+    preview: Option<crate::native_image_preview::PreviewSurface>,
+    /// Graph surface (`crate::native_graph`).
+    graph: Option<crate::native_graph::GraphPanel>,
 }
 
 impl Default for PageState {
@@ -539,6 +608,8 @@ impl Default for PageState {
             theme: DEFAULT_THEME.to_owned(),
             error: None,
             pending: None,
+            preview: None,
+            graph: None,
         }
     }
 }
@@ -702,12 +773,154 @@ impl PageState {
             .then(|| crate::native_home::layout(cols, rows, inputs))
     }
 
+    // ── read-only model surfaces (image preview / graph) ───────────────
+
+    /// Open the image-preview surface for `images` and switch to
+    /// [`Page::ImagePreview`].
+    ///
+    /// Mirrors the upstream dialog: the requested initial index is clamped
+    /// (`component/dialog-image-preview.tsx:16`) and opening with no image is a
+    /// no-op that leaves the current page, rows and pending intent untouched
+    /// (`component/prompt/index.tsx:403-406` returns before opening). `protocol`
+    /// is the terminal image protocol the native bridge negotiated; the dialog
+    /// itself is `fit="fit"` (`dialog-image-preview.tsx:78`). Returns whether a
+    /// surface was opened.
+    pub fn open_image_preview(
+        &mut self,
+        images: Vec<crate::native_image_preview::PreviewImage>,
+        initial: i64,
+        protocol: crate::native_image_preview::ImageProtocol,
+    ) -> bool {
+        let Some(state) = crate::native_image_preview::ImagePreviewState::open(images, initial)
+        else {
+            return false;
+        };
+        self.preview = Some(crate::native_image_preview::PreviewSurface::dialog(
+            state, protocol, None,
+        ));
+        self.open(Page::ImagePreview);
+        true
+    }
+
+    /// The loaded preview surface (geometry + state), if any.
+    #[must_use]
+    pub fn preview(&self) -> Option<&crate::native_image_preview::PreviewSurface> {
+        self.preview.as_ref()
+    }
+
+    /// Previous/next image, wrapping only when more than one image exists
+    /// (`dialog-image-preview.tsx:24-28`). `false` when no surface is loaded.
+    pub fn preview_move(&mut self, direction: i64) -> bool {
+        match self.preview.as_mut() {
+            Some(surface) => {
+                surface.state_mut().move_by(direction);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Record a decode failure; the caption becomes `No preview` in the error
+    /// role and the image box disappears (`dialog-image-preview.tsx:54-57`).
+    pub fn preview_failed(&mut self) -> bool {
+        match self.preview.as_mut() {
+            Some(surface) => {
+                surface.state_mut().mark_failed();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Update the negotiated terminal image protocol (a terminal that cannot
+    /// draw images renders the explicit placeholder row).
+    pub fn set_image_protocol(
+        &mut self,
+        protocol: crate::native_image_preview::ImageProtocol,
+    ) -> bool {
+        match self.preview.as_mut() {
+            Some(surface) => {
+                surface.set_protocol(protocol);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Supply the decoded image size so the body box is aspect-preserved;
+    /// `None` leaves the painter's own fallback in charge.
+    pub fn set_image_natural_size(
+        &mut self,
+        natural: Option<crate::native_image_preview::ImageSize>,
+    ) -> bool {
+        match self.preview.as_mut() {
+            Some(surface) => {
+                surface.set_natural(natural);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Load the session graph (a `crate::native_graph::GraphView` projection,
+    /// e.g. `from_family`) and switch to [`Page::Graph`]. The panel keeps the
+    /// projection's focus/pan; geometry is computed at render time.
+    pub fn open_graph(&mut self, graph: crate::native_graph::GraphView) {
+        self.graph = Some(crate::native_graph::GraphPanel::new(graph));
+        self.open(Page::Graph);
+    }
+
+    /// Replace the graph surface's status/message (unsupported fence, syntax
+    /// error, oversized canvas) while keeping the last good frame. `false`
+    /// when no graph is loaded.
+    pub fn set_graph_status(
+        &mut self,
+        status: crate::native_graph::PanelStatus,
+        message: Option<&str>,
+    ) -> bool {
+        match self.graph.as_mut() {
+            Some(panel) => {
+                panel.set_status(status, message);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The loaded graph surface, if any.
+    #[must_use]
+    pub fn graph(&self) -> Option<&crate::native_graph::GraphPanel> {
+        self.graph.as_ref()
+    }
+
+    /// Horizontal drag of the graph frame in cells (`audit-messages.md:82`:
+    /// dragging changes `scrollX`; it clamps at zero and never wraps).
+    pub fn graph_scroll_x(&mut self, delta: i32) -> bool {
+        match self.graph.as_mut() {
+            Some(panel) => {
+                panel.scroll_x_by(delta);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Cursor navigation inside the graph (`crate::native_graph::NavDir`).
+    pub fn graph_navigate(&mut self, direction: crate::native_graph::NavDir) -> bool {
+        match self.graph.as_mut() {
+            Some(panel) => {
+                panel.view_mut().navigate(direction);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// The stored frontend theme marker (no persistence from here).
     #[must_use]
     pub fn theme(&self) -> &str {
         &self.theme
     }
-
     /// Store a supported theme marker in frontend state. `false` (state
     /// unchanged) for markers the existing palette does not support.
     pub fn set_theme(&mut self, marker: &str) -> bool {
@@ -749,6 +962,14 @@ impl PageState {
     #[must_use]
     pub fn activate(&mut self) -> PageAction {
         let page = self.current;
+        // Read-only view surfaces have no backend intent and no selection:
+        // the preview dialog's own bindings are `left`/`right`
+        // (`dialog-image-preview.tsx:30-38`) and the graph uses its cursor.
+        // Never a request, never a pretend ACK.
+        if page.is_view_surface() {
+            self.pending = None;
+            return PageAction::None;
+        }
         let selected = self.selected().cloned();
         let Some(row) = selected else {
             self.pending = None;
@@ -837,6 +1058,9 @@ impl PageState {
         if height == 0 || width == 0 {
             return Vec::new();
         }
+        if self.current.is_view_surface() {
+            return self.render_view_surface(width, height);
+        }
         let visible = self.visible();
         let line = |text: &str, role, detail_from| Line { text: clip_chars(text, width), role, detail_from };
         let mut out = Vec::with_capacity(height.min(64));
@@ -923,6 +1147,65 @@ impl PageState {
     }
 
     // ── internals ─────────────────────────────────────────────────────
+
+    /// Render the read-only model surface of [`Page::ImagePreview`] /
+    /// [`Page::Graph`]. The owning model is asked for its rows at the live
+    /// content box, so geometry is computed exactly once; the painter reuses
+    /// `crate::native_image_preview::PreviewSurface::image_box` for the image
+    /// region and `crate::native_graph::GraphPanel::view` for hit testing.
+    /// With no model loaded the page states that honestly instead of painting
+    /// an empty success.
+    fn render_view_surface(
+        &self,
+        width: usize,
+        height: usize,
+    ) -> Vec<crate::native_ui_style::Line> {
+        use crate::native_ui_style::{Line, Role};
+        let width16 = u16::try_from(width).unwrap_or(u16::MAX);
+        let height16 = u16::try_from(height).unwrap_or(u16::MAX);
+        let line = |text: String, role| Line {
+            text: clip_chars(&text, width),
+            role,
+            detail_from: None,
+        };
+        let mut out: Vec<Line> = if self.current == Page::ImagePreview {
+            match self.preview.as_ref() {
+                Some(surface) => surface
+                    .rows(width16, height16)
+                    .into_iter()
+                    .map(|row| line(row.text, preview_role(row.role)))
+                    .collect(),
+                None => vec![
+                    line(self.current.title().to_owned(), Role::Heading),
+                    line(
+                        "no image attached to this session".to_owned(),
+                        Role::Description,
+                    ),
+                ],
+            }
+        } else {
+            match self.graph.as_ref() {
+                Some(panel) => panel
+                    .rows(width16, height16)
+                    .into_iter()
+                    .map(|row| line(row.text, panel_role(row.role)))
+                    .collect(),
+                None => vec![
+                    line(self.current.title().to_owned(), Role::Heading),
+                    line(
+                        "no graph loaded for this session".to_owned(),
+                        Role::Description,
+                    ),
+                    line(
+                        crate::native_graph::GraphPanel::FOOTER.to_owned(),
+                        Role::Hint,
+                    ),
+                ],
+            }
+        };
+        out.truncate(height);
+        out
+    }
 
     /// Visible row indices for the current page and search filter.
     fn visible(&self) -> Vec<usize> {
@@ -1012,6 +1295,38 @@ pub fn theme_supported(marker: &str) -> bool {
     SUPPORTED_THEMES
         .iter()
         .any(|supported| *supported == marker)
+}
+
+/// Map a preview-surface role onto the shared typography roles: the header is
+/// a heading, the mention/caption is a description, `No preview` and the
+/// unsupported-protocol placeholder are errors, and the action row is a hint.
+fn preview_role(role: crate::native_image_preview::PreviewRole) -> crate::native_ui_style::Role {
+    use crate::native_image_preview::PreviewRole;
+    use crate::native_ui_style::Role;
+    match role {
+        PreviewRole::Heading => Role::Heading,
+        PreviewRole::Body => Role::Item,
+        PreviewRole::Caption => Role::Description,
+        PreviewRole::Error => Role::Error,
+        PreviewRole::Hint => Role::Hint,
+    }
+}
+
+/// Map a graph-panel role onto the shared typography roles: axis and legend
+/// are secondary descriptions, series rows are items, and the empty/syntax/
+/// oversize notes distinguish informational from failed states.
+fn panel_role(role: crate::native_graph::PanelRole) -> crate::native_ui_style::Role {
+    use crate::native_graph::PanelRole;
+    use crate::native_ui_style::Role;
+    match role {
+        PanelRole::Heading => Role::Heading,
+        PanelRole::Axis => Role::Description,
+        PanelRole::Gutter | PanelRole::Body => Role::Item,
+        PanelRole::Legend => Role::Description,
+        PanelRole::Note => Role::Description,
+        PanelRole::Error => Role::Error,
+        PanelRole::Hint => Role::Hint,
+    }
 }
 
 /// Byte-bounded cut that never splits a UTF-8 character (storage bounds).
@@ -1800,5 +2115,200 @@ mod tests {
         assert!(state
             .home_shell(80, 24, crate::native_home::HomeInputs::default())
             .is_some());
+    }
+
+    // ── v6 (image preview + graph reachability) ─────────────────────────
+
+    fn preview_images(count: usize) -> Vec<crate::native_image_preview::PreviewImage> {
+        (0..count)
+            .map(|index| {
+                crate::native_image_preview::PreviewImage::with_mention(
+                    format!("data:image/png;base64,{index}"),
+                    format!("[Image {}]", index + 1),
+                )
+            })
+            .collect()
+    }
+
+    // MEDIA-001 on the real route: the preview page renders the dialog
+    // surface, an honest empty state, and every failure fallback.
+    #[test]
+    fn image_preview_page_renders_surface_and_honest_empty_state() {
+        use crate::native_image_preview::{ImageProtocol, ImageSize};
+        use crate::native_ui_style::Role;
+
+        let mut state = PageState::new();
+        state.open(Page::ImagePreview);
+        let rows = state.render(80, 8);
+        assert_eq!(rows[0], "Image preview");
+        assert!(rows.iter().any(|line| line.contains("no image attached")));
+        assert_eq!(state.activate(), PageAction::None);
+        assert!(!state.preview_move(1), "no surface loaded");
+        assert!(!state.preview_failed());
+
+        // Opening from a gallery cell clamps the initial index.
+        assert!(state.open_image_preview(preview_images(3), 9, ImageProtocol::Kitty));
+        assert_eq!(state.page(), Page::ImagePreview);
+        assert!(state.set_image_natural_size(Some(ImageSize::new(16, 9))));
+        let lines = state.render_styled(60, 12);
+        assert_eq!(lines[0].text, "Image 3 of 3");
+        assert_eq!(lines[0].role, Role::Heading);
+        assert!(lines
+            .iter()
+            .any(|line| line.text == "[Image 3]" && line.role == Role::Description));
+        assert_eq!(lines[11].text, "← previous    next →");
+        assert_eq!(lines[11].role, Role::Hint);
+        // The painter reuses the same box geometry the rows were built from.
+        let box_ = state.preview().expect("surface").image_box(60, 12).expect("box");
+        assert_eq!((box_.width, box_.height), (16, 9));
+
+        // Decode failure: `No preview` in the error role; navigation clears it.
+        assert!(state.preview_failed());
+        let lines = state.render_styled(60, 12);
+        assert!(lines
+            .iter()
+            .any(|line| line.text.trim() == "No preview" && line.role == Role::Error));
+        assert!(state.preview_move(1));
+        assert_eq!(state.preview().expect("surface").state().index(), 0, "wraps 2 -> 0");
+        assert!(!state.preview().expect("surface").state().failed());
+
+        // A terminal without an image protocol states it instead of painting
+        // a blank success.
+        assert!(state.set_image_protocol(ImageProtocol::None));
+        assert!(state
+            .render(60, 12)
+            .iter()
+            .any(|line| line.contains("terminal cannot draw images")));
+
+        // Opening with no image changes nothing (no page switch, no surface).
+        let before = state.page();
+        assert!(!state.open_image_preview(Vec::new(), 0, ImageProtocol::Kitty));
+        assert_eq!(state.page(), before);
+        assert!(state.preview().is_some());
+
+        // Bounds hold at every degenerate size.
+        for width in [0usize, 1, 5, 40] {
+            for height in [0usize, 1, 2, 6] {
+                let lines = state.render(width, height);
+                assert!(lines.len() <= height);
+                for line in &lines {
+                    assert!(line.chars().count() <= width, "{line:?}");
+                }
+            }
+        }
+    }
+
+    // MD-008 on the real route: the graph page paints the panel (gutter, axis,
+    // series rows, legend), reaches focus/pan, and states empty/error cases.
+    #[test]
+    fn graph_page_renders_panel_and_honest_empty_state() {
+        use crate::native_graph::{FamilyNode, GraphView, NavDir, NodeStatus, PanelStatus};
+        use crate::native_ui_style::Role;
+
+        let mut state = PageState::new();
+        state.open(Page::Graph);
+        let rows = state.render(80, 10);
+        assert_eq!(rows[0], "Graph");
+        assert!(rows.iter().any(|line| line.contains("no graph loaded")));
+        assert_eq!(state.activate(), PageAction::None);
+        assert!(!state.graph_scroll_x(4), "no surface loaded");
+        assert!(!state.graph_navigate(NavDir::Down));
+        assert!(!state.set_graph_status(PanelStatus::Empty, None));
+
+        let family = vec![
+            FamilyNode::new("a", "Alpha", NodeStatus::Running),
+            FamilyNode::new("a1", "Beta", NodeStatus::Done).with_parent("a"),
+        ];
+        state.open_graph(GraphView::from_family(&family, 80, 24));
+        assert_eq!(state.page(), Page::Graph);
+        let lines = state.render_styled(80, 14);
+        assert_eq!(lines[0].text, "Graph · 2 nodes · 1 edges");
+        assert_eq!(lines[0].role, Role::Heading);
+        assert_eq!(lines[1].text, "Legend: Session 1 · Subagent 1");
+        assert_eq!(lines[1].role, Role::Description);
+        assert!(lines.iter().any(|line| line.text.contains('┬')), "depth axis");
+        assert_eq!(lines[13].role, Role::Hint);
+
+        // The surface is the model: focus and horizontal drag reach it.
+        let before = state
+            .graph()
+            .expect("panel")
+            .view()
+            .focused_id()
+            .map(str::to_owned);
+        assert!(state.graph_navigate(NavDir::Right));
+        assert_ne!(
+            state
+                .graph()
+                .expect("panel")
+                .view()
+                .focused_id()
+                .map(str::to_owned),
+            before
+        );
+        assert!(state.graph_scroll_x(6));
+        assert_eq!(state.graph().expect("panel").scroll_x(), 6);
+
+        // A syntax failure names the problem and keeps the last good frame.
+        assert!(state.set_graph_status(PanelStatus::SyntaxError, Some("unexpected token")));
+        let lines = state.render_styled(80, 8);
+        assert!(lines
+            .iter()
+            .any(|line| line.text.contains("diagram error: unexpected token") && line.role == Role::Error));
+        assert_eq!(state.graph().expect("panel").view().node_count(), 2);
+
+        for width in [0usize, 1, 6, 50] {
+            for height in [0usize, 1, 3, 9] {
+                let lines = state.render(width, height);
+                assert!(lines.len() <= height);
+                for line in &lines {
+                    assert!(line.chars().count() <= width, "{line:?}");
+                }
+            }
+        }
+        assert_eq!(state.activate(), PageAction::None);
+        assert!(state.pending().is_none());
+    }
+
+    // View surfaces are additive: row pages keep their snapshot, foreign rows
+    // never render on a view page, and the tab order still round-trips home.
+    #[test]
+    fn view_pages_leave_row_state_untouched_and_close_to_home() {
+        let mut state = PageState::new();
+        state.open(Page::Models);
+        state.set_rows(vec![row("gpt-5.6", "GPT-5.6", "openai")]);
+        assert!(state.open_image_preview(
+            vec![crate::native_image_preview::PreviewImage::new(
+                "data:image/png;base64,AA"
+            )],
+            0,
+            crate::native_image_preview::ImageProtocol::Kitty,
+        ));
+        assert_eq!(state.page(), Page::ImagePreview);
+        assert_eq!(state.rows().len(), 1, "row snapshot survives the view page");
+        assert!(state.filtered().is_empty());
+        // The view page never mixes foreign rows into its surface.
+        assert!(!state
+            .render(80, 6)
+            .iter()
+            .any(|line| line.contains("GPT-5.6")));
+
+        // Closing returns to the routeless home page and keeps the model.
+        state.close();
+        assert!(state.is_home());
+        assert!(state.preview().is_some());
+        assert_eq!(state.rows().len(), 1);
+
+        // Both view pages stay in the tab cycle, and the cycle closes.
+        let mut page = Page::Chat;
+        let mut seen = Vec::new();
+        for _ in Page::ORDER {
+            seen.push(page);
+            page = page.next();
+        }
+        assert_eq!(seen, Page::ORDER.to_vec());
+        assert_eq!(page, Page::Chat);
+        assert!(seen.contains(&Page::ImagePreview));
+        assert!(seen.contains(&Page::Graph));
     }
 }

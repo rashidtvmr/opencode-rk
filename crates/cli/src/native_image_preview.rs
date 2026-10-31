@@ -22,6 +22,16 @@
 //!
 //! MEDIA-001 has no kit fixture; the tests below are authored cases.
 //! Pure model: filesystem work is behind [`LocalFiles`] and no IO happens here.
+//!
+//! v2 (wave-6 reachability): [`PreviewSurface`] is the rendered half of the
+//! preview dialog — size negotiation, aspect-preserving [`fit_box`], the body
+//! placeholder for a terminal that cannot draw images, the metadata caption
+//! row and the previous/next action row. It is consumed by
+//! `crate::native_view_pages::Page::ImagePreview` through
+//! `PageState::open_image_preview`, so the model is reachable from the page
+//! router instead of only from tests. Upstream evidence for the surface is
+//! repeated next to [`PreviewSurface`]; it remains the dialog of
+//! `component/dialog-image-preview.tsx`, not a route of its own.
 
 use std::collections::HashMap;
 
@@ -539,6 +549,340 @@ impl ImagePreviewState {
             .saturating_sub(PREVIEW_VERTICAL_CHROME)
             .max(PREVIEW_IMAGE_MIN_HEIGHT)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Preview surface: fit/protocol negotiation, body box, caption and actions
+// ---------------------------------------------------------------------------
+//
+// This is the renderable half of the preview dialog: the rows a page emits for
+// an image part, plus the cell box the painter composites the real image into.
+// All geometry is computed once here; the page (crate::native_view_pages)
+// renders these rows and never recomputes the box.
+//
+// Upstream evidence (pin 450e7b92412c780a7b5a75226bb8d49aaca24e22):
+// - `component/dialog-image-preview.tsx:70-80`: the body is a single `<image>`
+//   with `fit="fit"`, `protocol="auto"`, `width="100%"` and
+//   `height={max(3, height - 8)}` (`:19`).
+// - `component/dialog-image-preview.tsx:52` header `Image N of M`; `:54-57`
+//   footer child (`No preview` in `feedback.error.base`, else the mention text
+//   or `Image N` in `text.muted`); `:43-51` previous/next actions only when
+//   more than one image; `:60-72` legacy footer `← previous` / `next →`.
+// - `component/prompt/index.tsx:1717-1718,1732-1739`: gallery cells are
+//   `height() x height()*2` and use `fit="cover"`; `:1724-1732` a decode
+//   failure renders the muted `No preview` fallback instead of the image.
+// - `routes/session/index.tsx:2686-2705`: the tool gallery has the same
+//   `fit="cover"` cells and the same `No preview` fallback.
+//
+// Deviation, not parity: the pin renders through OpenTUI with
+// `protocol="auto"`; the negotiated protocol lives in the native bridge, which
+// this pure module cannot inspect. [`ImageProtocol::None`] therefore emits an
+// explicit muted placeholder row instead of a silently blank box, so a
+// terminal that cannot draw images never looks like an empty success.
+
+/// Image drawing protocol negotiated with the terminal.
+///
+/// Upstream asks for `protocol="auto"` (`dialog-image-preview.tsx:77`,
+/// `prompt/index.tsx:1735`, `routes/session/index.tsx:2699`) and lets OpenTUI
+/// pick kitty/iTerm2/sixel. The native bridge owns that negotiation; this
+/// module only needs to know whether the chosen protocol can draw.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImageProtocol {
+    Kitty,
+    Iterm2,
+    Sixel,
+    /// No terminal image protocol is available.
+    None,
+}
+
+impl ImageProtocol {
+    #[must_use]
+    pub fn draws(self) -> bool {
+        !matches!(self, Self::None)
+    }
+}
+
+/// `fit` mode of an image renderable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewFit {
+    /// `fit="fit"`: aspect-preserving contain inside the cell box
+    /// (`dialog-image-preview.tsx:78`).
+    Fit,
+    /// `fit="cover"`: fill the cell box and crop the overflow
+    /// (`prompt/index.tsx:1736`, `routes/session/index.tsx:2699`).
+    Cover,
+}
+
+/// Decoded image size in terminal cells. Caller-fed: decoding is not modeled
+/// by this module.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImageSize {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl ImageSize {
+    #[must_use]
+    pub fn new(width: u32, height: u32) -> Self {
+        Self { width, height }
+    }
+}
+
+/// The cell box an image occupies inside its available area.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FitBox {
+    pub width: u16,
+    pub height: u16,
+}
+
+/// Aspect-preserving fit of `natural` inside `avail_width` x `avail_height`.
+///
+/// `PreviewFit::Fit` is the OpenTUI contain behavior of
+/// `dialog-image-preview.tsx:78`: the box keeps the image's aspect ratio and
+/// touches the tighter of the two available edges. `PreviewFit::Cover` fills
+/// the whole available box (`prompt/index.tsx:1736`). A zero available edge
+/// yields a zero box; an unknown natural size (`0`) yields the whole area so
+/// the painter's own fallback decides.
+#[must_use]
+pub fn fit_box(
+    avail_width: u16,
+    avail_height: u16,
+    natural: ImageSize,
+    fit: PreviewFit,
+) -> FitBox {
+    if avail_width == 0 || avail_height == 0 {
+        return FitBox {
+            width: 0,
+            height: 0,
+        };
+    }
+    if natural.width == 0 || natural.height == 0 {
+        return FitBox {
+            width: avail_width,
+            height: avail_height,
+        };
+    }
+    if fit == PreviewFit::Cover {
+        return FitBox {
+            width: avail_width,
+            height: avail_height,
+        };
+    }
+    let natural_width = u64::from(natural.width);
+    let natural_height = u64::from(natural.height);
+    // Height when the box spans the full width, rounded half up.
+    let height_at_full_width =
+        (u64::from(avail_width) * natural_height + natural_width / 2) / natural_width;
+    if height_at_full_width <= u64::from(avail_height) {
+        return FitBox {
+            width: avail_width,
+            height: u16::try_from(height_at_full_width).unwrap_or(avail_height).max(1),
+        };
+    }
+    // Width when the box spans the full height, rounded half up.
+    let width_at_full_height =
+        (u64::from(avail_height) * natural_width + natural_height / 2) / natural_height;
+    FitBox {
+        width: u16::try_from(width_at_full_height)
+            .unwrap_or(avail_width)
+            .clamp(1, avail_width),
+        height: avail_height,
+    }
+}
+
+/// Role of one preview row (mapped to the page palette by the caller).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewRole {
+    /// Dialog header (`DialogHeader title`).
+    Heading,
+    /// Image placeholder/body row.
+    Body,
+    /// Footer child: mention text or `Image N` (`text.muted`).
+    Caption,
+    /// `No preview` and other failure text (`feedback.error.base`).
+    Error,
+    /// Previous/next action row.
+    Hint,
+}
+
+/// One rendered preview row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreviewLine {
+    pub text: String,
+    pub role: PreviewRole,
+}
+
+/// The preview surface for one image part: dialog state plus the negotiated
+/// protocol, the decoded size (when known) and the fit mode.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreviewSurface {
+    state: ImagePreviewState,
+    protocol: ImageProtocol,
+    natural: Option<ImageSize>,
+    fit: PreviewFit,
+}
+
+impl PreviewSurface {
+    /// Dialog surface: `fit="fit"` (`dialog-image-preview.tsx:78`).
+    #[must_use]
+    pub fn dialog(
+        state: ImagePreviewState,
+        protocol: ImageProtocol,
+        natural: Option<ImageSize>,
+    ) -> Self {
+        Self {
+            state,
+            protocol,
+            natural,
+            fit: PreviewFit::Fit,
+        }
+    }
+
+    /// Gallery-cell surface: `fit="cover"` (`prompt/index.tsx:1736`).
+    #[must_use]
+    pub fn gallery(
+        state: ImagePreviewState,
+        protocol: ImageProtocol,
+        natural: Option<ImageSize>,
+    ) -> Self {
+        Self {
+            state,
+            protocol,
+            natural,
+            fit: PreviewFit::Cover,
+        }
+    }
+
+    #[must_use]
+    pub fn state(&self) -> &ImagePreviewState {
+        &self.state
+    }
+
+    /// Mutable dialog state (navigation/failure) without rebuilding geometry.
+    pub fn state_mut(&mut self) -> &mut ImagePreviewState {
+        &mut self.state
+    }
+
+    #[must_use]
+    pub fn protocol(&self) -> ImageProtocol {
+        self.protocol
+    }
+
+    pub fn set_protocol(&mut self, protocol: ImageProtocol) {
+        self.protocol = protocol;
+    }
+
+    pub fn set_natural(&mut self, natural: Option<ImageSize>) {
+        self.natural = natural;
+    }
+
+    #[must_use]
+    pub fn fit(&self) -> PreviewFit {
+        self.fit
+    }
+
+    /// Visible body rows for a surface of `width` x `height` cells: the header
+    /// always, the footer child always, the action row when navigation exists
+    /// and the remaining rows are the image box.
+    #[must_use]
+    pub fn body_rows(&self, width: u16, height: u16) -> u16 {
+        if width == 0 || height == 0 {
+            return 0;
+        }
+        let actions = u16::from(self.state.can_navigate());
+        height.saturating_sub(1 + 1 + actions)
+    }
+
+    /// Cell box the painter composites the decoded image into. `None` when the
+    /// surface has no body rows at this height, or when the terminal cannot
+    /// draw images at all (the placeholder row is rendered instead).
+    #[must_use]
+    pub fn image_box(&self, width: u16, height: u16) -> Option<FitBox> {
+        let body = self.body_rows(width, height);
+        if body == 0 || !self.protocol.draws() || self.state.failed() {
+            return None;
+        }
+        let natural = self.natural.unwrap_or(ImageSize::new(0, 0));
+        Some(fit_box(width, body, natural, self.fit))
+    }
+
+    /// Render the surface as bounded rows, never splitting a character.
+    #[must_use]
+    pub fn rows(&self, width: u16, height: u16) -> Vec<PreviewLine> {
+        if width == 0 || height == 0 {
+            return Vec::new();
+        }
+        let clip = |text: &str| clip_chars(text, usize::from(width));
+        let mut out = vec![PreviewLine {
+            text: clip(&self.state.header()),
+            role: PreviewRole::Heading,
+        }];
+        if height == 1 {
+            return out;
+        }
+        let caption = PreviewLine {
+            text: clip(&self.state.footer_label()),
+            role: if self.state.failed() {
+                PreviewRole::Error
+            } else {
+                PreviewRole::Caption
+            },
+        };
+        let actions = self.state.can_navigate().then(|| PreviewLine {
+            // Legacy footer bindings (`dialog-image-preview.tsx:60-72`).
+            text: clip("← previous    next →"),
+            role: PreviewRole::Hint,
+        });
+        let body_rows = self.body_rows(width, height);
+        for _ in 0..body_rows {
+            out.push(PreviewLine {
+                text: String::new(),
+                role: PreviewRole::Body,
+            });
+        }
+        if self.state.failed() {
+            // A decode failure replaces the image with the muted fallback
+            // (`prompt/index.tsx:1724-1732`); the caption stays the error.
+            if let Some(row) = out.get_mut(1) {
+                row.text = centered("No preview", width);
+                row.role = PreviewRole::Error;
+            }
+        } else if !self.protocol.draws() && body_rows > 0 {
+            if let Some(row) = out.get_mut(1) {
+                row.text = centered(
+                    "image preview unavailable: terminal cannot draw images",
+                    width,
+                );
+                row.role = PreviewRole::Error;
+            }
+        }
+        out.push(caption);
+        if let Some(actions) = actions {
+            if out.len() < usize::from(height) {
+                out.push(actions);
+            }
+        }
+        out.truncate(usize::from(height));
+        out
+    }
+}
+
+/// Column-bounded cut by characters (never splits a character).
+fn clip_chars(text: &str, max_chars: usize) -> String {
+    text.chars().take(max_chars).collect()
+}
+
+/// Center `text` in exactly `width` columns: leading spaces, then the text,
+/// then trailing spaces; a text wider than `width` is cut at the column bound.
+/// Upstream centers cell fallbacks with
+/// `alignItems="center" justifyContent="center"` (`prompt/index.tsx:1724-1730`).
+fn centered(text: &str, width: u16) -> String {
+    let width = usize::from(width);
+    let clipped = clip_chars(text, width);
+    let text_width = clipped.chars().count();
+    let left = width.saturating_sub(text_width) / 2;
+    let right = width.saturating_sub(text_width + left);
+    format!("{}{}{}", " ".repeat(left), clipped, " ".repeat(right))
 }
 
 // ---------------------------------------------------------------------------
@@ -1064,5 +1408,120 @@ mod tests {
             parse_pasted_filepaths(file_url_list, "linux"),
             vec!["/tmp/a.png".to_string(), "/tmp/b.png".to_string()]
         );
+    }
+
+    // MEDIA-001 surface: the preview dialog rows a page emits — header,
+    // aspect-fit image box, caption, failure placeholder, unsupported
+    // protocol placeholder, actions only when multiple images.
+    #[test]
+    fn media001_preview_surface_geometry_caption_and_fallbacks() {
+        // Aspect-preserving contain (`dialog-image-preview.tsx:78`).
+        let wide = fit_box(40, 20, ImageSize::new(16, 9), PreviewFit::Fit);
+        assert_eq!(wide.height, 20, "taller than the 16:9 box, so height binds");
+        assert_eq!(wide.width, 36, "20 * 16 / 9 rounded");
+        let square = fit_box(90, 30, ImageSize::new(100, 100), PreviewFit::Fit);
+        assert_eq!((square.width, square.height), (30, 30));
+        let exact = fit_box(40, 10, ImageSize::new(4, 1), PreviewFit::Fit);
+        assert_eq!((exact.width, exact.height), (40, 10));
+        // Cover fills the requested box (`prompt/index.tsx:1736`).
+        let cover = fit_box(40, 20, ImageSize::new(16, 9), PreviewFit::Cover);
+        assert_eq!((cover.width, cover.height), (40, 20));
+        // Unknown natural size and empty available area.
+        let unknown = fit_box(10, 4, ImageSize::new(0, 0), PreviewFit::Fit);
+        assert_eq!((unknown.width, unknown.height), (10, 4));
+        let empty = fit_box(0, 4, ImageSize::new(16, 9), PreviewFit::Fit);
+        assert_eq!((empty.width, empty.height), (0, 0));
+        // Extreme ratios still occupy at least one cell on the short side.
+        let sliver = fit_box(200, 20, ImageSize::new(10_000, 1), PreviewFit::Fit);
+        assert_eq!(sliver.height, 1);
+        assert_eq!(sliver.width, 200);
+
+        let three = images(3);
+        let state = ImagePreviewState::open(three, 1).expect("three images");
+        let mut surface = PreviewSurface::dialog(state, ImageProtocol::Kitty, Some(ImageSize::new(16, 9)));
+        assert_eq!(surface.fit(), PreviewFit::Fit);
+        assert_eq!(surface.protocol(), ImageProtocol::Kitty);
+        // Header always first; body box honours the header+caption+action rows.
+        assert_eq!(surface.body_rows(80, 24), 21);
+        let box_ = surface.image_box(80, 24).expect("drawable image box");
+        assert_eq!(box_.width, 37, "16:9 contain inside 80 x 21");
+        assert_eq!(box_.height, 21);
+
+        let rows = surface.rows(80, 24);
+        assert_eq!(rows.len(), 24);
+        assert_eq!(rows[0].text, "Image 2 of 3");
+        assert_eq!(rows[0].role, PreviewRole::Heading);
+        // Body rows reserve the image area.
+        assert!(rows[1..22].iter().all(|row| row.text.is_empty()));
+        // Footer child: the mention text (`dialog-image-preview.tsx:56`).
+        assert_eq!(rows[22].text, "[Image 2]");
+        assert_eq!(rows[22].role, PreviewRole::Caption);
+        // Multiple images get the previous/next action row (`:43-51,60-72`).
+        assert_eq!(rows[23].text, "← previous    next →");
+        assert_eq!(rows[23].role, PreviewRole::Hint);
+
+        // A single image: no actions, so the body grows by one row.
+        let single = PreviewSurface::dialog(
+            ImagePreviewState::open(images(1), 0).expect("one image"),
+            ImageProtocol::Kitty,
+            None,
+        );
+        assert_eq!(single.body_rows(80, 24), 22);
+        let rows = single.rows(80, 24);
+        assert_eq!(rows.len(), 24, "rows stay exactly the surface height");
+        assert_eq!(rows[0].text, "Image 1 of 1");
+        assert!(!rows.iter().any(|row| row.text.contains("previous")));
+
+        // Decode failure: `No preview` replaces the body and colours the
+        // caption as an error (`:54-57`, `prompt/index.tsx:1724-1732`).
+        surface.state_mut().mark_failed();
+        assert!(surface.image_box(80, 24).is_none(), "no box for a failed decode");
+        let rows = surface.rows(80, 24);
+        assert_eq!(rows[1].role, PreviewRole::Error);
+        assert!(rows[1].text.contains("No preview"));
+        assert_eq!(rows[22].text, "No preview");
+        assert_eq!(rows[22].role, PreviewRole::Error);
+        surface.state_mut().move_by(1);
+        assert!(!surface.state().failed());
+        assert_eq!(surface.rows(80, 24)[22].text, "[Image 3]");
+
+        // Terminal without an image protocol: explicit placeholder, no box.
+        let mut blocked = PreviewSurface::dialog(
+            ImagePreviewState::open(images(2), 0).expect("two images"),
+            ImageProtocol::None,
+            Some(ImageSize::new(4, 4)),
+        );
+        assert!(!blocked.protocol().draws());
+        assert!(blocked.image_box(60, 12).is_none());
+        let rows = blocked.rows(60, 12);
+        assert_eq!(rows[1].role, PreviewRole::Error);
+        assert!(rows[1].text.contains("terminal cannot draw images"));
+        assert_eq!(rows[1].text.chars().count(), 60, "placeholder fills the row");
+        // A negotiated protocol restores the box.
+        blocked.set_protocol(ImageProtocol::Sixel);
+        assert!(blocked.image_box(60, 12).is_some());
+        // Gallery cells use cover so they always fill their cell box.
+        let cell = PreviewSurface::gallery(
+            ImagePreviewState::open(images(1), 0).expect("one image"),
+            ImageProtocol::Iterm2,
+            Some(ImageSize::new(2, 8)),
+        );
+        assert_eq!(cell.fit(), PreviewFit::Cover);
+        // Cover fills the body area (header + caption are not image rows), so a
+        // single-image cell at height 6 gets four body rows.
+        assert_eq!(cell.image_box(12, 6).map(|box_| (box_.width, box_.height)), Some((12, 4)));
+
+        // Degenerate geometry never panics and never exceeds its bound.
+        for width in [0u16, 1, 2, 7] {
+            for height in [0u16, 1, 2, 3, 9] {
+                let rows = surface.rows(width, height);
+                assert!(rows.len() <= usize::from(height));
+                for row in &rows {
+                    assert!(row.text.chars().count() <= usize::from(width), "{:?}", row.text);
+                }
+            }
+        }
+        assert!(surface.rows(0, 10).is_empty());
+        assert!(surface.rows(10, 0).is_empty());
     }
 }
