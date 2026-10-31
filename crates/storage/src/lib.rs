@@ -32,8 +32,9 @@ use opencode_rk_contracts::{
     MAX_ARTIFACT_LANGUAGE_BYTES, MAX_ARTIFACT_TITLE_BYTES, MAX_ARTIFACT_TOTAL_BYTES,
     MAX_ARTIFACT_VERSIONS, MAX_ARTIFACTS_PER_SESSION, MAX_ATTACHMENT_MIME_BYTES,
     MAX_ATTACHMENT_NAME_BYTES, MAX_DRAFT_ATTACHMENT_BYTES, MAX_DRAFT_ATTACHMENTS,
-    MAX_INLINE_PAYLOAD_BYTES, MAX_REASONING_SUMMARY_BYTES, MessageId, MessageRecord, MessageRole,
-    PayloadRef, SessionId, SessionState, SessionSummary, Timestamp,
+    MAX_INLINE_PAYLOAD_BYTES, MAX_REASONING_SUMMARY_BYTES, MAX_TITLE_BYTES, MessageExecution,
+    MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, SessionState, SessionSummary,
+    Timestamp,
 };
 pub use quota_v2::QuotaV2;
 pub use retention_v2::RetentionV2;
@@ -119,6 +120,8 @@ pub enum StorageError {
     InvalidArtifact,
     #[error("todo collection is invalid or exceeds its supported bounds")]
     InvalidTodo,
+    #[error("message execution facts are invalid or exceed their supported bounds")]
+    InvalidMessageExecution,
     #[error("payload exceeds inline limit and must be stored as a blob")]
     InlinePayloadTooLarge,
     #[error("event payload exceeds {MAX_EVENT_PAYLOAD_BYTES} bytes")]
@@ -1060,6 +1063,94 @@ impl Storage {
         tx.commit()?;
         Ok(())
     }
+    /// Record the execution facts one turn reported for `execution.message_id`.
+    ///
+    /// Each field is stored exactly as produced; `None` stays NULL and is never
+    /// rewritten as zero. A later row for the same message replaces the earlier
+    /// one, so a producer that reports twice cannot create duplicates.
+    pub fn append_message_execution(
+        &self,
+        execution: &MessageExecution,
+    ) -> Result<(), StorageError> {
+        let valid = |value: Option<&str>| -> bool {
+            value.is_none_or(|value| !value.is_empty() && value.len() <= MAX_TITLE_BYTES)
+        };
+        if !valid(execution.provider_id.as_deref())
+            || !valid(execution.model_id.as_deref())
+            || !valid(execution.stop_reason.as_deref())
+        {
+            return Err(StorageError::InvalidMessageExecution);
+        }
+        let count = |value: Option<u64>| -> Result<Option<i64>, StorageError> {
+            value
+                .map(|value| i64::try_from(value).map_err(|_| StorageError::InvalidMessageExecution))
+                .transpose()
+        };
+        let input_tokens = count(execution.input_tokens)?;
+        let output_tokens = count(execution.output_tokens)?;
+        let cached_tokens = count(execution.cached_tokens)?;
+        let reasoning_tokens = count(execution.reasoning_tokens)?;
+        let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        connection.execute(
+            "INSERT INTO message_execution(message_id,provider_id,model_id,stop_reason,input_tokens,output_tokens,cached_tokens,reasoning_tokens) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(message_id) DO UPDATE SET provider_id=excluded.provider_id,model_id=excluded.model_id,stop_reason=excluded.stop_reason,input_tokens=excluded.input_tokens,output_tokens=excluded.output_tokens,cached_tokens=excluded.cached_tokens,reasoning_tokens=excluded.reasoning_tokens",
+            params![
+                execution.message_id.to_string(),
+                execution.provider_id,
+                execution.model_id,
+                execution.stop_reason,
+                input_tokens,
+                output_tokens,
+                cached_tokens,
+                reasoning_tokens,
+            ],
+        )?;
+        Ok(())
+    }
+    /// Execution facts for exactly `message_ids` (order is unspecified).
+    ///
+    /// Id-scoped rather than page-ordered: a caller that reloads an older
+    /// history page gets its own rows without re-reading newer messages.
+    pub fn list_message_execution(
+        &self,
+        message_ids: &[MessageId],
+    ) -> Result<Vec<MessageExecution>, StorageError> {
+        if message_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<String> = message_ids
+            .iter()
+            .take(1_000)
+            .map(MessageId::to_string)
+            .collect();
+        let placeholders = std::iter::repeat_n("?", ids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let mut statement = connection.prepare(&format!(
+            "SELECT message_id,provider_id,model_id,stop_reason,input_tokens,output_tokens,cached_tokens,reasoning_tokens FROM message_execution WHERE message_id IN ({placeholders})"
+        ))?;
+        let rows = statement.query_map(rusqlite::params_from_iter(ids.iter()), |row| {
+            let count = |index: usize| -> Result<Option<u64>, rusqlite::Error> {
+                row.get::<_, Option<i64>>(index)?
+                    .map(|value| {
+                        u64::try_from(value).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(index, value))
+                    })
+                    .transpose()
+            };
+            Ok(MessageExecution {
+                message_id: parse_id(row.get(0)?)?,
+                provider_id: row.get(1)?,
+                model_id: row.get(2)?,
+                stop_reason: row.get(3)?,
+                input_tokens: count(4)?,
+                output_tokens: count(5)?,
+                cached_tokens: count(6)?,
+                reasoning_tokens: count(7)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
+    }
     pub fn create_draft_attachment(
         &self,
         session_id: SessionId,
@@ -1512,6 +1603,21 @@ impl Storage {
             );
             CREATE INDEX IF NOT EXISTS draft_attachments_session_idx
                 ON draft_attachments(session_id,created_at,id);",
+        )?;
+        // Producer-observed execution facts for one assistant message. Every
+        // column is nullable because a turn may not report it; a stored row is
+        // always exactly what the producer wrote.
+        connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS message_execution(
+                message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+                provider_id TEXT CHECK(provider_id IS NULL OR length(CAST(provider_id AS BLOB)) BETWEEN 1 AND 512),
+                model_id TEXT CHECK(model_id IS NULL OR length(CAST(model_id AS BLOB)) BETWEEN 1 AND 512),
+                stop_reason TEXT CHECK(stop_reason IS NULL OR length(CAST(stop_reason AS BLOB)) BETWEEN 1 AND 512),
+                input_tokens INTEGER CHECK(input_tokens IS NULL OR input_tokens>=0),
+                output_tokens INTEGER CHECK(output_tokens IS NULL OR output_tokens>=0),
+                cached_tokens INTEGER CHECK(cached_tokens IS NULL OR cached_tokens>=0),
+                reasoning_tokens INTEGER CHECK(reasoning_tokens IS NULL OR reasoning_tokens>=0)
+            );",
         )?;
         connection.execute_batch(
             "CREATE TABLE IF NOT EXISTS artifacts(

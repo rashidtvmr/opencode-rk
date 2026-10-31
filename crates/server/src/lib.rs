@@ -117,7 +117,8 @@ use opencode_rk_providers::responses::{
 };
 use opencode_rk_security::{Decision, OperationIntent, PermissionBroker, SecurityPolicy};
 use opencode_rk_sessions::{
-    CompactionCheckpoint, HistoryItem, SessionError, SessionService, ToolCallAdmission, ToolRound,
+    CompactionCheckpoint, HistoryItem, MessageExecutionInput, SessionError, SessionService,
+    ToolCallAdmission, ToolRound,
 };
 use opencode_rk_tools::executor::ToolExecutor;
 use opencode_rk_tools::file_ops::{FileOperation, FileTool};
@@ -1122,7 +1123,7 @@ async fn list_messages(
         .await
         .map_err(ApiFailure::internal)?;
     let mut rows = Vec::with_capacity(messages.len());
-    for message in messages {
+    for message in &messages {
         let message_id = message.id;
         let mut value = serde_json::to_value(message).map_err(ApiFailure::internal)?;
         let mut parts = Vec::new();
@@ -1165,6 +1166,7 @@ async fn list_messages(
         }
         rows.push(value);
     }
+    attach_execution(&state.sessions, &messages, &mut rows).await?;
     Ok(Json(json!({"messages":rows})))
 }
 
@@ -1191,8 +1193,13 @@ async fn list_history_page(
     // children registered in this daemon lifetime is the same fact the
     // `/children` route reports, surfaced here so the footer count needs no
     // extra startup route.
+    let mut rows = messages
+        .iter()
+        .map(|message| serde_json::to_value(message).map_err(ApiFailure::internal))
+        .collect::<Result<Vec<_>, _>>()?;
+    attach_execution(&state.sessions, &messages, &mut rows).await?;
     Ok(Json(json!({
-        "messages": messages,
+        "messages": rows,
         "next_before": next_before,
         "children": children.count(id),
     })))
@@ -2688,10 +2695,15 @@ pub(crate) fn create_turn_stream_with_message(
                                     (!reasoning_summary.is_empty()).then_some(reasoning_summary);
                                 match state
                                     .sessions
-                                    .append_assistant_with_reasoning(
+                                    .append_assistant_with_reasoning_and_execution(
                                         state.session_id,
                                         assistant_text,
                                         persisted_summary.clone(),
+                                        Some(turn_execution(
+                                            &state.qualified_model,
+                                            Some(stop_reason.as_str()),
+                                            state.provider.usage(),
+                                        )),
                                     )
                                     .await
                                 {
@@ -3005,10 +3017,18 @@ pub(crate) fn create_turn_stream_with_message(
                                 (!reasoning_summary.is_empty()).then_some(reasoning_summary);
                             match state
                                 .sessions
-                                .append_assistant_with_reasoning(
+                                .append_assistant_with_reasoning_and_execution(
                                     state.session_id,
                                     assistant_text,
                                     persisted_summary.clone(),
+                                    // This frame carries no `usage` (it mirrors the
+                                    // round's terminal stop), so only the stop is
+                                    // recorded as a fact.
+                                    Some(turn_execution(
+                                        &state.qualified_model,
+                                        Some(stop.as_str().as_str()),
+                                        None,
+                                    )),
                                 )
                                 .await
                             {
@@ -3379,6 +3399,97 @@ fn parse_attachment_id(value: &str) -> Result<AttachmentId, ApiFailure> {
 }
 fn parse_artifact_id(value: &str) -> Result<ArtifactId, ApiFailure> {
     ArtifactId::from_str(value).map_err(|_| ApiFailure::bad_request("invalid artifact id"))
+}
+
+/// Execution facts one completed turn actually reported. `qualified_model` is
+/// the turn-scope `provider/model` string; a model without a provider prefix
+/// leaves `provider_id` absent rather than inventing one.
+fn turn_execution(
+    qualified_model: &str,
+    stop_reason: Option<&str>,
+    usage: Option<opencode_rk_providers::responses::ReportedUsage>,
+) -> MessageExecutionInput {
+    let (provider_id, model_id) = match qualified_model.split_once('/') {
+        Some((provider, model)) if !provider.is_empty() && !model.is_empty() => {
+            (Some(provider.to_owned()), Some(model.to_owned()))
+        }
+        _ if !qualified_model.is_empty() => (None, Some(qualified_model.to_owned())),
+        _ => (None, None),
+    };
+    MessageExecutionInput {
+        provider_id,
+        model_id,
+        stop_reason: stop_reason.map(str::to_owned),
+        input_tokens: usage.map(|usage| usage.input_tokens),
+        output_tokens: usage.map(|usage| usage.output_tokens),
+        cached_tokens: usage.and_then(|usage| usage.cached_tokens),
+        reasoning_tokens: usage.and_then(|usage| usage.reasoning_tokens),
+    }
+}
+
+/// Wire shape of one stored [`MessageExecution`]: only the fields the producer
+/// recorded, so an absent fact stays absent instead of becoming `null`/zero.
+fn execution_json(fact: &opencode_rk_contracts::MessageExecution) -> Option<Value> {
+    let mut object = serde_json::Map::new();
+    if let Some(value) = &fact.provider_id {
+        object.insert("provider_id".into(), json!(value));
+    }
+    if let Some(value) = &fact.model_id {
+        object.insert("model_id".into(), json!(value));
+    }
+    if let Some(value) = &fact.stop_reason {
+        object.insert("stop_reason".into(), json!(value));
+    }
+    let mut usage = serde_json::Map::new();
+    for (key, value) in [
+        ("input_tokens", fact.input_tokens),
+        ("output_tokens", fact.output_tokens),
+        ("cached_tokens", fact.cached_tokens),
+        ("reasoning_tokens", fact.reasoning_tokens),
+    ] {
+        if let Some(value) = value {
+            usage.insert(key.into(), json!(value));
+        }
+    }
+    if !usage.is_empty() {
+        object.insert("usage".into(), Value::Object(usage));
+    }
+    (!object.is_empty()).then(|| Value::Object(object))
+}
+
+/// Attach the stored execution facts to already-serialized message rows. Rows
+/// without stored facts keep no `execution` key.
+async fn attach_execution(
+    sessions: &SessionService,
+    records: &[opencode_rk_contracts::MessageRecord],
+    rows: &mut [Value],
+) -> Result<(), ApiFailure> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let facts = sessions
+        .message_execution(records.iter().map(|record| record.id).collect())
+        .await
+        .map_err(ApiFailure::internal)?;
+    if facts.is_empty() {
+        return Ok(());
+    }
+    let by_message: std::collections::HashMap<_, _> = facts
+        .iter()
+        .map(|fact| (fact.message_id, fact))
+        .collect();
+    for row in rows.iter_mut() {
+        let Some(id) = row.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let Ok(message_id) = parse_message_id(id) else {
+            continue;
+        };
+        if let Some(fact) = by_message.get(&message_id).and_then(|fact| execution_json(fact)) {
+            row["execution"] = fact;
+        }
+    }
+    Ok(())
 }
 fn attachment_failure(error: SessionError) -> ApiFailure {
     match error {

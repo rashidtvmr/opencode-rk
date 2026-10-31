@@ -40,6 +40,7 @@
 
 use serde_json::Value;
 
+use crate::native_assistant_facts::AssistantFacts;
 use crate::native_view_chat::{ChatMessage, ChatPart, ChatRole};
 
 /// Max bytes retained per message part (matches the chat view's per-row input
@@ -489,15 +490,13 @@ pub fn project_message(message: &Value) -> Option<ChatMessage> {
         role,
         parts,
         agent: opt_string(message, "agent"),
-        model: opt_string(message, "model"),
-        // Real execution facts are not persisted on history records yet: the
-        // native `MessageRecord` carries id/role/body/created_at only, and the
-        // live `assistant_message` frame's `usage`/`stop_reason` are not
-        // written back. Replay therefore projects NO footer facts — the
-        // completion footer stays absent for history until a durable-facts
-        // producer persists them. Never backfilled from `created_at` or the
-        // currently selected UI model.
-        assistant_facts: None,
+        // Stored execution facts name the model the turn actually ran on; the
+        // currently selected UI model is never substituted.
+        model: opt_string(message, "model").or_else(|| AssistantFacts::model_label(message)),
+        // Real persisted facts from the additive `execution` object (producer:
+        // `crates/server/src/lib.rs` turn completion). A record without them
+        // projects no footer rather than a fabricated one.
+        assistant_facts: AssistantFacts::from_history_record(message),
     })
 }
 
@@ -1323,6 +1322,47 @@ mod tests {
         .unwrap();
         assert_eq!(with_facts.agent.as_deref(), Some("build"));
         assert_eq!(with_facts.model.as_deref(), Some("provider/model-1"));
+    }
+
+    // Stored execution facts are the only source of a history footer; a record
+    // without them projects neither facts nor a model label.
+    #[test]
+    fn stored_execution_facts_project_the_footer_and_model_label() {
+        let with_execution = project_message(&json!({
+            "role": "assistant",
+            "body": {"storage": "inline", "text": "done"},
+            "execution": {
+                "provider_id": "openai",
+                "model_id": "gpt-5.6",
+                "stop_reason": "completed",
+                "usage": {"input_tokens": 5, "output_tokens": 9}
+            }
+        }))
+        .unwrap();
+        assert_eq!(with_execution.model.as_deref(), Some("openai/gpt-5.6"));
+        let facts = with_execution.assistant_facts.expect("stored facts");
+        assert_eq!(facts.stop_reason.as_deref(), Some("completed"));
+        assert_eq!(facts.output_tokens, Some(9));
+        assert_eq!(facts.reasoning_tokens, None);
+        assert!(!facts.interrupted);
+
+        let without = project_message(&json!({
+            "role": "assistant",
+            "body": {"storage": "inline", "text": "gone"}
+        }))
+        .unwrap();
+        assert_eq!(without.model, None);
+        assert_eq!(without.assistant_facts, None);
+
+        // A provider-less model records the id and renders it bare, matching
+        // upstream's fallback text.
+        let bare = project_message(&json!({
+            "role": "assistant",
+            "body": {"storage": "inline", "text": "x"},
+            "execution": {"model_id": "solo-model", "stop_reason": "completed"}
+        }))
+        .unwrap();
+        assert_eq!(bare.model.as_deref(), Some("solo-model"));
     }
 
     #[test]

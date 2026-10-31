@@ -57,8 +57,8 @@ pub use branch_v2::ForkProvenance;
 use chrono::{DateTime, Utc};
 use opencode_rk_contracts::{
     ArtifactDocument, ArtifactId, ArtifactKind, ArtifactSummary, AssistantActivity, AttachmentId,
-    DraftAttachment, MAX_REASONING_SUMMARY_BYTES, MAX_TITLE_BYTES, MessageId, MessageRecord,
-    MessageRole, PayloadRef, SessionId, SessionState, SessionSummary, Timestamp,
+    DraftAttachment, MAX_REASONING_SUMMARY_BYTES, MAX_TITLE_BYTES, MessageExecution, MessageId,
+    MessageRecord, MessageRole, PayloadRef, SessionId, SessionState, SessionSummary, Timestamp,
 };
 use opencode_rk_storage::{CatalogV2, NewMessage, NewSession, Storage, V2Writer};
 pub use opencode_rk_storage::StorageError;
@@ -360,6 +360,35 @@ pub struct WorkspaceSummary {
     pub project_root: Option<String>,
     pub status: u8,
     pub created_at_us: i64,
+}
+
+/// Execution facts a turn reported, before they are bound to the message that
+/// stores it. A producer fills only what the provider actually reported.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct MessageExecutionInput {
+    pub provider_id: Option<String>,
+    pub model_id: Option<String>,
+    pub stop_reason: Option<String>,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub cached_tokens: Option<u64>,
+    pub reasoning_tokens: Option<u64>,
+}
+
+impl MessageExecutionInput {
+    #[must_use]
+    pub fn for_message(self, message_id: MessageId) -> MessageExecution {
+        MessageExecution {
+            message_id,
+            provider_id: self.provider_id,
+            model_id: self.model_id,
+            stop_reason: self.stop_reason,
+            input_tokens: self.input_tokens,
+            output_tokens: self.output_tokens,
+            cached_tokens: self.cached_tokens,
+            reasoning_tokens: self.reasoning_tokens,
+        }
+    }
 }
 
 impl SessionService {
@@ -696,6 +725,26 @@ impl SessionService {
         text: impl Into<String>,
         reasoning_summary: Option<String>,
     ) -> Result<MessageRecord, SessionError> {
+        self.append_assistant_with_reasoning_and_execution(
+            session_id,
+            text,
+            reasoning_summary,
+            None,
+        )
+        .await
+    }
+    /// Append an assistant message and the execution facts its turn reported.
+    ///
+    /// The message is the durable record of the turn; the facts are attached
+    /// after it commits and their failure never discards it — a turn that ran
+    /// must stay in the transcript even when its metadata cannot be stored.
+    pub async fn append_assistant_with_reasoning_and_execution(
+        &self,
+        session_id: SessionId,
+        text: impl Into<String>,
+        reasoning_summary: Option<String>,
+        execution: Option<MessageExecutionInput>,
+    ) -> Result<MessageRecord, SessionError> {
         let text = text.into();
         if reasoning_summary
             .as_ref()
@@ -706,10 +755,18 @@ impl SessionService {
             ));
         }
         if let Some(manager) = self.fork_manager_for(session_id).await? {
-            return run_session_blocking(move || {
+            let message = run_session_blocking(move || {
                 manager.append_fork_assistant_with_reasoning(session_id, text, reasoning_summary)
             })
-            .await;
+            .await?;
+            if let Some(execution) = execution {
+                let storage = Arc::clone(&self.storage);
+                let _ = run_blocking(move || {
+                    storage.append_message_execution(&execution.for_message(message.id))
+                })
+                .await;
+            }
+            return Ok(message);
         }
         let body = PayloadRef::inline(text).map_err(|e| SessionError::Contract(e.to_string()))?;
         let message = MessageRecord {
@@ -725,7 +782,22 @@ impl SessionService {
             storage.append_message_with_reasoning(&candidate, reasoning_summary.as_deref())
         })
         .await?;
+        if let Some(execution) = execution {
+            let storage = Arc::clone(&self.storage);
+            let execution = execution.for_message(message.id);
+            let _ = run_blocking(move || storage.append_message_execution(&execution)).await;
+        }
         Ok(message)
+    }
+    /// Execution facts for exactly `message_ids` (order unspecified).
+    pub async fn message_execution(
+        &self,
+        message_ids: Vec<MessageId>,
+    ) -> Result<Vec<MessageExecution>, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.list_message_execution(&message_ids))
+            .await
+            .map_err(SessionError::from)
     }
     pub async fn append_blob(
         &self,

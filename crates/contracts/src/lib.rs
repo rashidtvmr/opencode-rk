@@ -230,6 +230,25 @@ pub struct AssistantActivity {
     pub reasoning_summary: String,
 }
 
+/// Execution facts a producer observed for one assistant message.
+///
+/// Every field is optional: a producer writes only what the turn actually
+/// reported (`usage` counters and the terminal `stop_reason`), and a missing
+/// value stays absent rather than defaulting to zero. `provider_id`/`model_id`
+/// are the qualified model the turn ran on, captured in turn scope — they are
+/// not inferable from the message body or the currently selected UI model.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct MessageExecution {
+    pub message_id: MessageId,
+    pub provider_id: Option<String>,
+    pub model_id: Option<String>,
+    pub stop_reason: Option<String>,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub cached_tokens: Option<u64>,
+    pub reasoning_tokens: Option<u64>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactKind {

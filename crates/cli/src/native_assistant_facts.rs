@@ -9,9 +9,14 @@
 //!   `reasoning_summary`, `usage` and `stop_reason`. It does NOT carry
 //!   `agent`, `model`, `started_ms`, `streamed_ms` or `completed_ms`.
 //! - `crates/server/src/lib.rs:1975-1989`: `provider_id`/`model_id` exist only
-//!   in turn-creation scope; they are not attached to the frame or the
-//!   persisted `MessageRecord`, so historical agent/model remain ABSENT
-//!   (never inferred from the selected UI model or `MessageRecord.created_at`).
+//!   in turn-creation scope; they are not attached to the frame, so the LIVE
+//!   frame still carries no agent/model/timing. They ARE persisted for the
+//!   message (`message_execution`) and replayed on `/messages` and `/history`
+//!   as the additive `execution` object, which is what
+//!   [`AssistantFacts::from_history_record`] and
+//!   [`AssistantFacts::model_label`] read. Nothing is inferred from the
+//!   selected UI model or `MessageRecord.created_at`; timing and agent remain
+//!   absent because no producer records them.
 //! - `crates/server/src/agent_loop.rs:35-57`: `TurnStop` (`stop_reason`) has NO
 //!   cancellation variant — `stop_reason` never encodes an interruption.
 //!
@@ -44,14 +49,14 @@ pub const CANCELLED_CODE: &str = "cancelled";
 
 /// Real execution facts attachable to one assistant [`ChatMessage`]
 /// (`crate::native_view_chat::ChatMessage`). Every field is either populated
-/// from authoritative execution metadata (the live turn stream) or left
-/// absent (`None`/`false`) — never backfilled from `MessageRecord.created_at`,
-/// wall time or the currently selected UI model.
+/// from authoritative execution metadata (the live turn stream, or the stored
+/// `execution` object a completed turn wrote) or left absent (`None`/`false`) —
+/// never backfilled from `MessageRecord.created_at`, wall time or the
+/// currently selected UI model.
 ///
-/// Historical `agent`/`model`/timing are NOT modelled here: the native
-/// protocol does not emit them (see module docs). They stay explicit gaps
-/// until a producer patch adds them to the wire contract; when it does, they
-/// extend this struct from that authoritative metadata only.
+/// `agent` and timing are NOT modelled here: no producer records them, so they
+/// stay explicit gaps until one does; when it does, they extend this struct
+/// from that authoritative metadata only.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AssistantFacts {
     /// Backend-reported stop reason (`completed`, `incomplete:...`,
@@ -116,6 +121,54 @@ impl AssistantFacts {
             interrupted,
             error_message: Some(message),
         }
+    }
+
+    /// Facts from one stored history record's additive `execution` object.
+    ///
+    /// `None` when the record carries no stored execution facts, so a message
+    /// that predates the producer paints no footer at all. History has no
+    /// transport error, so `interrupted` and `error_message` stay absent —
+    /// interruption is a live-turn fact, not a stored one.
+    #[must_use]
+    pub fn from_history_record(record: &Value) -> Option<Self> {
+        let execution = record.get("execution")?;
+        let usage = execution.get("usage");
+        let facts = Self {
+            stop_reason: execution
+                .get("stop_reason")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            output_tokens: usage
+                .and_then(|usage| usage.get("output_tokens"))
+                .and_then(Value::as_u64),
+            reasoning_tokens: usage
+                .and_then(|usage| usage.get("reasoning_tokens"))
+                .and_then(Value::as_u64),
+            interrupted: false,
+            error_message: None,
+        };
+        (facts != Self::default()).then_some(facts)
+    }
+
+    /// Footer model text from the stored execution facts, in upstream's form
+    /// (`routes/session/index.tsx:2014-2021`): `providerID/id`, or the bare id
+    /// when the producer recorded no provider. History projection has no model
+    /// catalog, so the catalog-name branch cannot resolve here.
+    #[must_use]
+    pub fn model_label(record: &Value) -> Option<String> {
+        let execution = record.get("execution")?;
+        let model = execution
+            .get("model_id")
+            .and_then(Value::as_str)
+            .filter(|model| !model.is_empty())?;
+        let provider = execution
+            .get("provider_id")
+            .and_then(Value::as_str)
+            .filter(|provider| !provider.is_empty());
+        Some(match provider {
+            Some(provider) => format!("{provider}/{model}"),
+            None => model.to_owned(),
+        })
     }
 }
 
