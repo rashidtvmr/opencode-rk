@@ -1427,13 +1427,6 @@ struct PaintCtx {
     rename_dialog: Option<(String, Option<String>)>,
 }
 
-#[cfg(feature = "native")]
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum NativeIntent {
-    SelectTab { session: SessionRef },
-    CloseTab { session: SessionRef },
-}
-
 #[cfg(all(test, feature = "native"))]
 mod tab_context_menu_dispatch_tests {
     use super::*;
@@ -6404,8 +6397,10 @@ fn native_loop(
                 native_input_decoder::InputEvent::Byte(key) => {
                     if matches!(*key, b'\r' | b'\n') {
                         if let Some(route) = completion.selected_command().map(str::to_owned) {
-                            // /exit is dispatched below as a typed tab-close intent;
-                            // process exit remains reserved for /quit and :q/:quit.
+                            // /exit is the upstream `app.exit` action and is
+                            // dispatched below as a global client exit, the
+                            // same as /quit and :q/:quit (a selected exit
+                            // route is never a tab close).
                             // Executable commands are dispatched by this same
                             // Enter event. Argument-bearing commands remain a
                             // completion (for example `/cd` must still get a
@@ -6478,9 +6473,9 @@ fn native_loop(
                         needs_paint = true;
                         continue;
                     }
-                    if route == "/exit" {
-                        event = native_input_decoder::InputEvent::Byte(13);
-                    } else if route == "/quit" { break; }
+                    // A clicked/pressed exit route terminates the client
+                    // immediately; there is no tab-close command anymore.
+                    if native_process_exit_route(&route) { break; }
                     let route_cursor = route.len();
                     crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, route, route_cursor);
                     completion.sync(&draft);
@@ -7577,9 +7572,11 @@ fn native_loop(
                     if let Some(crate::native_command_palette::PaletteAction::Route(route)) =
                         view.command_palette_activate()
                     {
-                        // /exit must use the same typed close dispatcher as
-                        // completion and normal composer input. Only the
-                        // explicit process-exit routes terminate the loop.
+                        // Routes activated from the palette (including
+                        // /exit) re-enter the same local dispatch chain as
+                        // completion and normal composer input, so the
+                        // exit-word contract is identical for all three
+                        // sources.
                         palette_route = Some(route);
                         view.close_command_palette();
                     }
@@ -8239,37 +8236,13 @@ fn native_loop(
                     },
                 };
                 let command = text.trim();
-                if matches!(dialog, native_setup::Dialog::None) && native_close_tab_route(command) {
-                    let Some(session) = navigation.active().map(|tab| tab.session.clone()) else {
-                        session_route = false;
-                        view.set_session_route(false);
-                        needs_paint = true;
-                        continue;
-                    };
-                    let intent = NativeIntent::CloseTab { session };
-                    if let NativeIntent::CloseTab { session } = intent {
-                        let close_scroll = view.chat_scroll_offset();
-                match close_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|m| m.qualified()), close_scroll) {
-                            Ok(result) => apply_close_tab_result(
-                                result,
-                                &mut view,
-                                &mut live,
-                                &mut history_window,
-                                &mut binding_generation,
-                                &mut draft,
-                                &mut draft_cursor,
-                                &mut selected,
-                                &models,
-                                &mut session_route,
-                                &mut compact_worker,
-                            ),
-                            Err(error) => append_transcript(&mut transcript, format!("error: close tab: {error}")),
-                        }
-                    }
-                    consume_local_command_with_cursor(&mut draft, &mut draft_cursor, command, true);
-                    needs_paint = true;
-                    continue;
-                }
+                // Typed commands never close a tab: upstream's
+                // `session.tab.close` has no slash alias (keybind
+                // `<leader>w` only — see `native_process_exit_route`), so the
+                // only typed terminal command here is the exit word. It
+                // terminates the client globally, exactly like the upstream
+                // `app.exit` action, regardless of how many tabs are open
+                // (a Home/root window with no tab must still exit).
                 if matches!(dialog, native_setup::Dialog::None) && native_process_exit_route(command) {
                     break;
                 }
@@ -9414,9 +9387,10 @@ fn configured_command_input(text: &str) -> Option<(&str, &str)> {
 /// production page table plus the two chat-only routes that are not
 /// `Page::from_route` entries (`/commands` has no static route; `/new`
 /// is a session-create action). No invented aliases: an unknown or
-/// unsupported command is never "recognized" here. (`:q`/`:quit`/
-/// `/exit`/`/quit` exit before dispatch, so their draft never renders
-/// again and needs no consumption.)
+/// unsupported command is never "recognized" here. (`/exit`, `/quit`,
+/// `/q`, bare `exit`/`quit` and `:q`/`:quit` exit the client before
+/// dispatch, so their draft never renders again and needs no
+/// consumption — see `native_process_exit_route`.)
 #[cfg(feature = "native")]
 #[cfg(feature = "native")]
 fn is_recognized_local_command(command: &str) -> bool {
@@ -9458,19 +9432,38 @@ fn consume_local_command_with_cursor(
     }
 }
 
+/// Slash surface of upstream `app.exit`: the command is registered as
+/// `slash: { name: "exit", aliases: ["quit", "q"] }`
+/// (`packages/tui/src/app.tsx:1176-1181`), so `/exit`, `/quit` and `/q` all
+/// run the same `exit()` action. Recognized here so a user-configured command
+/// can never shadow the built-in exit route and the Commands page has a local
+/// handler for it.
 #[cfg(feature = "native")]
 fn native_exit_route(command: &str) -> bool {
-    matches!(command, ":q" | ":quit" | "/exit" | "/quit")
+    matches!(command, "/exit" | "/quit" | "/q")
 }
 
-#[cfg(feature = "native")]
-fn native_close_tab_route(command: &str) -> bool {
-    command == "/exit"
-}
-
+/// Every spelling that terminates the CLIENT globally, at the selected pin
+/// `450e7b92412c780a7b5a75226bb8d49aaca24e22`:
+/// - slash surface `/exit`, `/quit`, `/q` — `app.tsx:1176-1181` above;
+/// - bare `exit`, `quit`, `:q` typed into the prompt and submitted —
+///   `packages/tui/src/component/prompt/index.tsx:1128`
+///   (`trimmed === "exit" || trimmed === "quit" || trimmed === ":q"`),
+///   mirrored by `isExitCommand` in `packages/tui/src/mini/prompt.shared.ts:71-76`;
+/// - `:quit`, retained as an approved native extension (same action).
+///
+/// Tab close is NOT an exit spelling. Upstream exposes it only as
+/// `session.tab.close` bound to `<leader>w`
+/// (`packages/tui/src/config/keybind.ts:119`); the command has no `slash`
+/// entry (`packages/tui/src/app.tsx:878-884`), so no typed command closes a
+/// tab. Tabs close through that key binding, the tab context menu and the
+/// middle-click tab gesture, all of which preserve reopen/daemon work.
 #[cfg(feature = "native")]
 fn native_process_exit_route(command: &str) -> bool {
-    matches!(command, ":q" | ":quit" | "/quit")
+    matches!(
+        command,
+        "/exit" | "/quit" | "/q" | "exit" | "quit" | ":q" | ":quit"
+    )
 }
 
 #[cfg(feature = "native")]
@@ -10506,29 +10499,68 @@ mod command_consumption_tests {
             Some(crate::native_view_pages::Page::Theme)
         );
         assert!(super::native_exit_route("/exit"));
+        assert!(super::native_exit_route("/quit"));
+        assert!(super::native_exit_route("/q"));
         assert_eq!(super::native_local_page_route("/not-a-local-command"), None);
         assert_eq!(super::native_local_page_route("/memory"), Some(crate::native_view_pages::Page::Memory));
         assert!(!super::native_exit_route("/not-a-local-command"));
     }
     use super::{consume_local_command, is_recognized_local_command};
 
+    /// CORRECTED expectations, not weakened ones: an independent
+    /// test-contract evaluator recorded APPROVE_SUPERSESSION (2026-10-30)
+    /// against pin `450e7b92412c780a7b5a75226bb8d49aaca24e22`. Upstream runs
+    /// `exit()` for `app.exit` and its `quit`/`q` aliases
+    /// (`packages/tui/src/app.tsx:1176-1181`) and for the submitted exit
+    /// words `exit`, `quit`, `:q`
+    /// (`packages/tui/src/component/prompt/index.tsx:1128`, mirrored in
+    /// `packages/tui/src/mini/prompt.shared.ts:71-76`); `:quit` is the
+    /// approved native extension of the same action. The previous version of
+    /// this test asserted that `/exit` closed a tab and must NOT exit — that
+    /// encoded the installed defect (root-window `/exit` closed a tab and the
+    /// app never terminated).
     #[test]
-    fn exit_closes_final_client_tab_without_process_termination_and_retains_daemon_work() {
+    fn every_exit_spelling_terminates_client_and_tab_close_stays_separate() {
+        for spelling in ["/exit", "/quit", "/q", "exit", "quit", ":q", ":quit"] {
+            assert!(
+                super::native_process_exit_route(spelling),
+                "{spelling} must terminate the client globally"
+            );
+        }
+        for not_exit in [
+            "/close",
+            "/tab",
+            "exit now",
+            "/exit extra",
+            "/exits",
+            "Exit",
+            "/EXIT",
+            "/not-a-command",
+        ] {
+            assert!(
+                !super::native_process_exit_route(not_exit),
+                "{not_exit} must not terminate the client"
+            );
+        }
+        // Tab close is a SEPARATE action with no typed command: upstream's
+        // `session.tab.close` has no `slash` entry (`app.tsx:878-884`) and is
+        // bound to `<leader>w` (`config/keybind.ts:119`). The navigation
+        // transition still closes one tab while the daemon-side work state
+        // (reopen/daemon work) is preserved.
         let mut navigation = crate::native_navigation::NavigationState::new();
-        let session = crate::native_navigation::SessionRef("00000000-0000-0000-0000-000000000001".into());
+        let session =
+            crate::native_navigation::SessionRef("00000000-0000-0000-0000-000000000001".into());
         navigation.open(session.clone());
         navigation.apply(crate::native_navigation::DaemonEvent::WorkState {
             session: session.clone(),
             state: crate::native_navigation::WorkState::Running,
         });
-        assert!(super::native_close_tab_route("/exit"));
-        assert!(!super::native_process_exit_route("/exit"));
         assert!(navigation.close(&session).is_ok());
         assert_eq!(navigation.tab_len(), 0);
-        assert_eq!(navigation.work_state(&session), Some(crate::native_navigation::WorkState::Running));
-        assert!(super::native_process_exit_route("/quit"));
-        assert!(super::native_process_exit_route(":q"));
-        assert!(super::native_process_exit_route(":quit"));
+        assert_eq!(
+            navigation.work_state(&session),
+            Some(crate::native_navigation::WorkState::Running)
+        );
     }
 
     #[test]
