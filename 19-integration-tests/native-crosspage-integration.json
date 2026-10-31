@@ -1,0 +1,118 @@
+{
+  "schema": "native-crosspage-integration-v1",
+  "status": "PASS",
+  "base_sha": "78aedc42eddf0800716cf64c9a98f653f4a8758b",
+  "upstream_pin": "95daf90670b7c039c436c85537da5fbfe2205b41",
+  "repo": "/Users/mymac/Projects/opencode-rk-recovery-20261005",
+  "scope": [
+    "real input route transitions",
+    "Escape/draft UTF-8 retention",
+    "permission/API-key focus ownership",
+    "backend-selection identity and ACK gates"
+  ],
+  "execution": "offline fixture self-checks and source contract checks only",
+  "forbidden": [
+    "product PTY",
+    "Cargo/Bun/network/build",
+    "real providers",
+    "secrets",
+    "user database"
+  ],
+  "results": [
+    {
+      "kind": "source-contract",
+      "path": "crates/cli/src/native_view.rs",
+      "sha256": "453c06ed20c10444136a53a6a4119afb6e58aa04df7baf22d227c2a1884d3450",
+      "required": [
+        "open_commands_page",
+        "GET /api/models (picker via /models or Ctrl-P)",
+        "ack_permission_reply",
+        "backend-ACKed session bind"
+      ],
+      "missing": [],
+      "pass": true
+    },
+    {
+      "kind": "source-contract",
+      "path": "crates/cli/src/native_view_dialogs.rs",
+      "sha256": "98ec551e2d2efeb62ff1e7205bc00b40369e27ef9c1aef338918ef2e8d02c6ec",
+      "required": [
+        "Permission",
+        "ApproveOnce",
+        "UnknownPermissionChoice",
+        "backend acknowledgement"
+      ],
+      "missing": [],
+      "pass": true
+    },
+    {
+      "kind": "source-contract",
+      "path": "crates/cli/src/native_input_decoder.rs",
+      "sha256": "916a394809acfca7ba226b4cfd0be70c8cfcf5f7d465cc0d7b3eb3fb5931e42e",
+      "required": [
+        "InputEvent::Escape",
+        "ESCAPE_GRACE",
+        "Paste"
+      ],
+      "missing": [],
+      "pass": true
+    },
+    {
+      "kind": "source-contract",
+      "path": "crates/cli/src/native_view_pages.rs",
+      "sha256": "3accd8ed6fe419d2789352672a31129455f3bf5815da99ce5771628966ed1dff",
+      "required": [
+        "\"/sessions\"",
+        "\"/models\"",
+        "Page::Commands"
+      ],
+      "missing": [],
+      "pass": true
+    },
+    {
+      "command": "/Applications/Xcode.app/Contents/Developer/usr/bin/python3 /Users/mymac/Projects/opencode-rk-recovery-20261005/tests/e2e/native_utf8_input.py --self-check",
+      "exit_code": 0,
+      "duration_ms": 50,
+      "output": "self-check: bounded SSE, exact Unicode state, semantic mismatch recording, request cap, and auth negative passed\n",
+      "kind": "offline-fixture-self-check",
+      "name": "utf8-draft-route",
+      "pass": true
+    },
+    {
+      "command": "/Applications/Xcode.app/Contents/Developer/usr/bin/python3 /Users/mymac/Projects/opencode-rk-recovery-20261005/tests/e2e/native_escape_input.py --self-check",
+      "exit_code": 0,
+      "duration_ms": 47,
+      "output": "self-check: exact two-turn history, bounded SSE, auth, and request cap passed\n",
+      "kind": "offline-fixture-self-check",
+      "name": "escape-draft-route",
+      "pass": true
+    },
+    {
+      "command": "/Applications/Xcode.app/Contents/Developer/usr/bin/python3 /Users/mymac/Projects/opencode-rk-recovery-20261005/tests/e2e/native_second_client.py --self-check",
+      "exit_code": 0,
+      "duration_ms": 559,
+      "output": "self-check: descriptor, session, messages, auth, redaction, and callback passed\n",
+      "kind": "offline-fixture-self-check",
+      "name": "second-client-identity",
+      "pass": true
+    },
+    {
+      "command": "/Applications/Xcode.app/Contents/Developer/usr/bin/python3 /Users/mymac/Projects/opencode-rk-recovery-20261005/tests/e2e/native_bracketed_paste.py --self-check",
+      "exit_code": 0,
+      "duration_ms": 50,
+      "output": "self-check: CRLF/CR normalize, exact two-turn history, request cap, auth, mismatch passed\n",
+      "kind": "offline-fixture-self-check",
+      "name": "bracketed-paste-draft",
+      "pass": true
+    },
+    {
+      "command": "/Applications/Xcode.app/Contents/Developer/usr/bin/python3 /Users/mymac/Projects/opencode-rk-recovery-20261005/tests/e2e/native_stream_tool.py --self-check",
+      "exit_code": 0,
+      "duration_ms": 556,
+      "output": "self-check: HTTP JSON defaults, actual gated early SSE, auth, invalid stream, four-round state history and typed-pair negatives passed\n",
+      "kind": "offline-fixture-self-check",
+      "name": "tool-ack-history",
+      "pass": true
+    }
+  ]
+}

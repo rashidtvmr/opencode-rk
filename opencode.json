@@ -1,0 +1,9 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "references": {
+    "matt-pocock-skills": {
+      "path": "docs/reference/matt-pocock-skills",
+      "description": "Vendored reference documentation of Matt Pocock's engineering and productivity skills (MIT). Read for TDD, diagnosing bugs, domain modeling, code review, grilling/interview, spec and ticket workflows, and writing docs for agents. This is reference material, NOT a registered skill - never invoke it as one. Where it conflicts with this repo's own AGENTS.md, docs/TDD.md, docs/CONVERGENCE.md, or docs/SUBAGENT_CONTROL.md, the local docs win."
+    }
+  }
+}

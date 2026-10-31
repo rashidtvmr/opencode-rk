@@ -1,0 +1,6 @@
+# Independent exact-copy and reproduction inventory (hashes excludes itself)
+15bc09e4c218912c32cff486b49f829fb476914d2372af95ef0a05013e30d334  source/custody.py
+d95b59f81e0e23187e6677831608ba00099eb4706906e7e509ca3f0341e22496  source/test_custody.py
+7dc3dc454cbfa83e6b585cb2e84d60aab32fc679cdae23e1760ceb770ecab55f  receipts/unittest-command.txt
+19eaf43821a7660ec323a87c8457bf74823beb296c39f5e01aa8a683aa50f061  receipts/unittest-exit.txt
+6f1709b9f13b7bbf88c06ca3ebcb0062e711705dfbef832eb022f0de624b6a8d  receipts/unittest-stdout.txt

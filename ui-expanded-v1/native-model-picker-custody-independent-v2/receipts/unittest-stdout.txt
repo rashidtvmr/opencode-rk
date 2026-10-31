@@ -1,0 +1,27 @@
+test_completed_assertion_green_exit0 (test_custody.CustodyTestCase) ... ok
+test_exception_marks_unfinished_not_green (test_custody.CustodyTestCase) ... ok
+test_green_requires_explicit_completed_assertion (test_custody.CustodyTestCase) ... ok
+test_manifest_different_binary_path_refused (test_custody.CustodyTestCase) ... ok
+test_manifest_sha_mismatch_refused (test_custody.CustodyTestCase) ... ok
+test_manifest_without_sha_refused (test_custody.CustodyTestCase) ... ok
+test_missing_artifact_closes_unfinished_exit3 (test_custody.CustodyTestCase) ... ok
+test_missing_binary_refused (test_custody.CustodyTestCase) ... ok
+test_missing_manifest_refused (test_custody.CustodyTestCase) ... ok
+test_module_import_has_no_launch_side_effects (test_custody.CustodyTestCase) ... ok
+test_output_colliding_grant_root_refused (test_custody.CustodyTestCase) ... ok
+test_output_created_exclusively_and_contained (test_custody.CustodyTestCase) ... ok
+test_output_parent_escape_refused (test_custody.CustodyTestCase) ... ok
+test_output_symlink_component_refused (test_custody.CustodyTestCase) ... ok
+test_output_symlink_leaf_refused (test_custody.CustodyTestCase) ... ok
+test_product_fail_red_exit1 (test_custody.CustodyTestCase) ... ok
+test_red_precedence_retains_unfinished_reason (test_custody.CustodyTestCase) ... ok
+test_refused_hash_denied_via_policy_helper (test_custody.CustodyTestCase) ... ok
+test_repeated_finish_refused (test_custody.CustodyTestCase) ... ok
+test_symlinked_binary_refused (test_custody.CustodyTestCase) ... ok
+test_unfinished_cannot_be_overwritten_green (test_custody.CustodyTestCase) ... ok
+test_valid_binary_hash_and_path_match (test_custody.CustodyTestCase) ... ok
+
+----------------------------------------------------------------------
+Ran 22 tests in 0.008s
+
+OK

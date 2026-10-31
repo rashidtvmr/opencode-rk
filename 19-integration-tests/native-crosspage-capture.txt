@@ -1,0 +1,13 @@
+status: PASS
+base_sha: 78aedc42eddf0800716cf64c9a98f653f4a8758b
+upstream_pin: 95daf90670b7c039c436c85537da5fbfe2205b41
+mode: offline; no product PTY/build/network
+PASS crates/cli/src/native_view.rs
+PASS crates/cli/src/native_view_dialogs.rs
+PASS crates/cli/src/native_input_decoder.rs
+PASS crates/cli/src/native_view_pages.rs
+PASS utf8-draft-route
+PASS escape-draft-route
+PASS second-client-identity
+PASS bracketed-paste-draft
+PASS tool-ack-history

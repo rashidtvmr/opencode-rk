@@ -1,0 +1,42 @@
+{
+  "version": "1.0",
+  "description": "Merge manifest for 500+ worktree branches",
+  "createdAt": "2026-10-01T00:00:00Z",
+  "totalBuckets": 25,
+  "eachBucketSize": 20,
+  "versionTarget": "v2",
+  "buckets": [
+    {
+      "id": "0",
+      "name": "topology-support-functions",
+      "branches": [
+        {
+          "branchName": "feature/topology-add-edge",
+          "source": "upstream/opencode-v2",
+          "baseCommit": "abc123def456"
+        },
+        {
+          "branchName": "feature/topology-remove-node",
+          "source": "upstream/opencode-v2-feature-slice",
+          "baseCommit": "def456ghi789"
+        }
+      ]
+    },
+    {
+      "id": "1",
+      "name": "protocol-streaming",
+      "branches": [
+        {
+          "branchName": "feature/stream-chunks",
+          "source": "upstream/opencode-v2-protocol",
+          "baseCommit": "jkl012mno345"
+        },
+        {
+          "branchName": "feature/stream-resize",
+          "source": "upstream/opencode-v2-protocol",
+          "baseCommit": "pqr678stu901"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+# L06-terminal-strategy hashes (SHA-256)
+
+## Final owned artifacts
+24d1f8122fb33b24befc6cf3e2d7b627554e2476a3d1469954cca7938d55b2a4  SCRATCHPAD.md
+6cc2267d39a27bd0658157216307eeac79c7055f232b8cb444b5640632b6980a  REPORT.md
+a1652e38440269f9df6516e993b6ed8d92afad1f0a52d038014438121f1bf2e5  VERDICT.md
+
+## Source evidence
+c612a317ca4bde0d337c20b65370b1866df7386d8ca75e80da83dfcd53044ffd  /Users/mymac/Projects/opencode-rk/.git/recovery-evidence/ui-parity-kit-20261028/parallel-replenishment/P01-v3-haiku/context.rs
+52190da4b586b7544d7970fe9e4e49da243f540f38b26e8419d95bc721d5e9f3  /Users/mymac/Projects/opencode-rk/.git/recovery-evidence/ui-parity-kit-20261028/native-provenance-river/opentui.h-at-8d6065a3-0.6.8.h
+260c0b651c215d5dd36ca666780a59a1342044e2c7e056dd5e97f8a3732614b4  /Users/mymac/Projects/opencode-rk/.git/recovery-evidence/ui-parity-kit-20261028/parallel-replenishment/P08-readback-v2-th/DEPENDENCY.patch
+5ac7dcf6e0398324f8608ea9d7125e3ba87eb477772f742a98f199b632c6b3bb  /Users/mymac/Projects/opencode-rk/.git/recovery-evidence/ui-parity-kit-20261028/parallel-replenishment/P03-strategy-combined/REPORT.md
+ea1ffff3eafafa1a329ed83e1daf9d2eea506b011f360c481ec8a7ab1a53259c  /Users/mymac/Projects/opencode-rk/.git/recovery-evidence/ui-parity-kit-20261028/parallel-replenishment/P03-strategy-combined/PRESERVED-HANDOFF.md
+
+## Pins verified
+Canonical HEAD: 7ceb21fb267751e1b3772f482d1673a76aa235df
+OpenCode HEAD: 450e7b92412c780a7b5a75226bb8d49aaca24e22
+OpenTUI: 8d6065a3e60039d16c6ee697692dcfbc46d3c786
