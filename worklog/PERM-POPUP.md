@@ -75,3 +75,13 @@ board_grants_bounded_max.
   edits and are NOT committed by me.
 - Next orchestrator action: fix or re-delegate `page_pins_to_bottom_and_scrolls`
   in native_transcript.rs, then rerun this landing sequence.
+
+## LANDED (2026-10-21, owner-approved despite pre-existing out-of-lane failure)
+- Branch `lane/PERM-POPUP`, commit `59a51346d76a64bcccef430589e2842ba05dab45`,
+  pushed to origin (PR link emitted by remote). 8 files, +1341/−1. NOT merged to main.
+- Staged set verified = exactly the 8 instructed paths (Cargo.toml, chat.rs,
+  main.rs, native_approvals.rs, permission_command.rs, PERM-COMMAND/FEATURE/POPUP worklogs).
+- Post-commit scoped reruns on the committed tree:
+  - `cargo +1.98.1 test -p opencode-rk-cli --bin oc2 native_approvals` -> ok. 21 passed; 0 failed
+  - `cargo +1.98.1 test -p opencode-rk-cli --bin oc2 permission` -> ok. 12 passed; 0 failed
+- Remaining in tree after landing: `AGENTS.md` modified, 19 untracked files (other lanes).

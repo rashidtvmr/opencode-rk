@@ -947,11 +947,23 @@ fn resolve_cli_data_dir() -> Option<std::path::PathBuf> {
 /// Print a frame through the native OpenTUI memory renderer when available:
 /// [`render_once`] snapshot on success, legacy text on validation failure.
 /// Real Rust caller for the opentui bridge (CONVERGENCE NATIVE_TUI).
+///
+/// Headless `--once` snapshots must remain bounded but must also honor the
+/// `--memory` resource contract: all `MAX_MEMORY_FILES` retained entries (up to
+/// 64) must remain visible. The interactive `native_interactive_loop` sizes to
+/// the live terminal and never calls this path, so sizing the one-shot renderer
+/// to the full frame does not change interactive viewport rows/projection.
 fn print_native_or_legacy(frame: &str) -> String {
     #[cfg(feature = "native")]
     {
         let lines: Vec<String> = frame.lines().map(str::to_owned).collect();
-        match opencode_rk_opentui_bridge::Renderer::render_once(80, 24, &lines) {
+        // Size the headless renderer to fit every frame line so the 64-file
+        // memory cap is not clipped by a 24-row viewport. Capped by the bounded
+        // frame itself (<= banner + status + composer + MAX_MEMORY_FILES +
+        // footer hints), so headless output stays bounded.
+        let rows = u32::try_from(lines.len()).unwrap_or(u32::MAX).max(24);
+        let cols = 80u32;
+        match opencode_rk_opentui_bridge::Renderer::render_once(cols, rows, &lines) {
             Ok(snapshot) => snapshot,
             Err(_) => frame.to_owned(),
         }
