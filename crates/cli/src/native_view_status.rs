@@ -46,6 +46,13 @@ use opencode_rk_sessions::{validate_todos, Todo};
 // on this package's owned file set; the canonical path is
 // `crate::native_view_status::native_sidebar`. Do not also declare
 // `mod native_sidebar;` in `main.rs`: the same file cannot be loaded twice.
+//
+// This module only projects confirmed facts into that model (`with_sidebar`)
+// and paints every row it returns (`render_sidebar_styled`); composition,
+// thresholds, disclosure and footer rules live in `native_sidebar`. A child
+// session owns no information sidebar at all: the composition root suppresses
+// the pane before any projection runs (`native_view.rs` `parent_session`,
+// `LAY-09`), so there is no sidebar state for this view to render there.
 #[path = "native_sidebar.rs"]
 pub mod native_sidebar;
 
@@ -304,6 +311,158 @@ mod conditional_sidebar_tests {
         let visible = rows.iter().map(|row| row.trim()).filter(|row| !row.is_empty()).collect::<Vec<_>>();
         assert_eq!(visible, ["Context", "12,345 tokens", "12% used"]);
     }
+
+    /// Every confirmed contribution reaches the painted rows in upstream
+    /// order (`sidebar.tsx:56-78`). Nothing may be constructed in
+    /// `with_sidebar` and then dropped by the styled render path.
+    #[test]
+    fn every_confirmed_section_reaches_the_styled_sidebar_rows() {
+        use super::native_sidebar;
+        let mut view = StatusView::default();
+        view.set_session_binding(
+            Some(opencode_rk_contracts::SessionId::new().to_string()),
+            Some("All sections".into()),
+            Some(2),
+        );
+        view.set_context(Some(1500), Some(20_000));
+        view.set_cost(Some(1.25));
+        view.set_limit(Some(native_sidebar::LimitSection::new(
+            3.5,
+            native_sidebar::UsageLevel::Plenty,
+        )));
+        view.apply_mcp(&serde_json::json!({
+            "a": {"status":"connected"},
+            "b": {"status":"failed","error":"timeout"},
+            "c": {"status":"disabled"}
+        }))
+        .unwrap();
+        view.apply_todos(&serde_json::json!({"todos":[
+            {"id":"t1","content":"Ship sidebar","status":"pending","priority":"high"}
+        ]}))
+        .unwrap();
+        view.set_working_directory(Some("/projects/oc2".into()), Some("main".into()));
+        view.set_onboarding(Some(native_sidebar::Onboarding {
+            dismissed: false,
+            integrations_known: true,
+            connected_provider: false,
+        }));
+        let styled = view.render_sidebar_styled(38, 60);
+        let rows: Vec<&str> = styled.iter().map(|line| line.text.trim_end()).collect();
+        let index = |predicate: &dyn Fn(&str) -> bool| {
+            rows.iter()
+                .position(|row| predicate(row))
+                .unwrap_or_else(|| panic!("missing row in {rows:?}"))
+        };
+        let title = index(&|row| row == "All sections");
+        let context = index(&|row| row == "Context");
+        let tokens = index(&|row| row == "1,500 tokens");
+        let percent = index(&|row| row == "8% used");
+        let cost = index(&|row| row == "$1.25 spent");
+        let limit = index(&|row| row == "Limit");
+        let remaining = index(&|row| row == "$3.50 remaining");
+        let mcp = index(&|row| row == "▼ MCP");
+        let first = index(&|row| row.contains("• a Connected"));
+        let second = index(&|row| row.contains("• b Error"));
+        let third = index(&|row| row.contains("• c Disabled"));
+        let todo = index(&|row| row == "Todo");
+        let todo_row = index(&|row| row == "[ ] Ship sidebar");
+        let onboarding = index(&|row| row.contains("Getting started"));
+        let connect = index(&|row| row.contains("Connect provider"));
+        let footer = index(&|row| row == "/projects/oc2:main");
+        assert!(
+            title < context
+                && context < tokens
+                && tokens < percent
+                && percent < cost
+                && cost < limit
+                && limit < remaining
+                && remaining < mcp
+                && mcp < first
+                && first < second
+                && second < third
+                && third < todo
+                && todo < todo_row
+                && todo_row < onboarding
+                && onboarding < connect
+                && connect < footer,
+            "upstream composition order: {rows:?}"
+        );
+        // The plain string API is the same row set, not a second projection.
+        let plain_rows = view.render_sidebar(38, 60);
+        let plain: Vec<&str> = plain_rows
+            .iter()
+            .map(|row| row.trim_end())
+            .collect::<Vec<_>>();
+        assert_eq!(plain, rows);
+    }
+
+    /// A very tall pane bounds the composed height, not the composed row
+    /// list: the pinned footer (`sidebar.tsx:74-76`) must never be cut off by
+    /// the [`MAX_ROWS`] cap after a long body.
+    #[test]
+    fn oversized_height_keeps_pinned_footer_within_the_row_cap() {
+        use super::MAX_ROWS;
+        use super::native_sidebar;
+        let mut view = StatusView::default();
+        view.set_working_directory(Some("/w".into()), Some("main".into()));
+        view.set_onboarding(Some(native_sidebar::Onboarding {
+            dismissed: false,
+            integrations_known: true,
+            connected_provider: false,
+        }));
+        let todos = (0..100)
+            .map(|index| {
+                serde_json::json!({
+                    "id": format!("t{index}"),
+                    "content": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron",
+                    "status": "pending",
+                    "priority": "low"
+                })
+            })
+            .collect::<Vec<_>>();
+        view.apply_todos(&serde_json::json!({ "todos": todos }))
+            .unwrap();
+        let rows = view.render_sidebar(38, 400);
+        assert!(rows.len() <= MAX_ROWS, "row cap holds: {}", rows.len());
+        assert!(
+            rows.len() > MAX_ROWS / 2,
+            "the body really is longer than the cap: {}",
+            rows.len()
+        );
+        assert_eq!(
+            rows.last().map(String::as_str),
+            Some("/w:main"),
+            "pinned footer path survives the cap"
+        );
+        assert!(
+            rows.iter().any(|row| row.contains("Getting started")),
+            "pinned onboarding survives the cap"
+        );
+    }
+
+    /// Getting-started is a footer sibling of the location row, so it still
+    /// reaches the painted rows when no working directory was observed
+    /// (`footer.tsx:94-112`).
+    #[test]
+    fn onboarding_reaches_output_without_a_working_directory() {
+        use super::native_sidebar;
+        let mut view = StatusView::default();
+        view.set_onboarding(Some(native_sidebar::Onboarding {
+            dismissed: false,
+            integrations_known: true,
+            connected_provider: false,
+        }));
+        let rows = view.render_sidebar(38, 30);
+        assert!(rows.iter().any(|row| row.contains("Getting started")));
+        assert!(rows.iter().any(|row| row.trim_end().ends_with("/connect")));
+        // Dismissed or connected providers still hide the box.
+        view.set_onboarding(Some(native_sidebar::Onboarding {
+            dismissed: true,
+            integrations_known: true,
+            connected_provider: false,
+        }));
+        assert!(!view.render_sidebar(38, 30).join("\n").contains("Getting started"));
+    }
 }
 
 struct SidebarRow {
@@ -368,7 +527,11 @@ impl StatusView {
 
     #[must_use]
     pub fn mcp_sidebar_open(&self) -> bool {
-        self.mcp.len() <= native_sidebar::COLLAPSE_THRESHOLD || self.mcp_open.unwrap_or(true)
+        // Persisted disclosure only. Upstream renders rows at <=2 servers
+        // regardless of this flag (`mcp.tsx:49`), and keeps the collapsed
+        // heading summary whenever the flag is false (`mcp.tsx:41-46`), so
+        // this value must not be forced back to `true` by the list length.
+        self.mcp_open.unwrap_or(true)
     }
 
     /// Toggle the Todo disclosure. At most two todos always stay expanded, so
@@ -392,6 +555,9 @@ impl StatusView {
     /// (`sidebar.tsx:32-76`). The offset is clamped to the real body overflow.
     pub fn scroll_sidebar(&mut self, lines: isize, height: usize) {
         if height == 0 { return; }
+        // Same frame the renderer composes, so the offset can always reach
+        // the last painted body row (see `sidebar_rows`).
+        let height = height.min(MAX_ROWS);
         let width = native_sidebar::content_width(native_sidebar::SESSION_SIDEBAR_WIDTH);
         let maximum = self.with_sidebar(|sidebar| sidebar.scroll_limit(width, height));
         self.sidebar_offset = self.sidebar_offset.min(maximum)
@@ -464,6 +630,10 @@ impl StatusView {
     /// `width`/`height`/`MAX_ROWS` and by the current body scroll offset.
     fn sidebar_rows(&self, width: usize, height: usize) -> Vec<SidebarRow> {
         if width == 0 || height == 0 { return Vec::new(); }
+        // Cap the composed height, not the composed rows: truncating the tail
+        // of a taller frame would drop the pinned footer rows that
+        // `sidebar.tsx:74-76` keeps at the bottom of the pane.
+        let height = height.min(MAX_ROWS);
         let mut rows: Vec<SidebarRow> = self.with_sidebar(|sidebar| {
             sidebar
                 .render(width, height, self.sidebar_offset)
@@ -654,7 +824,9 @@ impl StatusView {
         if width == 0 || height == 0 { return None; }
         let rows = self.sidebar_rows(width, height);
         let target = rows.get(row)?;
-        if target.mcp_toggle && self.mcp.len() > 2 { return Some(McpSidebarHit::Toggle); }
+        if target.mcp_toggle && self.mcp.len() > native_sidebar::COLLAPSE_THRESHOLD {
+            return Some(McpSidebarHit::Toggle);
+        }
         let entry = self.mcp.get(target.mcp_index?)?;
         Some(McpSidebarHit::Server { name: entry.name.as_str(), included: entry.included? })
     }
@@ -2100,6 +2272,34 @@ mod mcp_sidebar_behavior_regression {
         view.apply_mcp(&snapshot).unwrap();
         assert!(!view.mcp_sidebar_open());
         assert!(view.render_sidebar(80, 20).iter().any(|row| row.contains("▶ MCP")));
+    }
+
+    /// SIDE-11: a collapse persisted while the list was long survives the
+    /// list shrinking to <=2 servers. Upstream keeps the flag
+    /// (`mcp.tsx:29-34` refuses to toggle at <=2), still prints the muted
+    /// summary (`mcp.tsx:41-46`) and always shows the rows without an arrow
+    /// (`mcp.tsx:36-38/49`).
+    #[test]
+    fn collapse_persisted_from_a_longer_list_survives_shrinking_to_two() {
+        let mut view = StatusView::default();
+        view.apply_mcp(&three_servers()).unwrap();
+        assert!(view.toggle_mcp_sidebar());
+        assert!(!view.mcp_sidebar_open());
+        view.apply_mcp(&json!({
+            "a": {"status":"connected"},
+            "b": {"status":"failed", "error":"timeout"}
+        }))
+        .unwrap();
+        assert!(!view.mcp_sidebar_open(), "the persisted flag is not reset");
+        let rows = view.render_sidebar(80, 20);
+        assert!(rows.iter().any(|row| row == "MCP (1 active, 1 error)"), "{rows:?}");
+        assert!(!rows.iter().any(|row| row.starts_with('▶')), "no arrow at <=2");
+        assert!(rows.iter().any(|row| row.contains("• a Connected")), "{rows:?}");
+        assert!(rows.iter().any(|row| row.contains("• b Error")), "{rows:?}");
+        // Toggling is still refused while <=2 servers exist.
+        assert!(!view.toggle_mcp_sidebar());
+        assert!(!view.mcp_sidebar_open());
+        assert!(view.render_sidebar(80, 20).iter().any(|row| row == "MCP (1 active, 1 error)"));
     }
 
     #[test]

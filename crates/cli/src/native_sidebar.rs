@@ -29,6 +29,15 @@
 //! The header (top padding + title + title bottom padding) and the footer
 //! (top padding + getting-started + location path, `sidebar.tsx:32-49/74-76`)
 //! are pinned; only the body scrolls.
+//!
+//! Rule sources closed here:
+//! * MCP disclosure thresholds and the persisted-collapse summary
+//!   (`feature-plugins/sidebar/mcp.tsx:29-49`);
+//! * Todo disclosure and its `remaining` summary (`todo.tsx:25-43`);
+//! * getting-started box padding, inner gaps and its independence from the
+//!   location row (`footer.tsx:26-112`);
+//! * the footer path menu copy/open/workspaces actions and the selection
+//!   guard (`ui/working-directory-actions.tsx:16-58`).
 
 use crate::native_ui_style::Role;
 use opencode_rk_sessions::TodoStatus;
@@ -428,6 +437,13 @@ impl<'a> McpSection<'a> {
     }
 
     /// Heading text: arrow + `MCP` (+ collapsed summary, `mcp.tsx:36-47`).
+    ///
+    /// The disclosure arrow is gated on more than two servers
+    /// (`mcp.tsx:36-38`), but the muted summary span is gated only on the
+    /// persisted `open` flag (`mcp.tsx:41-46`). A list that was collapsed
+    /// while long and later shrank to one/two servers therefore still shows
+    /// the summary while its rows stay permanently visible
+    /// (`mcp.tsx:49`, `SIDE-11`).
     #[must_use]
     pub fn heading(&self) -> String {
         let arrow = if self.collapsible() {
@@ -439,10 +455,10 @@ impl<'a> McpSection<'a> {
         } else {
             ""
         };
-        if self.collapsible() && !self.open {
-            format!("{arrow}MCP ({})", self.summary())
-        } else {
+        if self.open {
             format!("{arrow}MCP")
+        } else {
+            format!("{arrow}MCP ({})", self.summary())
         }
     }
 
@@ -793,6 +809,13 @@ impl<'a> Footer<'a> {
             Role::Description
         }
     }
+
+    /// Working-directory menu for this pinned footer
+    /// (`working-directory-actions.tsx:16-58`).
+    #[must_use]
+    pub fn menu(&self, selection_active: bool, can_move: bool) -> Option<Vec<FooterMenuItem>> {
+        footer_menu(Some(self.directory), selection_active, can_move)
+    }
 }
 
 /// `branch ? `${path}:${branch}` : path`, then `truncateFilePath`.
@@ -803,6 +826,100 @@ pub fn footer_label(directory: &str, branch: Option<&str>, max_width: usize) -> 
         None => directory.to_owned(),
     };
     truncate_file_path(&value, max_width)
+}
+
+/// Title of the working-directory menu (`working-directory-actions.tsx:22`).
+pub const FOOTER_MENU_TITLE: &str = "Working directory";
+
+/// One entry of the footer path menu (`working-directory-actions.tsx:24-54`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FooterAction {
+    /// `location.copy` — writes the directory to the clipboard and toasts
+    /// `Path copied to clipboard`.
+    CopyPath,
+    /// `location.open` — hands the directory to the system file manager.
+    OpenFolder,
+    /// `session.move` — only offered when the caller can move the session.
+    Workspaces,
+}
+
+impl FooterAction {
+    /// Exact menu title (`working-directory-actions.tsx:25/37/48`).
+    #[must_use]
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::CopyPath => "Copy path",
+            Self::OpenFolder => "Open folder",
+            Self::Workspaces => "Workspaces",
+        }
+    }
+
+    /// Exact menu description (`working-directory-actions.tsx:28/38/50`).
+    /// `CopyPath` shows the directory itself, so it is filled by the caller.
+    #[must_use]
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::CopyPath => "",
+            Self::OpenFolder => "in system file manager",
+            Self::Workspaces => "to another working directory",
+        }
+    }
+
+    /// Keymap value carried by the menu entry.
+    #[must_use]
+    pub fn value(self) -> &'static str {
+        match self {
+            Self::CopyPath => "location.copy",
+            Self::OpenFolder => "location.open",
+            Self::Workspaces => "session.move",
+        }
+    }
+}
+
+/// One rendered menu entry: the action plus its resolved description.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FooterMenuItem {
+    pub action: FooterAction,
+    pub title: &'static str,
+    pub description: String,
+}
+
+/// `openMenu` (`working-directory-actions.tsx:16-58`).
+///
+/// Returns `None` (no menu, no action) when a text selection is active — the
+/// footer click must not open the menu while the user is selecting text — and
+/// when the working directory is unknown. `Workspaces` is offered only when
+/// the caller can move the session to another directory.
+#[must_use]
+pub fn footer_menu(
+    directory: Option<&str>,
+    selection_active: bool,
+    can_move: bool,
+) -> Option<Vec<FooterMenuItem>> {
+    if selection_active {
+        return None;
+    }
+    let directory = directory.filter(|directory| !directory.is_empty())?;
+    let mut items = vec![
+        FooterMenuItem {
+            action: FooterAction::CopyPath,
+            title: FooterAction::CopyPath.title(),
+            description: directory.to_owned(),
+        },
+        FooterMenuItem {
+            action: FooterAction::OpenFolder,
+            title: FooterAction::OpenFolder.title(),
+            description: FooterAction::OpenFolder.description().to_owned(),
+        },
+    ];
+    if can_move {
+        items.push(FooterMenuItem {
+            action: FooterAction::Workspaces,
+            title: FooterAction::Workspaces.title(),
+            description: FooterAction::Workspaces.description().to_owned(),
+        });
+    }
+    Some(items)
 }
 
 /// Getting-started fact set (`footer.tsx:18-23`).
@@ -824,11 +941,24 @@ impl Onboarding {
             && !self.connected_provider
     }
 
-    /// Box rows inside the footer (`footer.tsx:37-70`).
+    /// Box rows inside the footer, including the box's own vertical padding
+    /// (`footer.tsx:27-33` `paddingTop={1}`/`paddingBottom={1}`) and the
+    /// `gap={1}` between the four inner children (`footer.tsx:40-70`).
+    ///
+    /// The outer row is `⬖` + one gap cell + the inner column, and the inner
+    /// column is padded by the box's 2-cell left/right padding
+    /// (`footer.tsx:31-34`), so its budget is
+    /// `width - 4 (padding) - 2 (glyph + gap)`.
     #[must_use]
     pub fn lines(&self, width: usize) -> Vec<String> {
         let mut rows = Vec::new();
         let inner = width.saturating_sub(4).saturating_sub(2);
+        if inner == 0 {
+            // The box cannot fit its own padding and glyph; paint nothing
+            // rather than emitting rows wider than the sidebar.
+            return rows;
+        }
+        rows.push(String::new());
         rows.push(format!(
             "⬖ {:<inner$}",
             justify("Getting started", "✕", inner)
@@ -837,14 +967,17 @@ impl Onboarding {
             "OpenCode includes free models so you can start immediately.",
             "Connect from 75+ providers to use other models, including Claude, GPT, Gemini etc",
         ] {
+            rows.push(String::new());
             for line in wrap_cells(sentence, inner) {
                 rows.push(format!("  {line}"));
             }
         }
+        rows.push(String::new());
         rows.push(format!(
             "  {:<inner$}",
             justify("Connect provider", "/connect", inner)
         ));
+        rows.push(String::new());
         rows
     }
 }
@@ -1000,21 +1133,34 @@ impl<'a> Sidebar<'a> {
         rows
     }
 
+    /// Rows contributed by the footer box (`sidebar.tsx:74-76`,
+    /// `footer.tsx:94-112`).
+    ///
+    /// The box has `paddingTop={1}` and `gap={1}` between the onboarding
+    /// contribution and the location row. The getting-started box is a
+    /// sibling of the location row, not a child of it: it stays visible when
+    /// the working directory was never observed (`footer.tsx:94-112`), and
+    /// only the path row is gated on `directory()` being known.
     fn footer_rows(&self, width: usize, height: usize) -> Vec<SidebarRow> {
-        if self.footer.is_none() {
-            // Getting-started lives inside the footer contribution; without a
-            // pinned footer there is no footer box to paint.
+        let onboarding = self.onboarding.filter(|item| item.visible(height));
+        if onboarding.is_none() && self.footer.is_none() {
             return Vec::new();
         }
-        let mut rows = vec![SidebarRow::new(String::new(), Role::Description)];
-        if let Some(onboarding) = self.onboarding.filter(|item| item.visible(height)) {
+        let mut rows = vec![
+            SidebarRow::new(String::new(), Role::Description);
+            FOOTER_TOP_PADDING
+        ];
+        if let Some(onboarding) = onboarding {
             rows.extend(
                 onboarding
                     .lines(width)
                     .into_iter()
                     .map(|line| SidebarRow::new(line, Role::Description)),
             );
-            rows.push(SidebarRow::new(String::new(), Role::Description));
+            if self.footer.is_some() {
+                // `gap={1}` between the two footer children.
+                rows.push(SidebarRow::new(String::new(), Role::Description));
+            }
         }
         if let Some(footer) = self.footer {
             rows.push(SidebarRow::new(
@@ -1336,7 +1482,18 @@ mod tests {
             };
             assert!(!section.collapsible());
             assert!(section.expanded(), "<=2 servers stay visible");
-            assert_eq!(section.heading(), "MCP", "no disclosure arrow");
+            // `mcp.tsx:36-38` gates the arrow on more than two servers, but
+            // `mcp.tsx:41-46` gates the summary only on the persisted flag.
+            assert_eq!(section.heading(), format!("MCP ({count} active)"));
+            assert_eq!(
+                McpSection {
+                    items: &items,
+                    open: true
+                }
+                .heading(),
+                "MCP",
+                "no disclosure arrow at <=2 servers"
+            );
             assert_eq!(section.row(&items[0], body_width(content_width(42))), "• alpha Connected");
         }
 
@@ -1519,11 +1676,26 @@ mod tests {
         }
         .visible(40));
         let lines = ready.lines(content_width(42));
-        assert!(lines[0].starts_with("⬖ Getting started"));
-        assert!(lines[0].ends_with('✕'));
+        // Box paddingTop={1} (`footer.tsx:27`), then the ⬖ row.
+        assert_eq!(lines.first().map(String::as_str), Some(""));
+        assert!(lines[1].starts_with("⬖ Getting started"));
+        assert!(lines[1].ends_with('✕'));
         assert!(lines.iter().any(|line| line.contains("75+ providers")));
-        assert!(lines.last().unwrap().contains("Connect provider"));
-        assert!(lines.last().unwrap().ends_with("/connect"));
+        // The inner column has `gap={1}` between title, both sentences and
+        // the connect row (`footer.tsx:40-70`).
+        let connect = lines
+            .iter()
+            .rposition(|line| line.contains("Connect provider"))
+            .expect("connect row");
+        assert!(lines[connect].ends_with("/connect"));
+        assert_eq!(lines[connect + 1], "", "gap before the box paddingBottom");
+        // Box paddingBottom={1} (`footer.tsx:33`).
+        assert_eq!(lines.last().map(String::as_str), Some(""));
+        assert_eq!(
+            lines.iter().filter(|line| line.is_empty()).count(),
+            5,
+            "padding + three inner gaps + padding: {lines:?}"
+        );
         for line in &lines {
             assert!(cell_width(line) <= content_width(42).saturating_sub(4), "{line}");
         }
@@ -1542,6 +1714,85 @@ mod tests {
         let tall = sidebar.render(content_width(42), 22, 0);
         assert!(tall.iter().any(|row| row.text.contains("Getting started")));
         assert_eq!(tall.last().map(|row| row.text.as_str()), Some("/w"));
+    }
+
+    /// SIDE-12: getting-started is a sibling of the location row, so an
+    /// unknown working directory hides only the path (`footer.tsx:94-112`);
+    /// the live height gate still applies to the box itself.
+    #[test]
+    fn onboarding_renders_without_a_known_working_directory() {
+        let ready = Onboarding {
+            dismissed: false,
+            integrations_known: true,
+            connected_provider: false,
+        };
+        let sidebar = Sidebar {
+            onboarding: Some(ready),
+            ..Sidebar::default()
+        };
+        let tall = sidebar.render(content_width(42), 40, 0);
+        assert!(tall.iter().any(|row| row.text.contains("Getting started")));
+        assert!(tall.iter().any(|row| row.text.ends_with("/connect")));
+        // No location row is fabricated for the unknown directory.
+        assert!(!tall.iter().any(|row| row.text.contains("Unavailable")));
+        // Height 21 still suppresses the whole box.
+        let short = sidebar.render(content_width(42), 21, 0);
+        assert!(!short.iter().any(|row| row.text.contains("Getting started")));
+    }
+
+    /// SIDE-14: footer menu entries and the text-selection guard
+    /// (`working-directory-actions.tsx:16-58`).
+    #[test]
+    fn footer_menu_matches_copy_open_workspaces_and_selection_guard() {
+        let items = footer_menu(Some("/projects/oc2"), false, true).expect("menu");
+        assert_eq!(FOOTER_MENU_TITLE, "Working directory");
+        let actions: Vec<FooterAction> = items.iter().map(|item| item.action).collect();
+        assert_eq!(
+            actions,
+            [
+                FooterAction::CopyPath,
+                FooterAction::OpenFolder,
+                FooterAction::Workspaces
+            ]
+        );
+        assert_eq!(items[0].title, "Copy path");
+        assert_eq!(items[0].description, "/projects/oc2");
+        assert_eq!(items[1].title, "Open folder");
+        assert_eq!(items[1].description, "in system file manager");
+        assert_eq!(items[2].title, "Workspaces");
+        assert_eq!(items[2].description, "to another working directory");
+        assert_eq!(FooterAction::CopyPath.value(), "location.copy");
+        assert_eq!(FooterAction::OpenFolder.value(), "location.open");
+        assert_eq!(FooterAction::Workspaces.value(), "session.move");
+        // Without move authority the Workspaces entry does not exist.
+        let fixed = footer_menu(Some("/w"), false, false).expect("menu");
+        assert_eq!(fixed.len(), 2);
+        assert!(fixed
+            .iter()
+            .all(|item| item.action != FooterAction::Workspaces));
+        // A text selection prevents the menu from opening at all.
+        assert!(footer_menu(Some("/w"), true, true).is_none());
+        // No known directory: nothing to copy or open.
+        assert!(footer_menu(None, false, true).is_none());
+        assert!(footer_menu(Some(""), false, true).is_none());
+        // The pinned footer delegates to the same rule.
+        let footer = Footer {
+            directory: "/w",
+            branch: None,
+            hovered: true,
+        };
+        assert_eq!(footer.menu(false, true), footer_menu(Some("/w"), false, true));
+        assert!(footer.menu(true, true).is_none());
+        // Hover only restyles the path; it never invents a menu state.
+        assert_eq!(footer.role(), Role::Item);
+        assert_eq!(
+            Footer {
+                hovered: false,
+                ..footer
+            }
+            .role(),
+            Role::Description
+        );
     }
 
     /// SIDE-13: footer path truncation, branch suffix, platform shapes.
