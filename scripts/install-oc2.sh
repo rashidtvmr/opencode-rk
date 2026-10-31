@@ -119,6 +119,26 @@ case "$identity_out" in
     exit 74
     ;;
 esac
+help_out="$("$INSTALL_DIR/$BIN" --help 2>&1)" || {
+  echo "FAIL: installed binary --help failed; removing $INSTALL_DIR/$BIN" >&2
+  rm -f "$INSTALL_DIR/$BIN"
+  exit 74
+}
+case "$help_out" in
+  *opencode-rk*)
+    echo "FAIL: installed binary --help identifies as legacy name; removing $INSTALL_DIR/$BIN" >&2
+    rm -f "$INSTALL_DIR/$BIN"
+    exit 74
+    ;;
+esac
+case "$help_out" in
+  *oc2*) ;;
+  *)
+    echo "FAIL: installed binary identity mismatch (no oc2 in --help); removing $INSTALL_DIR/$BIN" >&2
+    rm -f "$INSTALL_DIR/$BIN"
+    exit 74
+    ;;
+esac
 rm -rf "$stage"; trap - EXIT INT TERM
 echo "installed $INSTALL_DIR/$BIN ($PLATFORM)" >&2
 printf '%s\n' "$identity_out"

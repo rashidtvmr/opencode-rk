@@ -79,6 +79,25 @@ pub enum StorageError {
     BlobHashMismatch,
     #[error("storage mutex poisoned")]
     Poisoned,
+    #[error(
+        "unsupported SQLite engine {version} (source id {source_id}): WAL-reset race fix requires >= 3.51.3 or audited backport 3.44.6+/3.50.7+; refusing WAL mode fail-closed"
+    )]
+    UnsupportedSqliteEngine { version: String, source_id: String },
+}
+/// Minimum bundled engine for the WAL path.
+///
+/// SQLite documents a rare WAL-reset race (checkpointer vs. writer wrapping to
+/// the start of the WAL) fixed in 3.51.3 and backported to 3.44.6 / 3.50.7
+/// (`docs/storage/ENGINE_GATE.md`). `Storage::configure` enters WAL mode, so it
+/// refuses to open on engines below this floor instead of silently running
+/// unqualified. Numeric form of the `SQLITE_VERSION_NUMBER` scheme
+/// (major * 1_000_000 + minor * 1_000 + patch).
+pub const MIN_SQLITE_VERSION_NUMBER: i32 = 3_051_003;
+/// Returns true when a numeric `SQLITE_VERSION_NUMBER`-style value meets the
+/// WAL-reset gate. Backport releases are rejected until their exact
+/// `sqlite_source_id()` values are audited and allowlisted.
+fn sqlite_version_supported(version_number: i32) -> bool {
+    version_number >= MIN_SQLITE_VERSION_NUMBER
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StoragePaths {
@@ -637,9 +656,34 @@ impl Storage {
         Ok(())
     }
     fn configure(connection: &Connection) -> Result<(), StorageError> {
+        Self::require_supported_engine(connection)?;
         connection.execute_batch("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL; PRAGMA auto_vacuum=INCREMENTAL;")?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
         Ok(())
+    }
+    /// Fail-closed WAL-reset engine gate (`docs/STORAGE.md:164-168`).
+    ///
+    /// Runs before any PRAGMA write or schema creation. Refuses engines below
+    /// the fixed floor with [`StorageError::UnsupportedSqliteEngine`] instead
+    /// of silently entering WAL mode.
+    ///
+    /// Durability boundary: this bootstrap path uses `synchronous=NORMAL` and
+    /// relies on same-host WAL filesystem semantics; format-2 writers use
+    /// `synchronous=FULL` (`SchemaV2`/`CatalogV2`). The bundled engine
+    /// (rusqlite `bundled`, currently 3.53.x) is production qualification; the
+    /// local Python test engine (3.46.x, affected range) is DDL-test only.
+    fn require_supported_engine(connection: &Connection) -> Result<(), StorageError> {
+        let version_number = rusqlite::version_number();
+        if sqlite_version_supported(version_number) {
+            return Ok(());
+        }
+        let source_id: String = connection
+            .query_row("SELECT sqlite_source_id()", [], |row| row.get(0))
+            .unwrap_or_else(|_| "unknown".to_owned());
+        Err(StorageError::UnsupportedSqliteEngine {
+            version: rusqlite::version().to_owned(),
+            source_id,
+        })
     }
     fn migrate(connection: &Connection) -> Result<(), StorageError> {
         connection.execute_batch("CREATE TABLE IF NOT EXISTS schema_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,title TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('active','archived')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,archived_at TEXT); CREATE INDEX IF NOT EXISTS sessions_updated_idx ON sessions(updated_at DESC); CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,role TEXT NOT NULL,inline_text TEXT,blob_hash TEXT,byte_len INTEGER NOT NULL CHECK(byte_len>=0),created_at TEXT NOT NULL,CHECK((inline_text IS NULL)!=(blob_hash IS NULL))); CREATE INDEX IF NOT EXISTS messages_session_idx ON messages(session_id,created_at,id); CREATE TABLE IF NOT EXISTS message_activity(message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,reasoning_summary TEXT NOT NULL CHECK(length(CAST(reasoning_summary AS BLOB))<=8192)); CREATE TABLE IF NOT EXISTS recent_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,kind TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS recent_events_session_idx ON recent_events(session_id,seq); INSERT INTO schema_meta(key,value) VALUES('schema_version','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value;")?;
