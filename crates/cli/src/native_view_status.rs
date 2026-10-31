@@ -469,6 +469,10 @@ struct SidebarRow {
     line: crate::native_ui_style::Line,
     mcp_index: Option<usize>,
     mcp_toggle: bool,
+    /// Per-cell overrides produced by `native_sidebar` (MCP dot/name/status,
+    /// muted collapsed summaries, faint+struck-through cancelled todos),
+    /// already clamped to the fitted row text.
+    spans: Vec<crate::native_ui_style::LineSpan>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -515,6 +519,43 @@ impl StatusView {
         self.sidebar_rows(width, height)
             .into_iter()
             .map(|row| row.line)
+            .collect()
+    }
+
+    /// Per-span paint plan for the composed information sidebar, as
+    /// `(row index, span)` pairs (SIDE-07/SIDE-10).
+    ///
+    /// This is the integration accessor: the row index addresses the same rows
+    /// [`Self::render_sidebar_styled`] returns and each
+    /// [`crate::native_ui_style::LineSpan`] overrides the theme slot/attributes
+    /// of exactly its cells (dot colour, bold server name, muted status text,
+    /// muted collapsed summary, faint+struck-through cancelled todo). A row
+    /// without an entry is painted with its `Line::role`, as before.
+    ///
+    /// The frame is pinned: `content_width(SESSION_SIDEBAR_WIDTH)` (38 cells,
+    /// the width `native_view.rs` renders with) and the full body height, so the
+    /// header and body row indices are stable. A caller that paints a shorter
+    /// frame — where the body tail is clipped and the pinned footer rows sit
+    /// higher — must use [`Self::sidebar_span_styles_at`] with its real height
+    /// to stay row-aligned.
+    pub fn sidebar_span_styles(&self) -> Vec<(usize, crate::native_ui_style::LineSpan)> {
+        self.sidebar_span_styles_at(
+            native_sidebar::content_width(native_sidebar::SESSION_SIDEBAR_WIDTH),
+            MAX_ROWS,
+        )
+    }
+
+    /// [`Self::sidebar_span_styles`] for an explicit painted frame; pass the
+    /// exact `width`/`height` given to [`Self::render_sidebar_styled`].
+    pub fn sidebar_span_styles_at(
+        &self,
+        width: usize,
+        height: usize,
+    ) -> Vec<(usize, crate::native_ui_style::LineSpan)> {
+        self.sidebar_rows(width, height)
+            .into_iter()
+            .enumerate()
+            .flat_map(|(index, row)| row.spans.into_iter().map(move |span| (index, span)))
             .collect()
     }
 
@@ -638,14 +679,24 @@ impl StatusView {
             sidebar
                 .render(width, height, self.sidebar_offset)
                 .into_iter()
-                .map(|row| SidebarRow {
-                    line: crate::native_ui_style::Line {
-                        text: fit(&row.text, width),
-                        role: row.role,
-                        detail_from: None,
-                    },
-                    mcp_index: row.mcp_index,
-                    mcp_toggle: row.mcp_toggle,
+                .map(|row| {
+                    let text = fit(&row.text, width);
+                    // Truncation drops cells, so the span plan is clamped to the
+                    // fitted row; an override can never claim an unpainted cell.
+                    let spans = crate::native_ui_style::clamp_spans(
+                        &row.spans,
+                        native_sidebar::cell_width(&text),
+                    );
+                    SidebarRow {
+                        line: crate::native_ui_style::Line {
+                            text,
+                            role: row.role,
+                            detail_from: None,
+                        },
+                        mcp_index: row.mcp_index,
+                        mcp_toggle: row.mcp_toggle,
+                        spans,
+                    }
                 })
                 .collect()
         });
@@ -2327,5 +2378,234 @@ mod mcp_sidebar_behavior_regression {
         assert_eq!(top.get(3).map(String::as_str), Some("▼ MCP"));
         assert_eq!(view.mcp_sidebar_row_hit(80, 5, 3), Some(McpSidebarHit::Toggle));
         assert_ne!(view.mcp_sidebar_row_hit(80, 5, 0), Some(McpSidebarHit::Toggle));
+    }
+}
+
+/// SIDE-07 / SIDE-10: per-span paint plan exposed to the painter.
+///
+/// The composition root (`native_view.rs`) owns the wiring; this module only
+/// produces the `(row index, span)` pairs. Nothing here is acceptance evidence
+/// for rendered parity — it is the exact data the painter will consume.
+#[cfg(test)]
+mod sidebar_span_style_tests {
+    use super::StatusView;
+    use crate::native_ui_style::{span_at, LineSpan, ATTR_BOLD, ATTR_NONE, ATTR_STRIKETHROUGH};
+    use crate::native_theme_runtime::Slot;
+
+    fn view() -> StatusView {
+        let mut view = StatusView::default();
+        let id = opencode_rk_contracts::SessionId::new().to_string();
+        view.set_session_binding(Some(id), Some("Confined session".into()), Some(2));
+        view.set_context(Some(1_000), Some(200_000));
+        view.set_cost(Some(1.5));
+        view.apply_mcp(&serde_json::json!({
+            "alpha": {"status": "connected"},
+            "beta": {"status": "failed", "error": "timeout"},
+            "gamma": {"status": "needs_auth"},
+            "delta": {"status": "disabled"}
+        }))
+        .unwrap();
+        view.apply_todos(&serde_json::json!({
+            "todos": [
+                {"id": "a", "content": "Cancelled work", "status": "cancelled", "priority": "high"},
+                {"id": "b", "content": "Running work", "status": "in_progress", "priority": "high"},
+                {"id": "c", "content": "Later work", "status": "pending", "priority": "high"}
+            ]
+        }))
+        .unwrap();
+        view
+    }
+
+    /// The integration accessor signature is pinned: it takes only `&self` and
+    /// returns `(row index, span)` pairs. The integrator calls exactly these two
+    /// functions.
+    #[test]
+    fn sidebar_span_styles_signature_is_pinned() {
+        let accessor: fn(&StatusView) -> Vec<(usize, LineSpan)> = StatusView::sidebar_span_styles;
+        let framed: fn(&StatusView, usize, usize) -> Vec<(usize, LineSpan)> =
+            StatusView::sidebar_span_styles_at;
+        let view = view();
+        let plan = accessor(&view);
+        assert!(!plan.is_empty());
+        assert_eq!(plan, framed(&view, 38, super::MAX_ROWS));
+        // The pinned frame is the width the composition root renders with.
+        assert_eq!(
+            super::native_sidebar::content_width(super::native_sidebar::SESSION_SIDEBAR_WIDTH),
+            38
+        );
+    }
+
+    /// SIDE-07: the MCP dot, the bold server name and the muted status text of
+    /// the same row are three separate spans (`mcp.tsx:62-85`).
+    #[test]
+    fn mcp_row_spans_paint_dot_name_and_status() {
+        let view = view();
+        let rows = view.render_sidebar_styled(38, 30);
+        let plan = view.sidebar_span_styles_at(38, 30);
+        let index = rows
+            .iter()
+            .position(|line| line.text == "• alpha Connected")
+            .expect("connected server row");
+        let spans: Vec<LineSpan> = plan
+            .iter()
+            .filter(|(row, _)| *row == index)
+            .map(|(_, span)| *span)
+            .collect();
+        assert_eq!(
+            spans,
+            [
+                LineSpan::new(0, 1, Slot::Success, ATTR_NONE),
+                LineSpan::new(2, 5, Slot::Text, ATTR_BOLD),
+                LineSpan::new(8, 9, Slot::TextMuted, ATTR_NONE),
+            ]
+        );
+        // `span_at` resolves any cell of the row to the upstream `<text>`.
+        assert_eq!(span_at(&spans, 0).map(|span| span.slot), Some(Slot::Success));
+        assert_eq!(span_at(&spans, 3).map(|span| span.attributes), Some(ATTR_BOLD));
+        assert_eq!(span_at(&spans, 8).map(|span| span.slot), Some(Slot::TextMuted));
+        // A failed server paints its status with the error colour; its dot too.
+        let failed = rows
+            .iter()
+            .position(|line| line.text == "• beta Error")
+            .expect("failed server row");
+        let failed_spans: Vec<LineSpan> = plan
+            .iter()
+            .filter(|(row, _)| *row == failed)
+            .map(|(_, span)| *span)
+            .collect();
+        assert_eq!(failed_spans[0].slot, Slot::Error);
+        assert_eq!(failed_spans.last().map(|span| span.slot), Some(Slot::Error));
+        // `needs_auth` keeps a warning dot but muted status text (`mcp.tsx:15-21/82-85`).
+        let auth = rows
+            .iter()
+            .position(|line| line.text == "• gamma Sign in")
+            .expect("needs-auth row");
+        let auth_spans: Vec<LineSpan> = plan
+            .iter()
+            .filter(|(row, _)| *row == auth)
+            .map(|(_, span)| *span)
+            .collect();
+        assert_eq!(auth_spans[0].slot, Slot::Warning);
+        assert_eq!(auth_spans.last().map(|span| span.slot), Some(Slot::TextMuted));
+        // Every span addresses cells the painted row actually has.
+        for (row, span) in &plan {
+            let line = rows.get(*row).expect("painted row");
+            let cells = super::native_sidebar::cell_width(&line.text);
+            assert!(span.end_cell() <= cells, "{:?} {span:?}", line.text);
+        }
+    }
+
+    /// SIDE-10: a cancelled todo reaches the painter faint and struck through,
+    /// and in-progress keeps the warning foreground (`todo-item.tsx:5-21`).
+    #[test]
+    fn cancelled_todo_spans_are_faint_and_struck_through() {
+        let view = view();
+        let rows = view.render_sidebar_styled(38, 30);
+        let plan = view.sidebar_span_styles_at(38, 30);
+        let index = rows
+            .iter()
+            .position(|line| line.text == "[-] Cancelled work")
+            .expect("cancelled todo row");
+        let spans: Vec<LineSpan> = plan
+            .iter()
+            .filter(|(row, _)| *row == index)
+            .map(|(_, span)| *span)
+            .collect();
+        assert_eq!(spans[0], LineSpan::new(0, 3, Slot::TextMuted, ATTR_NONE));
+        assert_eq!(
+            spans[1],
+            LineSpan::new(4, 14, Slot::TextMuted, ATTR_STRIKETHROUGH)
+        );
+        assert_eq!(
+            span_at(&spans, 4).map(|span| span.attributes),
+            Some(ATTR_STRIKETHROUGH)
+        );
+        let running = rows
+            .iter()
+            .position(|line| line.text == "[•] Running work")
+            .expect("in-progress todo row");
+        let running_spans: Vec<LineSpan> = plan
+            .iter()
+            .filter(|(row, _)| *row == running)
+            .map(|(_, span)| *span)
+            .collect();
+        assert_eq!(running_spans[1].slot, Slot::Warning);
+        assert_eq!(running_spans[1].attributes, ATTR_NONE);
+    }
+
+    /// SIDE-07: headings stay bold base text and the context/limit values stay
+    /// muted inside them (`sidebar.tsx:32-48`, `context.tsx:23-37`,
+    /// `limit.tsx:27-32`); rows without an override keep their `Line::role`.
+    #[test]
+    fn heading_and_usage_rows_carry_whole_row_spans() {
+        let view = view();
+        let rows = view.render_sidebar_styled(38, 30);
+        let plan = view.sidebar_span_styles_at(38, 30);
+        let spans_for = |needle: &str| -> Vec<LineSpan> {
+            let index = rows
+                .iter()
+                .position(|line| line.text == needle)
+                .unwrap_or_else(|| panic!("missing row {needle:?}"));
+            plan.iter()
+                .filter(|(row, _)| *row == index)
+                .map(|(_, span)| *span)
+                .collect()
+        };
+        assert_eq!(
+            spans_for("Confined session"),
+            [LineSpan::new(0, 16, Slot::Text, ATTR_BOLD)]
+        );
+        assert_eq!(spans_for("Context"), [LineSpan::new(0, 7, Slot::Text, ATTR_BOLD)]);
+        assert_eq!(
+            spans_for("1,000 tokens"),
+            [LineSpan::new(0, 12, Slot::TextMuted, ATTR_NONE)]
+        );
+        assert_eq!(
+            spans_for("$1.50 spent"),
+            [LineSpan::new(0, 11, Slot::TextMuted, ATTR_NONE)]
+        );
+        // Separator and footer rows carry no override at all.
+        assert!(spans_for("").is_empty());
+        let blank_plan_rows: Vec<usize> = plan
+            .iter()
+            .filter(|(row, _)| rows.get(*row).is_some_and(|line| line.text.is_empty()))
+            .map(|(row, _)| *row)
+            .collect();
+        assert!(blank_plan_rows.is_empty());
+    }
+
+    /// A frame that clips the body still yields spans that only address painted
+    /// rows, and the pinned full-height plan matches the tall frame.
+    #[test]
+    fn span_plan_never_addresses_an_unpainted_row() {
+        let mut view = view();
+        for height in [5usize, 8, 12, 30, super::MAX_ROWS] {
+            let rows = view.render_sidebar_styled(38, height);
+            for (row, span) in view.sidebar_span_styles_at(38, height) {
+                let line = rows.get(row).expect("painted row");
+                let cells = super::native_sidebar::cell_width(&line.text);
+                assert!(span.end_cell() <= cells, "height {height}: {:?}", line.text);
+            }
+        }
+        assert_eq!(
+            view.sidebar_span_styles(),
+            view.sidebar_span_styles_at(38, super::MAX_ROWS)
+        );
+        // Scrolling moves the whole body; the plan follows the same frame.
+        view.scroll_sidebar(3, 12);
+        let rows = view.render_sidebar_styled(38, 12);
+        for (row, span) in view.sidebar_span_styles_at(38, 12) {
+            let line = rows.get(row).expect("painted row");
+            assert!(span.end_cell() <= super::native_sidebar::cell_width(&line.text));
+        }
+    }
+
+    /// Nothing confirmed: nothing to override, so the painter keeps using the
+    /// row roles (never an invented span).
+    #[test]
+    fn unobserved_sidebar_has_no_span_overrides() {
+        let view = StatusView::default();
+        assert!(view.sidebar_span_styles().is_empty());
+        assert!(view.sidebar_span_styles_at(38, 30).is_empty());
     }
 }

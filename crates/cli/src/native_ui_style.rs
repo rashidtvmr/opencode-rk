@@ -1,6 +1,27 @@
 #![forbid(unsafe_code)]
 //! Shared native typography roles. Terminal cell sizes stay fixed; weight and
 //! theme-aware contrast establish the visual hierarchy.
+//!
+//! A [`Line`] carries one [`Role`] for the whole row, which is enough for the
+//! single-`<text>` surfaces but not for the rows upstream paints per span.
+//! [`LineSpan`] is the additive per-cell companion: producers return
+//! `Vec<(row_index, LineSpan)>` alongside the rows they already emit, so no
+//! existing `Line { text, role, detail_from }` producer has to change.
+//!
+//! Pinned upstream evidence (OpenCode `450e7b92412c780a7b5a75226bb8d49aaca24e22`):
+//! * `packages/tui/src/feature-plugins/sidebar/mcp.tsx:62-85` — the status
+//!   bullet is its own `<text fg={dot(status)}>`, the server name is
+//!   `<b>{name}</b>`, and the status word is `theme.text.muted` unless the
+//!   server failed (`theme.text.feedback.error.base`);
+//! * `packages/tui/src/feature-plugins/sidebar/mcp.tsx:36-47` and
+//!   `feature-plugins/sidebar/todo.tsx:30-40` — a base-text arrow, a bold
+//!   section name and a muted collapsed summary inside one visual row;
+//! * `packages/tui/src/component/todo-item.tsx:5-21` — the marker and the
+//!   content share one status foreground, and a cancelled todo additionally
+//!   carries `TextAttributes.STRIKETHROUGH`;
+//! * `packages/tui/src/feature-plugins/sidebar/context.tsx:23-37` and
+//!   `feature-plugins/sidebar/limit.tsx:27-32` — bold base-text heading rows
+//!   followed by muted value rows.
 use crate::native_theme_runtime::Slot;
 
 // ── Text attributes ───────────────────────────────────────────────────
@@ -75,6 +96,113 @@ pub struct Line {
     pub text: String,
     pub role: Role,
     pub detail_from: Option<u16>,
+}
+
+impl Line {
+    /// Convenience constructor for producers that do not need `detail_from`.
+    ///
+    /// `Line` deliberately keeps exactly its three historical fields: adding a
+    /// fourth would break every struct-literal producer in the crate
+    /// (`native_view.rs`, `native_view_pages.rs`, `native_view_dialogs.rs`,
+    /// `native_permissions.rs`, `native_command_palette.rs`, ...). Per-span
+    /// overrides travel beside the rows instead — see [`LineSpan`] and
+    /// `StatusView::sidebar_span_styles`.
+    #[must_use]
+    pub fn new(text: impl Into<String>, role: Role) -> Self {
+        Self {
+            text: text.into(),
+            role,
+            detail_from: None,
+        }
+    }
+}
+
+/// One painted cell range inside a rendered row.
+///
+/// `start_cell`/`cells` are display cells counted from the first painted cell
+/// of the row — the same convention as `native_context::UsageStyleSpan` — and
+/// `slot`/`attributes` are the upstream `fg` and `TextAttributes` overrides for
+/// exactly those cells. `attributes` uses the pinned OpenTUI bitmask defined
+/// above, so a producer can express `STRIKETHROUGH` even though
+/// [`THEME_ATTRIBUTES`] (the theme resolver's mask) never emits it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LineSpan {
+    pub start_cell: usize,
+    pub cells: usize,
+    pub slot: Slot,
+    pub attributes: u32,
+}
+
+impl LineSpan {
+    #[must_use]
+    pub const fn new(start_cell: usize, cells: usize, slot: Slot, attributes: u32) -> Self {
+        Self {
+            start_cell,
+            cells,
+            slot,
+            attributes,
+        }
+    }
+
+    /// First cell after this span.
+    #[must_use]
+    pub const fn end_cell(self) -> usize {
+        self.start_cell.saturating_add(self.cells)
+    }
+
+    /// Whether `cell` falls inside this span. Empty spans cover nothing.
+    #[must_use]
+    pub const fn covers(self, cell: usize) -> bool {
+        self.cells > 0 && cell >= self.start_cell && cell < self.end_cell()
+    }
+
+    /// This span limited to a row of `width` cells; `None` when it starts at or
+    /// past the row end or loses all of its cells.
+    #[must_use]
+    pub const fn clipped(self, width: usize) -> Option<Self> {
+        if self.start_cell >= width || self.cells == 0 {
+            return None;
+        }
+        let cells = if self.end_cell() > width {
+            width - self.start_cell
+        } else {
+            self.cells
+        };
+        Some(Self {
+            start_cell: self.start_cell,
+            cells,
+            slot: self.slot,
+            attributes: self.attributes,
+        })
+    }
+}
+
+/// Override in effect at `cell`, if any. Spans are painted in order, so a later
+/// span wins where spans overlap (an inner `<span>` over its parent `<text>`).
+#[must_use]
+pub fn span_at(spans: &[LineSpan], cell: usize) -> Option<LineSpan> {
+    spans.iter().rev().copied().find(|span| span.covers(cell))
+}
+
+/// Limit every span to a row of `width` cells, dropping the ones that fall
+/// outside it. Producers must apply this after any row truncation, otherwise a
+/// span can claim cells the painted row no longer has.
+#[must_use]
+pub fn clamp_spans(spans: &[LineSpan], width: usize) -> Vec<LineSpan> {
+    spans.iter().filter_map(|span| span.clipped(width)).collect()
+}
+
+/// Row-indexed span table for the painter: every entry addresses one row, and
+/// out-of-range or duplicate-row entries are still kept in input order.
+#[must_use]
+pub fn spans_by_row(rows: usize, spans: &[(usize, LineSpan)]) -> Vec<Vec<LineSpan>> {
+    let mut table = vec![Vec::new(); rows];
+    for (row, span) in spans {
+        if let Some(target) = table.get_mut(*row) {
+            target.push(*span);
+        }
+    }
+    table
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -193,5 +321,57 @@ mod tests {
         );
         assert_eq!(attributes_from_names(["blink"]), None, "fail closed");
         assert_eq!(attribute_names(0), Vec::<&str>::new());
+    }
+
+    /// SIDE-07/SIDE-10: the span model is additive — the historical
+    /// three-field `Line` literal still compiles with no `spans` field, and
+    /// spans live beside the rows.
+    #[test]
+    fn line_stays_three_fields_and_spans_are_additive() {
+        let line = Line {
+            text: "• alpha Connected".into(),
+            role: Role::Item,
+            detail_from: None,
+        };
+        assert_eq!(line.text, "• alpha Connected");
+        assert_eq!(line.role, Role::Item);
+        assert_eq!(line.detail_from, None);
+        assert_eq!(Line::new("Heading", Role::Heading).text, "Heading");
+        // No spans means "paint the row with its role", never a hidden style.
+        assert!(spans_by_row(2, &[]).iter().all(Vec::is_empty));
+    }
+
+    /// SIDE-07: dot/name/status spans are addressable by display cell, a later
+    /// nested span overrides its parent, and truncation clamps cell ranges.
+    #[test]
+    fn spans_address_display_cells_and_clip_to_the_row() {
+        let dot = LineSpan::new(0, 1, Slot::Success, ATTR_NONE);
+        let name = LineSpan::new(2, 5, Slot::Text, ATTR_BOLD);
+        let status = LineSpan::new(8, 9, Slot::TextMuted, ATTR_NONE);
+        let spans = [dot, name, status];
+        assert!(dot.covers(0) && !dot.covers(1));
+        assert_eq!(name.end_cell(), 7);
+        assert_eq!(span_at(&spans, 2), Some(name));
+        assert_eq!(span_at(&spans, 7), None, "gap cell has no span");
+        assert_eq!(span_at(&spans, 16), Some(status));
+
+        // A 12-cell row keeps the dot and name and cuts the status to 4 cells;
+        // a span starting outside the row disappears entirely.
+        let clamped = clamp_spans(&spans, 12);
+        assert_eq!(clamped, [dot, name, LineSpan::new(8, 4, Slot::TextMuted, ATTR_NONE)]);
+        assert_eq!(LineSpan::new(0, 3, Slot::Text, ATTR_NONE).clipped(0), None);
+        assert_eq!(LineSpan::new(4, 0, Slot::Text, ATTR_NONE).clipped(10), None);
+        // Empty rows and out-of-range rows never gain spans.
+        let table = spans_by_row(2, &[(1, dot), (9, name)]);
+        assert_eq!(table, vec![Vec::new(), vec![dot]]);
+    }
+
+    /// SIDE-10: strikethrough is expressible per span even though the theme
+    /// resolver's mask ([`THEME_ATTRIBUTES`]) never emits it.
+    #[test]
+    fn strikethrough_is_a_span_attribute_outside_the_theme_mask() {
+        let cancelled = LineSpan::new(4, 6, Slot::TextMuted, ATTR_STRIKETHROUGH);
+        assert_eq!(cancelled.attributes & ATTR_STRIKETHROUGH, ATTR_STRIKETHROUGH);
+        assert_eq!(THEME_ATTRIBUTES & ATTR_STRIKETHROUGH, 0);
     }
 }

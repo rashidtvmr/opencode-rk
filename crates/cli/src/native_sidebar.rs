@@ -39,7 +39,10 @@
 //! * the footer path menu copy/open/workspaces actions and the selection
 //!   guard (`ui/working-directory-actions.tsx:16-58`).
 
-use crate::native_ui_style::Role;
+use crate::native_theme_runtime::Slot;
+use crate::native_ui_style::{
+    clamp_spans, LineSpan, Role, ATTR_BOLD, ATTR_NONE, ATTR_STRIKETHROUGH,
+};
 use opencode_rk_sessions::TodoStatus;
 
 /// `SESSION_SIDEBAR_WIDTH` (`packages/tui/src/ui/layout.ts:1`).
@@ -88,6 +91,17 @@ pub fn body_width(content: usize) -> usize {
 #[must_use]
 pub fn cell_width(text: &str) -> usize {
     crate::native_view_layout::visit_unpadded_cells(text, usize::MAX, |_, _| {})
+}
+
+/// Span covering the whole row, measured in display cells. Empty text has no
+/// span: there is nothing to paint over.
+fn whole_row(text: &str, slot: Slot, attributes: u32) -> Vec<LineSpan> {
+    let cells = cell_width(text);
+    if cells == 0 {
+        Vec::new()
+    } else {
+        vec![LineSpan::new(0, cells, slot, attributes)]
+    }
 }
 
 /// Bounded prefix of `text` that fits `max` cells.
@@ -477,10 +491,53 @@ impl<'a> McpSection<'a> {
         }
     }
 
+    /// Per-cell overrides for [`Self::heading`] (`mcp.tsx:36-47`):
+    ///
+    /// * the disclosure arrow is `fg={theme.text.base}` with no weight
+    ///   (`mcp.tsx:37-39`);
+    /// * `MCP` is wrapped in `<b>` (`mcp.tsx:41-43`), base text;
+    /// * the collapsed summary — including the space before `(` — is one
+    ///   `fg={theme.text.muted}` span (`mcp.tsx:43-46`).
+    #[must_use]
+    pub fn heading_spans(&self) -> Vec<LineSpan> {
+        let text = self.heading();
+        let mut spans = Vec::new();
+        let mut cell = 0usize;
+        if self.collapsible() {
+            let arrow = if self.open { "▼ " } else { "▶ " };
+            let arrow_cells = cell_width(arrow).saturating_sub(1);
+            spans.push(LineSpan::new(0, arrow_cells, Slot::Text, ATTR_NONE));
+            cell = cell_width(arrow);
+        }
+        spans.push(LineSpan::new(cell, cell_width("MCP"), Slot::Text, ATTR_BOLD));
+        cell += cell_width("MCP");
+        if !self.open {
+            let cells = cell_width(&text).saturating_sub(cell);
+            if cells > 0 {
+                spans.push(LineSpan::new(cell, cells, Slot::TextMuted, ATTR_NONE));
+            }
+        }
+        clamp_spans(&spans, cell_width(&text))
+    }
+
     /// One server row, truncated before the fixed status (`mcp.tsx:52-88`,
     /// `SIDE-08`). `width` is the body budget.
     #[must_use]
     pub fn row(&self, item: &McpItem<'_>, width: usize) -> String {
+        self.row_parts(item, width).0
+    }
+
+    /// Per-cell overrides for [`Self::row`] (`mcp.tsx:62-85`): the bullet is its
+    /// own `fg={dot(status)}` text (one cell), the name is `<b>` base text, and
+    /// the fixed status word is muted unless the server failed — only `failed`
+    /// uses `theme.text.feedback.error.base` (`mcp.tsx:82-85`). The native
+    /// `(excluded)` suffix (`SIDE-15`) stays muted.
+    #[must_use]
+    pub fn row_spans(&self, item: &McpItem<'_>, width: usize) -> Vec<LineSpan> {
+        self.row_parts(item, width).1
+    }
+
+    fn row_parts(&self, item: &McpItem<'_>, width: usize) -> (String, Vec<LineSpan>) {
         let label = item.status.label();
         let suffix = if item.included == Some(false) {
             " (excluded)"
@@ -488,7 +545,8 @@ impl<'a> McpSection<'a> {
             ""
         };
         // bullet + one gap + one gap before the fixed status + suffix
-        let fixed = 2usize + 1 + cell_width(label) + cell_width(suffix);
+        let bullet = cell_width("•");
+        let fixed = bullet + 1 + 1 + cell_width(label) + cell_width(suffix);
         let available = width.saturating_sub(fixed);
         let name_width = cell_width(item.name);
         let name = if name_width <= available {
@@ -498,11 +556,31 @@ impl<'a> McpSection<'a> {
         } else {
             String::new()
         };
-        if name.is_empty() {
+        let text = if name.is_empty() {
             format!("• {label}{suffix}")
         } else {
             format!("• {name} {label}{suffix}")
+        };
+        let mut spans = vec![LineSpan::new(0, bullet, item.status.dot(), ATTR_NONE)];
+        let mut cell = bullet + 1;
+        if !name.is_empty() {
+            let cells = cell_width(&name);
+            spans.push(LineSpan::new(cell, cells, Slot::Text, ATTR_BOLD));
+            cell += cells + 1;
         }
+        let status_slot = if item.status == McpDisplayStatus::Failed {
+            Slot::Error
+        } else {
+            Slot::TextMuted
+        };
+        let status_cells = cell_width(label);
+        spans.push(LineSpan::new(cell, status_cells, status_slot, ATTR_NONE));
+        cell += status_cells;
+        let suffix_cells = cell_width(suffix);
+        if suffix_cells > 0 {
+            spans.push(LineSpan::new(cell, suffix_cells, Slot::TextMuted, ATTR_NONE));
+        }
+        (text, clamp_spans(&spans, width))
     }
 }
 
@@ -523,6 +601,25 @@ pub fn todo_role(status: &TodoStatus) -> Role {
     match status {
         TodoStatus::InProgress => Role::Warning,
         _ => Role::Description,
+    }
+}
+
+/// `TodoItem` painted foreground and attributes (`component/todo-item.tsx:5-21`).
+///
+/// The marker and the content share one foreground; only a cancelled todo adds
+/// `TextAttributes.STRIKETHROUGH`, and only the content `<text>` carries it.
+///
+/// Upstream cancelled uses `theme.text.faint` (`todo-item.tsx:8`). The native
+/// palette has no faint slot yet, so [`Slot::TextMuted`] stands in: upstream
+/// resolves `faint` to `$text.muted` for every theme that does not define it
+/// (`packages/theme/src/tui/expand.ts:44`), and the strikethrough — not the
+/// colour — is what distinguishes the row.
+#[must_use]
+pub fn todo_span_style(status: &TodoStatus) -> (Slot, u32) {
+    match status {
+        TodoStatus::InProgress => (Slot::Warning, ATTR_NONE),
+        TodoStatus::Cancelled => (Slot::TextMuted, ATTR_STRIKETHROUGH),
+        TodoStatus::Completed | TodoStatus::Pending => (Slot::TextMuted, ATTR_NONE),
     }
 }
 
@@ -580,26 +677,49 @@ impl<'a> TodoSection<'a> {
         }
     }
 
+    /// Per-cell overrides for [`Self::heading`] (`todo.tsx:30-40`): base-text
+    /// arrow, `<b>Todo</b>`, then the muted ` ({n} remaining)` summary (its
+    /// leading space included) when the more-than-two-row list is collapsed.
+    #[must_use]
+    pub fn heading_spans(&self) -> Vec<LineSpan> {
+        let text = self.heading();
+        let mut spans = Vec::new();
+        let mut cell = 0usize;
+        if self.collapsible() {
+            let arrow = if self.open { "▼ " } else { "▶ " };
+            let arrow_cells = cell_width(arrow).saturating_sub(1);
+            spans.push(LineSpan::new(0, arrow_cells, Slot::Text, ATTR_NONE));
+            cell = cell_width(arrow);
+        }
+        spans.push(LineSpan::new(cell, cell_width("Todo"), Slot::Text, ATTR_BOLD));
+        cell += cell_width("Todo");
+        if self.collapsible() && !self.open {
+            let cells = cell_width(&text).saturating_sub(cell);
+            if cells > 0 {
+                spans.push(LineSpan::new(cell, cells, Slot::TextMuted, ATTR_NONE));
+            }
+        }
+        clamp_spans(&spans, cell_width(&text))
+    }
+
     /// Wrapped body rows: `"[x] text"`, continuation lines aligned under the
     /// text (`todo-item.tsx:15-27`, `wrapMode="word"`).
     #[must_use]
     pub fn body(&self, width: usize) -> Vec<String> {
+        self.rows_with_spans(width)
+            .into_iter()
+            .map(|(line, _)| line)
+            .collect()
+    }
+
+    /// [`Self::body`] plus the per-cell overrides of each row: the marker span
+    /// (no attributes, `todo-item.tsx:14-16`) and the content span (strikethrough
+    /// for a cancelled todo, `todo-item.tsx:17-24`).
+    #[must_use]
+    pub fn rows_with_spans(&self, width: usize) -> Vec<(String, Vec<LineSpan>)> {
         let mut rows = Vec::new();
         for row in self.rows {
-            let marker = todo_marker(&row.status);
-            let indent = cell_width(marker) + 1;
-            let wrapped = wrap_cells(row.content, width.saturating_sub(indent));
-            if wrapped.is_empty() {
-                rows.push(marker.to_owned());
-                continue;
-            }
-            for (index, line) in wrapped.into_iter().enumerate() {
-                if index == 0 {
-                    rows.push(format!("{marker} {line}"));
-                } else {
-                    rows.push(format!("{}{line}", " ".repeat(indent)));
-                }
-            }
+            rows.extend(wrap_todo_row_spans(row, width));
         }
         rows
     }
@@ -998,6 +1118,11 @@ pub struct SidebarRow {
     pub role: Role,
     pub mcp_index: Option<usize>,
     pub mcp_toggle: bool,
+    /// Per-cell overrides for the cells upstream paints inside a narrower
+    /// `<text>`/`<span>` (MCP dot, bold name, muted status, muted collapsed
+    /// summary, faint/struck-through cancelled todo). Empty means the row is
+    /// painted entirely with `role`.
+    pub spans: Vec<LineSpan>,
 }
 
 impl SidebarRow {
@@ -1007,6 +1132,14 @@ impl SidebarRow {
             role,
             mcp_index: None,
             mcp_toggle: false,
+            spans: Vec::new(),
+        }
+    }
+
+    fn styled(text: impl Into<String>, role: Role, spans: Vec<LineSpan>) -> Self {
+        Self {
+            spans,
+            ..Self::new(text, role)
         }
     }
 }
@@ -1050,10 +1183,10 @@ impl<'a> Sidebar<'a> {
         let title_width = title_width(width);
         let mut rows = vec![SidebarRow::new(String::new(), Role::Description)];
         if let Some(title) = self.title.filter(|title| !title.trim().is_empty()) {
-            rows.push(SidebarRow::new(
-                take_cells(title, title_width),
-                Role::SidebarHeading,
-            ));
+            // `fg={theme.text.base}` + `TextAttributes.BOLD` (`sidebar.tsx:33-45`).
+            let text = take_cells(title, title_width);
+            let spans = whole_row(&text, Slot::Text, ATTR_BOLD);
+            rows.push(SidebarRow::styled(text, Role::SidebarHeading, spans));
             rows.push(SidebarRow::new(String::new(), Role::Description));
         }
         rows
@@ -1063,13 +1196,17 @@ impl<'a> Sidebar<'a> {
         let body = body_width(width);
         let mut blocks: Vec<Vec<SidebarRow>> = Vec::new();
         if let Some(context) = self.context {
-            let mut block = vec![SidebarRow::new("Context", Role::SidebarHeading)];
-            block.extend(
-                context
-                    .lines()
-                    .into_iter()
-                    .map(|line| SidebarRow::new(take_cells(&line, body), Role::Description)),
-            );
+            // `<b>Context</b>` over muted value rows (`context.tsx:23-37`).
+            let mut block = vec![SidebarRow::styled(
+                "Context",
+                Role::SidebarHeading,
+                whole_row("Context", Slot::Text, ATTR_BOLD),
+            )];
+            for line in context.lines() {
+                let text = take_cells(&line, body);
+                let spans = whole_row(&text, Slot::TextMuted, ATTR_NONE);
+                block.push(SidebarRow::styled(text, Role::Description, spans));
+            }
             blocks.push(block);
         }
         if let Some(limit) = self.limit {
@@ -1078,39 +1215,61 @@ impl<'a> Sidebar<'a> {
             } else {
                 Role::Description
             };
+            // `fg={danger ? error : muted}` (`limit.tsx:28-32`).
+            let slot = if limit.dangerous() {
+                Slot::Error
+            } else {
+                Slot::TextMuted
+            };
+            let text = take_cells(&limit.line(), body);
+            let spans = whole_row(&text, slot, ATTR_NONE);
             blocks.push(vec![
-                SidebarRow::new("Limit", Role::SidebarHeading),
-                SidebarRow::new(take_cells(&limit.line(), body), role),
+                SidebarRow::styled(
+                    "Limit",
+                    Role::SidebarHeading,
+                    whole_row("Limit", Slot::Text, ATTR_BOLD),
+                ),
+                SidebarRow::styled(text, role, spans),
             ]);
         }
         if let Some(mcp) = self.mcp.filter(|mcp| !mcp.items.is_empty()) {
+            let heading = take_cells(&mcp.heading(), body);
+            let spans = clamp_spans(&mcp.heading_spans(), cell_width(&heading));
             let mut block = vec![SidebarRow {
-                text: take_cells(&mcp.heading(), body),
+                text: heading,
                 role: Role::SidebarHeading,
                 mcp_index: None,
                 mcp_toggle: mcp.collapsible(),
+                spans,
             }];
             if mcp.expanded() {
                 for (index, item) in mcp.items.iter().enumerate() {
+                    let (text, spans) = mcp.row_parts(item, body);
                     block.push(SidebarRow {
-                        text: mcp.row(item, body),
+                        text,
                         role: item.status.row_role(),
                         mcp_index: Some(index),
                         mcp_toggle: false,
+                        spans,
                     });
                 }
             }
             blocks.push(block);
         }
         if let Some(todo) = self.todo.filter(|todo| !todo.rows.is_empty()) {
-            let mut block = vec![SidebarRow::new(
-                take_cells(&todo.heading(), body),
-                Role::SidebarHeading,
-            )];
+            let heading = take_cells(&todo.heading(), body);
+            let spans = clamp_spans(&todo.heading_spans(), cell_width(&heading));
+            let mut block = vec![SidebarRow {
+                text: heading,
+                role: Role::SidebarHeading,
+                mcp_index: None,
+                mcp_toggle: false,
+                spans,
+            }];
             if todo.expanded() {
                 for row in todo.rows {
-                    for line in wrap_todo_row(row, body) {
-                        block.push(SidebarRow::new(line, todo_role(&row.status)));
+                    for (text, spans) in wrap_todo_row_spans(row, body) {
+                        block.push(SidebarRow::styled(text, todo_role(&row.status), spans));
                     }
                 }
             }
@@ -1197,24 +1356,59 @@ impl<'a> Sidebar<'a> {
         rows.truncate(height);
         rows
     }
+
+    /// The per-span paint plan of the same frame: `(row index, span)` pairs for
+    /// the rows [`Self::render`] returns, in row order and then span order.
+    ///
+    /// Row indices address the returned `Vec<SidebarRow>`; spans address display
+    /// cells inside that row. A row that needs no override contributes nothing,
+    /// so the painter can keep using the row [`Role`] for every other row.
+    #[must_use]
+    pub fn render_span_styles(
+        &self,
+        width: usize,
+        height: usize,
+        scroll: usize,
+    ) -> Vec<(usize, LineSpan)> {
+        self.render(width, height, scroll)
+            .into_iter()
+            .enumerate()
+            .flat_map(|(index, row)| row.spans.into_iter().map(move |span| (index, span)))
+            .collect()
+    }
 }
 
-fn wrap_todo_row(row: &TodoRow<'_>, width: usize) -> Vec<String> {
+fn wrap_todo_row_spans(row: &TodoRow<'_>, width: usize) -> Vec<(String, Vec<LineSpan>)> {
     let marker = todo_marker(&row.status);
+    let (slot, attributes) = todo_span_style(&row.status);
     let indent = cell_width(marker) + 1;
+    let marker_cells = cell_width(marker);
     let wrapped = wrap_cells(row.content, width.saturating_sub(indent));
     if wrapped.is_empty() {
-        return vec![marker.to_owned()];
+        // `todo-item.tsx:14-16`: the marker `<text>` keeps the status colour and
+        // no attributes even when there is no content to follow it.
+        return vec![(marker.to_owned(), vec![LineSpan::new(0, marker_cells, slot, ATTR_NONE)])];
     }
     wrapped
         .into_iter()
         .enumerate()
         .map(|(index, line)| {
-            if index == 0 {
+            let text = if index == 0 {
                 format!("{marker} {line}")
             } else {
                 format!("{}{line}", " ".repeat(indent))
+            };
+            let mut spans = Vec::new();
+            if index == 0 {
+                spans.push(LineSpan::new(0, marker_cells, slot, ATTR_NONE));
             }
+            let cells = cell_width(&line);
+            if cells > 0 {
+                // The content `<text>` starts after the marker and its gap
+                // (`todo-item.tsx:17-24`) and owns the strikethrough.
+                spans.push(LineSpan::new(indent, cells, slot, attributes));
+            }
+            (text, clamp_spans(&spans, width))
         })
         .collect()
 }
@@ -1897,5 +2091,327 @@ mod tests {
             Sidebar::default().section_headings(),
             Vec::<&'static str>::new()
         );
+    }
+
+    // ── SIDE-07 / SIDE-10: per-span painting ──────────────────────────
+
+    fn span_cells(row: &SidebarRow) -> usize {
+        cell_width(&row.text)
+    }
+
+    /// SIDE-07: the MCP row paints its bullet with the status dot colour, the
+    /// server name bold and the status word muted (error only when failed)
+    /// (`mcp.tsx:62-85`).
+    #[test]
+    fn mcp_rows_paint_dot_name_and_status_per_span() {
+        let items = mcp(&[
+            McpDisplayStatus::Connected,
+            McpDisplayStatus::Failed,
+            McpDisplayStatus::Disabled,
+            McpDisplayStatus::NeedsAuth,
+        ]);
+        let section = McpSection {
+            items: &items,
+            open: true,
+        };
+        let width = body_width(content_width(42));
+        for item in &items {
+            let text = section.row(item, width);
+            let spans = section.row_spans(item, width);
+            assert_eq!(spans.len(), 3, "dot, name, status: {text}");
+            // Bullet: one cell, exactly the status dot colour (`mcp.tsx:64-78`).
+            assert_eq!(spans[0], LineSpan::new(0, 1, item.status.dot(), ATTR_NONE));
+            // Name: base text, bold, starting after the bullet and its gap.
+            let name_cells = cell_width(item.name);
+            assert_eq!(spans[1], LineSpan::new(2, name_cells, Slot::Text, ATTR_BOLD));
+            // Status: only `failed` uses the error colour (`mcp.tsx:82-85`).
+            let status_cell = 2 + name_cells + 1;
+            let status_slot = if item.status == McpDisplayStatus::Failed {
+                Slot::Error
+            } else {
+                Slot::TextMuted
+            };
+            assert_eq!(
+                spans[2],
+                LineSpan::new(status_cell, cell_width(item.status.label()), status_slot, ATTR_NONE),
+                "{text}"
+            );
+            assert!(spans.iter().all(|span| span.end_cell() <= cell_width(&text)));
+            // The three spans name the exact cells upstream paints separately.
+            assert_eq!(
+                crate::native_ui_style::span_at(&spans, status_cell).map(|span| span.slot),
+                Some(status_slot)
+            );
+        }
+    }
+
+    /// SIDE-08/SIDE-15: the truncated name and the native `(excluded)` suffix
+    /// keep their own spans, and no span reaches past the painted row.
+    #[test]
+    fn mcp_row_spans_survive_truncation_and_the_excluded_suffix() {
+        let item = McpItem {
+            name: "a-very-long-server-name-that-must-be-truncated",
+            status: McpDisplayStatus::Failed,
+            included: Some(false),
+        };
+        let section = McpSection {
+            items: std::slice::from_ref(&item),
+            open: true,
+        };
+        for width in [12usize, 20, 37] {
+            let text = section.row(&item, width);
+            let spans = section.row_spans(&item, width);
+            assert!(spans.iter().all(|span| span.end_cell() <= cell_width(&text)));
+            assert_eq!(spans[0].slot, Slot::Error, "failed dot");
+            assert_eq!(spans.last().map(|span| span.slot), Some(Slot::TextMuted));
+            if text.contains("a-very") {
+                assert_eq!(spans[1].slot, Slot::Text, "name");
+                assert_eq!(spans[1].attributes, ATTR_BOLD);
+            }
+            for pair in spans.windows(2) {
+                assert!(pair[0].end_cell() <= pair[1].start_cell, "no overlap: {spans:?}");
+            }
+        }
+        // No room for a name: only the bullet and the fixed status survive,
+        // and neither reaches past the row budget.
+        let narrow = section.row_spans(&item, 3);
+        assert!(narrow.iter().all(|span| span.start_cell < 3));
+    }
+
+    /// SIDE-11: heading = base-text arrow + bold label + muted collapsed
+    /// summary that includes its leading space (`mcp.tsx:36-47`,
+    /// `todo.tsx:30-40`).
+    #[test]
+    fn collapsed_headings_paint_arrow_label_and_muted_summary() {
+        let items = mcp(&[
+            McpDisplayStatus::Connected,
+            McpDisplayStatus::Failed,
+            McpDisplayStatus::Disabled,
+        ]);
+        let collapsed = McpSection {
+            items: &items,
+            open: false,
+        };
+        let heading = collapsed.heading();
+        assert_eq!(heading, "▶ MCP (1 active, 1 error)");
+        let spans = collapsed.heading_spans();
+        assert_eq!(spans[0], LineSpan::new(0, 1, Slot::Text, ATTR_NONE), "arrow");
+        assert_eq!(spans[1], LineSpan::new(2, 3, Slot::Text, ATTR_BOLD), "MCP");
+        assert_eq!(
+            spans[2],
+            LineSpan::new(5, cell_width(&heading) - 5, Slot::TextMuted, ATTR_NONE)
+        );
+        assert!(spans[2].covers(5), "the summary span owns the leading space");
+        assert_eq!(spans[2].end_cell(), cell_width(&heading));
+
+        // Expanded: no summary span at all, and <=2 servers drop the arrow.
+        let open = McpSection {
+            items: &items,
+            open: true,
+        };
+        assert_eq!(
+            open.heading_spans(),
+            [LineSpan::new(0, 1, Slot::Text, ATTR_NONE), LineSpan::new(2, 3, Slot::Text, ATTR_BOLD)]
+        );
+        let two = mcp(&[McpDisplayStatus::Connected, McpDisplayStatus::Connected]);
+        let flat = McpSection {
+            items: &two,
+            open: false,
+        };
+        assert_eq!(
+            flat.heading_spans()[0],
+            LineSpan::new(0, 3, Slot::Text, ATTR_BOLD),
+            "no arrow at <=2 servers"
+        );
+        assert_eq!(
+            flat.heading_spans()[1].start_cell,
+            3,
+            "the muted summary still owns the collapsed suffix"
+        );
+
+        let todos = [
+            TodoRow {
+                content: "one",
+                status: TodoStatus::Completed,
+            },
+            TodoRow {
+                content: "two",
+                status: TodoStatus::Pending,
+            },
+            TodoRow {
+                content: "three",
+                status: TodoStatus::InProgress,
+            },
+        ];
+        let todo = TodoSection {
+            rows: &todos,
+            open: false,
+        };
+        let heading = todo.heading();
+        assert_eq!(heading, "▶ Todo (2 remaining)");
+        let spans = todo.heading_spans();
+        assert_eq!(spans[0], LineSpan::new(0, 1, Slot::Text, ATTR_NONE));
+        assert_eq!(spans[1], LineSpan::new(2, 4, Slot::Text, ATTR_BOLD));
+        assert_eq!(
+            spans[2],
+            LineSpan::new(6, cell_width(&heading) - 6, Slot::TextMuted, ATTR_NONE)
+        );
+    }
+
+    /// SIDE-10: a cancelled todo is faint (`theme.text.faint`) and struck
+    /// through on its content only; the marker keeps the colour without the
+    /// attribute (`todo-item.tsx:5-21`).
+    #[test]
+    fn cancelled_todos_are_faint_and_struck_through() {
+        let rows = [
+            TodoRow {
+                content: "Dropped",
+                status: TodoStatus::Cancelled,
+            },
+            TodoRow {
+                content: "Doing",
+                status: TodoStatus::InProgress,
+            },
+            TodoRow {
+                content: "Later",
+                status: TodoStatus::Pending,
+            },
+            TodoRow {
+                content: "Done",
+                status: TodoStatus::Completed,
+            },
+        ];
+        let section = TodoSection {
+            rows: &rows,
+            open: true,
+        };
+        let painted = section.rows_with_spans(body_width(content_width(42)));
+        assert_eq!(painted.len(), 4);
+        let (text, spans) = &painted[0];
+        assert_eq!(text, "[-] Dropped");
+        assert_eq!(spans[0], LineSpan::new(0, 3, Slot::TextMuted, ATTR_NONE));
+        assert_eq!(
+            spans[1],
+            LineSpan::new(4, cell_width("Dropped"), Slot::TextMuted, ATTR_STRIKETHROUGH)
+        );
+        assert_eq!(
+            crate::native_ui_style::span_at(spans, 4).map(|span| span.attributes),
+            Some(ATTR_STRIKETHROUGH)
+        );
+        // In progress keeps the warning foreground and no strikethrough.
+        assert_eq!(painted[1].1[1].slot, Slot::Warning);
+        assert_eq!(painted[1].1[1].attributes, ATTR_NONE);
+        // Pending/completed stay muted without attributes.
+        for index in [2, 3] {
+            assert_eq!(painted[index].1[1].slot, Slot::TextMuted);
+            assert_eq!(painted[index].1[1].attributes, ATTR_NONE);
+        }
+        // `todo_role` stays the row-level fallback for the same statuses.
+        assert_eq!(todo_role(&TodoStatus::Cancelled), Role::Description);
+        assert_eq!(todo_span_style(&TodoStatus::Cancelled), (Slot::TextMuted, ATTR_STRIKETHROUGH));
+
+        // A wrapped cancelled todo strikes every content row, never the indent.
+        let long = [TodoRow {
+            content: "alpha beta gamma delta epsilon zeta eta theta iota kappa",
+            status: TodoStatus::Cancelled,
+        }];
+        let wrapped = TodoSection {
+            rows: &long,
+            open: true,
+        }
+        .rows_with_spans(16);
+        assert!(wrapped.len() > 1);
+        for (line, spans) in &wrapped {
+            assert!(cell_width(line) <= 16, "{line}");
+            let content = spans.last().expect("content span");
+            assert_eq!(content.attributes, ATTR_STRIKETHROUGH);
+            assert_eq!(content.start_cell, 4, "content hangs under the marker gap");
+            assert!(content.end_cell() <= cell_width(line));
+        }
+    }
+
+    /// SIDE-07/SIDE-10: `render_span_styles` addresses exactly the painted
+    /// rows of `render` — every index in range, every span inside its row, and
+    /// the heading/context/todo spans searchable by row text.
+    #[test]
+    fn render_span_styles_address_the_painted_rows() {
+        let items = mcp(&[McpDisplayStatus::Connected, McpDisplayStatus::Failed]);
+        let todos = [TodoRow {
+            content: "Cancelled work",
+            status: TodoStatus::Cancelled,
+        }];
+        let sidebar = Sidebar {
+            title: Some("Session"),
+            context: ContextSection::new(Some(1_000), Some(200_000), Some(0.5)),
+            limit: Some(LimitSection::new(0.0, UsageLevel::Reached)),
+            mcp: Some(McpSection {
+                items: &items,
+                open: true,
+            }),
+            todo: Some(TodoSection {
+                rows: &todos,
+                open: true,
+            }),
+            footer: None,
+            onboarding: None,
+        };
+        let width = content_width(SESSION_SIDEBAR_WIDTH);
+        let rows = sidebar.render(width, 40, 0);
+        let plan = sidebar.render_span_styles(width, 40, 0);
+        assert!(!plan.is_empty());
+        for (index, span) in &plan {
+            let row = rows.get(*index).expect("span index addresses a painted row");
+            assert!(span.cells > 0);
+            assert!(span.end_cell() <= span_cells(row), "{row:?} {span:?}");
+        }
+        // Row text -> the spans on it.
+        let spans_for = |needle: &str| -> Vec<LineSpan> {
+            let index = rows
+                .iter()
+                .position(|row| row.text == needle)
+                .unwrap_or_else(|| panic!("missing row {needle:?}"));
+            plan.iter()
+                .filter(|(row, _)| *row == index)
+                .map(|(_, span)| *span)
+                .collect()
+        };
+        assert_eq!(
+            spans_for("Session"),
+            [LineSpan::new(0, cell_width("Session"), Slot::Text, ATTR_BOLD)]
+        );
+        assert_eq!(
+            spans_for("Context"),
+            [LineSpan::new(0, 7, Slot::Text, ATTR_BOLD)]
+        );
+        assert_eq!(
+            spans_for("1,000 tokens"),
+            [LineSpan::new(0, cell_width("1,000 tokens"), Slot::TextMuted, ATTR_NONE)]
+        );
+        // A dangerous limit row is painted with the error slot (`limit.tsx:28-32`).
+        assert_eq!(
+            spans_for("$0 remaining"),
+            [LineSpan::new(0, cell_width("$0 remaining"), Slot::Error, ATTR_NONE)]
+        );
+        let failed = spans_for("• alpha Connected");
+        assert_eq!(failed[0].slot, Slot::Success);
+        assert_eq!(failed[1].attributes, ATTR_BOLD);
+        assert_eq!(failed[2].slot, Slot::TextMuted);
+        assert_eq!(
+            spans_for("• beta Error")[2].slot,
+            Slot::Error,
+            "a failed server paints its status with the error colour"
+        );
+        let cancelled = spans_for("[-] Cancelled work");
+        assert_eq!(cancelled[1].attributes, ATTR_STRIKETHROUGH);
+        // Blank separator rows carry no override.
+        assert!(spans_for("").is_empty());
+        // A frame that clips the body keeps its plan inside the painted rows.
+        for height in [3usize, 6, 12, 40] {
+            let frame = sidebar.render(width, height, 0);
+            for (index, span) in sidebar.render_span_styles(width, height, 0) {
+                let row = frame.get(index).expect("painted row");
+                assert!(span.end_cell() <= span_cells(row), "height {height}: {row:?}");
+            }
+        }
     }
 }
