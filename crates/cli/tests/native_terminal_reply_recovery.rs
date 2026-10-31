@@ -35,6 +35,11 @@ fn bytes(events: Vec<InputEvent>) -> Vec<u8> {
             InputEvent::Paste(text) => panic!("unexpected Paste event: {text:?}"),
             InputEvent::ArrowUp => panic!("unexpected ArrowUp event"),
             InputEvent::ArrowDown => panic!("unexpected ArrowDown event"),
+            InputEvent::ArrowLeft => panic!("unexpected ArrowLeft event"),
+            InputEvent::ArrowRight => panic!("unexpected ArrowRight event"),
+            InputEvent::ShiftEnter => panic!("unexpected ShiftEnter event"),
+            InputEvent::CtrlJ => panic!("unexpected CtrlJ event"),
+            InputEvent::AltEnter => panic!("unexpected AltEnter event"),
             InputEvent::Mouse { .. } => panic!("unexpected Mouse event"),
         })
         .collect()

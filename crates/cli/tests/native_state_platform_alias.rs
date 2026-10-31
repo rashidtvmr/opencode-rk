@@ -1,7 +1,11 @@
 #![cfg(target_os = "macos")]
 
+#[path = "../src/native_app.rs"]
+mod native_app;
 #[path = "../src/native_box_style.rs"]
 mod native_box_style;
+#[path = "../src/native_navigation.rs"]
+mod native_navigation;
 #[path = "../src/native_view_layout.rs"]
 mod native_view_layout;
 #[path = "../src/native_ui_budget.rs"]
