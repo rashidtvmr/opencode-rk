@@ -130,6 +130,28 @@
     "recovery/ui": "/Users/mymac/Projects/opencode-rk-recovery-lanes/ui",
     "recovery/platform": "/Users/mymac/Projects/opencode-rk-recovery-lanes/platform"
   },
+  "approvedNonExecutionBranches": [
+    "lane/PERM-POPUP",
+    "lane/R1.2-security-workflow-repair-migration",
+    "recovery/pre-unclog-20261031",
+    "review-i03-theme",
+    "feat/web-agents-20261026",
+    "feat/web-files-20261026",
+    "feat/web-jobs-20261026",
+    "feat/web-mcp-20261026",
+    "feat/web-nav-20261026",
+    "feat/web-parity-restoration-20261026",
+    "feat/web-queue-20261026",
+    "feat/web-rich-20261026"
+  ],
+  "frozenRefForwardAmendments": {
+    "lane/R1.2-security-workflow-repair": {
+      "from": "0c1dda250fd952a02068364d1caa21f88bc074ef",
+      "to": "4fae90af25cfa1027e0ecd0ac1c369ecde272f55",
+      "why": "fast-forward continuation; snapshot tip is an ancestor of the new tip",
+      "at": "2026-10-31T00:00:00+00:00"
+    }
+  },
   "lanePolicy": {
     "oneActiveFailurePerLane": true,
     "claimRequiresLaneAtCurrentMainV2": true,

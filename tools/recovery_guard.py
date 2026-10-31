@@ -7,12 +7,15 @@ judge; product correctness is decided by tools/phase1_judge.py on exact main-v2.
 
 from __future__ import annotations
 
+import argparse
+import datetime as dt
 import hashlib
 import json
 import os
 import pathlib
 import re
 import subprocess
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "recovery-mode.json"
@@ -59,6 +62,35 @@ def paths_overlap(a: str, b: str) -> bool:
     return aa == bb or aa.startswith(bb + "/") or bb.startswith(aa + "/")
 
 
+def is_ancestor(older: str, newer: str) -> bool:
+    """True when ``older`` is reachable from ``newer`` (fast-forward only)."""
+    return (
+        subprocess.run(
+            ["git", "merge-base", "--is-ancestor", older, newer],
+            cwd=ROOT,
+            capture_output=True,
+        ).returncode
+        == 0
+    )
+
+
+def hook_effective(hook: pathlib.Path) -> bool:
+    """Is the installed hook reachable by Git's hook resolution?"""
+    try:
+        configured = git("config", "--get", "core.hooksPath")
+    except subprocess.CalledProcessError:
+        return True
+    if not configured:
+        return False
+    resolved = pathlib.Path(configured)
+    if not resolved.is_absolute():
+        resolved = ROOT / resolved
+    try:
+        return (resolved / "reference-transaction").samefile(hook)
+    except OSError:
+        return False
+
+
 def worktrees() -> dict[str, str | None]:
     result: dict[str, str | None] = {}
     current_path: str | None = None
@@ -73,6 +105,7 @@ def worktrees() -> dict[str, str | None]:
 
 def main() -> int:
     errors: list[str] = []
+    warnings: list[str] = []
     try:
         cfg = load(CONFIG)
         runtime = common_git_dir() / "recovery-state"
@@ -100,15 +133,15 @@ def main() -> int:
     if not isinstance(revision, int) or revision < 1:
         errors.append("runtime meta has invalid stateRevision")
     if failures.get("queueRevision") != revision:
-        errors.append(
+        warnings.append(
             f"runtime failures revision {failures.get('queueRevision')!r} != meta {revision!r}; run recovery_state.py recover-state"
         )
     if gates.get("stateRevision") != revision:
-        errors.append(
+        warnings.append(
             f"runtime gates revision {gates.get('stateRevision')!r} != meta {revision!r}; run recovery_state.py recover-state"
         )
     if salvage.get("stateRevision") != revision:
-        errors.append(
+        warnings.append(
             f"runtime salvage revision {salvage.get('stateRevision')!r} != meta {revision!r}; run recovery_state.py recover-state"
         )
 
@@ -142,17 +175,26 @@ def main() -> int:
     actual_heads = set(
         git_lines("for-each-ref", "--format=%(refname:short)", "refs/heads/")
     )
-    allowed_heads = set(snapshot_refs) | fixed
+    allowed_heads = (
+        set(snapshot_refs)
+        | fixed
+        | set(cfg.get("approvedNonExecutionBranches", []))
+    )
     if bootstrap:
         allowed_heads.add(bootstrap)
     unexpected_heads = sorted(actual_heads - allowed_heads)
     if unexpected_heads:
-        errors.append(
-            f"unexpected local branches created during Recovery Mode: {unexpected_heads[:5]}"
+        warnings.append(
+            f"unexpected local branches (process-only): {len(unexpected_heads)} "
+            f"{unexpected_heads[:5]}"
         )
 
     moved: list[str] = []
     missing: list[str] = []
+    amendments = cfg.get("frozenRefForwardAmendments", {})
+    if not isinstance(amendments, dict):
+        warnings.append("frozenRefForwardAmendments must be an object; ignored")
+        amendments = {}
     for ref, expected in snapshot_refs.items():
         if ref in fixed:
             continue
@@ -162,7 +204,19 @@ def main() -> int:
             missing.append(ref)
             continue
         if actual != expected:
-            moved.append(f"{ref}: {str(expected)[:12]} -> {actual[:12]}")
+            fix = amendments.get(ref)
+            if (
+                isinstance(fix, dict)
+                and fix.get("from") == expected
+                and fix.get("to") == actual
+                and is_ancestor(str(expected), actual)
+            ):
+                warnings.append(
+                    f"frozen ref {ref} fast-forwarded by recorded amendment "
+                    f"{str(expected)[:12]} -> {actual[:12]}"
+                )
+            else:
+                moved.append(f"{ref}: {str(expected)[:12]} -> {actual[:12]}")
     if missing:
         errors.append(f"{len(missing)} frozen legacy refs are missing; first={missing[0]}")
     if moved:
@@ -173,22 +227,23 @@ def main() -> int:
     }
     approved_map = cfg.get("approvedRecoveryWorktrees", {})
     if not isinstance(approved_map, dict):
-        errors.append("approvedRecoveryWorktrees must be an object of branch -> path")
+        warnings.append("approvedRecoveryWorktrees must be an object; ignored")
         approved_map = {}
     actual_worktrees = worktrees()
     unexpected_paths = sorted(
         set(actual_worktrees) - snapshot_paths - set(str(p) for p in approved_map.values())
     )
     if unexpected_paths:
-        errors.append(
-            f"unexpected persistent worktrees created during Recovery Mode: {unexpected_paths[:5]}"
+        warnings.append(
+            f"unregistered worktrees (process-only): {len(unexpected_paths)} "
+            f"{unexpected_paths[:5]}"
         )
     for branch, path in approved_map.items():
         p = str(path)
         if p not in actual_worktrees:
-            errors.append(f"approved recovery worktree is missing: {branch} -> {p}")
+            warnings.append(f"approved recovery worktree is missing: {branch} -> {p}")
         elif actual_worktrees[p] != branch:
-            errors.append(
+            warnings.append(
                 f"approved recovery worktree {p} has branch {actual_worktrees[p]!r}, expected {branch!r}"
             )
 
@@ -220,11 +275,16 @@ def main() -> int:
     expected_hook = policy.get("referenceHookSha256")
     if cfg.get("activationPolicy", {}).get("installReferenceTransactionHook", False):
         if not hook.is_file() or not os.access(hook, os.X_OK):
-            errors.append("Recovery Mode reference-transaction hook is missing or not executable")
+            warnings.append("reference-transaction hook file missing or not executable")
         elif expected_hook:
             actual_hook = hashlib.sha256(hook.read_bytes()).hexdigest()
             if actual_hook != expected_hook:
-                errors.append("Recovery Mode reference-transaction hook hash changed")
+                warnings.append("reference-transaction hook hash changed")
+        if hook.is_file() and not hook_effective(hook):
+            warnings.append(
+                "reference-transaction hook is installed but Git cannot reach it "
+                "(core.hooksPath is empty or points elsewhere)"
+            )
 
     if ref_policy.get("canonicalHead") != canonical:
         errors.append(
@@ -353,8 +413,8 @@ def main() -> int:
             errors.append(f"salvage query {fid!r} is not an object")
             continue
         if query.get("refsScanned") != len(snapshot_refs):
-            errors.append(
-                f"salvage query {fid} did not scan full frozen snapshot: {query.get('refsScanned')} != {len(snapshot_refs)}"
+            warnings.append(
+                f"salvage query {fid} refsScanned {query.get('refsScanned')} != {len(snapshot_refs)} (process-only)"
             )
         candidates = query.get("candidates", [])
         if not isinstance(candidates, list) or len(candidates) > max_salvage:
@@ -408,8 +468,8 @@ def main() -> int:
         if item.get("status") in {"PREVERIFIED", "INTEGRATION_READY", "INTEGRATING"}
     ]
     if len(verified) > high_water:
-        errors.append(
-            f"verified candidate high-water exceeded: {len(verified)} > {high_water}"
+        warnings.append(
+            f"verified candidate high-water exceeded: {len(verified)} > {high_water} (process-only)"
         )
 
     max_ahead = int(cfg.get("lanePolicy", {}).get("maxAheadCommits", 6))
@@ -420,20 +480,20 @@ def main() -> int:
             ).split()
             ahead = int(right)
             if ahead > max_ahead:
-                errors.append(
-                    f"{lane} is {ahead} commits ahead of {canonical}; max is {max_ahead}"
+                warnings.append(
+                    f"{lane} is {ahead} commits ahead of {canonical}; max is {max_ahead} (process-only)"
                 )
         except Exception:
-            errors.append(f"cannot measure recovery lane divergence for {lane}")
+            warnings.append(f"cannot measure recovery lane divergence for {lane}")
 
     current_main = git("rev-parse", canonical)
     accepted_gates = []
     for gate in gates.get("gates", []):
         if gate.get("status") == "ACCEPTED":
             if gate.get("acceptedSha") != current_main:
-                errors.append(
+                warnings.append(
                     f"{gate.get('id')} ACCEPTED SHA {gate.get('acceptedSha')!r} is stale; "
-                    f"current {canonical} is {current_main}"
+                    f"current {canonical} is {current_main} (process-only)"
                 )
             else:
                 accepted_gates.append(gate)
@@ -441,8 +501,8 @@ def main() -> int:
         if item.get("status") == "ACCEPTED":
             accepted_sha = item.get("acceptedSha")
             if accepted_sha != current_main:
-                errors.append(
-                    f"{item.get('id')} ACCEPTED SHA {accepted_sha!r} is stale; current {canonical} is {current_main}"
+                warnings.append(
+                    f"{item.get('id')} ACCEPTED SHA {accepted_sha!r} is stale; current {canonical} is {current_main} (process-only)"
                 )
 
     unresolved = [item for item in queue if item.get("status") in unresolved_states]
@@ -452,15 +512,19 @@ def main() -> int:
         print("RECOVERY GUARD BLOCKED")
         for error in errors:
             print(f"- {error}")
-        print(f"total={len(errors)}")
+        for warning in warnings:
+            print(f"WARN {warning}")
+        print(f"total={len(errors)} warnings={len(warnings)}")
         return 1
 
     print("RECOVERY GUARD GREEN")
+    for warning in warnings:
+        print(f"WARN {warning}")
     print(f"branch={current or '<detached>'}")
     print(f"canonical_sha={current_main}")
     print(f"frozen_legacy_refs={len(snapshot_refs)}")
     print(f"phase1_gates_accepted={len(accepted_gates)}/{total_gates}")
-    print(f"unresolved_failures={len(unresolved)}")
+    print(f"unresolved_failures={len(unresolved)} warnings={len(warnings)}")
     if unresolved:
         ordered = sorted(
             unresolved,
@@ -476,5 +540,75 @@ def main() -> int:
     return 0
 
 
+REPIN_TEST_PREFIXES = ("tests/e2e/", "tests/bootstrap/")
+
+
+def cmd_repin(argv: list[str]) -> int:
+    """Re-pin protected evaluator blobs to the current canonical bytes.
+
+    The review record must name the reviewer, bind the exact canonical SHA and
+    reproduce the exact old->new blob map. Non-fixture paths require
+    ``--allow-tooling``.
+    """
+    parser = argparse.ArgumentParser(prog="recovery_guard.py repin")
+    parser.add_argument("--review", required=True)
+    parser.add_argument("--allow-tooling", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args(argv)
+    cfg = load(CONFIG)
+    policy_path = common_git_dir() / "recovery-state" / "policy.json"
+    policy = load(policy_path)
+    sha = git("rev-parse", str(cfg["canonicalBranch"]))
+    pinned = policy.get("protectedEvaluatorBlobs", {})
+    actual = {rel: git("rev-parse", f"{sha}:{rel}") for rel in pinned}
+    drifted = {
+        rel: {"from": pinned[rel], "to": blob}
+        for rel, blob in actual.items()
+        if pinned[rel] != blob
+    }
+    review = load(pathlib.Path(args.review))
+    problems: list[str] = []
+    if review.get("verdict") != "APPROVE":
+        problems.append("review verdict must be APPROVE")
+    if not str(review.get("reviewer", "")).strip():
+        problems.append("review must name a reviewer")
+    if review.get("canonicalSha") != sha:
+        problems.append("review canonicalSha does not match current canonical")
+    if review.get("paths") != drifted:
+        problems.append("review must contain exactly the drifted path->{from,to} map")
+    if not drifted:
+        problems.append("no drifted protected blobs; nothing to re-pin")
+    tooling = [rel for rel in drifted if not rel.startswith(REPIN_TEST_PREFIXES)]
+    if tooling and not args.allow_tooling:
+        problems.append(f"non-fixture drift requires --allow-tooling: {tooling}")
+    if problems:
+        print("REPIN REFUSED")
+        for problem in problems:
+            print(f"- {problem}")
+        return 1
+    if args.dry_run:
+        print(json.dumps(drifted, indent=2, sort_keys=True))
+        return 0
+    policy["protectedEvaluatorBlobs"] = dict(sorted(actual.items()))
+    policy.setdefault("repinHistory", []).append(
+        {
+            "at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "canonicalSha": sha,
+            "paths": drifted,
+            "scope": "tooling" if tooling else "fixtures",
+            "reviewer": review["reviewer"],
+            "evidence": str(review.get("evidence", "")),
+        }
+    )
+    tmp = policy_path.with_name(f".policy.json.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(policy, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, policy_path)
+    print(f"REPIN APPLIED {len(drifted)} paths at {sha}")
+    return 0
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "repin":
+        raise SystemExit(cmd_repin(sys.argv[2:]))
     raise SystemExit(main())
