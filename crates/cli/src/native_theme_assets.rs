@@ -14,6 +14,21 @@ mod tests {
     use crate::native_theme_runtime::{palette_from_asset, ThemeMode};
 
     #[test]
+    fn every_shipped_upstream_theme_resolves_semantic_tokens() {
+        for (name, text) in ASSETS {
+            let value: serde_json::Value = serde_json::from_str(text).expect("bundled JSON");
+            for mode in [ThemeMode::Dark, ThemeMode::Light] {
+                let theme = crate::native_theme_runtime::RuntimeTheme::from_asset(name, &value, mode)
+                    .expect("bundled theme loads");
+                assert!(
+                    theme.semantic.is_some(),
+                    "{name} {mode}: legacy semantic roles did not resolve"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn every_shipped_upstream_theme_resolves_in_both_modes() {
         assert_eq!(ASSETS.len(), 33);
         for (name, text) in ASSETS {

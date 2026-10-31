@@ -1475,7 +1475,7 @@ fn push_code_wrapped(
 pub struct ChatRunSpan {
     pub start: u16,
     pub end: u16,
-    pub flags: u8,
+    pub flags: u16,
 }
 
 fn row_cells(text: &str) -> usize {
@@ -1686,7 +1686,7 @@ fn project_pairs(
             pair_at += 1;
         }
         if mapped != cluster_chars || mapped == 0 { return; }
-        let mut flags = 0u8;
+        let mut flags = 0u16;
         for run in runs.iter().take(crate::markdown_runs::MAX_RUNS_PER_ROW) {
             if run.start <= source_start && run.end >= source_end { flags |= run.flags; }
         }
@@ -1759,20 +1759,26 @@ fn flow_options(mode: crate::markdown_runs::MarkdownMode) -> crate::native_markd
 /// onto the transcript's style bits. Roles whose upstream styling is a color
 /// only (list markers, rules, quotes, strikethrough) carry no bit here; the
 /// paint layer owns those colors.
-fn flow_role_flags(role: crate::native_markdown_flow::MarkdownRole) -> u8 {
-    use crate::markdown_runs::{BOLD, CODE, CODE_BLOCK, ITALIC, LINK};
+fn flow_role_flags(role: crate::native_markdown_flow::MarkdownRole) -> u16 {
+    use crate::markdown_runs::{
+        BOLD, CODE, CODE_BLOCK, HEADING, HEADING1, ITALIC, LINK, LINK_TEXT, LIST, QUOTE, RULE,
+        STRIKE,
+    };
     use crate::native_markdown_flow::MarkdownRole;
     match role {
-        MarkdownRole::Strong | MarkdownRole::Heading | MarkdownRole::Heading1 => BOLD,
+        MarkdownRole::Heading => BOLD | HEADING,
+        MarkdownRole::Heading1 => BOLD | HEADING | HEADING1,
+        MarkdownRole::Strong => BOLD,
         MarkdownRole::Emphasis => ITALIC,
+        MarkdownRole::Strikethrough => STRIKE,
         MarkdownRole::InlineCode => CODE,
         MarkdownRole::CodeBlock => CODE | CODE_BLOCK,
-        MarkdownRole::Link | MarkdownRole::LinkUrl | MarkdownRole::LinkLabel => LINK,
-        MarkdownRole::Text
-        | MarkdownRole::Strikethrough
-        | MarkdownRole::BlockQuote
-        | MarkdownRole::ListMarker
-        | MarkdownRole::Rule => 0,
+        MarkdownRole::Link | MarkdownRole::LinkUrl => LINK,
+        MarkdownRole::LinkLabel => LINK | LINK_TEXT,
+        MarkdownRole::BlockQuote => QUOTE,
+        MarkdownRole::ListMarker => LIST,
+        MarkdownRole::Rule => RULE,
+        MarkdownRole::Text => 0,
     }
 }
 
@@ -1783,7 +1789,7 @@ struct FlowRowChunk {
     spans: Vec<ChatRunSpan>,
 }
 
-fn push_chunk_spans(spans: &mut Vec<ChatRunSpan>, start: usize, end: usize, flags: u8) {
+fn push_chunk_spans(spans: &mut Vec<ChatRunSpan>, start: usize, end: usize, flags: u16) {
     if start >= end || flags == 0 {
         return;
     }
@@ -1809,7 +1815,7 @@ fn push_chunk_spans(spans: &mut Vec<ChatRunSpan>, start: usize, end: usize, flag
 fn wrap_flow_row(row: &crate::native_markdown_flow::FlowRow, content_width: usize) -> Vec<FlowRowChunk> {
     use crate::native_markdown_flow::cells;
     let mut text = String::new();
-    let mut styled: Vec<(usize, usize, u8)> = Vec::new();
+    let mut styled: Vec<(usize, usize, u16)> = Vec::new();
     let mut cell = 0usize;
     for span in &row.spans {
         let start = cell;
@@ -1848,7 +1854,7 @@ fn wrap_flow_row(row: &crate::native_markdown_flow::FlowRow, content_width: usiz
     let mut row_start = 0usize;
     let mut spans: Vec<ChatRunSpan> = Vec::new();
     let mut retire = |chunks: &mut Vec<FlowRowChunk>, current: &mut String, used: &mut usize,
-                      row_start: &mut usize, spans: &mut Vec<ChatRunSpan>, styled: &[(usize, usize, u8)]| {
+                      row_start: &mut usize, spans: &mut Vec<ChatRunSpan>, styled: &[(usize, usize, u16)]| {
         for (start, end, flags) in styled {
             let start = (*start).max(*row_start);
             let end = (*end).min(*row_start + *used);

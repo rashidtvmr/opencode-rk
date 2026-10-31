@@ -2405,6 +2405,15 @@ impl NativeView {
                     } else {
                         width
                     };
+                    // Markdown spans address painted cells, so they move with
+                    // the container padding `padded` adds in front of the text.
+                    if let Some(spans) = self.chat_markdown_spans.get_mut(index) {
+                        let padding = (row_width / 2).min(2);
+                        for span in spans.iter_mut() {
+                            span.start = span.start.saturating_add(padding);
+                            span.end = span.end.saturating_add(padding);
+                        }
+                    }
                     padded(&line, row_width)
                 })
                 .collect();

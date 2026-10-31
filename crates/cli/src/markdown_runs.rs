@@ -39,12 +39,27 @@ pub enum RunKind {
     Link,
 }
 
-pub const BOLD: u8 = 1;
-pub const ITALIC: u8 = 2;
-pub const CODE: u8 = 4;
-pub const LINK: u8 = 8;
+pub const BOLD: u16 = 1;
+pub const ITALIC: u16 = 2;
+pub const CODE: u16 = 4;
+pub const LINK: u16 = 8;
 /// Inline raw code receives upstream base background; fenced/block code does not.
-pub const CODE_BLOCK: u8 = 16;
+pub const CODE_BLOCK: u16 = 16;
+// Color-only roles (`generateSyntax`, `packages/theme/src/tui/syntax.ts:46-71`)
+// need their own bits because the painter owns the token color, not the text.
+/// `markup.heading.*` (heading color; `HEADING1` also underlines).
+pub const HEADING: u16 = 32;
+pub const HEADING1: u16 = 64;
+/// `markup.link.label` (linkText color, distinct from the link itself).
+pub const LINK_TEXT: u16 = 128;
+/// `markup.quote` (blockQuote color, italic).
+pub const QUOTE: u16 = 256;
+/// `markup.list` (listItem color for the marker).
+pub const LIST: u16 = 512;
+/// Rule/table glyphs (horizontalRule color).
+pub const RULE: u16 = 1024;
+/// `markup.strikethrough` (muted color).
+pub const STRIKE: u16 = 2048;
 
 /// A style interval on a sanitized source row. `start..end` is the source
 /// interval used by projection; rendered concealment is derived separately.
@@ -61,7 +76,7 @@ pub struct MarkdownRun {
     /// even when [`Self::url`] is `None`.
     pub url_span: Option<(usize, usize)>,
     /// Combined OpenTUI TextAttributes-compatible flags.
-    pub flags: u8,
+    pub flags: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -389,7 +404,7 @@ fn scan_inline(
     text: &str,
     start: usize,
     end: usize,
-    parent: u8,
+    parent: u16,
     bounds: &[usize],
     out: &mut Vec<MarkdownRun>,
 ) {
@@ -478,7 +493,7 @@ fn push_run(
     start: usize,
     end: usize,
     kind: RunKind,
-    flags: u8,
+    flags: u16,
     url: Option<String>,
     url_span: Option<(usize, usize)>,
     bounds: &[usize],

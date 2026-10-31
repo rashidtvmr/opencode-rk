@@ -1944,6 +1944,123 @@ mod surface_paint_regressions {
     }
 
     #[test]
+    fn assistant_markdown_emits_code_and_bold_spans_through_the_live_view() {
+        use crate::native_view_chat::{ChatMessage, ChatRole};
+        let mut view = crate::native_view::NativeView::new(120, 40);
+        view.set_session_route(true);
+        let messages = vec![ChatMessage::text(
+            ChatRole::Assistant,
+            "# Heading\n\nbefore `inline_code` after and **bold words**",
+        )];
+        let lines = view.render_typed("draft", &messages, false, &[]);
+        let spans = view.chat_markdown_spans().to_vec();
+        let row_index = lines
+            .iter()
+            .position(|line| line.contains("inline_code"))
+            .expect("code row painted");
+        let row = &lines[row_index];
+        let start = row.find("inline_code").expect("code text in row");
+        let row_spans = &spans[row_index];
+        let code = row_spans
+            .iter()
+            .find(|span| span.flags & crate::markdown_runs::CODE != 0)
+            .unwrap_or_else(|| panic!("row {row_index} spans: {row_spans:?} row: {row:?} text_start={start}"));
+        assert!(
+            spans.iter().flatten().any(|span| span.flags & crate::markdown_runs::BOLD != 0),
+            "bold span missing; spans: {spans:?}"
+        );
+        assert_eq!(
+            (usize::from(code.start), usize::from(code.end)),
+            (start, start + "inline_code".len()),
+            "code span must address the painted cells; row: {row:?}"
+        );
+        // Upstream `generateSyntax` distinguishes heading and strong colors,
+        // so the producer must keep them apart.
+        let heading_row = lines
+            .iter()
+            .position(|line| line.contains("Heading"))
+            .expect("heading row painted");
+        let heading_start = lines[heading_row].find("Heading").expect("heading text");
+        assert!(
+            spans[heading_row].iter().any(|span| {
+                span.flags & crate::markdown_runs::HEADING != 0
+                    && usize::from(span.start) <= heading_start
+                    && usize::from(span.end) >= heading_start + "Heading".len()
+            }),
+            "heading span missing; row {} spans: {:?}",
+            heading_row,
+            spans[heading_row]
+        );
+        let bold_start = lines
+            .iter()
+            .position(|line| line.contains("bold words"))
+            .and_then(|row| Some((row, lines[row].find("bold words")?)))
+            .expect("bold text painted");
+        assert!(
+            spans[bold_start.0].iter().any(|span| {
+                span.flags & crate::markdown_runs::BOLD != 0
+                    && span.flags & crate::markdown_runs::HEADING == 0
+                    && usize::from(span.start) == bold_start.1
+                    && usize::from(span.end) == bold_start.1 + "bold".len()
+            }),
+            "strong span missing; row {} spans: {:?}",
+            bold_start.0,
+            spans[bold_start.0]
+        );
+    }
+
+    #[test]
+    fn markdown_span_flags_map_to_upstream_tokens() {
+        use crate::markdown_runs::{
+            BOLD, CODE, HEADING, HEADING1, ITALIC, LINK, LINK_TEXT, LIST, QUOTE, RULE, STRIKE,
+        };
+        let markdown = crate::native_theme_runtime::RuntimeTheme::builtin_default(
+            crate::native_theme_runtime::ThemeMode::Dark,
+        )
+        .semantic
+        .expect("shipped V2 asset resolves")
+        .markdown;
+        let color = |flags| super::markdown_run_color(&markdown, flags).map(|color| color.rgba);
+        assert_eq!(color(CODE), Some(markdown.code.rgba));
+        assert_eq!(color(HEADING), Some(markdown.heading.rgba));
+        assert_eq!(color(HEADING | HEADING1), Some(markdown.heading.rgba));
+        assert_eq!(color(BOLD), Some(markdown.strong.rgba));
+        assert_eq!(color(ITALIC), Some(markdown.emphasis.rgba));
+        assert_eq!(color(LINK), Some(markdown.link.rgba));
+        assert_eq!(color(LINK | LINK_TEXT), Some(markdown.link_text.rgba));
+        assert_eq!(color(QUOTE), Some(markdown.block_quote.rgba));
+        assert_eq!(color(RULE), Some(markdown.horizontal_rule.rgba));
+        assert_eq!(color(LIST), Some(markdown.list_item.rgba));
+        assert_eq!(color(STRIKE), Some(markdown.muted.rgba));
+        assert_eq!(color(0), None);
+        assert_eq!(super::run_attributes(HEADING1) & 8, 8, "h1 underlines");
+        assert_eq!(super::run_attributes(QUOTE) & 4, 4, "quotes are italic");
+    }
+
+    #[test]
+    fn live_theme_loader_resolves_markdown_tokens() {
+        use crate::native_theme_runtime::ThemeMode;
+        // The builtin `opencode` theme is the V2 document upstream
+        // (`packages/tui/src/theme/index.ts` `listThemes`).
+        let default = super::load_native_theme("opencode", ThemeMode::Dark, &[])
+            .expect("default theme loads");
+        let semantic = default.semantic.as_ref().expect("default semantic roles");
+        assert_eq!(semantic.markdown.code.rgba, [0x7f, 0xd8, 0x8f, 0xff]);
+        assert_eq!(semantic.markdown.code_block.rgba, [0xee, 0xee, 0xee, 0xff]);
+
+        // Legacy assets carry the same-named roles and migrate 1:1
+        // (`packages/theme/src/tui/v1-migrate.ts`).
+        let legacy = super::load_native_theme("dracula", ThemeMode::Dark, &[])
+            .expect("bundled legacy theme loads");
+        let semantic = legacy.semantic.as_ref().expect("legacy semantic roles");
+        assert_eq!(semantic.text_base.rgba, [0xf8, 0xf8, 0xf2, 0xff]);
+        assert_eq!(semantic.markdown.code.rgba, [0x50, 0xfa, 0x7b, 0xff]);
+        assert_eq!(semantic.markdown.heading.rgba, [0xbd, 0x93, 0xf9, 0xff]);
+        assert_eq!(semantic.syntax.keyword.rgba, [0xff, 0x79, 0xc6, 0xff]);
+        assert_eq!(semantic.background_raised_base.rgba, [0x21, 0x22, 0x2c, 0xff]);
+    }
+
+    #[test]
     fn borderless_home_prompt_has_no_rail_or_bottom_edge() {
         let mut view = crate::native_view::NativeView::new(100, 32);
         view.set_session_route(false);
@@ -2661,14 +2778,55 @@ fn modal_row_fg(line: &str, heading: bool, palette: crate::native_theme_runtime:
     }
 }
 
-fn run_attributes(flags: u8) -> u32 {
-    // Pinned OpenTUI attributes: BOLD=1, ITALIC=4, UNDERLINE=8.
-    // Code is colored semantically rather than approximated as DIM.
+fn run_attributes(flags: u16) -> u32 {
+    use crate::markdown_runs::{
+        BOLD, HEADING, HEADING1, ITALIC, LINK, LINK_TEXT, QUOTE,
+    };
+    // Pinned OpenTUI attributes: BOLD=1, ITALIC=4, UNDERLINE=8, matching
+    // `generateSyntax` (`packages/theme/src/tui/syntax.ts:46-71`): headings and
+    // strong are bold, headings of level 1 underline, emphasis and quotes are
+    // italic, and links underline.
     let mut attributes = 0;
-    if flags & crate::markdown_runs::BOLD != 0 { attributes |= 1; }
-    if flags & crate::markdown_runs::ITALIC != 0 { attributes |= 4; }
-    if flags & crate::markdown_runs::LINK != 0 { attributes |= 8; }
+    if flags & (BOLD | HEADING | HEADING1) != 0 { attributes |= 1; }
+    if flags & (ITALIC | QUOTE) != 0 { attributes |= 4; }
+    if flags & (LINK | LINK_TEXT | HEADING1) != 0 { attributes |= 8; }
     attributes
+}
+
+/// Foreground token for one Markdown span, in upstream rule order
+/// (`packages/theme/src/tui/syntax.ts:46-71`). `None` leaves the row's own
+/// foreground alone.
+#[cfg(feature = "native")]
+fn markdown_run_color(
+    markdown: &crate::native_theme_runtime::MarkdownPalette,
+    flags: u16,
+) -> Option<&crate::native_theme_runtime::HueColor> {
+    use crate::markdown_runs::{
+        BOLD, CODE, HEADING, HEADING1, ITALIC, LINK, LINK_TEXT, LIST, QUOTE, RULE, STRIKE,
+    };
+    if flags & CODE != 0 {
+        Some(&markdown.code)
+    } else if flags & (HEADING | HEADING1) != 0 {
+        Some(&markdown.heading)
+    } else if flags & BOLD != 0 {
+        Some(&markdown.strong)
+    } else if flags & ITALIC != 0 {
+        Some(&markdown.emphasis)
+    } else if flags & LINK_TEXT != 0 {
+        Some(&markdown.link_text)
+    } else if flags & LINK != 0 {
+        Some(&markdown.link)
+    } else if flags & QUOTE != 0 {
+        Some(&markdown.block_quote)
+    } else if flags & RULE != 0 {
+        Some(&markdown.horizontal_rule)
+    } else if flags & LIST != 0 {
+        Some(&markdown.list_item)
+    } else if flags & STRIKE != 0 {
+        Some(&markdown.muted)
+    } else {
+        None
+    }
 }
 
 
@@ -3214,13 +3372,18 @@ fn native_paint(
                     if let Some(markdown) = ctx.markdown.as_ref() {
                         if let Some(run_spans) = ctx.chat_markdown_spans.get(row) {
                             for run_span in run_spans {
-                                if run_span.flags & crate::markdown_runs::CODE != 0
-                                    && x >= u32::from(run_span.start)
+                                if x >= u32::from(run_span.start)
                                     && x.saturating_add(u32::from(cells)) <= u32::from(run_span.end)
                                 {
-                                    fg = Rgba::new(markdown.code.rgba[0], markdown.code.rgba[1], markdown.code.rgba[2], markdown.code.rgba[3]);
-                                    if run_span.flags & crate::markdown_runs::CODE_BLOCK == 0 {
-                                        bg = Rgba::new(markdown.inline_background.rgba[0], markdown.inline_background.rgba[1], markdown.inline_background.rgba[2], markdown.inline_background.rgba[3]);
+                                    if let Some(color) = markdown_run_color(markdown, run_span.flags) {
+                                        let [r, g, b, a] = color.rgba;
+                                        fg = Rgba::new(r, g, b, a);
+                                    }
+                                    if run_span.flags & crate::markdown_runs::CODE != 0
+                                        && run_span.flags & crate::markdown_runs::CODE_BLOCK == 0
+                                    {
+                                        let [r, g, b, a] = markdown.inline_background.rgba;
+                                        bg = Rgba::new(r, g, b, a);
                                     }
                                 }
                             }
@@ -4410,6 +4573,12 @@ fn load_native_theme_with_budget(
             return RuntimeTheme::from_asset(name, &value, mode)
                 .map_err(|error| format!("invalid theme: {error}"));
         }
+    }
+    // Upstream `listThemes()` (`packages/tui/src/theme/index.ts`) overrides the
+    // legacy `DEFAULT_THEMES` entry: the builtin `opencode` theme is the V2
+    // document, whose hue scales drive `theme.increase`/`decrease`.
+    if name == "opencode" {
+        return Ok(RuntimeTheme::builtin_default(mode));
     }
     let json = crate::native_theme_assets::lookup(name)
         .ok_or_else(|| format!("unknown theme: {name}"))?;

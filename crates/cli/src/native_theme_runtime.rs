@@ -565,6 +565,177 @@ pub fn palette_from_asset(asset: &Value, mode: ThemeMode) -> Result<Palette, Pal
     palette_from_json(&defs, theme, mode)
 }
 
+/// Upstream V1 categorical token order (`categoricalTokens` in
+/// `packages/theme/src/tui/v1-migrate.ts`).
+const V1_CATEGORICAL_TOKENS: [&str; 7] =
+    ["secondary", "accent", "success", "warning", "primary", "error", "info"];
+
+/// Resolve the semantic token view for a legacy (`defs` + `theme`) document.
+///
+/// Upstream migrates a legacy document through `migrateV1`
+/// (`packages/theme/src/tui/v1-migrate.ts`), which copies every Markdown,
+/// syntax, diff, feedback and surface token from the identically named legacy
+/// role. The hue scales it also synthesizes are not reproduced here: a legacy
+/// literal therefore keeps its color under [`SemanticPalette::increase`] /
+/// [`SemanticPalette::decrease`]. Every bundled legacy theme resolves fully.
+///
+/// # Errors
+///
+/// [`PaletteError`] when the asset is malformed or a required legacy role is
+/// missing or unusable.
+fn semantic_from_json(
+    defs: &Value,
+    theme: &Value,
+    mode: ThemeMode,
+) -> Result<SemanticPalette, PaletteError> {
+    let defs_table = match defs {
+        Value::Null => None,
+        Value::Object(defs) => {
+            check_keys(defs, "defs")?;
+            defs.values().try_for_each(|value| {
+                if value.is_string() {
+                    Ok(())
+                } else {
+                    Err(PaletteError::BadColor {
+                        role: "defs".to_owned(),
+                    })
+                }
+            })?;
+            Some(defs)
+        }
+        _ => return Err(PaletteError::NotAnObject { context: "defs" }),
+    };
+    let theme_table = match theme {
+        Value::Object(theme) => theme,
+        _ => return Err(PaletteError::NotAnObject { context: "theme" }),
+    };
+    check_keys(theme_table, "theme")?;
+    let view = View {
+        defs: defs_table,
+        theme: theme_table,
+        mode,
+    };
+    let role = |name: &'static str| -> Result<HueColor, PaletteError> {
+        let value = theme_table
+            .get(name)
+            .ok_or_else(|| PaletteError::MissingRole {
+                role: name.to_owned(),
+            })?;
+        view.resolve(name, value, &mut Vec::new())
+            .map(HueColor::literal)
+    };
+
+    let background = role("background")?;
+    let background_panel = role("backgroundPanel")?;
+    let background_element = role("backgroundElement")?;
+    let text = role("text")?;
+    let text_muted = role("textMuted")?;
+    let primary = role("primary")?;
+    let accent = role("accent")?;
+    let transparent = HueColor::literal([0, 0, 0, 0]);
+
+    // `selectedForeground(theme, theme.primary)`.
+    let selected = match theme_table.get("selectedListItemText") {
+        Some(value) => view
+            .resolve("selectedListItemText", value, &mut Vec::new())
+            .map(HueColor::literal)?,
+        None if background.rgba[3] != 0 => background.clone(),
+        None => {
+            let [r, g, b, _] = primary.rgba;
+            let luminance =
+                0.299 * f64::from(r) + 0.587 * f64::from(g) + 0.114 * f64::from(b);
+            if luminance > 255.0 * 0.5 {
+                HueColor::literal([0, 0, 0, 255])
+            } else {
+                HueColor::literal([255, 255, 255, 255])
+            }
+        }
+    };
+
+    let mut action_states = HashMap::new();
+    action_states.insert("disabled".to_owned(), text_muted.clone());
+    action_states.insert("hovered".to_owned(), background_panel.clone());
+    action_states.insert("focused".to_owned(), primary);
+    action_states.insert("selected".to_owned(), transparent.clone());
+
+    let mut categorical = Vec::new();
+    let mut categorical_colors: Vec<HueColor> = Vec::new();
+    for token in V1_CATEGORICAL_TOKENS {
+        let color = role(token)?;
+        if categorical_colors.iter().any(|seen| seen.rgba == color.rgba) {
+            continue;
+        }
+        categorical.push(token.to_owned());
+        categorical_colors.push(color);
+    }
+
+    Ok(SemanticPalette {
+        background_base: background.clone(),
+        background_raised_base: background_panel.clone(),
+        background_raised_high: background_element,
+        text_base: text,
+        text_muted,
+        text_feedback_error: role("error")?,
+        text_feedback_warning: role("warning")?,
+        text_feedback_success: role("success")?,
+        text_feedback_info: role("info")?,
+        tab_interactive: role("primary")?,
+        tab_attention: role("accent")?,
+        background_action_primary: V2StatefulColor {
+            base: transparent,
+            states: action_states,
+        },
+        markdown: MarkdownPalette {
+            code: role("markdownCode")?,
+            inline_background: background,
+            text: role("markdownText")?,
+            heading: role("markdownHeading")?,
+            link: role("markdownLink")?,
+            link_text: role("markdownLinkText")?,
+            block_quote: role("markdownBlockQuote")?,
+            emphasis: role("markdownEmph")?,
+            strong: role("markdownStrong")?,
+            horizontal_rule: role("markdownHorizontalRule")?,
+            list_item: role("markdownListItem")?,
+            list_enumeration: role("markdownListEnumeration")?,
+            image: role("markdownImage")?,
+            image_text: role("markdownImageText")?,
+            code_block: role("markdownCodeBlock")?,
+            muted: role("textMuted")?,
+        },
+        syntax: SyntaxPalette {
+            comment: role("syntaxComment")?,
+            keyword: role("syntaxKeyword")?,
+            function: role("syntaxFunction")?,
+            variable: role("syntaxVariable")?,
+            string: role("syntaxString")?,
+            number: role("syntaxNumber")?,
+            type_name: role("syntaxType")?,
+            operator: role("syntaxOperator")?,
+            punctuation: role("syntaxPunctuation")?,
+        },
+        diff: DiffPalette {
+            added_text: role("diffAdded")?,
+            removed_text: role("diffRemoved")?,
+            context_text: role("diffContext")?,
+            hunk_header_text: role("diffHunkHeader")?,
+            added_background: role("diffAddedBg")?,
+            removed_background: role("diffRemovedBg")?,
+            context_background: role("diffContextBg")?,
+            added_highlight: role("diffHighlightAdded")?,
+            removed_highlight: role("diffHighlightRemoved")?,
+            line_number_text: role("diffLineNumber")?,
+            added_line_number_background: role("diffAddedLineNumberBg")?,
+            removed_line_number_background: role("diffRemovedLineNumberBg")?,
+        },
+        text_action_primary_focused: selected,
+        prompt: accent,
+        categorical,
+        categorical_colors,
+        hues: HashMap::new(),
+    })
+}
+
 const V2_STEPS: [u16; 9] = [100, 200, 300, 400, 500, 600, 700, 800, 900];
 const V2_STATES: [&str; 5] = ["disabled", "pressed", "focused", "selected", "hovered"];
 const V2_MAX_HUES: usize = 128;
@@ -655,6 +826,8 @@ pub struct MarkdownPalette {
     pub image: HueColor,
     pub image_text: HueColor,
     pub code_block: HueColor,
+    /// `text.muted` — upstream `markup.strikethrough` foreground.
+    pub muted: HueColor,
 }
 
 /// The nine upstream syntax token colors (`syntax.*`).
@@ -1274,6 +1447,7 @@ impl V2Resolver {
             image: get(&["markdown", "image"])?,
             image_text: get(&["markdown", "imageText"])?,
             code_block: get(&["markdown", "codeBlock"])?,
+            muted: get(&["text", "muted"])?,
         };
         Ok(SemanticPalette {
             background_base: get(&["background", "base"])?, background_raised_base: get(&["background", "raised", "base"])?, background_raised_high: get(&["background", "raised", "high"])?,
@@ -1440,7 +1614,8 @@ pub struct RuntimeTheme {
     pub requested_mode: ThemeMode,
     /// Palette resolved from the theme definitions for [`Self::mode`].
     pub palette: Palette,
-    /// Semantic V2 token view when loaded from a V2 theme document.
+    /// Semantic token view: the V2 document's own roles, or a legacy
+    /// document's identical roles migrated the way upstream `migrateV1` does.
     pub semantic: Option<SemanticPalette>,
 }
 
@@ -1489,12 +1664,22 @@ impl RuntimeTheme {
                 semantic: Some(resolved.semantic),
             });
         }
+        let object = asset.as_object().ok_or(PaletteError::NotAnObject {
+            context: "theme asset",
+        })?;
+        let defs = object.get("defs").cloned().unwrap_or(Value::Null);
+        // A legacy theme that omits optional semantic roles keeps the core
+        // palette it always had instead of failing the whole load; every
+        // bundled legacy theme resolves completely (see the asset test).
+        let semantic = object
+            .get("theme")
+            .and_then(|theme| semantic_from_json(&defs, theme, mode).ok());
         Ok(Self {
             name: name.to_owned(),
             mode,
             requested_mode: mode,
             palette: palette_from_asset(asset, mode)?,
-            semantic: None,
+            semantic,
         })
     }
 }
