@@ -7,6 +7,12 @@
 //! OSC and other terminal reply strings are discarded with constant-size state
 //! through their terminator, including replies split across input reads.
 //! The caller's four-byte UTF-8 decoder still handles ordinary input.
+//!
+//! Upstream reference at pin `450e7b92412c780a7b5a75226bb8d49aaca24e22`
+//! (`packages/tui/src/component/prompt/index.tsx:1097-1477`): paste frames are
+//! normalized (`\r\n`/`\r` to `\n`) before any text reaches the composer, the
+//! Return family stays distinct so the submit keymap decides, and IME/Kitty
+//! scalars are decoded as complete UTF-8 units rather than byte offsets.
 
 use std::time::{Duration, Instant};
 
@@ -850,5 +856,80 @@ mod kitty_printable_regressions {
         for byte in b"ok" { decoder.push(*byte, now); }
         assert_eq!(decoder.pop(), Some(InputEvent::Byte(b'o')));
         assert_eq!(decoder.pop(), Some(InputEvent::Byte(b'k')));
+    }
+}
+
+#[cfg(test)]
+mod cp31_cp36_cp41_input_tests {
+    //! CP-31 (IME/duplicate submit), CP-36 (paste normalization) and CP-41
+    //! (renderer-safe offsets). Upstream: `component/prompt/index.tsx:1097-1477`.
+
+    use super::*;
+
+    fn decode(bytes: &[u8]) -> Vec<InputEvent> {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        let mut events = Vec::new();
+        for &byte in bytes {
+            decoder.push(byte, now);
+            while let Some(event) = decoder.pop() {
+                events.push(event);
+            }
+        }
+        events
+    }
+
+    #[test]
+    fn cp36_cp41_paste_normalizes_line_endings_and_preserves_unicode_clusters() {
+        let mut frame = Vec::new();
+        frame.extend_from_slice(b"\x1b[200~");
+        frame.extend_from_slice("界\r\n👩‍👩‍👧‍👦\rதமிழ்\r\n".as_bytes());
+        frame.extend_from_slice(b"\x1b[201~");
+        assert_eq!(
+            decode(&frame),
+            vec![InputEvent::Paste(
+                "界\n👩‍👩‍👧‍👦\nதமிழ்\n".to_owned()
+            )],
+            "one atomic paste; CRLF and lone CR become LF; no byte offsets"
+        );
+        // Framing bytes never reach ordinary keyboard dispatch.
+        assert!(decode(b"\x1b[200~\x1b[201~")
+            .iter()
+            .all(|event| matches!(event, InputEvent::Paste(_))));
+    }
+
+    #[test]
+    fn cp31_final_hangul_scalar_is_one_complete_ime_event() {
+        // U+D55C (한) delivered as a Kitty key report stays a complete UTF-8
+        // scalar; the caller's textarea flush sees the final composition.
+        let bytes = "\u{d55c}".as_bytes();
+        assert_eq!(
+            decode(b"\x1b[54620;1u"),
+            bytes.iter().copied().map(InputEvent::Byte).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            String::from_utf8(bytes.to_vec()).unwrap(),
+            "한"
+        );
+    }
+
+    #[test]
+    fn cp31_rapid_kitty_enters_remain_two_press_events_for_the_submit_gate() {
+        // The decoder never coalesces physical presses; deduplication belongs
+        // to the composer's SubmitGate, so exactly one submission is sent.
+        assert_eq!(
+            decode(b"\x1b[13;1u\x1b[13;1u"),
+            vec![InputEvent::Byte(13), InputEvent::Byte(13)]
+        );
+        // Shift/Ctrl/Alt Return stay distinct newline events even under a
+        // rapid sequence.
+        assert_eq!(
+            decode(b"\x1b[13;2u\x1b[13;5u\x1b[13;3u"),
+            vec![
+                InputEvent::ShiftEnter,
+                InputEvent::CtrlJ,
+                InputEvent::AltEnter
+            ]
+        );
     }
 }

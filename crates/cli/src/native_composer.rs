@@ -26,9 +26,32 @@
 //!   rejected, and buffer + paste may never exceed [`MAX_DRAFT_BYTES`]
 //!   (32 KiB, mirrors `MAX_DRAFT_BYTES` in `opencode-rk-sessions`
 //!   `tui_state` and `MAX_PASTE_BYTES` in `terminal_host`).
+//!
+//! Upstream reference at pin `450e7b92412c780a7b5a75226bb8d49aaca24e22`
+//! (`packages/tui/src/`):
+//! - `config/keybind.ts:128-280`: `prompt.submit` defaults to `none`, Enter is
+//!   `input.submit`, Tab completes, Shift+Tab cycles the agent, and `none`
+//!   disables an action with no component fallback ([`KeymapDefaults`]).
+//! - `component/prompt/index.tsx:707-770`: dialog focus survives a prompt
+//!   remount; the prompt is focusable only with an empty dialog stack
+//!   ([`PromptFocus`]).
+//! - `component/prompt/index.tsx:975-1095`: `!` at offset zero enters shell
+//!   mode, Escape/Backspace-at-zero/Ctrl+C-on-empty exit it, and history
+//!   restores text, mode, parts and cursor ([`Composer::handle_key`],
+//!   [`Composer::handle_control`], [`Composer::restore_history_entry`]).
+//! - `component/prompt/index.tsx:1097-1210`: a reentrancy guard prevents a
+//!   double Enter, the authoritative editor text is flushed for IME, and the
+//!   snapshot is cleared synchronously and restored only into an empty composer
+//!   ([`SubmitGate`], [`Composer::submit_ime`], [`DraftSnapshot`]).
+//! - `component/prompt/index.tsx:1124-1188` and
+//!   `routes/session/index.tsx:1650-1657`: queue-vs-steer, refusal of queued
+//!   shell/exit/slash/editor prompts, and blank-Enter promotion
+//!   ([`plan_submit`], [`Composer::promote_queued`]).
 
 use std::collections::VecDeque;
 use std::fmt;
+
+use crate::native_paste::{js_trim, DraftEntry, PastedText, PromptMode};
 
 /// Max paste body admitted by [`Composer::apply_paste`] (32 KiB).
 pub const MAX_PASTE_BYTES: usize = 32 * 1024;
@@ -208,6 +231,8 @@ pub enum ComposerError {
     PasteTooLarge { bytes: usize, limit: usize },
     /// Busy queue is at [`BUSY_QUEUE_CAP`].
     QueueFull { limit: usize },
+    /// A previous submission is still in flight (`index.tsx:1097-1112`).
+    SubmitInFlight,
 }
 
 impl fmt::Display for ComposerError {
@@ -223,6 +248,7 @@ impl fmt::Display for ComposerError {
             Self::QueueFull { limit } => {
                 write!(f, "busy queue full ({limit} drafts); interrupt or wait")
             }
+            Self::SubmitInFlight => write!(f, "a submission is already in flight"),
         }
     }
 }
@@ -253,6 +279,7 @@ pub enum Key {
     Down,
     Home,
     End,
+    Esc,
 }
 
 /// What a [`Key`] means under a [`SubmitKeymap`].
@@ -269,6 +296,7 @@ pub enum KeyAction {
     Down,
     Home,
     End,
+    Esc,
 }
 
 /// Decide what a key does under a keymap. Only [`KeyAction::Submit`] can
@@ -294,6 +322,7 @@ pub const fn decide_key(key: Key, keymap: SubmitKeymap) -> KeyAction {
         Key::Down => KeyAction::Down,
         Key::Home => KeyAction::Home,
         Key::End => KeyAction::End,
+        Key::Esc => KeyAction::Esc,
     }
 }
 
@@ -632,6 +661,9 @@ pub struct Composer {
     busy: bool,
     queue: VecDeque<String>,
     keymap: SubmitKeymap,
+    mode: PromptMode,
+    /// Autocomplete owns Tab/Enter while visible (`index.tsx:975-1020`).
+    autocomplete_visible: bool,
 }
 
 impl Composer {
@@ -647,7 +679,22 @@ impl Composer {
             busy: false,
             queue: VecDeque::new(),
             keymap,
+            mode: PromptMode::Normal,
+            autocomplete_visible: false,
         }
+    }
+
+    #[must_use]
+    pub const fn mode(&self) -> PromptMode {
+        self.mode
+    }
+
+    pub fn set_mode(&mut self, mode: PromptMode) {
+        self.mode = mode;
+    }
+
+    pub fn set_autocomplete_visible(&mut self, visible: bool) {
+        self.autocomplete_visible = visible;
     }
 
     #[must_use]
@@ -696,6 +743,16 @@ impl Composer {
     /// Route one physical key through the keymap. Submission flows only
     /// from here; [`apply_paste`](Self::apply_paste) never submits.
     pub fn handle_key(&mut self, key: Key) -> Result<KeyHandled, ComposerError> {
+        // `!` enters shell mode only at offset zero with no autocomplete
+        // (`index.tsx:975-1020`); in any other position it is literal text.
+        if self.mode == PromptMode::Normal
+            && !self.autocomplete_visible
+            && self.buf.cursor() == 0
+            && matches!(key, Key::Char('!'))
+        {
+            self.mode = PromptMode::Shell;
+            return Ok(KeyHandled::Edited);
+        }
         match decide_key(key, self.keymap) {
             KeyAction::Submit => match self.submit()? {
                 SubmitOutcome::Sent(_) => Ok(KeyHandled::Submitted),
@@ -710,7 +767,13 @@ impl Composer {
                 Ok(KeyHandled::Edited)
             }
             KeyAction::Backspace => {
-                self.buf.backspace();
+                // Backspace at offset zero leaves shell mode instead of
+                // editing (`index.tsx:1000-1020`).
+                if self.mode == PromptMode::Shell && self.buf.cursor() == 0 {
+                    self.mode = PromptMode::Normal;
+                } else {
+                    self.buf.backspace();
+                }
                 Ok(KeyHandled::Edited)
             }
             KeyAction::Delete => {
@@ -739,6 +802,14 @@ impl Composer {
             }
             KeyAction::End => {
                 self.buf.move_to_end();
+                Ok(KeyHandled::Edited)
+            }
+            KeyAction::Esc => {
+                // Escape exits shell mode (`index.tsx:997-1000`); in normal
+                // mode it only dismisses transient UI owned by the caller.
+                if self.mode == PromptMode::Shell {
+                    self.mode = PromptMode::Normal;
+                }
                 Ok(KeyHandled::Edited)
             }
         }
@@ -784,12 +855,18 @@ impl Composer {
     /// clones onto the bounded queue. Draft text is preserved in both cases
     /// for the interrupt path (idle keeps a checkpoint via `take`).
     pub fn submit(&mut self) -> Result<SubmitOutcome, ComposerError> {
-        if self.buf.text().trim().is_empty() {
+        // JS `trim`, including U+FEFF (`index.tsx:1124`).
+        if js_trim(self.buf.text()).is_empty() {
             return Err(ComposerError::EmptyDraft);
         }
         if !self.busy {
             let sent = self.buf.take();
             self.busy = true;
+            // A shell command returns the composer to normal mode once it is
+            // sent (`index.tsx:1319-1321`).
+            if self.mode == PromptMode::Shell {
+                self.mode = PromptMode::Normal;
+            }
             return Ok(SubmitOutcome::Sent(sent));
         }
         if self.queue.len() >= BUSY_QUEUE_CAP {
@@ -820,6 +897,594 @@ impl Composer {
             }
         }
     }
+
+    /// Ctrl+C handling (`index.tsx:997-1000,208`): in an empty shell prompt it
+    /// exits shell mode; otherwise it clears a non-empty draft and reports the
+    /// interrupted text.
+    pub fn handle_control(&mut self, byte: u8) -> ControlOutcome {
+        if byte != 3 {
+            return ControlOutcome::Inert;
+        }
+        if self.mode == PromptMode::Shell && self.buf.is_empty() {
+            self.mode = PromptMode::Normal;
+            return ControlOutcome::ExitShell;
+        }
+        if self.buf.is_empty() {
+            ControlOutcome::Inert
+        } else {
+            let cleared = self.buf.take();
+            ControlOutcome::Cleared(cleared)
+        }
+    }
+
+    /// Restore a history entry exactly, including mode and cursor
+    /// (`index.tsx:1048-1095`). Structured parts live on `DraftEntry` and are
+    /// restored by the caller's tracked-prompt owner.
+    pub fn restore_history_entry(&mut self, entry: &DraftEntry) -> Result<(), ComposerError> {
+        self.buf.set_text(entry.text.clone())?;
+        self.buf.set_cursor(entry.cursor);
+        self.mode = entry.mode;
+        Ok(())
+    }
+
+    /// Capture a submission snapshot, including mode and paste parts
+    /// (`index.tsx:1192-1205`).
+    #[must_use]
+    pub fn snapshot(&self, parts: &[PastedText]) -> DraftSnapshot {
+        DraftSnapshot {
+            text: self.buf.text().to_owned(),
+            cursor: self.buf.cursor(),
+            mode: self.mode,
+            parts: parts.to_vec(),
+        }
+    }
+
+    /// Keep the first queued draft but promote it to steer delivery, matching
+    /// blank Enter in an idle session (`routes/session/index.tsx:1650-1657`).
+    pub fn promote_queued(&mut self) -> Option<String> {
+        let next = self.queue.pop_front()?;
+        self.busy = true;
+        Some(next)
+    }
+
+    /// Submit under the reentrancy guard. A second invocation while the first
+    /// is in flight is refused instead of creating a phantom empty prompt
+    /// (`index.tsx:1097-1112`).
+    pub fn submit_guarded(
+        &mut self,
+        gate: &mut SubmitGate,
+    ) -> Result<SubmitOutcome, ComposerError> {
+        if !gate.try_begin() {
+            return Err(ComposerError::SubmitInFlight);
+        }
+        let outcome = self.submit();
+        gate.finish();
+        outcome
+    }
+
+    /// Flush the authoritative editor text before submitting, so a final IME
+    /// composition is included even when it never reached the store
+    /// (`index.tsx:1114-1121`). The gate covers flush + submit as one attempt.
+    pub fn submit_ime(
+        &mut self,
+        gate: &mut SubmitGate,
+        editor_text: &str,
+    ) -> Result<SubmitOutcome, ComposerError> {
+        if !gate.try_begin() {
+            return Err(ComposerError::SubmitInFlight);
+        }
+        let outcome = self.flush_ime(editor_text).and_then(|()| self.submit());
+        gate.finish();
+        outcome
+    }
+
+    /// Adopt the textarea's authoritative text when it differs from the
+    /// draft, keeping the cursor on a valid boundary.
+    pub fn flush_ime(&mut self, editor_text: &str) -> Result<(), ComposerError> {
+        if editor_text == self.buf.text() {
+            return Ok(());
+        }
+        let cursor = self.buf.cursor().min(editor_text.len());
+        self.buf.set_text(editor_text.to_owned())?;
+        self.buf.set_cursor(cursor);
+        Ok(())
+    }
+}
+
+/// Submission reentrancy guard (`index.tsx:1097-1112`).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SubmitGate {
+    in_flight: bool,
+}
+
+impl SubmitGate {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub const fn is_in_flight(&self) -> bool {
+        self.in_flight
+    }
+
+    pub fn try_begin(&mut self) -> bool {
+        if self.in_flight {
+            return false;
+        }
+        self.in_flight = true;
+        true
+    }
+
+    pub fn finish(&mut self) {
+        self.in_flight = false;
+    }
+}
+
+/// Full composer snapshot taken before the first await of a submission
+/// (`index.tsx:1189-1207`).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DraftSnapshot {
+    pub text: String,
+    pub cursor: usize,
+    pub mode: PromptMode,
+    pub parts: Vec<PastedText>,
+}
+
+impl DraftSnapshot {
+    /// Restore only into an empty composer; typing made while the request was
+    /// in flight always wins (`index.tsx:1203-1209`).
+    pub fn restore(&self, composer: &mut Composer) -> bool {
+        if !composer.buf.is_empty() {
+            return false;
+        }
+        if composer.buf.set_text(self.text.clone()).is_err() {
+            return false;
+        }
+        composer.buf.set_cursor(self.cursor);
+        composer.mode = self.mode;
+        true
+    }
+}
+
+/// Delivery chosen for a prompt (`index.tsx:1097`, `routes/session/index.tsx:754`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Delivery {
+    Steer,
+    Queue,
+}
+
+/// Why a queue delivery was refused, preserving the draft.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum QueueRejection {
+    ShellMode,
+    ExitWord,
+    SlashCommand,
+    EditorSelection,
+}
+
+/// What a submission attempt should do before any IO.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SubmitPlan {
+    /// Send immediately (normal delivery).
+    Steer,
+    /// Enqueue for the running turn.
+    Queue,
+    /// Blank Enter: commit the current agent/model and promote the first
+    /// queued prompt, if any (`index.tsx:1124-1127,1365-1373`).
+    BlankPromotion { queued: bool, commit_selection: bool },
+    /// Queue delivery refused with a warning; draft preserved.
+    Rejected(QueueRejection),
+    /// Exit word or an unavailable/disabled path; nothing is sent.
+    Exit,
+    Ignored,
+}
+
+/// Inputs that gate a submission attempt (`index.tsx:1097-1188`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SubmitContext {
+    pub mode: PromptMode,
+    pub has_session: bool,
+    pub autocomplete_visible: bool,
+    pub editor_selection: bool,
+    pub slash: bool,
+    pub disabled: bool,
+    pub queued: usize,
+}
+
+impl Default for SubmitContext {
+    fn default() -> Self {
+        Self {
+            mode: PromptMode::Normal,
+            has_session: true,
+            autocomplete_visible: false,
+            editor_selection: false,
+            slash: false,
+            disabled: false,
+            queued: 0,
+        }
+    }
+}
+
+/// Pure queue-vs-steer decision. Blank input in an existing normal session is
+/// meaningful (promotion), while queued shell commands, exit words, slash
+/// commands and pending editor selections are refused (`index.tsx:1124-1188`).
+#[must_use]
+pub fn plan_submit(text: &str, delivery: Delivery, ctx: SubmitContext) -> SubmitPlan {
+    if ctx.disabled || ctx.autocomplete_visible {
+        return SubmitPlan::Ignored;
+    }
+    let trimmed = js_trim(text);
+    let exit_word = matches!(trimmed, "exit" | "quit" | ":q");
+    let blank = trimmed.is_empty();
+    if blank && (!ctx.has_session || ctx.mode == PromptMode::Shell || delivery == Delivery::Queue) {
+        return match delivery {
+            Delivery::Steer if !ctx.has_session || ctx.mode == PromptMode::Shell => {
+                // Home/shell blank Enter has no queued promotion target here.
+                SubmitPlan::BlankPromotion {
+                    queued: ctx.queued > 0 && ctx.has_session,
+                    commit_selection: false,
+                }
+            }
+            Delivery::Steer => SubmitPlan::BlankPromotion {
+                queued: ctx.queued > 0,
+                commit_selection: ctx.queued > 0,
+            },
+            Delivery::Queue => SubmitPlan::Ignored,
+        };
+    }
+    if delivery == Delivery::Queue {
+        if ctx.mode == PromptMode::Shell {
+            return SubmitPlan::Rejected(QueueRejection::ShellMode);
+        }
+        if exit_word {
+            return SubmitPlan::Rejected(QueueRejection::ExitWord);
+        }
+        if ctx.slash {
+            return SubmitPlan::Rejected(QueueRejection::SlashCommand);
+        }
+        if ctx.editor_selection {
+            return SubmitPlan::Rejected(QueueRejection::EditorSelection);
+        }
+    }
+    if exit_word {
+        return SubmitPlan::Exit;
+    }
+    if blank {
+        return SubmitPlan::BlankPromotion {
+            queued: ctx.queued > 0,
+            commit_selection: true,
+        };
+    }
+    match delivery {
+        Delivery::Steer => SubmitPlan::Steer,
+        Delivery::Queue => SubmitPlan::Queue,
+    }
+}
+
+/// Ownership of keyboard focus (`index.tsx:752-770`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FocusTarget {
+    Prompt,
+    Dialog,
+    Nowhere,
+}
+
+/// Prompt focus across dialog mounts and prompt remounts. A nonempty dialog
+/// stack keeps focus; the prompt only reclaims it after the last dialog
+/// closes (`index.tsx:752-761`).
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PromptFocus {
+    dialogs: Vec<String>,
+    prompt_focused: bool,
+    prompt_focusable: bool,
+}
+
+impl PromptFocus {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn open_dialog(&mut self, id: &str) {
+        if !self.dialogs.iter().any(|dialog| dialog == id) {
+            self.dialogs.push(id.to_owned());
+        }
+        self.prompt_focused = false;
+        self.prompt_focusable = false;
+    }
+
+    pub fn close_dialog(&mut self, id: &str) -> bool {
+        let before = self.dialogs.len();
+        self.dialogs.retain(|dialog| dialog != id);
+        let closed = self.dialogs.len() != before;
+        if self.dialogs.is_empty() {
+            // The effect refocuses the prompt once the dialog stack empties.
+            self.prompt_focusable = true;
+            self.prompt_focused = true;
+        }
+        closed
+    }
+
+    /// Slot/plugin updates can remount the background prompt while a dialog is
+    /// open; focus stays with the dialog.
+    pub fn remount(&mut self) {
+        if self.dialogs.is_empty() {
+            self.prompt_focusable = true;
+            self.prompt_focused = true;
+        } else {
+            self.prompt_focusable = false;
+            self.prompt_focused = false;
+        }
+    }
+
+    pub fn sync(&mut self, visible: bool, disabled: bool) {
+        if !visible || disabled || !self.dialogs.is_empty() {
+            self.prompt_focusable = false;
+            self.prompt_focused = false;
+        } else {
+            self.prompt_focusable = true;
+            self.prompt_focused = true;
+        }
+    }
+
+    #[must_use]
+    pub fn target(&self) -> FocusTarget {
+        if !self.dialogs.is_empty() {
+            FocusTarget::Dialog
+        } else if self.prompt_focused && self.prompt_focusable {
+            FocusTarget::Prompt
+        } else {
+            FocusTarget::Nowhere
+        }
+    }
+
+    #[must_use]
+    pub fn prompt_focusable(&self) -> bool {
+        self.prompt_focusable
+    }
+
+    /// Type one character into whichever surface owns focus.
+    pub fn type_char(&mut self, prompt: &mut Composer, ch: char) -> FocusTarget {
+        match self.target() {
+            FocusTarget::Prompt => {
+                let _ = prompt.handle_key(Key::Char(ch));
+                FocusTarget::Prompt
+            }
+            FocusTarget::Dialog => FocusTarget::Dialog,
+            FocusTarget::Nowhere => FocusTarget::Nowhere,
+        }
+    }
+}
+
+/// Keymap action identifiers from the upstream defaults (`config/keybind.ts`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KeymapAction {
+    PromptSubmit,
+    InputSubmit,
+    Queue,
+    Newline,
+    Complete,
+    AutocompletePrevious,
+    AutocompleteNext,
+    AutocompleteHide,
+    CycleAgent,
+    CycleAgentReverse,
+    Clear,
+    LineHome,
+    LineEnd,
+    Editor,
+    Images,
+    Stash,
+    StashPop,
+    StashList,
+    Skills,
+    Interrupt,
+    Background,
+    Move,
+}
+
+/// A binding is either configured to a chord or explicitly disabled. `"none"`
+/// disables the action: components must not supply a fallback of their own.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Binding {
+    Chord(&'static str),
+    Disabled,
+}
+
+/// Upstream keymap defaults needed by the composer. Leader is `ctrl+x`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KeymapDefaults {
+    entries: Vec<(KeymapAction, Binding)>,
+}
+
+impl Default for KeymapDefaults {
+    fn default() -> Self {
+        Self::upstream()
+    }
+}
+
+impl KeymapDefaults {
+    #[must_use]
+    pub fn upstream() -> Self {
+        Self {
+            entries: vec![
+                (KeymapAction::PromptSubmit, Binding::Disabled),
+                (KeymapAction::InputSubmit, Binding::Chord("return")),
+                (KeymapAction::Queue, Binding::Chord("<leader>return")),
+                (
+                    KeymapAction::Newline,
+                    Binding::Chord("shift+return,ctrl+return,alt+return,ctrl+j"),
+                ),
+                (KeymapAction::Complete, Binding::Chord("tab")),
+                (
+                    KeymapAction::AutocompletePrevious,
+                    Binding::Chord("up,ctrl+p"),
+                ),
+                (
+                    KeymapAction::AutocompleteNext,
+                    Binding::Chord("down,ctrl+n"),
+                ),
+                (KeymapAction::AutocompleteHide, Binding::Chord("escape")),
+                (KeymapAction::CycleAgent, Binding::Chord("shift+tab")),
+                (KeymapAction::CycleAgentReverse, Binding::Disabled),
+                (KeymapAction::Clear, Binding::Chord("ctrl+c")),
+                (KeymapAction::LineHome, Binding::Chord("ctrl+a")),
+                (KeymapAction::LineEnd, Binding::Chord("ctrl+e")),
+                (KeymapAction::Editor, Binding::Chord("<leader>e")),
+                (KeymapAction::Images, Binding::Chord("<leader>i")),
+                (KeymapAction::Stash, Binding::Disabled),
+                (KeymapAction::StashPop, Binding::Disabled),
+                (KeymapAction::StashList, Binding::Disabled),
+                (KeymapAction::Skills, Binding::Disabled),
+                (KeymapAction::Interrupt, Binding::Chord("escape")),
+                (KeymapAction::Background, Binding::Chord("ctrl+b")),
+                (KeymapAction::Move, Binding::Disabled),
+            ],
+        }
+    }
+
+    #[must_use]
+    pub fn binding(&self, action: KeymapAction) -> Option<Binding> {
+        self.entries
+            .iter()
+            .find(|(candidate, _)| *candidate == action)
+            .map(|(_, binding)| *binding)
+    }
+
+    /// Return the configured chord list, or `None` when disabled/absent.
+    #[must_use]
+    pub fn chord(&self, action: KeymapAction) -> Option<&str> {
+        match self.binding(action)? {
+            Binding::Chord(chord) => Some(chord),
+            Binding::Disabled => None,
+        }
+    }
+
+    /// Configure an action to `"none"` (or any chord). Disabled entries never
+    /// dispatch, even if a component could interpret the physical key.
+    pub fn configure(&mut self, action: KeymapAction, binding: Binding) {
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|(candidate, _)| *candidate == action)
+        {
+            entry.1 = binding;
+        }
+    }
+
+    /// Resolve one chord string to its first matching action. Disabled actions
+    /// and `"none"` configurations never match.
+    #[must_use]
+    pub fn dispatch(&self, chord: &str) -> Option<KeymapAction> {
+        self.entries.iter().find_map(|(action, binding)| match binding {
+            Binding::Chord(chords)
+                if chords
+                    .split(',')
+                    .any(|candidate| candidate.trim() == chord) =>
+            {
+                Some(*action)
+            }
+            _ => None,
+        })
+    }
+}
+
+/// Streaming/retry phase of the session mounted above the prompt
+/// (`index.tsx:1674-1983`).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TurnPhase {
+    #[default]
+    Idle,
+    Streaming,
+    Retrying,
+}
+
+/// Transcript rows above the prompt. Retry notices are ordinary entries and
+/// are never removed by phase changes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TranscriptEntry {
+    Retry { attempt: u32, message: String },
+}
+
+/// Same-surface prompt chrome; it does not change with the turn phase.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PromptChrome {
+    pub surface: &'static str,
+    pub input_enabled: bool,
+}
+
+/// Prompt availability is independent of the session surfacing a retry
+/// (`component/usage.tsx:57-64`, `index.tsx:1674-1983`).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PromptSurface {
+    phase: TurnPhase,
+    transcript: Vec<TranscriptEntry>,
+}
+
+impl Default for PromptSurface {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PromptSurface {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            phase: TurnPhase::Idle,
+            transcript: Vec::new(),
+        }
+    }
+
+    pub fn begin_streaming(&mut self) {
+        self.phase = TurnPhase::Streaming;
+    }
+
+    pub fn retry(&mut self, attempt: u32, message: &str) {
+        self.phase = TurnPhase::Retrying;
+        self.transcript.push(TranscriptEntry::Retry {
+            attempt,
+            message: message.to_owned(),
+        });
+    }
+
+    pub fn finish(&mut self) {
+        self.phase = TurnPhase::Idle;
+    }
+
+    #[must_use]
+    pub const fn phase(&self) -> TurnPhase {
+        self.phase
+    }
+
+    #[must_use]
+    pub fn is_busy(&self) -> bool {
+        !matches!(self.phase, TurnPhase::Idle)
+    }
+
+    #[must_use]
+    pub fn transcript(&self) -> &[TranscriptEntry] {
+        &self.transcript
+    }
+
+    /// The prompt keeps the same raised surface and stays typeable while the
+    /// session streams or retries; only the busy signal changes.
+    #[must_use]
+    pub const fn chrome(&self) -> PromptChrome {
+        PromptChrome {
+            surface: "prompt.raised",
+            input_enabled: true,
+        }
+    }
+}
+
+/// Result of clearing/interrupting via a control byte.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ControlOutcome {
+    ExitShell,
+    Cleared(String),
+    Inert,
 }
 
 impl Default for Composer {
@@ -876,6 +1541,363 @@ mod line_cursor_tests {
         assert_eq!(composer.buffer().cursor(), "a\n".len());
         assert!(composer.handle_line_binding(5));
         assert_eq!(&composer.draft()[composer.buffer().cursor()..], "\nempty\n終");
+    }
+}
+
+#[cfg(test)]
+mod keymap_and_submit_tests {
+    //! CP-28, CP-29, CP-31, CP-32, CP-33, CP-42
+    //! (`config/keybind.ts:128-280`, `component/prompt/index.tsx:707-761`,
+    //! `1097-1404`, `routes/session/index.tsx:1590-1658`).
+
+    use super::*;
+    use crate::native_paste::{HistoryEntry, PastedText, PromptHistory};
+
+    #[test]
+    fn cp28_defaults_disable_prompt_submit_without_component_fallback() {
+        let defaults = KeymapDefaults::upstream();
+        // `prompt.submit` defaults to none; Enter is owned by `input.submit`.
+        assert_eq!(defaults.chord(KeymapAction::PromptSubmit), None);
+        assert_eq!(
+            defaults.dispatch("return"),
+            Some(KeymapAction::InputSubmit)
+        );
+        assert_eq!(
+            defaults.dispatch("shift+tab"),
+            Some(KeymapAction::CycleAgent)
+        );
+        assert_eq!(defaults.dispatch("tab"), Some(KeymapAction::Complete));
+        assert_eq!(
+            defaults.dispatch("ctrl+j"),
+            Some(KeymapAction::Newline)
+        );
+        assert_eq!(defaults.chord(KeymapAction::CycleAgentReverse), None);
+        assert_eq!(
+            defaults.dispatch("ctrl+c"),
+            Some(KeymapAction::Clear)
+        );
+
+        // Configured disablement wins: no component may synthesize the action.
+        let mut disabled = KeymapDefaults::upstream();
+        disabled.configure(KeymapAction::InputSubmit, Binding::Disabled);
+        assert_eq!(disabled.dispatch("return"), None);
+        disabled.configure(
+            KeymapAction::CycleAgent,
+            Binding::Disabled,
+        );
+        assert_eq!(disabled.dispatch("shift+tab"), None);
+        assert_eq!(disabled.dispatch("tab"), Some(KeymapAction::Complete));
+    }
+
+    #[test]
+    fn cp29_dialog_keeps_focus_across_prompt_remount_and_typing() {
+        let mut focus = PromptFocus::new();
+        let mut composer = Composer::new();
+        focus.remount();
+        assert_eq!(focus.target(), FocusTarget::Prompt);
+        assert_eq!(
+            focus.type_char(&mut composer, 'a'),
+            FocusTarget::Prompt
+        );
+        assert_eq!(composer.draft(), "a");
+
+        focus.open_dialog("models");
+        // Slot/catalog update remounts the background prompt.
+        focus.remount();
+        assert!(!focus.prompt_focusable());
+        assert_eq!(focus.target(), FocusTarget::Dialog);
+        assert_eq!(
+            focus.type_char(&mut composer, 'b'),
+            FocusTarget::Dialog
+        );
+        assert_eq!(composer.draft(), "a", "background prompt never receives it");
+
+        assert!(focus.close_dialog("models"));
+        assert_eq!(focus.target(), FocusTarget::Prompt);
+        assert_eq!(
+            focus.type_char(&mut composer, 'c'),
+            FocusTarget::Prompt
+        );
+        assert_eq!(composer.draft(), "ac");
+
+        focus.sync(false, false);
+        assert_eq!(focus.target(), FocusTarget::Nowhere);
+        focus.sync(true, true);
+        assert_eq!(focus.target(), FocusTarget::Nowhere);
+    }
+
+    #[test]
+    fn cp30_shell_entry_and_exit_edges_preserve_draft() {
+        let mut composer = Composer::new();
+        assert_eq!(
+            composer.handle_key(Key::Char('!')),
+            Ok(KeyHandled::Edited)
+        );
+        assert_eq!(composer.mode(), PromptMode::Shell);
+        assert_eq!(composer.draft(), "", "the trigger is not inserted");
+
+        composer.set_mode(PromptMode::Normal);
+        composer.set_draft("ls").unwrap();
+        assert_eq!(
+            composer.handle_key(Key::Char('!')),
+            Ok(KeyHandled::Edited)
+        );
+        assert_eq!(composer.mode(), PromptMode::Normal);
+        assert_eq!(composer.draft(), "ls!", "middle ! is literal text");
+
+        composer.set_mode(PromptMode::Shell);
+        composer.buffer_mut().set_cursor(0);
+        assert_eq!(composer.handle_key(Key::Esc), Ok(KeyHandled::Edited));
+        assert_eq!(composer.mode(), PromptMode::Normal);
+
+        composer.set_mode(PromptMode::Shell);
+        composer.buffer_mut().set_cursor(0);
+        assert_eq!(
+            composer.handle_key(Key::Backspace),
+            Ok(KeyHandled::Edited)
+        );
+        assert_eq!(composer.mode(), PromptMode::Normal);
+        assert_eq!(composer.draft(), "ls!");
+
+        composer.set_mode(PromptMode::Shell);
+        composer.set_draft("").unwrap();
+        assert_eq!(composer.handle_control(3), ControlOutcome::ExitShell);
+        assert_eq!(composer.mode(), PromptMode::Normal);
+
+        composer.set_draft("draft").unwrap();
+        assert_eq!(
+            composer.handle_control(3),
+            ControlOutcome::Cleared("draft".to_owned())
+        );
+        assert_eq!(composer.draft(), "");
+        assert_eq!(composer.handle_control(3), ControlOutcome::Inert);
+    }
+
+    #[test]
+    fn cp30_multiline_history_restores_parts_mode_and_cursor() {
+        let mut composer = Composer::new();
+        let parts = vec![PastedText {
+            text: "one\ntwo\nthree".to_owned(),
+            placeholder: "[Pasted ~3 lines]".to_owned(),
+            start: 12,
+            end: 29,
+        }];
+        let entry = DraftEntry {
+            text: "echo café\necho 世界".to_owned(),
+            cursor: "echo café\n".len(),
+            mode: PromptMode::Shell,
+            parts: parts.clone(),
+        };
+        let mut history = PromptHistory::new();
+        history.append(HistoryEntry {
+            prompt: entry.clone(),
+        });
+        let restored = history.move_through(-1, "").unwrap();
+        composer
+            .restore_history_entry(&restored.prompt)
+            .unwrap();
+        assert_eq!(composer.draft(), entry.text);
+        assert_eq!(composer.buffer().cursor(), entry.cursor);
+        assert_eq!(composer.mode(), PromptMode::Shell);
+        assert_eq!(restored.prompt.parts, parts);
+    }
+
+    #[test]
+    fn cp31_enter_submits_once_and_ime_flush_includes_final_hangul() {
+        let mut composer = Composer::new();
+        composer.set_draft("안녕").unwrap();
+        let mut gate = SubmitGate::new();
+        assert_eq!(
+            composer.submit_guarded(&mut gate),
+            Ok(SubmitOutcome::Sent("안녕".to_owned()))
+        );
+        assert!(!gate.is_in_flight());
+
+        // A second concurrent dispatch is refused, not turned into a phantom
+        // empty prompt.
+        assert!(gate.try_begin());
+        assert_eq!(
+            composer.submit_guarded(&mut gate),
+            Err(ComposerError::SubmitInFlight)
+        );
+        gate.finish();
+        assert_eq!(
+            composer.submit_guarded(&mut gate),
+            Err(ComposerError::EmptyDraft)
+        );
+
+        // The final composed character may only exist in the editor text.
+        composer.interrupt();
+        assert_eq!(
+            composer.submit_ime(&mut gate, "한"),
+            Ok(SubmitOutcome::Sent("한".to_owned()))
+        );
+        composer.interrupt();
+        assert_eq!(
+            composer.submit_ime(&mut gate, ""),
+            Err(ComposerError::EmptyDraft)
+        );
+    }
+
+    #[test]
+    fn cp32_snapshot_restores_only_into_an_empty_composer() {
+        let parts = vec![PastedText {
+            text: "a\nb\nc".to_owned(),
+            placeholder: "[Pasted ~3 lines]".to_owned(),
+            start: 0,
+            end: 17,
+        }];
+        let mut composer = Composer::new();
+        composer.set_draft("old draft 世界").unwrap();
+        composer.buffer_mut().set_cursor(3);
+        composer.set_mode(PromptMode::Shell);
+        let snapshot = composer.snapshot(&parts);
+        assert_eq!(snapshot.parts, parts);
+        assert_eq!(snapshot.mode, PromptMode::Shell);
+
+        // Typing during the in-flight request survives a failed restore.
+        composer.set_draft("newer").unwrap();
+        assert!(!snapshot.restore(&mut composer));
+        assert_eq!(composer.draft(), "newer");
+
+        composer.set_draft("").unwrap();
+        composer.set_mode(PromptMode::Normal);
+        assert!(snapshot.restore(&mut composer));
+        assert_eq!(composer.draft(), "old draft 世界");
+        assert_eq!(composer.buffer().cursor(), 3);
+        assert_eq!(composer.mode(), PromptMode::Shell);
+    }
+
+    #[test]
+    fn cp33_queue_versus_steer_and_blank_enter_promotion() {
+        let normal = SubmitContext::default();
+        assert_eq!(
+            plan_submit("hello", Delivery::Steer, normal),
+            SubmitPlan::Steer
+        );
+        assert_eq!(
+            plan_submit("hello", Delivery::Queue, normal),
+            SubmitPlan::Queue
+        );
+        assert_eq!(
+            plan_submit(
+                "hello",
+                Delivery::Queue,
+                SubmitContext {
+                    mode: PromptMode::Shell,
+                    ..normal
+                }
+            ),
+            SubmitPlan::Rejected(QueueRejection::ShellMode)
+        );
+        assert_eq!(
+            plan_submit(
+                "hello",
+                Delivery::Queue,
+                SubmitContext {
+                    slash: true,
+                    ..normal
+                }
+            ),
+            SubmitPlan::Rejected(QueueRejection::SlashCommand)
+        );
+        assert_eq!(
+            plan_submit(
+                "hello",
+                Delivery::Queue,
+                SubmitContext {
+                    editor_selection: true,
+                    ..normal
+                }
+            ),
+            SubmitPlan::Rejected(QueueRejection::EditorSelection)
+        );
+        assert_eq!(
+            plan_submit("exit", Delivery::Queue, normal),
+            SubmitPlan::Rejected(QueueRejection::ExitWord)
+        );
+        assert_eq!(plan_submit("exit", Delivery::Steer, normal), SubmitPlan::Exit);
+        assert_eq!(
+            plan_submit(
+                "hi",
+                Delivery::Steer,
+                SubmitContext {
+                    autocomplete_visible: true,
+                    ..normal
+                }
+            ),
+            SubmitPlan::Ignored
+        );
+        assert_eq!(
+            plan_submit("", Delivery::Steer, SubmitContext { queued: 2, ..normal }),
+            SubmitPlan::BlankPromotion {
+                queued: true,
+                commit_selection: true
+            }
+        );
+        assert_eq!(
+            plan_submit(
+                "",
+                Delivery::Steer,
+                SubmitContext {
+                    has_session: false,
+                    queued: 2,
+                    ..normal
+                }
+            ),
+            SubmitPlan::BlankPromotion {
+                queued: false,
+                commit_selection: false
+            }
+        );
+        assert_eq!(
+            plan_submit("", Delivery::Queue, normal),
+            SubmitPlan::Ignored
+        );
+
+        // The promoted draft is the first queued prompt and starts a turn.
+        let mut composer = Composer::new();
+        composer.set_draft("first").unwrap();
+        composer.submit().unwrap();
+        composer.set_draft("second").unwrap();
+        composer.submit().unwrap();
+        composer.set_draft("third").unwrap();
+        composer.submit().unwrap();
+        composer.interrupt();
+        assert_eq!(composer.promote_queued(), Some("second".to_owned()));
+        assert!(composer.is_busy());
+        assert_eq!(composer.queue_len(), 1);
+        assert_eq!(composer.finish_turn(), Some("third".to_owned()));
+    }
+
+    #[test]
+    fn cp42_retry_notice_survives_and_prompt_chrome_is_independent() {
+        let mut surface = PromptSurface::new();
+        let idle_chrome = surface.chrome();
+        assert_eq!(surface.phase(), TurnPhase::Idle);
+        assert!(!surface.is_busy());
+
+        surface.begin_streaming();
+        assert!(surface.is_busy());
+        assert_eq!(surface.chrome(), idle_chrome);
+
+        surface.retry(2, "network error, retrying");
+        assert_eq!(surface.phase(), TurnPhase::Retrying);
+        assert!(surface.is_busy());
+        assert_eq!(surface.chrome(), idle_chrome, "same raised prompt surface");
+        assert_eq!(surface.transcript().len(), 1);
+
+        surface.finish();
+        assert!(!surface.is_busy());
+        assert_eq!(surface.chrome(), idle_chrome);
+        assert_eq!(
+            surface.transcript(),
+            &[TranscriptEntry::Retry {
+                attempt: 2,
+                message: "network error, retrying".to_owned()
+            }],
+            "retry message remains in the transcript"
+        );
     }
 }
 

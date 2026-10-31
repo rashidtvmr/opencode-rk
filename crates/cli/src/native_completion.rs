@@ -1,6 +1,15 @@
 #![forbid(unsafe_code)]
 //! Composer-owned, bounded completion state. Acceptance only edits the draft;
 //! dispatch and permission checks remain in the ordinary submit path.
+//!
+//! Geometry and row presentation mirror upstream at pin `450e7b9`
+//! (`component/prompt/autocomplete.tsx:560-660,818-960`): the popup is an
+//! absolute overlay above the measured prompt anchor, its height is
+//! `min(10, options or 1, max(1, anchor.y))`, rows reserve four cells plus a
+//! kind label, titles middle-truncate, and empty/loading/error views use
+//! distinct messages.
+
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Item {
@@ -10,6 +19,49 @@ pub struct Item {
     pub disabled: bool,
 }
 
+/// Optional right-aligned kind label (`autocomplete.tsx:844-848`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Kind {
+    Skill,
+    Agent,
+    Reference,
+}
+
+impl Kind {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Skill => "skill",
+            Self::Agent => "agent",
+            Self::Reference => "reference",
+        }
+    }
+}
+
+/// The completion source whose empty state is being rendered.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CompletionMode {
+    Command,
+    Reference,
+    Directory,
+}
+
+/// Asynchronous search state for reference/directory completion
+/// (`autocomplete.tsx:829-852`).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SearchStatus {
+    pub loading: bool,
+    pub failed: bool,
+}
+
+/// Presentation inputs that do not belong to the option list itself.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PanelState {
+    /// `None` derives The mode from the active trigger marker.
+    pub mode: Option<CompletionMode>,
+    pub status: SearchStatus,
+}
+
 #[derive(Default)]
 pub struct Completion {
     pub commands: Vec<Item>,
@@ -17,6 +69,8 @@ pub struct Completion {
     selected: usize,
     draft: String,
     dismissed: Option<String>,
+    kinds: BTreeMap<String, Kind>,
+    destructive: BTreeMap<String, String>,
 }
 
 impl Completion {
@@ -77,21 +131,162 @@ impl Completion {
     }
 
     pub fn panel_at(&self, draft: &str, cursor: usize, anchor: (u16, u16, u16, u16)) -> Option<Panel> {
+        self.panel_state(draft, cursor, anchor, PanelState::default(), None)
+    }
+
+    /// Popup geometry and rows for a specific search state.
+    ///
+    /// While a trigger is active the popup is visible even with zero options:
+    /// upstream paints one message row for searching/empty/error. Height is
+    /// `min(10, max(1, count), max(1, anchor.y))`, positioned entirely above
+    /// the anchor (`autocomplete.tsx:829-869`).
+    pub fn panel_state(
+        &self,
+        draft: &str,
+        cursor: usize,
+        anchor: (u16, u16, u16, u16),
+        state: PanelState,
+        confirming: Option<&str>,
+    ) -> Option<Panel> {
         let (x, y, width, _) = anchor;
+        if y == 0 || width == 0 {
+            return None;
+        }
+        let (_, marker, _) = self.trigger_at(draft, cursor)?;
         let items = self.visible_at(draft, cursor);
-        if items.is_empty() || y == 0 || width == 0 { return None; }
-        let capacity = usize::from(y).min(10);
-        let selected = self.selected.min(items.len().saturating_sub(1));
-        let start = selected.saturating_sub(capacity - 1);
+        let mode = state.mode.unwrap_or(if marker == '/' {
+            CompletionMode::Command
+        } else {
+            CompletionMode::Reference
+        });
+        let count = items.len();
+        let height = count.max(1).min(10).min(usize::from(y).max(1));
+        if count == 0 {
+            let message = empty_message(mode, state.status);
+            return Some(Panel {
+                x,
+                y: y.saturating_sub(1),
+                width,
+                rows: vec![(format!(" {message}"), false)],
+                values: Vec::new(),
+                disabled: Vec::new(),
+                height: 1,
+                empty: Some(message.to_owned()),
+                empty_is_error: matches!(mode, CompletionMode::Reference)
+                    && state.status.failed
+                    && !state.status.loading,
+                kind_labels: vec![None],
+                confirming: vec![false],
+            });
+        }
+        let selected = self.selected.min(count - 1);
+        let start = selected.saturating_sub(height - 1);
         let mut rows = Vec::new();
         let mut values = Vec::new();
         let mut disabled = Vec::new();
-        for (index, item) in items.iter().enumerate().skip(start).take(capacity) {
-            rows.push((format!(" {} {}  {}", if index == selected { "›" } else { " " }, item.value, item.description), index == selected));
+        let mut kind_labels = Vec::new();
+        let mut confirming_rows = Vec::new();
+        for (index, item) in items.iter().enumerate().skip(start).take(height) {
+            let is_confirming =
+                confirming.is_some_and(|id| id == item.value);
+            let kind = self.kinds.get(&item.value).copied();
+            let row = styled_row(
+                item,
+                kind,
+                confirming.and_then(|id| {
+                    (id == item.value)
+                        .then(|| self.destructive.get(&item.value).map(String::as_str))
+                        .flatten()
+                }),
+                width,
+            );
+            rows.push((row, index == selected));
             values.push(item.value.clone());
             disabled.push(item.disabled);
+            kind_labels.push(kind);
+            confirming_rows.push(is_confirming);
         }
-        Some(Panel { x, y: y - rows.len() as u16, width, rows, values, disabled })
+        let height = rows.len() as u16;
+        Some(Panel {
+            x,
+            y: y - height,
+            width,
+            rows,
+            values,
+            disabled,
+            height,
+            empty: None,
+            empty_is_error: false,
+            kind_labels,
+            confirming: confirming_rows,
+        })
+    }
+
+    /// Record the optional kind label for a value (`autocomplete.tsx:844-848`).
+    pub fn set_kind(&mut self, value: &str, kind: Kind) {
+        self.kinds.insert(value.to_owned(), kind);
+    }
+
+    /// Record the destructive confirmation text for a value
+    /// (`autocomplete.tsx:640-660`).
+    pub fn set_destructive(&mut self, value: &str, confirm: &str) {
+        self.destructive
+            .insert(value.to_owned(), confirm.to_owned());
+    }
+
+    /// Hover/mouse-move selection. Changing the row clears any pending
+    /// destructive confirmation (`autocomplete.tsx:590-600`).
+    pub fn hover_select(&mut self, index: usize) -> bool {
+        let count = self.visible().len();
+        if count == 0 {
+            return false;
+        }
+        let next = index.min(count - 1);
+        if next != self.selected {
+            self.selected = next;
+            return true;
+        }
+        false
+    }
+
+    pub fn mouse_down(&mut self, index: usize) -> bool {
+        self.hover_select(index)
+    }
+
+    /// Mouse up accepts the hovered row (`autocomplete.tsx:920-924`).
+    pub fn mouse_up(&mut self, draft: &mut String, limit: usize) -> bool {
+        self.accept(draft, limit)
+    }
+
+    /// First press arms the destructive confirmation, second press runs it
+    /// (`autocomplete.tsx:640-657`). `Run` is returned to the caller, which
+    /// owns the action; selection clamps to the shortened list.
+    pub fn trigger_destructive(
+        &mut self,
+        value: &str,
+        confirming: &mut Option<String>,
+    ) -> DestructiveOutcome {
+        if !self.destructive.contains_key(value) {
+            return DestructiveOutcome::None;
+        }
+        if confirming.as_deref() != Some(value) {
+            *confirming = Some(value.to_owned());
+            return DestructiveOutcome::Confirm;
+        }
+        *confirming = None;
+        let count = self.visible().len();
+        self.selected = self.selected.min(count.saturating_sub(2));
+        DestructiveOutcome::Run
+    }
+
+    /// Move to a concrete row (used by keyboard navigation).
+    pub fn move_to(&mut self, index: usize) -> bool {
+        self.hover_select(index)
+    }
+
+    #[must_use]
+    pub fn selected_index(&self) -> usize {
+        self.selected()
     }
 
     pub fn navigate(&mut self, down: bool) {
@@ -223,9 +418,138 @@ pub struct Panel {
     pub x: u16,
     pub y: u16,
     pub width: u16,
+    /// Painted height, `min(10, max(1, options), max(1, anchor.y))`.
+    pub height: u16,
     pub rows: Vec<(String, bool)>,
+    /// Present when the trigger is active but there are no options.
+    pub empty: Option<String>,
+    /// Error styling for a failed reference search (`autocomplete.tsx:850-852`).
+    pub empty_is_error: bool,
+    pub kind_labels: Vec<Option<Kind>>,
+    pub confirming: Vec<bool>,
     values: Vec<String>,
     disabled: Vec<bool>,
+}
+
+/// Result of a destructive-row activation (`autocomplete.tsx:640-657`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DestructiveOutcome {
+    None,
+    Confirm,
+    Run,
+}
+
+/// Upstream empty-view message (`autocomplete.tsx:840-850`).
+#[must_use]
+pub fn empty_message(mode: CompletionMode, status: SearchStatus) -> &'static str {
+    match mode {
+        CompletionMode::Command => "No matching commands",
+        CompletionMode::Directory => {
+            if status.loading {
+                "Searching…"
+            } else if status.failed {
+                "Could not search directories. Keep typing to try again."
+            } else {
+                "No matching directories"
+            }
+        }
+        CompletionMode::Reference => {
+            if status.loading {
+                "Searching…"
+            } else if status.failed {
+                "Could not search files. Keep typing to try again."
+            } else {
+                "No matching files, agents, or references"
+            }
+        }
+    }
+}
+
+/// Cells occupied by `text` under the shared renderer segmentation.
+#[must_use]
+pub fn display_width(text: &str) -> usize {
+    crate::native_view_layout::visit_unpadded_cells(text, 4096, |_, _| {})
+}
+
+/// Take at most `budget` display cells without splitting a cluster.
+fn take_cells(text: &str, budget: usize) -> String {
+    let mut out = String::new();
+    crate::native_view_layout::visit_unpadded_cells(text, budget, |glyph, _| out.push_str(glyph));
+    out
+}
+
+/// `Locale.truncateMiddle` (`util/locale.ts:89-97`): UTF-16 units, but never
+/// splitting a Rust scalar/display cluster.
+#[must_use]
+pub fn truncate_middle(text: &str, max_units: usize) -> String {
+    if text.encode_utf16().count() <= max_units {
+        return text.to_owned();
+    }
+    if max_units <= 1 {
+        return "…".to_owned();
+    }
+    let ellipsis = 1;
+    let keep_start = (max_units - ellipsis).div_ceil(2);
+    let keep_end = (max_units - ellipsis) / 2;
+    let mut start_units = 0;
+    let mut start = String::new();
+    for ch in text.chars() {
+        let units = ch.len_utf16();
+        if start_units + units > keep_start {
+            break;
+        }
+        start_units += units;
+        start.push(ch);
+    }
+    let mut end_units = 0;
+    let mut end_reversed = Vec::new();
+    for ch in text.chars().rev() {
+        let units = ch.len_utf16();
+        if end_units + units > keep_end {
+            break;
+        }
+        end_units += units;
+        end_reversed.push(ch);
+    }
+    let end: String = end_reversed.into_iter().rev().collect();
+    format!("{start}…{end}")
+}
+
+/// One row with upstream presentation rules: one cell of padding, title
+/// middle-truncated to `width - 4 - (label + 2)`, normalized description, and
+/// a right-aligned kind label. Total painted width never exceeds `width`.
+fn styled_row(
+    item: &Item,
+    kind: Option<Kind>,
+    confirm: Option<&str>,
+    width: u16,
+) -> String {
+    let width = usize::from(width);
+    let label = kind.map(Kind::label);
+    let label_cells = label.map_or(0, |label| 2 + display_width(label));
+    let content_width = width.saturating_sub(4 + label_cells).max(1);
+    let title = truncate_middle(confirm.unwrap_or(&item.value), content_width);
+    let mut row = String::from(" ");
+    row.push_str(&title);
+    if confirm.is_none() && !item.description.is_empty() {
+        let desc = item
+            .description
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let fixed = 2 + display_width(&title) + label_cells + 1;
+        let budget = width.saturating_sub(fixed);
+        if budget > 0 {
+            row.push(' ');
+            row.push_str(&take_cells(&desc, budget));
+        }
+    }
+    if let Some(label) = label {
+        row.push_str("  ");
+        row.push_str(label);
+    }
+    row.push(' ');
+    row
 }
 
 impl Panel {
@@ -547,5 +871,240 @@ mod tests {
         assert!(items.iter().any(|item| item.value == "@src/café.rs"));
         assert!(!items.iter().any(|item| item.value.contains(".env") || item.value.contains("target/") || item.value.contains("linked/")));
         std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod popup_geometry_and_style_tests {
+    //! CP-39, CP-40, CP-41
+    //! (`component/prompt/autocomplete.tsx:560-660,818-960`).
+
+    use super::*;
+
+    fn fixture() -> Completion {
+        let mut completion = Completion {
+            commands: vec![
+                Item { value: "/models".into(), description: "Select model".into(), disabled: false },
+                Item { value: "/mcp".into(), description: "MCP status".into(), disabled: false },
+            ],
+            mentions: vec![
+                Item { value: "@explore".into(), description: "agent".into(), disabled: false },
+                Item { value: "@src/café.rs".into(), description: "file".into(), disabled: false },
+            ],
+            ..Completion::default()
+        };
+        completion.set_kind("@explore", Kind::Agent);
+        completion.set_kind("@src/café.rs", Kind::Reference);
+        completion
+    }
+
+    #[test]
+    fn cp39_popup_tracks_anchor_resize_growth_and_short_viewports() {
+        let mut completion = fixture();
+        completion.commands.extend((0..12).map(|index| Item {
+            value: format!("/model{index:02}"),
+            description: "command".into(),
+            disabled: false,
+        }));
+        let draft = "/model".to_owned();
+        completion.sync(&draft);
+
+        // Wide sidebar-open anchor.
+        let wide = completion.panel((10, 12, 80, 2)).unwrap();
+        assert_eq!((wide.x, wide.y, wide.width, wide.height), (10, 2, 80, 10));
+
+        // Sidebar toggle/resize moves x and narrows width without reflowing y.
+        let narrow = completion.panel((3, 12, 40, 2)).unwrap();
+        assert_eq!((narrow.x, narrow.y, narrow.width), (3, 2, 40));
+
+        // Long prompt growth pushes the anchor down; popup follows it.
+        let grown = completion.panel((10, 20, 80, 8)).unwrap();
+        assert_eq!(grown.y, 10);
+
+        // Near-top prompt: height is capped by available rows above the anchor.
+        let near_top = completion.panel((10, 4, 80, 1)).unwrap();
+        assert_eq!(near_top.height, 4);
+        assert_eq!(near_top.y, 0);
+
+        // Short terminal with one row above the anchor.
+        let short = completion.panel((10, 1, 80, 1)).unwrap();
+        assert_eq!(short.height, 1);
+        assert_eq!(short.y, 0);
+
+        // No room above at all.
+        assert!(completion.panel((10, 0, 80, 1)).is_none());
+    }
+
+    #[test]
+    fn cp39_empty_state_still_paints_one_row_above_anchor() {
+        let mut completion = fixture();
+        completion.sync("/zzz");
+        let panel = completion
+            .panel_state(
+                "/zzz",
+                4,
+                (2, 6, 30, 1),
+                PanelState::default(),
+                None,
+            )
+            .unwrap();
+        assert_eq!(panel.height, 1);
+        assert_eq!(panel.y, 5);
+        assert_eq!(panel.empty.as_deref(), Some("No matching commands"));
+        assert_eq!(panel.rows.len(), 1);
+        assert!(panel.value_at(2, 5).is_none());
+    }
+
+    #[test]
+    fn cp40_keyboard_hover_and_mouse_share_one_selection() {
+        let mut completion = fixture();
+        let mut draft = "/m".to_owned();
+        completion.sync(&draft);
+        completion.navigate(true);
+        assert_eq!(completion.selected_index(), 1);
+        // Hover moves selection back to the first row without accepting.
+        assert!(completion.mouse_down(0));
+        assert_eq!(completion.selected_index(), 0);
+        assert_eq!(draft, "/m");
+        // Mouse up accepts the hovered row.
+        assert!(completion.mouse_up(&mut draft, 4096));
+        assert_eq!(draft, "/models ");
+    }
+
+    #[test]
+    fn cp40_kind_label_and_destructive_confirmation_replace_description() {
+        let mut completion = fixture();
+        let mut draft = "@expl".to_owned();
+        completion.sync(&draft);
+        let panel = completion.panel((0, 8, 40, 1)).unwrap();
+        assert_eq!(panel.kind_labels[0], Some(Kind::Agent));
+        assert!(panel.rows[0].0.trim_end().ends_with("agent"));
+
+        let mut commands = fixture();
+        commands.commands.push(Item {
+            value: "/delete".into(),
+            description: "Delete session".into(),
+            disabled: false,
+        });
+        commands.set_destructive("/delete", "Press again to delete session");
+        let mut draft = "/delete".to_owned();
+        commands.sync(&draft);
+        let mut confirming = None;
+        assert_eq!(
+            commands.trigger_destructive("/delete", &mut confirming),
+            DestructiveOutcome::Confirm
+        );
+        let panel = commands
+            .panel_state(
+                "/delete",
+                7,
+                (0, 8, 48, 1),
+                PanelState::default(),
+                confirming.as_deref(),
+            )
+            .unwrap();
+        assert!(panel.confirming[0]);
+        assert!(panel.rows[0].0.contains("Press again"));
+        assert_eq!(panel.kind_labels[0], None, "label hidden while confirming");
+        assert_eq!(
+            commands.trigger_destructive("/delete", &mut confirming),
+            DestructiveOutcome::Run
+        );
+        assert_eq!(confirming, None);
+    }
+
+    #[test]
+    fn cp40_empty_messages_distinguish_command_search_and_failure() {
+        assert_eq!(
+            empty_message(CompletionMode::Command, SearchStatus::default()),
+            "No matching commands"
+        );
+        assert_eq!(
+            empty_message(
+                CompletionMode::Reference,
+                SearchStatus { loading: true, failed: false }
+            ),
+            "Searching…"
+        );
+        assert_eq!(
+            empty_message(
+                CompletionMode::Reference,
+                SearchStatus { loading: false, failed: true }
+            ),
+            "Could not search files. Keep typing to try again."
+        );
+        assert_eq!(
+            empty_message(
+                CompletionMode::Reference,
+                SearchStatus { loading: false, failed: false }
+            ),
+            "No matching files, agents, or references"
+        );
+        assert_eq!(
+            empty_message(
+                CompletionMode::Directory,
+                SearchStatus { loading: false, failed: true }
+            ),
+            "Could not search directories. Keep typing to try again."
+        );
+        assert_eq!(
+            empty_message(
+                CompletionMode::Directory,
+                SearchStatus { loading: false, failed: false }
+            ),
+            "No matching directories"
+        );
+
+        let mut completion = fixture();
+        completion.sync("@zzz");
+        let failed = completion
+            .panel_state(
+                "@zzz",
+                4,
+                (0, 8, 40, 1),
+                PanelState {
+                    mode: None,
+                    status: SearchStatus { loading: false, failed: true },
+                },
+                None,
+            )
+            .unwrap();
+        assert!(failed.empty_is_error);
+        assert_eq!(
+            failed.empty.as_deref(),
+            Some("Could not search files. Keep typing to try again.")
+        );
+    }
+
+    #[test]
+    fn cp41_titles_truncate_by_utf16_units_without_splitting_clusters() {
+        // `"😀"` is two UTF-16 units; JS `length` also reports two.
+        let value = "😀😀😀😀😀😀";
+        assert_eq!(value.encode_utf16().count(), 12);
+        let truncated = truncate_middle(value, 5);
+        assert_eq!(truncated, "😀…😀");
+        assert_eq!(truncated.encode_utf16().count(), 5);
+        assert!(truncated.is_char_boundary(truncated.len()));
+        // No truncation at exactly the budget.
+        assert_eq!(truncate_middle("café", 4), "café");
+        assert_eq!(truncate_middle("café", 1), "…");
+    }
+
+    #[test]
+    fn cp41_rows_fit_by_cells_for_tabs_cjk_zwj_and_combining_marks() {
+        let mut completion = fixture();
+        completion.mentions = vec![
+            Item { value: "@界\tcafé".into(), description: "a\tb  c".into(), disabled: false },
+            Item { value: "@👩‍👩‍👧‍👦".into(), description: "e\u{301}x".into(), disabled: false },
+        ];
+        completion.set_kind("@👩‍👩‍👧‍👦", Kind::Reference);
+        let draft = "@".to_owned();
+        completion.sync(&draft);
+        let panel = completion.panel((1, 8, 24, 1)).unwrap();
+        for row in &panel.rows {
+            assert!(display_width(&row.0) <= 24, "row overflows cells: {row:?}");
+        }
+        assert!(panel.rows.iter().any(|row| row.0.contains("café")));
+        assert!(panel.rows.iter().any(|row| row.0.contains("reference")));
     }
 }

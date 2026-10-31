@@ -498,3 +498,46 @@ mod tests {
         assert_eq!(outside.selected_text(), None);
     }
 }
+
+#[cfg(test)]
+mod cp41_cell_width_tests {
+    //! CP-41: renderer-compatible offsets and cell widths
+    //! (`component/prompt/autocomplete.tsx:660-960`,
+    //! `component/prompt/index.tsx:707-761`).
+
+    use super::TextSelection;
+
+    #[test]
+    fn cp41_selection_uses_cells_for_tabs_cjk_zwj_tamil_and_combining_marks() {
+        let lines = vec![
+            "a\tb".to_owned(),
+            "界👩‍👩‍👧‍👦e\u{301}".to_owned(),
+            "தமிழ்".to_owned(),
+        ];
+        let mut selection = TextSelection::default();
+        selection.set_rows(&lines, 0, 0, 20);
+        assert!(selection.press(0, 0));
+        selection.drag(19, 2);
+        selection.release();
+        assert_eq!(
+            selection.selected_text().as_deref(),
+            // Tabs are painted as a space cell, so the renderer's text is what
+            // is copied; wide/ZWJ/Tamil/combining clusters survive intact.
+            Some("a b\n界👩‍👩‍👧‍👦e\u{301}\nதமிழ்"),
+            "no byte-offset slicing: wide, ZWJ, Tamil and marks survive"
+        );
+        let spans = selection.spans();
+        let wide: Vec<_> = spans.iter().filter(|(row, _, _)| *row == 1).copied().collect();
+        assert_eq!(
+            wide,
+            vec![(1, 0, 2), (1, 2, 2), (1, 4, 1)],
+            "CJK and ZWJ occupy two cells; e+combining occupies one"
+        );
+        let tamil: Vec<_> = spans.iter().filter(|(row, _, _)| *row == 2).collect();
+        assert!(!tamil.is_empty());
+        assert!(tamil.iter().all(|(_, _, width)| *width >= 1));
+        // A drag past the right edge clamps to the last real cell, never
+        // selecting viewport padding.
+        assert!(spans.iter().all(|(_, x, width)| x + width <= 20));
+    }
+}
