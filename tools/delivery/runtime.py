@@ -394,15 +394,21 @@ def prompt_for(payload):
               "change policies, launch children, or modify existing acceptance tests. "
               "The controller runs tests and owns publication.\n") % (
                   stage, task["id"], task["goal"], task["source"], payload.get("base"), ", ".join(task["paths"]))
+    envelope = ("OUTPUT CONTRACT (precedence over task goal): your ENTIRE final turn output "
+                "must be exactly one complete JSON object and nothing else -- no leading prose, "
+                "no trailing explanation, no markdown fences, no code blocks, no blank prefixes. "
+                "A response that is not pure JSON at the JSON parser entry point is rejected as a "
+                "runtime failure (agent must return exactly one complete JSON response). "
+                "Emit ONLY the JSON object.\n")
     if stage == "review":
-        return header + ("Independent diff-first review. You are not the author. Do not edit anything. "
+        return header + envelope + ("Independent diff-first review. You are not the author. Do not edit anything. "
                          "Inspect DELIVERY_REVIEW.diff and the real implementation and tests. "
                          "Check wiring, security, failure handling and requirement coverage. "
                          "Respond with one JSON object only: {\"verdict\":\"APPROVE\" or \"NEEDS_FIX\","
                          "\"findings\":[\"specific evidence\"]}. Reject incomplete or untested claims. "
                          + ("You are the security evaluator.\n" if payload.get("security_review") else "\n"))
     if stage == "diagnose":
-        return header + ("Read only. Diagnose repeated failures, do not change code. Return JSON "
+        return header + envelope + ("Read only. Diagnose repeated failures, do not change code. Return JSON "
                          "{\"diagnosis\":\"root cause\",\"approach\":\"materially different repair strategy\"}.\n"
                          + "Observed failures:\n" + payload.get("report", ""))
     return header + ("Implement the complete behavior and meaningful tests within the grant. "
