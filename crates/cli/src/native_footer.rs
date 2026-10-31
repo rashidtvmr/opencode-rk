@@ -55,18 +55,20 @@ pub const WIDTH_DURATION_GAP_HIGH: usize = 36;
 /// Exact interruption suffix text (upstream `index.tsx:2065`: ` · interrupted`).
 pub const INTERRUPTED_SPAN: &str = " · interrupted";
 
-/// Live shell-mode prompt hint from the pinned footer plugin. The mode is an
-/// authoritative native view fact; no provider, usage, or shortcut is inferred.
+/// Live shell-mode prompt hint from the pinned footer plugin
+/// (`packages/tui/src/feature-plugins/prompt/footer.tsx:122-129`): `esc `
+/// followed by `shell` below 44 columns and `exit shell mode` at 44 or more.
+/// The mode is an authoritative native view fact; no provider, usage, or
+/// shortcut is inferred.
 #[must_use]
 pub fn shell_mode_footer(width: usize) -> Option<String> {
     if width == 0 {
         return None;
     }
-    Some(if width < 44 {
-        "esc shell"
-    } else {
-        "esc exit shell mode"
-    }.to_owned())
+    Some(format!(
+        "esc {}",
+        crate::native_status_rail::shell_mode_hint(width)
+    ))
 }
 
 /// One rendered footer row: content (no caller decoration) and its paint class.
@@ -422,5 +424,22 @@ mod native_footer_tests {
         assert_eq!(WIDTH_DURATION_GAP_LOW, 28);
         assert_eq!(WIDTH_DURATION_GAP_HIGH, 36);
         assert_eq!(INTERRUPTED_SPAN, " · interrupted");
+    }
+
+    #[test]
+    fn shell_mode_hint_switches_exactly_at_44_columns() {
+        // Upstream footer.tsx:126: `dimensions().width < 44 ? "shell" :
+        // "exit shell mode"`, prefixed by `esc `.
+        assert_eq!(shell_mode_footer(43).as_deref(), Some("esc shell"));
+        assert_eq!(
+            shell_mode_footer(44).as_deref(),
+            Some("esc exit shell mode")
+        );
+        assert_eq!(
+            shell_mode_footer(120).as_deref(),
+            Some("esc exit shell mode")
+        );
+        // A zero-width terminal has no room for the hint.
+        assert_eq!(shell_mode_footer(0), None);
     }
 }

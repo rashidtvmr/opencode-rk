@@ -535,6 +535,86 @@ mod tests {
         );
         assert!(!line.contains(&"m".repeat(100)), "{line}");
     }
+
+    #[test]
+    fn cp16_running_family_excludes_self_and_inactive_children() {
+        // Upstream footer.tsx:22-28: family(sessionID) minus self, filtered to
+        // `status(id) === "running"`. Nested siblings and the current child
+        // count; inactive children and the session itself do not.
+        let family = [
+            FamilyMember {
+                id: "ses_root",
+                running: true,
+            },
+            FamilyMember {
+                id: "ses_child_active",
+                running: true,
+            },
+            FamilyMember {
+                id: "ses_child_idle",
+                running: false,
+            },
+            FamilyMember {
+                id: "ses_nested_active",
+                running: true,
+            },
+        ];
+        assert_eq!(running_subagent_count(&family, "ses_root"), 2);
+        assert_eq!(running_subagent_count(&family, "ses_child_active"), 2);
+        // No family (no session id) yields zero, never a guess.
+        assert_eq!(running_subagent_count(&[], "ses_root"), 0);
+        // A family whose only running member is self yields zero.
+        assert_eq!(
+            running_subagent_count(
+                &[FamilyMember {
+                    id: "ses_root",
+                    running: true
+                }],
+                "ses_root"
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn cp16_shell_records_count_by_session_only() {
+        // Upstream footer.tsx:29-35 counts location shell records whose
+        // metadata.sessionID matches; there is no shell-status filter.
+        let records = [
+            ShellRecord {
+                session_id: "ses_a",
+            },
+            ShellRecord {
+                session_id: "ses_b",
+            },
+            ShellRecord {
+                session_id: "ses_a",
+            },
+        ];
+        assert_eq!(session_shell_count(&records, "ses_a"), 2);
+        assert_eq!(session_shell_count(&records, "ses_b"), 1);
+        assert_eq!(session_shell_count(&records, "ses_missing"), 0);
+        assert_eq!(session_shell_count(&[], "ses_a"), 0);
+    }
+
+    #[test]
+    fn cp16_live_counts_labels_match_footer_pluralization() {
+        // Upstream footer.tsx:27,34: `{count} subagent(s)` / `{count} shell(s)`,
+        // joined by ` · ` when both exist (footer.tsx:86).
+        assert_eq!(subagent_label(1).as_deref(), Some("1 subagent"));
+        assert_eq!(subagent_label(2).as_deref(), Some("2 subagents"));
+        assert_eq!(subagent_label(0), None);
+        assert_eq!(shell_label(1).as_deref(), Some("1 shell"));
+        assert_eq!(shell_label(3).as_deref(), Some("3 shells"));
+        assert_eq!(shell_label(0), None);
+        assert_eq!(live_counts_label(0, 0), None);
+        assert_eq!(
+            live_counts_label(2, 1).as_deref(),
+            Some("2 subagents · 1 shell")
+        );
+        assert_eq!(live_counts_label(1, 0).as_deref(), Some("1 subagent"));
+        assert_eq!(live_counts_label(0, 2).as_deref(), Some("2 shells"));
+    }
 }
 
 /// Compact live subagent count for the footer rail (upstream `agents.tsx`).
@@ -572,4 +652,43 @@ pub(crate) fn live_counts_label(subagents: usize, shells: usize) -> Option<Strin
     } else {
         Some(parts.join(" · "))
     }
+}
+
+/// One `session.family(sessionID)` projection for the footer's live subagent
+/// count. Upstream `feature-plugins/prompt/footer.tsx:22-28` counts every
+/// family member except the session itself whose status is `"running"`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FamilyMember<'a> {
+    pub id: &'a str,
+    pub running: bool,
+}
+
+/// Upstream `footer.tsx:22-28`: nested siblings and the current child count
+/// when running; the session itself and inactive children never do.
+#[must_use]
+#[allow(dead_code)]
+pub(crate) fn running_subagent_count(family: &[FamilyMember<'_>], session_id: &str) -> usize {
+    family
+        .iter()
+        .filter(|member| member.id != session_id && member.running)
+        .count()
+}
+
+/// One shell record projection for the footer's live shell count. Upstream
+/// `footer.tsx:29-35` counts the location's shell records whose
+/// `metadata.sessionID` matches, regardless of the record's own status.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ShellRecord<'a> {
+    pub session_id: &'a str,
+}
+
+/// Upstream `footer.tsx:29-35`: shells belonging to this session, counted by
+/// record identity (there is no status filter in the footer projection).
+#[must_use]
+#[allow(dead_code)]
+pub(crate) fn session_shell_count(records: &[ShellRecord<'_>], session_id: &str) -> usize {
+    records
+        .iter()
+        .filter(|record| record.session_id == session_id)
+        .count()
 }
