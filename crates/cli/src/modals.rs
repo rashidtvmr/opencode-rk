@@ -4,6 +4,18 @@
 //! Pure state only: no IO, no threads. Caller renders
 //! [`ModalStack::top`] and executes confirm/picker side effects;
 //! [`ModalStack::render_top`] builds ASCII box lines (pure).
+//!
+//! [`KeyScope`] models which layer consumes keyboard input. Upstream keeps
+//! input modes mutually exclusive: the form route pushes `FORM_MODE` on
+//! mount and pops it through the returned cleanup
+//! (`packages/tui/src/routes/session/form.tsx:536`), while the keymap mode
+//! API documents "Mutually exclusive OpenCode input modes" and "pushes a
+//! mode until the returned cleanup is called"
+//! (`packages/tui/src/context/keymap.tsx:173-178`). Permission and question
+//! overlays likewise register their key layer only while mounted
+//! (`packages/tui/src/routes/session/permission.tsx:284`,
+//! `permission.tsx:440`), so an open overlay suppresses composer keys and
+//! closing it restores the previous owner.
 
 /// Max open modals retained.
 pub const MAX_MODALS: usize = 8;
@@ -124,6 +136,84 @@ fn truncate_title(title: &str) -> String {
     title.chars().take(MAX_TITLE_LEN).collect()
 }
 
+/// Which layer consumes keyboard input right now. [`KeyOwner::Composer`] is
+/// the resting state; every overlay pushes over it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyOwner {
+    Composer,
+    Permission,
+    Question,
+    Form,
+    Modal,
+}
+
+/// LIFO stack of keyboard owners, bounded by [`MAX_MODALS`].
+///
+/// Only the top owner receives keys. Pushing an overlay suppresses composer
+/// input; popping restores the previous owner, and the composer owns keys
+/// again once the stack empties (the upstream mode-push cleanup contract,
+/// `form.tsx:536`, `keymap.tsx:173-178`).
+#[derive(Debug, Default)]
+pub struct KeyScope {
+    owners: Vec<KeyOwner>,
+}
+
+impl KeyScope {
+    #[must_use]
+    pub fn new() -> Self {
+        Self { owners: Vec::new() }
+    }
+
+    /// Take keyboard ownership for an overlay. Returns `false` when
+    /// [`KeyOwner::Composer`] is pushed (it rests instead of stacking) or
+    /// when the stack is full. Re-pushing the current owner is allowed so a
+    /// caller can re-assert ownership idempotently.
+    pub fn push(&mut self, owner: KeyOwner) -> bool {
+        if owner == KeyOwner::Composer || self.owners.len() >= MAX_MODALS {
+            return false;
+        }
+        self.owners.push(owner);
+        true
+    }
+
+    /// Give keyboard ownership back to the previous owner. Returns the
+    /// owner that was popped, or `None` when only the composer holds keys.
+    pub fn pop(&mut self) -> Option<KeyOwner> {
+        self.owners.pop()
+    }
+
+    /// The layer that receives keys: the top overlay, else the composer.
+    #[must_use]
+    pub fn owner(&self) -> KeyOwner {
+        self.owners.last().copied().unwrap_or(KeyOwner::Composer)
+    }
+
+    /// True while any overlay owns keys, i.e. composer routing must be
+    /// suppressed.
+    #[must_use]
+    pub fn suppresses_composer(&self) -> bool {
+        !self.owners.is_empty()
+    }
+
+    /// Drop every overlay owner and return to the composer (overlay teardown
+    /// or hard dismissal). Returns how many owners were dropped.
+    pub fn restore_composer(&mut self) -> usize {
+        let dropped = self.owners.len();
+        self.owners.clear();
+        dropped
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.owners.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.owners.is_empty()
+    }
+}
+
 /// Min box width (`+` + 1 char + `+` per side floor): `+--+` shape.
 const MIN_BOX_WIDTH: usize = 4;
 /// Max box width: keeps huge viewports bounded.
@@ -226,5 +316,52 @@ mod tests {
         let narrow = stack.render_top(6).unwrap();
         assert_eq!(narrow[1].chars().count(), 6);
         assert!(narrow[1].starts_with("|héll"));
+    }
+
+    // Upstream pops the form mode through the push cleanup
+    // (`packages/tui/src/routes/session/form.tsx:536`) and only the mounted
+    // route's key layer is reachable (`packages/tui/src/context/keymap.tsx:173-178`,
+    // `routes/session/permission.tsx:284`). Nested overlays therefore own the
+    // keyboard in LIFO order and closing them returns keys to the composer.
+    #[test]
+    fn form_008_overlay_key_scope_restores_composer() {
+        let mut scope = KeyScope::new();
+        assert_eq!(scope.owner(), KeyOwner::Composer);
+        assert!(!scope.suppresses_composer());
+
+        // A form takes keys from the composer.
+        assert!(scope.push(KeyOwner::Form));
+        assert_eq!(scope.owner(), KeyOwner::Form);
+        assert!(scope.suppresses_composer());
+
+        // A modal opened over the form owns keys; the form keeps its place.
+        assert!(scope.push(KeyOwner::Modal));
+        assert_eq!(scope.owner(), KeyOwner::Modal);
+        assert_eq!(scope.len(), 2);
+
+        // Closing the modal restores the form, not the composer.
+        assert_eq!(scope.pop(), Some(KeyOwner::Modal));
+        assert_eq!(scope.owner(), KeyOwner::Form);
+
+        // Closing the form returns keys to the composer.
+        assert_eq!(scope.pop(), Some(KeyOwner::Form));
+        assert_eq!(scope.owner(), KeyOwner::Composer);
+        assert!(!scope.suppresses_composer());
+        assert_eq!(scope.pop(), None, "composer is never popped");
+
+        // The composer can never be stacked; re-pushing is idempotent-safe.
+        assert!(!scope.push(KeyOwner::Composer));
+        assert!(scope.push(KeyOwner::Permission));
+        assert!(scope.push(KeyOwner::Permission));
+        assert_eq!(scope.len(), 2);
+        assert_eq!(scope.restore_composer(), 2, "teardown drops every owner");
+        assert_eq!(scope.owner(), KeyOwner::Composer);
+
+        // Ownership is bounded like the modal stack.
+        for _ in 0..MAX_MODALS {
+            assert!(scope.push(KeyOwner::Question));
+        }
+        assert!(!scope.push(KeyOwner::Question));
+        assert_eq!(scope.len(), MAX_MODALS);
     }
 }

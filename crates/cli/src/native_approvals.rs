@@ -20,6 +20,16 @@
 //!
 //! Wired into `main.rs` as `crate::native_approvals`; replay window bounded by
 //! `MAX_HISTORY` eviction (ancient digests eventually forgotten).
+//!
+//! P17 permission audit (upstream pin
+//! `450e7b92412c780a7b5a75226bb8d49aaca24e22`): the prompt's three reply
+//! variants (`once`, `always`, `reject` — `packages/tui/src/routes/session/
+//! permission.tsx:232-240`) are recorded with the reviewed scope, so an
+//! `always` grant carries the expiry/policy binding of the request it was
+//! granted for, a reply that arrives after the grant aged out settles as an
+//! expired denial, and a missing reply is a denial (deny-by-default) rather
+//! than an implicit approval (`packages/tui/src/util/permission.ts:154-175`,
+//! `permission.tsx:243-257`).
 
 use std::collections::VecDeque;
 
@@ -141,6 +151,42 @@ pub enum RetryKind {
     AmbiguousSideEffects,
 }
 
+/// The three upstream permission replies
+/// (`permission.tsx:232-240`, labels `util/permission.ts:162-168`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PermissionReply {
+    Once,
+    Always,
+    Reject,
+}
+
+impl PermissionReply {
+    /// Stable reply key sent with the decision.
+    #[must_use]
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Once => "once",
+            Self::Always => "always",
+            Self::Reject => "reject",
+        }
+    }
+}
+
+/// Audited outcome of one permission prompt. `always` is the only reply that
+/// records a persistent grant; it keeps the reviewed scope (and therefore its
+/// expiry and policy version) and is rewritten to an expired denial when the
+/// grant had already aged out at decision time.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PermissionAudit {
+    pub request_id: String,
+    pub action: String,
+    pub reply: PermissionReply,
+    pub scope: ApprovalScope,
+    pub decided_at_tick: u64,
+    pub persistent: bool,
+    pub expired: bool,
+}
+
 /// Pending-approval queue plus settled history, in-flight tracking and a
 /// broadcast generation. Every collection is bounded.
 #[derive(Debug, Default)]
@@ -150,6 +196,7 @@ pub struct ApprovalBoard {
     started: VecDeque<OperationDigest>,
     interrupted: VecDeque<OperationDigest>,
     in_flight: Option<OperationDigest>,
+    permission_audit: VecDeque<PermissionAudit>,
     broadcast_seq: u64,
 }
 
@@ -344,6 +391,50 @@ impl ApprovalBoard {
         } else {
             RetryKind::SafeToRetry
         }
+    }
+
+    /// Record a permission prompt reply in the audit trail. `reply == None`
+    /// is deny-by-default: a prompt that ends without an explicit reply is a
+    /// real denial, never an approval. A reply arriving at or after
+    /// `scope.expires_at_tick` is recorded as an expired denial (the grant
+    /// aged out), so a late `always` can never persist. Bounded by
+    /// [`MAX_HISTORY`]; bumps the broadcast generation.
+    pub fn reply_permission(
+        &mut self,
+        request_id: &str,
+        action: &str,
+        reply: Option<PermissionReply>,
+        scope: ApprovalScope,
+        now: u64,
+    ) -> PermissionAudit {
+        let expired = now >= scope.expires_at_tick;
+        let (reply, persistent) = if expired {
+            (PermissionReply::Reject, false)
+        } else {
+            let reply = reply.unwrap_or(PermissionReply::Reject);
+            (reply, reply == PermissionReply::Always)
+        };
+        let audit = PermissionAudit {
+            request_id: request_id.to_string(),
+            action: action.to_string(),
+            reply,
+            scope,
+            decided_at_tick: now,
+            persistent,
+            expired,
+        };
+        if self.permission_audit.len() >= MAX_HISTORY {
+            self.permission_audit.pop_front();
+        }
+        self.permission_audit.push_back(audit.clone());
+        self.bump();
+        audit
+    }
+
+    /// Audited permission replies, oldest first.
+    #[must_use]
+    pub fn permission_audit(&self) -> &VecDeque<PermissionAudit> {
+        &self.permission_audit
     }
 
     /// Record a settled decision, dropping the oldest on overflow (bounded).
@@ -677,5 +768,84 @@ mod tests {
         }
         assert_eq!(board.history().len(), MAX_HISTORY);
         assert_eq!(board.history()[0].digest.0, format!("h8"));
+    }
+
+    // Upstream shows `once`/`always`/`reject` replies behind a save-rule gate
+    // (`packages/tui/src/routes/session/permission.tsx:232-240`) with labels
+    // from `util/permission.ts:162-168`. An `always` reply persists the scope
+    // it was reviewed under; a prompt that closes with no explicit reply, or
+    // replies after `expires_at_tick`, must settle as a denial so a late
+    // `always` can never persist (`permission.tsx:243-257`).
+    #[test]
+    fn permission_replies_are_audited_with_expiry_and_deny_by_default() {
+        let mut board = ApprovalBoard::new();
+        assert_eq!(PermissionReply::Once.key(), "once");
+        assert_eq!(PermissionReply::Always.key(), "always");
+        assert_eq!(PermissionReply::Reject.key(), "reject");
+
+        // `once` approves this occurrence only; nothing persists.
+        let once = board.reply_permission(
+            "req-1",
+            "bash",
+            Some(PermissionReply::Once),
+            scope(),
+            10,
+        );
+        assert_eq!(once.reply, PermissionReply::Once);
+        assert!(!once.persistent);
+        assert!(!once.expired);
+        assert_eq!(once.decided_at_tick, 10);
+
+        // `always` is the only persistent reply and keeps the reviewed scope.
+        let always = board.reply_permission(
+            "req-2",
+            "edit",
+            Some(PermissionReply::Always),
+            scope(),
+            20,
+        );
+        assert_eq!(always.reply, PermissionReply::Always);
+        assert!(always.persistent);
+        assert_eq!(always.scope, scope(), "the grant binds the reviewed scope");
+
+        // A prompt that ends without an explicit reply is a real denial.
+        let silent = board.reply_permission("req-3", "bash", None, scope(), 30);
+        assert_eq!(silent.reply, PermissionReply::Reject);
+        assert!(!silent.persistent);
+        assert!(!silent.expired);
+
+        // A late `always` (at/after the expiry tick) cannot persist.
+        let late = board.reply_permission(
+            "req-4",
+            "bash",
+            Some(PermissionReply::Always),
+            scope(),
+            600,
+        );
+        assert_eq!(late.reply, PermissionReply::Reject);
+        assert!(!late.persistent);
+        assert!(late.expired, "expiry is audited, not silently dropped");
+
+        // Oldest-first trail; every reply bumped the broadcast generation.
+        assert_eq!(board.permission_audit().len(), 4);
+        assert_eq!(board.permission_audit()[0].request_id, "req-1");
+        assert_eq!(board.permission_audit()[3].request_id, "req-4");
+        assert_eq!(board.broadcast_seq(), 4);
+
+        // Audit storage is bounded like the decision history.
+        for i in 0..(MAX_HISTORY + 8) {
+            board.reply_permission(
+                &format!("loop-{i}"),
+                "bash",
+                Some(PermissionReply::Reject),
+                scope(),
+                40,
+            );
+        }
+        assert_eq!(board.permission_audit().len(), MAX_HISTORY);
+        assert_eq!(
+            board.permission_audit().back().unwrap().request_id,
+            format!("loop-{}", MAX_HISTORY + 7)
+        );
     }
 }

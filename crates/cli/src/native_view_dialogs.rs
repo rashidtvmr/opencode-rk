@@ -1115,6 +1115,1780 @@ impl DialogView {
     }
 }
 
+/// Upstream question/form overlay port (P17, FORM-003..FORM-008).
+///
+/// Pure state + pure row rendering: no IO, no clock, no threads. Caller
+/// supplies the form definition collected from the daemon, routes keys into
+/// [`form_overlay::FormPrompt::handle_key`] while [`form_overlay::FormPrompt::active`]
+/// is true, and dispatches the resolved answer map.
+///
+/// Upstream evidence, pin `450e7b92412c780a7b5a75226bb8d49aaca24e22`:
+/// * conditional `when` gating and the scoped answer map —
+///   `packages/tui/src/routes/session/form.tsx:97-110`;
+/// * single-field fast path, tab count, tab fit test at `width - 8`, 24-cell
+///   label truncation and `+3` per tab — `form.tsx:111-122,795-847`;
+/// * rows/selection/display value/toggle and multiselect custom helpers —
+///   `packages/tui/src/util/form.ts:15-131`;
+/// * validation messages and timing — `util/form.ts:72-110`,
+///   `form.tsx:381-448,513-534`;
+/// * default values and custom defaults — `util/form.ts:19-34`;
+/// * key bindings (left/h, right/l, tab, 1-9, up/k, down/j, return, space
+///   multiselect only, escape) — `form.tsx:642-765`;
+/// * paste routing, burst typing interceptor, up leaving the editor only from
+///   the first visual line — `form.tsx:243-255,345-379,607-617`;
+/// * external acknowledgement requires a confirmed action, not open/copy —
+///   `form.tsx:477-511`; review acknowledgement/progress and the
+///   `max(3, height-14)` review viewport — `form.tsx:140,1063-1149`;
+/// * draft stash/restore across remounts — `form.tsx:44-57,72-73,211-228`;
+/// * keyboard scope: the form pushes its own mode and only consumes keys
+///   while active — `form.tsx:66,536-553`.
+pub mod form_overlay {
+    use std::collections::BTreeMap;
+
+    /// Form field kind (`FormField` union in `util/form.ts:11-61`).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum FieldKind {
+        Text,
+        Number,
+        Integer,
+        Boolean,
+        Single,
+        Multi,
+        External,
+    }
+
+    /// String format constraints (`util/form.ts:89-92`).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum TextFormat {
+        Email,
+        Uri,
+        Date,
+        DateTime,
+    }
+
+    /// A submitted/edited value. `List` is only used by multiselect fields.
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum FormValue {
+        Text(String),
+        Number(f64),
+        Bool(bool),
+        List(Vec<String>),
+    }
+
+    /// One selectable option (`FormRow` upstream).
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct FormOption {
+        pub value: String,
+        pub label: String,
+        pub description: Option<String>,
+    }
+
+    impl FormOption {
+        #[must_use]
+        pub fn new(value: impl Into<String>, label: impl Into<String>) -> Self {
+            Self { value: value.into(), label: label.into(), description: None }
+        }
+        #[must_use]
+        pub fn described(value: impl Into<String>, label: impl Into<String>, description: impl Into<String>) -> Self {
+            Self { value: value.into(), label: label.into(), description: Some(description.into()) }
+        }
+    }
+
+    /// One `when` condition (`form.tsx:101-105`). `equal == false` is the
+    /// upstream `ne` operator.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Condition {
+        pub key: String,
+        pub value: FormValue,
+        pub equal: bool,
+    }
+
+    impl Condition {
+        #[must_use]
+        pub fn eq(key: impl Into<String>, value: FormValue) -> Self {
+            Self { key: key.into(), value, equal: true }
+        }
+        #[must_use]
+        pub fn ne(key: impl Into<String>, value: FormValue) -> Self {
+            Self { key: key.into(), value, equal: false }
+        }
+    }
+
+    /// One form field. `options` is empty for free text/number/boolean
+    /// fields; `custom` enables the "type your own answer" row.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct FormField {
+        pub key: String,
+        pub title: Option<String>,
+        pub kind: FieldKind,
+        pub description: Option<String>,
+        pub placeholder: Option<String>,
+        pub required: bool,
+        pub default: Option<FormValue>,
+        pub options: Vec<FormOption>,
+        pub custom: bool,
+        pub format: Option<TextFormat>,
+        pub min_length: Option<usize>,
+        pub max_length: Option<usize>,
+        pub minimum: Option<f64>,
+        pub maximum: Option<f64>,
+        pub min_items: Option<usize>,
+        pub max_items: Option<usize>,
+        pub when: Vec<Condition>,
+        pub url: Option<String>,
+    }
+
+    impl FormField {
+        #[must_use]
+        pub fn new(key: impl Into<String>, kind: FieldKind) -> Self {
+            Self {
+                key: key.into(),
+                title: None,
+                kind,
+                description: None,
+                placeholder: None,
+                required: false,
+                default: None,
+                options: Vec::new(),
+                custom: false,
+                format: None,
+                min_length: None,
+                max_length: None,
+                minimum: None,
+                maximum: None,
+                min_items: None,
+                max_items: None,
+                when: Vec::new(),
+                url: None,
+            }
+        }
+
+        #[must_use]
+        pub fn titled(mut self, title: impl Into<String>) -> Self {
+            self.title = Some(title.into());
+            self
+        }
+        #[must_use]
+        pub fn required(mut self) -> Self {
+            self.required = true;
+            self
+        }
+        #[must_use]
+        pub fn defaulted(mut self, value: FormValue) -> Self {
+            self.default = Some(value);
+            self
+        }
+        #[must_use]
+        pub fn with_options(mut self, options: Vec<FormOption>) -> Self {
+            self.options = options;
+            self
+        }
+        #[must_use]
+        pub fn custom(mut self) -> Self {
+            self.custom = true;
+            self
+        }
+        #[must_use]
+        pub fn described(mut self, description: impl Into<String>) -> Self {
+            self.description = Some(description.into());
+            self
+        }
+
+        /// Visible label: `title ?? (external ? url : key)`
+        /// (`util/form.ts:15-17`).
+        #[must_use]
+        pub fn label(&self) -> String {
+            if let Some(title) = &self.title {
+                return title.clone();
+            }
+            if self.kind == FieldKind::External {
+                return self.url.clone().unwrap_or_default();
+            }
+            self.key.clone()
+        }
+
+        #[must_use]
+        pub fn is_answer_field(&self) -> bool {
+            self.kind != FieldKind::External
+        }
+
+        /// `formTextual`: number/integer, or string without options
+        /// (`util/form.ts:36-39`).
+        #[must_use]
+        pub fn is_textual(&self) -> bool {
+            matches!(self.kind, FieldKind::Number | FieldKind::Integer)
+                || (self.kind == FieldKind::Text && self.options.is_empty())
+        }
+
+        /// `formCustom`: option-backed string/multiselect with `custom`
+        /// (`util/form.ts:41-45`).
+        #[must_use]
+        pub fn is_custom(&self) -> bool {
+            self.custom
+                && (self.kind == FieldKind::Multi
+                    || (self.kind == FieldKind::Text && !self.options.is_empty())
+                    || self.kind == FieldKind::Single)
+        }
+    }
+
+    /// Rendered row for a field (`FormRow`, `util/form.ts:5-9`).
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct FormRow {
+        pub value: FormValue,
+        pub label: String,
+        pub description: Option<String>,
+    }
+
+    /// `formRows` (`util/form.ts:47-61`): booleans are Yes/No, option fields
+    /// map their options, everything else has no rows.
+    #[must_use]
+    pub fn form_rows(field: &FormField) -> Vec<FormRow> {
+        match field.kind {
+            FieldKind::Boolean => vec![
+                FormRow { value: FormValue::Bool(true), label: "Yes".into(), description: None },
+                FormRow { value: FormValue::Bool(false), label: "No".into(), description: None },
+            ],
+            FieldKind::Multi | FieldKind::Single | FieldKind::Text if !field.options.is_empty() => field
+                .options
+                .iter()
+                .map(|option| FormRow {
+                    value: FormValue::Text(option.value.clone()),
+                    label: option.label.clone(),
+                    description: option.description.clone(),
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// `formSelected` (`util/form.ts:63-70`): matching row index, the custom
+    /// row for a non-option value of a custom field, else 0.
+    #[must_use]
+    pub fn form_selected(field: &FormField, value: Option<&FormValue>) -> usize {
+        let Some(value) = value else {
+            return 0;
+        };
+        if matches!(value, FormValue::List(_)) {
+            return 0;
+        }
+        let rows = form_rows(field);
+        if let Some(index) = rows.iter().position(|row| &row.value == value) {
+            return index;
+        }
+        if matches!(value, FormValue::Text(_)) && field.is_custom() {
+            return rows.len();
+        }
+        0
+    }
+
+    /// `formDisplayValue` (`util/form.ts:112-118`).
+    #[must_use]
+    pub fn form_display_value(field: &FormField, value: Option<&FormValue>, empty_multiselect: &str) -> String {
+        let Some(value) = value else {
+            return String::new();
+        };
+        let rows = form_rows(field);
+        let label = |item: &FormValue| {
+            rows.iter()
+                .find(|row| &row.value == item)
+                .map(|row| row.label.clone())
+                .unwrap_or_else(|| match item {
+                    FormValue::Text(text) => text.clone(),
+                    FormValue::Number(number) => num(*number),
+                    FormValue::Bool(flag) => flag.to_string(),
+                    FormValue::List(items) => items.join(", "),
+                })
+        };
+        match value {
+            FormValue::List(items) if items.is_empty() => empty_multiselect.to_string(),
+            FormValue::List(items) => items.iter().map(|item| label(&FormValue::Text(item.clone()))).collect::<Vec<_>>().join(", "),
+            other => label(other),
+        }
+    }
+
+    /// `formToggleMultiselect` (`util/form.ts:120-124`).
+    #[must_use]
+    pub fn toggle_multiselect(value: Option<&FormValue>, item: &str) -> FormValue {
+        let mut values = match value {
+            Some(FormValue::List(items)) => items.clone(),
+            _ => Vec::new(),
+        };
+        if let Some(index) = values.iter().position(|value| value == item) {
+            values.remove(index);
+        } else {
+            values.push(item.to_string());
+        }
+        FormValue::List(values)
+    }
+
+    /// `formSetMultiselectCustom` (`util/form.ts:126-131`).
+    #[must_use]
+    pub fn set_multiselect_custom(value: Option<&FormValue>, previous: Option<&str>, next: &str) -> FormValue {
+        let mut current = match value {
+            Some(FormValue::List(items)) => items.clone(),
+            _ => Vec::new(),
+        };
+        if let Some(previous) = previous {
+            if let Some(index) = current.iter().position(|item| item == previous) {
+                current.remove(index);
+            }
+        }
+        if !next.is_empty() && !current.iter().any(|item| item == next) {
+            current.push(next.to_string());
+        }
+        FormValue::List(current)
+    }
+
+    fn num(value: f64) -> String {
+        if value.fract() == 0.0 && value.abs() < 1e15 {
+            format!("{}", value as i64)
+        } else {
+            value.to_string()
+        }
+    }
+
+    fn valid_email(value: &str) -> bool {
+        let parts: Vec<&str> = value.split('@').collect();
+        if parts.len() != 2 || value.chars().any(char::is_whitespace) {
+            return false;
+        }
+        let (local, domain) = (parts[0], parts[1]);
+        !local.is_empty()
+            && !domain.is_empty()
+            && domain.contains('.')
+            && domain.split('.').all(|label| !label.is_empty())
+    }
+
+    fn valid_url(value: &str) -> bool {
+        let Some((scheme, rest)) = value.split_once(':') else {
+            return false;
+        };
+        let mut chars = scheme.chars();
+        matches!(chars.next(), Some(first) if first.is_ascii_alphabetic())
+            && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+            && !rest.is_empty()
+    }
+
+    fn leap_year(year: i64) -> bool {
+        (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+    }
+
+    fn days_in_month(year: i64, month: i64) -> i64 {
+        match month {
+            1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+            4 | 6 | 9 | 11 => 30,
+            2 if leap_year(year) => 29,
+            2 => 28,
+            _ => 0,
+        }
+    }
+
+    fn parse_date(value: &str) -> Option<(i64, i64, i64)> {
+        let bytes = value.as_bytes();
+        if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+            return None;
+        }
+        let year = value[0..4].parse::<i64>().ok()?;
+        let month = value[5..7].parse::<i64>().ok()?;
+        let day = value[8..10].parse::<i64>().ok()?;
+        if !(1..=12).contains(&month) || day < 1 || day > days_in_month(year, month) {
+            return None;
+        }
+        Some((year, month, day))
+    }
+
+    fn valid_date(value: &str) -> bool {
+        parse_date(value).is_some()
+    }
+
+    fn valid_date_time(value: &str) -> bool {
+        let Some((date, time)) = value.split_once(['T', 't']) else {
+            return false;
+        };
+        if parse_date(date).is_none() {
+            return false;
+        }
+        // HH:MM[:SS][.fff][Z|±HH:MM] — the subset every `Date` parse accepts.
+        let time = time.trim_end_matches(['Z', 'z']);
+        let time = match time.split_once('+').or_else(|| time.rsplit_once('-')) {
+            Some((clock, offset)) if !offset.is_empty() => {
+                let (hours, minutes) = offset.split_once(':').unwrap_or((offset, "0"));
+                if hours.parse::<u32>().map(|h| h > 23).unwrap_or(true)
+                    || minutes.parse::<u32>().map(|m| m > 59).unwrap_or(true)
+                {
+                    return false;
+                }
+                clock
+            }
+            _ => time,
+        };
+        let time = time.split_once('.').map(|(clock, _)| clock).unwrap_or(time);
+        let clock: Vec<&str> = time.split(':').collect();
+        if clock.len() < 2 || clock.len() > 3 {
+            return false;
+        }
+        let hours = clock[0].parse::<u32>().ok();
+        let minutes = clock[1].parse::<u32>().ok();
+        let seconds = if clock.len() == 3 { clock[2].parse::<u32>().ok() } else { Some(0) };
+        matches!((hours, minutes, seconds), (Some(h), Some(m), Some(s)) if h <= 23 && m <= 59 && s <= 59)
+    }
+
+    /// `formValidateValue` (`util/form.ts:72-110`). Returns the exact
+    /// upstream message, or `None` when the value is acceptable. The regex
+    /// `pattern` branch is not ported (no regex engine here) and is reported
+    /// as unimplemented in the handoff — no pattern is silently accepted.
+    #[must_use]
+    pub fn validate(field: &FormField, value: Option<&FormValue>) -> Option<String> {
+        let Some(value) = value else {
+            return field.required.then(|| "Answer required".to_string());
+        };
+        if field.required {
+            let empty = match value {
+                FormValue::Text(text) => text.is_empty(),
+                FormValue::List(items) => items.is_empty(),
+                _ => false,
+            };
+            if empty {
+                return Some(if field.kind == FieldKind::Multi {
+                    "Select at least one option"
+                } else {
+                    "Answer required"
+                }
+                .to_string());
+            }
+        }
+        match field.kind {
+            FieldKind::Text | FieldKind::Single => {
+                let FormValue::Text(text) = value else {
+                    return Some("Expected text".to_string());
+                };
+                if let Some(min) = field.min_length {
+                    if text.chars().count() < min {
+                        return Some(format!("Must be at least {min} characters"));
+                    }
+                }
+                if let Some(max) = field.max_length {
+                    if text.chars().count() > max {
+                        return Some(format!("Must be at most {max} characters"));
+                    }
+                }
+                match field.format {
+                    Some(TextFormat::Email) if !valid_email(text) => {
+                        return Some("Expected an email address".to_string())
+                    }
+                    Some(TextFormat::Uri) if !valid_url(text) => return Some("Expected a URL".to_string()),
+                    Some(TextFormat::Date) if !valid_date(text) => {
+                        return Some("Expected a date (YYYY-MM-DD)".to_string())
+                    }
+                    Some(TextFormat::DateTime) if !valid_date_time(text) => {
+                        return Some("Expected a date and time".to_string())
+                    }
+                    _ => {}
+                }
+                if !field.options.is_empty()
+                    && !field.custom
+                    && !field.options.iter().any(|option| option.value == *text)
+                {
+                    return Some("Select an available option".to_string());
+                }
+                None
+            }
+            FieldKind::Number | FieldKind::Integer => {
+                let FormValue::Number(number) = value else {
+                    return Some("Expected a number".to_string());
+                };
+                if !number.is_finite() {
+                    return Some("Expected a number".to_string());
+                }
+                if field.kind == FieldKind::Integer && number.fract() != 0.0 {
+                    return Some("Expected an integer".to_string());
+                }
+                if let Some(minimum) = field.minimum {
+                    if *number < minimum {
+                        return Some(format!("Must be at least {}", num(minimum)));
+                    }
+                }
+                if let Some(maximum) = field.maximum {
+                    if *number > maximum {
+                        return Some(format!("Must be at most {}", num(maximum)));
+                    }
+                }
+                None
+            }
+            FieldKind::Boolean => {
+                if matches!(value, FormValue::Bool(_)) { None } else { Some("Expected yes or no".to_string()) }
+            }
+            FieldKind::Multi => {
+                let FormValue::List(items) = value else {
+                    return Some("Expected selections".to_string());
+                };
+                if let Some(min) = field.min_items {
+                    if items.len() < min {
+                        return Some(format!("Select at least {min}"));
+                    }
+                }
+                if let Some(max) = field.max_items {
+                    if items.len() > max {
+                        return Some(format!("Select at most {max}"));
+                    }
+                }
+                if !field.custom
+                    && items.iter().any(|item| !field.options.iter().any(|option| option.value == *item))
+                {
+                    return Some("Select only available options".to_string());
+                }
+                None
+            }
+            FieldKind::External => None,
+        }
+    }
+
+    /// `formInitialValues` (`util/form.ts:19-34`).
+    #[must_use]
+    pub fn initial_values(fields: &[FormField]) -> (BTreeMap<String, FormValue>, BTreeMap<String, String>) {
+        let mut answers = BTreeMap::new();
+        for field in fields {
+            if field.is_answer_field() {
+                if let Some(default) = &field.default {
+                    answers.insert(field.key.clone(), default.clone());
+                }
+            }
+        }
+        let mut custom = BTreeMap::new();
+        for field in fields {
+            if field.kind != FieldKind::Text || field.options.is_empty() || !field.custom {
+                continue;
+            }
+            let Some(FormValue::Text(default)) = field.default.as_ref() else {
+                continue;
+            };
+            if field.options.iter().any(|option| option.value == *default) {
+                continue;
+            }
+            custom.insert(field.key.clone(), default.clone());
+        }
+        (answers, custom)
+    }
+
+    /// Where keyboard focus must go when the overlay leaves.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum FocusTarget {
+        Overlay,
+        Composer,
+    }
+
+    /// Why the form stopped being shown.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum DismissReason {
+        /// Session/terminal ended while the form was still pending.
+        Terminal,
+        /// The form was dropped upstream (stale location).
+        Stale,
+        /// The daemon rejected revalidation.
+        RevalidationFailed,
+        /// The user dismissed it (Esc).
+        Cancelled,
+        /// The user answered it.
+        Resolved,
+    }
+
+    /// Consumed-on-take draft, mirroring `drafts` in `form.tsx:44-57,72-73`.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct FormDraft {
+        pub tab: usize,
+        pub answers: BTreeMap<String, FormValue>,
+        pub custom: BTreeMap<String, String>,
+        pub external_ready: BTreeMap<String, bool>,
+        pub selected: usize,
+        pub editing: bool,
+        pub error: String,
+    }
+
+    /// Result of leaving the overlay.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Dismissal {
+        pub focus: FocusTarget,
+        pub draft: Option<FormDraft>,
+    }
+
+    /// Paste routing outcome (`form.tsx:354-379`).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum PasteOutcome {
+        InsertedInEditor,
+        CustomRowOpened,
+        Ignored,
+    }
+
+    /// Review row accent (`form.tsx:1075-1120`).
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum ReviewState {
+        Acknowledged,
+        AcknowledgeRequired,
+        Answered,
+        Missing,
+        Invalid(String),
+        NotAnswered,
+    }
+
+    /// One review row.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct ReviewRow {
+        pub label: String,
+        pub display: String,
+        pub state: ReviewState,
+    }
+
+    const REVIEW_LABEL_MAX: usize = 40;
+    const TAB_LABEL_MAX: usize = 24;
+    const EDITOR_MAX_HEIGHT: usize = 6;
+
+    fn truncate(label: &str, max: usize) -> String {
+        if label.chars().count() > max {
+            let mut text: String = label.chars().take(max.saturating_sub(1)).collect();
+            text.truncate(text.trim_end().len());
+            text.push('…');
+            text
+        } else {
+            label.to_string()
+        }
+    }
+
+    fn condition_hit(value: &FormValue, target: &FormValue) -> bool {
+        match value {
+            FormValue::List(items) => {
+                matches!(target, FormValue::Text(text) if items.iter().any(|item| item == text))
+            }
+            other => other == target,
+        }
+    }
+
+    /// Question/form prompt state (`FormPrompt`, `form.tsx:59-1175`).
+    #[derive(Clone, Debug)]
+    pub struct FormPrompt {
+        id: String,
+        title: String,
+        message: Option<String>,
+        fields: Vec<FormField>,
+        answers: BTreeMap<String, FormValue>,
+        custom: BTreeMap<String, String>,
+        external_ready: BTreeMap<String, bool>,
+        tab: usize,
+        selected: usize,
+        editing: bool,
+        error: String,
+        cursor: usize,
+        active: bool,
+        resolution: Option<BTreeMap<String, FormValue>>,
+    }
+
+    impl FormPrompt {
+        #[must_use]
+        pub fn new(
+            id: impl Into<String>,
+            title: impl Into<String>,
+            message: Option<String>,
+            fields: Vec<FormField>,
+        ) -> Self {
+            let (answers, custom) = initial_values(&fields);
+            let selected = fields
+                .iter()
+                .find(|field| field.is_answer_field())
+                .map(|field| form_selected(field, answers.get(&field.key)))
+                .unwrap_or(0);
+            let mut prompt = Self {
+                id: id.into(),
+                title: title.into(),
+                message,
+                fields,
+                answers,
+                custom,
+                external_ready: BTreeMap::new(),
+                tab: 0,
+                selected,
+                editing: false,
+                error: String::new(),
+                cursor: 0,
+                active: true,
+                resolution: None,
+            };
+            // The editor mounts with the cursor at the end (`form.tsx:897-900`).
+            prompt.cursor = prompt.editor_text().chars().count();
+            prompt
+        }
+
+        /// Restore a consumed draft (`form.tsx:77-87`).
+        #[must_use]
+        pub fn restore(
+            id: impl Into<String>,
+            title: impl Into<String>,
+            message: Option<String>,
+            fields: Vec<FormField>,
+            draft: FormDraft,
+        ) -> Self {
+            let mut prompt = Self {
+                id: id.into(),
+                title: title.into(),
+                message,
+                fields,
+                answers: draft.answers,
+                custom: draft.custom,
+                external_ready: draft.external_ready,
+                tab: draft.tab,
+                selected: draft.selected,
+                editing: draft.editing,
+                error: draft.error,
+                cursor: 0,
+                active: true,
+                resolution: None,
+            };
+            // Restored editor text (draft custom) mounts with the cursor at
+            // the end (`form.tsx:897-900`).
+            prompt.cursor = prompt.editor_text().chars().count();
+            prompt
+        }
+
+        #[must_use]
+        pub fn id(&self) -> &str {
+            &self.id
+        }
+
+        /// `active = interactivity && keymap mode == form` (`form.tsx:66`).
+        pub fn set_active(&mut self, active: bool) {
+            self.active = active;
+        }
+
+        #[must_use]
+        pub fn active(&self) -> bool {
+            self.active
+        }
+
+        /// Focus owner while the prompt is mounted.
+        #[must_use]
+        pub fn focus_target(&self) -> FocusTarget {
+            if self.active { FocusTarget::Overlay } else { FocusTarget::Composer }
+        }
+
+        #[must_use]
+        pub fn tab(&self) -> usize {
+            self.tab
+        }
+
+        #[must_use]
+        pub fn selected(&self) -> usize {
+            self.selected
+        }
+
+        #[must_use]
+        pub fn editing(&self) -> bool {
+            self.editing
+        }
+
+        #[must_use]
+        pub fn error(&self) -> &str {
+            &self.error
+        }
+
+        #[must_use]
+        pub fn resolution(&self) -> Option<&BTreeMap<String, FormValue>> {
+            self.resolution.as_ref()
+        }
+
+        #[must_use]
+        pub fn answer(&self, key: &str) -> Option<&FormValue> {
+            self.answers.get(key)
+        }
+
+        /// Fields passing their `when` conditions, in declaration order
+        /// (`form.tsx:97-110`). External fields are always shown.
+        #[must_use]
+        pub fn visible_indices(&self) -> Vec<usize> {
+            let mut scope: BTreeMap<&str, &FormValue> = BTreeMap::new();
+            let mut visible = Vec::new();
+            for (index, field) in self.fields.iter().enumerate() {
+                if field.kind == FieldKind::External {
+                    visible.push(index);
+                    continue;
+                }
+                let active = field.when.iter().all(|condition| {
+                    match scope.get(condition.key.as_str()) {
+                        Some(value) => condition.equal == condition_hit(value, &condition.value),
+                        None => false,
+                    }
+                });
+                if active {
+                    if let Some(value) = self.answers.get(&field.key) {
+                        scope.insert(field.key.as_str(), value);
+                    }
+                    visible.push(index);
+                }
+            }
+            visible
+        }
+
+        #[must_use]
+        pub fn visible_fields(&self) -> Vec<&FormField> {
+            self.visible_indices().into_iter().map(|index| &self.fields[index]).collect()
+        }
+
+        fn current_index(&self) -> Option<usize> {
+            self.visible_indices().get(self.tab).copied()
+        }
+
+        #[must_use]
+        pub fn answer_field(&self) -> Option<&FormField> {
+            let field = &self.fields[self.current_index()?];
+            field.is_answer_field().then_some(field)
+        }
+
+        #[must_use]
+        pub fn external_field(&self) -> Option<&FormField> {
+            let field = &self.fields[self.current_index()?];
+            (field.kind == FieldKind::External).then_some(field)
+        }
+
+        /// One visible answerable field takes the single-field fast path
+        /// (`form.tsx:111-117`).
+        #[must_use]
+        pub fn single(&self) -> bool {
+            let visible = self.visible_indices();
+            if visible.len() != 1 {
+                return false;
+            }
+            let field = &self.fields[visible[0]];
+            match field.kind {
+                FieldKind::External => false,
+                FieldKind::Boolean => true,
+                FieldKind::Text | FieldKind::Single => !field.options.is_empty(),
+                _ => false,
+            }
+        }
+
+        /// `tabs = single ? 1 : fields + 1` (`form.tsx:118`).
+        #[must_use]
+        pub fn tabs(&self) -> usize {
+            if self.single() { 1 } else { self.visible_indices().len() + 1 }
+        }
+
+        /// Tabs fit only when `sum(truncate(label, 24) + 3) <= width - 8`
+        /// (`form.tsx:119-122`).
+        #[must_use]
+        pub fn tabbed(&self, width: usize) -> bool {
+            let needed = self
+                .visible_fields()
+                .iter()
+                .map(|field| truncate(&field.label(), TAB_LABEL_MAX).chars().count() + 3)
+                .sum::<usize>()
+                + "Submit".chars().count()
+                + 3;
+            needed <= width.saturating_sub(8)
+        }
+
+        /// The confirmation/review tab is active (`form.tsx:139`).
+        #[must_use]
+        pub fn confirm(&self) -> bool {
+            !self.single() && self.tab >= self.visible_indices().len()
+        }
+
+        /// Configured rows plus any extra custom multiselect picks
+        /// (`form.tsx:141-158`).
+        #[must_use]
+        pub fn rows(&self) -> Vec<FormRow> {
+            let Some(field) = self.answer_field() else {
+                return Vec::new();
+            };
+            let mut rows = form_rows(field);
+            if field.kind != FieldKind::Multi {
+                return rows;
+            }
+            let Some(FormValue::List(values)) = self.answers.get(&field.key) else {
+                return rows;
+            };
+            let known: Vec<FormValue> = rows.iter().map(|row| row.value.clone()).collect();
+            let custom_text = self.custom.get(&field.key).map(String::as_str).unwrap_or("");
+            for value in values {
+                let present = known.contains(&FormValue::Text(value.clone()));
+                if !present && value != custom_text {
+                    rows.push(FormRow {
+                        value: FormValue::Text(value.clone()),
+                        label: value.clone(),
+                        description: None,
+                    });
+                }
+            }
+            rows
+        }
+
+        fn multi(&self) -> bool {
+            self.answer_field().map(|field| field.kind == FieldKind::Multi).unwrap_or(false)
+        }
+
+        fn textual(&self) -> bool {
+            if self.confirm() {
+                return false;
+            }
+            self.answer_field().map(FormField::is_textual).unwrap_or(false)
+        }
+
+        fn custom_field(&self) -> bool {
+            self.answer_field().map(FormField::is_custom).unwrap_or(false)
+        }
+
+        /// `other()` — the custom row is selected (`form.tsx:185`).
+        #[must_use]
+        pub fn other(&self) -> bool {
+            self.custom_field() && self.selected == self.rows().len()
+        }
+
+        /// Current custom row text (`form.tsx:186`).
+        #[must_use]
+        pub fn input(&self) -> String {
+            let key = self.answer_field().map(|field| field.key.as_str()).unwrap_or("");
+            self.custom.get(key).cloned().unwrap_or_default()
+        }
+
+        fn custom_picked(&self) -> bool {
+            let value = self.input();
+            if value.is_empty() {
+                return false;
+            }
+            let key = self.answer_field().map(|field| field.key.as_str()).unwrap_or("");
+            match self.answers.get(key) {
+                Some(FormValue::List(items)) => items.iter().any(|item| *item == value),
+                Some(FormValue::Text(text)) => *text == value,
+                _ => false,
+            }
+        }
+
+        fn custom_checked(&self) -> bool {
+            self.custom_picked() || (self.multi() && self.other() && self.editing)
+        }
+
+        /// Footer/action label (`form.tsx:195-209`).
+        #[must_use]
+        pub fn action_label(&self) -> &'static str {
+            if self.confirm() {
+                return "submit";
+            }
+            if let Some(external) = self.external_field() {
+                if self.answers.get(&external.key) == Some(&FormValue::Bool(true)) {
+                    return "continue";
+                }
+                return if self.external_ready.get(&external.key).copied().unwrap_or(false) {
+                    "I finished"
+                } else {
+                    "open link"
+                };
+            }
+            if self.multi() {
+                if self.other() && self.editing {
+                    return "done";
+                }
+                if self.other() && self.input().is_empty() {
+                    return "edit";
+                }
+                return "toggle";
+            }
+            if self.single() { "submit" } else { "confirm" }
+        }
+
+        /// `completed(item)` (`form.tsx:123-128`).
+        #[must_use]
+        pub fn completed(&self, field: &FormField) -> bool {
+            let Some(value) = self.answers.get(&field.key) else {
+                return false;
+            };
+            if field.kind == FieldKind::External {
+                return *value == FormValue::Bool(true);
+            }
+            validate(field, Some(value)).is_none()
+        }
+
+        /// `answered()` (`form.tsx:129`).
+        #[must_use]
+        pub fn answered_count(&self) -> usize {
+            self.visible_fields().iter().filter(|field| self.completed(field)).count()
+        }
+
+        /// Store an answer, normalizing an empty optional multiselect away
+        /// (`form.tsx:257-267`).
+        fn store_answer(&mut self, key: &str, value: Option<FormValue>) {
+            let optional_multi = self
+                .fields
+                .iter()
+                .find(|field| field.key == key)
+                .map(|field| field.kind == FieldKind::Multi && !field.required)
+                .unwrap_or(false);
+            let normalized = match value {
+                Some(FormValue::List(items)) if items.is_empty() && optional_multi => None,
+                Some(FormValue::List(items)) if items.is_empty() => {
+                    // Still omit: an empty multiselect is no answer.
+                    let _ = items;
+                    None
+                }
+                other => other,
+            };
+            match normalized {
+                Some(value) => {
+                    self.answers.insert(key.to_string(), value);
+                }
+                None => {
+                    self.answers.remove(key);
+                }
+            }
+            self.error.clear();
+        }
+
+        /// Public answer write used by paste/typing tests.
+        pub fn set_answer(&mut self, key: &str, value: Option<FormValue>) {
+            self.store_answer(key, value);
+        }
+
+        /// `selectTab` (`form.tsx:314-320`).
+        pub fn select_tab(&mut self, index: usize) {
+            let visible = self.visible_indices();
+            let index = if visible.is_empty() { 0 } else { index % (visible.len() + 1) };
+            self.tab = index;
+            self.selected = match visible.get(index) {
+                Some(field_index) => {
+                    let field = &self.fields[*field_index];
+                    if field.is_answer_field() { form_selected(field, self.answers.get(&field.key)) } else { 0 }
+                }
+                None => 0,
+            };
+            self.editing = false;
+            self.error.clear();
+        }
+
+        fn step_tab(&mut self, delta: isize) {
+            let total = self.tabs();
+            let next = (self.tab as isize + delta).rem_euclid(total as isize) as usize;
+            self.select_tab(next);
+        }
+
+        fn step_selection(&mut self, delta: isize) {
+            let total = self.rows().len() + usize::from(self.custom_field());
+            if total == 0 {
+                return;
+            }
+            self.selected = (self.selected as isize + delta).rem_euclid(total as isize) as usize;
+        }
+
+        /// Move to the custom row (`form.tsx:347-351,975-1012`).
+        pub fn select_custom_row(&mut self) {
+            if self.custom_field() {
+                self.selected = self.rows().len();
+            }
+        }
+
+        fn update_custom(&mut self, value: &str) {
+            let Some(field) = self.answer_field().cloned() else {
+                return;
+            };
+            let previous = self.custom.get(&field.key).cloned().unwrap_or_default();
+            if previous == value {
+                return;
+            }
+            self.custom.insert(field.key.clone(), value.to_string());
+            let answer = if field.kind == FieldKind::Multi {
+                Some(set_multiselect_custom(
+                    self.answers.get(&field.key),
+                    if previous.is_empty() { None } else { Some(previous.as_str()) },
+                    value,
+                ))
+            } else if value.is_empty() {
+                None
+            } else {
+                Some(FormValue::Text(value.to_string()))
+            };
+            self.store_answer(&field.key, answer);
+        }
+
+        fn toggle(&mut self, value: &str) {
+            let Some(field) = self.answer_field().cloned() else {
+                return;
+            };
+            let next = toggle_multiselect(self.answers.get(&field.key), value);
+            self.store_answer(&field.key, Some(next));
+        }
+
+        /// Validate a picked option and advance (`form.tsx:279-294`).
+        pub fn pick(&mut self, value: FormValue, custom_value: Option<String>) -> Option<BTreeMap<String, FormValue>> {
+            let field = self.answer_field()?.clone();
+            if let Some(invalid) = validate(&field, Some(&value)) {
+                self.error = invalid;
+                return None;
+            }
+            self.store_answer(&field.key, Some(value.clone()));
+            if let Some(custom) = custom_value {
+                self.custom.insert(field.key.clone(), custom);
+            }
+            if self.single() {
+                let reply = BTreeMap::from([(field.key, value)]);
+                self.resolution = Some(reply.clone());
+                return Some(reply);
+            }
+            self.select_tab(self.tab + 1);
+            None
+        }
+
+        /// Row/custom activation (`form.tsx:322-343`).
+        pub fn select_option(&mut self) {
+            if self.other() {
+                if !self.multi() {
+                    self.editing = true;
+                    return;
+                }
+                let value = self.input();
+                if !value.is_empty() && self.custom_picked() {
+                    self.toggle(&value);
+                    return;
+                }
+                self.editing = true;
+                return;
+            }
+            let Some(row) = self.rows().get(self.selected).cloned() else {
+                return;
+            };
+            if self.multi() {
+                if let FormValue::Text(value) = &row.value {
+                    self.toggle(value);
+                }
+                return;
+            }
+            let _ = self.pick(row.value, None);
+        }
+
+        /// Space toggles a multiselect row only (`form.tsx:753-755`); single
+        /// choice and textual fields never consume it. Returns whether the
+        /// key was consumed.
+        pub fn space(&mut self) -> bool {
+            if self.confirm() || self.editing || self.textual() || !self.multi() {
+                return false;
+            }
+            self.select_option();
+            true
+        }
+
+        /// Character interceptor for the custom row (`form.tsx:243-255`).
+        /// Control/whitespace characters are ignored, and a selected custom
+        /// row starts editing on the first accepted character.
+        pub fn type_char(&mut self, character: char) -> bool {
+            if character.is_control() || character.is_whitespace() || !self.other() || self.textual() || self.editing {
+                return false;
+            }
+            let mut next = self.input();
+            next.push(character);
+            self.update_custom(&next);
+            self.editing = true;
+            self.cursor = next.chars().count();
+            true
+        }
+
+        /// Insert text at the editor cursor (`form.tsx:356-358,366-377`).
+        /// Textual answers live in the editor until committed and are only
+        /// captured into `custom` (`form.tsx:211-228`), so typing must not
+        /// write the answer map; custom rows update their answer live
+        /// (`form.tsx:302-310`).
+        pub fn editor_insert(&mut self, text: &str) {
+            let mut chars: Vec<char> = self.editor_text().chars().collect();
+            let cursor = self.cursor.min(chars.len());
+            for (offset, character) in text.chars().enumerate() {
+                chars.insert(cursor + offset, character);
+            }
+            self.cursor = cursor + text.chars().count();
+            let joined: String = chars.into_iter().collect();
+            if self.textual() {
+                if let Some(field) = self.answer_field() {
+                    self.custom.insert(field.key.clone(), joined);
+                }
+            } else {
+                self.update_custom(&joined);
+                self.editing = true;
+            }
+        }
+
+        #[must_use]
+        pub fn cursor(&self) -> usize {
+            self.cursor
+        }
+
+        /// Position the editor cursor (char index, clamped on insert).
+        pub fn set_cursor(&mut self, cursor: usize) {
+            self.cursor = cursor;
+        }
+
+        /// Paste routing (`form.tsx:345-364`): an active editor inserts at
+        /// the cursor; otherwise a custom row opens for editing; never a
+        /// submit.
+        pub fn paste(&mut self, text: &str) -> PasteOutcome {
+            if !self.active {
+                return PasteOutcome::Ignored;
+            }
+            if self.editing || self.textual() {
+                self.editor_insert(text);
+                return PasteOutcome::InsertedInEditor;
+            }
+            if !self.custom_field() || self.confirm() {
+                return PasteOutcome::Ignored;
+            }
+            self.select_custom_row();
+            let mut next = self.input();
+            next.push_str(text);
+            self.update_custom(&next);
+            self.editing = true;
+            self.cursor = next.chars().count();
+            PasteOutcome::CustomRowOpened
+        }
+
+        /// Up leaves the editor only from the first visual line and with a
+        /// row above it (`form.tsx:607-617`). `visual_row` is the editor's
+        /// `scrollY + visualCursor.visualRow`.
+        pub fn up_in_editor(&mut self, visual_row: usize) -> bool {
+            if self.textual() || self.selected == 0 || visual_row > 0 {
+                return false;
+            }
+            self.editing = false;
+            self.selected -= 1;
+            true
+        }
+
+        /// `commitInput` (`form.tsx:381-440`). Returns `false` (with the
+        /// error set) when validation fails.
+        pub fn commit_input(&mut self, text: &str) -> bool {
+            let Some(field) = self.answer_field().cloned() else {
+                return false;
+            };
+            let is_textual = field.is_textual();
+            let is_multi = field.kind == FieldKind::Multi;
+            if text.is_empty() {
+                let value = if !is_textual && is_multi {
+                    let previous = self.custom.get(&field.key).cloned().unwrap_or_default();
+                    Some(set_multiselect_custom(
+                        self.answers.get(&field.key),
+                        if previous.is_empty() { None } else { Some(previous.as_str()) },
+                        "",
+                    ))
+                } else {
+                    None
+                };
+                if is_textual || !is_multi {
+                    if let Some(invalid) = validate(&field, value.as_ref()) {
+                        self.error = invalid;
+                        return false;
+                    }
+                }
+                self.store_answer(&field.key, value);
+                self.custom.insert(field.key.clone(), String::new());
+                self.editing = false;
+                return true;
+            }
+            if is_textual && matches!(field.kind, FieldKind::Number | FieldKind::Integer) {
+                let value = text.trim().parse::<f64>().unwrap_or(f64::NAN);
+                if let Some(invalid) = validate(&field, Some(&FormValue::Number(value))) {
+                    self.error = invalid;
+                    return false;
+                }
+                self.store_answer(&field.key, Some(FormValue::Number(value)));
+            }
+            if is_textual && field.kind == FieldKind::Text {
+                if let Some(invalid) = validate(&field, Some(&FormValue::Text(text.to_string()))) {
+                    self.error = invalid;
+                    return false;
+                }
+                self.store_answer(&field.key, Some(FormValue::Text(text.to_string())));
+            }
+            if !is_textual && is_multi {
+                let previous = self.custom.get(&field.key).cloned().unwrap_or_default();
+                let next = set_multiselect_custom(
+                    self.answers.get(&field.key),
+                    if previous.is_empty() { None } else { Some(previous.as_str()) },
+                    text,
+                );
+                self.store_answer(&field.key, Some(next));
+            }
+            if !is_textual && !is_multi {
+                if let Some(invalid) = validate(&field, Some(&FormValue::Text(text.to_string()))) {
+                    self.error = invalid;
+                    return false;
+                }
+                self.store_answer(&field.key, Some(FormValue::Text(text.to_string())));
+            }
+            let configured = field.options.iter().any(|option| option.value == text);
+            self.custom.insert(field.key.clone(), if configured { String::new() } else { text.to_string() });
+            self.editing = false;
+            true
+        }
+
+        /// Tab/shift-tab while editing (`form.tsx:442-448`).
+        pub fn submit_input(&mut self, text: &str, direction: isize) {
+            if !self.commit_input(text) {
+                if direction == -1 {
+                    self.step_tab(-1);
+                }
+                return;
+            }
+            if !self.single() {
+                self.step_tab(direction);
+            }
+        }
+
+        /// Open/copy only mark the external action ready; they never
+        /// acknowledge it (`form.tsx:477-496`).
+        pub fn mark_external_opened(&mut self) {
+            let Some(field) = self.external_field() else {
+                return;
+            };
+            let key = field.key.clone();
+            self.error.clear();
+            self.external_ready.insert(key, true);
+        }
+
+        pub fn mark_external_copied(&mut self) {
+            self.mark_external_opened();
+        }
+
+        #[must_use]
+        pub fn external_ready(&self, key: &str) -> bool {
+            self.external_ready.get(key).copied().unwrap_or(false)
+        }
+
+        /// Enter on an external field (`form.tsx:498-511`): the first
+        /// activation opens the link, the second marks the action ready, and
+        /// only the third records the acknowledgement.
+        pub fn acknowledge_external(&mut self) {
+            let Some(field) = self.external_field() else {
+                return;
+            };
+            let key = field.key.clone();
+            if self.answers.get(&key) == Some(&FormValue::Bool(true)) {
+                self.select_tab(self.tab + 1);
+                return;
+            }
+            if !self.external_ready(key.as_str()) {
+                self.mark_external_opened();
+                return;
+            }
+            self.store_answer(&key, Some(FormValue::Bool(true)));
+            self.select_tab(self.tab + 1);
+        }
+
+        /// Final submission (`form.tsx:513-534`): every external action must
+        /// be acknowledged and every visible answer must validate. Returns
+        /// the answer map, omitting undefined answers.
+        pub fn submit(&mut self) -> Option<BTreeMap<String, FormValue>> {
+            let visible = self.visible_indices();
+            let unacknowledged = visible.iter().find_map(|index| {
+                let field = &self.fields[*index];
+                (field.kind == FieldKind::External
+                    && self.answers.get(&field.key) != Some(&FormValue::Bool(true)))
+                .then(|| field.label())
+            });
+            if let Some(label) = unacknowledged {
+                self.error = format!("External action must be acknowledged: {label}");
+                return None;
+            }
+            let invalid = visible.iter().find_map(|index| {
+                let field = &self.fields[*index];
+                if field.is_answer_field() {
+                    validate(field, self.answers.get(&field.key))
+                } else {
+                    None
+                }
+            });
+            if let Some(invalid) = invalid {
+                self.error = invalid;
+                return None;
+            }
+            let mut answer = BTreeMap::new();
+            for index in visible {
+                let field = &self.fields[index];
+                if let Some(value) = self.answers.get(&field.key) {
+                    answer.insert(field.key.clone(), value.clone());
+                }
+            }
+            self.resolution = Some(answer.clone());
+            Some(answer)
+        }
+
+        /// Review rows (`form.tsx:1063-1123`).
+        #[must_use]
+        pub fn review_rows(&self) -> Vec<ReviewRow> {
+            self.visible_fields()
+                .into_iter()
+                .map(|field| {
+                    let label = truncate(&field.label(), REVIEW_LABEL_MAX);
+                    if field.kind == FieldKind::External {
+                        let acknowledged = self.answers.get(&field.key) == Some(&FormValue::Bool(true));
+                        return ReviewRow {
+                            label,
+                            display: if acknowledged { "Acknowledged" } else { "(acknowledgement required)" }.to_string(),
+                            state: if acknowledged { ReviewState::Acknowledged } else { ReviewState::AcknowledgeRequired },
+                        };
+                    }
+                    let value = self.answers.get(&field.key);
+                    let answered = value.is_some();
+                    let missing = !answered && field.required;
+                    if let Some(invalid) = validate(field, value) {
+                        return ReviewRow { label, display: invalid.clone(), state: ReviewState::Invalid(invalid) };
+                    }
+                    let (display, state) = if answered {
+                        (form_display_value(field, value, "(none)"), ReviewState::Answered)
+                    } else if missing {
+                        ("(required)".to_string(), ReviewState::Missing)
+                    } else {
+                        ("(not answered)".to_string(), ReviewState::NotAnswered)
+                    };
+                    ReviewRow { label, display, state }
+                })
+                .collect()
+        }
+
+        /// Review viewport cap: `max(3, height - 14)` (`form.tsx:140`).
+        #[must_use]
+        pub fn review_max_height(&self, terminal_height: usize) -> usize {
+            terminal_height.saturating_sub(14).max(3)
+        }
+
+        /// Scroll hints appear only when the review actually overflows
+        /// (`form.tsx:1145-1149`).
+        #[must_use]
+        pub fn review_scroll_available(&self, content_height: usize, terminal_height: usize) -> bool {
+            content_height > self.review_max_height(terminal_height)
+        }
+
+        /// Number of editor rows: `minHeight 1`, `maxHeight 6`
+        /// (`form.tsx:887-908,1026-1052`).
+        #[must_use]
+        pub fn editor_height(&self) -> usize {
+            let text = self.editor_text();
+            let lines = text.split('\n').count().max(1);
+            lines.min(EDITOR_MAX_HEIGHT)
+        }
+
+        #[must_use]
+        pub fn editor_text(&self) -> String {
+            if self.textual() {
+                let typed = self.input();
+                if !typed.is_empty() {
+                    return typed;
+                }
+                if let Some(field) = self.answer_field() {
+                    return form_display_value(field, self.answers.get(&field.key), "");
+                }
+                return String::new();
+            }
+            self.input()
+        }
+
+        /// Leave the overlay. Upstream stashes a draft whenever the form is
+        /// still listed after unmount (terminal/stale/revalidation failure)
+        /// and restores composer focus (`form.tsx:211-228`).
+        pub fn dismiss(&mut self, reason: DismissReason) -> Dismissal {
+            self.active = false;
+            let stash = matches!(
+                reason,
+                DismissReason::Terminal | DismissReason::Stale | DismissReason::RevalidationFailed
+            );
+            Dismissal {
+                focus: FocusTarget::Composer,
+                draft: stash.then(|| FormDraft {
+                    tab: self.tab,
+                    answers: self.answers.clone(),
+                    custom: self.custom.clone(),
+                    external_ready: self.external_ready.clone(),
+                    selected: self.selected,
+                    editing: self.editing,
+                    error: self.error.clone(),
+                }),
+            }
+        }
+
+        /// Keyboard routing. Returns whether the key was consumed. Inactive
+        /// prompts consume nothing, so transcript keys cannot leak into (or
+        /// out of) the overlay (`form.tsx:66,243-255,536-553`).
+        pub fn handle_key(&mut self, key: FormKey) -> bool {
+            if !self.active {
+                return false;
+            }
+            match key {
+                FormKey::Char(character) => {
+                    if self.editing || self.textual() {
+                        if character.is_control() {
+                            return true;
+                        }
+                        self.editor_insert(&character.to_string());
+                        true
+                    } else {
+                        self.type_char(character)
+                    }
+                }
+                FormKey::Space => self.space(),
+                FormKey::Up { visual_row } => {
+                    if self.editing || self.textual() {
+                        self.up_in_editor(visual_row);
+                        true
+                    } else if self.confirm() {
+                        true
+                    } else {
+                        self.step_selection(-1);
+                        true
+                    }
+                }
+                FormKey::Down => {
+                    if !self.editing && !self.textual() && !self.confirm() {
+                        self.step_selection(1);
+                    }
+                    true
+                }
+                FormKey::Left | FormKey::ShiftTab => {
+                    if self.editing || self.textual() {
+                        let text = self.editor_text();
+                        self.submit_input(text.trim(), -1);
+                    } else if !self.confirm() {
+                        self.step_tab(-1);
+                    }
+                    true
+                }
+                FormKey::Right | FormKey::Tab => {
+                    if self.editing || self.textual() {
+                        let text = self.editor_text();
+                        self.submit_input(text.trim(), 1);
+                    } else if !self.confirm() {
+                        self.step_tab(1);
+                    }
+                    true
+                }
+                FormKey::Enter => {
+                    if self.confirm() {
+                        let _ = self.submit();
+                        return true;
+                    }
+                    if let Some(external) = self.external_field() {
+                        let key = external.key.clone();
+                        let _ = key;
+                        self.acknowledge_external();
+                        return true;
+                    }
+                    if self.editing || self.textual() {
+                        let text = self.editor_text();
+                        let trimmed = text.trim().to_string();
+                        let multi = self.multi();
+                        if !self.commit_input(&trimmed) {
+                            return true;
+                        }
+                        if multi || trimmed.is_empty() {
+                            return true;
+                        }
+                        if let Some(field) = self.answer_field().cloned() {
+                            if self.single() {
+                                let reply = BTreeMap::from([(field.key, FormValue::Text(trimmed))]);
+                                self.resolution = Some(reply);
+                            } else {
+                                self.select_tab(self.tab + 1);
+                            }
+                        }
+                        return true;
+                    }
+                    self.select_option();
+                    true
+                }
+                FormKey::Escape => {
+                    if self.confirm() {
+                        let _ = self.dismiss(DismissReason::Cancelled);
+                        return true;
+                    }
+                    if self.editing {
+                        if self.textual() {
+                            let _ = self.dismiss(DismissReason::Cancelled);
+                        } else {
+                            self.editing = false;
+                        }
+                        return true;
+                    }
+                    let _ = self.dismiss(DismissReason::Cancelled);
+                    true
+                }
+                FormKey::CtrlC => {
+                    if !self.textual() && !self.editing {
+                        let _ = self.dismiss(DismissReason::Cancelled);
+                        return true;
+                    }
+                    let text = self.editor_text();
+                    if !text.is_empty() {
+                        self.update_custom("");
+                        self.cursor = 0;
+                    } else if self.textual() {
+                        let _ = self.dismiss(DismissReason::Cancelled);
+                    } else {
+                        self.editing = false;
+                    }
+                    true
+                }
+                FormKey::Digit(digit) => {
+                    if digit == 0 || self.editing || self.textual() || self.confirm() {
+                        return false;
+                    }
+                    let total = self.rows().len() + usize::from(self.custom_field());
+                    let max = total.min(9);
+                    let index = usize::from(digit) - 1;
+                    if index >= max {
+                        return false;
+                    }
+                    self.selected = index;
+                    self.select_option();
+                    true
+                }
+            }
+        }
+
+        /// Render the prompt rows (`form.tsx:767-1174`). Widths are counted
+        /// in chars; the terminal painter performs the final cell pass.
+        #[must_use]
+        pub fn render(&self, width: usize, terminal_height: usize) -> Vec<String> {
+            let clip = |text: &str| -> String { text.chars().take(width).collect() };
+            let mut rows = Vec::new();
+            rows.push(clip(&self.title));
+            if let Some(message) = &self.message {
+                rows.push(clip(message));
+            }
+            if !self.single() {
+                if self.tabbed(width) {
+                    let mut bar = String::new();
+                    for field in self.visible_fields() {
+                        bar.push_str(&truncate(&field.label(), TAB_LABEL_MAX));
+                        bar.push_str("  ");
+                    }
+                    bar.push_str("Submit");
+                    rows.push(clip(&bar));
+                } else {
+                    let visible = self.visible_indices().len();
+                    let counter = if self.confirm() {
+                        "Review".to_string()
+                    } else {
+                        format!("Field {} of {visible}", self.tab.min(visible.saturating_sub(1)) + 1)
+                    };
+                    let progress = if visible > 0 {
+                        format!(" · {}/{visible} completed", self.answered_count())
+                    } else {
+                        String::new()
+                    };
+                    rows.push(clip(&format!("{counter}{progress}")));
+                }
+            }
+            if !self.confirm() {
+                if let Some(external) = self.external_field() {
+                    if let Some(title) = &external.title {
+                        rows.push(clip(title));
+                    }
+                    if let Some(description) = &external.description {
+                        rows.push(clip(description));
+                    }
+                    if let Some(url) = &external.url {
+                        rows.push(clip(url));
+                    }
+                    rows.push(clip(if self.answers.get(&external.key) == Some(&FormValue::Bool(true)) {
+                        "✓ Acknowledged"
+                    } else if self.external_ready(&external.key) {
+                        "Complete the external action, then press enter to confirm."
+                    } else {
+                        "Open or copy the URL, complete the external action, then confirm."
+                    }));
+                }
+                if let Some(field) = self.answer_field() {
+                    rows.push(clip(field.description.as_deref().unwrap_or(&field.label())));
+                    if self.textual() {
+                        let text = self.editor_text();
+                        let lines: Vec<&str> = text.split('\n').collect();
+                        if lines.is_empty() || (lines.len() == 1 && lines[0].is_empty()) {
+                            rows.push(String::new());
+                        } else {
+                            for line in lines.iter().take(EDITOR_MAX_HEIGHT) {
+                                rows.push(clip(line));
+                            }
+                        }
+                    } else {
+                        let multi = self.multi();
+                        for (index, row) in self.rows().iter().enumerate() {
+                            let picked = match self.answers.get(&field.key) {
+                                Some(FormValue::List(items)) => match &row.value {
+                                    FormValue::Text(value) => items.iter().any(|item| item == value),
+                                    other => items.iter().any(|item| FormValue::Text(item.clone()) == *other),
+                                },
+                                Some(value) => *value == row.value,
+                                None => false,
+                            };
+                            let prefix = format!("{}. ", index + 1);
+                            if multi {
+                                rows.push(clip(&format!("{prefix}[{}] {}", if picked { "✓" } else { " " }, row.label)));
+                            } else {
+                                rows.push(clip(&format!("{prefix}{}{}", row.label, if picked { " ✓" } else { "" })));
+                            }
+                            if let Some(description) = &row.description {
+                                rows.push(clip(&format!("{}{}", " ".repeat(if multi { 7 } else { 3 }), description)));
+                            }
+                        }
+                        if self.custom_field() {
+                            let prefix = format!("{}. ", self.rows().len() + 1);
+                            if multi {
+                                let checked = self.custom_checked();
+                                let body = if self.editing || !self.input().is_empty() {
+                                    self.input()
+                                } else {
+                                    "Type your own answer".to_string()
+                                };
+                                rows.push(clip(&format!("{prefix}[{}] {body}", if checked { "✓" } else { " " })));
+                            } else {
+                                let body = if self.editing || !self.input().is_empty() {
+                                    self.input()
+                                } else {
+                                    "Type your own answer".to_string()
+                                };
+                                rows.push(clip(&format!("{prefix}{body}{}", if self.custom_picked() { "✓" } else { "" })));
+                            }
+                        }
+                    }
+                }
+            }
+            if self.confirm() {
+                for row in self.review_rows().into_iter().take(self.review_max_height(terminal_height)) {
+                    rows.push(clip(&format!("{}: {}", row.label, row.display)));
+                }
+            }
+            let mut footer: Vec<String> = Vec::new();
+            if !self.single() {
+                footer.push("⇆ tab".to_string());
+            }
+            if !self.confirm() && !self.textual() && self.external_field().is_none() && !self.editing {
+                footer.push("↑↓ select".to_string());
+            }
+            footer.push(format!("enter {}", self.action_label()));
+            if self.external_field().is_some() {
+                footer.push("c copy".to_string());
+            }
+            footer.push(if self.editing && !self.textual() { "esc close" } else { "esc dismiss" }.to_string());
+            rows.push(clip(&footer.join(" ")));
+            rows
+        }
+    }
+
+    /// Keys routed into [`FormPrompt::handle_key`].
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum FormKey {
+        Char(char),
+        Space,
+        Up { visual_row: usize },
+        Down,
+        Left,
+        Right,
+        Tab,
+        ShiftTab,
+        Enter,
+        Escape,
+        CtrlC,
+        Digit(u8),
+    }
+}
+
 #[cfg(test)]
 mod scoped_input_tests {
     use super::*;
@@ -2087,5 +3861,407 @@ mod tests {
             DialogError::AckStaleAttempt.code(),
             "dialog.ack_stale_attempt"
         );
+    }
+}
+
+#[cfg(test)]
+mod form_tests {
+    use super::form_overlay::*;
+
+    fn option(value: &str, label: &str) -> FormOption {
+        FormOption::new(value, label)
+    }
+
+    fn text_default(field: FormField, text: &str) -> FormField {
+        field.defaulted(FormValue::Text(text.to_string()))
+    }
+
+    fn kinds_form() -> Vec<FormField> {
+        vec![
+            text_default(
+                FormField { min_length: Some(3), required: true, ..FormField::new("name", FieldKind::Text).titled("Name") },
+                "Ada",
+            ),
+            FormField { minimum: Some(18.0), maximum: Some(99.0), required: true, ..FormField::new("age", FieldKind::Number).titled("Age") },
+            FormField::new("count", FieldKind::Integer).titled("Count"),
+            FormField::new("agree", FieldKind::Boolean).titled("Agree"),
+            FormField::new("region", FieldKind::Single)
+                .titled("Region")
+                .required()
+                .with_options(vec![option("eu", "Europe"), option("us", "United States")]),
+            FormField::new("topics", FieldKind::Multi)
+                .titled("Topics")
+                .with_options(vec![option("a", "Alpha"), option("b", "Beta")])
+                .custom(),
+            FormField { url: Some("https://example.com/approve".into()), description: Some("Approve in the browser".into()), ..FormField::new("site", FieldKind::External).titled("Site") },
+            FormField { when: vec![Condition::eq("agree", FormValue::Bool(true))], ..FormField::new("why", FieldKind::Text).titled("Why") },
+        ]
+    }
+
+    // FORM-003 — every field kind, validation, review and draft restoration.
+    // Upstream: util/form.ts:19-110 (initial values, rows, validation),
+    // form.tsx:97-110 (conditional gating), form.tsx:1063-1123 (review),
+    // form.tsx:44-57,72-73,211-228 (draft stash/restore).
+    #[test]
+    fn form_003_field_kinds_validation_review_and_draft_restoration() {
+        let mut form = FormPrompt::new("f-3", "Details", None, kinds_form());
+        // Defaults seed answers; conditional field is hidden until `agree`.
+        assert_eq!(form.answer("name"), Some(&FormValue::Text("Ada".into())));
+        assert!(form.visible_fields().iter().all(|field| field.key != "why"));
+        form.set_answer("agree", Some(FormValue::Bool(true)));
+        assert!(form.visible_fields().iter().any(|field| field.key == "why"));
+        assert_eq!(form.visible_fields().last().unwrap().key, "why");
+
+        // Validation messages are the exact upstream strings.
+        let fields = kinds_form();
+        let number = fields.iter().find(|field| field.key == "age").unwrap();
+        assert_eq!(validate(number, Some(&FormValue::Number(17.0))).as_deref(), Some("Must be at least 18"));
+        assert_eq!(validate(number, Some(&FormValue::Number(100.0))).as_deref(), Some("Must be at most 99"));
+        assert_eq!(validate(number, None).as_deref(), Some("Answer required"));
+        let integer = fields.iter().find(|field| field.key == "count").unwrap();
+        assert_eq!(validate(integer, Some(&FormValue::Number(1.5))).as_deref(), Some("Expected an integer"));
+        assert_eq!(validate(integer, Some(&FormValue::Text("1".into()))).as_deref(), Some("Expected a number"));
+        let boolean = fields.iter().find(|field| field.key == "agree").unwrap();
+        assert_eq!(validate(boolean, Some(&FormValue::Text("yes".into()))).as_deref(), Some("Expected yes or no"));
+        assert_eq!(validate(boolean, Some(&FormValue::Bool(true))), None);
+        let single = fields.iter().find(|field| field.key == "region").unwrap();
+        assert_eq!(validate(single, Some(&FormValue::Text("mars".into()))).as_deref(), Some("Select an available option"));
+        assert_eq!(validate(single, Some(&FormValue::Text("eu".into()))), None);
+        let multi = fields.iter().find(|field| field.key == "topics").unwrap();
+        assert_eq!(validate(multi, Some(&FormValue::List(vec![]))).as_deref(), None);
+        let strict_multi = FormField::new("strict", FieldKind::Multi).required().with_options(vec![option("a", "A")]);
+        assert_eq!(validate(&strict_multi, Some(&FormValue::List(vec![]))).as_deref(), Some("Select at least one option"));
+        assert_eq!(
+            validate(&strict_multi, Some(&FormValue::List(vec!["zzz".into()]))).as_deref(),
+            Some("Select only available options")
+        );
+        let long = FormField { min_length: Some(3), ..FormField::new("long", FieldKind::Text) };
+        assert_eq!(validate(&long, Some(&FormValue::Text("ab".into()))).as_deref(), Some("Must be at least 3 characters"));
+        let email = FormField { format: Some(TextFormat::Email), ..FormField::new("mail", FieldKind::Text) };
+        assert_eq!(validate(&email, Some(&FormValue::Text("nope".into()))).as_deref(), Some("Expected an email address"));
+        assert_eq!(validate(&email, Some(&FormValue::Text("a@b.co".into()))), None);
+        let date = FormField { format: Some(TextFormat::Date), ..FormField::new("date", FieldKind::Text) };
+        assert_eq!(validate(&date, Some(&FormValue::Text("2023-02-30".into()))).as_deref(), Some("Expected a date (YYYY-MM-DD)"));
+        assert_eq!(validate(&date, Some(&FormValue::Text("2024-02-29".into()))), None);
+
+        // Review rows report answered/missing/required states.
+        form.set_answer("age", Some(FormValue::Number(30.0)));
+        form.set_answer("region", Some(FormValue::Text("eu".into())));
+        let review = form.review_rows();
+        let name = review.iter().find(|row| row.label == "Name").unwrap();
+        assert_eq!(name.display, "Ada");
+        assert_eq!(name.state, ReviewState::Answered);
+        let region = review.iter().find(|row| row.label == "Region").unwrap();
+        assert_eq!(region.display, "Europe");
+        let site = review.iter().find(|row| row.label == "Site").unwrap();
+        assert_eq!(site.display, "(acknowledgement required)");
+        assert_eq!(site.state, ReviewState::AcknowledgeRequired);
+        let why = review.iter().find(|row| row.label == "Why").unwrap();
+        assert_eq!(why.display, "(not answered)");
+        assert_eq!(why.state, ReviewState::NotAnswered);
+
+        // Draft stash/restore keeps the tab, answers, custom text and error.
+        form.select_tab(2);
+        form.commit_input("7");
+        assert_eq!(form.answer("count"), Some(&FormValue::Number(7.0)));
+        form.set_answer("topics", Some(FormValue::List(vec!["custom".into()])));
+        let dismissal = form.dismiss(DismissReason::Stale);
+        assert_eq!(dismissal.focus, FocusTarget::Composer);
+        let draft = dismissal.draft.expect("stale form keeps a draft");
+        assert_eq!(draft.tab, 2);
+        let restored = FormPrompt::restore("f-3", "Details", None, kinds_form(), draft);
+        assert_eq!(restored.tab(), 2);
+        assert_eq!(restored.answer("count"), Some(&FormValue::Number(7.0)));
+        assert_eq!(restored.answer("topics"), Some(&FormValue::List(vec!["custom".into()])));
+        assert!(restored.visible_fields().iter().any(|field| field.key == "why"));
+    }
+
+    // FORM-004 — narrow fallback at the exact fit boundary, 24-cell labels,
+    // checkbox width 4, description insets 3/7, textarea height 1..6.
+    // Upstream: form.tsx:119-122 (fit), form.tsx:40-42,817-820 (24-cell
+    // labels), form.tsx:943-957 (checkbox width 4), form.tsx:966-970
+    // (insets), form.tsx:902-904,1042-1044 (1..6 editor height).
+    #[test]
+    fn form_004_narrow_tab_fallback_checkbox_insets_and_editor_height() {
+        let long = FormField::new("a", FieldKind::Text).titled("A".repeat(30));
+        let long_b = FormField::new("b", FieldKind::Text).titled("B".repeat(30));
+        let form = FormPrompt::new("f-4", "Form", None, vec![long, long_b]);
+        // 24-cell truncation: 23 chars + ellipsis.
+        let expected = format!("{}…", "A".repeat(23));
+        assert_eq!(expected.chars().count(), 24);
+        // Needed = (24 + 3) * 2 + (6 + 3) = 63 <= width - 8.
+        assert!(form.tabbed(71));
+        assert!(!form.tabbed(70));
+        let wide = form.render(71, 30);
+        assert!(wide[1].starts_with(&expected), "{:?}", wide[1]);
+        assert!(wide[1].contains("Submit"));
+        let narrow = form.render(70, 30);
+        assert!(narrow[1].starts_with("Field 1 of 2"), "{:?}", narrow[1]);
+        assert!(!narrow[1].contains("Submit"));
+
+        // Checkbox width 4 and label column 7 for multiselect; single has no
+        // checkbox so its label starts at column 3.
+        let multi = FormPrompt::new(
+            "f-4m",
+            "Form",
+            None,
+            vec![FormField::new("topics", FieldKind::Multi)
+                .titled("Topics")
+                .with_options(vec![FormOption::described("a", "Alpha", "first")])
+                .custom()],
+        );
+        let rows = multi.render(80, 30);
+        let alpha = rows.iter().find(|row| row.starts_with("1. ")).expect("option row");
+        assert!(alpha.starts_with("1. [ ] Alpha"), "{alpha:?}");
+        assert_eq!(alpha.find("Alpha"), Some(7));
+        let description = rows.iter().find(|row| row.contains("first")).expect("description row");
+        assert!(description.starts_with("       first"), "{description:?}");
+        let single = FormPrompt::new(
+            "f-4s",
+            "Form",
+            None,
+            vec![FormField::new("region", FieldKind::Single)
+                .titled("Region")
+                .with_options(vec![FormOption::described("eu", "Europe", "old world")])],
+        );
+        let rows = single.render(80, 30);
+        let europe = rows.iter().find(|row| row.starts_with("1. ")).expect("option row");
+        assert!(europe.starts_with("1. Europe"), "{europe:?}");
+        assert_eq!(europe.find("Europe"), Some(3));
+        let description = rows.iter().find(|row| row.contains("old world")).expect("description row");
+        assert!(description.starts_with("   old world"), "{description:?}");
+
+        // Editor height is clamped to 1..=6.
+        let empty = FormPrompt::new("f-4e", "Form", None, vec![FormField::new("t", FieldKind::Text)]);
+        assert_eq!(empty.editor_height(), 1);
+        let three = FormPrompt::new(
+            "f-4t",
+            "Form",
+            None,
+            vec![text_default(FormField::new("t", FieldKind::Text), "1\n2\n3")],
+        );
+        assert_eq!(three.editor_height(), 3);
+        let ten = FormPrompt::new(
+            "f-4h",
+            "Form",
+            None,
+            vec![text_default(FormField::new("t", FieldKind::Text), "1\n2\n3\n4\n5\n6\n7\n8\n9\n10")],
+        );
+        assert_eq!(ten.editor_height(), 6);
+    }
+
+    // FORM-005 — paste into the custom row opens editing without submit,
+    // paste into the editor inserts at the cursor, burst typing is kept, and
+    // up leaves the editor only from the first visual line.
+    // Upstream: form.tsx:345-379 (paste), form.tsx:243-255 (burst typing),
+    // form.tsx:607-617 (up), form.tsx:322-343 (custom row activation).
+    #[test]
+    fn form_005_paste_custom_row_cursor_burst_typing_and_up_scope() {
+        let field = FormField::new("region", FieldKind::Single)
+            .titled("Region")
+            .with_options(vec![option("eu", "Europe")])
+            .custom();
+        let mut form = FormPrompt::new("f-5", "Form", None, vec![field]);
+        form.select_custom_row();
+        assert_eq!(form.selected(), 1, "custom row follows the configured row");
+        assert_eq!(form.paste("berlin"), PasteOutcome::CustomRowOpened);
+        assert!(form.editing());
+        assert_eq!(form.input(), "berlin");
+        assert_eq!(form.answer("region"), Some(&FormValue::Text("berlin".into())));
+        assert_eq!(form.resolution(), None, "paste never submits");
+        assert_eq!(form.error(), "");
+
+        // Paste into the active editor inserts at the cursor, not at the end.
+        form.set_cursor(3);
+        assert_eq!(form.paste("XY"), PasteOutcome::InsertedInEditor);
+        assert_eq!(form.input(), "berXYlin");
+        assert_eq!(form.cursor(), 5);
+
+        // Burst typing is routed character by character without loss. Textual
+        // answers stay in the editor until committed (`form.tsx:211-228`).
+        let mut typed = FormPrompt::new("f-5b", "Form", None, vec![FormField::new("q", FieldKind::Text)]);
+        for character in "burst".chars() {
+            assert!(typed.handle_key(FormKey::Char(character)));
+        }
+        assert_eq!(typed.editor_text(), "burst");
+        assert_eq!(typed.answer("q"), None, "typing does not commit the answer");
+        assert!(typed.handle_key(FormKey::Tab));
+        assert_eq!(typed.answer("q"), Some(&FormValue::Text("burst".into())));
+
+        // Up only leaves the editor from the first visual line.
+        assert!(form.editing());
+        assert!(!form.up_in_editor(2), "wrapped line keeps the editor");
+        assert!(form.editing());
+        assert!(!form.up_in_editor(1));
+        assert!(form.editing());
+        assert!(form.up_in_editor(0));
+        assert!(!form.editing());
+        assert_eq!(form.selected(), 0);
+    }
+
+    // FORM-006 — space toggles multiselect only, an optional empty
+    // multiselect omits its answer, and validation waits for the submit
+    // point.
+    // Upstream: form.tsx:753-755 (space binding), form.tsx:257-267 (empty
+    // optional multiselect), util/form.ts:72-75, form.tsx:381-448 (commit
+    // validation), form.tsx:513-525 (submit validation).
+    #[test]
+    fn form_006_space_toggle_empty_multiselect_and_validation_timing() {
+        let multi_field = FormField::new("topics", FieldKind::Multi)
+            .titled("Topics")
+            .with_options(vec![option("a", "Alpha"), option("b", "Beta")]);
+        let mut form = FormPrompt::new("f-6", "Form", None, vec![multi_field]);
+        assert!(form.handle_key(FormKey::Space));
+        assert_eq!(form.answer("topics"), Some(&FormValue::List(vec!["a".into()])));
+        assert!(form.handle_key(FormKey::Space));
+        assert_eq!(form.answer("topics"), None, "optional empty multiselect is omitted");
+        // Toggling by digit also works and keeps both values.
+        assert!(form.handle_key(FormKey::Digit(1)));
+        assert!(form.handle_key(FormKey::Down));
+        assert!(form.handle_key(FormKey::Space));
+        assert_eq!(form.answer("topics"), Some(&FormValue::List(vec!["a".into(), "b".into()])));
+
+        // Space never toggles (or answers) a single choice.
+        let mut single = FormPrompt::new(
+            "f-6s",
+            "Form",
+            None,
+            vec![FormField::new("region", FieldKind::Single)
+                .titled("Region")
+                .with_options(vec![option("eu", "Europe")])],
+        );
+        assert!(!single.handle_key(FormKey::Space));
+        assert_eq!(single.answer("region"), None);
+        assert!(!single.editing());
+
+        // Validation is deferred until the matching submit point.
+        let mut textual = FormPrompt::new(
+            "f-6t",
+            "Form",
+            None,
+            vec![FormField { min_length: Some(3), required: true, ..FormField::new("name", FieldKind::Text) }],
+        );
+        assert!(textual.handle_key(FormKey::Char('a')));
+        assert!(textual.handle_key(FormKey::Char('b')));
+        assert_eq!(textual.error(), "", "typing is not validated early");
+        assert_eq!(textual.editor_text(), "ab");
+        assert_eq!(textual.answer("name"), None, "typing does not commit");
+        assert!(textual.handle_key(FormKey::Tab));
+        assert_eq!(textual.error(), "Must be at least 3 characters", "tab commit validates");
+        assert_eq!(textual.answer("name"), None);
+        // Enter on the review tab re-validates and refuses to submit.
+        let mut empty_required = FormPrompt::new(
+            "f-6r",
+            "Form",
+            None,
+            vec![FormField::new("name", FieldKind::Text).required(), FormField::new("other", FieldKind::Text)],
+        );
+        empty_required.select_tab(2);
+        assert!(empty_required.confirm());
+        assert_eq!(empty_required.submit(), None);
+        assert_eq!(empty_required.error(), "Answer required");
+        assert_eq!(empty_required.resolution(), None);
+    }
+
+    // FORM-007 — opening/copying a URL does not acknowledge it, review
+    // errors/progress count external acknowledgement, and the review only
+    // offers scrolling when it overflows.
+    // Upstream: form.tsx:477-511 (external actions), form.tsx:513-517
+    // (submit gate), form.tsx:1063-1123 (review), form.tsx:140,1145-1149
+    // (review viewport/scroll hint).
+    #[test]
+    fn form_007_external_acknowledgement_and_review_scroll() {
+        let external = FormField {
+            url: Some("https://example.com/approve".into()),
+            ..FormField::new("site", FieldKind::External).titled("Site")
+        };
+        let fields = vec![external, text_default(FormField::new("note", FieldKind::Text).titled("Note"), "ok")];
+        let mut form = FormPrompt::new("f-7", "Form", None, fields);
+        assert_eq!(form.action_label(), "open link");
+        // Submission is refused while the external action is unacknowledged.
+        assert_eq!(form.submit(), None);
+        assert_eq!(form.error(), "External action must be acknowledged: Site");
+        // Opening and copying only mark the action ready.
+        form.mark_external_opened();
+        assert!(form.external_ready("site"));
+        assert_eq!(form.answer("site"), None);
+        assert_eq!(form.action_label(), "I finished");
+        assert_eq!(form.submit(), None, "opened is not acknowledged");
+        form.mark_external_copied();
+        assert_eq!(form.answer("site"), None);
+        // Review shows the acknowledgement requirement as an error state, and
+        // progress only counts acknowledged external fields
+        // (`form.tsx:123-129`).
+        let row = form.review_rows().into_iter().find(|row| row.label == "Site").unwrap();
+        assert_eq!(row.state, ReviewState::AcknowledgeRequired);
+        assert_eq!(row.display, "(acknowledgement required)");
+        assert_eq!(form.answered_count(), 1, "external field is not complete yet");
+        // Enter acknowledges once ready, and only then can the form submit.
+        form.acknowledge_external();
+        assert_eq!(form.answer("site"), Some(&FormValue::Bool(true)));
+        assert_eq!(form.answered_count(), 2, "acknowledged external counts");
+        let row = form.review_rows().into_iter().find(|row| row.label == "Site").unwrap();
+        assert_eq!(row.state, ReviewState::Acknowledged);
+        let answer = form.submit().expect("acknowledged form submits");
+        assert_eq!(answer.get("site"), Some(&FormValue::Bool(true)));
+        assert_eq!(answer.get("note"), Some(&FormValue::Text("ok".into())));
+        // Scroll is offered only when the review overflows the viewport.
+        assert_eq!(form.review_max_height(30), 16);
+        assert_eq!(form.review_max_height(10), 3);
+        assert!(!form.review_scroll_available(16, 30));
+        assert!(form.review_scroll_available(17, 30));
+        assert!(form.review_scroll_available(4, 10));
+    }
+
+    // FORM-008 — terminal/stale/revalidation-failed forms restore composer
+    // focus and drafts, and keyboard scope never leaks into the transcript.
+    // Upstream: form.tsx:211-228 (draft on unmount), form.tsx:66,536-553
+    // (mode scope), form.tsx:607-617,642-765 (scoped key layers).
+    #[test]
+    fn form_008_dismissal_focus_drafts_and_keyboard_scope() {
+        let fields = || vec![text_default(FormField::new("name", FieldKind::Text).titled("Name"), "Ada")];
+        for reason in [DismissReason::Terminal, DismissReason::Stale, DismissReason::RevalidationFailed] {
+            let mut form = FormPrompt::new("f-8", "Form", None, fields());
+            form.select_tab(0);
+            form.set_cursor(3);
+            form.editor_insert("!");
+            let dismissal = form.dismiss(reason);
+            assert_eq!(dismissal.focus, FocusTarget::Composer, "{reason:?} restores composer focus");
+            let draft = dismissal.draft.unwrap_or_else(|| panic!("{reason:?} keeps a draft"));
+            let restored = FormPrompt::restore("f-8", "Form", None, fields(), draft);
+            assert_eq!(restored.focus_target(), FocusTarget::Overlay);
+            // Uncommitted editor text is captured into the draft
+            // (`form.tsx:211-228`), so the restored editor shows it while the
+            // committed answer map still holds the last committed value.
+            assert_eq!(restored.editor_text(), "Ada!");
+            assert_eq!(restored.input(), "Ada!");
+            assert_eq!(restored.answer("name"), Some(&FormValue::Text("Ada".into())));
+        }
+        // Cancelled/resolved forms leave no draft behind.
+        let mut cancelled = FormPrompt::new("f-8c", "Form", None, fields());
+        cancelled.handle_key(FormKey::Escape);
+        let dismissal = cancelled.dismiss(DismissReason::Cancelled);
+        assert_eq!(dismissal.focus, FocusTarget::Composer);
+        assert_eq!(dismissal.draft, None);
+
+        // An inactive overlay consumes nothing: no tab move, no dismissal, no
+        // action reaching the transcript underneath.
+        let mut inactive = FormPrompt::new(
+            "f-8i",
+            "Form",
+            None,
+            vec![FormField::new("a", FieldKind::Text), FormField::new("b", FieldKind::Text)],
+        );
+        inactive.set_active(false);
+        assert!(!inactive.handle_key(FormKey::Tab));
+        assert_eq!(inactive.tab(), 0);
+        assert!(!inactive.handle_key(FormKey::Escape));
+        assert_eq!(inactive.resolution(), None);
+        assert!(!inactive.handle_key(FormKey::Char('x')));
+        assert_eq!(inactive.answer("a"), None);
+        // Reactivated, the same keys are consumed by the overlay.
+        inactive.set_active(true);
+        assert!(inactive.handle_key(FormKey::Tab));
+        assert_eq!(inactive.tab(), 1);
     }
 }
