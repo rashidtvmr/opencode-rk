@@ -223,6 +223,54 @@ def agent_definition(cfg, route):
     return {key: row[key] for key in ("description", "mode", "model", "steps", "system", "variant") if key in row}
 
 
+def model_ref(definition, route):
+    """Bind the explicit session model before any CLI dispatch (fail closed).
+
+    Mirrors Model.Ref.parse in packages/schema/src/model.ts (pin
+    450e7b92412c780a7b5a75226bb8d49aaca24e22): the provider is the text before
+    the FIRST "/", the optional variant follows the FIRST "#" after that
+    slash, and the model id between them may itself contain slashes. A bound
+    session model makes the runner raise ModelUnavailableError
+    (session/runner/model.ts) instead of silently resolving a foreign default
+    provider.
+    """
+    model = definition.get("model")
+    if isinstance(model, dict):
+        provider = model.get("providerID")
+        ident = model.get("model")
+        variant = model.get("variant")
+        if (not isinstance(provider, str) or not provider or "/" in provider or "#" in provider):
+            raise Failure("authorized route model object has no usable providerID: " + route, "runtime")
+        if not isinstance(ident, str) or not ident or "#" in ident:
+            raise Failure("authorized route model object has no usable model id: " + route, "runtime")
+        if variant is not None and (not isinstance(variant, str) or not variant or "#" in variant):
+            raise Failure("authorized route model object variant is empty or malformed: " + route, "runtime")
+    elif isinstance(model, str):
+        cut = model.find("/")
+        if cut <= 0 or "#" in model[:cut]:
+            raise Failure("authorized route model lacks provider/model separation: " + route, "runtime")
+        provider, rest = model[:cut], model[cut + 1:]
+        split = rest.find("#")
+        if split < 0:
+            ident, variant = rest, None
+        else:
+            ident, variant = rest[:split], rest[split + 1:]
+        if not ident:
+            raise Failure("authorized route model id is empty: " + route, "runtime")
+        if variant is not None and ("#" in variant or not variant):
+            raise Failure("authorized route model variant is empty or malformed: " + route, "runtime")
+    else:
+        raise Failure("authorized route has no explicit configured model: " + route, "runtime")
+    row = definition.get("variant")
+    if row is not None and (not isinstance(row, str) or not row or "#" in row):
+        raise Failure("authorized route agent variant is empty or malformed: " + route, "runtime")
+    if variant is None and row:
+        variant = row
+    elif variant is not None and row and row != variant:
+        raise Failure("authorized route model and agent variant disagree: " + route, "runtime")
+    return provider + "/" + ident + ("" if variant is None else "#" + variant)
+
+
 def permissions(grants, editable):
     rules = [{"action": "*", "resource": "*", "effect": "deny"}]
     rules.extend({"action": a, "resource": "*", "effect": "allow"} for a in ("read", "glob", "grep"))
@@ -383,6 +431,10 @@ def agent(payload, cfg, workspace, route, valid, log):
     else:
         exe = cfg["runtime"]["executable"]
         definition = agent_definition(cfg, route)
+        # Bind the route's exact model identity before dispatch; the CLI then
+        # reports ModelUnavailableError instead of silently switching to a
+        # foreign default provider when the location catalog misses this model.
+        model = model_ref(definition, route)
         # A route selects a model/provider, not a permanent research-only role.
         definition["system"] = (
             "You are a scoped software-delivery worker. Follow the role and exact "
@@ -402,7 +454,8 @@ def agent(payload, cfg, workspace, route, valid, log):
             if not isinstance(rules, list) or rules[-len(expected):] != expected:
                 raise Failure("effective agent permissions do not match the scoped overlay", "authority")
             isolation = ["--standalone"] if cfg["runtime"].get("standalone", False) else []
-            result = run([exe, "run", *isolation, "--agent", route, "--format", "json", "--auto", prompt],
+            result = run([exe, "run", *isolation, "--agent", route, "--model", model,
+                          "--format", "json", "--auto", prompt],
                          workspace, valid=valid, timeout=cfg["stage_timeout"],
                          max_bytes=cfg["max_output_bytes"],
                          env=environment(agent=True, forward=cfg["runtime"].get("forward_env", [])), log=log,
