@@ -418,6 +418,39 @@ mod page_spacing_tests {
     }
 
     #[test]
+    fn sidebar_footer_renders_only_the_confirmed_session_directory() {
+        let mut view = NativeView::new(148, 30);
+        view.set_session_route(true);
+        let frame = view.render("draft", &[], false, &[]);
+        assert!(
+            !frame.iter().any(|row| row.contains("/Users/mymac/Projects/demo")),
+            "no footer without a confirmed directory"
+        );
+        view.set_sidebar_location(Some("/Users/mymac/Projects/demo".to_owned()), None);
+        let frame = view.render("draft", &[], false, &[]);
+        assert!(
+            frame.iter().any(|row| row.contains("/Users/mymac/Projects/demo")),
+            "confirmed directory paints the pinned footer: {frame:?}"
+        );
+        // Wide/CJK paths stay inside the 38-cell footer budget.
+        view.set_sidebar_location(Some("/tmp/工作🦀/project".to_owned()), None);
+        let frame = view.render("draft", &[], false, &[]);
+        let footer = frame
+            .iter()
+            .find(|row| row.contains("project"))
+            .expect("CJK path stays visible");
+        assert!(
+            crate::native_sidebar::cell_width(footer.trim_end()) <= 148,
+            "footer never overruns the pane"
+        );
+        // Clearing the fact hides the footer; a stale session path never
+        // survives a binding change.
+        view.set_sidebar_location(None, None);
+        let frame = view.render("draft", &[], false, &[]);
+        assert!(!frame.iter().any(|row| row.contains("project")));
+    }
+
+    #[test]
     fn accepted_projection_invalidates_old_sidebar_coordinates_until_repaint() {
         let mut view = NativeView::new(148, 30);
         view.set_session_route(true);
@@ -912,6 +945,14 @@ impl NativeView {
     /// the process cwd.
     pub fn set_project_directory(&mut self, directory: String) {
         self.set_workspace(directory);
+    }
+
+    /// Session sidebar footer location (`footer.tsx:87-109`). The directory is
+    /// the authenticated session's own `directory`; the branch is shown only
+    /// when a producer confirmed it. `None` hides the pinned footer instead of
+    /// reusing another session's or the Home workspace's path.
+    pub fn set_sidebar_location(&mut self, directory: Option<String>, branch: Option<String>) {
+        self.status.set_working_directory(directory, branch);
     }
 
     /// Catalogue display names are presentation only. The status retains the

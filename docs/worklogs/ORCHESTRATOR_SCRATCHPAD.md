@@ -9776,3 +9776,23 @@ builds. Two already worked; one had a real root cause and is fixed.
   Context/Limit/footer/onboarding, footer hover menu hit-test, MCP click
   semantics (open vs toggle), disclosure persistence, onboarding affordances,
   and staged-cell goldens for SIDE-03..15.
+
+## 2026-11-01 — Sidebar footer location wired (SIDE-13 landed)
+
+- **Contract**: `feature-plugins/sidebar/footer.tsx:87-109` pins the session's
+  working directory (and branch when known) at the sidebar bottom; the label is
+  `path[:branch]` truncated by `truncateFilePath` to 38 cells.
+- **Fact source**: the authenticated session record's own `directory`
+  (`crates/server/src/lib.rs:1050-1056`, listing rows too). The Home workspace
+  label is NOT reused: `NativeView::set_sidebar_location` passes only the
+  snapshot directory, so an unknown directory hides the footer instead of
+  showing another route's path.
+- **Branch**: no VCS observer exists, so `None` — the label renders the bare
+  path rather than inventing a branch.
+- **Validation**: unit test `sidebar_footer_renders_only_the_confirmed_session_directory`
+  (present/absent/CJK); the installed journey now creates its session with a
+  real directory and asserts the path inside the sidebar band (column >= 110)
+  on the reload leg, next to the existing model/duration assertions.
+- **Remaining SIDE gaps**: cost/limit classes need producers (usage classes
+  and model limits are not on the live wire), footer hover menu + copy/open
+  actions, MCP click semantics, disclosure persistence, onboarding actions.

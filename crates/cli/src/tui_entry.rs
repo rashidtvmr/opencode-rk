@@ -5347,6 +5347,14 @@ fn native_loop(
             .and_then(|snapshot| snapshot.directory.clone())
             .unwrap_or_else(current_workspace_label),
     );
+    // Session sidebar footer (`footer.tsx:87-109`): the active session's own
+    // authenticated directory, never the Home workspace fallback. No VCS
+    // observer exists yet, so the branch stays absent (the label renders the
+    // bare path) rather than inventing one.
+    view.set_sidebar_location(
+        live.as_ref().and_then(|snapshot| snapshot.directory.clone()),
+        None,
+    );
     view.set_parent_session(
         live.as_ref()
             .is_some_and(|snapshot| snapshot.parent_session),
