@@ -11,6 +11,7 @@
 //! Honest-capability rule: labels/`Unavailable` lines are emitted from real
 //! connection/backend facts only — never dummy data.
 
+use crate::native_modal_layer::DialogRect;
 use crate::native_view_chat::ChatView;
 use crate::native_tabs::TabReservation;
 use crate::native_view_dialogs::DialogView;
@@ -48,6 +49,17 @@ impl DialogSize {
             Self::Medium => 60,
             Self::Large => 88,
             Self::XLarge => 116,
+        }
+    }
+
+    /// The same size class expressed in the dialog stack's terms
+    /// (`crate::native_modal_layer::DialogSize`, `dialogWidth()` at
+    /// `packages/tui/src/ui/dialog.tsx:30-34`).
+    fn stack(self) -> crate::native_modal_layer::DialogSize {
+        match self {
+            Self::Medium => crate::native_modal_layer::DialogSize::Medium,
+            Self::Large => crate::native_modal_layer::DialogSize::Large,
+            Self::XLarge => crate::native_modal_layer::DialogSize::XLarge,
         }
     }
 }
@@ -89,11 +101,14 @@ pub struct NativeView {
     sidebar_span_styles: Vec<(u16, u16, u16, crate::native_theme_runtime::Slot, u32)>,
     command_palette: crate::native_command_palette::CommandPalette,
     status: StatusView,
-    /// Held from day one; `DialogView::request/answer` wiring is explicitly
-    /// pending until the dialogs part delivers its request/answer API
-    /// (inventing calls here would not compile). The live `/connect`,
-    /// `/models` and `/connect` credential dialogs remain the existing
-    /// `native_setup` center-dialog path in `tui_entry`.
+    /// Stack-owning dialog facade. `open_*`, `answer`, `ack`, `is_open` and
+    /// `intercepts_input` are wired end to end: the shell routes keys, paste
+    /// and ACK correlation here, and the modal rows painted by `render` are
+    /// composed from this stack's top entry (`DialogView::compose_at`), so the
+    /// painted dialog and the input-gating entry are one object. The
+    /// `/connect` and `/models` credential pickers still paint through the
+    /// existing `native_setup` center-dialog overlay path in `tui_entry`; they
+    /// are overlays, not stack entries.
     pub dialogs: DialogView,
     /// Facade-owned permission retry correlation (NOT part of the approved
     /// `DialogView`): the attempt number of the last dispatched reply whose
@@ -786,8 +801,18 @@ impl NativeView {
         self.placeholder_index = index % 3;
     }
 
+    /// Size class of the center overlay.
+    ///
+    /// Writes the dialog store the modal stack reads (`dialog.setSize()`,
+    /// `packages/tui/src/ui/dialog.tsx:432-434`) AND the local preset that
+    /// positions overlays with no stack entry (command palette, theme page,
+    /// generic action overlays). Opening a stack dialog still resets the store
+    /// to medium (`replace()`, `:400-419`), so an overlay size never leaks into
+    /// the next dialog; the local preset survives that reset, which is why the
+    /// two are kept separately.
     pub fn set_dialog_size(&mut self, size: DialogSize) {
         self.dialog_size = size;
+        self.dialogs.set_dialog_size(size.stack());
     }
 
     pub fn set_composer_agent(&mut self, agent: Option<String>, variant: Option<String>) {
@@ -897,7 +922,17 @@ impl NativeView {
         // is NOT the outer panel x; the same +4 header inset holds in all 24
         // capture cases (80-wide horizontal fixtures: header 14, panel 10).
         let center_cols = self.layout.cols;
-        let width = center_cols.saturating_sub(2).min(self.dialog_size.width());
+        // The dialog store is the presentation authority while a dialog is
+        // open (`ui/dialog.tsx:432-434`): the panel that paints and the entry
+        // that gates input must use one size class. Overlays with no stack
+        // entry (command palette, theme page, generic action overlays) keep
+        // the local preset.
+        let size = if self.dialogs.is_open() {
+            self.dialogs.dialog_size()
+        } else {
+            self.dialog_size.stack()
+        };
+        let width = center_cols.saturating_sub(2).min(size.width());
         let box_id = if self.command_palette.is_open() {
             crate::native_box_style::BoxId::Menu
         } else {
@@ -937,6 +972,31 @@ impl NativeView {
             content_width: width.saturating_sub(2 * inset),
             bottom_padding: padding,
             backdrop_alpha: 150,
+        }
+    }
+
+    /// Panel rect handed to [`DialogView::compose_at`] for this frame.
+    ///
+    /// `compose_at` derives the body width by re-applying `DialogLayout`'s
+    /// side padding (`packages/tui/src/ui/dialog.tsx:139-157`, `DIALOG_INSET`
+    /// = 3 per side, and `native_view_dialogs::frame_over`), while the native
+    /// modal keeps its capture-backed two-cell framing (`content_x - x`,
+    /// asserted by the rendered-view parity fixture
+    /// `modal_heading_uses_upstream_top_padding_and_inner_two_cell_inset`).
+    /// The rect therefore carries the body at exactly the capture-measured
+    /// width, so the composed rows, [`ModalPresentation`] and pointer hit
+    /// testing all agree on one body width. `x`/`y` keep the content origin
+    /// and `height` is the full terminal height, which is the same value
+    /// [`NativeView::dialog_layout_metrics`] gives the layout for
+    /// terminal-derived select viewports.
+    fn dialog_frame_rect(&self, modal: ModalPresentation) -> DialogRect {
+        DialogRect {
+            x: modal.content_x,
+            y: modal.content_y,
+            width: modal
+                .content_width
+                .saturating_add(2 * crate::native_modal_layer::DIALOG_INSET),
+            height: self.layout.rows,
         }
     }
 
@@ -2611,14 +2671,26 @@ impl NativeView {
         // conversation column: dialog.tsx medium=60, maxWidth=cols-2, top=h/4.
         let modal_geometry = self.modal_presentation();
         let dialog_width = modal_geometry.width;
-        let modal_lines = if self.dialogs.is_open() && permission_rows.is_none() {
+        let modal_content_height = self.modal_content_height();
+        // Rows, panel and entry come from the dialog stack in ONE derivation
+        // (`ui/dialog.tsx:472-479` paints only `stack.at(-1)`), so the rows
+        // that paint can never belong to a different dialog than the entry
+        // that gates input. A closed stack composes nothing. The inline
+        // permission body (`render_typed_permission`) paints the same dialog
+        // in the chat column, so it keeps the overlay path here.
+        let dialog_frame = if permission_rows.is_none() {
             self.dialogs
-                .render_styled_with_metrics(self.dialog_layout_metrics(modal_geometry.content_width))
+                .compose_at(self.dialog_frame_rect(modal_geometry), modal_content_height)
+        } else {
+            None
+        };
+        let modal_lines = if let Some(frame) = dialog_frame {
+            frame.rows
         } else if self.command_palette.is_open() {
             self.command_palette
-                .render_styled(modal_geometry.content_width, self.modal_content_height())
+                .render_styled(modal_geometry.content_width, modal_content_height)
         } else if self.pages.page() == Page::Theme {
-            let height = self.modal_content_height().min(16);
+            let height = modal_content_height.min(16);
             let mut lines = self
                 .pages
                 .render_styled(usize::from(modal_geometry.content_width), height);
@@ -2632,7 +2704,7 @@ impl NativeView {
             // overlay consume the reserved footer row.
             overlay
                 .iter()
-                .take(self.modal_content_height())
+                .take(modal_content_height)
                 .enumerate()
                 .map(|(index, text)| crate::native_ui_style::Line {
                     text: text.clone(),
@@ -2649,7 +2721,6 @@ impl NativeView {
                 })
                 .collect()
         };
-        let modal_content_height = self.modal_content_height();
         // Modal rows clip at the shared footer of the FULL composed frame
         // (`content_y` is absolute); `height` above is the tab-reduced
         // render height and must not bound modal rows.
@@ -6248,5 +6319,160 @@ mod p05_footer_caller_regression {
         assert!(!idle_row.contains("exit shell mode"));
         assert!(idle_row.contains("/fixture/project"), "directory restored: {idle_row:?}");
         assert!(idle_row.contains("Context Usage 1000/10000"), "persistent context restored: {idle_row:?}");
+    }
+}
+
+#[cfg(test)]
+mod dialog_stack_composition_tests {
+    use super::*;
+    use crate::native_modal_layer::{DialogSize as StackSize, ModalKey};
+    use crate::native_view_dialogs::{DialogKind, DialogRequest};
+
+    fn confirm(title: &str) -> DialogRequest {
+        DialogRequest {
+            id: "req-1".to_owned(),
+            session_id: "ses-1".to_owned(),
+            kind: DialogKind::Confirm,
+            title: title.to_owned(),
+            choices: vec!["continue".to_owned(), "cancel".to_owned()],
+            message: None,
+            disabled: Vec::new(),
+            error: None,
+        }
+    }
+
+    /// The panel that paints and the entry that gates input read one size
+    /// class: the dialog store (`ui/dialog.tsx:432-434`), not a parallel
+    /// view-local preset.
+    #[test]
+    fn dialog_panel_width_comes_from_the_stack_size_class() {
+        let mut view = NativeView::new(120, 32);
+        view.set_session_route(true);
+        view.set_dialog_size(DialogSize::Medium);
+        view.dialogs
+            .open_request_sized(confirm("Stack sized dialog"), StackSize::Large, false)
+            .expect("valid request");
+
+        let modal = view.modal_presentation();
+        assert_eq!(modal.width, 88, "panel width follows the dialog store");
+        assert_eq!(modal.x, 16);
+        assert_eq!(modal.content_width, 84);
+        let frame = view.render("", &[], false, &[]);
+        assert_eq!(
+            frame[usize::from(modal.content_y)].find("Stack sized dialog"),
+            Some(usize::from(modal.content_x)),
+            "the composed heading lands on the presentation content origin"
+        );
+    }
+
+    /// `set_dialog_size` is the shell's `dialog.setSize()`: it writes the
+    /// store, while opening resets it (`replace()`) so an overlay preset never
+    /// leaks into the next dialog. The local preset still positions overlays
+    /// that have no stack entry.
+    #[test]
+    fn set_dialog_size_writes_the_store_and_opening_resets_it() {
+        let mut view = NativeView::new(120, 32);
+        view.set_dialog_size(DialogSize::XLarge);
+        assert_eq!(view.dialogs.dialog_size(), StackSize::XLarge);
+        assert_eq!(view.modal_presentation().width, 116, "closed overlay preset");
+
+        view.dialogs
+            .open_permission("req-x", "ses-x", "run fixture command")
+            .expect("open permission");
+        assert_eq!(view.dialogs.dialog_size(), StackSize::Medium, "replace() resets the store");
+        assert_eq!(view.modal_presentation().width, 60, "open dialog paints the store size");
+
+        view.dialogs.close();
+        assert_eq!(
+            view.modal_presentation().width,
+            116,
+            "overlay preset survives the dialog store reset"
+        );
+    }
+
+    /// Rows come from the stack entry itself: closing through the modal stack
+    /// (Escape route) removes the painted rows, and no boolean mirror can keep
+    /// them on screen.
+    #[test]
+    fn composed_rows_belong_to_the_stack_entry_and_stop_when_it_closes() {
+        let mut view = NativeView::new(120, 32);
+        view.set_session_route(true);
+        view.dialogs
+            .open_permission("req-1", "ses-1", "write /tmp/example")
+            .expect("open permission");
+        let frame = view.render("", &[], false, &[]);
+        assert!(
+            frame.iter().any(|row| row.contains("write /tmp/example")),
+            "the open entry paints"
+        );
+
+        let route = view.dialogs.escape_route(false);
+        assert_eq!(route.key, ModalKey::Closed);
+        assert!(!view.dialogs.is_open());
+        let frame = view.render("", &[], false, &[]);
+        assert!(
+            !frame.iter().any(|row| row.contains("write /tmp/example")),
+            "a closed stack paints no dialog rows"
+        );
+    }
+
+    /// Paint and pointer input address the same cells: the footer cell a user
+    /// clicks is the cell the composed row painted, at the documented content
+    /// width, and the rows are exactly the composed rows.
+    #[test]
+    fn painted_dialog_cells_are_the_cells_pointer_hit_testing_addresses() {
+        let mut view = NativeView::new(120, 32);
+        view.set_session_route(true);
+        view.dialogs
+            .open_permission("req-9", "ses-9", "run fixture command")
+            .expect("open permission");
+        let modal = view.modal_presentation();
+        let budget = view.modal_content_height();
+        let frame = view.render("", &[], false, &[]);
+
+        let first = usize::from(modal.content_y);
+        let (row_index, footer_start) = frame
+            .iter()
+            .enumerate()
+            .skip(first)
+            .find_map(|(row, line)| {
+                line.find("click here confirm")
+                    .map(|start| (row - first, start))
+            })
+            .expect("painted confirm footer");
+        assert!(footer_start >= usize::from(modal.content_x));
+        let column = footer_start - usize::from(modal.content_x);
+        assert_eq!(
+            modal.content_point(
+                u16::try_from(footer_start).expect("column fits"),
+                u16::try_from(first + row_index).expect("row fits"),
+                budget
+            ),
+            Some((u16::try_from(column).expect("column fits"), row_index)),
+            "pointer coordinates resolve to the painted footer cell"
+        );
+        assert!(
+            view.dialogs.confirm_at_cell_with_metrics(
+                view.dialog_layout_metrics(modal.content_width),
+                row_index,
+                column
+            ),
+            "the hit-test path confirms the painted footer cell"
+        );
+
+        let composed = view
+            .dialogs
+            .compose_at(view.dialog_frame_rect(modal), budget)
+            .expect("an open stack composes");
+        assert_eq!(composed.rows.len(), budget);
+        for (index, row) in composed.rows.iter().enumerate() {
+            let start = usize::from(modal.content_x);
+            let end = start + row.text.len();
+            assert_eq!(
+                &frame[first + index][start..end],
+                row.text.as_str(),
+                "painted row {index} is the composed row"
+            );
+        }
     }
 }
