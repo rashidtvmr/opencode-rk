@@ -392,6 +392,44 @@ impl Transcript {
     pub fn render_page(&self, page: &TranscriptPage, height: usize, width: usize) -> Vec<String> {
         render_lines(self.page(page, height), width)
     }
+
+    /// Position of a retained line id.
+    ///
+    /// Row identity is the stable anchor used by the session transcript
+    /// (`native_message_rows::AnchorTarget`); the line id plays the same role
+    /// for this bounded scrollback.
+    #[must_use]
+    pub fn index_of(&self, id: u64) -> Option<usize> {
+        self.lines.iter().position(|line| line.id == id)
+    }
+
+    /// Start offset of the window that ends at `id`.
+    ///
+    /// Unlike [`page`](Self::page) this is keyed by line identity, so new
+    /// arrivals do not move the anchored view. `None` when the line was
+    /// evicted or `height == 0`.
+    #[must_use]
+    pub fn anchored_offset(&self, id: u64, height: usize) -> Option<usize> {
+        let height = height.min(MAX_WINDOW);
+        if height == 0 {
+            return None;
+        }
+        let end = self.index_of(id)? + 1;
+        Some(end.saturating_sub(height))
+    }
+
+    /// Lines from [`anchored_offset`](Self::anchored_offset) to the anchored
+    /// line, inclusive. Empty when the anchor is gone.
+    #[must_use]
+    pub fn anchored_page(&self, id: u64, height: usize) -> &[TranscriptLine] {
+        match self.anchored_offset(id, height) {
+            Some(start) => {
+                let end = self.index_of(id).map_or(start, |index| index + 1);
+                &self.lines[start..end]
+            }
+            None => &[],
+        }
+    }
 }
 
 /// Pinned-to-bottom scroll state for [`Transcript::page`].
@@ -762,5 +800,39 @@ mod tests {
         let fitting = "e\u{0301}  ";
         assert_eq!(render_lines(&[TranscriptLine { id: 1, text: fitting.into() }], 3), vec![fitting]);
         assert!(render_lines(&[TranscriptLine { id: 2, text: "界a".repeat(MAX_WINDOW) }], 1).len() <= MAX_WINDOW);
+    }
+
+    #[test]
+    fn anchored_page_is_pinned_by_line_identity() {
+        let mut t = Transcript::new();
+        let mut ids = Vec::new();
+        for i in 0..5 {
+            ids.push(t.push(&format!("line {i}")));
+        }
+        let anchor = ids[3];
+        assert_eq!(t.index_of(anchor), Some(3));
+        assert_eq!(t.anchored_offset(anchor, 2), Some(2));
+        let page: Vec<u64> = t.anchored_page(anchor, 2).iter().map(|line| line.id).collect();
+        assert_eq!(page, vec![ids[2], ids[3]]);
+        // New arrivals do not move an identity-pinned page.
+        for i in 0..10 {
+            t.push(&format!("new {i}"));
+        }
+        let page: Vec<u64> = t.anchored_page(anchor, 2).iter().map(|line| line.id).collect();
+        assert_eq!(page, vec![ids[2], ids[3]]);
+        assert_eq!(t.anchored_offset(anchor, 0), None);
+        assert!(t.anchored_page(999_999, 2).is_empty());
+    }
+
+    #[test]
+    fn anchored_page_reports_evicted_line_instead_of_wrong_content() {
+        let mut t = Transcript::new();
+        let anchor = t.push("oldest");
+        for i in 0..MAX_SCROLLBACK {
+            t.push(&format!("fill {i}"));
+        }
+        assert_eq!(t.index_of(anchor), None, "anchor evicted from bounded scrollback");
+        assert_eq!(t.anchored_offset(anchor, 10), None);
+        assert!(t.anchored_page(anchor, 10).is_empty());
     }
 }

@@ -539,6 +539,22 @@ pub fn project_history_entries(messages: &[Value]) -> Vec<(String, ChatMessage)>
     projected
 }
 
+/// Project a bounded history page into the shared grouped row model. Every row
+/// identity comes from the same `project_history_entries` pair used by the
+/// anchor/render path; no second projection exists.
+#[must_use]
+pub fn project_history_rows(messages: &[Value]) -> Vec<crate::native_message_rows::SessionRow> {
+    project_history_rows_with(messages, crate::native_message_rows::Verbosity::Medium)
+}
+
+#[must_use]
+pub fn project_history_rows_with(
+    messages: &[Value],
+    verbosity: crate::native_message_rows::Verbosity,
+) -> Vec<crate::native_message_rows::SessionRow> {
+    crate::native_message_rows::rows_from_chat_entries(&project_history_entries(messages), verbosity)
+}
+
 #[cfg(test)]
 mod history_window_tests {
     use super::*;
@@ -692,6 +708,45 @@ mod history_window_tests {
         assert!(ids.windows(2).all(|pair| pair[0] != pair[1]));
         assert!(window.at_newest_page());
     }
+
+    #[test]
+    fn window_rows_use_the_shared_model_and_require_boundary_fill() {
+        use crate::native_message_rows::{GroupKind, SessionRow, Verbosity};
+        let cursor = "11111111-1111-4111-8111-111111111111";
+        // Assistant with only a persisted reasoning summary: its oldest row is
+        // a reasoning group, so a page cut here is provisional.
+        let reasoning = json!({
+            "id": "22222222-2222-4222-8222-222222222222",
+            "role": "assistant",
+            "body": {"storage": "inline", "text": " "},
+            "reasoning_summary": "plan"
+        });
+        let mut window = NativeHistoryWindow::new(&[reasoning], Some(cursor.to_owned()));
+        assert!(window.has_older());
+        assert_eq!(
+            window.rows(Verbosity::Medium),
+            project_history_rows(window.messages()),
+            "window rows and page rows share one projection"
+        );
+        assert!(matches!(
+            window.rows(Verbosity::Medium).first(),
+            Some(SessionRow::Group(group)) if group.kind == GroupKind::Reasoning
+        ));
+        assert!(window.needs_group_boundary_fill(Verbosity::Medium));
+
+        let older = json!({
+            "id": "33333333-3333-4333-8333-333333333333",
+            "role": "user",
+            "body": {"storage": "inline", "text": "older prompt"}
+        });
+        assert!(window
+            .load_older(|_, _| Ok(json!({"messages": [older], "next_before": null})))
+            .unwrap());
+        assert!(
+            !window.needs_group_boundary_fill(Verbosity::Medium),
+            "a message row now precedes the group, so the boundary is complete"
+        );
+    }
 }
 
 pub const HISTORY_PAGE_SIZE: usize = 100;
@@ -738,6 +793,17 @@ impl NativeHistoryWindow {
     pub fn messages(&self) -> &[Value] { &self.messages }
     pub fn next_before(&self) -> Option<&str> { self.next_before.as_deref() }
     pub fn has_older(&self) -> bool { !self.exhausted && self.next_before.is_some() }
+    /// Grouped rows for the retained window, using the shared message-row
+    /// model (`native_message_rows`) so history paging and live grouping agree.
+    pub fn rows(&self, verbosity: crate::native_message_rows::Verbosity) -> Vec<crate::native_message_rows::SessionRow> {
+        crate::native_message_rows::rows_from_chat_entries(&project_history_entries(&self.messages), verbosity)
+    }
+    /// A page boundary can cut a group in half (`rows.ts:27-45`): when the
+    /// oldest retained row is a group and older pages exist, callers must keep
+    /// loading until something precedes the group.
+    pub fn needs_group_boundary_fill(&self, verbosity: crate::native_message_rows::Verbosity) -> bool {
+        crate::native_message_rows::boundary_fill_required(&self.rows(verbosity), self.has_older())
+    }
     pub fn has_newer_recovery(&self) -> bool { !self.tail_page.is_empty() && self.tail_before.is_some() }
 
     pub fn has_adjacent_newer(&self) -> bool { self.newer_page.as_ref().is_some_and(|page| !page.is_empty()) }

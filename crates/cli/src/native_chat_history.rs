@@ -102,6 +102,45 @@ mod tests {
                 .all(|message| message.role == ChatRole::System)
         );
     }
+
+    #[test]
+    fn retained_messages_project_into_the_shared_grouped_rows() {
+        use crate::native_message_rows::{GroupKind, SessionRow, Verbosity};
+        let mut history = NativeChatHistory::default();
+        history.append("user".into(), ChatMessage::text(ChatRole::User, "hi"));
+        history.append(
+            "thinking".into(),
+            ChatMessage {
+                role: ChatRole::Assistant,
+                parts: vec![
+                    ChatPart::Thinking("first".into()),
+                    ChatPart::Thinking("second".into()),
+                ],
+                agent: None,
+                model: None,
+                assistant_facts: None,
+            },
+        );
+        history.notice("note".into());
+        let rows = history.rows(Verbosity::Medium);
+        assert_eq!(rows.len(), 3);
+        assert!(matches!(
+            &rows[0],
+            SessionRow::Entry(crate::native_message_rows::SessionEntry::Message { .. })
+        ));
+        match &rows[1] {
+            SessionRow::Group(group) => {
+                assert_eq!(group.kind, GroupKind::Reasoning);
+                assert_eq!(group.size, 2, "consecutive thoughts group together");
+                assert!(group.completed, "the following notice closes the group");
+            }
+            other => panic!("expected a reasoning group: {other:?}"),
+        }
+        assert!(matches!(
+            &rows[2],
+            SessionRow::Entry(crate::native_message_rows::SessionEntry::Message { .. })
+        ));
+    }
 }
 
 impl Deref for NativeChatHistory {
@@ -300,6 +339,24 @@ impl NativeChatHistory {
         if !self.lines.is_empty() && !self.messages.is_empty() {
             self.partial = Some((self.lines.len() - 1, self.messages.len() - 1));
         }
+    }
+
+    /// Grouped transcript rows for the retained messages, using the shared
+    /// row model (`native_message_rows`) so live history, replayed history and
+    /// the daemon projection group identically.
+    ///
+    /// Identities are positional (`history:{index}`) because this bounded log
+    /// retains no backend ids; callers that need durable anchors use the
+    /// projection ids instead.
+    #[must_use]
+    pub fn rows(&self, verbosity: crate::native_message_rows::Verbosity) -> Vec<crate::native_message_rows::SessionRow> {
+        let entries: Vec<(String, ChatMessage)> = self
+            .messages
+            .iter()
+            .enumerate()
+            .map(|(index, message)| (format!("history:{index}"), message.clone()))
+            .collect();
+        crate::native_message_rows::rows_from_chat_entries(&entries, verbosity)
     }
 }
 

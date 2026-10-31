@@ -119,6 +119,224 @@ impl AssistantFacts {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Completion footer (MSG-008)
+// ---------------------------------------------------------------------------
+//
+// Upstream renders one footer under each assistant message
+// (`packages/tui/src/routes/session/index.tsx:2010-2067`):
+//
+// - error notice row first, only when `message.error && !interrupted &&
+//   !retry`; the notice is the free-limit notice, a usage-limit notice, or the
+//   generic `Error: {message}` row (`:2035-2047`).
+// - the footer box has `paddingLeft=3` and `marginTop=1` when `retry` or a
+//   non-interrupted error is present, else no top margin (`:2050`).
+// - slots in fixed order: agent (titlecased, always), ` · model` when width
+//   >= 28 (`:2055-2057`), ` · duration` when a duration exists and width < 28
+//   or width >= 36 (`:2058-2060`), ` · {tps} tok/s` when the session tps
+//   setting is on and throughput exists (`:2061-2063`), ` · interrupted` when
+//   the error is exactly `"Step interrupted"` (`:2064-2066`).
+//
+// Formatting mirrors `packages/tui/src/util/locale.ts:3-5` (titlecase) and
+// `:29-49` (duration): ms below 1s, one-decimal seconds below 1 min,
+// `m s`, `h m`, `d h` above. Upstream reads model/duration/tps from message
+// metadata this wire does not carry; they are only rendered when supplied by
+// authoritative live metadata, never inferred (see module docs).
+
+/// Width at and above which the model slot is rendered (`index.tsx:2055`).
+pub const FOOTER_MODEL_MIN_WIDTH: u16 = 28;
+/// Width below which the duration slot is rendered (`index.tsx:2058`).
+pub const FOOTER_DURATION_NARROW_MAX_WIDTH: u16 = 28;
+/// Width at and above which the duration slot is rendered (`index.tsx:2058`).
+pub const FOOTER_DURATION_WIDE_MIN_WIDTH: u16 = 36;
+
+/// Upstream `Locale.titlecase` (`util/locale.ts:3-5`): capitalise the first
+/// letter of every word.
+#[must_use]
+pub fn titlecase(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut at_word_start = true;
+    for ch in input.chars() {
+        if ch.is_whitespace() {
+            at_word_start = true;
+            out.push(ch);
+        } else if at_word_start {
+            out.extend(ch.to_uppercase());
+            at_word_start = false;
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// Upstream `Locale.duration` (`util/locale.ts:29-49`).
+#[must_use]
+pub fn format_duration(ms: u64) -> String {
+    if ms < 1_000 {
+        format!("{ms}ms")
+    } else if ms < 60_000 {
+        format!("{:.1}s", ms as f64 / 1_000.0)
+    } else if ms < 3_600_000 {
+        format!("{}m {}s", ms / 60_000, (ms % 60_000) / 1_000)
+    } else if ms < 86_400_000 {
+        format!("{}h {}m", ms / 3_600_000, (ms % 3_600_000) / 60_000)
+    } else {
+        format!("{}d {}h", ms / 86_400_000, (ms % 86_400_000) / 3_600_000)
+    }
+}
+
+/// One rendered footer slot; the order in [`FooterRow::slots`] is the
+/// upstream order (`index.tsx:2053-2066`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FooterSlotKind {
+    Agent,
+    Model,
+    Duration,
+    TokensPerSecond,
+    Interrupted,
+}
+
+/// A footer slot and its display text (separator-free; the renderer joins
+/// slots with ` · `).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FooterSlot {
+    pub kind: FooterSlotKind,
+    pub text: String,
+}
+
+/// The notice row that precedes the footer (`index.tsx:2035-2047`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FooterNotice {
+    None,
+    /// Generic `Error: {message}` row.
+    Error(String),
+    /// `provider.free-limit` notice (`:2031`, `:2043-2045`).
+    FreeLimit,
+    /// Usage-limit notice (`:2032`, `:2046`).
+    UsageLimit,
+}
+
+/// Everything the completion footer can render. Only authoritative live
+/// metadata may populate `agent`/`model`/`duration_ms`/`tokens_per_second`;
+/// error, retry, interruption and limit flags come from typed facts.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AssistantFooter {
+    pub agent: Option<String>,
+    pub model: Option<String>,
+    pub duration_ms: Option<u64>,
+    pub tokens_per_second: Option<f64>,
+    /// Session tps setting (`config.data.session.tps`, `index.tsx:2061`).
+    pub tps_enabled: bool,
+    pub interrupted: bool,
+    pub error_message: Option<String>,
+    pub error_is_free_limit: bool,
+    pub error_is_usage_limit: bool,
+    pub retry: bool,
+}
+
+/// The notice row, top margin and ordered slots of one footer.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FooterRow {
+    pub notice: FooterNotice,
+    pub margin_top: u16,
+    pub slots: Vec<FooterSlot>,
+}
+
+impl AssistantFooter {
+    /// Footer facts from the execution [`AssistantFacts`]. Agent/model/timing
+    /// stay absent unless the caller adds authoritative live metadata.
+    #[must_use]
+    pub fn from_facts(facts: &AssistantFacts) -> Self {
+        Self {
+            interrupted: facts.interrupted,
+            error_message: facts.error_message.clone(),
+            ..Self::default()
+        }
+    }
+
+    /// `props.message.error` presence (`index.tsx:2035`).
+    #[must_use]
+    pub fn has_error(&self) -> bool {
+        self.error_message.is_some() || self.error_is_free_limit || self.error_is_usage_limit
+    }
+
+    /// `index.tsx:2035-2047`: no notice for interruptions or retries; typed
+    /// limit errors select their notice, everything else is `Error: {msg}`.
+    #[must_use]
+    pub fn notice(&self) -> FooterNotice {
+        if !self.has_error() || self.interrupted || self.retry {
+            return FooterNotice::None;
+        }
+        if self.error_is_free_limit {
+            FooterNotice::FreeLimit
+        } else if self.error_is_usage_limit {
+            FooterNotice::UsageLimit
+        } else {
+            FooterNotice::Error(self.error_message.clone().unwrap_or_default())
+        }
+    }
+
+    /// `index.tsx:2050`: one row of top margin above the footer when a retry
+    /// is offered or a non-interrupted error notice is shown.
+    #[must_use]
+    pub fn margin_top(&self) -> u16 {
+        if self.retry || (self.has_error() && !self.interrupted) {
+            1
+        } else {
+            0
+        }
+    }
+
+    /// Build the full footer for a terminal `width`: notice, margin and slots
+    /// in upstream order with the width breakpoints at 28 and 36.
+    #[must_use]
+    pub fn row(&self, width: u16) -> FooterRow {
+        let mut slots = Vec::new();
+        if let Some(agent) = self.agent.as_deref() {
+            slots.push(FooterSlot {
+                kind: FooterSlotKind::Agent,
+                text: titlecase(agent),
+            });
+        }
+        if width >= FOOTER_MODEL_MIN_WIDTH {
+            if let Some(model) = self.model.as_deref() {
+                slots.push(FooterSlot {
+                    kind: FooterSlotKind::Model,
+                    text: model.to_owned(),
+                });
+            }
+        }
+        if let Some(ms) = self.duration_ms {
+            if width < FOOTER_DURATION_NARROW_MAX_WIDTH || width >= FOOTER_DURATION_WIDE_MIN_WIDTH {
+                slots.push(FooterSlot {
+                    kind: FooterSlotKind::Duration,
+                    text: format_duration(ms),
+                });
+            }
+        }
+        if self.tps_enabled {
+            if let Some(tps) = self.tokens_per_second {
+                slots.push(FooterSlot {
+                    kind: FooterSlotKind::TokensPerSecond,
+                    text: format!("{tps:.1} tok/s"),
+                });
+            }
+        }
+        if self.interrupted {
+            slots.push(FooterSlot {
+                kind: FooterSlotKind::Interrupted,
+                text: "interrupted".to_owned(),
+            });
+        }
+        FooterRow {
+            notice: self.notice(),
+            margin_top: self.margin_top(),
+            slots,
+        }
+    }
+}
+
 #[cfg(test)]
 mod native_assistant_facts_tests {
     use super::*;
@@ -197,5 +415,138 @@ mod native_assistant_facts_tests {
             let facts = AssistantFacts::from_error(Some(code.to_owned()), "provider stream failed".to_owned());
             assert!(!facts.interrupted, "{code} must not interrupt");
         }
+    }
+
+    // MSG-008: completion footer slots, width breakpoints and notice rows
+    // (`packages/tui/src/routes/session/index.tsx:2035-2066`;
+    // `packages/tui/src/util/locale.ts:3-5,29-49`).
+
+    fn full_footer() -> AssistantFooter {
+        AssistantFooter {
+            agent: Some("build".to_owned()),
+            model: Some("anthropic/claude-sonnet".to_owned()),
+            duration_ms: Some(1_500),
+            tokens_per_second: Some(20.0),
+            tps_enabled: true,
+            ..AssistantFooter::default()
+        }
+    }
+
+    fn kinds(row: &FooterRow) -> Vec<FooterSlotKind> {
+        row.slots.iter().map(|slot| slot.kind).collect()
+    }
+
+    #[test]
+    fn msg008_footer_slots_follow_terminal_width_breakpoints() {
+        use FooterSlotKind::*;
+        // 27: model hidden (<28), duration shown (<28).
+        let narrow = full_footer().row(27);
+        assert_eq!(kinds(&narrow), vec![Agent, Duration, TokensPerSecond]);
+        assert_eq!(narrow.slots[0].text, "Build");
+        assert_eq!(narrow.slots[1].text, "1.5s");
+        assert_eq!(narrow.slots[2].text, "20.0 tok/s");
+        // 28 and 35: model shown, duration hidden.
+        for width in [28, 35] {
+            assert_eq!(
+                kinds(&full_footer().row(width)),
+                vec![Agent, Model, TokensPerSecond],
+                "width {width}"
+            );
+        }
+        // 36: model and duration both shown.
+        assert_eq!(
+            kinds(&full_footer().row(36)),
+            vec![Agent, Model, Duration, TokensPerSecond]
+        );
+        assert_eq!(full_footer().row(36).slots[1].text, "anthropic/claude-sonnet");
+    }
+
+    #[test]
+    fn msg008_footer_notice_rows_and_spacing_are_typed() {
+        let mut error = full_footer();
+        error.error_message = Some("provider stream failed".to_owned());
+        let row = error.row(40);
+        assert_eq!(row.notice, FooterNotice::Error("provider stream failed".to_owned()));
+        assert_eq!(row.margin_top, 1);
+
+        // Interrupted: no notice, no margin, ordered suffix last.
+        let mut interrupted = AssistantFooter::from_facts(&AssistantFacts::from_error(
+            Some(CANCELLED_CODE.to_owned()),
+            "Step interrupted".to_owned(),
+        ));
+        interrupted.agent = Some("build".to_owned());
+        interrupted.model = Some("m".to_owned());
+        let row = interrupted.row(40);
+        assert_eq!(row.notice, FooterNotice::None);
+        assert_eq!(row.margin_top, 0);
+        assert_eq!(kinds(&row), vec![FooterSlotKind::Agent, FooterSlotKind::Model, FooterSlotKind::Interrupted]);
+        assert_eq!(row.slots[2].text, "interrupted");
+
+        // Retry suppresses the notice but keeps the one-row margin.
+        let mut retry = error.clone();
+        retry.retry = true;
+        let row = retry.row(40);
+        assert_eq!(row.notice, FooterNotice::None);
+        assert_eq!(row.margin_top, 1);
+
+        // Typed limit errors pick their own notice rows.
+        let mut free = error.clone();
+        free.error_is_free_limit = true;
+        assert_eq!(free.row(40).notice, FooterNotice::FreeLimit);
+        let mut usage = error;
+        usage.error_is_usage_limit = true;
+        assert_eq!(usage.row(40).notice, FooterNotice::UsageLimit);
+
+        // No error: no notice, no margin.
+        let row = full_footer().row(40);
+        assert_eq!(row.notice, FooterNotice::None);
+        assert_eq!(row.margin_top, 0);
+    }
+
+    #[test]
+    fn msg008_footer_omits_slots_without_authoritative_metadata() {
+        // Historical messages lack agent/model/timing: nothing is fabricated.
+        let bare = AssistantFooter::from_facts(&AssistantFacts::from_message_frame(&json!({
+            "type": "assistant_message",
+            "usage": {"output_tokens": 20},
+            "stop_reason": "completed"
+        })));
+        let row = bare.row(40);
+        assert!(row.slots.is_empty());
+        assert_eq!(row.notice, FooterNotice::None);
+
+        // tps requires both the session setting and a real throughput value.
+        let mut no_tps = full_footer();
+        no_tps.tps_enabled = false;
+        assert!(!kinds(&no_tps.row(40)).contains(&FooterSlotKind::TokensPerSecond));
+        let mut no_value = full_footer();
+        no_value.tokens_per_second = None;
+        assert!(!kinds(&no_value.row(40)).contains(&FooterSlotKind::TokensPerSecond));
+
+        // Duration and model are independent of each other.
+        let mut no_duration = full_footer();
+        no_duration.duration_ms = None;
+        assert_eq!(kinds(&no_duration.row(27)), vec![FooterSlotKind::Agent, FooterSlotKind::TokensPerSecond]);
+        let mut no_model = full_footer();
+        no_model.model = None;
+        assert_eq!(kinds(&no_model.row(40)), vec![FooterSlotKind::Agent, FooterSlotKind::Duration, FooterSlotKind::TokensPerSecond]);
+    }
+
+    #[test]
+    fn msg008_duration_and_titlecase_match_upstream_locale() {
+        // util/locale.ts:29-49.
+        assert_eq!(format_duration(0), "0ms");
+        assert_eq!(format_duration(999), "999ms");
+        assert_eq!(format_duration(1_000), "1.0s");
+        assert_eq!(format_duration(1_500), "1.5s");
+        assert_eq!(format_duration(59_999), "60.0s");
+        assert_eq!(format_duration(60_000), "1m 0s");
+        assert_eq!(format_duration(65_000), "1m 5s");
+        assert_eq!(format_duration(3_600_000), "1h 0m");
+        assert_eq!(format_duration(90_000_000), "1d 1h");
+        // util/locale.ts:3-5.
+        assert_eq!(titlecase("build"), "Build");
+        assert_eq!(titlecase("plan mode"), "Plan Mode");
+        assert_eq!(titlecase(""), "");
     }
 }
