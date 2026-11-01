@@ -10456,7 +10456,7 @@ fn native_loop(
                                 );
                             } else {
                                 queued_drafts
-                                    .push_back((live.as_ref().map(|snapshot| snapshot.session_id.clone()), draft.clone()));
+                                    .push_back((live.as_ref().map(|snapshot| snapshot.session_id.clone()), crate::native_paste::expand_for_submit(&draft, &draft_parts)));
                                 // The queued snapshot clears the composer
                                 // (`index.tsx:1172-1174` resetComposer).
                                 crate::native_composer::replace_draft_with_cursor(
@@ -10519,7 +10519,7 @@ fn native_loop(
                     // provider turn can originate from the command buffer.
                     Some(route) => route.to_owned(),
                     None => match dialog {
-                        native_setup::Dialog::None => draft.clone(),
+                        native_setup::Dialog::None => crate::native_paste::expand_for_submit(&draft, &draft_parts),
                         native_setup::Dialog::ApiKey => key_input.trim().to_owned(),
                         _ => filter_input.trim().to_owned(),
                     },

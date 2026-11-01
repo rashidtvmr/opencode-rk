@@ -423,6 +423,36 @@ pub fn expand_pasted(
     true
 }
 
+/// Build the body to SEND for one submit dispatch: every tracked folded
+/// placeholder is replaced by its full pasted text while the displayed draft
+/// and its tracked ranges stay untouched.
+///
+/// Upstream computes `inputText` once from the store text plus the pasted
+/// extmarks and hands it to `session.prompt` (`prompt/index.tsx:1129` ->
+/// `:1368`); a folded placeholder is only ever a display affordance
+/// (`prompt/part.ts:11-27`). Ranges expand right-to-left so byte offsets
+/// taken from the unexpanded text remain valid.
+#[must_use]
+pub fn expand_for_submit(draft: &str, parts: &[PastedText]) -> String {
+    if parts.is_empty() {
+        return draft.to_owned();
+    }
+    let mut result = draft.to_owned();
+    let mut ranges: Vec<&PastedText> = parts.iter().collect();
+    ranges.sort_by_key(|part| std::cmp::Reverse(part.start));
+    for part in ranges {
+        if part.start > part.end
+            || part.end > draft.len()
+            || !draft.is_char_boundary(part.start)
+            || !draft.is_char_boundary(part.end)
+        {
+            continue;
+        }
+        result.replace_range(part.start..part.end, &part.text);
+    }
+    result
+}
+
 /// Byte count added by expanding `part` in place, for shifting mention ranges.
 #[must_use]
 pub fn expansion_delta(part: &PastedText, full_text: &str) -> isize {
@@ -1787,6 +1817,25 @@ mod paste_normalization_tests {
         ));
         // A NEL-only wrapper is not blank for the clear-retention check either.
         assert!(!js_trim("\u{85}").is_empty());
+    }
+
+    #[test]
+    fn cp08_submit_expands_folded_placeholder_without_touching_display() {
+        // A draft holding one folded part submits the EXPANDED body while the
+        // displayed draft and its tracked range stay unchanged
+        // (`prompt/index.tsx:1129`, `prompt/part.ts:11-27`).
+        let body = "l1\nl2\nl3";
+        let mut draft = String::from("see ");
+        let mut cursor = draft.len();
+        let mut parts = Vec::new();
+        let at = draft.len();
+        let plan = plan_paste(body, PasteMode::Fold, at, &[]);
+        apply_paste_plan(&mut draft, &mut cursor, &mut parts, plan, 4096).unwrap();
+        let folded = draft.clone();
+        let sent = expand_for_submit(&draft, &parts);
+        assert_eq!(sent, format!("see {body} "));
+        assert_eq!(draft, folded, "displayed draft must not change");
+        assert_eq!(parts.len(), 1, "tracked ranges must not change");
     }
 }
 
