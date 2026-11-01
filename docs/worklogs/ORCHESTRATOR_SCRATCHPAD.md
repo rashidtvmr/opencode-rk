@@ -10241,3 +10241,39 @@ REVIEW-SIDE10+ (gpt-6-luna); CP38-IMAGES, CP40-AUTOSTYLE (vyce-combined).
 `git checkout -q -- crates/cli/src/tui_entry.rs` from the canonical workdir; it was
 a genuine no-op (file matched HEAD blob byte-for-byte). Tree clean, no ref moves.
 Do not continue workers that write canonical.
+
+**User review (2026-11-01) — 5 findings; all addressed.** The reviewer cited
+`c1daacd1` + uncommitted files. Status:
+- **F4 (queue blocks one session behind another)** — the reviewer's own wording
+  matched the CP-08 defect. Fixed in `08914566` (`next_queued_for_session`).
+- **F1 (existing tabs cannot reopen from New/Home; `select_tab_transition`
+  origin from `live`)** — fixed in `fa5cd58d`: route every navigation transition
+  + close/reopen through the stable `daemon_origin` instead of the active
+  binding; permission-dispatch sites keep `live`. Regression test
+  `home_select_binds_target_with_stable_daemon_origin_absent_live`.
+- **F2 (paste appends, ignores cursor, bypasses paste machinery)** — fixed in
+  `2bb5f82d`: `native_composer::insert_paste_at_cursor` (`plan_paste` +
+  `apply_paste_plan`), cursor-aware insert/fold, `draft_parts` loop state cleared
+  wherever the draft clears/replaces; API-key/filter keep bounded append.
+- **F5 (Sessions-list navigation bypasses outgoing state capture)** — fixed in
+  `78446d16`: `save_active_state` before the Sessions-page bind, matching
+  `select_tab_transition`; atomic on refusal.
+- **F3 (subagent dock rows not clickable)** — not yet fixed; dispatched as
+  `W14-F3-DOCKCLICK`.
+
+Each F1/F2/F5 landing: guard GREEN, `oc2` suite green (2059/0 after F2). F4
+landed with a focused owner-scoping regression test.
+
+**Wave-14 dispatched (24 workers, base `78446d16`)** — see `briefs/WAVE14-TASKS.md`:
+F3-DOCKCLICK, CP12-PAINTER, MSG006-MENU2, CP35-DRAFT, TAB24-TITLESRC,
+CP38-IMAGES, CP42-STREAMSTYLE, CP02-GEO2 (vyce ×8); SIDE12-CONNSRC,
+CP39-AUTOPOS2, LAY19-ANSWER, REVIEW-FIXES, CP36-ANSI, REVIEW-MSG006
+(vyce-combined ×6, per user request to use that route); CP08-INBOX, THEME10-GATE
+(th-free); TAB21-VIEWROUTE (river); SIDE08-DIALOGMCP (mimo); F2-VERIFY,
+EVIDENCE-GOLDENS (gpt-6-luna).
+
+**Parity-evidence limitation acknowledged:** the reviewer notes the harness still
+lacks specification goldens / an upstream capture adapter, and oc2 self-captures
+must not be treated as proof of parity. Dispatched `W14-EVIDENCE-GOLDENS` to
+produce a concrete upstream-capture adapter plan (styled cells + cursor/focus +
+action traces from the pinned upstream commit).
