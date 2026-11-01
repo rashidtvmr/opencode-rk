@@ -344,6 +344,9 @@ pub struct ToolDisplay {
     pub error: Option<String>,
     /// Detached `Background` badge.
     pub background: bool,
+    /// Execute output preview, retained until metadata can mark a completed
+    /// transport state as a runtime error.
+    pub execute_error_preview: Vec<ToolRow>,
     /// A permission decision is pending for THIS tool call
     /// (`routes/session/index.tsx:2834`): the row's foreground becomes
     /// `theme.text.feedback.warning.base` (`:2837`). Upstream adds NO badge
@@ -432,11 +435,24 @@ pub fn tool_display(
     }
     let visible_output = tool_display_content(status, Some(output.as_str())).unwrap_or("");
     let mut body: Vec<ToolRow> = Vec::new();
+    let execute_error_preview = if kind == ToolKind::Execute {
+        collapse_tool_output(
+            output.trim(),
+            EXECUTE_PREVIEW_LINES,
+            EXECUTE_PREVIEW_LINES * width.saturating_sub(6).max(20),
+        )
+        .0
+        .split('\n')
+        .enumerate()
+        .map(|(index, line)| {
+            let prefix = if index == 0 { "↳ " } else { "  " };
+            (format!("{prefix}{line}"), ChatRowClass::ToolError)
+        })
+        .collect()
+    } else {
+        Vec::new()
+    };
     let mut error = None;
-    let background = args.as_ref().is_some_and(|value| {
-        value.get("background").and_then(Value::as_bool).unwrap_or(false)
-    });
-
     if state == ToolStatus::Error {
         let message = output.trim();
         error = Some(if message.is_empty() {
@@ -490,7 +506,7 @@ pub fn tool_display(
             ("←", label)
         }
         ToolKind::Subagent => subagent_display(&args, state),
-        ToolKind::Execute => execute_display(width, &args, state, visible_output, &mut body),
+        ToolKind::Execute => execute_display(state),
         ToolKind::Patch => {
             let label = patch_label(&args);
             let label = if label == "Patch" && state.is_running() {
@@ -530,7 +546,8 @@ pub fn tool_display(
         label,
         body,
         error,
-        background,
+        background: false,
+        execute_error_preview,
         permission_needed: false,
     }
 }
@@ -576,6 +593,21 @@ pub fn apply_tool_metadata(mut display: ToolDisplay, metadata_json: &str) -> Too
             display.body.extend(extra);
         }
     }
+    if display.kind == ToolKind::Execute {
+        if let Some(value) = meta.get("toolCalls") {
+            let rows: Vec<ToolRow> = execute_calls(value)
+                .iter()
+                .map(|call| {
+                    let (marker, class) = match call.status {
+                        ExecuteCallStatus::Error => ("✗", ChatRowClass::ToolError),
+                        _ => ("›", ChatRowClass::ToolResult),
+                    };
+                    (format!("{marker} {}", execute_call_summary(call)), class)
+                })
+                .collect();
+            display.body.splice(0..0, rows);
+        }
+    }
     if display.kind == ToolKind::Execute
         && meta.get("error").and_then(Value::as_bool) == Some(true)
         && display.status != ToolStatus::Error
@@ -583,7 +615,8 @@ pub fn apply_tool_metadata(mut display: ToolDisplay, metadata_json: &str) -> Too
         display.status = ToolStatus::Error;
         display.icon = "✗";
     }
-    let detached = display.status == ToolStatus::Completed
+    let detached = matches!(display.kind, ToolKind::Shell | ToolKind::Subagent)
+        && display.status == ToolStatus::Completed
         && meta.get("status").and_then(Value::as_str) == Some("running");
     if detached {
         display.background = true;
@@ -882,44 +915,12 @@ fn generic_display(
     }
 }
 
-fn execute_display(
-    width: usize,
-    args: &Option<Map<String, Value>>,
-    state: ToolStatus,
-    output: &str,
-    body: &mut Vec<ToolRow>,
-) -> (&'static str, String) {
+fn execute_display(state: ToolStatus) -> (&'static str, String) {
     let icon = match state {
         ToolStatus::Completed => "✓",
         ToolStatus::Error => "✗",
         _ => "│",
     };
-    let calls = args
-        .as_ref()
-        .and_then(|args| args.get("toolCalls").or_else(|| args.get("tool_calls")))
-        .map(execute_calls)
-        .unwrap_or_default();
-    for call in &calls {
-        let (marker, class) = match call.status {
-            ExecuteCallStatus::Error => ("✗", ChatRowClass::ToolError),
-            _ => ("›", ChatRowClass::ToolResult),
-        };
-        body.push((format!("{marker} {}", execute_call_summary(call)), class));
-    }
-    // Success output stays out of the inline preview; only a runtime error
-    // shows its bounded tail (`index.tsx:3405-3411`).
-    if state == ToolStatus::Error {
-        let preview = collapse_tool_output(
-            output,
-            EXECUTE_PREVIEW_LINES,
-            EXECUTE_PREVIEW_LINES * width.saturating_sub(6).max(20),
-        )
-        .0;
-        for (index, line) in preview.split('\n').enumerate() {
-            let prefix = if index == 0 { "↳ " } else { "  " };
-            body.push((format!("{prefix}{line}"), ChatRowClass::ToolError));
-        }
-    }
     (icon, "execute".to_owned())
 }
 
@@ -1237,10 +1238,10 @@ fn rows(width: usize, display: &ToolDisplay) -> Vec<ToolRow> {
         push_badge(&mut out, width, &header_prefix, "Background", class);
     }
     if display.status == ToolStatus::Error {
-        if display.kind == ToolKind::Execute && !display.body.is_empty() {
-            // Runtime errors show exactly the bounded output preview
-            // (`index.tsx:3405-3411`), not a synthesized failure sentence.
-            for (line, body_class) in &display.body {
+        if display.kind == ToolKind::Execute {
+            // Child calls retain their own lifecycle class. Only output uses
+            // the bounded runtime-error preview; never synthesize a failure.
+            for (line, body_class) in display.body.iter().chain(&display.execute_error_preview) {
                 push_wrapped(&mut out, width, line, BODY_INDENT, *body_class);
                 if out.len() >= MAX_TOOL_ROWS {
                     break;
@@ -1580,8 +1581,12 @@ mod tests {
         );
         // The label itself never carries the badge; `rows()` emits the
         // atomic `StatusBadge` token instead (`index.tsx:2875-2883,3317`).
+        // TOOL-011: the detached badge comes from `metadata.status === "running"`
+        // (`index.tsx:3343`), never the shell/subagent argument `background` flag.
         assert!(!background.label.ends_with(" Background "));
-        assert!(background.background);
+        assert!(!background.background, "argument flag must not select detached mode");
+        let detached = apply_tool_metadata(background, r#"{"status":"running"}"#);
+        assert!(detached.background, "metadata.status=running selects the Background badge");
         assert!(is_background_subagent(Some("running"), "completed"));
         assert!(!is_background_subagent(Some("running"), "running"));
         assert!(!is_background_subagent(None, "completed"));
@@ -1629,23 +1634,20 @@ mod tests {
 
     #[test]
     fn execute_children_and_error_preview() {
-        let args = json!({
-            "code": "return 1",
-            "toolCalls": [
-                {"tool": "read", "status": "running", "input": {"path": "a.rs"}},
-                {"tool": "grep", "status": "error", "input": {"pattern": "x"}},
-                {"tool": "bad"}
-            ]
-        })
-        .to_string();
-        let calls = execute_calls(&json!([
+        let args = json!({"code": "return 1"}).to_string();
+        let tool_calls = json!([
             {"tool": "read", "status": "running", "input": {"path": "a.rs"}},
             {"tool": "grep", "status": "error", "input": {"pattern": "x"}},
             {"tool": "bad"}
-        ]));
+        ]);
+        let calls = execute_calls(&tool_calls);
         assert_eq!(calls.len(), 2);
         assert_eq!(execute_call_summary(&calls[0]), "read [path=a.rs]");
-        let rows = tool_state_rows(80, "execute", "running", &args, "", false);
+        let display = apply_tool_metadata(
+            tool_display(80, "execute", "running", &args, "", false),
+            &json!({"toolCalls": tool_calls}).to_string(),
+        );
+        let rows = rows_for_display(80, &display);
         assert!(rows.iter().any(|(row, class)| *class == ChatRowClass::ToolResult
             && row.contains("› read [path=a.rs]")));
         assert!(rows.iter().any(|(row, class)| *class == ChatRowClass::ToolError
@@ -1874,6 +1876,28 @@ mod tests {
             r#"{"status":"completed"}"#,
         );
         assert!(!normal.background);
+        let argument_flag = tool_display(
+            80,
+            "bash",
+            "running",
+            r#"{"command":"ls","background":true}"#,
+            "",
+            false,
+        );
+        assert!(!argument_flag.background, "only metadata.status selects detached mode");
+        let unrelated = apply_tool_metadata(
+            tool_display(80, "read", "completed", r#"{"path":"a.rs"}"#, "", false),
+            r#"{"status":"running"}"#,
+        );
+        assert!(!unrelated.background, "metadata.status only controls shell/subagent badges");
+
+        let execute = apply_tool_metadata(
+            tool_display(80, "execute", "completed", r#"{"code":"1"}"#, "failure output", false),
+            r#"{"error":true}"#,
+        );
+        let execute_rows = rows_for_display(80, &execute);
+        assert!(execute_rows.iter().any(|(row, class)| *class == ChatRowClass::ToolError
+            && row.contains("↳ failure output")), "metadata runtime error keeps bounded output: {execute_rows:?}");
 
         // Subagent in the same detached state paints the Background badge.
         let sub = apply_tool_metadata(
