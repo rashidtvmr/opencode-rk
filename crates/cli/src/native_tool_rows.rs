@@ -510,6 +510,46 @@ pub fn tool_display(
     }
 }
 
+/// Overlay the upstream `metadata` facts that the wire `status` string cannot
+/// carry, matching the TUI's metadata-driven branches (TOOL-006/007/008):
+///
+/// - The `execute` root turns red when `metadata.error === true` **even if**
+///   the transport state is `completed`
+///   (`routes/session/index.tsx:3401-3411`,
+///   `hasRuntimeError = metadata.error === true || state.status === "error"`);
+///   upstream keys this on `toolCalls`, which only `execute` carries.
+/// - A shell whose part completed while the detached process is still running
+///   shows the `Background` badge (`index.tsx:2984-2990`,
+///   `background = state.status === "completed" && metadata.status === "running"`).
+/// - A subagent in the same detached state uses
+///   `isBackgroundSubagent(metadata, status)` (`index.tsx:3339-3341`) and paints
+///   the `Background` `StatusBadge` (`:3320-3325`).
+///
+/// Facts absent from `metadata_json` never change the display, so an ordinary
+/// completed row keeps its existing rendering.
+#[must_use]
+pub fn apply_tool_metadata(mut display: ToolDisplay, metadata_json: &str) -> ToolDisplay {
+    let Ok(Value::Object(meta)) = serde_json::from_str::<Value>(metadata_json) else {
+        return display;
+    };
+    if display.kind == ToolKind::Execute
+        && meta.get("error").and_then(Value::as_bool) == Some(true)
+        && display.status != ToolStatus::Error
+    {
+        display.status = ToolStatus::Error;
+        display.icon = "✗";
+    }
+    let detached = display.status == ToolStatus::Completed
+        && meta.get("status").and_then(Value::as_str) == Some("running");
+    if detached {
+        display.background = true;
+        if display.kind == ToolKind::Subagent && !display.label.ends_with(" Background ") {
+            display.label.push_str("  Background ");
+        }
+    }
+    display
+}
+
 fn parse_args(args_json: &str) -> Option<Map<String, Value>> {
     if args_json.is_empty() || args_json.len() > MAX_ARGS_BYTES {
         return None;
@@ -1640,5 +1680,59 @@ mod tests {
         assert_eq!(result[0].1, ChatRowClass::ToolResult);
         assert_eq!(tool_display_content("running", Some("x")), None);
         assert_eq!(tool_display_content("completed", Some("x")), Some("x"));
+    }
+
+    /// TOOL-006/007/008: `metadata` overlays the transport status.
+    #[test]
+    fn metadata_error_and_detached_background_overlay() {
+        // `execute` runtime error forces the red root even when transport says
+        // completed (`index.tsx:3401-3411`).
+        let base = tool_display(80, "execute", "completed", r#"{"code":"1"}"#, "", false);
+        assert_eq!(base.status, ToolStatus::Completed);
+        let failed = apply_tool_metadata(base, r#"{"error":true}"#);
+        assert_eq!(failed.status, ToolStatus::Error);
+        assert_eq!(failed.icon, "✗");
+
+        // Non-execute metadata error is not applied (upstream keys on toolCalls).
+        let shell_meta_error = apply_tool_metadata(
+            tool_display(80, "bash", "completed", r#"{"command":"ls"}"#, "", false),
+            r#"{"error":true}"#,
+        );
+        assert_eq!(shell_meta_error.status, ToolStatus::Completed);
+
+        // Detached process: part completed, process still running.
+        let shell = apply_tool_metadata(
+            tool_display(80, "bash", "completed", r#"{"command":"ls"}"#, "", false),
+            r#"{"status":"running"}"#,
+        );
+        assert!(shell.background);
+        let normal = apply_tool_metadata(
+            tool_display(80, "bash", "completed", r#"{"command":"ls"}"#, "", false),
+            r#"{"status":"completed"}"#,
+        );
+        assert!(!normal.background);
+
+        // Subagent in the same detached state paints the Background badge.
+        let sub = apply_tool_metadata(
+            tool_display(
+                80,
+                "subagent",
+                "completed",
+                r#"{"agent":"build","description":"x"}"#,
+                "",
+                false,
+            ),
+            r#"{"status":"running"}"#,
+        );
+        assert!(sub.background);
+        assert!(sub.label.ends_with(" Background "));
+
+        // Absent / malformed metadata changes nothing.
+        let untouched = apply_tool_metadata(
+            tool_display(80, "bash", "completed", r#"{"command":"ls"}"#, "", false),
+            "not json",
+        );
+        assert!(!untouched.background);
+        assert_eq!(untouched.status, ToolStatus::Completed);
     }
 }
