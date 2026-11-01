@@ -9886,3 +9886,61 @@ are NOT re-recorded by main to force green.
 **Blocker pattern**: most remaining gaps are blocked on server-side data —
 per-session attention kind (TAB-04/05), `time.viewed` view acknowledgement
 (TAB-21), tab vcs branch detail (TAB-04 detail), live `TabStatus` adapter.
+
+### 2026-11-01 wave 2 — five product fixes landed, oracle app-render resolved
+
+**Landed (guard GREEN after each; committed blob hashes match tested bytes).**
+
+- `03c0d7dd` — **CP-04**: the composer rail inset keys on the *terminal* width
+  (`packages/tui/src/component/prompt/index.tsx:1691-1692`,
+  `dimensions().width < 44 ? 1 : 2`), never the pane width. Threaded real
+  terminal width through `prompt_geometry` / `(session_)composer_layout`;
+  `ChatView` records `NativeView::layout.cols` each frame; two inline
+  pane-keyed duplicates in `native_view.rs` now use `prompt_inset(cols)`.
+  Focused test `cp04_rail_inset_follows_terminal_not_pane`.
+- `69b34b25` — **TAB-18**: production `MenuTarget::New` now carries the live
+  newest-first `NavigationState::recently_closed()` list (capped at
+  `MAX_RECENTLY_CLOSED = 10`) and `MenuAction::Reopen{session}` routes through
+  `reopen_tab_transition(Some(id))` instead of a no-op
+  (`component/session-tabs.tsx:383-417`). Focused test
+  `production_new_target_offers_newest_recent_tabs_and_reopens_selected_id`.
+- `428ca1bc` — **MEDIA-001**: the image-preview loading phase. `PreviewLoad
+  {Loading,Ready}` + `mark_loading`/`mark_ready`/`is_loading`; `image_box`
+  returns `None` and `rows` paints a centered muted `Loading image…` slot while
+  decoding (`feature-plugins/system/diff-viewer-image.tsx:36-42`). Focused test
+  `media001_preview_loading_slot`.
+- `0fa7efbc` — **TAB-15**: horizontal tab-strip drag-reorder. `TabStrip::drag_slot`
+  ports upstream `slotAt` (`component/session-tabs.tsx:1490-1500`); the strip
+  records the solved `before` count; the live motion arm is de-gated by
+  orientation and a horizontal body press arms `tab_drag.press` (skipping the
+  close child). Focused test `tab_strip_drag_slot_matches_slotat`.
+- `c1ca1b76` — **THEME-18**: the dock measured labels with `chars().count()`.
+  Added `cell_cells` over the one canonical segmentation
+  (`native_view_layout::visit_unpadded_cells`) and routed the DockLine advance,
+  tab/hint labels, `esc_x`/`esc_hit` and body-row label/status columns through
+  it. Focused test `dock_metrics_use_display_cells_for_wide_glyphs`. Suite 1987/0.
+
+**Oracle app-render verdict (ORACLE-HARNESS).** The *renderer*-level offline
+capture works (`captureSpans()` in the certification shape), but driving the
+real `packages/tui/src/app.tsx` is blocked: the checkout's `node_modules` has
+**no `@opencode/*` workspace links**, and `Bun.plugin(...).onResolve` does not
+intercept nested bare-specifier resolution (`Cannot find package '@opencode/
+client'`, `@opencode/schema`). Version skew: checkout `@opentui 0.4.5` vs
+catalog 0.6.8; `effect 4.0.0-beta.83` (missing `Base64Url`) vs 4.0.1;
+`solid-js 1.9.10` vs 1.9.15. A `pkgfarm/` copy of `packages/*` with real
+`@opencode/*` symlinks was created but not yet exercised.
+
+**Row 0 adjudicated directly from upstream (no oracle needed).** `app.tsx:614`
+`tabsAvailable = enabled() && tabs().length > 0 && route.data.type !== "plugin"`
+and the `<Show when={tabsVisible()...}>` at `:1437` mean upstream does **not**
+render the tab strip on Home with zero sessions. So the 109 row-0 diffs are
+oc2 painting a strip upstream suppresses there; the 10 composer-border diffs are
+INTENDED. The goldens remain stale self-captures (`6fd34d77`).
+
+**Coverage**: 4 obligations had no handoff (`LAY-18/19/20`, `THEME-18`); all four
+now audited. LAY-18 already correct; LAY-19/20 blocked on absent production Home
+form/plugin-failure state; THEME-18 fixed.
+
+**Next**: land TAB-16 horizontal `CloseHold` render consumption (TAB-13-HORIZ
+step list B1-B7); resolve the oracle app-render via the `pkgfarm` walk-up; keep
+dispatching the ~14 inflight audits.
