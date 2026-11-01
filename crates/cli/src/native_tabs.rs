@@ -2365,11 +2365,15 @@ impl CloseHold {
                 0
             };
             let preceding: u16 = widths.iter().take(index).copied().sum();
-            let width = self.x.saturating_sub(leading).saturating_sub(preceding) + 2;
+            // Upstream computes `hold.x - leading - preceding + 2` in signed
+            // arithmetic and rejects a sub-1 result (`session-tabs.tsx:263-264`).
+            // Saturating subtraction here would clamp the intermediate to 0 and
+            // fabricate a two-cell tab instead of refusing the hold.
+            let width = i32::from(self.x) - i32::from(leading) - i32::from(preceding) + 2;
             if width < 1 {
                 return None;
             }
-            widths[index] = width;
+            widths[index] = u16::try_from(width).ok()?;
         }
         Some(HeldLayout {
             tabs: visible,
@@ -3952,6 +3956,18 @@ mod tests {
         );
         // The pre-close list (no removal yet) keeps the original widths.
         assert_eq!(hold.layout(&ids).unwrap().widths, vec![10, 10, 10]);
+        // A hold whose signed target width is below one is refused, not
+        // saturated into a fabricated two-cell tab (`session-tabs.tsx:263-264`).
+        let impossible = CloseHold::new(
+            &ids,
+            &ids,
+            &[10, 10, 10],
+            &ids[1],
+            &ids[2],
+            5, // x far left of a's two leading cells: width = 5 - 10 + 2 < 1
+            0,
+        );
+        assert_eq!(impossible.layout(&after), None, "sub-one width refuses the hold");
         // Render consumption (TAB-16): the held layout replaces the adaptive
         // width solve, so the painted slots keep the held widths and the
         // target's close cell stays at the pointer column x=18.
