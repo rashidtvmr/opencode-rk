@@ -253,6 +253,10 @@ pub struct StatusView {
     footer: Option<SidebarFooter>,
     /// Getting-started facts (`footer.tsx:18-23`); `None` = not observed.
     sidebar_onboarding: Option<native_sidebar::Onboarding>,
+    /// Sidebar title paints DIM while the rename is pending with animations
+    /// off, else BOLD (`routes/session/sidebar.tsx:41-45`). Default `false`
+    /// preserves the previous always-BOLD behavior.
+    sidebar_title_dim: bool,
 }
 
 /// Confirmed location facts for the pinned sidebar footer.
@@ -394,6 +398,48 @@ mod conditional_sidebar_tests {
             .map(|row| row.trim_end())
             .collect::<Vec<_>>();
         assert_eq!(plain, rows);
+    }
+
+    /// SIDE-01: the sidebar title paints DIM while the rename is pending with
+    /// animations off, else BOLD (`routes/session/sidebar.tsx:41-45`), reusing
+    /// the shared `title_attributes` predicate (`native_tabs.rs:1733`).
+    #[test]
+    fn sidebar_title_dims_while_pending_with_animations_off() {
+        use super::MAX_ROWS;
+        use super::native_sidebar;
+        let mut view = StatusView::default();
+        view.set_session_binding(
+            Some(opencode_rk_contracts::SessionId::new().to_string()),
+            Some("Titled".into()),
+            Some(0),
+        );
+        let title_attr = |view: &StatusView| {
+            let rows = view.render_sidebar_styled(
+                native_sidebar::SESSION_SIDEBAR_WIDTH,
+                MAX_ROWS,
+            );
+            let index = rows
+                .iter()
+                .position(|line| line.text.trim_end() == "Titled")
+                .expect("title row painted");
+            view.sidebar_span_styles_at(native_sidebar::SESSION_SIDEBAR_WIDTH, MAX_ROWS)
+                .into_iter()
+                .find(|(row, span)| *row == index && span.cells >= "Titled".len())
+                .expect("title span painted")
+                .1
+                .attributes
+        };
+        // Default: BOLD (no pending fact).
+        assert_eq!(title_attr(&view), crate::native_ui_style::ATTR_BOLD);
+        // Pending with animations on: still BOLD.
+        view.set_title_state(true, true);
+        assert_eq!(title_attr(&view), crate::native_ui_style::ATTR_BOLD);
+        // Pending with animations off: DIM.
+        view.set_title_state(true, false);
+        assert_eq!(title_attr(&view), crate::native_ui_style::ATTR_DIM);
+        // Not pending: BOLD again even with animations off.
+        view.set_title_state(false, false);
+        assert_eq!(title_attr(&view), crate::native_ui_style::ATTR_BOLD);
     }
 
     /// A very tall pane bounds the composed height, not the composed row
@@ -676,6 +722,7 @@ impl StatusView {
         };
         let sidebar = native_sidebar::Sidebar {
             title: self.session_title.as_deref(),
+            title_dim: self.sidebar_title_dim,
             context,
             limit: self.sidebar_limit,
             mcp: (!mcp_items.is_empty()).then(|| native_sidebar::McpSection {
@@ -925,6 +972,16 @@ impl StatusView {
 
     pub fn set_agent(&mut self, agent: Option<String>) {
         self.agent = non_empty(agent);
+    }
+
+    /// Set the sidebar title's pending/animations facts. The title paints DIM
+    /// while a rename is pending with animations off, else BOLD
+    /// (`routes/session/sidebar.tsx:41-45`); reuse the tab-title model
+    /// (`native_tabs::title_attributes`) so both surfaces share one predicate.
+    pub fn set_title_state(&mut self, pending: bool, animations: bool) {
+        self.sidebar_title_dim =
+            crate::native_tabs::title_attributes(true, pending, animations)
+                == crate::native_ui_style::ATTR_DIM;
     }
 
     pub fn set_context(&mut self, used: Option<u64>, window: Option<u64>) {

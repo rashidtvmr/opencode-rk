@@ -41,7 +41,7 @@
 
 use crate::native_theme_runtime::Slot;
 use crate::native_ui_style::{
-    clamp_spans, LineSpan, Role, ATTR_BOLD, ATTR_NONE, ATTR_STRIKETHROUGH,
+    clamp_spans, LineSpan, Role, ATTR_BOLD, ATTR_DIM, ATTR_NONE, ATTR_STRIKETHROUGH,
 };
 use opencode_rk_sessions::TodoStatus;
 
@@ -1157,6 +1157,10 @@ pub const SECTION_ORDER: [&str; 4] = ["Context", "Limit", "MCP", "Todo"];
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Sidebar<'a> {
     pub title: Option<&'a str>,
+    /// `title.pending(sessionID) && config.animations === false`
+    /// (`routes/session/sidebar.tsx:41-45`): the pending rename with animations
+    /// off paints the title DIM, otherwise BOLD. Only meaningful with a title.
+    pub title_dim: bool,
     pub context: Option<ContextSection>,
     pub limit: Option<LimitSection>,
     pub mcp: Option<McpSection<'a>>,
@@ -1189,9 +1193,12 @@ impl<'a> Sidebar<'a> {
         let title_width = title_width(width);
         let mut rows = vec![SidebarRow::new(String::new(), Role::Description)];
         if let Some(title) = self.title.filter(|title| !title.trim().is_empty()) {
-            // `fg={theme.text.base}` + `TextAttributes.BOLD` (`sidebar.tsx:33-45`).
+            // `fg={theme.text.base}` with `attributes` DIM while the rename is
+            // pending and animations are off, else BOLD
+            // (`sidebar.tsx:33-45`).
+            let attributes = if self.title_dim { ATTR_DIM } else { ATTR_BOLD };
             let text = take_cells(title, title_width);
-            let spans = whole_row(&text, Slot::Text, ATTR_BOLD);
+            let spans = whole_row(&text, Slot::Text, attributes);
             rows.push(SidebarRow::styled(text, Role::SidebarHeading, spans));
             rows.push(SidebarRow::new(String::new(), Role::Description));
         }
@@ -1470,6 +1477,7 @@ mod tests {
         }];
         let sidebar = Sidebar {
             title: Some("Session"),
+            title_dim: false,
             context: ContextSection::new(Some(1000), Some(200_000), Some(0.5)),
             limit: Some(LimitSection::new(5.0, UsageLevel::Plenty)),
             mcp: Some(McpSection {
@@ -2377,6 +2385,7 @@ mod tests {
         }];
         let sidebar = Sidebar {
             title: Some("Session"),
+            title_dim: false,
             context: ContextSection::new(Some(1_000), Some(200_000), Some(0.5)),
             limit: Some(LimitSection::new(0.0, UsageLevel::Reached)),
             mcp: Some(McpSection {
