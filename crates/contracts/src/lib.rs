@@ -159,12 +159,36 @@ pub enum SessionState {
     Archived,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileDiffStatus {
+    Added,
+    Deleted,
+    Modified,
+}
+
+/// Mirrors upstream `FileDiff.Info` (`packages/schema/src/file-diff.ts:6-12`).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FileDiffInfo {
+    pub file: String,
+    pub patch: String,
+    pub additions: u32,
+    pub deletions: u32,
+    pub status: FileDiffStatus,
+}
+
+/// Mirrors upstream `Session.Revert` (`packages/schema/src/session-revert.ts:7-14`):
+/// `messageID` required; `partID`, `snapshot` and `files` optional.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SessionRevert {
     #[serde(rename = "messageID")]
     pub message_id: MessageId,
     #[serde(rename = "partID", default, skip_serializing_if = "Option::is_none")]
     pub part_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files: Option<Vec<FileDiffInfo>>,
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SessionSummary {
@@ -468,5 +492,38 @@ mod tests {
             value.get("revert").and_then(|r| r.get("messageID")),
             Some(&serde_json::json!("00000000-0000-4000-8000-000000000002"))
         );
+    }
+    #[test]
+    fn session_revert_round_trips_snapshot_and_files() {
+        let json = r#"{"id":"00000000-0000-4000-8000-000000000001","title":"t","state":"active","created_at":"2024-01-01T00:00:00.000Z","updated_at":"2024-01-01T00:00:00.000Z","archived_at":null,"revert":{"messageID":"00000000-0000-4000-8000-000000000002","partID":"p1","snapshot":"snap-1","files":[{"file":"a.rs","patch":"@@","additions":1,"deletions":2,"status":"modified"}]}}"#;
+        let summary: SessionSummary = serde_json::from_str(json).unwrap();
+        let revert = summary.revert.as_ref().unwrap();
+        assert_eq!(revert.part_id.as_deref(), Some("p1"));
+        assert_eq!(revert.snapshot.as_deref(), Some("snap-1"));
+        let files = revert.files.as_ref().unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].file, "a.rs");
+        assert_eq!(files[0].additions, 1);
+        assert_eq!(files[0].deletions, 2);
+        assert_eq!(files[0].status, FileDiffStatus::Modified);
+        let value = serde_json::to_value(&summary).unwrap();
+        assert_eq!(value.pointer("/revert/snapshot"), Some(&serde_json::json!("snap-1")));
+        assert_eq!(
+            value.pointer("/revert/files/0/status"),
+            Some(&serde_json::json!("modified"))
+        );
+    }
+    #[test]
+    fn session_revert_omits_absent_optionals() {
+        let revert = SessionRevert {
+            message_id: MessageId::from_str("00000000-0000-4000-8000-000000000002").unwrap(),
+            part_id: None,
+            snapshot: None,
+            files: None,
+        };
+        let value = serde_json::to_value(&revert).unwrap();
+        assert!(value.get("partID").is_none());
+        assert!(value.get("snapshot").is_none());
+        assert!(value.get("files").is_none());
     }
 }
