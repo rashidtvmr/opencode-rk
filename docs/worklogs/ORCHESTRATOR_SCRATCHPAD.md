@@ -10126,3 +10126,69 @@ Do not continue a worker that writes canonical. Preserve bytes; never reset/clea
 `W10-REVIEW-TAB20`, `W10-REVIEW-DIALOG11`, `W10-SIDE01`, `W10-DIFF002` completed with
 no evidence file. `W10-MSG006` and `W10-CP21` reported `(c)` blockers with named
 seams. These five need re-dispatch with the "write handoff in the LAST 3 steps" rule.
+
+---
+
+## Wave-11/12 landings + foreign-stash incident (2026-11-01, base 5c1a80c9 → 014db2eb)
+
+**Landed (each: focused tests + full `oc2` suite green):**
+- `fe2523c3` **TAB-20** `tabs.scope` global|cwd resolution. Main re-authored the
+  corrupt `W9-TAB20-SCOPE` candidate (its hunk at line 237 was broken). Adds
+  `TabPersistenceScope` (Global | Cwd), a `tab_scope` resolver reading disk CLI
+  config then inline override (last valid wins), and routes
+  `load_session_tabs`/`persist_session_tabs` through it. Generic
+  `Into<TabPersistenceScope>` bound keeps existing call sites compiling.
+  Upstream: `config/index.tsx:193-195,334` (default `cwd`),
+  `context/session-tabs.tsx:105-118` (`store.cwd[paths.cwd]` vs `store.global`).
+- `0c04461b` **SIDE-01** sidebar title rename-pending projection. `NativeView::
+  set_title_state` forwards to the status projection; `sidebar_title_pending`
+  matches the active session id against the in-flight rename identity,
+  reprojected from post-drain state each frame. Upstream
+  `routes/session/sidebar.tsx:33-45`, `context/data.tsx:22-47`. From the
+  `W11-SIDE01-TITLEDRIVER` patch; main fixed its test (literal id rejected by the
+  paint gate → bind a canonical `SessionId`; open the sidebar when the route
+  layout does not).
+- `24e3bcf5` **SIDE-10** optional session revert state. Adds
+  `SessionRevert { messageID, partID }` + `SessionSummary.revert: Option<..>`
+  (serde default + skip_serializing_if); `get_session` serializes the whole
+  struct so the field is served with no server change. Upstream
+  `schema/src/session.ts:59`, `session-revert.ts:7-14`. From `W11-SIDE10-REVERT`;
+  main completed 4 `SessionSummary` literals the peer missed (sessions
+  store/decode + a test helper).
+- `014db2eb` **DIFF-002** edit diagnostics after the diff. `PatchDiagnostic` on
+  `ChatPart::Patch` + `parse_diagnostics` mirroring upstream
+  `routes/session/index.tsx:3492,3703-3725,3811-3825` (severity-1 filter, path
+  key, slice(0,3), `Error [l:c] msg` rows as ToolError) with reserved slots
+  inside `MAX_MESSAGE_ROWS`. From `W10-DIFF002`; main fixed one double-borrow.
+  Recorded gap: no confirmed oc2 producer of `metadata.diagnostics` yet.
+
+**FOREIGN-STASH INCIDENT (self-inflicted, contained).** While probing whether the
+pre-existing `native_terminal_reply_recovery` E0004 test-target error was mine, I
+ran `git stash push` then `git stash pop`. The Recovery ref-transaction guard
+BLOCKED the push (ref creation forbidden) but the pop's *working-tree* half still
+applied a FOREIGN stash (`stash@{0}` = WIP on `336cf5b0`) onto the tree, leaving
+conflict markers in AGENTS.md, native_navigation.rs, native_tabs.rs,
+native_view.rs, tui_entry.rs, server/src/lib.rs, ORCHESTRATOR_SCRATCHPAD.md.
+Containment: confirmed the SIDE-10 files were disjoint and clean; restored exactly
+those 7 foreign files from `HEAD` bytes (no ref moves, no reset/clean/checkout);
+verified zero markers remain; the foreign stash is PRESERVED at
+`stash@{0}=f26fd487` (nothing lost). LESSON: never use `git stash` in this repo —
+the guard leaves a half-applied pop. The E0004 is genuinely pre-existing: both
+`native_input_decoder.rs` and the test target are byte-identical to HEAD and every
+commit adding the uncovered `InputEvent` variants is an ancestor of HEAD.
+
+**Wave-12 dispatched (20+ workers, base `014db2eb`):** `W12-MSG006-ID`,
+`W12-CP21-DOCKHOVER`, `W12-SIDE14-FOOTERHOVER`, `W12-SIDE12-CONNLIST`,
+`W12-DIALOG12-CALLER`, `W12-SIDE08-DIALOGMCP`, `W12-TAB24-PENDING`,
+`W12-CP02-GEOMETRY` (vyce-deepseek-v41 ×8); `W12-TAB21-VIEWROUTE2`,
+`W12-DIFF002-PRODUCER` (@9router-luna-free); `W12-BLOCKER-AUDIT2`,
+`W12-CP30-31-33-IME`, `W12-REVIEW-A-retry` (@xkiro-gpt-6-luna);
+`W12-TAB23-LEADERCHORD`, `W12-THEME10-GATE` (@xkiro-mimo-v2-6-flash);
+`W12-CP08-SUBMITWIRE` (@9router-river-glm-5-3-flash);
+`W12-LAY19-FORMEVENT`, `W12-MSG006-MENU` (@9router-th-free);
+`W12-REVIEW-B-retry`, `W12-REVIEW-C` (@9router-vyce-deepseek-v4.1-free-combined).
+
+**Route error recorded:** `@xkiro-haiku-5-5` returned "This model accepts requests
+only from Anthropic's official tools" for both W12-REVIEW-A/B — route unusable
+from this harness. Re-dispatched those reviews on `@xkiro-gpt-6-luna` and
+`@9router-vyce-deepseek-v4.1-free-combined`. Usage UNKNOWN without telemetry.
