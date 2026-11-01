@@ -54,6 +54,9 @@ pub const MIGRATION_ERROR_TITLE: &str = "Data migration failed";
 pub const OVERLAY_BACKDROP_ALPHA: u8 = 150;
 /// Reconnecting box width before the 90% viewport clamp.
 pub const RECONNECT_WIDTH: u16 = 48;
+/// `startup.skipInitialLoading` (`app.tsx:382`) is sourced from
+/// `process.env.OPENCODE_FAST_BOOT`.
+pub const FAST_BOOT_ENV: &str = "OPENCODE_FAST_BOOT";
 /// Startup overlay z-index.
 pub const Z_STARTUP: u16 = 5_000;
 /// Reconnecting/migration overlay z-index.
@@ -360,6 +363,10 @@ pub struct StartupLoading {
     wait_at: Option<u64>,
     shown_at: Option<u64>,
     hide_at: Option<u64>,
+    /// `startup.skipInitialLoading` (`app.tsx:382,1473`): when set the component
+    /// is never mounted, so the hint must never appear regardless of readiness
+    /// timing. Mirrors upstream's `<Show when={!startup.skipInitialLoading}>`.
+    skip: bool,
 }
 
 impl StartupLoading {
@@ -369,8 +376,36 @@ impl StartupLoading {
         Self::default()
     }
 
+    /// `startup.skipInitialLoading` (`app.tsx:382,1473`, sourced from
+    /// `OPENCODE_FAST_BOOT`): the component is not mounted, so the hint is
+    /// suppressed for the whole run. Clears any pending/active grace and is
+    /// sticky across later `update`/`tick` calls.
+    pub fn skip(&mut self) {
+        self.skip = true;
+        self.visible_state_off();
+    }
+
+    /// Whether the hint has been suppressed (`startup.skipInitialLoading`).
+    #[must_use]
+    pub fn skipped(&self) -> bool {
+        self.skip
+    }
+
+    /// Clear the visibility/timer facts so no timer can resurrect the hint.
+    fn visible_state_off(&mut self) {
+        self.shown = false;
+        self.shown_at = None;
+        self.wait_at = None;
+        self.hide_at = None;
+    }
+
     /// Feed a logical timestamp and the current `plugins.ready` value.
     pub fn update(&mut self, now: u64, ready: bool) {
+        if self.skip {
+            // Unmounted upstream: no timer state is ever established.
+            self.visible_state_off();
+            return;
+        }
         self.tick(now);
         self.ready = ready;
         if ready {
@@ -399,6 +434,10 @@ impl StartupLoading {
 
     /// Advance logical time without changing readiness.
     pub fn tick(&mut self, now: u64) {
+        if self.skip {
+            self.visible_state_off();
+            return;
+        }
         if let Some(deadline) = self.wait_at {
             if now >= deadline {
                 self.wait_at = None;
@@ -966,6 +1005,31 @@ mod tests {
         assert!(!startup.visible());
         startup.update(500, false);
         assert!(startup.visible());
+    }
+
+    /// DIALOG-19: `startup.skipInitialLoading` (`app.tsx:382,1473`, from
+    /// `OPENCODE_FAST_BOOT`) unmounts `<StartupLoading>`, so the hint never
+    /// appears — not even when readiness never arrives and the 500 ms grace
+    /// elapses. The suppression is sticky across later updates/ticks.
+    #[test]
+    fn fast_boot_suppresses_the_startup_hint() {
+        let mut startup = StartupLoading::new();
+        startup.skip();
+        assert!(startup.skipped());
+        // Normal mode would show at 500 ms; the skipped hint must stay hidden.
+        startup.update(0, false);
+        startup.update(500, false);
+        assert!(!startup.visible());
+        startup.tick(1_000);
+        assert!(!startup.visible());
+        // A ready transition cannot resurrect it either.
+        startup.update(2_000, true);
+        assert!(!startup.visible());
+        // Without skip, the same timeline does show the hint (control).
+        let mut normal = StartupLoading::new();
+        normal.update(0, false);
+        normal.update(500, false);
+        assert!(normal.visible());
     }
 
     #[test]
