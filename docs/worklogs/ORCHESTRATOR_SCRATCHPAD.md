@@ -9978,3 +9978,33 @@ daemon event; CP-12 scanner trail RGBA needs a per-cell color channel in
 `RailSpan` keyed by theme slots (structural); CP-10 right-footer, CP-08 submit
 gates are partly unverified. Oracle app-render remains blocked (missing
 `@opencode/*` workspace links, `uqr`, and `Schema.isStartingWith` skew).
+
+### 2026-11-01 wave 4 — live tool rows + CP-05 (2 commits)
+
+Base advanced `fc4ad7a9` -> `99f56a2e`. Guard GREEN after each; suite 1998/0.
+
+- `fbf76b1f` — **TOOL-WIRING/006/007/008**: the live transcript now routes
+  every `ChatPart::ToolCall`/`ToolResult`/`ToolState` through the shared
+  per-tool specialization model (`native_tool_rows`) instead of the legacy
+  bracketed `[tool] name (id)` / `[result]` / `[error]` labels. `ToolState`
+  grew a bounded `metadata: String` (the caller fact the wire `status` cannot
+  carry); `apply_tool_metadata` folds it in (Read `↳ Loaded`, execute
+  `metadata.error` -> red, detached `Background`). `rows_for_display` exposed
+  for a resolved `ToolDisplay`; `append_tool_rows` emits the header row verbatim
+  (exact column/glyph) and body rows at `BODY_INDENT` under `MAX_MESSAGE_ROWS`.
+  The live event path and `/api/sessions` history carry no tool `metadata`
+  today, so those facts reach the frame only where the producer supplies them
+  (no fabrication). Tests: updated `typed_tool_thinking…`; new
+  `live_transcript_renders_tool_specializations_and_call_metadata`.
+- `99f56a2e` — **CP-05**: `EditBuffer::delete_to_line_end`/`delete_to_line_start`
+  (line-local, newline preserved, false on empty kill span);
+  `Composer::handle_line_binding` and free `apply_line_binding` accept bytes
+  11/21; `tui_entry` byte 11 runs the kill first (falls back to the Commands
+  page on a no-op) and byte 21 joins the 1|5 line-binding arm. Upstream
+  `config/keybind.ts:233,234`. Tests: `ctrl_k_and_ctrl_u_delete_to_line_edges`,
+  `apply_line_binding_kills_to_line_edges`.
+
+**Next**: DIALOG-11 `search_footer` (`dialog-select.tsx:807`, `command-palette.tsx:26,41`);
+CP-10 live right-footer wiring; the TAB-11 half-block cap color; consume the
+re-dispatched handoffs (DIALOG-12/13 variant models, MSG-006/007 mouse-up +
+menu, TAB-20/22 scope/tombstone) and land the (b) fixes.
