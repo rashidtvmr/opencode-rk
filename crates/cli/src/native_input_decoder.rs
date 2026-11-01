@@ -69,6 +69,16 @@ pub(crate) enum InputEvent {
     AltEnter,
     Paste(String),
     Mouse { x: u16, y: u16, kind: u8, modifiers: u8 },
+    /// CSI I (`\x1b[I`) - terminal focus gained. The upstream parser
+    /// matches the exact two-byte-final sequence and only reports edges
+    /// (`@opentui/core` chunk-node-51kpf0mz.js:8774-8785); same edge-dedup
+    /// duty applies to this transport, it never emits duplicates of its own
+    /// state, only one event per received report.
+    FocusGained,
+    /// CSI O (`\x1b[O`) - terminal focus lost; the renderer counterpart of
+    /// `FocusGained`, consumed as the `focused` fact of TAB-21
+    /// (`context/session-tabs.tsx:94-99`).
+    FocusLost,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -330,6 +340,18 @@ impl TerminalInputDecoder {
                 });
             } else if self.state == State::Csi && byte == b'u' {
                 self.decode_kitty();
+            } else if self.state == State::Csi
+                && self.len == 0
+                && matches!(byte, b'I' | b'O')
+            {
+                // Focus reports are matched exactly like upstream
+                // (`chunk-node-51kpf0mz.js:8774-8789`): a parameterized or
+                // SS3 form stays protocol.
+                self.emit(if byte == b'I' {
+                    InputEvent::FocusGained
+                } else {
+                    InputEvent::FocusLost
+                });
             } else if self.state == State::Csi
                 && matches!(byte, b'M' | b'm')
                 && self.sequence.first() == Some(&b'<')
@@ -671,6 +693,25 @@ mod horizontal_cursor_regressions {
         assert_eq!(decoder.pop(), Some(InputEvent::ArrowRight));
         assert_eq!(decoder.pop(), None);
     }
+
+    #[test]
+    fn focus_reports_decode_exactly_while_parameter_and_ss3_forms_stay_inert() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[I\x1b[O\x1b[I" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::FocusGained), "CSI I is focus gained");
+        assert_eq!(decoder.pop(), Some(InputEvent::FocusLost), "CSI O is focus lost");
+        assert_eq!(
+            decoder.pop(),
+            Some(InputEvent::FocusGained),
+            "every received report emits one raw event; the renderer's edge             dedup lives on the consumer side (chunk-node-51kpf0mz.js:8778-8786)"
+        );
+        assert_eq!(decoder.pop(), None);
+        // SS3 application-key forms and parameterized/modifier variants are
+        // not focus reports anywhere upstream.
+        for byte in b"\x1bOI\x1b[1;3I\x1b[1;5O\x1b[?I" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), None);
+   }
 
     #[test]
     fn kitty_plain_horizontal_cursor_private_keys_decode_but_modified_stays_inert() {

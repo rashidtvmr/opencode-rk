@@ -5901,6 +5901,9 @@ fn native_loop(
     let mut utf8 = NativeUtf8Decoder::default();
     let mut input = native_input_decoder::TerminalInputDecoder::default();
     let mut observed_size = (cols, rows);
+    // TAB-21: last observed terminal focus report. Startup assumes focused
+    // (`Some(true)`) like the upstream renderer's initial focus state.
+    let mut client_focused: Option<bool> = Some(true);
     let mut needs_paint = true;
     // The last painted strip is the sole hit-test snapshot; paint and input
     // never independently recompute tab geometry.
@@ -7981,11 +7984,36 @@ fn native_loop(
             native_input_decoder::InputEvent::ArrowRight => ("right", 0, None),
             native_input_decoder::InputEvent::Escape => ("escape", 0, None),
             native_input_decoder::InputEvent::Mouse { .. } => ("mouse", 0, None),
+            native_input_decoder::InputEvent::FocusGained => ("focus-gained", 0, None),
+            native_input_decoder::InputEvent::FocusLost => ("focus-lost", 0, None),
         };
         crate::native_debug::event(
             "input.event",
             serde_json::json!({"kind":kind,"bytes":size,"control":control,"dialog":format!("{dialog:?}"),"page":format!("{:?}",view.page()),"palette":view.command_palette_open(),"help":help_open,"permission":view.dialogs.intercepts_input(),"composer_bytes":draft.len(),"busy":worker.is_some()}),
         );
+        // TAB-21: terminal focus reports are owned here before any dialog or
+        // page can consume them as keys. The report only moves the fact on an
+        // edge, mirroring the upstream renderer's `_terminalFocusState`
+        // guard (`chunk-node-51kpf0mz.js:8777-8786`); the viewed/idle
+        // acknowledge driver consumes `client_focused` when the watermark
+        // seam lands.
+        if matches!(
+            &event,
+            native_input_decoder::InputEvent::FocusGained
+                | native_input_decoder::InputEvent::FocusLost
+        ) {
+            match &event {
+                native_input_decoder::InputEvent::FocusGained if client_focused != Some(true) => {
+                    client_focused = Some(true);
+                }
+                native_input_decoder::InputEvent::FocusLost if client_focused != Some(false) => {
+                    client_focused = Some(false);
+                }
+                _ => {}
+            }
+            needs_paint = true;
+            continue;
+        }
         needs_paint = true;
         // Focus snapshot for this event: an open (non-Chat) page behaves
         // like the frozen Help overlay for focus purposes.
@@ -9568,6 +9596,11 @@ fn native_loop(
             | native_input_decoder::InputEvent::TabPrevious
             | native_input_decoder::InputEvent::TabSlot(_)
             | native_input_decoder::InputEvent::TabReopen => continue,
+            // Defensive unreachable arm: focus reports are consumed above the
+            // dialog/page dispatch, but this match stays exhaustive over
+            // `InputEvent`.
+            native_input_decoder::InputEvent::FocusGained
+            | native_input_decoder::InputEvent::FocusLost => continue,
         };
         if children_panel.open && !view.dialogs.intercepts_input() && !matches!(byte, 3 | 4) {
             let composing = children_panel.composing;
