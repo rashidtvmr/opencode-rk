@@ -361,9 +361,9 @@ mod conditional_sidebar_tests {
         let limit = index(&|row| row == "Limit");
         let remaining = index(&|row| row == "$3.50 remaining");
         let mcp = index(&|row| row == "▼ MCP");
-        let first = index(&|row| row.contains("• a Connected"));
-        let second = index(&|row| row.contains("• b Error"));
-        let third = index(&|row| row.contains("• c Disabled"));
+        let first = index(&|row| row.starts_with("• a ") && row.ends_with("Connected"));
+        let second = index(&|row| row.starts_with("• b ") && row.ends_with("Error"));
+        let third = index(&|row| row.starts_with("• c ") && row.ends_with("Disabled"));
         let todo = index(&|row| row == "Todo");
         let todo_row = index(&|row| row == "[ ] Ship sidebar");
         let onboarding = index(&|row| row.contains("Getting started"));
@@ -1701,8 +1701,8 @@ mod tests {
         let beta = rows.iter().position(|row| row.contains("beta")).expect("beta row");
         // `mcp.tsx:20-32` renders its own capitalised labels; the wire
         // status string is never painted verbatim.
-        assert_eq!(rows[alpha], "• alpha Connected (excluded)");
-        assert_eq!(rows[beta], "• beta Connected");
+        assert_eq!(rows[alpha], "• alpha          Connected (excluded)");
+        assert_eq!(rows[beta], "• beta                      Connected");
     }
 
     #[test]
@@ -2313,14 +2313,14 @@ mod mcp_sidebar_behavior_regression {
         let mut view = StatusView::default();
         view.apply_mcp(&three_servers()).unwrap();
         assert!(view.mcp_sidebar_open());
-        assert!(view.render_sidebar(80, 20).iter().any(|row| row.contains("• a Connected")));
+        assert!(view.render_sidebar(80, 20).iter().any(|row| (row.contains("• a ") && row.ends_with("Connected"))));
         assert!(view.toggle_mcp_sidebar());
         assert!(!view.mcp_sidebar_open());
         assert!(view.render_sidebar(80, 20).iter().any(|row| row.contains("▶ MCP")));
-        assert!(!view.render_sidebar(80, 20).iter().any(|row| row.contains("• a Connected")));
+        assert!(!view.render_sidebar(80, 20).iter().any(|row| (row.contains("• a ") && row.ends_with("Connected"))));
         assert!(view.toggle_mcp_sidebar());
         assert!(view.mcp_sidebar_open());
-        assert!(view.render_sidebar(80, 20).iter().any(|row| row.contains("• a Connected")));
+        assert!(view.render_sidebar(80, 20).iter().any(|row| (row.contains("• a ") && row.ends_with("Connected"))));
     }
 
     #[test]
@@ -2338,7 +2338,7 @@ mod mcp_sidebar_behavior_regression {
             view.apply_mcp(&snapshot).unwrap();
             assert!(!view.toggle_mcp_sidebar());
             assert!(view.mcp_sidebar_open());
-            assert!(view.render_sidebar(80, 20).iter().any(|row| row.contains("• a Connected")));
+            assert!(view.render_sidebar(80, 20).iter().any(|row| (row.contains("• a ") && row.ends_with("Connected"))));
         }
     }
 
@@ -2374,8 +2374,8 @@ mod mcp_sidebar_behavior_regression {
         let rows = view.render_sidebar(80, 20);
         assert!(rows.iter().any(|row| row == "MCP (1 active, 1 error)"), "{rows:?}");
         assert!(!rows.iter().any(|row| row.starts_with('▶')), "no arrow at <=2");
-        assert!(rows.iter().any(|row| row.contains("• a Connected")), "{rows:?}");
-        assert!(rows.iter().any(|row| row.contains("• b Error")), "{rows:?}");
+        assert!(rows.iter().any(|row| (row.contains("• a ") && row.ends_with("Connected"))), "{rows:?}");
+        assert!(rows.iter().any(|row| (row.contains("• b ") && row.ends_with("Error"))), "{rows:?}");
         // Toggling is still refused while <=2 servers exist.
         assert!(!view.toggle_mcp_sidebar());
         assert!(!view.mcp_sidebar_open());
@@ -2398,7 +2398,7 @@ mod mcp_sidebar_behavior_regression {
         view.scroll_sidebar(2, 5);
         let scrolled = view.render_sidebar(80, 5);
         assert_eq!(scrolled.get(1).map(String::as_str), Some("MCP incident"));
-        assert_eq!(scrolled.get(3).map(String::as_str), Some("• b Error"));
+        assert_eq!(scrolled.get(3).map(String::as_str), Some("• b                                                                       Error"));
         assert_ne!(view.mcp_sidebar_row_hit(80, 5, 1), Some(McpSidebarHit::Toggle));
         // Returning to the top restores the MCP heading as the body's first
         // visible row, still below the pinned title.
@@ -2473,7 +2473,7 @@ mod sidebar_span_style_tests {
         let plan = view.sidebar_span_styles_at(38, 30);
         let index = rows
             .iter()
-            .position(|line| line.text == "• alpha Connected")
+            .position(|line| line.text.starts_with("• alpha ") && line.text.ends_with("Connected"))
             .expect("connected server row");
         let spans: Vec<LineSpan> = plan
             .iter()
@@ -2485,17 +2485,18 @@ mod sidebar_span_style_tests {
             [
                 LineSpan::new(0, 1, Slot::Success, ATTR_NONE),
                 LineSpan::new(2, 5, Slot::Text, ATTR_BOLD),
-                LineSpan::new(8, 9, Slot::TextMuted, ATTR_NONE),
+                // Right-aligned status (`flexGrow={1}` name, sidebar/mcp.tsx:67).
+                LineSpan::new(28, 9, Slot::TextMuted, ATTR_NONE),
             ]
         );
         // `span_at` resolves any cell of the row to the upstream `<text>`.
         assert_eq!(span_at(&spans, 0).map(|span| span.slot), Some(Slot::Success));
         assert_eq!(span_at(&spans, 3).map(|span| span.attributes), Some(ATTR_BOLD));
-        assert_eq!(span_at(&spans, 8).map(|span| span.slot), Some(Slot::TextMuted));
+        assert_eq!(span_at(&spans, 28).map(|span| span.slot), Some(Slot::TextMuted));
         // A failed server paints its status with the error colour; its dot too.
         let failed = rows
             .iter()
-            .position(|line| line.text == "• beta Error")
+            .position(|line| line.text.starts_with("• beta ") && line.text.ends_with("Error"))
             .expect("failed server row");
         let failed_spans: Vec<LineSpan> = plan
             .iter()
@@ -2507,7 +2508,7 @@ mod sidebar_span_style_tests {
         // `needs_auth` keeps a warning dot but muted status text (`mcp.tsx:15-21/82-85`).
         let auth = rows
             .iter()
-            .position(|line| line.text == "• gamma Sign in")
+            .position(|line| line.text.starts_with("• gamma ") && line.text.ends_with("Sign in"))
             .expect("needs-auth row");
         let auth_spans: Vec<LineSpan> = plan
             .iter()

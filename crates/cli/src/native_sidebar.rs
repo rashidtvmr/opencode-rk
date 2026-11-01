@@ -549,24 +549,25 @@ impl<'a> McpSection<'a> {
         let fixed = bullet + 1 + 1 + cell_width(label) + cell_width(suffix);
         let available = width.saturating_sub(fixed);
         let name_width = cell_width(item.name);
-        let name = if name_width <= available {
+        // Upstream gives the name `flexGrow={1}` (sidebar/mcp.tsx:67), so the
+        // fixed status word sits flush against the row's right edge and the
+        // name region absorbs the slack. Reserve exactly that region so the
+        // status is right-aligned instead of left-packed.
+        let name_region = available;
+        let name = if name_width <= name_region {
             item.name.to_owned()
-        } else if available > 1 {
-            format!("{}…", take_cells(item.name, available - 1))
+        } else if name_region > 1 {
+            format!("{}…", take_cells(item.name, name_region - 1))
         } else {
             String::new()
         };
-        let text = if name.is_empty() {
-            format!("• {label}{suffix}")
-        } else {
-            format!("• {name} {label}{suffix}")
-        };
+        let pad = name_region.saturating_sub(cell_width(&name));
+        let text = format!("• {name}{} {label}{suffix}", " ".repeat(pad));
         let mut spans = vec![LineSpan::new(0, bullet, item.status.dot(), ATTR_NONE)];
-        let mut cell = bullet + 1;
+        let name_start = bullet + 1;
         if !name.is_empty() {
             let cells = cell_width(&name);
-            spans.push(LineSpan::new(cell, cells, Slot::Text, ATTR_BOLD));
-            cell += cells + 1;
+            spans.push(LineSpan::new(name_start, cells, Slot::Text, ATTR_BOLD));
         }
         let status_slot = if item.status == McpDisplayStatus::Failed {
             Slot::Error
@@ -574,11 +575,16 @@ impl<'a> McpSection<'a> {
             Slot::TextMuted
         };
         let status_cells = cell_width(label);
-        spans.push(LineSpan::new(cell, status_cells, status_slot, ATTR_NONE));
-        cell += status_cells;
+        let status_start = name_start + name_region + 1;
+        spans.push(LineSpan::new(status_start, status_cells, status_slot, ATTR_NONE));
         let suffix_cells = cell_width(suffix);
         if suffix_cells > 0 {
-            spans.push(LineSpan::new(cell, suffix_cells, Slot::TextMuted, ATTR_NONE));
+            spans.push(LineSpan::new(
+                status_start + status_cells,
+                suffix_cells,
+                Slot::TextMuted,
+                ATTR_NONE,
+            ));
         }
         (text, clamp_spans(&spans, width))
     }
@@ -1702,7 +1708,7 @@ mod tests {
                 "MCP",
                 "no disclosure arrow at <=2 servers"
             );
-            assert_eq!(section.row(&items[0], body_width(content_width(42))), "• alpha Connected");
+            assert_eq!(section.row(&items[0], body_width(content_width(42))), "• alpha                     Connected");
         }
 
         let items = mcp(&[
@@ -1718,8 +1724,14 @@ mod tests {
         assert_eq!(open.heading(), "▼ MCP");
         assert_eq!(open.active(), 1);
         assert_eq!(open.errors(), 2);
-        assert_eq!(open.row(&items[1], body_width(content_width(42))), "• beta Error");
-        assert_eq!(open.row(&items[2], body_width(content_width(42))), "• gamma Sign in");
+        assert_eq!(
+            open.row(&items[1], body_width(content_width(42))),
+            "• beta                          Error"
+        );
+        assert_eq!(
+            open.row(&items[2], body_width(content_width(42))),
+            "• gamma                       Sign in"
+        );
         let collapsed = McpSection {
             items: &items,
             open: false,
@@ -1788,7 +1800,7 @@ mod tests {
             open: true,
         }
         .row(&excluded, body_width(content_width(42)));
-        assert_eq!(row, "• alpha Error (excluded)");
+        assert_eq!(row, "• alpha              Error (excluded)");
     }
 
     /// SIDE-10/SIDE-11: todo markers, wrapping, remaining count.
@@ -2138,8 +2150,17 @@ mod tests {
             // Name: base text, bold, starting after the bullet and its gap.
             let name_cells = cell_width(item.name);
             assert_eq!(spans[1], LineSpan::new(2, name_cells, Slot::Text, ATTR_BOLD));
-            // Status: only `failed` uses the error colour (`mcp.tsx:82-85`).
-            let status_cell = 2 + name_cells + 1;
+            // Status: right-aligned against the row edge (`flexGrow={1}` on the
+            // name, sidebar/mcp.tsx:67); only `failed` uses the error colour.
+            let bullet = 1usize;
+            let label_cells = cell_width(item.status.label());
+            let suffix_cells = if item.included == Some(false) {
+                cell_width(" (excluded)")
+            } else {
+                0
+            };
+            let name_region = width.saturating_sub(bullet + 1 + 1 + label_cells + suffix_cells);
+            let status_cell = 2 + name_region + 1;
             let status_slot = if item.status == McpDisplayStatus::Failed {
                 Slot::Error
             } else {
@@ -2406,12 +2427,12 @@ mod tests {
             spans_for("$0 remaining"),
             [LineSpan::new(0, cell_width("$0 remaining"), Slot::Error, ATTR_NONE)]
         );
-        let failed = spans_for("• alpha Connected");
+        let failed = spans_for("• alpha                     Connected");
         assert_eq!(failed[0].slot, Slot::Success);
         assert_eq!(failed[1].attributes, ATTR_BOLD);
         assert_eq!(failed[2].slot, Slot::TextMuted);
         assert_eq!(
-            spans_for("• beta Error")[2].slot,
+            spans_for("• beta                          Error")[2].slot,
             Slot::Error,
             "a failed server paints its status with the error colour"
         );
