@@ -2533,8 +2533,24 @@ fn chat_row_foreground(class: &crate::native_view_chat::ChatRowClass, text_color
         ChatRowClass::DiffRemoved => error,
         ChatRowClass::ToolError => error,
         ChatRowClass::ToolPermission => warning,
+        ChatRowClass::ToolDenied => muted,
         ChatRowClass::FooterError => error,
         _ => text_color,
+    }
+}
+
+/// Attribute override owned by a chat row class. Only `ToolDenied` carries
+/// one: upstream strikes the denied tool icon and label
+/// (`routes/session/message-parts.tsx:242,252,288`
+/// `denied ? TextAttributes.STRIKETHROUGH`). Every other class keeps the
+/// theme/markdown attribute stream untouched.
+#[cfg(feature = "native")]
+fn chat_row_attribute_override(class: Option<&crate::native_view_chat::ChatRowClass>) -> u32 {
+    match class {
+        Some(crate::native_view_chat::ChatRowClass::ToolDenied) => {
+            crate::native_ui_style::ATTR_STRIKETHROUGH
+        }
+        _ => 0,
     }
 }
 
@@ -2606,6 +2622,33 @@ mod footer_v3_painter_tests {
             muted,
             "upstream footer field spans fg = theme.text.muted"
         );
+    }
+
+    /// TOOL-005: the denied tool class keeps the muted foreground and carries
+    /// the upstream `TextAttributes.STRIKETHROUGH` override on its cells,
+    /// while a completed tool result gets no attribute override.
+    #[test]
+    fn denied_tool_rows_keep_muted_foreground_and_strike() {
+        let text_color = Rgba::rgb(1, 2, 3);
+        let muted = Rgba::rgb(4, 5, 6);
+        let error = Rgba::rgb(7, 8, 9);
+        let warning = Rgba::rgb(10, 11, 12);
+        assert_eq!(
+            chat_row_foreground(&ChatRowClass::ToolDenied, text_color, muted, error, warning),
+            muted,
+            "denied tool fg = theme.text.muted (index.tsx:2837 default branch)"
+        );
+        assert_eq!(
+            chat_row_attribute_override(Some(&ChatRowClass::ToolDenied)),
+            crate::native_ui_style::ATTR_STRIKETHROUGH,
+            "denied tool label carries TextAttributes.STRIKETHROUGH"
+        );
+        assert_eq!(
+            chat_row_attribute_override(Some(&ChatRowClass::ToolResult)),
+            crate::native_ui_style::ATTR_NONE,
+            "an ordinary completed tool result is not struck"
+        );
+        assert_eq!(chat_row_attribute_override(None), crate::native_ui_style::ATTR_NONE);
     }
 
     /// TOOL-002: a tool row awaiting a permission decision paints
@@ -3777,7 +3820,11 @@ fn native_paint(
                 } else {
                     normal_fg
                 };
-                let mut attributes = 0;
+                let mut attributes = if in_modal {
+                    0
+                } else {
+                    chat_row_attribute_override(ctx.chat_row_classes.get(row))
+                };
                 if in_modal && (y == u32::from(ctx.modal.content_y)
                     || modal_text.trim_start().starts_with("> ")) {
                     attributes = crate::native_ui_style::style(crate::native_ui_style::Role::Heading).attributes;

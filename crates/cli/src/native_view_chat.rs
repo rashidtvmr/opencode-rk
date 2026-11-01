@@ -715,6 +715,12 @@ pub enum ChatRowClass {
     ToolPermission,
     /// Errored tool result header or output row.
     ToolError,
+    /// Denied (rejected permission / dismissed question) tool row: upstream
+    /// strikes the icon and label and keeps the muted color
+    /// (`routes/session/message-parts.tsx:242,252,288`
+    /// `denied ? TextAttributes.STRIKETHROUGH`; fg stays `theme.text.muted`
+    /// via `index.tsx:2826-2848`).
+    ToolDenied,
     /// Agent/model/location switch notice body, muted
     /// (`packages/tui/src/routes/session/index.tsx:2094`, `:2097-2101`).
     SwitchNotice,

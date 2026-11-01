@@ -171,7 +171,8 @@ impl ToolStatus {
     pub fn row_class(self) -> ChatRowClass {
         match self {
             Self::Streaming | Self::Running | Self::Pending => ChatRowClass::ToolCall,
-            Self::Completed | Self::Denied => ChatRowClass::ToolResult,
+            Self::Completed => ChatRowClass::ToolResult,
+            Self::Denied => ChatRowClass::ToolDenied,
             Self::Error => ChatRowClass::ToolError,
         }
     }
@@ -1550,7 +1551,7 @@ mod tests {
             true,
         );
         assert!(rows.iter().all(|(_, class)| *class != ChatRowClass::ToolError));
-        assert_eq!(rows[0].1, ChatRowClass::ToolResult);
+        assert_eq!(rows[0].1, ChatRowClass::ToolDenied);
         assert!(rows[0].0.contains('⊘'));
         assert!(!rows.iter().any(|(row, _)| row.contains("failed")));
     }
@@ -1771,6 +1772,24 @@ mod tests {
         assert_eq!(classify_status("completed", false).row_class(), ChatRowClass::ToolResult);
         assert_eq!(classify_status("running", false).row_class(), ChatRowClass::ToolCall);
         assert_eq!(classify_status("error", true).row_class(), ChatRowClass::ToolError);
+    }
+
+    /// TOOL-005: a denied tool keeps the muted (not error) color but moves to
+    /// the dedicated class that carries the upstream strikethrough
+    /// (`routes/session/message-parts.tsx:242,252,288`).
+    #[test]
+    fn denied_status_maps_to_the_strikethrough_class() {
+        let display = tool_display(
+            80,
+            "shell",
+            "completed",
+            "",
+            "PermissionRejectedError: user dismissed the request",
+            true,
+        );
+        assert_eq!(display.status, ToolStatus::Denied);
+        assert_eq!(display.status.row_class(), ChatRowClass::ToolDenied);
+        assert_ne!(display.status.row_class(), ChatRowClass::ToolError);
     }
 
     #[test]
