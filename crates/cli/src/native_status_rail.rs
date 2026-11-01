@@ -53,6 +53,7 @@
 //! interrupt state, counts, usage strings) is a caller-supplied fact.
 
 use crate::native_status::live_counts_label;
+use crate::native_theme::Rgba;
 
 /// Upstream `footer.tsx:59`: `Math.max(0, dimensions().width - 8)` — the
 /// fitting width is the terminal width minus the composer's horizontal
@@ -335,6 +336,12 @@ struct ScannerState {
     holding: bool,
     hold_progress: i32,
     forward: bool,
+    /// `spinner.ts:32-33,172-173,181-183,191-193`: frames spent inside
+    /// the current movement leg and the leg total (forward `width`,
+    /// backward `width - 1`); both zero while holding. Drives the
+    /// inactive-cell fade-in (`movementProgress`/`movementTotal`).
+    movement_progress: i32,
+    movement_total: i32,
 }
 
 /// `spinner.ts:25-83` (`getScannerState`) for the `bidirectional` direction
@@ -350,6 +357,8 @@ fn scanner_state(frame_index: usize) -> ScannerState {
             holding: false,
             hold_progress: 0,
             forward: true,
+            movement_progress: frame as i32,
+            movement_total: SCANNER_WIDTH as i32,
         }
     } else if frame < forward_frames + hold_end_frames {
         ScannerState {
@@ -357,6 +366,8 @@ fn scanner_state(frame_index: usize) -> ScannerState {
             holding: true,
             hold_progress: (frame - forward_frames) as i32,
             forward: true,
+            movement_progress: 0,
+            movement_total: 0,
         }
     } else if frame < forward_frames + hold_end_frames + backward_frames {
         let backward_index = frame - forward_frames - hold_end_frames;
@@ -365,6 +376,8 @@ fn scanner_state(frame_index: usize) -> ScannerState {
             holding: false,
             hold_progress: 0,
             forward: false,
+            movement_progress: backward_index as i32,
+            movement_total: (SCANNER_WIDTH - 1) as i32,
         }
     } else {
         ScannerState {
@@ -372,6 +385,8 @@ fn scanner_state(frame_index: usize) -> ScannerState {
             holding: true,
             hold_progress: (frame - forward_frames - hold_end_frames - backward_frames) as i32,
             forward: false,
+            movement_progress: 0,
+            movement_total: 0,
         }
     }
 }
@@ -443,6 +458,111 @@ pub fn scanner_render(animations: bool, elapsed_ms: u64) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// --- CP-12 per-cell trail colors (upstream `spinner.ts:141-250`) -----------
+
+/// `index.tsx:1661,1668`: the prompt scanner's `inactiveFactor: 0.6`.
+pub const SCANNER_INACTIVE_ALPHA: f32 = 0.6;
+/// `index.tsx:1663,1670`: the prompt scanner's `minAlpha: 0.3`.
+pub const SCANNER_MIN_ALPHA: f32 = 0.3;
+
+/// `spinner.ts:199-236` (`deriveTrailColors`, default six steps): the head is
+/// fully opaque, index 1 is a bloom at `1.15` brightness with alpha `0.9`,
+/// then the alpha decays as `0.65^(i-1)`. RGB channels are otherwise carried
+/// through unchanged (clamped at full brightness).
+#[must_use]
+pub fn scanner_trail_colors(base: Rgba) -> [Rgba; SCANNER_TRAIL_STEPS] {
+    let mut colors = [base; SCANNER_TRAIL_STEPS];
+    for (step, color) in colors.iter_mut().enumerate() {
+        let (alpha, brightness) = match step {
+            0 => (1.0, 1.0),
+            1 => (0.9, 1.15),
+            _ => (0.65f32.powi(step as i32 - 1), 1.0),
+        };
+        let channel = |value: u8| (f32::from(value) * brightness).min(255.0).round() as u8;
+        *color = Rgba::new(
+            channel(base.r),
+            channel(base.g),
+            channel(base.b),
+            (alpha * 255.0).round() as u8,
+        );
+    }
+    colors
+}
+
+/// `spinner.ts:239-250` (`deriveInactiveColor`): the same RGB with the alpha
+/// reduced to `factor` (the prompt passes `inactiveFactor: 0.6`). The falloff
+/// stays background-independent upstream; the view composites it.
+#[must_use]
+pub fn scanner_inactive_color(base: Rgba, factor: f32) -> Rgba {
+    Rgba::new(base.r, base.g, base.b, (factor.clamp(0.0, 1.0) * 255.0).round() as u8)
+}
+
+/// `spinner.ts:161-181`: the inactive-alpha fade during holds and movement
+/// (`enableFading` defaults on; the prompt keeps it on). Holding fades the
+/// inactive alpha linearly toward `minAlpha`; movement fades in from
+/// `minAlpha` with `progress = movementProgress / max(1, movementTotal - 1)`.
+#[must_use]
+pub fn scanner_inactive_fade(frame_index: usize) -> f32 {
+    let state = scanner_state(frame_index);
+    let min = SCANNER_MIN_ALPHA;
+    if state.holding {
+        let total = if state.forward {
+            SCANNER_HOLD_END_FRAMES
+        } else {
+            SCANNER_HOLD_START_FRAMES
+        };
+        let progress = state.hold_progress as f32 / total as f32;
+        (1.0 - progress * (1.0 - min)).max(min)
+    } else {
+        let progress = state.movement_progress as f32
+            / (state.movement_total.saturating_sub(1)).max(1) as f32;
+        min + progress * (1.0 - min)
+    }
+}
+
+/// Upstream per-cell colors (`spinner.ts:185-198`): active cells take
+/// `scanner_trail_colors()[index]` at the trail's own alpha; inactive cells
+/// take `scanner_inactive_color` scaled by `scanner_inactive_fade`. Glyph
+/// selection stays `scanner_frame`'s business; the view composites each
+/// returned color over the composer background (`index.tsx:1676`
+/// `promptBg = theme.decrease(theme.background.raised.base)`) with
+/// [`composite_rgba`] before emitting truecolor SGR.
+#[must_use]
+pub fn scanner_cell_colors(base: Rgba, frame_index: usize) -> [Rgba; SCANNER_WIDTH] {
+    let trail = scanner_trail_colors(base);
+    let inactive = scanner_inactive_color(base, SCANNER_INACTIVE_ALPHA);
+    let fade = scanner_inactive_fade(frame_index);
+    let mut cells = [inactive; SCANNER_WIDTH];
+    for (char_index, cell) in cells.iter_mut().enumerate() {
+        let index = scanner_color_index(frame_index, char_index);
+        if (0..SCANNER_TRAIL_STEPS as i32).contains(&index) {
+            *cell = trail[index as usize];
+        } else {
+            cell.a = ((f32::from(inactive.a) / 255.0) * fade * 255.0).round() as u8;
+        }
+    }
+    cells
+}
+
+/// Straight `src-over` composite of a foreground RGBA over an (assumed
+/// opaque) background color: how the view resolves a cell against the
+/// composer background before terminal output.
+#[must_use]
+pub fn composite_rgba(front: Rgba, back: Rgba) -> Rgba {
+    let alpha = f32::from(front.a) / 255.0;
+    let blend = |front: u8, back: u8| {
+        (f32::from(front) * alpha + f32::from(back) * (1.0 - alpha)).round() as u8
+    };
+    Rgba::new(
+        blend(front.r, back.r),
+        blend(front.g, back.g),
+        blend(front.b, back.b),
+        255,
+    )
+}
+
+// ---------------------------------------------------------------------------
+
 // One-cell spinner (mini footer sibling of the scanner)
 // ---------------------------------------------------------------------------
 
@@ -2295,5 +2415,73 @@ mod native_status_rail_tests {
         );
         assert_eq!(composer_close(None), ComposerClose::Close);
         assert_eq!(composer_close(Some("")), ComposerClose::Close);
+    }
+}
+
+mod cp12_scanner_color_tests {
+    use super::*;
+
+    #[test]
+    fn cp12_trail_colors_match_upstream_falloff() {
+        // `spinner.ts:199-236` with the dark border step (`#484848`,
+        // `border -> darkStep7` in the bundled theme resolution).
+        let base = Rgba::rgb(0x48, 0x48, 0x48);
+        let colors = scanner_trail_colors(base);
+        let alphas: [u8; SCANNER_TRAIL_STEPS] = colors.map(|color| color.a);
+        assert_eq!(alphas, [255, 230, 166, 108, 70, 46]);
+        // Head carries the base color unchanged; the bloom multiplies 1.15
+        // and clamps; later steps keep the base RGB with decayed alpha only.
+        assert_eq!(colors[0].r, 0x48);
+        assert_eq!(colors[1].r, 0x53);
+        assert_eq!(colors[3].r, 0x48);
+        assert_eq!(colors[3].g, 0x48);
+        assert_eq!(colors[3].b, 0x48);
+    }
+
+    #[test]
+    fn cp12_cell_colors_frame_zero_head_and_fading_tail() {
+        let base = Rgba::rgb(0x48, 0x48, 0x48);
+        let cells = scanner_cell_colors(base, 0);
+        // Frame 0: the head is opaque at cell 0; no trail extends past the
+        // scanner's left edge, so every other cell is inactive at the 0.3 fade.
+        assert_eq!(cells[0], Rgba::rgb(0x48, 0x48, 0x48));
+        let inactive_start = Rgba::new(0x48, 0x48, 0x48, 46);
+        for cell in &cells[1..] {
+            assert_eq!(*cell, inactive_start);
+        }
+
+        // Frame 7: trail indices run backward from the head at cell 7.
+        let cells = scanner_cell_colors(base, 7);
+        assert_eq!(cells[7], base);
+        assert_eq!(cells[6].a, 230);
+        assert_eq!(cells[5].a, 166);
+        assert_eq!(cells[4].a, 108);
+        // Inactive cells have reached the base inactive alpha by movement end.
+        assert_eq!(cells[1].a, 153);
+    }
+
+    #[test]
+    fn cp12_cell_colors_hold_end_keeps_head_bright_then_fades() {
+        let base = Rgba::rgb(0x48, 0x48, 0x48);
+        // Frame 8: first hold-end frame. `holdProgress 0` keeps the inactive
+        // alpha at its base 0.6 (153); the head sits at cell 7.
+        let cells = scanner_cell_colors(base, 8);
+        assert_eq!(cells[7].a, 255);
+        assert_eq!(cells[6].a, 230);
+        assert_eq!(cells[0].a, 153);
+        // Frame 16: `holdProgress 8 / holdTotal 9` shifts every color index
+        // past the six trail steps, leaving all cells at the faded inactive
+        // alpha: 0.6 * (1 - 8/9 * 0.7) * 255 = 57.8 -> 58.
+        let cells = scanner_cell_colors(base, 16);
+        assert!(cells.iter().all(|color| color.a == 58));
+    }
+
+    #[test]
+    fn cp12_composite_over_composer_background() {
+        // The `promptBg` surface is opaque (`index.tsx:1676`), so a cell's
+        // resolved color is `composite_rgba(cell, background)`.
+        let front = Rgba::new(255, 255, 255, 128);
+        let back = Rgba::rgb(0, 0, 0);
+        assert_eq!(composite_rgba(front, back), Rgba::rgb(128, 128, 128));
     }
 }
