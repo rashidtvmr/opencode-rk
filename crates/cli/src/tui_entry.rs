@@ -7238,6 +7238,14 @@ fn native_loop(
             native_input_decoder::InputEvent::ArrowDown => ("down", 0, None),
             native_input_decoder::InputEvent::AltArrowUp => ("alt-up", 0, None),
             native_input_decoder::InputEvent::AltArrowDown => ("alt-down", 0, None),
+            // Tab-navigation chords are dispatched to `TabCommand` below; this
+            // match only labels them for the debug trace.
+            native_input_decoder::InputEvent::AltShiftArrowUp => ("alt-shift-up", 0, None),
+            native_input_decoder::InputEvent::AltShiftArrowDown => ("alt-shift-down", 0, None),
+            native_input_decoder::InputEvent::TabNext => ("tab-next", 0, None),
+            native_input_decoder::InputEvent::TabPrevious => ("tab-previous", 0, None),
+            native_input_decoder::InputEvent::TabSlot(_) => ("tab-slot", 0, None),
+            native_input_decoder::InputEvent::TabReopen => ("tab-reopen", 0, None),
             native_input_decoder::InputEvent::ArrowLeft => ("left", 0, None),
             native_input_decoder::InputEvent::ArrowRight => ("right", 0, None),
             native_input_decoder::InputEvent::Escape => ("escape", 0, None),
@@ -7257,14 +7265,35 @@ fn native_loop(
         // inert, and the permission modal / Help gates above keep
         // precedence over both.
         let page_query_open = view.page().accepts_search();
-        // `alt+down`/`alt+up` cycle session tabs (`config/keybind.ts:114,116`).
-        // Like the leader chord, the binding only fires while the chat composer
-        // owns focus; dialogs and pages keep their own arrow navigation.
-        if matches!(
-            &event,
-            native_input_decoder::InputEvent::AltArrowUp | native_input_decoder::InputEvent::AltArrowDown
-        ) {
-            let forward = matches!(&event, native_input_decoder::InputEvent::AltArrowDown);
+        // `session.tab.*` shortcuts (`config/keybind.ts:113-118,152-161`).
+        // Every physical chord names the same `TabCommand` as the leader
+        // path, so default and customized bindings share one dispatch. Like
+        // the leader chord, they only fire while the chat composer owns
+        // focus; dialogs and pages keep their own arrow navigation.
+        let tab_command = match &event {
+            native_input_decoder::InputEvent::AltArrowDown
+            | native_input_decoder::InputEvent::TabNext => {
+                Some(crate::native_navigation::TabCommand::Next)
+            }
+            native_input_decoder::InputEvent::AltArrowUp
+            | native_input_decoder::InputEvent::TabPrevious => {
+                Some(crate::native_navigation::TabCommand::Previous)
+            }
+            native_input_decoder::InputEvent::AltShiftArrowDown => {
+                Some(crate::native_navigation::TabCommand::NextUnread)
+            }
+            native_input_decoder::InputEvent::AltShiftArrowUp => {
+                Some(crate::native_navigation::TabCommand::PreviousUnread)
+            }
+            native_input_decoder::InputEvent::TabSlot(index) => {
+                Some(crate::native_navigation::TabCommand::Select(*index))
+            }
+            native_input_decoder::InputEvent::TabReopen => {
+                Some(crate::native_navigation::TabCommand::Reopen)
+            }
+            _ => None,
+        };
+        if let Some(command) = tab_command {
             if matches!(dialog, native_setup::Dialog::None)
                 && !page_open
                 && !help_open
@@ -7274,32 +7303,72 @@ fn native_loop(
                 && !children_panel.open
                 && !view.command_palette_open()
             {
-                let mut probe = navigation.clone();
-                if navigation.active().is_none() {
-                    probe.select_tab_slot(if forward { 1 } else { navigation.tab_len() });
-                } else {
-                    probe.step_tab(forward);
-                }
-                if let Some(target) = probe.active().map(|tab| tab.session.clone()) {
-                    let scroll = view.chat_scroll_offset();
-                    match select_tab_transition(
-                        &mut view, &mut transcript, &mut navigation, &draft, draft_cursor,
-                        live.as_ref().map(|snapshot| snapshot.origin.as_str()),
-                        auth, binding_generation, &target,
-                        selected.as_ref().map(|model| model.qualified()), scroll,
-                    ) {
-                        Ok(result) => {
-                            apply_close_tab_result(
-                                result, &mut view, &mut live, &mut history_window,
-                                &mut binding_generation, &mut draft, &mut draft_cursor,
-                                &mut selected, &models, &mut session_route,
-                                &mut compact_worker,
-                            );
-                            completion.sync(&draft);
+                use crate::native_navigation::TabCommand;
+                let target = match command {
+                    TabCommand::Next | TabCommand::Previous => {
+                        let forward = matches!(command, TabCommand::Next);
+                        let mut probe = navigation.clone();
+                        if navigation.active().is_none() {
+                            probe.select_tab_slot(if forward { 1 } else { navigation.tab_len() });
+                        } else {
+                            probe.step_tab(forward);
                         }
-                        Err(error) => {
-                            append_transcript(&mut transcript, format!("error: select tab: {error}"))
+                        probe.active().map(|tab| tab.session.clone())
+                    }
+                    TabCommand::NextUnread | TabCommand::PreviousUnread => {
+                        navigation.unread_target(matches!(command, TabCommand::NextUnread))
+                    }
+                    TabCommand::Select(index) => {
+                        navigation.tab_at(index).map(|tab| tab.session.clone())
+                    }
+                    TabCommand::Reopen => None,
+                    TabCommand::Close => None,
+                };
+                let result = match command {
+                    TabCommand::Reopen => {
+                        // Read the scroll before the mutable borrow of `view`
+                        // starts (`chat_scroll_offset` is a plain getter).
+                        let scroll = view.chat_scroll_offset();
+                        reopen_tab_transition(
+                            &mut view, &mut transcript, &mut navigation, &draft, draft_cursor,
+                            live.as_ref().map(|snapshot| snapshot.origin.as_str()),
+                            auth, binding_generation,
+                            selected.as_ref().map(|model| model.qualified()),
+                            scroll,
+                        )
+                    }
+                    _ => match target {
+                        Some(target) => {
+                            let scroll = view.chat_scroll_offset();
+                            select_tab_transition(
+                                &mut view, &mut transcript, &mut navigation, &draft, draft_cursor,
+                                live.as_ref().map(|snapshot| snapshot.origin.as_str()),
+                                auth, binding_generation, &target,
+                                selected.as_ref().map(|model| model.qualified()), scroll,
+                            )
                         }
+                        // No resolvable target (e.g. no tabs yet): consume the
+                        // chord without a transition, as the pre-existing
+                        // `if let Some(target)` guard did.
+                        None => {
+                            utf8.reset();
+                            needs_paint = true;
+                            continue;
+                        }
+                    },
+                };
+                match result {
+                    Ok(result) => {
+                        apply_close_tab_result(
+                            result, &mut view, &mut live, &mut history_window,
+                            &mut binding_generation, &mut draft, &mut draft_cursor,
+                            &mut selected, &models, &mut session_route,
+                            &mut compact_worker,
+                        );
+                        completion.sync(&draft);
+                    }
+                    Err(error) => {
+                        append_transcript(&mut transcript, format!("error: select tab: {error}"))
                     }
                 }
             }
@@ -8605,6 +8674,15 @@ fn native_loop(
             | native_input_decoder::InputEvent::ArrowRight
             | native_input_decoder::InputEvent::AltArrowUp
             | native_input_decoder::InputEvent::AltArrowDown => continue,
+            // Tab-navigation chords were already dispatched to `TabCommand`
+            // above; if one reaches here it was gated by an input owner, so
+            // keep it inert rather than converting it to a composer byte.
+            native_input_decoder::InputEvent::AltShiftArrowUp
+            | native_input_decoder::InputEvent::AltShiftArrowDown
+            | native_input_decoder::InputEvent::TabNext
+            | native_input_decoder::InputEvent::TabPrevious
+            | native_input_decoder::InputEvent::TabSlot(_)
+            | native_input_decoder::InputEvent::TabReopen => continue,
         };
         if children_panel.open && !view.dialogs.intercepts_input() && !matches!(byte, 3 | 4) {
             let composing = children_panel.composing;
@@ -10836,6 +10914,52 @@ fn select_tab_transition(
     seed_navigation_titles(&mut staged, &snapshot);
     *navigation = staged;
     Ok(CloseTabResult { snapshot: Some(snapshot), draft: target.draft, cursor: target.cursor, scroll: target.scroll, selected_model: target.selected_model, generation: prospective, home: false })
+}
+
+/// `session.tab.reopen` (`config/keybind.ts:118`): restore the most recent
+/// user-closed tab at its recorded slot and route to it. The staged
+/// navigation snapshot keeps the closed stack intact when the fetch fails.
+#[cfg(feature = "native")]
+fn reopen_tab_transition(
+    view: &mut crate::native_view::NativeView,
+    transcript: &mut NativeChatHistory,
+    navigation: &mut crate::native_navigation::NavigationState,
+    draft: &str,
+    cursor: usize,
+    origin: Option<&str>,
+    auth: Option<&str>,
+    generation: u64,
+    selected_model: Option<String>,
+    scroll: usize,
+) -> Result<CloseTabResult, String> {
+    let mut staged = navigation.clone();
+    if navigation.active().is_some() {
+        staged
+            .save_active_state(draft.to_owned(), cursor, scroll, selected_model)
+            .map_err(|error| format!("reopen refused: {error:?}"))?;
+    }
+    let session = staged
+        .reopen(None)
+        .ok_or_else(|| "reopen refused: no closed tab".to_owned())?;
+    let target = staged
+        .active()
+        .cloned()
+        .ok_or_else(|| "reopen refused: target missing".to_owned())?;
+    let prospective = crate::native_view::reserve_generation(generation)
+        .ok_or_else(|| "reopen refused: binding generation exhausted".to_owned())?;
+    let origin = origin.ok_or_else(|| "reopen refused: daemon unavailable".to_owned())?;
+    let (snapshot, _) = bind_session(view, transcript, draft, cursor, origin, Some(&session.0), auth)?;
+    seed_navigation_titles(&mut staged, &snapshot);
+    *navigation = staged;
+    Ok(CloseTabResult {
+        snapshot: Some(snapshot),
+        draft: target.draft,
+        cursor: target.cursor,
+        scroll: target.scroll,
+        selected_model: target.selected_model,
+        generation: prospective,
+        home: false,
+    })
 }
 
 #[cfg(feature = "native")]

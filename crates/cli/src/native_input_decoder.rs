@@ -36,8 +36,29 @@ pub(crate) enum InputEvent {
     /// Decoded separately so modifier chords never become typed text or an
     /// unmodified arrow that a dialog would consume.
     AltArrowUp,
-    /// CSI 1;3B — Alt+Down (`session.tab.next`, `config/keybind.ts:114`).
+    /// CSI 1;3B — Alt+Down (`session.tab.next`, `config/keybind.ts:113`).
     AltArrowDown,
+    /// CSI 1;4B — Alt+Shift+Down (`session.tab.next_unread`,
+    /// `config/keybind.ts:115`).
+    AltShiftArrowDown,
+    /// CSI 1;4A — Alt+Shift+Up (`session.tab.previous_unread`,
+    /// `config/keybind.ts:116`).
+    AltShiftArrowUp,
+    /// Kitty Ctrl+Tab (CSI 9;5u). Upstream `session.tab.next` is
+    /// `ctrl+tab,alt+down` (`config/keybind.ts:113`); the `alt+down` half is
+    /// already decoded as `AltArrowDown`, and no `alt+tab` binding exists.
+    TabNext,
+    /// Kitty Ctrl+Shift+Tab (CSI 9;6u). Upstream `session.tab.previous` is
+    /// `ctrl+shift+tab,alt+up` (`config/keybind.ts:114`); the `alt+up` half is
+    /// already decoded as `AltArrowUp`. `alt+backspace` is NOT a tab binding -
+    /// upstream uses it for `input.delete.word.backward` (`:244`).
+    TabPrevious,
+    /// Kitty Ctrl+digit (CSI 49;5u .. 57;5u, 48;5u)
+    /// (`session.tab.select.{1..10}`, `config/keybind.ts:152-161`).
+    TabSlot(usize),
+    /// Kitty Ctrl+Shift+T (CSI 116;6u) (`session.tab.reopen`,
+    /// `config/keybind.ts:118`).
+    TabReopen,
     /// Kitty Shift+Return (CSI 13;2u). The caller resolves this as newline;
     /// it must not become Byte(13), which is the bare submit key.
     ShiftEnter,
@@ -285,6 +306,15 @@ impl TerminalInputDecoder {
                 } else {
                     InputEvent::AltArrowDown
                 });
+            } else if matches!(byte, b'A' | b'B')
+                && self.state == State::Csi
+                && &self.sequence[..self.len] == b"1;4"
+            {
+                self.emit(if byte == b'A' {
+                    InputEvent::AltShiftArrowUp
+                } else {
+                    InputEvent::AltShiftArrowDown
+                });
             } else if matches!(byte, b'A' | b'B' | b'C' | b'D')
                 && (self.len == 0
                     || (self.state == State::Csi && &self.sequence[..self.len] == b"1"))
@@ -470,8 +500,43 @@ impl TerminalInputDecoder {
         const SHIFT: u32 = 0b001;
         const ALT: u32 = 0b010;
         const CTRL: u32 = 0b100;
+        // A single combined value, NOT an or-pattern: inside a tuple pattern
+        // `CTRL | SHIFT` parses as alternatives (which the compiler flags as an
+        // unreachable pattern), so Ctrl+Shift never matched.
+        const CTRL_SHIFT: u32 = CTRL | SHIFT;
         const CAPS_LOCK: u32 = 0b1_000_000;
         const NUM_LOCK: u32 = 0b10_000_000;
+        // Tab navigation chords (`config/keybind.ts:113,114,118,152-161`). They
+        // carry no printable meaning, so they are resolved to the bound
+        // command instead of being dropped or leaking as C0 text. Only chords
+        // upstream actually binds are decoded: `ctrl+tab`, `ctrl+shift+tab`,
+        // `ctrl+1..9`,`ctrl+0`, `ctrl+shift+t`. `alt+backspace` is deliberately
+        // absent - it is `input.delete.word.backward` (`:244`), not a tab chord.
+        if modifier_bits & !(SHIFT | ALT | CTRL | CAPS_LOCK | NUM_LOCK) == 0 {
+            match (codepoint, modifier_bits & (SHIFT | ALT | CTRL)) {
+                (9, CTRL) => {
+                    self.emit(InputEvent::TabNext);
+                    return;
+                }
+                (9, CTRL_SHIFT) => {
+                    self.emit(InputEvent::TabPrevious);
+                    return;
+                }
+                (49..=57, CTRL) => {
+                    self.emit(InputEvent::TabSlot((codepoint - 49) as usize));
+                    return;
+                }
+                (48, CTRL) => {
+                    self.emit(InputEvent::TabSlot(9));
+                    return;
+                }
+                (116 | 84, CTRL_SHIFT) => {
+                    self.emit(InputEvent::TabReopen);
+                    return;
+                }
+                _ => {}
+            }
+        }
         if codepoint == 0x0d
             && modifier_bits & !(SHIFT | ALT | CTRL | CAPS_LOCK | NUM_LOCK) == 0
         {
@@ -539,10 +604,60 @@ mod horizontal_cursor_regressions {
         for byte in b"\x1b[1;3B\x1b[1;3A" { decoder.push(*byte, now); }
         assert_eq!(decoder.pop(), Some(InputEvent::AltArrowDown));
         assert_eq!(decoder.pop(), Some(InputEvent::AltArrowUp));
+        // Alt+Shift is the unread-tab binding (`config/keybind.ts:115-116`).
+        for byte in b"\x1b[1;4B\x1b[1;4A" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::AltShiftArrowDown));
+        assert_eq!(decoder.pop(), Some(InputEvent::AltShiftArrowUp));
         // Ctrl/Shift (and any other modifier) forms remain protocol: they must
         // never become an ordinary arrow that a dialog or composer consumes.
-        for byte in b"\x1b[1;5B\x1b[1;2A\x1b[1;4B" { decoder.push(*byte, now); }
+        for byte in b"\x1b[1;5B\x1b[1;2A" { decoder.push(*byte, now); }
         assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn tab_navigation_chords_decode_to_their_bound_commands() {
+        // Kitty CSI u: codepoint;modifier, where modifier bits are
+        // shift=1, alt=2, ctrl=4 plus one (`config/keybind.ts:113,114`).
+        // Only chords upstream actually binds are decoded.
+        let now = Instant::now();
+        let mut decoder = TerminalInputDecoder::default();
+        for byte in b"\x1b[9;5u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::TabNext), "ctrl+tab");
+        for byte in b"\x1b[9;6u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::TabPrevious), "ctrl+shift+tab");
+        // `alt+down`/`alt+up` are already `AltArrowDown`/`AltArrowUp`, and
+        // upstream binds neither `alt+tab` nor `alt+backspace` to a tab
+        // command: `alt+backspace` is `input.delete.word.backward`
+        // (`config/keybind.ts:244`). Both must decode to no tab event.
+        for byte in b"\x1b[9;3u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), None, "alt+tab is not a tab binding");
+        for byte in b"\x1b[8;3u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), None, "alt+backspace is delete-word-backward");
+        for byte in b"\x1b[49;5u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::TabSlot(0)), "ctrl+1");
+        for byte in b"\x1b[53;5u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::TabSlot(4)), "ctrl+5");
+        for byte in b"\x1b[48;5u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::TabSlot(9)), "ctrl+0");
+        for byte in b"\x1b[116;6u\x1b[84;6u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::TabReopen), "ctrl+shift+t");
+        assert_eq!(decoder.pop(), Some(InputEvent::TabReopen), "ctrl+shift+T");
+        assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn modified_digits_and_release_events_never_leak_text() {
+        let now = Instant::now();
+        let mut decoder = TerminalInputDecoder::default();
+        // Ctrl+digit release (event type 2 is a repeat; releases are >= 3).
+        for byte in b"\x1b[49:3u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), None);
+        // Ctrl+Shift+digit is not a bound slot selector.
+        for byte in b"\x1b[49;6u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), None);
+        // A plain tab still reaches the composer.
+        for byte in b"\t" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::Byte(b'\t')));
     }
 
     #[test]

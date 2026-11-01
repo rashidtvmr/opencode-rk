@@ -309,6 +309,11 @@ pub struct NavigationState {
     /// User-closed tabs eligible for reopen, in-memory only
     /// (`session-tabs-model.ts:70-101`). Never persisted.
     closed: Vec<ClosedTab>,
+    /// Tabs whose latest background completion has not been focused since.
+    /// Upstream derives this from `time.idle > time.viewed`
+    /// (`context/session-tabs.tsx:120-123`); the native single-client loop
+    /// marks it on a Running -> Idle transition for a non-active tab.
+    unread: Vec<SessionRef>,
 }
 
 /// In-memory tab history. Upstream bounds it at 100 entries and keeps the
@@ -391,6 +396,8 @@ impl NavigationState {
         self.active = index;
         self.home = false;
         let session = self.tabs[index].session.clone();
+        // Focusing the route views it (`context/session-tabs.tsx:229-267`).
+        self.unread.retain(|candidate| *candidate != session);
         self.record_history(&session);
     }
 
@@ -516,6 +523,7 @@ impl NavigationState {
         }
         self.history = TabHistory::default();
         self.closed.clear();
+        self.unread.clear();
     }
 
     /// Explicit tab lifecycle name used by native view callers. This is an
@@ -729,6 +737,60 @@ impl NavigationState {
         Some(index)
     }
 
+    /// Record a background completion for `session` so the tab shows unread
+    /// until it is focused (`context/session-tabs.tsx:120-123`).
+    pub fn mark_unread(&mut self, session: &SessionRef) {
+        if self.unread.contains(session) || self.unread.len() >= MAX_TABS {
+            return;
+        }
+        self.unread.push(session.clone());
+    }
+
+    /// Whether `session` has an unviewed background completion.
+    #[must_use]
+    pub fn is_unread(&self, session: &SessionRef) -> bool {
+        self.unread.contains(session)
+    }
+
+    /// Unread tabs in tab order.
+    #[must_use]
+    pub fn unread_sessions(&self) -> Vec<SessionRef> {
+        self.tabs
+            .iter()
+            .filter(|tab| self.unread.contains(&tab.session))
+            .map(|tab| tab.session.clone())
+            .collect()
+    }
+
+    /// `cycleUnread` target (`session-tabs-model.ts:102-115`): the first tab
+    /// with an unviewed completion after the active one, wrapping to the
+    /// start. With no active route the scan starts at the first (forward) or
+    /// last (backward) tab, matching upstream's `start = -1 | 0`.
+    #[must_use]
+    pub fn unread_target(&self, forward: bool) -> Option<SessionRef> {
+        if self.tabs.is_empty() {
+            return None;
+        }
+        let len = self.tabs.len();
+        let start = match self.active() {
+            Some(_) => self.active as isize,
+            None if forward => -1,
+            None => 0,
+        };
+        for offset in 1..=len {
+            let step: isize = if forward {
+                offset as isize
+            } else {
+                -(offset as isize)
+            };
+            let index = (start + step).rem_euclid(len as isize) as usize;
+            if self.is_unread(&self.tabs[index].session) {
+                return Some(self.tabs[index].session.clone());
+            }
+        }
+        None
+    }
+
     /// The focused tab.
     #[must_use]
     pub fn active(&self) -> Option<&Tab> {
@@ -884,6 +946,7 @@ impl NavigationState {
                 }
                 self.remove_tab(&session);
                 self.closed.retain(|entry| entry.session != session);
+                self.unread.retain(|candidate| *candidate != session);
                 self.titles.retain(|(s, _, _)| *s != session);
                 self.snapshot_titles.retain(|(s, _)| *s != session);
                 self.work.retain(|(s, _)| *s != session);
@@ -896,13 +959,26 @@ impl NavigationState {
                 self.open_forked(child, parent);
             }
             DaemonEvent::WorkState { session, state } => {
+                let previous = self
+                    .work
+                    .iter()
+                    .find(|(s, _)| *s == session)
+                    .map(|(_, state)| *state);
                 match self.work.iter_mut().find(|(s, _)| *s == session) {
                     Some(entry) => entry.1 = state,
                     None => {
                         if self.work.len() < MAX_TABS {
-                            self.work.push((session, state));
+                            self.work.push((session.clone(), state));
                         }
                     }
+                }
+                // A tab that settles while another route is focused is
+                // unread until it is focused again (`context/session-tabs.tsx:120-123`).
+                if state == WorkState::Idle
+                    && previous == Some(WorkState::Running)
+                    && self.active().is_none_or(|tab| tab.session != session)
+                {
+                    self.mark_unread(&session);
                 }
             }
         }
