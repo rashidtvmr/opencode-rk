@@ -805,6 +805,7 @@ pub(crate) fn prompt_geometry(
     frame: EffectiveBox,
     allow_rail: bool,
     terminal_width: u16,
+    terminal_height: u16,
 ) -> PromptPaneGeometry {
     let height = height.min(crate::native_view_chat::MAX_VIEW_ROWS);
     let width = width.min(u16::MAX as usize);
@@ -824,7 +825,11 @@ pub(crate) fn prompt_geometry(
         // width (`dimensions().width < 44 ? 1 : 2`), never the pane width. The
         // pane-derived width only coincides with it when no rail/sidebar is
         // present. `prompt_inset` owns the strict `< 44` rule.
-        let max_input = ((height + 2) / 3).max(6).min(height - 4);
+        // `index.tsx:1674`: the textarea row cap is
+        // `max(6, floor(dimensions().height / 3))` — `editor_max_rows` on the
+        // TERMINAL height, never the body budget; the pane only clamps it
+        // structurally (`input + 4` must fit the body rows).
+        let max_input = crate::native_prompt_layout::editor_max_rows(terminal_height).min(height - 4);
         let inset = usize::from(crate::native_prompt_layout::prompt_inset(terminal_width));
         let text_width = width.saturating_sub(1 + 2 * inset);
         let input = wrap_prompt(draft, text_width.max(1), draft.len())
@@ -900,6 +905,9 @@ pub(crate) struct PromptPaneInput<'a> {
     /// Terminal columns: the metadata text budget uses the terminal width,
     /// not the prompt's own width (`metadata.tsx:28`).
     pub terminal_width: u16,
+    /// Terminal rows: the textarea row cap keys on the terminal height
+    /// (`editor_max_rows`, `index.tsx:1674`), never the body budget.
+    pub terminal_height: u16,
     /// `status() === "running"` (`index.tsx:1912`).
     pub busy: bool,
     /// `store.interrupt > 0` (`index.tsx:1920`).
@@ -932,6 +940,7 @@ impl<'a> PromptPaneInput<'a> {
             cursor: draft.len(),
             mode,
             terminal_width,
+            terminal_height: u16::try_from(height).unwrap_or(u16::MAX),
             busy,
             interrupt_armed: false,
             placeholder: None,
@@ -964,7 +973,7 @@ impl<'a> PromptPane<'a> {
         // An editor offset beyond the visible source, or one that would split
         // UTF-8, is not a cursor: the caller's view reports no caret for it.
         let cursor_valid = input.cursor <= draft.len() && draft.is_char_boundary(input.cursor);
-        let geometry = prompt_geometry(input.width, input.height, draft, input.frame, input.allow_rail, input.terminal_width);
+        let geometry = prompt_geometry(input.width, input.height, draft, input.frame, input.allow_rail, input.terminal_width, input.terminal_height);
         let text_width = geometry.text_width.max(1);
         let wrapped = wrap_prompt(draft, text_width, input.cursor);
         let window_start = if geometry.input_rows == 0 { 0 } else { wrapped.window_start(geometry.input_rows) };
@@ -1686,6 +1695,7 @@ mod tests {
             cursor: draft.len(),
             mode: PromptMode::Normal,
             terminal_width: u16::try_from(width).unwrap_or(u16::MAX),
+            terminal_height: u16::try_from(height).unwrap_or(u16::MAX),
             busy: false,
             interrupt_armed: false,
             placeholder: None,
@@ -1732,23 +1742,52 @@ mod tests {
 
     #[test]
     fn pane_rail_caps_editor_rows_and_keeps_the_cursor_visible() {
-        // `floor((height + 2) / 3).max(6)` mirrors the retired
-        // `session_composer_layout` cap; 20 rows allows 7 editor rows.
+        // `editor_max_rows` (`index.tsx:1674`): `max(6, floor(terminalHeight / 3))`,
+        // keyed on the terminal height; 20 terminal rows allow 6 editor rows.
         let draft = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight";
         let pane = PromptPane::compose(composer_input(60, 20, draft, frame(0)));
-        assert_eq!(pane.geometry().input_rows, 7);
-        assert_eq!(pane.height(), 11);
+        assert_eq!(pane.geometry().input_rows, 6);
+        assert_eq!(pane.height(), 10);
         let editors: Vec<_> = pane
             .rows()
             .iter()
             .filter(|row| row.kind == PromptPaneRowKind::Editor)
             .collect();
-        assert_eq!(editors.len(), 7);
+        assert_eq!(editors.len(), 6);
         // The window follows the tail cursor: the last row is "eight".
         assert!(editors.last().unwrap().text.trim_end().ends_with("eight"));
-        assert_eq!(editors.first().unwrap().text.trim_end(), "┃  two");
+        assert_eq!(editors.first().unwrap().text.trim_end(), "┃  three");
         assert!(editors.iter().all(|row| row.text.starts_with("┃  ")));
-        assert_eq!(pane.cursor_cell(), Some((3 + 5, 7)));
+        assert_eq!(pane.cursor_cell(), Some((3 + 5, 6)));
+    }
+
+    #[test]
+    fn pane_rail_cap_matches_editor_max_rows() {
+        // CP-01/CP-02/CP-04: the rail editor cap is
+        // `editor_max_rows(terminal_height)` = `max(6, floor(terminalHeight / 3))`
+        // (`index.tsx:1674`), keyed on the TERMINAL height; the body budget
+        // only clamps it structurally. The retired `((height + 2) / 3)` proxy
+        // allowed 14 rows at terminal 40; `editor_max_rows` pins 13
+        // (`native_prompt_layout` tests pin (12,6),(24,8),(40,13)).
+        let draft = "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14";
+        for (terminal, cap) in [(12usize, 6usize), (24, 8), (40, 13)] {
+            let pane = PromptPane::compose(composer_input(60, terminal, draft, frame(0)));
+            assert_eq!(pane.geometry().input_rows, cap, "terminal={terminal}");
+        }
+        // The key is the terminal height, not the body budget: 20 body rows in
+        // a 24-row terminal allow 8 editor rows (`floor(24 / 3)`), where keying
+        // the body would clamp to `floor(20 / 3) = 6`.
+        let pane = PromptPane::compose(PromptPaneInput {
+            terminal_height: 24,
+            ..composer_input(60, 20, draft, frame(0))
+        });
+        assert_eq!(pane.geometry().input_rows, 8, "cap keys on the terminal height");
+        // The body budget still clamps structurally (`input + 4 <= height`).
+        let pane = PromptPane::compose(PromptPaneInput {
+            terminal_height: 40,
+            ..composer_input(60, 10, draft, frame(0))
+        });
+        assert_eq!(pane.geometry().input_rows, 6, "structural clamp keeps input + 4 in the body");
     }
 
     #[test]
@@ -1925,14 +1964,14 @@ mod tests {
             padding: 0,
         };
         // Narrow pane (24 cols), wide terminal (52): upstream inset is 2.
-        let wide_term = prompt_geometry(24, 20, "x", frame, true, 52);
+        let wide_term = prompt_geometry(24, 20, "x", frame, true, 52, 20);
         assert_eq!(wide_term.style, PromptPaneStyle::Rail);
         assert_eq!(wide_term.text_left, 3, "wide terminal keeps inset 2: {wide_term:?}");
         // Wide pane (80 cols), narrow terminal (43): upstream inset is 1.
-        let narrow_term = prompt_geometry(80, 20, "x", frame, true, 43);
+        let narrow_term = prompt_geometry(80, 20, "x", frame, true, 43, 20);
         assert_eq!(narrow_term.style, PromptPaneStyle::Rail);
         assert_eq!(narrow_term.text_left, 2, "narrow terminal flips to inset 1: {narrow_term:?}");
         // The flip is strict at 44 (`< 44`).
-        assert_eq!(prompt_geometry(80, 20, "x", frame, true, 44).text_left, 3);
+        assert_eq!(prompt_geometry(80, 20, "x", frame, true, 44, 20).text_left, 3);
     }
 }

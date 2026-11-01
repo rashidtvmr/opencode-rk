@@ -1750,6 +1750,7 @@ impl NativeView {
                 draft,
                 &self.box_appearance,
                 self.layout.cols,
+                self.layout.rows,
             );
             let composer_height = layout.height;
             Some((
@@ -1804,7 +1805,7 @@ impl NativeView {
     pub fn session_prompt_rail(&self, draft: &str) -> bool {
         self.session_route && crate::native_view_chat::session_composer_layout(
             usize::from(self.presentation().main_width.saturating_sub(4)),
-            self.session_body_height(), draft, &self.box_appearance, self.layout.cols,
+            self.session_body_height(), draft, &self.box_appearance, self.layout.cols, self.layout.rows,
         ).rail
     }
 
@@ -1927,6 +1928,7 @@ impl NativeView {
             draft,
             &self.box_appearance,
             self.layout.cols,
+            self.layout.rows,
         );
         let pad = usize::from(frame.padding);
         let (text_left, text_top, text_width, text_height) = if layout.rail {
@@ -2707,6 +2709,7 @@ impl NativeView {
         self.sidebar_scrollbar = None;
         self.chat.set_markdown_mode(self.markdown_mode);
         self.chat.set_terminal_width(self.layout.cols);
+        self.chat.set_terminal_height(self.layout.rows);
         self.context_usage_hit = None;
         self.live_footer_hit = None;
         self.dock_hit.clear();
@@ -2898,6 +2901,7 @@ impl NativeView {
             let prompt = crate::native_view_chat::session_composer_layout(
                 usize::from(inner_width), body_height, draft, &self.box_appearance,
                 self.layout.cols,
+                self.layout.rows,
             );
             let mut body = body;
             if prompt.rail && !has_permission {
@@ -5472,7 +5476,7 @@ mod tests {
             let (left, top, region_width, height) = view.composer_region(draft).unwrap();
             let layout = crate::native_view_chat::session_composer_layout(
                 usize::from(region_width), view.session_body_height(), draft, &appearance,
-                view.layout.cols);
+                view.layout.cols, view.layout.rows);
             assert!(layout.framed);
             let wrapped = crate::native_prompt_layout::wrap_prompt(draft, usize::from(region_width - 4), draft.len());
             assert!(wrapped.rows.len() > 1);

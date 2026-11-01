@@ -119,6 +119,10 @@ pub struct ChatView {
     /// direct unit APIs that have no terminal) falls back to the pane width;
     /// the live frame sets the real value via [`ChatView::set_terminal_width`].
     terminal_width: Option<u16>,
+    /// Full terminal height for the textarea row cap, same lifecycle as
+    /// `terminal_width`: the live frame sets it via
+    /// [`ChatView::set_terminal_height`].
+    terminal_height: Option<u16>,
     /// Row of the styled body where the transcript content starts, and how
     /// many transcript rows the last render exposed. The transcript
     /// scrollbar is painted against these live values, never recomputed.
@@ -148,6 +152,13 @@ impl ChatView {
         self.terminal_width = Some(terminal_width);
     }
 
+    /// Record the full terminal height for the textarea row cap
+    /// (`editor_max_rows`, `index.tsx:1674`). The live frame sets this before
+    /// rendering; direct unit APIs fall back to the pane height.
+    pub(crate) fn set_terminal_height(&mut self, terminal_height: u16) {
+        self.terminal_height = Some(terminal_height);
+    }
+
     /// TOOL-002 live join input (`routes/session/index.tsx:2793-2799`):
     /// bounded pending tool-call ids from the authenticated backend poll.
     /// Upstream also gates on `local.permission.mode === "autoaccept"`; oc2
@@ -175,6 +186,14 @@ impl ChatView {
             .unwrap_or_else(|| u16::try_from(fallback).unwrap_or(u16::MAX))
     }
 
+    /// Effective terminal height for the textarea row cap (`editor_max_rows`,
+    /// `index.tsx:1674`): the recorded real terminal height, or `fallback`
+    /// (the pane height) for direct unit APIs.
+    fn composer_terminal_height(&self, fallback: usize) -> u16 {
+        self.terminal_height
+            .unwrap_or_else(|| u16::try_from(fallback).unwrap_or(u16::MAX))
+    }
+
     pub(crate) fn markdown_mode(&self) -> crate::markdown_runs::MarkdownMode {
         self.markdown_mode
     }
@@ -195,6 +214,7 @@ impl ChatView {
     /// transcript + composer), matching the render entry points.
     pub(crate) fn prompt_pane<'a>(&self, mut input: PromptPaneInput<'a>) -> PromptPane<'a> {
         input.cursor = self.prompt_cursor(input.draft);
+        input.terminal_height = self.composer_terminal_height(input.height);
         PromptPane::compose(input)
     }
 
@@ -237,6 +257,7 @@ impl ChatView {
             cursor: draft.len(),
             mode: PromptMode::Normal,
             terminal_width: self.composer_terminal_width(width),
+            terminal_height: self.composer_terminal_height(height),
             busy,
             interrupt_armed: false,
             placeholder: None,
@@ -816,11 +837,12 @@ pub(crate) fn composer_layout(
     draft: &str,
     frame: crate::native_box_style::EffectiveBox,
     terminal_width: u16,
+    terminal_height: u16,
 ) -> ComposerLayout {
     // Framed-only projection: the rail presentation is selected by
     // `session_composer_layout` because it also owns the appearance. Upstream
     // textarea/box geometry is pinned in `native_prompt_pane`.
-    crate::native_prompt_pane::prompt_geometry(width, height, draft, frame, false, terminal_width)
+    crate::native_prompt_pane::prompt_geometry(width, height, draft, frame, false, terminal_width, terminal_height)
         .into()
 }
 
@@ -837,6 +859,7 @@ pub(crate) fn session_composer_layout(
     draft: &str,
     appearance: &crate::native_box_style::BoxAppearance,
     terminal_width: u16,
+    terminal_height: u16,
 ) -> ComposerLayout {
     let style = appearance.effective(crate::native_box_style::BoxId::ChatComposer);
     crate::native_prompt_pane::prompt_geometry(
@@ -846,6 +869,7 @@ pub(crate) fn session_composer_layout(
         style,
         !appearance.home_composer_outline(),
         terminal_width,
+        terminal_height,
     )
     .into()
 }
@@ -863,7 +887,8 @@ mod rail_prompt_bounds_tests {
                 for draft in ["", "draft", multiline.as_str()] {
                     let layout = session_composer_layout(
                         width, height, draft, &appearance,
-                        u16::try_from(width).unwrap_or(u16::MAX));
+                        u16::try_from(width).unwrap_or(u16::MAX),
+                        u16::try_from(height).unwrap_or(u16::MAX));
                     assert!(layout.height <= height.min(MAX_VIEW_ROWS), "width={width} height={height}");
                     if layout.rail {
                         assert!(layout.height >= 5);
@@ -872,7 +897,7 @@ mod rail_prompt_bounds_tests {
                 }
             }
         }
-        let smallest = session_composer_layout(40, 6, &multiline, &appearance, 40);
+        let smallest = session_composer_layout(40, 6, &multiline, &appearance, 40, 6);
         assert!(smallest.rail);
         assert_eq!(smallest.height, 6);
     }
@@ -2756,7 +2781,7 @@ impl ChatView {
         if !frame.has_border() {
             return self.render_typed_classified(width, height, workspace, messages, draft, busy);
         }
-        let layout = composer_layout(width, height, draft, frame, self.composer_terminal_width(width));
+        let layout = composer_layout(width, height, draft, frame, self.composer_terminal_width(width), self.composer_terminal_height(height));
         if !layout.framed {
             return self.render_typed_classified(width, height, workspace, messages, draft, busy);
         }
@@ -5764,10 +5789,10 @@ mod tests {
             thickness: 1,
             padding: 0,
         };
-        let layout = composer_layout(40, 3, "draft", frame, 40);
+        let layout = composer_layout(40, 3, "draft", frame, 40, 3);
         assert!(!layout.framed);
         assert_eq!(layout.height, 1);
-        let layout = composer_layout(40, 4, "draft", frame, 40);
+        let layout = composer_layout(40, 4, "draft", frame, 40, 4);
         assert!(layout.framed);
         assert!(layout.height >= 3);
     }
@@ -6098,7 +6123,8 @@ mod tests {
                 for draft in ["", "one\ntwo\nthree"] {
                     let layout = session_composer_layout(
                         width, height, draft, &appearance,
-                        u16::try_from(width).unwrap_or(u16::MAX));
+                        u16::try_from(width).unwrap_or(u16::MAX),
+                        u16::try_from(height).unwrap_or(u16::MAX));
                     let pane = ChatView::new().prompt_pane(PromptPaneInput::composer(
                         &appearance,
                         width,
@@ -6121,19 +6147,19 @@ mod tests {
     #[test]
     fn default_session_composer_is_a_rail_and_explicit_outline_is_framed() {
         let appearance = crate::native_box_style::BoxAppearance::default();
-        let rail = session_composer_layout(80, 20, "draft", &appearance, 80);
+        let rail = session_composer_layout(80, 20, "draft", &appearance, 80, 20);
         assert!(rail.rail && !rail.framed);
         assert_eq!(rail.height, 5);
 
         let mut outline = crate::native_box_style::BoxAppearance::default();
         outline.frame_mode = crate::native_box_style::FrameMode::Outline;
-        let framed = session_composer_layout(80, 20, "draft", &outline, 80);
+        let framed = session_composer_layout(80, 20, "draft", &outline, 80, 20);
         assert!(framed.framed && !framed.rail);
         assert_eq!(framed.height, 3);
 
         // The framed-only projection never selects the rail presentation.
         let frame = appearance.effective(crate::native_box_style::BoxId::ChatComposer);
-        let projected = composer_layout(80, 20, "draft", frame, 80);
+        let projected = composer_layout(80, 20, "draft", frame, 80, 20);
         assert!(!projected.rail && projected.framed);
     }
 
@@ -6237,6 +6263,7 @@ mod tests {
             cursor: "draft".len(),
             mode: PromptMode::Normal,
             terminal_width: 40,
+            terminal_height: 12,
             busy: false,
             interrupt_armed: false,
             placeholder: None,
