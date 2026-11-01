@@ -10192,3 +10192,52 @@ commit adding the uncovered `InputEvent` variants is an ancestor of HEAD.
 only from Anthropic's official tools" for both W12-REVIEW-A/B — route unusable
 from this harness. Re-dispatched those reviews on `@xkiro-gpt-6-luna` and
 `@9router-vyce-deepseek-v4.1-free-combined`. Usage UNKNOWN without telemetry.
+
+**Wave-12 landings on `main-v2` (each verified: guard GREEN + full `oc2` suite OK):**
+- `b836bb4e` **CP-08** composer Enter → `plan_submit`. Adds bounded
+  owner-session-tagged `queued_drafts` (reusing `BUSY_QUEUE_CAP`), pure
+  `composer_enter_plan`, plan-routed Enter branch (steer falls through; queue
+  enqueues+clears; blank idle promotes), promotion on turn finish. Mirrors
+  upstream `prompt/index.tsx:455,1097-1188,1790-1795`,
+  `routes/session/index.tsx:1650-1657`. From `W12-CP08-SUBMITWIRE` (handoff hit
+  the step cap; materialized from its inline text). Suite 2052/0. Recorded gaps:
+  queued prompts promote on next Enter (not auto-delivered); queue is
+  process-local, not a server session inbox.
+- `28f7e6ae` **SIDE-12** hit-test slice: `StatusView::onboarding_dismiss_row(
+  width,height) -> Option<usize>` reusing `sidebar_rows` so the index matches
+  `render_sidebar_styled`; `None` when the box is hidden. Mirrors upstream
+  `feature-plugins/sidebar/footer.tsx:38-52`. From `W12-SIDE12-CONNLIST`; main
+  authored the focused test. Suite 2053/0. Recorded gap: no live connection fact
+  source yet (no `GET /api/integration`, no `connections` field on server
+  IntegrationInfo), so the box cannot show in production.
+
+**Wave-12 honest verdicts (no landing):**
+- `W12-DIFF002-PRODUCER`: DIFF-002 producer gap is **upstream-faithful** — upstream
+  defers edit/write LSP diagnostics (`tool/plugin/edit.ts:205`, `write.ts:44`) and
+  its metadata carries `files`, not `diagnostics`. The landed renderer is correct
+  and cannot be exercised until an LSP runtime exists in either codebase. No
+  producer patch possible or required for parity.
+- `W12-TAB21-VIEWROUTE2`: (c) blocker — no persisted idle/viewed watermarks
+  (`workspace.sql:58-80`), no wired client focus signal
+  (`native_input_decoder.rs:28-71`), `ViewAcknowledgement` has no production
+  caller. Needs columns + `POST /api/session/:id/view` + focus wiring.
+- `W12-MSG006-MENU`: (c) blocker gated on MSG006-ID — `ChatMessage`
+  (`native_view_chat.rs:644-665`) has no `message_id`; `apply_history_window`
+  (`tui_entry.rs:1043-1053`) strips ids via id-dropping `project_history`.
+- `W12-CP30-31-33-IME`: (c) blocker — native loop owns a legacy `String` draft
+  with no authoritative `plainText`/textarea seam; needs draft-owner migration.
+- `W12-BLOCKER-AUDIT2`: smallest seams for SIDE-01 (generated-title pending fact),
+  CP-12 (styled per-cell footer paint), CP-08 (done via `plan_submit` wiring),
+  TAB-23 (non-printable leader follow-up).
+
+**Wave-13 dispatched (20+ workers, base `28f7e6ae`)** — see
+`briefs/WAVE13-TASKS.md`: MSG006-ID2, SIDE14-HOVER2, CP12-PAINTER, CP35-PARTS,
+CP36-PASTE, CP37-ASYNCPASTE, CP41-CELLWIDTH, CP42-STREAMSTYLE (vyce ×8);
+LAY19-REVIEW, CP21-HOVER2, CP39-AUTOPOS (luna-free); THEME10, SIDE08-UP2 (th-free);
+DIALOG12-CALLER2 (river); TAB23-LEADER2, CP02-GEO2 (mimo); REVIEW-CP08,
+REVIEW-SIDE10+ (gpt-6-luna); CP38-IMAGES, CP40-AUTOSTYLE (vyce-combined).
+
+**Canonical-integrity note:** the `W12-CP08-SUBMITWIRE` worker ran a stray
+`git checkout -q -- crates/cli/src/tui_entry.rs` from the canonical workdir; it was
+a genuine no-op (file matched HEAD blob byte-for-byte). Tree clean, no ref moves.
+Do not continue workers that write canonical.
