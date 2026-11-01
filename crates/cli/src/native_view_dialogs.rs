@@ -1570,6 +1570,7 @@ impl DialogView {
 /// * keyboard scope: the form pushes its own mode and only consumes keys
 ///   while active — `form.tsx:66,536-553`.
 pub mod form_overlay {
+    use regex_automata::meta::Regex;
     use std::collections::BTreeMap;
 
     /// Form field kind (`FormField` union in `util/form.ts:11-61`).
@@ -1641,8 +1642,9 @@ pub mod form_overlay {
         }
     }
 
-    /// One form field. `options` is empty for free text/number/boolean
-    /// fields; `custom` enables the "type your own answer" row.
+    /// One form field. `options: None` means no options were supplied;
+    /// `Some(vec![])` remains option-backed, matching JavaScript [] truthiness.
+    /// `custom` enables the "type your own answer" row.
     #[derive(Clone, Debug, PartialEq)]
     pub struct FormField {
         pub key: String,
@@ -1652,9 +1654,10 @@ pub mod form_overlay {
         pub placeholder: Option<String>,
         pub required: bool,
         pub default: Option<FormValue>,
-        pub options: Vec<FormOption>,
+        pub options: Option<Vec<FormOption>>,
         pub custom: bool,
         pub format: Option<TextFormat>,
+        pub pattern: Option<String>,
         pub min_length: Option<usize>,
         pub max_length: Option<usize>,
         pub minimum: Option<f64>,
@@ -1676,9 +1679,10 @@ pub mod form_overlay {
                 placeholder: None,
                 required: false,
                 default: None,
-                options: Vec::new(),
+                options: None,
                 custom: false,
                 format: None,
+                pattern: None,
                 min_length: None,
                 max_length: None,
                 minimum: None,
@@ -1707,7 +1711,13 @@ pub mod form_overlay {
         }
         #[must_use]
         pub fn with_options(mut self, options: Vec<FormOption>) -> Self {
-            self.options = options;
+            self.options = Some(options);
+            self
+        }
+
+        #[must_use]
+        pub fn with_pattern(mut self, pattern: impl Into<String>) -> Self {
+            self.pattern = Some(pattern.into());
             self
         }
         #[must_use]
@@ -1744,7 +1754,7 @@ pub mod form_overlay {
         #[must_use]
         pub fn is_textual(&self) -> bool {
             matches!(self.kind, FieldKind::Number | FieldKind::Integer)
-                || (self.kind == FieldKind::Text && self.options.is_empty())
+                || (self.kind == FieldKind::Text && self.options.is_none())
         }
 
         /// `formCustom`: option-backed string/multiselect with `custom`
@@ -1753,8 +1763,7 @@ pub mod form_overlay {
         pub fn is_custom(&self) -> bool {
             self.custom
                 && (self.kind == FieldKind::Multi
-                    || (self.kind == FieldKind::Text && !self.options.is_empty())
-                    || self.kind == FieldKind::Single)
+                    || (matches!(self.kind, FieldKind::Text | FieldKind::Single) && self.options.is_some()))
         }
     }
 
@@ -1775,8 +1784,10 @@ pub mod form_overlay {
                 FormRow { value: FormValue::Bool(true), label: "Yes".into(), description: None },
                 FormRow { value: FormValue::Bool(false), label: "No".into(), description: None },
             ],
-            FieldKind::Multi | FieldKind::Single | FieldKind::Text if !field.options.is_empty() => field
+            FieldKind::Multi | FieldKind::Single | FieldKind::Text => field
                 .options
+                .as_deref()
+                .unwrap_or_default()
                 .iter()
                 .map(|option| FormRow {
                     value: FormValue::Text(option.value.clone()),
@@ -1961,9 +1972,7 @@ pub mod form_overlay {
     }
 
     /// `formValidateValue` (`util/form.ts:72-110`). Returns the exact
-    /// upstream message, or `None` when the value is acceptable. The regex
-    /// `pattern` branch is not ported (no regex engine here) and is reported
-    /// as unimplemented in the handoff — no pattern is silently accepted.
+    /// upstream message, or `None` when the value is acceptable.
     #[must_use]
     pub fn validate(field: &FormField, value: Option<&FormValue>) -> Option<String> {
         let Some(value) = value else {
@@ -1999,6 +2008,15 @@ pub mod form_overlay {
                         return Some(format!("Must be at most {max} characters"));
                     }
                 }
+                if let Some(pattern) = &field.pattern {
+                    match Regex::new(pattern) {
+                        Ok(regex) if !regex.is_match(text) => {
+                            return Some(format!("Must match pattern: {pattern}"));
+                        }
+                        Ok(_) => {}
+                        Err(_) => return Some(format!("Invalid pattern: {pattern}")),
+                    }
+                }
                 match field.format {
                     Some(TextFormat::Email) if !valid_email(text) => {
                         return Some("Expected an email address".to_string())
@@ -2012,10 +2030,9 @@ pub mod form_overlay {
                     }
                     _ => {}
                 }
-                if !field.options.is_empty()
-                    && !field.custom
-                    && !field.options.iter().any(|option| option.value == *text)
-                {
+                if field.options.as_ref().is_some_and(|options| {
+                    !field.custom && !options.iter().any(|option| option.value == *text)
+                }) {
                     return Some("Select an available option".to_string());
                 }
                 None
@@ -2060,7 +2077,9 @@ pub mod form_overlay {
                     }
                 }
                 if !field.custom
-                    && items.iter().any(|item| !field.options.iter().any(|option| option.value == *item))
+                    && items.iter().any(|item| {
+                        !field.options.as_deref().unwrap_or_default().iter().any(|option| option.value == *item)
+                    })
                 {
                     return Some("Select only available options".to_string());
                 }
@@ -2083,13 +2102,13 @@ pub mod form_overlay {
         }
         let mut custom = BTreeMap::new();
         for field in fields {
-            if field.kind != FieldKind::Text || field.options.is_empty() || !field.custom {
+            if field.kind != FieldKind::Text || field.options.is_none() || !field.custom {
                 continue;
             }
             let Some(FormValue::Text(default)) = field.default.as_ref() else {
                 continue;
             };
-            if field.options.iter().any(|option| option.value == *default) {
+            if field.options.as_deref().unwrap_or_default().iter().any(|option| option.value == *default) {
                 continue;
             }
             custom.insert(field.key.clone(), default.clone());
@@ -2385,7 +2404,7 @@ pub mod form_overlay {
             match field.kind {
                 FieldKind::External => false,
                 FieldKind::Boolean => true,
-                FieldKind::Text | FieldKind::Single => !field.options.is_empty(),
+                FieldKind::Text | FieldKind::Single => field.options.is_some(),
                 _ => false,
             }
         }
@@ -2840,7 +2859,7 @@ pub mod form_overlay {
                 }
                 self.store_answer(&field.key, Some(FormValue::Text(text.to_string())));
             }
-            let configured = field.options.iter().any(|option| option.value == text);
+            let configured = field.options.as_deref().unwrap_or_default().iter().any(|option| option.value == text);
             self.custom.insert(field.key.clone(), if configured { String::new() } else { text.to_string() });
             self.editing = false;
             true
@@ -6609,6 +6628,34 @@ mod form_tests {
         assert_eq!(restored.answer("count"), Some(&FormValue::Number(7.0)));
         assert_eq!(restored.answer("topics"), Some(&FormValue::List(vec!["custom".into()])));
         assert!(restored.visible_fields().iter().any(|field| field.key == "why"));
+    }
+
+    // FORM-003 — regex pattern validation, including invalid patterns, and JS
+    // undefined-vs-empty-array option semantics (`form.ts:38,82-88`; `form.tsx:116`).
+    #[test]
+    fn form_003_pattern_and_undefined_options_semantics() {
+        let patterned = FormField::new("code", FieldKind::Text).with_pattern(r"item-[0-9]+");
+        assert_eq!(validate(&patterned, Some(&FormValue::Text("prefix item-42 suffix".into()))), None);
+        assert_eq!(
+            validate(&patterned, Some(&FormValue::Text("prefix item-x suffix".into()))).as_deref(),
+            Some("Must match pattern: item-[0-9]+"),
+        );
+        let invalid_pattern = FormField::new("bad", FieldKind::Text).with_pattern("[");
+        assert_eq!(
+            validate(&invalid_pattern, Some(&FormValue::Text("value".into()))).as_deref(),
+            Some("Invalid pattern: ["),
+        );
+
+        let free_text = FormField::new("free", FieldKind::Text);
+        assert!(free_text.is_textual());
+        assert_eq!(validate(&free_text, Some(&FormValue::Text("anything".into()))), None);
+        let empty_options = FormField::new("choices", FieldKind::Text).with_options(vec![]);
+        assert!(!empty_options.is_textual());
+        assert!(FormPrompt::new("f-3-options", "Form", None, vec![empty_options.clone()]).single());
+        assert_eq!(
+            validate(&empty_options, Some(&FormValue::Text("anything".into()))).as_deref(),
+            Some("Select an available option"),
+        );
     }
 
     // FORM-004 — narrow fallback at the exact fit boundary, 24-cell labels,
