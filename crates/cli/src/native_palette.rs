@@ -2296,6 +2296,192 @@ pub mod pickers {
     /// (`dialog-session-list.tsx:41`).
     pub const SESSION_SEARCH_DEBOUNCE_MS: u64 = 150;
 
+    /// Snapshot of the favorite order when the model dialog opens. New-design
+    /// dialogs keep this order stable until reopened (`dialog-model.tsx:79-81,105`).
+    #[derive(Clone, Debug, Default, PartialEq, Eq)]
+    pub struct ModelPickerState {
+        favorites_at_open: Vec<ModelKey>,
+    }
+
+    impl ModelPickerState {
+        #[must_use]
+        pub fn open(favorites: &[ModelKey]) -> Self {
+            Self { favorites_at_open: favorites.to_vec() }
+        }
+
+        #[must_use]
+        pub fn favorites_at_open(&self) -> &[ModelKey] {
+            &self.favorites_at_open
+        }
+
+        #[must_use]
+        pub fn order(
+            &self,
+            models: &[ModelCandidate],
+            current_favorites: &[ModelKey],
+            recents: &[ModelKey],
+            new_designs: bool,
+            restricted_to_provider: bool,
+        ) -> Vec<ModelCandidate> {
+            if restricted_to_provider {
+                return order_models(models, &[], &[], new_designs, true);
+            }
+            let favorites = if new_designs { &self.favorites_at_open } else { current_favorites };
+            order_models(models, favorites, recents, new_designs, false)
+        }
+
+        #[must_use]
+        pub fn search<'a>(&self, query: &str, models: &'a [ModelCandidate]) -> Vec<&'a ModelCandidate> {
+            search_models(query, models, &self.favorites_at_open)
+        }
+    }
+
+    /// A user's explicit choice in `DialogVariant`; `Default` maps to
+    /// `variant.set(undefined)`, while named variants are persisted verbatim.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum ModelVariantChoice {
+        Default,
+        Variant(String),
+    }
+
+    /// Pure state for the flat variant select (`dialog-variant.tsx:9-42`).
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct ModelVariantPicker {
+        options: Vec<String>,
+        current: String,
+        filter_enabled: bool,
+    }
+
+    impl ModelVariantPicker {
+        #[must_use]
+        pub fn new(variants: &[String], current: Option<&str>, new_designs: bool) -> Self {
+            let mut options = vec!["default".to_owned()];
+            options.extend(variants.iter().filter(|variant| variant.as_str() != "default").cloned());
+            Self {
+                options,
+                current: current.unwrap_or("default").to_owned(),
+                filter_enabled: !new_designs,
+            }
+        }
+
+        #[must_use]
+        pub fn options(&self) -> &[String] {
+            &self.options
+        }
+
+        #[must_use]
+        pub fn current(&self) -> &str {
+            &self.current
+        }
+
+        #[must_use]
+        pub const fn filter_enabled(&self) -> bool {
+            self.filter_enabled
+        }
+
+        /// Returns `None` for a value outside the visible options.
+        #[must_use]
+        pub fn choose(&self, value: &str) -> Option<ModelVariantChoice> {
+            if !self.options.iter().any(|option| option == value) {
+                return None;
+            }
+            Some(if value == "default" {
+                ModelVariantChoice::Default
+            } else {
+                ModelVariantChoice::Variant(value.to_owned())
+            })
+        }
+    }
+
+    /// Next dialog after selecting a model (`dialog-model.tsx:25-38`): retain
+    /// a still-valid current variant, otherwise offer variants when present.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum ModelSelectionDialog {
+        Closed,
+        VariantPicker,
+    }
+
+    #[must_use]
+    pub fn next_dialog_after_model_select(variants: &[String], current: Option<&str>) -> ModelSelectionDialog {
+        if current.is_some_and(|current| variants.iter().any(|variant| variant == current)) || variants.is_empty() {
+            ModelSelectionDialog::Closed
+        } else {
+            ModelSelectionDialog::VariantPicker
+        }
+    }
+
+    /// Facts rendered in a model's selected-row detail (`model-options.tsx:48-105`).
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct ModelDetailFacts {
+        pub free: bool,
+        pub input_price_per_million: Option<f64>,
+        pub output_price_per_million: Option<f64>,
+        pub input_modalities: Vec<String>,
+        pub context_limit: u64,
+        pub reasoning: bool,
+    }
+
+    /// Fresh limit amount at picker open; the provider supplies this value.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct ModelUsageDetail {
+        pub text: String,
+        pub danger: bool,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct ModelDetailRow {
+        pub amount: String,
+        pub amount_is_danger: bool,
+        pub facts: Vec<String>,
+    }
+
+    impl ModelDetailFacts {
+        #[must_use]
+        pub fn row(&self, usage: Option<ModelUsageDetail>) -> ModelDetailRow {
+            let price = if self.free {
+                "Free".to_owned()
+            } else {
+                match (self.input_price_per_million, self.output_price_per_million) {
+                    (Some(input), Some(output)) => format!("${}/${}", model_dollars(input), model_dollars(output)),
+                    _ => String::new(),
+                }
+            };
+            let modalities = self.input_modalities.iter().map(|value| {
+                if value == "pdf" { "PDF".to_owned() }
+                else {
+                    let mut chars = value.chars();
+                    chars.next().map_or_else(String::new, |first| first.to_uppercase().collect::<String>() + chars.as_str())
+                }
+            }).collect::<Vec<_>>().join(", ");
+            let mut facts = if modalities.is_empty() { Vec::new() } else { vec![modalities] };
+            facts.push(if self.context_limit >= 1_000_000 {
+                format!("{}M", (self.context_limit as f64 / 1_000_000.0 * 10.0).round() / 10.0)
+            } else if self.context_limit >= 1_000 {
+                format!("{}K", (self.context_limit as f64 / 1_000.0).round() as u64)
+            } else {
+                self.context_limit.to_string()
+            });
+            if self.reasoning { facts.push("Reasoning".to_owned()); }
+            match usage {
+                Some(usage) => {
+                    let price_per_million = if price.is_empty() || price == "Free" { price } else { format!("{price} per 1M") };
+                    if !price_per_million.is_empty() { facts.insert(0, price_per_million); }
+                    ModelDetailRow {
+                        amount: usage.text,
+                        amount_is_danger: usage.danger,
+                        facts,
+                    }
+                }
+                None => ModelDetailRow { amount: price, amount_is_danger: false, facts },
+            }
+        }
+    }
+
+    fn model_dollars(value: f64) -> String {
+        let value = format!("{value:.2}");
+        value.trim_end_matches('0').trim_end_matches('.').to_owned()
+    }
+
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct SessionRow {
         pub id: String,
@@ -3898,6 +4084,59 @@ mod dialog_parity_tests {
         );
         let ids: Vec<_> = results.iter().map(|model| model.id.as_str()).collect();
         assert_eq!(ids, vec!["two", "one"]);
+    }
+
+    // DIALOG-12: variants, model-selection transition and favorites-at-open snapshot
+    // (`dialog-model.tsx:25-38,79-81,105`; `dialog-variant.tsx:9-42`).
+    #[test]
+    fn model_variant_picker_and_open_snapshot_match_upstream() {
+        let variants = vec!["default".to_owned(), "thinking".to_owned(), "fast".to_owned()];
+        let picker = ModelVariantPicker::new(&variants, Some("thinking"), false);
+        assert_eq!(picker.options(), ["default", "thinking", "fast"]);
+        assert_eq!(picker.current(), "thinking");
+        assert!(picker.filter_enabled());
+        assert_eq!(picker.choose("default"), Some(ModelVariantChoice::Default));
+        assert_eq!(picker.choose("fast"), Some(ModelVariantChoice::Variant("fast".into())));
+        assert_eq!(picker.choose("unknown"), None);
+        assert!(!ModelVariantPicker::new(&variants, None, true).filter_enabled());
+
+        assert_eq!(next_dialog_after_model_select(&variants, Some("thinking")), ModelSelectionDialog::Closed);
+        assert_eq!(next_dialog_after_model_select(&variants, Some("invalid")), ModelSelectionDialog::VariantPicker);
+        assert_eq!(next_dialog_after_model_select(&[], Some("invalid")), ModelSelectionDialog::Closed);
+
+        let models = vec![
+            ModelCandidate { provider: "p".into(), id: "two".into(), title: "Model Two".into(), free: false, deprecated: false },
+            ModelCandidate { provider: "p".into(), id: "one".into(), title: "Model One".into(), free: false, deprecated: false },
+        ];
+        let one = ("p".to_owned(), "one".to_owned());
+        let two = ("p".to_owned(), "two".to_owned());
+        let opened = ModelPickerState::open(std::slice::from_ref(&one));
+        let favorites_after_open = vec![two.clone()];
+        assert_eq!(opened.favorites_at_open(), &[one]);
+        assert_eq!(opened.order(&models, &favorites_after_open, &[], true, false)[0].id, "one");
+        assert_eq!(opened.order(&models, &favorites_after_open, &[], true, true)[0].id, "two");
+        assert_eq!(opened.order(&models, &favorites_after_open, &[], false, false)[0].id, "two");
+        assert_eq!(order_models(&models, &favorites_after_open, &[], true, false)[0].id, "two");
+        assert_eq!(opened.search("model", &models)[0].id, "one");
+    }
+
+    // DIALOG-12: model detail row keeps fresh usage limits beside price and model facts.
+    #[test]
+    fn model_detail_row_shows_usage_limit_and_facts() {
+        let detail = ModelDetailFacts {
+            free: false,
+            input_price_per_million: Some(2.5),
+            output_price_per_million: Some(10.0),
+            input_modalities: vec!["text".into(), "pdf".into()],
+            context_limit: 1_000_000,
+            reasoning: true,
+        };
+        let row = detail.row(Some(ModelUsageDetail { text: "$5 left".into(), danger: true }));
+        assert_eq!(row.amount, "$5 left");
+        assert!(row.amount_is_danger);
+        assert_eq!(row.facts, ["$2.5/$10 per 1M", "Text, PDF", "1M", "Reasoning"]);
+        let free = ModelDetailFacts { free: true, ..detail };
+        assert_eq!(free.row(None).amount, "Free");
     }
 
     // DIALOG-13: debounce, stale responses, scope persistence, search copy,
