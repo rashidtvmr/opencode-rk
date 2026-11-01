@@ -1845,6 +1845,41 @@ pub mod select {
         }
     }
 
+    /// One extra action bound while the prompt input is focused
+    /// (`ui/dialog-prompt.tsx:8-14,52-73`). `command` is the keymap command id;
+    /// `command_title` defaults to `title` for help listings. The trigger
+    /// callback is behavioral wiring and is not part of this display model.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct DialogPromptAction {
+        pub title: String,
+        pub command: String,
+        pub command_title: Option<String>,
+    }
+
+    impl DialogPromptAction {
+        #[must_use]
+        pub fn new(title: impl Into<String>, command: impl Into<String>) -> Self {
+            Self {
+                title: title.into(),
+                command: command.into(),
+                command_title: None,
+            }
+        }
+
+        /// `action.commandTitle ?? action.title` (`dialog-prompt.tsx:67`).
+        #[must_use]
+        pub fn command_title(&self) -> &str {
+            self.command_title.as_deref().unwrap_or(&self.title)
+        }
+    }
+
+    /// Upper bound on prompt extra actions, so a hostile caller cannot grow the
+    /// prompt unbounded.
+    pub const MAX_PROMPT_ACTIONS: usize = 16;
+
+    /// `busyText ?? "Working…"` (`dialog-prompt.tsx:169`).
+    pub const DEFAULT_PROMPT_BUSY_TEXT: &str = "Working…";
+
     /// One-row prompt state (`ui/dialog-prompt.tsx`). Busy suspends editing,
     /// blurs the input, blocks submission, extra actions and Escape cancel.
     #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -1852,6 +1887,11 @@ pub mod select {
         value: String,
         busy: bool,
         focused: bool,
+        /// Spinner line shown while busy (`dialog-prompt.tsx:100-140,168-170`).
+        busy_text: Option<String>,
+        /// Extra actions bound while focused and not busy
+        /// (`dialog-prompt.tsx:52-73`).
+        actions: Vec<DialogPromptAction>,
     }
 
     impl PromptState {
@@ -1865,6 +1905,8 @@ pub mod select {
                 value: value.to_owned(),
                 busy: false,
                 focused: true,
+                busy_text: None,
+                actions: Vec::new(),
             }
         }
 
@@ -1881,6 +1923,45 @@ pub mod select {
         #[must_use]
         pub fn is_focused(&self) -> bool {
             self.focused
+        }
+
+        /// Raw `busyText`, or `None` (`dialog-prompt.tsx:169`).
+        #[must_use]
+        pub fn busy_text(&self) -> Option<&str> {
+            self.busy_text.as_deref()
+        }
+
+        /// The line painted while busy, defaulting `busyText` to `"Working…"`
+        /// (`dialog-prompt.tsx:168-170`); `None` when not busy.
+        #[must_use]
+        pub fn busy_line(&self) -> Option<&str> {
+            self.busy
+                .then(|| self.busy_text.as_deref().unwrap_or(DEFAULT_PROMPT_BUSY_TEXT))
+        }
+
+        pub fn set_busy_text(&mut self, text: Option<String>) {
+            self.busy_text = text;
+        }
+
+        /// Register an extra action (`props.actions`); bounded by
+        /// [`MAX_PROMPT_ACTIONS`].
+        pub fn add_action(&mut self, action: DialogPromptAction) -> bool {
+            if self.actions.len() >= MAX_PROMPT_ACTIONS {
+                return false;
+            }
+            self.actions.push(action);
+            true
+        }
+
+        /// Actions currently triggerable: none while busy
+        /// (`dialog-prompt.tsx:52-56` binds them only when `!props.busy`).
+        #[must_use]
+        pub fn actions(&self) -> &[DialogPromptAction] {
+            if self.busy {
+                &[]
+            } else {
+                &self.actions
+            }
         }
 
         pub fn set_busy(&mut self, busy: bool) {
@@ -3260,6 +3341,41 @@ mod dialog_parity_tests {
         assert!(prompt.escape());
         assert_eq!(prompt.submit(), Some("start!"));
         assert_eq!(PromptState::SUBMIT_PRIORITY, 1);
+    }
+
+    // DIALOG-10: extra actions and the busy line
+    // (dialog-prompt.tsx:8-14,52-73,100-140,168-170).
+    #[test]
+    fn prompt_actions_and_busy_text_follow_upstream() {
+        let mut prompt = PromptState::open("q");
+        // Not busy: the busy line is absent.
+        assert_eq!(prompt.busy_line(), None);
+        // Registered actions are triggerable while idle.
+        assert!(prompt.add_action(DialogPromptAction::new("rewrite", "prompt.rewrite")));
+        let mut titled = DialogPromptAction::new("toggle", "prompt.toggle");
+        titled.command_title = Some("Toggle value".into());
+        assert!(prompt.add_action(titled));
+        assert_eq!(prompt.actions().len(), 2);
+        assert_eq!(prompt.actions()[0].command_title(), "rewrite", "falls back to title");
+        assert_eq!(prompt.actions()[1].command_title(), "Toggle value");
+        // Busy: actions vanish and the default busy line shows.
+        prompt.set_busy(true);
+        assert!(prompt.actions().is_empty(), "actions are disabled while busy");
+        assert_eq!(prompt.busy_line(), Some("Working…"));
+        prompt.set_busy_text(Some("Summoning".into()));
+        assert_eq!(prompt.busy_text(), Some("Summoning"));
+        assert_eq!(prompt.busy_line(), Some("Summoning"));
+        // Idle again: the custom text is retained but no line is painted.
+        prompt.set_busy(false);
+        assert_eq!(prompt.actions().len(), 2);
+        assert_eq!(prompt.busy_line(), None);
+        // The action cap is enforced.
+        let mut capped = PromptState::open("");
+        for i in 0..MAX_PROMPT_ACTIONS {
+            assert!(capped.add_action(DialogPromptAction::new(format!("a{i}"), "c")));
+        }
+        assert!(!capped.add_action(DialogPromptAction::new("overflow", "c")));
+        assert_eq!(capped.actions().len(), MAX_PROMPT_ACTIONS);
     }
 
     // DIALOG-10: confirmation legacy and new-design key variants
