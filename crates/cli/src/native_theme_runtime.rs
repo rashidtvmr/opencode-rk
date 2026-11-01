@@ -1523,8 +1523,6 @@ pub enum LoadError {
     InvalidJson,
     /// Config parsed but the `theme` key is unusably shaped.
     Config(ConfigThemeError),
-    /// Config names a theme that is not a builtin and no asset was supplied.
-    UnknownTheme { name: String },
 }
 
 impl fmt::Display for LoadError {
@@ -1535,12 +1533,6 @@ impl fmt::Display for LoadError {
             }
             Self::InvalidJson => write!(f, "runtime config is not valid UTF-8 JSON"),
             Self::Config(error) => write!(f, "{error}"),
-            Self::UnknownTheme { name } => {
-                write!(
-                    f,
-                    "unknown non-builtin theme {name:?}; no asset source supplied"
-                )
-            }
         }
     }
 }
@@ -1585,8 +1577,16 @@ pub fn load_runtime_theme(
         match config_theme_name(&config) {
             Ok(None) => return Ok(RuntimeTheme::builtin_default(mode)),
             Ok(Some(name)) => {
-                return RuntimeTheme::named(&name, mode)
-                    .ok_or_else(|| LoadError::UnknownTheme { name });
+                // THEME-11: upstream `context/theme.tsx:297-307`
+                // `const name = sources[store.active] ? store.active : "opencode"`
+                // — a name that is not in the available source set silently
+                // renders the shipped `opencode` default; it is not a hard load
+                // error. (`loadTheme` failing for a *known* name also falls
+                // back to `opencode` at `:300-306`.) A configured `tui.theme`
+                // that addresses a library/custom theme not shipped natively
+                // therefore still starts, on the default palette.
+                return Ok(RuntimeTheme::named(&name, mode)
+                    .unwrap_or_else(|| RuntimeTheme::builtin_default(mode)));
             }
             Err(error) => {
                 first_bad.get_or_insert(LoadError::Config(error));
@@ -1773,13 +1773,17 @@ impl ThemeController {
         self.lock.is_some()
     }
 
-    /// Picker movement: preview immediately, persist nothing. The first
-    /// preview snapshots the pre-picker selection for [`Self::cancel_pick`].
+    /// Picker movement: preview AND persist immediately, mirroring upstream
+    /// `dialog-theme-list.tsx:32-37` (`onMove` -> `themes.set`) whose
+    /// `context/theme.tsx:341-349` `set` writes `configState.update`
+    /// straight away. The first preview snapshots the pre-picker selection
+    /// for [`Self::cancel_pick`].
     pub fn preview(&mut self, name: &str) {
         if self.picking.is_none() {
             self.picking = Some(self.persisted.clone());
         }
         self.active = name.to_owned();
+        self.persisted.name = name.to_owned();
     }
 
     /// Picker confirmation: persist the previewed selection.
@@ -2898,15 +2902,15 @@ mod tests {
     }
 
     #[test]
-    fn loader_unknown_theme_name_fails_closed() {
+    fn loader_unknown_theme_name_falls_back_to_opencode() {
         let dir = scratch_dir(3);
         let path = dir.join("tui.json");
-        std::fs::write(&path, r#"{"theme":"ayu"}"#).expect("write config");
+        std::fs::write(&path, r#"{"theme":"not-a-theme"}"#).expect("write config");
+        // THEME-11: upstream `context/theme.tsx:297-307` resolves an unknown
+        // name to the shipped `opencode` default rather than failing closed.
         assert_eq!(
             load_runtime_theme(&[&path], ThemeMode::Dark),
-            Err(LoadError::UnknownTheme {
-                name: "ayu".to_owned()
-            })
+            Ok(RuntimeTheme::builtin_default(ThemeMode::Dark))
         );
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
@@ -3562,7 +3566,13 @@ fn theme12_picker_preview_cancel_and_confirm_preserve_preferences() {
     );
     controller.preview("nord");
     assert_eq!(controller.active_name(), "nord", "movement previews immediately");
-    assert_eq!(controller.persisted().name, "opencode", "preview persists nothing");
+    // THEME-12: upstream `dialog-theme-list.tsx:32-37` `onMove` -> `themes.set`
+    // -> `context/theme.tsx:341-349` persists the selection immediately.
+    assert_eq!(
+        controller.persisted().name,
+        "nord",
+        "movement previews AND persists immediately"
+    );
     assert_eq!(controller.cancel_pick().name, "opencode", "cancel restores AND persists initial");
     assert_eq!(controller.active_name(), "opencode");
 
