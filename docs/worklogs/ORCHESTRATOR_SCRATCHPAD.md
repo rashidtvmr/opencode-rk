@@ -10374,3 +10374,54 @@ MSG-006 menu, F3 dock click, TAB-24 generate, CP-35 migrate, SIDE-10 revert) plu
 remaining `(iii)` clusters (SIDE-03/04/05, THEME-01..09, TOOL-005..010,
 DIALOG-01..10, FFI-01..04, PAR-22, CP-22..27) and two read-only reviews
 (`W18-REVIEW-WAVE17`, `W18-OBLIGATION-DELTA2`).
+
+## Window — wave-18 integration (base `471c87d0` -> HEAD `2a2e39be`)
+
+Landed one at a time (compile + focused test + full suite + immediate commit):
+
+- `abedad7e` **DIALOG-12 + TAB-07** — model picker renders recents-first
+  (`dialog_rows`/`dialog_selected_row` resolve the picker index back to the
+  committed model); attention feedback outranks busy for the indicator number
+  (`session-tabs.tsx:1648-1658`). 2097/0.
+- `004f6875` **CP-35** — first production reference to `TrackedDraft` at the
+  per-frame realign seam; un-migrated sites named in the handoff. 2097/0.
+- `b820256c` **MSG-006** — painted transcript row -> backend `message_id` map
+  (real producer, populated by the live render pass). Menu consumer still a
+  named `(c)` blocker (no loop state holder/render/input host). 2098/0.
+- `14256579` **PAR-22 + TAB-24** — `ProvenanceManifest` (deterministic
+  canonical serialization) + server empty-title generate path
+  (`derived_session_title`, `handlers/session.ts:234-244`). 2099/0, server 305/0.
+- `f2749134` **FFI-08** — real fix: diff selection sliced bytes but
+  `Position.col` is a char column, so a multibyte partial selection panicked;
+  now maps char->byte. 218 bridge tests.
+- `350b216d` **CP-23** — production dock registers both always-mounted tabs
+  (`ComposerDock::session()`). The candidate's `set_route` + rewritten dock tests
+  failed (asserted aspirational `active()`/route semantics) and were dropped.
+- `71372c9e` **SIDE-10** — `sessions.revert` column + idempotent migration +
+  `set_session_revert` + decoder, so get/list serialize the fact. storage 123/0,
+  sessions 44/0, server 305/0.
+- `2a2e39be` **TOOL-007/008/009 + CP-03/06** — focused clauses pinning landed
+  producers. 2105/0. Dropped the candidate's TOOL-005 test (mis-modeled the row).
+
+**Skipped (recorded):**
+- `W18-DIALOG01-10` — pure `pub(super)` dialog-select helpers with no producer,
+  duplicating the live `picker_viewport`; unverified heuristics not landed.
+- `W18-CP22-27` route gate/`active()` — tests failed; only CP-23 landed.
+- `W18-DIALOG13-18`/`W18-FFI01-04` — empty patches; the last said six dialogs
+  were already present (verify), FFI-01..04 already have producers+tests.
+
+**Confirmed blocked (do not re-dispatch as small slices):**
+- **TAB-21 watermark** — needs a `time.idle`/`time.viewed` model + view POST
+  route + client POST; `ViewAcknowledgement` has no caller. Multi-crate.
+  (TAB-07's `unread==Error` hue shares this dependency.)
+- **MSG-006 menu / SIDE-08 MCP dialog / DIALOG-01 select** — each needs a
+  dialog state-holder + render + input host that does not exist yet.
+- **SIDE-10 stage route/consumer** + snapshot service — still absent.
+
+**Worker reliability:** wave-18 again lost several packages to silent
+step-capped completion (W18-SIDE14-WIRE, W18-TAB22-FALLBACK, W18-SIDE03-05,
+W18-F3-DOCKCLICK, W18-MSG006 consumer half). Main did the bounded ones locally
+and recorded the structural blockers.
+
+**Wave-19 planned** — target only clear, bounded seams; leave the multi-crate
+transport blockers recorded rather than re-dispatching them.
