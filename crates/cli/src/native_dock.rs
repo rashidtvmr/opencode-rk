@@ -236,7 +236,7 @@ pub struct DockLine {
 impl DockLine {
     fn push(&mut self, text: impl Into<String>, style: DockStyle, bold: bool) {
         let text = text.into();
-        let x = self.text.chars().count() as u16;
+        let x = cell_cells(&self.text);
         self.text.push_str(&text);
         self.spans.push(DockSpan {
             text,
@@ -294,6 +294,15 @@ fn take_cells(text: &str, budget: u16) -> String {
         out.push_str(glyph);
     });
     out
+}
+
+/// Display cells occupied by `text`, through the one canonical segmentation
+/// (`native_view_layout::visit_unpadded_cells`) that paint, clipping and hit
+/// testing share. THEME-18: the dock must never fall back to `chars().count()`
+/// for a cell advance, or a wide/CJK/emoji label drifts between the painted
+/// column and the hit column.
+fn cell_cells(text: &str) -> u16 {
+    u16::try_from(visit_unpadded_cells(text, usize::from(u16::MAX), |_, _| {})).unwrap_or(u16::MAX)
 }
 
 /// Row background fill. Painted over `[x, x + width)` before the spans, so the
@@ -775,7 +784,7 @@ impl ComposerDock {
                         active,
                         x,
                     );
-                    let label_len = label.chars().count() as u16;
+                    let label_len = cell_cells(label);
                     x = x.saturating_add(label_len);
                     if index + 1 < tabs.len() {
                         line.advance(DOCK_TAB_GAP);
@@ -787,7 +796,7 @@ impl ComposerDock {
         // Right-aligned `esc` inside the outer right padding (`index.tsx:123`).
         let esc_x = width
             .saturating_sub(DOCK_PADDING_RIGHT)
-            .saturating_sub(DOCK_ESC_LABEL.chars().count() as u16);
+            .saturating_sub(cell_cells(DOCK_ESC_LABEL));
         line.push_at(DOCK_ESC_LABEL, DockStyle::Esc, false, esc_x);
         // The row text is the left-aligned content; the esc affordance lives at
         // `esc_x` (see `esc_hit`).
@@ -803,8 +812,8 @@ impl ComposerDock {
         }
         let start = width
             .saturating_sub(DOCK_PADDING_RIGHT)
-            .saturating_sub(DOCK_ESC_LABEL.chars().count() as u16);
-        Some((start, start + DOCK_ESC_LABEL.chars().count() as u16 - 1))
+            .saturating_sub(cell_cells(DOCK_ESC_LABEL));
+        Some((start, start + cell_cells(DOCK_ESC_LABEL) - 1))
     }
 
     /// Hint row (`index.tsx:132-151`): each hint is `bold label + " " +
@@ -818,11 +827,11 @@ impl ComposerDock {
         let hints = self.footer_hints();
         let mut x = DOCK_TEXT_X;
         for (index, hint) in hints.iter().enumerate() {
-            let label_len = hint.label.chars().count() as u16;
+            let label_len = cell_cells(&hint.label);
             line.push_here(&hint.label, DockStyle::HintLabel, true, x);
             line.push_here(" ", DockStyle::HintLabel, false, x + label_len);
             let shortcut = hint.shortcut.clone().unwrap_or_default();
-            let shortcut_len = shortcut.chars().count() as u16;
+            let shortcut_len = cell_cells(&shortcut);
             line.push_here(shortcut, DockStyle::HintShortcut, false, x + label_len + 1);
             x = x.saturating_add(label_len + 1 + shortcut_len);
             if index + 1 < hints.len() {
@@ -1045,11 +1054,11 @@ fn body_paint_row(width: u16, row: &DockBodyRow) -> DockPaintRow {
     let status_cells = row
         .status
         .as_ref()
-        .map_or(0, |status| u16::try_from(status.text.chars().count()).unwrap_or(u16::MAX));
+        .map_or(0, |status| cell_cells(&status.text));
     let status_x = right.saturating_sub(status_cells);
     let label_budget = status_x.saturating_sub(DOCK_TEXT_X);
     let label = take_cells(&row.label, label_budget);
-    let label_cells = u16::try_from(label.chars().count()).unwrap_or(u16::MAX);
+    let label_cells = cell_cells(&label);
     paint.spans.push(DockSpan {
         text: label.clone(),
         style: row.style,
@@ -1866,6 +1875,32 @@ mod native_dock_tests {
             DOCK_TEXT_X + label.text.chars().count() as u16 + 7,
             "the label is truncated, not wrapped"
         );
+    }
+
+    /// THEME-18: the dock advances by measured display cells, never by
+    /// `chars().count()`, so a wide (CJK) label paints and hit-tests in the
+    /// same column. A `界面` label is 4 cells (2 per ideograph); a bogus
+    /// char-count advance would place the following span 2 cells in.
+    #[test]
+    fn dock_metrics_use_display_cells_for_wide_glyphs() {
+        let cjk = "界面";
+        assert_eq!(cell_cells(cjk), 4, "two ideographs are four cells");
+        assert_ne!(cell_cells(cjk), cjk.chars().count() as u16, "char count would be 2");
+        let mut line = DockLine::default();
+        line.push_here(cjk, DockStyle::TabActive, true, DOCK_TEXT_X);
+        let next = DOCK_TEXT_X + cell_cells(cjk) + DOCK_TAB_GAP;
+        line.advance(DOCK_TAB_GAP);
+        line.push_here("Shell", DockStyle::TabInactive, false, next);
+        assert_eq!(
+            line.spans[1].x, next,
+            "the second tab starts after the wide cells, not after chars().count()"
+        );
+        // `esc_hit` reserves the measured `esc` width at the right padding.
+        let mut dock = ComposerDock::session();
+        dock.open(Some(DockTabId::Shell));
+        let (start, end) = dock.esc_hit(40).expect("open dock exposes esc");
+        assert_eq!(start, 40 - DOCK_PADDING_RIGHT - cell_cells(DOCK_ESC_LABEL));
+        assert_eq!(end, start + cell_cells(DOCK_ESC_LABEL) - 1);
     }
 
     #[test]
