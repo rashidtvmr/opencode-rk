@@ -1306,6 +1306,21 @@ mod tests {
         assert_eq!(palette.decrease_default(&hue([0x48, 0x48, 0x48, 0xff])).rgba, [0x48, 0x48, 0x48, 0xff]);
     }
 
+    // CP-03 — transparent mode keeps alpha through the decrease identity.
+    #[test]
+    fn cp03_transparent_literal_background_keeps_alpha_zero() {
+        // Transparent mode feeds a literal transparent background through the
+        // decrease identity (resolve.ts:181 `if (!match) return color`); the
+        // surface must keep alpha 0 so the terminal shows through on blank
+        // padding cells.
+        let palette = dark();
+        let literal = palette.decrease_default(&hue([0x48, 0x48, 0x48, 0x00]));
+        assert_eq!(literal.rgba, [0x48, 0x48, 0x48, 0x00]);
+        // The opaque literal path stays byte-identical as well.
+        let opaque = palette.decrease_default(&hue([0x48, 0x48, 0x48, 0xff]));
+        assert_eq!(opaque.rgba, [0x48, 0x48, 0x48, 0xff]);
+    }
+
     // CP-04 — padding and inner width at 40/43/44 columns.
     #[test]
     fn cp04_surface_rows_are_exactly_the_pane_width_at_40_43_44() {
@@ -1500,6 +1515,29 @@ mod tests {
         assert_eq!(cells("界"), 2);
         assert_eq!(truncate_width("界界界", 4), "界…");
         assert_eq!(truncate_width("界界界", 1), "…");
+    }
+
+    #[test]
+    fn cp06_budget_is_terminal_derived_when_the_parent_is_narrower() {
+        // `metadata.tsx:26-28` measures candidates against
+        // `dimensions().width` only; a prompt parent narrower than the
+        // terminal (pane inset, open sidebar) never shrinks the budget.
+        let long_model = "m".repeat(60);
+        let input = PromptMetadataInput {
+            mode: PromptMode::Normal,
+            agent: None,
+            auto: false,
+            model: long_model.as_str(),
+            provider: "",
+            variant: None,
+            limit: None,
+            effort: None,
+        };
+        // Terminal 80 -> budget 67; the 60-cell model fits untouched even
+        // though every real prompt parent is narrower than the terminal.
+        let layout = metadata_layout(&input, 80);
+        assert_eq!(layout.model, long_model);
+        assert_eq!(cells(&layout.model), 60);
     }
 
     // CP-07 — data-driven agent selection and colors.

@@ -1669,6 +1669,76 @@ mod tests {
         assert!(!rows.iter().any(|(row, _)| row.contains("printed output")));
     }
 
+    // TOOL-007: error/cancelled subagent states classify correctly and no
+    // lifecycle state invents percentage progress
+    // (`routes/session/index.tsx:2826-2867`; subagent rows never carry a %).
+    #[test]
+    fn subagent_error_cancelled_states_and_no_invented_percentage() {
+        assert_eq!(classify_status("failed", false), ToolStatus::Error);
+        assert_eq!(ToolStatus::Error.row_class(), ChatRowClass::ToolError);
+        // `cancelled` is never claimed as success or running.
+        assert_eq!(classify_status("cancelled", false), ToolStatus::Pending);
+        assert!(!ToolStatus::Pending.is_running());
+        let failed = tool_state_rows(
+            80,
+            "subagent",
+            "error",
+            &json!({"agent": "build", "description": "x"}).to_string(),
+            "child failed",
+            true,
+        );
+        assert!(
+            failed.iter().any(|(_, class)| *class == ChatRowClass::ToolError),
+            "{failed:?}"
+        );
+        for state in ["running", "completed", "error", "cancelled"] {
+            let display = label(
+                "subagent",
+                state,
+                json!({"agent": "build", "description": "x", "sessionID": "s1"}),
+            );
+            assert!(!display.label.contains('%'), "{}", display.label);
+            let rows = rows_for_display(80, &display);
+            assert!(
+                rows.iter().all(|(row, _)| !row.contains('%')),
+                "no invented percentage in {state}: {rows:?}"
+            );
+        }
+    }
+
+    // TOOL-008: a missing model override adds NO model label; an explicit
+    // override shows the provider/model reference with its variant suffix
+    // (`subagentModelLabel`, `index.tsx` subagent tool rows).
+    #[test]
+    fn subagent_missing_model_override_adds_no_model_label() {
+        let plain = label("subagent", "completed", json!({"agent": "build", "description": "x"}));
+        assert!(!plain.label.contains('·'), "{}", plain.label);
+        assert_eq!(subagent_model_label("openai/gpt-5"), "openai/gpt-5");
+        let explicit = label(
+            "subagent",
+            "completed",
+            json!({"agent": "build", "description": "x", "model": "openai/gpt-5#high"}),
+        );
+        assert!(
+            explicit.label.ends_with("\u{b7} openai/gpt-5 (high)"),
+            "{}",
+            explicit.label
+        );
+    }
+
+    // TOOL-009: `metadata.error` recolors the ROOT row to error even when the
+    // transport state is completed (`index.tsx:3408-3427`), independent of the
+    // metadata child rows updating from `metadata.toolCalls`.
+    #[test]
+    fn execute_metadata_error_recolors_the_completed_root() {
+        let root = tool_display(80, "execute", "completed", r#"{"code":"1"}"#, "ok", false);
+        assert_eq!(root.status, ToolStatus::Completed);
+        assert_eq!(root.icon, "\u{2713}");
+        let flipped = apply_tool_metadata(root, r#"{"error":true}"#);
+        assert_eq!(flipped.status, ToolStatus::Error);
+        assert_eq!(flipped.icon, "\u{2717}");
+    }
+
     #[test]
     fn todo_question_and_patch_bodies() {
         let todos = tool_state_rows(
