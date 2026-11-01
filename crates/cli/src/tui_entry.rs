@@ -9696,18 +9696,35 @@ fn native_loop(
             continue;
         }
         if byte == 3 {
-            if let Some(text) = selection.selected_text() {
-                let frame = selection_clipboard_frame(&text);
-                let mut stdout = std::io::stdout().lock();
-                stdout.write_all(frame.as_bytes())?;
-                stdout.flush()?;
-                crate::native_debug::event(
-                    "ui.selection_copy",
-                    serde_json::json!({"bytes":text.len()}),
-                );
-                selection.clear();
-                needs_paint = true;
-                continue;
+            match crate::native_text_selection::ctrl_c_copy_outcome(
+                selection.has_selection(),
+                selection.selected_text().is_some(),
+            ) {
+                // No selection: fall through so Ctrl+C keeps exit priority.
+                crate::native_text_selection::CtrlCCopy::FallThrough => {}
+                // Upstream retains the selection after a successful copy
+                // (`packages/tui/src/util/selection.ts:78-87`); keep the
+                // highlight and click history, only repaint.
+                crate::native_text_selection::CtrlCCopy::Retain => {
+                    if let Some(text) = selection.selected_text() {
+                        let frame = selection_clipboard_frame(&text);
+                        let mut stdout = std::io::stdout().lock();
+                        stdout.write_all(frame.as_bytes())?;
+                        stdout.flush()?;
+                        crate::native_debug::event(
+                            "ui.selection_copy",
+                            serde_json::json!({"bytes":text.len()}),
+                        );
+                    }
+                    needs_paint = true;
+                    continue;
+                }
+                // A failed copy clears the selection (upstream `:79-81`).
+                crate::native_text_selection::CtrlCCopy::Clear => {
+                    selection.clear();
+                    needs_paint = true;
+                    continue;
+                }
             }
         } else if byte == 27 {
             selection.clear();

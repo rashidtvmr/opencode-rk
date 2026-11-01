@@ -235,6 +235,12 @@ impl TextSelection {
         out
     }
 
+    /// True when a selection exists (anchor and focus set), matching the
+    /// upstream `renderer.getSelection()` presence check (`selection.ts:73`).
+    pub fn has_selection(&self) -> bool {
+        self.anchor.is_some() && self.focus.is_some()
+    }
+
     /// Clear anchor, focus, and the active drag state.
     pub fn clear(&mut self) {
         self.anchor = None;
@@ -334,12 +340,57 @@ fn floor_char_boundary(s: &str, max: usize) -> usize {
     end
 }
 
+/// Result of a Ctrl+C copy attempt. Mirrors upstream `handleSelectionKey`
+/// (`packages/tui/src/util/selection.ts:78-95`): with no selection the key
+/// falls through (upstream returns at `:73`); a successful copy RETAINS the
+/// selection; only a failed copy clears it (`:79-81`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CtrlCCopy {
+    /// No selection to act on; let the event reach app exit.
+    FallThrough,
+    /// Copy succeeded; keep the highlight and click history.
+    Retain,
+    /// Copy failed (selection without text); clear it.
+    Clear,
+}
+
+/// Decide the Ctrl+C selection outcome from the copy result.
+pub fn ctrl_c_copy_outcome(has_selection: bool, has_text: bool) -> CtrlCCopy {
+    match (has_selection, has_text) {
+        (false, _) => CtrlCCopy::FallThrough,
+        (true, true) => CtrlCCopy::Retain,
+        (true, false) => CtrlCCopy::Clear,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{copy_on_select_disabled, MouseCopyEvent, TextSelection};
+    use super::{copy_on_select_disabled, CtrlCCopy, MouseCopyEvent, TextSelection};
+    use super::ctrl_c_copy_outcome;
 
     fn rows(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn ctrl_c_retains_on_success_and_clears_only_on_failure() {
+        // No selection: the key falls through to app exit (selection.ts:73).
+        assert_eq!(ctrl_c_copy_outcome(false, false), CtrlCCopy::FallThrough);
+        assert_eq!(ctrl_c_copy_outcome(false, true), CtrlCCopy::FallThrough);
+        // Successful copy retains the highlight (selection.ts:78-87).
+        assert_eq!(ctrl_c_copy_outcome(true, true), CtrlCCopy::Retain);
+        // Failed copy (selection, no text) clears it (selection.ts:79-81).
+        assert_eq!(ctrl_c_copy_outcome(true, false), CtrlCCopy::Clear);
+    }
+
+    #[test]
+    fn copied_selection_remains_present_for_ctrl_c() {
+        let mut selection = selected();
+        assert_eq!(selection.copy_for_input_kind(2, false).as_deref(), Some("界e\u{301}"));
+        // The copy must NOT clear: has_selection stays true (upstream retains).
+        assert!(selection.has_selection());
+        assert_eq!(selection.selected_text().as_deref(), Some("界e\u{301}"));
+        assert!(!selection.spans().is_empty());
     }
 
     #[test]
