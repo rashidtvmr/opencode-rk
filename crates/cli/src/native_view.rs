@@ -871,9 +871,10 @@ impl NativeView {
             rail_interactive: true,
             queued_prompts: crate::native_view_chat::QueueDock::default(),
             dock: {
-                let mut dock = ComposerDock::new();
-                dock.register(DockTabId::Subagents);
-                dock
+                // CP-23 (`composer/index.tsx:127-128`): both always-mounted
+                // tabs (Subagents, Shell) are registered in the production
+                // view, in JSX mount order; Terminals stays gated on `terminals`.
+                ComposerDock::session()
             },
             dock_tab: SubagentsTab::new(),
             dock_session: None,
@@ -7783,6 +7784,14 @@ mod composer_dock_tests {
         view.set_model(Some("fixture-model".into()));
         view.set_live_children_status(&status(children));
         view
+    }
+
+    // CP-23: the production view registers both always-mounted composer tabs
+    // (`composer/index.tsx:127-128`), so Subagents (the first) is active.
+    #[test]
+    fn production_dock_registers_the_always_mounted_tabs() {
+        let view = view_with(children());
+        assert_eq!(view.dock_active_tab(), Some(DockTabId::Subagents));
     }
 
     // A closed dock is the pre-dock frame cell-for-cell: it publishes no hit
