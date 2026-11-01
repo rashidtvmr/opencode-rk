@@ -551,6 +551,32 @@ impl StatusView {
         })
     }
 
+    /// Upstream `formatContextUsage` (`util/session.ts:63-66`): the grouped
+    /// token total, plus `" (percent%)"` when the model context limit is
+    /// known. This is the live right-footer usage row (`footer.tsx:38-46`);
+    /// `None` until a matching provider usage observation exists. With no
+    /// confirmed limit the bare grouped number is shown, never a fabricated
+    /// percentage.
+    #[must_use]
+    pub fn usage_status_label(&self) -> Option<String> {
+        let (used, window) = self.context?;
+        let value = crate::native_sidebar::format_thousands(used);
+        Some(match window {
+            Some(window) => {
+                let percent = crate::native_sidebar::percent_used(used, window);
+                format!("{value} ({percent}%)")
+            }
+            None => value,
+        })
+    }
+
+    /// Confirmed session cost in USD for the footer status list
+    /// (`footer.tsx:38-46`, `session.cost`); `None` for zero/absent/invalid.
+    #[must_use]
+    pub fn cost(&self) -> Option<f64> {
+        self.sidebar_cost
+    }
+
     /// Upstream session sidebar content, separate from the diagnostic Status
     /// page. Session identity comes only from the accepted binding; the MCP
     /// section is omitted for an empty registry (sidebar/mcp.tsx:30).

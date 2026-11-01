@@ -162,6 +162,15 @@ pub struct NativeView {
     /// (`prompt/footer.tsx:22-28` `subagents()`); painted in the prompt footer
     /// row as `N subagent(s)`.
     live_subagents: usize,
+    /// Live `command.palette.show` shortcut (`footer.tsx:110-120`): the
+    /// `{key} commands` hint. Set from the resolved keymap, never guessed.
+    rail_command_shortcut: Option<String>,
+    /// Live `agent.cycle` shortcut (`footer.tsx:99-108`): the `{key} agents`
+    /// hint, shown only while the live/status branch is empty.
+    rail_agent_shortcut: Option<String>,
+    /// Whether the composer owns input (`useInteractivity`, `footer.tsx:60`):
+    /// the shortcuts render disabled + DIM while a side panel is focused.
+    rail_interactive: bool,
     /// First running subagent, the navigation target of the footer live
     /// label (`session.child.first`, `routes/session/index.tsx:1391-1398`).
     live_first_child: Option<String>,
@@ -850,6 +859,9 @@ impl NativeView {
             live_subagents: 0,
             live_first_child: None,
             live_footer_hit: None,
+            rail_command_shortcut: None,
+            rail_agent_shortcut: None,
+            rail_interactive: true,
             dock: {
                 let mut dock = ComposerDock::new();
                 dock.register(DockTabId::Subagents);
@@ -1064,6 +1076,26 @@ impl NativeView {
     pub fn set_live_children(&mut self, running: usize, first: Option<String>) {
         self.live_subagents = running;
         self.live_first_child = first.filter(|_| running > 0);
+    }
+
+    /// Resolved footer shortcut hints (`footer.tsx:99-120`): the `commands`
+    /// (`command.palette.show`) and `agents` (`agent.cycle`) key labels. Pass
+    /// `None` when the keymap entry is unbound so no hint is fabricated.
+    pub fn set_rail_shortcuts(&mut self, commands: Option<String>, agents: Option<String>) {
+        self.rail_command_shortcut = commands.filter(|key| !key.is_empty());
+        self.rail_agent_shortcut = agents.filter(|key| !key.is_empty());
+    }
+
+    /// Whether the composer owns input (`useInteractivity`): footer hints read
+    /// disabled + DIM while a side panel/window is focused (`footer.tsx:60`).
+    pub fn set_rail_interactive(&mut self, interactive: bool) {
+        self.rail_interactive = interactive;
+    }
+
+    /// Confirmed session cost in USD, surfaced by the right-footer status list
+    /// (`footer.tsx:38-46`). `None`/zero hides the money row.
+    pub fn set_cost(&mut self, cost: Option<f64>) {
+        self.status.set_cost(cost);
     }
 
     /// Footer live label hit `(x, y, cells)` from the last painted frame.
@@ -3521,34 +3553,75 @@ impl NativeView {
                 .count();
             right = format!("⊙ {connected} MCP /status  {right}");
         }
-        let context_label = self
-            .status
-            .context_usage_label()
-            .filter(|label| label.chars().count().saturating_add(1) <= usize::from(inner));
-        let context_width = context_label
+        // Right-footer status list (`footer.tsx:38-46`): the
+        // `formatContextUsage` row then the money row, joined ` · ` by the
+        // rail. The group carries the click target (`/context`), so the whole
+        // status cell stays one pointer region.
+        let mut usage_rows: Vec<String> = Vec::new();
+        if let Some(usage) = self.status.usage_status_label() {
+            usage_rows.push(usage);
+        }
+        if let Some(cost) = self.status.cost() {
+            usage_rows.push(crate::native_sidebar::format_money(cost));
+        }
+        // The built-in footer plugin contribution (`footer.tsx:65-131`): live
+        // subagent/shell counts, the usage/cost list and the `commands`/`agents`
+        // hints, fitted to the reserved layout width. Version/MCP chrome stays
+        // in the `right` right-aligned term (oc2 extension; upstream has no
+        // such cell), so the rail never overwrites it.
+        let facts = crate::native_status_rail::RailFacts {
+            // Live subagent/shell counts are painted by the in-body
+            // `composer_footer_row` (`prompt.footer` slot) with the child
+            // navigation hit contract; this shared shell footer adds only the
+            // usage/cost status list and the `commands`/`agents` hints.
+            subagents: 0,
+            shells: 0,
+            usage: &usage_rows,
+            command_shortcut: self.rail_command_shortcut.as_deref(),
+            agent_shortcut: self.rail_agent_shortcut.as_deref(),
+            interactive: self.rail_interactive,
+            ..crate::native_status_rail::RailFacts::new(usize::from(width))
+        };
+        let rail_spans = crate::native_status_rail::rail_spans(&facts);
+        let footer_text = crate::native_status_rail::slot_text(
+            &rail_spans,
+            crate::native_status_rail::RailSlot::Footer,
+        );
+        // The `/context` click target is the usage/cost status list only
+        // (`footer.tsx:38-46`), never the adjacent `commands` hint.
+        let usage_width = rail_spans
+            .iter()
+            .filter(|span| span.segment == crate::native_status_rail::RailSegment::Usage)
+            .map(|span| span.text.chars().count())
+            .sum::<usize>() as u16;
+        let footer_label = (!footer_text.is_empty()).then_some(footer_text);
+        let footer_width = footer_label
             .as_ref()
             .map_or(0, |label| label.chars().count()) as u16;
-        let context_gap = u16::from(context_width > 0);
+        let footer_gap = u16::from(footer_width > 0);
         let right_width = right
             .chars()
             .count()
-            .min(usize::from(inner.saturating_sub(context_width).saturating_sub(context_gap)))
+            .min(usize::from(inner.saturating_sub(footer_width).saturating_sub(footer_gap)))
             as u16;
         let left_width = usize::from(inner)
             .saturating_sub(usize::from(right_width))
-            .saturating_sub(usize::from(context_width))
-            .saturating_sub(usize::from(context_gap))
+            .saturating_sub(usize::from(footer_width))
+            .saturating_sub(usize::from(footer_gap))
             .saturating_sub(1);
         let gap = usize::from(inner).saturating_sub(
             left_width
                 + usize::from(right_width)
-                + usize::from(context_width)
-                + usize::from(context_gap),
+                + usize::from(footer_width)
+                + usize::from(footer_gap),
         );
         let padding = (width / 2).min(2);
-        let context_hit = (context_width > 0).then_some((
-            padding.saturating_add(inner).saturating_sub(context_width),
-            context_width,
+        // The usage/cost list leads the footer group (live counts are absent
+        // here; the `commands` hint follows), so its hit starts at the group
+        // left edge and spans exactly the Usage spans.
+        let context_hit = (usage_width > 0).then_some((
+            padding.saturating_add(inner).saturating_sub(footer_width),
+            usage_width,
         ));
         let directory = fit(
             &footer_directory(&self.workspace, left_width as u16),
@@ -3560,10 +3633,10 @@ impl NativeView {
                 directory,
                 " ".repeat(gap),
                 fit(&right, right_width),
-                " ".repeat(usize::from(context_gap)),
-                context_label
+                " ".repeat(usize::from(footer_gap)),
+                footer_label
                     .as_ref()
-                    .map(|label| fit(label, context_width))
+                    .map(|label| fit(label, footer_width))
                     .unwrap_or_default()
             ),
             width,
@@ -5047,12 +5120,13 @@ mod context_pointer_regression {
             let mut view = NativeView::new(cols, rows);
             view.set_session_route(true);
             view.set_tab_reservation(TabReservation::for_view(orientation, cols, rows));
+            view.set_context_window(Some(500));
             view.set_usage(120, 30, None, None);
             let draft = "unsent draft";
             let send = view.send_button_region(draft);
             let frame = view.render(draft, &[], false, &[]);
             let (x, y, width) = view.context_usage_region().expect("confirmed indicator drawn");
-            assert!(frame[usize::from(y)].contains("Context Usage 150"));
+            assert!(frame[usize::from(y)].contains("150 (30%)"));
             assert!(view.context_usage_hit(x, y));
             assert!(!view.context_usage_hit(x.saturating_sub(1), y));
             assert!(!view.context_usage_hit(x.saturating_add(width), y));
@@ -5061,6 +5135,48 @@ mod context_pointer_regression {
             assert_eq!(view.page(), Page::Context);
             assert!(!view.context_usage_hit(x, y));
         }
+    }
+
+    #[test]
+    fn cp10_live_right_footer_paints_usage_cost_and_hints() {
+        let mut view = NativeView::new(120, 32);
+        view.set_session_route(true);
+        view.set_workspace("/fixture/project".to_owned());
+        view.set_composer_model("fixture", "openai");
+        view.set_context_window(Some(5_609));
+        view.set_usage(1_234, 0, None, None);
+        view.set_cost(Some(1.23));
+        view.set_live_children(2, Some("ses_child".to_owned()));
+        view.set_rail_shortcuts(Some("ctrl+p".to_owned()), Some("ctrl+x".to_owned()));
+        view.render_typed("", &[], false, &[]);
+        let frame = view.render_typed("", &[], false, &[]);
+        let row = frame.last().unwrap();
+        // `formatContextUsage` (`util/session.ts:63-66`): grouped tokens +
+        // `round(1234/5609*100)=22` percent.
+        assert!(row.contains("1,234 (22%)"), "usage row: {row:?}");
+        assert!(row.contains("$1.23"), "cost row: {row:?}");
+        assert!(!row.contains("Context Usage"), "divergent label removed: {row:?}");
+        // The live subagent count is painted by the in-body `prompt.footer`
+        // slot (`composer_footer_row`), not the shared shell row.
+        assert!(frame.join("\n").contains("2 subagents"), "live counts: {frame:?}");
+        // The usage/cost group carries the `/context` click target.
+        let (x, y, width) = view.context_usage_region().expect("status group admits a hit");
+        assert!(view.context_usage_hit(x, y));
+        assert!(width > 0);
+    }
+
+    #[test]
+    fn cp10_live_footer_commands_hint_and_agents_hint_precedence() {
+        // No usage: the empty-status rule shows shortcuts at width >= 44 and
+        // the `agents` hint exists only while the live branch is empty
+        // (`footer.tsx:57,99-120`).
+        let mut view = NativeView::new(120, 32);
+        view.set_session_route(true);
+        view.set_workspace("/fixture/project".to_owned());
+        view.set_rail_shortcuts(Some("ctrl+p".to_owned()), Some("ctrl+x".to_owned()));
+        let row = view.render_typed("", &[], false, &[]).pop().unwrap();
+        assert!(row.contains("ctrl+p commands"), "commands hint: {row:?}");
+        assert!(row.contains("ctrl+x agents"), "agents hint: {row:?}");
     }
 
     #[test]
@@ -7043,7 +7159,7 @@ mod p05_footer_caller_regression {
         assert!(!idle_row.contains("esc shell"));
         assert!(!idle_row.contains("exit shell mode"));
         assert!(idle_row.contains("/fixture/project"), "directory restored: {idle_row:?}");
-        assert!(idle_row.contains("Context Usage 1000/10000"), "persistent context restored: {idle_row:?}");
+        assert!(idle_row.contains("1,000 (10%)"), "persistent context restored: {idle_row:?}");
     }
 }
 
