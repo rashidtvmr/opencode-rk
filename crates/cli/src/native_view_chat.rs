@@ -48,7 +48,7 @@ use crate::native_prompt_pane::{
     PromptMetadataInput, PromptMode, PromptPane, PromptPaneInput, PromptPaneRowKind, PromptPaneStyle,
 };
 use crate::native_transcript::{TranscriptLine, render_lines, strip_ansi};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 /// Max rows a single view will scroll up from the tail. Bounds both the
 /// stored scroll state and the per-render wrap walk, so a hostile or
@@ -128,6 +128,14 @@ pub struct ChatView {
     /// scrollbar is painted against these live values, never recomputed.
     transcript_first: Cell<usize>,
     transcript_viewport: Cell<usize>,
+    /// Backend message id owning each painted body row of the last styled
+    /// render (`frame row -> ChatMessage.message_id`). This is the transcript
+    /// mouse-up hit-test: the pointer row resolves to the captured id that
+    /// keys the message menu (`routes/session/index.tsx:2396-2423`). `None`
+    /// for frame rows that own no message (header, composer, padding) and for
+    /// messages whose producer knew no backend id; never fabricated
+    /// positionally.
+    message_owners: RefCell<Vec<Option<String>>>,
     /// TOOL-002: tool-call ids whose permission decision is pending right
     /// now. Upstream joins the first pending request whose
     /// `source.type === "tool"` and `source.id` (oc2 wire `source.callID`,
@@ -2987,7 +2995,7 @@ impl ChatView {
             .unwrap_or(rows.len());
         let transcript_h = body_h.saturating_sub(1);
         let target = self.scroll.get().saturating_add(transcript_h);
-        let mut reversed: Vec<(StyledChatRow, Vec<ChatRunSpan>)> = Vec::new();
+        let mut reversed: Vec<(StyledChatRow, Vec<ChatRunSpan>, Option<String>)> = Vec::new();
         if transcript_h > 0 {
             'messages: for (index, message) in messages.iter().enumerate().rev() {
                 let mut message_spans: Vec<(usize, Vec<ChatRunSpan>)> = Vec::new();
@@ -3004,8 +3012,9 @@ impl ChatView {
                 for (row, spans) in message_spans {
                     if row < dense.len() { dense[row] = spans; }
                 }
+                let owner = message.message_id.clone();
                 for (row, spans) in message_rows.into_iter().zip(dense).rev() {
-                    reversed.push((row, spans));
+                    reversed.push((row, spans, owner.clone()));
                     if reversed.len() >= target {
                         break 'messages;
                     }
@@ -3031,11 +3040,14 @@ impl ChatView {
         self.transcript_viewport.set(transcript_h);
         let mut bounds = vec![None; rows.len()];
         let mut row_spans: Vec<Vec<ChatRunSpan>> = vec![Vec::new(); rows.len()];
-        for (index, ((text, class, range), spans)) in visible.into_iter().enumerate() {
+        let mut owners: Vec<Option<String>> = vec![None; rows.len()];
+        for (index, ((text, class, range), spans, owner)) in visible.into_iter().enumerate() {
             rows[first + index] = (text, class);
             bounds[first + index] = range;
             row_spans[first + index] = spans;
+            owners[first + index] = owner;
         }
+        self.message_owners.replace(owners);
         let styled: Vec<StyledChatRow> = rows.into_iter()
             .zip(bounds)
             .map(|((text, class), bounds)| (text, class, bounds))
@@ -3121,6 +3133,22 @@ impl ChatView {
     /// Transcript viewport height in rows from the last render.
     #[must_use]
     pub fn transcript_viewport_rows(&self) -> usize { self.transcript_viewport.get() }
+
+    /// Backend message id owning each painted body row of the last styled
+    /// render, indexed by frame row. This is the transcript hit-test the
+    /// mouse-up handler resolves against to open the message menu with the
+    /// exact captured id (`packages/tui/src/routes/session/dialog-message.tsx:13-23`).
+    #[must_use]
+    pub fn message_owners(&self) -> Vec<Option<String>> {
+        self.message_owners.borrow().clone()
+    }
+
+    /// Backend message id owning `row`, or `None` when the row belongs to no
+    /// message (header, composer, padding) or to an id-less message.
+    #[must_use]
+    pub fn message_owner_at(&self, row: usize) -> Option<String> {
+        self.message_owners.borrow().get(row).cloned().flatten()
+    }
 
     /// Anchor the last currently visible transcript row to a message and an
     /// intra-message rendered-row offset. The caller supplies the same full
@@ -5014,6 +5042,49 @@ mod tests {
             narrower.iter().filter(|(_, class, _)| *class == ChatRowClass::UserCard).count()
                 > user.iter().filter(|(_, class, _)| *class == ChatRowClass::UserCard).count(),
             "narrower width wraps the actual user-card projection"
+        );
+    }
+
+    #[test]
+    fn painted_rows_map_back_to_backend_message_ids() {
+        let width = 40;
+        let height = 20;
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let mut question = ChatMessage::text(ChatRole::User, "first question");
+        question.message_id = Some("msg_a".to_owned());
+        let mut answer = ChatMessage::text(ChatRole::Assistant, "the answer");
+        answer.message_id = Some("msg_b".to_owned());
+        let mut anonymous = ChatMessage::text(ChatRole::User, "no backend id");
+        anonymous.message_id = None;
+        let messages = vec![question, answer, anonymous];
+
+        let view = ChatView::new();
+        let (rows, _) = view.render_styled_with_spans(
+            width, height, "", &messages, "", false, &appearance,
+        );
+        let first = view.transcript_first_row();
+        // The frame header owns no message.
+        if first > 0 {
+            assert_eq!(view.message_owner_at(0), None, "header row owns no message");
+        }
+        // Every painted row of the first user message resolves to its backend
+        // id, and at least one of those rows is the user card surface.
+        let a_rows: Vec<usize> = (first..rows.len())
+            .filter(|row| view.message_owner_at(*row).as_deref() == Some("msg_a"))
+            .collect();
+        assert!(!a_rows.is_empty(), "msg_a owns painted rows");
+        assert!(
+            a_rows.iter().any(|row| rows[*row].1 == ChatRowClass::UserCard),
+            "the msg_a user card resolves through its painted rows",
+        );
+        assert!(
+            (first..rows.len()).any(|row| view.message_owner_at(row).as_deref() == Some("msg_b")),
+            "the assistant reply keeps its own backend id",
+        );
+        // An id-less message never fabricates an owner (no `history:{index}`).
+        assert!(
+            view.message_owners().iter().flatten().all(|id| id == "msg_a" || id == "msg_b"),
+            "no owner is invented for a message with no backend id",
         );
     }
 

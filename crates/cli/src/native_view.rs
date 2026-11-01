@@ -1039,6 +1039,21 @@ impl NativeView {
 
     pub fn chat_markdown_spans(&self) -> &[Vec<crate::native_view_chat::ChatRunSpan>] { &self.chat_markdown_spans }
 
+    /// Backend message id owning each painted body row of the last styled
+    /// transcript render. The transcript mouse-up hit-test resolves the row
+    /// under the pointer to this id and opens the message menu keyed by it.
+    #[must_use]
+    pub fn chat_message_owners(&self) -> Vec<Option<String>> {
+        self.chat.message_owners()
+    }
+
+    /// Backend message id owning `row`, or `None` when the row belongs to no
+    /// message. Empty before the first render of a frame.
+    #[must_use]
+    pub fn chat_message_owner_at(&self, row: usize) -> Option<String> {
+        self.chat.message_owner_at(row)
+    }
+
     pub fn set_prompt_mode(&mut self, shell: bool) {
         self.shell_mode = shell;
     }
