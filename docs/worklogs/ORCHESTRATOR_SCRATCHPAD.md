@@ -9944,3 +9944,37 @@ form/plugin-failure state; THEME-18 fixed.
 **Next**: land TAB-16 horizontal `CloseHold` render consumption (TAB-13-HORIZ
 step list B1-B7); resolve the oracle app-render via the `pkgfarm` walk-up; keep
 dispatching the ~14 inflight audits.
+
+### 2026-11-01 wave 3 — six more product fixes landed
+
+Base advanced `5b92ce98` -> `3ffbee2e`. Guard GREEN after each; suite 1991/0.
+
+- `07ced8d1` — **DIALOG-19**: `StartupLoading` gains a sticky `skip` flag
+  (`skip`/`skipped`), short-circuiting `update`/`tick` and clearing pending
+  grace, mirroring upstream `<Show when={!startup.skipInitialLoading}>`
+  (`app.tsx:382,1473`, `OPENCODE_FAST_BOOT`). Focused test with a non-skip
+  control.
+- `a70f633a` + `5be63549` — **TAB-16**: `render_with_held` replaces the adaptive
+  width solve with the held layout (`session-tabs.tsx:1348-1363`), and the live
+  loop now constructs a `CloseHold` on a left-release close (`holdCloseCell`,
+  `:1468-1489`) with `TabStrip::strip_origin_x` = `strip.screenX`, feeding it
+  into the render and releasing on leave/middle/menu/resize/5 s. Focused tests
+  `tab_16_*` and `close_hold_keeps_pointer_column_on_the_neighbouring_close_cell`.
+- `0301ab4e` — **CP-13**: the interrupt flash eases with `smoothstep`, not
+  linearly (`ui/animation.ts:32,46-47,177-183`): level
+  `0.75*(1-smoothstep(t/220))` = 0.6328125 at 55 ms. Midpoint unchanged.
+- `368dec35` — **TAB-04**: the live strip paints the attention *kind* — `!`
+  permission, `?` question (`session-tabs.tsx:172-174`, permission>question
+  `context/session-tabs.tsx:165-169`). `Attention.kind`, `TabInput.attention`,
+  fold in `from_navigation`, `indicator_label(flags, attention, is_home)`,
+  `DialogView::attention_dialog_kind`, live feed. (Background-tab attention
+  still (c) blocked on the absent per-session daemon feed.)
+- `3ffbee2e` — **DIALOG-10**: `DialogPromptAction` + bounded `MAX_PROMPT_ACTIONS`
+  + `PromptState.busy_text`/`actions` (empty while busy) and `busy_line()`
+  (`dialog-prompt.tsx:8-14,52-73,168-170`).
+
+**Still-blocked / deferred**: background-tab attention needs a per-session
+daemon event; CP-12 scanner trail RGBA needs a per-cell color channel in
+`RailSpan` keyed by theme slots (structural); CP-10 right-footer, CP-08 submit
+gates are partly unverified. Oracle app-render remains blocked (missing
+`@opencode/*` workspace links, `uqr`, and `Schema.isStartingWith` skew).
