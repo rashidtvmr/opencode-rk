@@ -563,6 +563,20 @@ pub enum ChatRole {
     System,
 }
 
+/// DIFF-002: one upstream `Diagnostics` row
+/// (`packages/tui/src/routes/session/index.tsx:3703-3723`): a severity-1
+/// diagnostic for the edited file, rendered as
+/// `Error [{line + 1}:{character + 1}] {message}`. `line`/`character` are the
+/// zero-based upstream `range.start` values; they stay integers because this
+/// enum derives `Eq` (upstream `finiteNumber`,
+/// `packages/tui/src/util/tool-display.ts:8-11`, accepts any finite number).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PatchDiagnostic {
+    pub line: i64,
+    pub character: i64,
+    pub message: String,
+}
+
 /// One typed message part. `ToolResult::is_error` is the backend's own
 /// result fact — never a guess derived from output text.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -615,6 +629,11 @@ pub enum ChatPart {
     Patch {
         path: String,
         diff: String,
+        /// DIFF-002: upstream `Diagnostics` rows
+        /// (`packages/tui/src/routes/session/index.tsx:3492` reads
+        /// `props.metadata.diagnostics`; `:3811-3825` `parseDiagnostics`
+        /// keeps severity-1 rows for the file path, at most three).
+        diagnostics: Vec<PatchDiagnostic>,
     },
 }
 
@@ -2455,7 +2474,7 @@ fn typed_message_rows_with_prefix_spans_mode(
                     ChatRowClass::Metadata,
                 );
             }
-            ChatPart::Patch { path, diff } => {
+            ChatPart::Patch { path, diff, diagnostics } => {
                 rows.push((
                     truncate_row(&format!("[diff] {path}"), width),
                     ChatRowClass::Metadata,
@@ -2476,9 +2495,14 @@ fn typed_message_rows_with_prefix_spans_mode(
                 // substrings to survive when both facts are true).
                 let budget = MAX_MESSAGE_ROWS.saturating_sub(rows.len());
                 let malformed_slots = usize::from(malformed);
-                let kept_without_trunc_status = total_rows.min(budget.saturating_sub(malformed_slots));
+                // DIFF-002: upstream `Diagnostics` rows get their own reserved
+                // slots inside the hard row cap, exactly like the `malformed`
+                // fact slot below.
+                let diag_slots = diagnostics.len();
+                let kept_without_trunc_status =
+                    total_rows.min(budget.saturating_sub(malformed_slots + diag_slots));
                 let truncated = rendered.truncated || kept_without_trunc_status < total_rows;
-                let reserve = malformed_slots + usize::from(truncated);
+                let reserve = malformed_slots + usize::from(truncated) + diag_slots;
                 let kept = total_rows.min(budget.saturating_sub(reserve));
                 for line in rendered.rows.into_iter().take(kept) {
                     let class = match line.role {
@@ -2489,6 +2513,26 @@ fn typed_message_rows_with_prefix_spans_mode(
                     rows.push((truncate_row(&format!("    {}", line.text), width), class));
                 }
                 let mut statuses: Vec<(String, ChatRowClass)> = Vec::new();
+                // DIFF-002 upstream `Diagnostics` rows
+                // (`packages/tui/src/routes/session/index.tsx:3703-3723`):
+                // `Error [{start.line + 1}:{start.character + 1}] {message}`
+                // in the error fg (`ChatRowClass::ToolError` maps to the error
+                // color at `tui_entry.rs:2548`) directly below the diff rows,
+                // before this renderer's own malformed/truncation fact rows.
+                for diagnostic in diagnostics.iter() {
+                    statuses.push((
+                        truncate_row(
+                            &format!(
+                                "Error [{}:{}] {}",
+                                diagnostic.line.saturating_add(1),
+                                diagnostic.character.saturating_add(1),
+                                diagnostic.message
+                            ),
+                            width,
+                        ),
+                        ChatRowClass::ToolError,
+                    ));
+                }
                 if malformed {
                     statuses.push((
                         truncate_row("    [malformed diff]", width),
@@ -2546,7 +2590,7 @@ mod diff_wiring_v2_regressions {
     use super::*;
 
     fn patch_message(diff: String) -> ChatMessage {
-        ChatMessage { role: ChatRole::Assistant, parts: vec![ChatPart::Patch { path: "many.rs".into(), diff }], agent: None, model: None, assistant_facts: None }
+        ChatMessage { role: ChatRole::Assistant, parts: vec![ChatPart::Patch { path: "many.rs".into(), diff, diagnostics: Vec::new() }], agent: None, model: None, assistant_facts: None }
     }
 
     #[test]
@@ -2566,6 +2610,35 @@ mod diff_wiring_v2_regressions {
         assert_eq!(rows.len(), MAX_MESSAGE_ROWS);
         assert!(rows.iter().any(|(row, class)| *class == ChatRowClass::ToolError && row.contains("[malformed diff]")));
         assert!(rows.iter().any(|(row, _)| row.contains("[diff truncated]")));
+    }
+
+    #[test]
+    fn diagnostics_rows_render_after_the_diff_with_upstream_format() {
+        // Upstream `Diagnostics`
+        // (`packages/tui/src/routes/session/index.tsx:3703-3723`) renders
+        // `Error [{start.line + 1}:{start.character + 1}] {message}` in the
+        // error fg directly below the diff.
+        let diff = "@@ -1,1 +1,1 @@\n-old\n+new\n".to_string();
+        let message = ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![ChatPart::Patch {
+                path: "many.rs".into(),
+                diff,
+                diagnostics: vec![PatchDiagnostic {
+                    line: 1,
+                    character: 2,
+                    message: "boom".into(),
+                }],
+            }],
+            agent: None,
+            model: None,
+            assistant_facts: None,
+        };
+        let rows = typed_message_rows(100, &message, false);
+        let diag = rows.iter().position(|(row, _)| row.contains("Error [2:3] boom")).expect("diagnostic row");
+        let diff_row = rows.iter().position(|(row, class)| *class == ChatRowClass::DiffAdded).expect("diff row");
+        assert!(diff_row < diag, "diagnostic rows render after the diff rows");
+        assert_eq!(rows[diag].1, ChatRowClass::ToolError);
     }
 
     #[test]

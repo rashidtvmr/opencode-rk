@@ -335,6 +335,7 @@ fn hydrated_parts(message: &Value, budget: &mut usize) -> Vec<ChatPart> {
                         result.get("output").or_else(|| result.get("payload"))
                             .and_then(Value::as_str).unwrap_or(""),
                         is_error,
+                        part.get("metadata"),
                         budget,
                     ),
                 );
@@ -358,6 +359,7 @@ fn hydrated_parts(message: &Value, budget: &mut usize) -> Vec<ChatPart> {
                         .and_then(Value::as_str).unwrap_or(""),
                     is_error,
                     ambiguous[index],
+                    part.get("metadata"),
                     budget,
                 ));
             }
@@ -384,6 +386,9 @@ fn hydrated_parts(message: &Value, budget: &mut usize) -> Vec<ChatPart> {
             "compaction" => output.push(ChatPart::Compaction { reason: take(text("reason"), budget) }),
             "patch" => output.push(ChatPart::Patch {
                 path: take(text("path"), budget), diff: take(text("diff"), budget),
+                // The standalone `"patch"` message part has no tool metadata
+                // seam upstream (DIFF-002 gap): no diagnostics source here.
+                diagnostics: Vec::new(),
             }),
             _ => {}
         }
@@ -395,7 +400,7 @@ fn hydrated_parts(message: &Value, budget: &mut usize) -> Vec<ChatPart> {
 /// resembling a patch stays ordinary tool output.
 pub fn tool_output_parts(name: &str, id: &str, output: &str, is_error: bool) -> Vec<ChatPart> {
     let mut budget = MAX_MESSAGE_BYTES;
-    tool_output_parts_bounded(name, id, output, is_error, false, &mut budget)
+    tool_output_parts_bounded(name, id, output, is_error, false, None, &mut budget)
 }
 fn tool_output_parts_bounded(
     name: &str,
@@ -403,12 +408,13 @@ fn tool_output_parts_bounded(
     output: &str,
     is_error: bool,
     ambiguous: bool,
+    metadata: Option<&Value>,
     budget: &mut usize,
 ) -> Vec<ChatPart> {
     let status = take(if ambiguous { "ambiguous" } else if is_error { "error" } else { "completed" }, budget);
     let name = take(name, budget);
     let id = take(id, budget);
-    let (body, patch) = tool_output_content(output, is_error, budget);
+    let (body, patch) = tool_output_content(output, is_error, metadata, budget);
     let mut parts = vec![ChatPart::ToolState {
         name, id, status, args: String::new(), output: body, is_error, metadata: String::new(),
     }];
@@ -423,7 +429,67 @@ fn tool_output_is_error(part: &Value) -> bool {
         .unwrap_or(false)
 }
 
-fn tool_output_content(output: &str, is_error: bool, budget: &mut usize) -> (String, Option<ChatPart>) {
+/// DIFF-002: upstream `parseDiagnostics`
+/// (`packages/tui/src/routes/session/index.tsx:3811-3825`) over the tool
+/// record's `metadata.diagnostics` map — the map upstream renders from
+/// (`:3492` `props.metadata.diagnostics`, with `ToolProps.metadata` the tool
+/// part's metadata record, `:2729-2734`). The map is keyed by the file path
+/// normalized like upstream `normalizePath`
+/// (`packages/tui/src/util/path.ts:4-11`): identity unless the platform is
+/// `win32`; the `win32.resolve`/`realpathSync.native` branch is not
+/// reproduced here (recorded gap). A row survives only when `severity === 1`,
+/// `range.start.line`/`range.start.character` are finite and the message is a
+/// non-empty string; then `.slice(0, 3)`.
+fn parse_diagnostics(
+    metadata: Option<&Value>,
+    path: &str,
+    budget: &mut usize,
+) -> Vec<crate::native_view_chat::PatchDiagnostic> {
+    let items = metadata
+        .and_then(|metadata| metadata.get("diagnostics"))
+        .and_then(|diagnostics| diagnostics.get(path))
+        .and_then(Value::as_array);
+    let Some(items) = items else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let severity = item.get("severity").and_then(Value::as_f64)?;
+            if severity != 1.0 {
+                return None;
+            }
+            let start = item.get("range")?.get("start")?;
+            let line = integral_position(start.get("line"))?;
+            let character = integral_position(start.get("character"))?;
+            let message = item.get("message").and_then(Value::as_str)?;
+            if message.is_empty() {
+                return None;
+            }
+            Some(crate::native_view_chat::PatchDiagnostic {
+                line,
+                character,
+                message: take(message, budget),
+            })
+        })
+        .take(3)
+        .collect()
+}
+
+/// Upstream `finiteNumber`
+/// (`packages/tui/src/util/tool-display.ts:8-11`) accepts any finite JS
+/// number. `ChatPart` derives `Eq`, so only finite integral positions (LSP
+/// `Position` is a `uinteger`) are threaded; fractional positions are
+/// dropped (recorded gap).
+fn integral_position(value: Option<&Value>) -> Option<i64> {
+    let number = value.and_then(Value::as_f64)?;
+    if !number.is_finite() || number.fract() != 0.0 {
+        return None;
+    }
+    Some(number as i64)
+}
+
+fn tool_output_content(output: &str, is_error: bool, metadata: Option<&Value>, budget: &mut usize) -> (String, Option<ChatPart>) {
     let mut end = output.len().min(MAX_MESSAGE_BYTES);
     while !output.is_char_boundary(end) { end -= 1; }
     let output = &output[..end];
@@ -431,9 +497,10 @@ fn tool_output_content(output: &str, is_error: bool, budget: &mut usize) -> (Str
         .filter(|value| value["format"] == "opencode.file-edit.v1" && !is_error);
     let body = typed.as_ref().and_then(|value| value["output"].as_str()).unwrap_or(output);
     let body = take(body, budget);
-    let patch = typed.and_then(|edit| edit["diff"].as_str().map(|diff| ChatPart::Patch {
-        path: take(edit["path"].as_str().unwrap_or(""), budget),
-        diff: take(diff, budget),
+    let patch = typed.and_then(|edit| edit["diff"].as_str().map(|diff| {
+        let path = take(edit["path"].as_str().unwrap_or(""), budget);
+        let diagnostics = parse_diagnostics(metadata, &path, budget);
+        ChatPart::Patch { path, diff: take(diff, budget), diagnostics }
     }));
     (body, patch)
 }
@@ -1141,14 +1208,54 @@ mod tests {
             name, id, status, output, is_error, ..
         } if name == "edit" && id == "edit-3" && status == "completed"
             && output == "Edit applied" && !is_error));
-        assert!(matches!(&projected.parts[1], ChatPart::Patch { path, diff }
+        assert!(matches!(&projected.parts[1], ChatPart::Patch { path, diff, .. }
             if path == "src/lib.rs" && diff.contains("+new")));
         let retained: usize = projected.parts.iter().map(|part| match part {
             ChatPart::ToolState { name, id, status, args, output, .. } => name.len() + id.len() + status.len() + args.len() + output.len(),
-            ChatPart::Patch { path, diff } => path.len() + diff.len(),
+            ChatPart::Patch { path, diff, diagnostics } =>
+                path.len() + diff.len() + diagnostics.iter().map(|d| d.message.len()).sum::<usize>(),
             _ => 0,
         }).sum();
         assert!(retained <= MAX_MESSAGE_BYTES);
+    }
+
+    #[test]
+    fn edit_metadata_diagnostics_parse_like_upstream_parse_diagnostics() {
+        // Upstream `parseDiagnostics`
+        // (`packages/tui/src/routes/session/index.tsx:3811-3825`): map keyed
+        // by the file path, `severity === 1` only, finite `range.start`
+        // positions, non-empty message, `.slice(0, 3)`.
+        let output = json!({
+            "format":"opencode.file-edit.v1", "path":"src/lib.rs",
+            "diff":"--- a/src/lib.rs\n+++ b/src/lib.rs\n-old\n+new\n", "output":"Edit applied"
+        }).to_string();
+        let record = actual_tool_record(json!([
+            {"type":"tool_call","call_id":"edit-4","name":"edit","status":"completed",
+             "arguments":{"path":"src/lib.rs"},
+             "metadata":{"diagnostics":{
+                "src/lib.rs":[
+                    {"severity":1,"range":{"start":{"line":1,"character":2}},"message":"boom"},
+                    {"severity":2,"range":{"start":{"line":3,"character":0}},"message":"hint"},
+                    {"severity":1,"range":{"start":{"line":4,"character":5}},"message":"bang"},
+                    {"severity":1,"range":{"start":{"line":6,"character":7}},"message":"third"},
+                    {"severity":1,"range":{"start":{"line":8,"character":9}},"message":"fourth"},
+                    {"severity":1,"range":{"start":{"line":9,"character":9}},"message":""}
+                ],
+                "other.rs":[{"severity":1,"range":{"start":{"line":0,"character":0}},"message":"wrong file"}]
+             }}},
+            {"type":"tool_output","call_id":"edit-4","name":"edit","output":output,"success":true,"is_error":false,"error":null}
+        ]), "[edit] Edit applied");
+        let projected = project_message(&record).expect("server edit MessageRecord projects");
+        let diagnostics = match &projected.parts[1] {
+            ChatPart::Patch { diagnostics, .. } => diagnostics,
+            other => panic!("expected patch part, got {other:?}"),
+        };
+        // severity != 1 skipped; empty message skipped; other.rs key skipped;
+        // `.slice(0, 3)` drops "fourth".
+        assert_eq!(diagnostics.len(), 3);
+        assert_eq!((diagnostics[0].line, diagnostics[0].character, diagnostics[0].message.as_str()), (1, 2, "boom"));
+        assert_eq!((diagnostics[1].line, diagnostics[1].character, diagnostics[1].message.as_str()), (4, 5, "bang"));
+        assert_eq!((diagnostics[2].line, diagnostics[2].character, diagnostics[2].message.as_str()), (6, 7, "third"));
     }
 
     #[test]
@@ -1604,7 +1711,7 @@ mod tests {
                 ChatPart::Retry { message, .. } => message.len(),
                 ChatPart::Step { kind, detail } => kind.len() + detail.len(),
                 ChatPart::Compaction { reason } => reason.len(),
-                ChatPart::Patch { path, diff } => path.len() + diff.len(),
+                ChatPart::Patch { path, diff, diagnostics } => path.len() + diff.len() + diagnostics.iter().map(|d| d.message.len()).sum::<usize>(),
                 ChatPart::ToolResult { name, output, .. } => name.len() + output.len(),
             })
             .sum();
