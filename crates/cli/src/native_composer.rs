@@ -2291,6 +2291,49 @@ mod tests {
         assert!(parts.is_empty());
     }
 
+    /// CP-36: a raw terminal body carrying ANSI escape sequences, pasted
+    /// through the production handler, is normalized (stripped + CRLF folded)
+    /// before it reaches the draft. The live `tui_entry.rs` paste arm calls
+    /// this; `plan_paste` runs `normalize_paste` (`index.tsx:1430`). A short
+    /// pure-escape body must come out byte-identical to the visible text.
+    #[test]
+    fn cp36_insert_paste_at_cursor_strips_ansi_from_pasted_body() {
+        use crate::native_paste::PasteMode;
+
+        let mut draft = "ab".to_owned();
+        let mut cursor = 1;
+        let mut parts = Vec::new();
+        insert_paste_at_cursor(
+            &mut draft,
+            &mut cursor,
+            &mut parts,
+            "\x1b[31mre\x1b[0md\r\nnext",
+            PasteMode::Full,
+            4096,
+        )
+        .expect("a boundary insert is admitted");
+        assert_eq!(draft, "ared\nnextb", "ANSI escapes must not reach the draft");
+        assert!(
+            !draft.contains('\x1b'),
+            "no ESC byte may survive into the draft"
+        );
+
+        let mut draft = String::new();
+        let mut cursor = 0;
+        let mut parts = Vec::new();
+        insert_paste_at_cursor(
+            &mut draft,
+            &mut cursor,
+            &mut parts,
+            "\x1b]0;title\x07text\x1bPpayload\x1b\\tail",
+            PasteMode::Full,
+            4096,
+        )
+        .expect("a boundary insert is admitted");
+        assert_eq!(draft, "texttail");
+        assert!(parts.is_empty(), "ANSI stripping yields no folded part");
+    }
+
     #[test]
     fn grapheme_navigation_and_delete_preserve_flags_keycaps_spacing_prepend_tamil_and_zwj() {
         let cases = ["🇺🇸", "1️⃣", "\u{0600}ا", "நி", "é", "👨‍👩‍👧‍👦"];
