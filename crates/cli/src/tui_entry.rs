@@ -3394,6 +3394,93 @@ fn menu_dismisses(event: &native_input_decoder::InputEvent) -> bool {
     )
 }
 
+/// Enter (CR/LF) closes an open message menu. The option it confirms is
+/// bound by the follow-up effect dispatch; this slice closes only.
+#[cfg(feature = "native")]
+fn menu_submits(event: &native_input_decoder::InputEvent) -> bool {
+    matches!(event, native_input_decoder::InputEvent::Byte(13 | 10))
+}
+
+/// Build the popup frame for an open message menu, centered in the
+/// viewport like upstream's `DialogSelect` (`dialog-message.tsx:29-90`,
+/// `ui/dialog-select.tsx`). Rows come from the model
+/// (`MessageActionMenu::render_rows` / `PendingSteerMenu::render_rows`)
+/// and are never fabricated here; the frame reuses the existing generic
+/// `MenuFrame` blitter (the `ctx.context_menu` paint block above).
+#[cfg(feature = "native")]
+fn message_menu_frame(
+    menu: &crate::native_view_chat::SessionMessageMenu,
+    viewport: crate::native_tab_context_menu::Viewport,
+) -> crate::native_tab_context_menu::MenuFrame {
+    const MENU_WIDTH: u16 = 44;
+    let width = MENU_WIDTH.min(viewport.width);
+    let rows: Vec<(String, crate::native_view_chat::ChatRowClass)> = match menu {
+        crate::native_view_chat::SessionMessageMenu::Actions(actions) => {
+            actions.render_rows(usize::from(width))
+        }
+        crate::native_view_chat::SessionMessageMenu::PendingSteer(pending) => {
+            pending.render_rows(usize::from(width))
+        }
+    };
+    let height = u16::try_from(rows.len()).unwrap_or(u16::MAX).min(viewport.height);
+    let x = viewport.width.saturating_sub(width) / 2;
+    let y = viewport.height.saturating_sub(height) / 2;
+    let items = rows
+        .into_iter()
+        .take(usize::from(height))
+        .enumerate()
+        .map(|(index, (label, _))| crate::native_tab_context_menu::VisibleMenuItem {
+            index,
+            rect: crate::native_tab_context_menu::MenuRect {
+                x,
+                y: y.saturating_add(u16::try_from(index).unwrap_or(u16::MAX)),
+                width,
+                height: 1,
+            },
+            label,
+            enabled: true,
+            hovered: false,
+            background: crate::native_theme_runtime::Slot::BackgroundPanel,
+            foreground: crate::native_theme_runtime::Slot::Text,
+        })
+        .collect();
+    crate::native_tab_context_menu::MenuFrame {
+        rect: Some(crate::native_tab_context_menu::MenuRect { x, y, width, height }),
+        items,
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod message_menu_frame_tests {
+    #[test]
+    fn message_menu_frame_centers_model_rows() {
+        let menu = crate::native_view_chat::menu_for_message(None, "ses", "msg", None);
+        let frame = super::message_menu_frame(
+            &menu,
+            crate::native_tab_context_menu::Viewport { width: 80, height: 24 },
+        );
+        let expected = match &menu {
+            crate::native_view_chat::SessionMessageMenu::Actions(actions) => {
+                actions.render_rows(44)
+            }
+            crate::native_view_chat::SessionMessageMenu::PendingSteer(pending) => {
+                pending.render_rows(44)
+            }
+        };
+        assert_eq!(frame.items.len(), expected.len());
+        let rect = frame.rect.expect("menu frame has a rect");
+        assert_eq!(rect.width, 44);
+        assert_eq!(rect.x, (80 - 44) / 2);
+        assert_eq!(rect.y, (24 - expected.len() as u16) / 2);
+        for (index, item) in frame.items.iter().enumerate() {
+            assert_eq!(item.label, expected[index].0);
+            assert_eq!(item.rect.y, rect.y + index as u16);
+            assert!(item.enabled);
+        }
+    }
+}
+
+
 #[cfg(feature = "native")]
 fn recent_closed_menu_target(navigation: &crate::native_navigation::NavigationState) -> crate::native_tab_context_menu::MenuTarget {
     // The reopen facility always exists in production, so this is `Some(..)`:
@@ -5966,6 +6053,7 @@ fn native_loop(
     // with the wrapping ` · ` window.
     let mut tab_marquee = crate::native_tabs::TabMarquee::new();
     let mut context_menu: Option<crate::native_tab_context_menu::TabContextMenu> = None;
+    let mut message_menu: Option<crate::native_view_chat::SessionMessageMenu> = None;
     let mut rename_input: Option<(crate::native_navigation::SessionRef, String)> = None;
     let mut rename_error: Option<String> = None;
     // Rename settlements ride the same bounded background-worker/channel
@@ -7897,7 +7985,10 @@ fn native_loop(
             })),
             vertical_rail: frame_rail.clone(),
             compact_tooltip: frame_tooltip,
-            context_menu: context_menu.as_ref().map(|menu| menu.frame(crate::native_tab_context_menu::Viewport { width: viewport.0, height: viewport.1 })),
+            context_menu: message_menu
+                .as_ref()
+                .map(|menu| message_menu_frame(menu, crate::native_tab_context_menu::Viewport { width: viewport.0, height: viewport.1 }))
+                .or_else(|| context_menu.as_ref().map(|menu| menu.frame(crate::native_tab_context_menu::Viewport { width: viewport.0, height: viewport.1 }))),
             rename_dialog: rename_input.as_ref().map(|(_,title)| (title.clone(), rename_error.clone())),
             transcript_scrollbar: view.transcript_scrollbar(),
             sidebar_scrollbar: view.sidebar_scrollbar(),
@@ -8488,6 +8579,18 @@ fn native_loop(
                 }
                 _ => {}
             }
+        }
+        // MSG-006 message menu owns input while open (upstream renders the
+        // select in `DialogSelect`, `dialog-message.tsx:13-23`): Escape /
+        // Ctrl-C / Ctrl-D dismiss and Enter closes; option effect dispatch
+        // and pointer option selection are named follow-up gaps. Every
+        // other event is swallowed while the menu is open (modal).
+        if message_menu.is_some() {
+            if menu_dismisses(&event) || menu_submits(&event) {
+                message_menu = None;
+            }
+            needs_paint = true;
+            continue;
         }
         // Rename dialog owns input before every widget below: Escape and
         // Ctrl-C/Ctrl-D cancel only (never exit), Enter submits through the
@@ -9337,11 +9440,52 @@ fn native_loop(
                             .as_deref(),
                         cfg!(windows),
                     );
-                    if let Some(text) = selection.copy_for_input_kind(kind, disable_copy) {
+                    let copied = selection.copy_for_input_kind(kind, disable_copy);
+                    if let Some(text) = copied {
                         let frame = selection_clipboard_frame(&text);
                         let mut stdout = std::io::stdout().lock();
                         stdout.write_all(frame.as_bytes())?;
                         stdout.flush()?;
+                    } else if kind == 2
+                        && message_menu.is_none()
+                        && !view.dialogs.is_open()
+                        && !view.command_palette_open()
+                        && matches!(dialog, native_setup::Dialog::None)
+                        && !help_open
+                    {
+                        // MSG-006 consumer (upstream `index.tsx:2396-2423`):
+                        // a left click-release with no copied selection
+                        // resolves the painted row's owner message (W18
+                        // owner map) and opens the message menu. Upstream
+                        // early-returns while a selection has text; that
+                        // gate is `click_acts(has_text_selection, ...)`.
+                        let has_text_selection = selection.selected_text().is_some();
+                        if crate::native_message_rows::click_acts(
+                            has_text_selection,
+                            crate::native_message_rows::RowAction::MessageActions,
+                        ) {
+                            if let (Some(snapshot), Some(message_id)) =
+                                (live.as_ref(), view.chat_message_owner_at(usize::from(y)))
+                            {
+                                let user_card = view
+                                    .chat_message_owners()
+                                    .iter()
+                                    .zip(view.chat_row_classes())
+                                    .any(|(owner, class)| {
+                                        owner.as_deref() == Some(message_id.as_str())
+                                            && *class
+                                                == crate::native_view_chat::ChatRowClass::UserCard
+                                    });
+                                if user_card {
+                                    message_menu = Some(crate::native_view_chat::menu_for_message(
+                                        None,
+                                        &snapshot.session_id,
+                                        &message_id,
+                                        None,
+                                    ));
+                                }
+                            }
+                        }
                     }
                     needs_paint = true;
                     continue;
