@@ -1171,4 +1171,56 @@ mod popup_geometry_and_style_tests {
         assert!(panel.rows.iter().any(|row| row.0.contains("café")));
         assert!(panel.rows.iter().any(|row| row.0.contains("reference")));
     }
+
+    #[test]
+    fn cp39_popup_uses_live_prompt_anchor_after_resize_growth_and_sidebar_toggle() {
+        let mut completion = fixture();
+        completion.commands.extend((0..12).map(|index| Item {
+            value: format!("/model{index:02}"),
+            description: "command".into(),
+            disabled: false,
+        }));
+        let query = "/model";
+        completion.sync(query);
+        let mut view = crate::native_view::NativeView::new(148, 30);
+        view.set_session_route(true);
+
+        let short_draft = "draft";
+        let sidebar_anchor = view.composer_region(short_draft).unwrap();
+        let sidebar_panel = completion.panel_at(query, query.len(), sidebar_anchor).unwrap();
+        assert_eq!(sidebar_panel.rows.len(), 10);
+        assert_eq!(sidebar_panel.x, sidebar_anchor.0);
+        assert_eq!(sidebar_panel.width, sidebar_anchor.2);
+        assert_eq!(sidebar_panel.y + sidebar_panel.height, sidebar_anchor.1);
+
+        view.toggle_sidebar();
+        let toggled_anchor = view.composer_region(short_draft).unwrap();
+        assert_ne!(toggled_anchor.2, sidebar_anchor.2);
+        let toggled_panel = completion.panel_at(query, query.len(), toggled_anchor).unwrap();
+        assert_eq!(toggled_panel.x, toggled_anchor.0);
+        assert_eq!(toggled_panel.width, toggled_anchor.2);
+        assert_eq!(toggled_panel.y + toggled_panel.height, toggled_anchor.1);
+
+        view.resize(100, 22);
+        let compact_anchor = view.composer_region(short_draft).unwrap();
+        let compact_panel = completion.panel_at(query, query.len(), compact_anchor).unwrap();
+        assert_eq!(compact_panel.y + compact_panel.height, compact_anchor.1);
+        let long_draft = "word ".repeat(400);
+        let grown_anchor = view.composer_region(&long_draft).unwrap();
+        assert!(grown_anchor.1 < compact_anchor.1, "wrapped prompt grows upward");
+        let grown_panel = completion.panel_at(query, query.len(), grown_anchor).unwrap();
+        assert_eq!(grown_panel.y + grown_panel.height, grown_anchor.1);
+
+        view.resize(80, 13);
+        let near_top_anchor = view.composer_region(&long_draft).unwrap();
+        assert!((1..=2).contains(&near_top_anchor.1));
+        let near_top_panel = completion.panel_at(query, query.len(), near_top_anchor).unwrap();
+        assert_eq!(near_top_panel.height, near_top_anchor.1);
+        assert_eq!(near_top_panel.y, 0);
+
+        view.resize(80, 8);
+        let short_terminal_anchor = view.composer_region(&long_draft).unwrap();
+        assert_eq!(short_terminal_anchor.1, 0);
+        assert!(completion.panel_at(query, query.len(), short_terminal_anchor).is_none());
+}
 }
