@@ -10080,6 +10080,30 @@ fn native_loop(
                                     ));
                                     continue;
                                 }
+                                // Capture the outgoing tab's draft/cursor/
+                                // scroll/model into navigation state BEFORE
+                                // routing, exactly as regular tab switching
+                                // does (`select_tab_transition`), so returning
+                                // to this session restores the latest edits
+                                // rather than a stale draft. Done before the
+                                // bind so a refusal leaves state intact.
+                                if navigation.active().is_some() {
+                                    if let Err(error) = navigation.save_active_state(
+                                        draft.clone(),
+                                        draft_cursor,
+                                        view.chat_scroll_offset(),
+                                        selected.as_ref().map(|m| m.qualified()),
+                                    ) {
+                                        append_transcript(
+                                            &mut transcript,
+                                            format!("error: session switch: state save refused: {error:?}"),
+                                        );
+                                        view.resolve_page_ack(crate::native_view_pages::Ack::Rejected(
+                                            format!("state save refused: {error:?}"),
+                                        ));
+                                        continue;
+                                    }
+                                }
                                 let bound = live
                                     .as_ref()
                                     .ok_or_else(|| "daemon unavailable".to_owned())
