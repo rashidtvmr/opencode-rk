@@ -1782,6 +1782,19 @@ pub const fn title_shimmer_runs(renaming: bool, animations: bool) -> bool {
     renaming && animations
 }
 
+/// The full pending-title fact for one session: an in-flight user rename OR an
+/// in-flight generated/auto title. Upstream keys a SINGLE client-local map,
+/// `generatingTitles[sessionID] === true` (`context/data.tsx:35`), and sets it
+/// from BOTH the rename dialog (`dialog-session-rename.tsx:15-25`) and the
+/// generated-title path `data.session.title.generate` (`context/data.tsx:37-46`,
+/// reachable from `routes/session/index.tsx:1045`). oc2 currently owns only the
+/// rename source (`RenameInFlight`); this names the second source so the shimmer
+/// clock keys the same union the moment a generate request exists.
+#[must_use]
+pub const fn title_pending(renaming: bool, generating: bool) -> bool {
+    renaming || generating
+}
+
 // ---------------------------------------------------------------------------
 // Title fade and marquee overflow.
 //
@@ -4147,6 +4160,17 @@ mod tests {
         assert!(!title_shimmer_runs(true, false), "pending + reduced motion is a static DIM frame");
         assert!(!title_shimmer_runs(false, true), "an idle title never animates");
         assert!(!title_shimmer_runs(false, false));
+    }
+
+    #[test]
+    fn tab_24_generated_title_pending_shares_the_same_clock_as_rename() {
+        // context/data.tsx:35 keys one pending map for both the explicit rename
+        // and the generated-title sources, so either one keeps the frame clock
+        // live while motion is enabled (title-shimmer.tsx:50-55).
+        assert!(title_shimmer_runs(title_pending(true, false), true));
+        assert!(title_shimmer_runs(title_pending(false, true), true));
+        assert!(!title_shimmer_runs(title_pending(false, false), true));
+        assert!(!title_shimmer_runs(title_pending(true, true), false));
     }
 
     #[test]
