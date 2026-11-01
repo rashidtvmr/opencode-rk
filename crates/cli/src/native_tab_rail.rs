@@ -738,15 +738,29 @@ impl RailFrame {
 
             let logical = frame.scroll_cells.saturating_add(usize::from(y).saturating_sub(content_top));
             if logical == 0 {
+                // The row directly under the search controls is the first
+                // item's `▄` cap; the controls' own absolute overlay
+                // (`session-tabs-rail.tsx:54-66`) wins that cell and paints
+                // `▀` while the search is hovered, `▄` while the item below is
+                // highlighted (`belowHighlighted`), and a blank cell otherwise.
                 let highlighted = inputs.first().is_some_and(|input| {
                     input.flags.active || hovered == Some(&input.session)
                 });
-                frame.rows.push(inert(
-                    y,
-                    "▄".repeat(usize::from(width)),
-                    if highlighted { RailRowKind::CapBottom } else { RailRowKind::CapTop },
-                    if highlighted { CellColor::CapBottom } else { CellColor::CapTop },
-                ));
+                if highlighted {
+                    frame.rows.push(inert(
+                        y,
+                        "▄".repeat(usize::from(width)),
+                        RailRowKind::CapBottom,
+                        CellColor::CapBottom,
+                    ));
+                } else {
+                    frame.rows.push(inert(
+                        y,
+                        " ".repeat(usize::from(width)),
+                        RailRowKind::Gap,
+                        CellColor::CompactPadding,
+                    ));
+                }
                 continue;
             }
             let item = logical.saturating_sub(1) / 2;
@@ -1906,6 +1920,76 @@ mod tests {
         assert_eq!(frame.hit(2, 7), Some(RailHit::Session(inputs[2].session.clone())));
         assert_eq!(frame.hit(2, 9), Some(RailHit::New));
         assert_eq!(frame.hit(2, 1), Some(RailHit::Search));
+    }
+
+    // TAB-11: the controls' absolute overlay row (`session-tabs-rail.tsx:54-66`)
+    // is `▀` while the search is hovered, `▄` while the item directly below is
+    // highlighted (`belowHighlighted`), and a blank cell otherwise. The Rust
+    // model derives the "search hovered" fact from the first item being hovered
+    // (the closest honest native equivalent) and must never paint `▀▀▀▀▀` over
+    // a non-highlighted neighbour.
+    #[test]
+    fn compact_controls_overlay_row_uses_below_highlighted_half_block() {
+        let inputs = vec![
+            RailInput {
+                session: crate::native_navigation::SessionRef("first".into()),
+                title: "First session".into(),
+                detail: "project-alpha".into(),
+                flags: TabFlags { active: true, busy: false, needs_attention: false },
+                marquee_offset: 0,
+            },
+            RailInput {
+                session: crate::native_navigation::SessionRef("second".into()),
+                title: "Second session".into(),
+                detail: "project-alpha".into(),
+                flags: TabFlags::default(),
+                marquee_offset: 0,
+            },
+        ];
+        // Nothing highlighted: the overlay cell is blank (not a cap glyph).
+        let idle_inputs = vec![
+            RailInput {
+                session: crate::native_navigation::SessionRef("first".into()),
+                title: "First session".into(),
+                detail: "project-alpha".into(),
+                flags: TabFlags::default(),
+                marquee_offset: 0,
+            },
+            RailInput {
+                session: crate::native_navigation::SessionRef("second".into()),
+                title: "Second session".into(),
+                detail: "project-alpha".into(),
+                flags: TabFlags::default(),
+                marquee_offset: 0,
+            },
+        ];
+        let idle = RailFrame::render_cells(&idle_inputs, 5, 24, 0, None, false);
+        assert_eq!(idle.rows[2].text, "     ");
+        assert_eq!(idle.rows[2].kind, RailRowKind::Gap);
+        assert_eq!(idle.compact_cap_role(2), None);
+
+        // Hovering a *non-active* first item still highlights the cell directly
+        // under the controls: `▄`, the bottom half, same as the active case.
+        let hovered = RailFrame::render_cells(
+            &idle_inputs,
+            5,
+            24,
+            0,
+            Some(&idle_inputs[0].session),
+            false,
+        );
+        assert_eq!(hovered.rows[2].text, "▄▄▄▄▄");
+        assert_eq!(hovered.rows[2].kind, RailRowKind::CapBottom);
+        assert_eq!(hovered.compact_cap_role(2), Some(CellColor::CapBottom));
+
+        // An active first item also paints the bottom half (its own cap).
+        let active = RailFrame::render_cells(&inputs, 5, 24, 0, None, false);
+        assert_eq!(active.rows[2].text, "▄▄▄▄▄");
+        assert_eq!(active.rows[2].kind, RailRowKind::CapBottom);
+
+        // Only the far end of the rail paints the top half
+        // (`SessionTabHalfRow edge="top"`), never this row.
+        assert_ne!(idle.rows[0].text, "     ");
     }
 
     #[test]
