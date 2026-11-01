@@ -740,6 +740,11 @@ const V2_STEPS: [u16; 9] = [100, 200, 300, 400, 500, 600, 700, 800, 900];
 const V2_STATES: [&str; 5] = ["disabled", "pressed", "focused", "selected", "hovered"];
 const V2_MAX_HUES: usize = 128;
 const V2_DEFAULT_ASSET: &str = include_str!("../assets/opencode-v2.json");
+/// Temporary "new-designs" theme asset (upstream
+/// `packages/tui/src/theme/assets/v2/opencode2.json`, imported at
+/// `packages/tui/src/theme/index.ts:5` and lazily parsed as the named
+/// `opencode2` document at `theme/index.ts:27-32`).
+const V2_NEW_DESIGNS_ASSET: &str = include_str!("../assets/opencode2.json");
 /// Full TUI syntax-rule count emitted by upstream
 /// `packages/theme/src/tui/syntax.ts` `generateSyntax` (one rule per
 /// `rule(...)` call, in declaration order).
@@ -1514,6 +1519,20 @@ pub fn config_theme_name(config: &Value) -> Result<Option<String>, ConfigThemeEr
 }
 
 /// Runtime-theme load errors. Loading reads ONLY explicitly supplied paths —
+
+/// Experimental "new-designs" gate (upstream `config/index.tsx:383-386`
+/// `useNewDesigns`: `config.data.experimental?.["new-designs"] === true`;
+/// the `experimental` record schema is `config/index.tsx:247-248`). Strict
+/// JSON `true`; absent, `false`, a string, or a non-object root reads as off.
+#[must_use]
+pub fn config_new_designs(config: &Value) -> bool {
+    config
+        .get("experimental")
+        .and_then(Value::as_object)
+        .and_then(|experimental| experimental.get("new-designs"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
 /// no environment probing, no user-database reads, no secret or log files.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LoadError {
@@ -1585,7 +1604,13 @@ pub fn load_runtime_theme(
                 // back to `opencode` at `:300-306`.) A configured `tui.theme`
                 // that addresses a library/custom theme not shipped natively
                 // therefore still starts, on the default palette.
-                return Ok(RuntimeTheme::named(&name, mode)
+                // THEME-10: the temporary `opencode2` theme enters the
+                // available source set only while the "new-designs" experiment
+                // gate is true (`config/index.tsx:383-386` applied through
+                // `context/theme.tsx:291-294`); when off, an
+                // `opencode2`-addressed config silently renders `opencode`
+                // per the THEME-11 fallback above.
+                return Ok(RuntimeTheme::named_gated(&name, mode, config_new_designs(&config))
                     .unwrap_or_else(|| RuntimeTheme::builtin_default(mode)));
             }
             Err(error) => {
@@ -1640,11 +1665,46 @@ impl RuntimeTheme {
         }
     }
 
-    /// Named builtin theme. Only the shipped default exists natively;
-    /// library/custom themes enter through [`Self::from_asset`].
+    /// Named builtin theme. Only the shipped defaults exist natively;
+    /// library/custom themes enter through [`Self::from_asset`]. The
+    /// temporary `opencode2` theme is gated off here (see [`Self::named_gated`]).
     #[must_use]
     pub fn named(name: &str, mode: ThemeMode) -> Option<Self> {
-        (name == "opencode").then(|| Self::builtin_default(mode))
+        Self::named_gated(name, mode, false)
+    }
+
+    /// Named builtin theme with the experimental gate applied. `opencode` is
+    /// always available. The temporary `opencode2` theme
+    /// (`theme/index.ts:27-32` `getOpenCode2Theme`, excluded from upstream
+    /// `allThemes()`) is offered ONLY while the "new-designs" experiment is
+    /// enabled (`config/index.tsx:383-386`); a name outside the available set
+    /// yields `None` and the caller silently renders `opencode`
+    /// (`context/theme.tsx:291-294,297-307`).
+    #[must_use]
+    pub fn named_gated(name: &str, mode: ThemeMode, new_designs: bool) -> Option<Self> {
+        match name {
+            "opencode" => Some(Self::builtin_default(mode)),
+            "opencode2" if new_designs => Self::opencode2(mode),
+            _ => None,
+        }
+    }
+
+    /// Temporary `opencode2` "new-designs" theme: the shipped v2 document
+    /// (upstream `assets/v2/opencode2.json`) resolved in `mode`, named
+    /// `opencode2` like `getOpenCode2Theme` (`theme/index.ts:27-32`). `None`
+    /// when the shipped asset is unusable, so the caller falls back to the
+    /// `opencode` default exactly as upstream does for an unresolvable name.
+    #[must_use]
+    pub fn opencode2(mode: ThemeMode) -> Option<Self> {
+        let asset = serde_json::from_str::<Value>(V2_NEW_DESIGNS_ASSET).ok()?;
+        let resolved = v2_theme_from_asset(&asset, mode).ok()?;
+        Some(Self {
+            name: "opencode2".to_owned(),
+            mode: resolved.selected_mode,
+            requested_mode: resolved.requested_mode,
+            palette: resolved.palette,
+            semantic: Some(resolved.semantic),
+        })
     }
 
     /// Build a theme from one parsed upstream theme-asset object.
@@ -3876,4 +3936,74 @@ fn theme14_cursor_wire_matches_abi_ids_and_leaves_shape_unchanged_when_absent() 
     );
     assert_eq!(color, hex("#141414"));
 }
+}
+
+// ── THEME-10: `opencode2` asset + experimental "new-designs" gate ───
+//
+// Upstream evidence: the temporary `opencode2` theme asset is imported at
+// `packages/tui/src/theme/index.ts:5` and lazily parsed as the named
+// `opencode2` document at `theme/index.ts:27-32` (`getOpenCode2Theme`, not
+// part of `allThemes()`). The gate is `config/index.tsx:383-386`
+// `useNewDesigns` (`config.data.experimental?.["new-designs"] === true`,
+// record schema `config/index.tsx:247-248`). While gated,
+// `context/theme.tsx:291-294` prepends `opencode2` to the available set and
+// `:297-307` silently renders `opencode` for names outside that set.
+#[cfg(test)]
+mod theme10_new_designs_gate {
+    use super::*;
+    use serde_json::json;
+
+    fn hex(token: &str) -> [u8; 4] {
+        parse_color(token).expect("test hex token")
+    }
+
+    #[test]
+    fn config_new_designs_matches_upstream_accessor() {
+        /// config/index.tsx:383-386 — strict `=== true`.
+        assert!(!config_new_designs(&json!({})));
+        assert!(!config_new_designs(&json!({ "experimental": {} })));
+        assert!(config_new_designs(&json!({ "experimental": { "new-designs": true } })));
+        assert!(!config_new_designs(&json!({ "experimental": { "new-designs": false } })));
+        assert!(!config_new_designs(&json!({ "experimental": { "new-designs": "true" } })));
+        assert!(!config_new_designs(&json!({ "experimental": { "client-mcp": true } })));
+        assert!(!config_new_designs(&json!([])));
+    }
+
+    #[test]
+    fn opencode2_is_offered_only_while_gated() {
+        /// theme/index.ts:27-32 + context/theme.tsx:291-294,297-307:
+        /// without the gate `opencode2` is not an available source name.
+        assert!(RuntimeTheme::named("opencode2", ThemeMode::Dark).is_none());
+        assert!(RuntimeTheme::named_gated("opencode2", ThemeMode::Dark, false).is_none());
+        let gated = RuntimeTheme::named_gated("opencode2", ThemeMode::Dark, true)
+            .expect("opencode2 resolves while the experiment is on");
+        assert_eq!(gated.name, "opencode2");
+        assert_eq!(
+            RuntimeTheme::named_gated("opencode", ThemeMode::Dark, false).map(|theme| theme.name),
+            Some("opencode".to_owned())
+        );
+    }
+
+    #[test]
+    fn opencode2_asset_resolves_pinned_upstream_values() {
+        /// Pinned `packages/tui/src/theme/assets/v2/opencode2.json` numbers:
+        /// `background.base = $hue.neutral.900 -> $hue.gray.900`
+        /// (dark #080808 / light #ffffff),
+        /// `background.raised.base = $hue.neutral.700 -> $hue.gray.700`
+        /// (dark #141414 / light #f2f2f2),
+        /// `text.base = $hue.neutral.100 -> $hue.gray.100`
+        /// (dark #ffffff / light #101010). Role paths per the v2 role table
+        /// (`native_theme_runtime.rs:1368-1371`).
+        let dark = RuntimeTheme::opencode2(ThemeMode::Dark).expect("dark resolves");
+        assert_eq!(dark.palette.get(Slot::Background), hex("#080808"));
+        assert_eq!(dark.palette.get(Slot::BackgroundPanel), hex("#141414"));
+        assert_eq!(dark.palette.get(Slot::Text), hex("#ffffff"));
+        let light = RuntimeTheme::opencode2(ThemeMode::Light).expect("light resolves");
+        assert_eq!(light.palette.get(Slot::Background), hex("#ffffff"));
+        assert_eq!(light.palette.get(Slot::BackgroundPanel), hex("#f2f2f2"));
+        assert_eq!(light.palette.get(Slot::Text), hex("#101010"));
+        /// Distinct from the shipped `opencode` default (THEME-10 asset).
+        assert_ne!(dark.palette, Palette::opencode_dark());
+        assert_ne!(light.palette, Palette::opencode_light());
+    }
 }
