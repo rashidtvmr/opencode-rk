@@ -10053,3 +10053,43 @@ test-only `native_view_chat`/`native_status_rail` pairs.
 **Next**: land the wave-9 (b) patches + server wire through the single
 integration writer; consume reviewer verdicts; re-dispatch any step-limited
 workers with a "write handoff in the LAST 3 steps" instruction.
+
+### 2026-11-01 wave 9 — server prerequisites, candidate reviews
+
+Base `2b2cf8ec` -> `6607314c` (worklog). Guard GREEN; suite 2034/0.
+
+**Landable candidates identified (awaiting independent review / main landing):**
+- **THEME-11/THEME-12** (`evidence/W9-THEME03-VERIFY/candidate.patch`, applies `-p1`):
+  verified against upstream `context/theme.tsx:297-307` (unknown theme NAME falls
+  back to `opencode`, NOT a hard error) and `dialog-theme-list.tsx:32-37`
+  (`onMove` -> `themes.set` persists immediately). CHANGES A SEMANTIC TEST
+  (`loader_unknown_theme_name_fails_closed` -> `..._falls_back_to_opencode`), so it
+  is under an independent contract-evaluator review (W9-REVIEW-THEME) before landing.
+  THEME-10 stays `(c)` (no `opencode2` asset / `new-designs` gate).
+- **DIALOG-12** (`evidence/W8-DIALOG12-VARIANT/candidate.patch`): pure state model
+  (variant picker, favorites-at-open snapshot, detail row) with no production
+  caller; patch is structurally corrupt at hunk 193 so it needs re-authoring.
+  Under review (W9-REVIEW-DIALOG12); the live model-picker caller is a separate gap.
+- **PAR-CLOCK** (`evidence/W8-PAR-CLOCK/`): a `FrameClock` at the single loop epoch
+  would make the whole frame deterministic; the peer's `candidate.patch` was missing
+  from evidence, so it is under re-verification (W9b-PARCLOCK) and will be
+  re-authored by main from the design if sound.
+
+**Verified already-correct:** CP-32 (`SubmittedDraft::capture` clears synchronously,
+`restore` fires only on an empty draft — `native_composer.rs:61-82`, sites
+`tui_entry.rs:6585,6645`).
+
+**Wave-8/9 blockers confirmed** (server/model prerequisites, not UI-only): SIDE-08
+(no `DialogMcp` model), LAY-19 (no inbound MCP `elicitation/create` dispatch + no
+`form.*` SSE), SIDE-10 (no `revert.messageID` wire), TAB-21 (view-ack route +
+terminal focus source absent), TAB-23 (`▀` rail search-hover overlay + `<leader>`
+arrow chord unwired), CP-12 (per-cell scanner RGBA + no status-rail painter),
+THEME-10 (`opencode2`/`new-designs`), SIDE-14 (no footer hover state),
+SIDE-01 (no `set_title_state` caller), CP-21 (no live queue-dock hover source),
+MSG-006 (`NativeChatHistory` has no stable message IDs), TAB-20 (no `tabs.scope`
+reader), CP-08 (planner has no production caller), TAB-22 (no tombstone set +
+title tiers).
+
+**Recurring worker failure mode:** several workers exhaust their step budget
+during investigation and write NO artifact. Mitigation in wave 9b: explicit
+"do exactly these reads, then write; write handoff in the FINAL step" briefs.
