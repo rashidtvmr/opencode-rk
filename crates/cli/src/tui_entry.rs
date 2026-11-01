@@ -1570,6 +1570,7 @@ struct PaintCtx {
     logo: Option<(u16, u16)>,
     tabs: Option<TabStrip>,
     vertical_rail: Option<crate::native_tab_rail::RailFrame>,
+    compact_tooltip: Option<crate::native_tab_rail::CompactTooltip>,
     context_menu: Option<crate::native_tab_context_menu::MenuFrame>,
     rename_dialog: Option<(String, Option<String>)>,
     /// Transcript scrollbar geometry for this frame, when shown.
@@ -1973,6 +1974,7 @@ mod surface_paint_regressions {
             logo: None,
             tabs: None,
             vertical_rail: None,
+            compact_tooltip: None,
             context_menu: None,
             rename_dialog: None,
             transcript_scrollbar: None,
@@ -2028,6 +2030,7 @@ mod surface_paint_regressions {
             logo: None,
             tabs: None,
             vertical_rail: None,
+            compact_tooltip: None,
             context_menu: None,
             rename_dialog: None,
             transcript_scrollbar: Some(scrollbar),
@@ -2112,6 +2115,7 @@ mod surface_paint_regressions {
             logo: None,
             tabs: None,
             vertical_rail: None,
+            compact_tooltip: None,
             context_menu: None,
             rename_dialog: None,
             transcript_scrollbar: None,
@@ -2139,6 +2143,65 @@ mod surface_paint_regressions {
             assert_ne!(rows[row].chars().nth(column), Some('█'),
                 "footer/shared rows never hold the thumb: row {row}");
         }
+    }
+
+    #[test]
+    fn compact_rail_tooltip_paints_caps_inset_title_and_detail() {
+        let mut view = crate::native_view::NativeView::new(60, 20);
+        let lines = view.render_typed("", &[], false, &[]);
+        let tooltip = crate::native_tab_rail::compact_tooltip(
+            11, 60, 20, 8, true, false, false, "A long title", "the detail",
+        )
+        .expect("hovered compact entry opens the tooltip");
+        let mut renderer = NativeRenderer::create_memory(60, 20).expect("memory renderer");
+        native_paint(&mut renderer, &lines, PaintCtx {
+            palette: crate::native_theme_runtime::Palette::opencode_dark(),
+            markdown: None,
+            presentation: view.presentation(),
+            modal_rows: None,
+            modal: view.modal_presentation(),
+            sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
+            chat_row_classes: view.chat_row_classes().to_vec(),
+            chat_markdown_spans: view.chat_markdown_spans().to_vec(),
+            selection: Vec::new(),
+            appearance: crate::native_box_style::BoxAppearance::default(),
+            modal_box: crate::native_box_style::BoxId::Dialog,
+            loading: None,
+            home: false,
+            rail_prompt: view.session_prompt_rail(""),
+            composer: None,
+            completion: None,
+            context_usage_styles: view.context_usage_styles().to_vec(),
+            sidebar_span_styles: view.sidebar_span_styles().to_vec(),
+            ui_regions: view.ui_regions(),
+            modal_underlay_rows: view.modal_underlay_rows(),
+            page_panel: view.page_panel(),
+            logo: None,
+            tabs: None,
+            vertical_rail: None,
+            compact_tooltip: Some(tooltip.clone()),
+            context_menu: None,
+            rename_dialog: None,
+            transcript_scrollbar: None,
+            sidebar_scrollbar: None,
+            scrollbar_track: Rgba::rgb(12, 12, 12),
+            scrollbar_thumb: Rgba::rgb(72, 72, 72),
+        }).expect("paint native frame");
+        let snapshot = renderer.snapshot_text().expect("native text snapshot");
+        let rows: Vec<_> = snapshot.lines().collect();
+        let x = usize::from(tooltip.rect.x);
+        let top = usize::from(tooltip.rect.y);
+        let width = usize::from(tooltip.rect.width);
+        assert_eq!(x, 11, "the tooltip starts where the rail ends");
+        assert_eq!(top, 7, "hover row 8 anchors the box one row up");
+        let cap: Vec<char> = rows[top].chars().skip(x).take(width).collect();
+        assert_eq!(cap, vec!['▄'; width], "the top cap spans the full width");
+        let body: String = rows[top + 1].chars().skip(x).take(width).collect();
+        assert_eq!(body, format!("{}{}", " A long title", " ".repeat(width - 13)));
+        let detail: String = rows[top + 2].chars().skip(x).take(width).collect();
+        assert_eq!(detail, format!("{}{}", " the detail", " ".repeat(width - 11)));
+        let bottom: Vec<char> = rows[top + 3].chars().skip(x).take(width).collect();
+        assert_eq!(bottom, vec!['▀'; width], "the bottom cap spans the full width");
     }
 
     #[test]
@@ -3938,6 +4001,41 @@ fn native_paint(
             }
         }
     }
+    // `session-tabs.tsx:1241-1278`: compact rail tooltip. Two half-block caps
+    // frame a raised two-row body holding the title (text.base) over the
+    // detail (text.muted), one cell inset on each side.
+    if let (Some(tooltip), None) = (ctx.compact_tooltip.as_ref(), modal) {
+        let x0 = u32::from(tooltip.rect.x);
+        let y0 = u32::from(tooltip.rect.y);
+        let w = u32::from(tooltip.rect.width).min(cols.saturating_sub(x0));
+        let h = u32::from(tooltip.rect.height).min(rows.saturating_sub(y0));
+        if w > 0 && h > 0 {
+            let raised = paint_color(ctx.palette, crate::native_theme_runtime::Slot::BackgroundPanel);
+            let base = paint_color(ctx.palette, crate::native_theme_runtime::Slot::Background);
+            let title_fg = paint_color(ctx.palette, crate::native_theme_runtime::Slot::Text);
+            let detail_fg = paint_color(ctx.palette, crate::native_theme_runtime::Slot::TextMuted);
+            renderer.fill_rect(x0, y0, w, 1, base)?;
+            renderer.draw_text_styled(x0, y0, &"▄".repeat(w as usize), raised, Some(base), 0)?;
+            if h >= 2 {
+                let bottom = y0.saturating_add(h - 1);
+                renderer.fill_rect(x0, bottom, w, 1, base)?;
+                renderer.draw_text_styled(x0, bottom, &"▀".repeat(w as usize), raised, Some(base), 0)?;
+            }
+            for row in 1..h.saturating_sub(1) {
+                let y = y0.saturating_add(row);
+                renderer.fill_rect(x0, y, w, 1, raised)?;
+                if w > 2 {
+                    let text = match row {
+                        1 => tooltip.title.as_str(),
+                        2 => tooltip.detail.as_str(),
+                        _ => "",
+                    };
+                    let fg = if row == 2 { detail_fg } else { title_fg };
+                    renderer.draw_text_styled(x0 + 1, y, &crate::native_view_layout::fit(text, (w - 2) as u16), fg, Some(raised), 0)?;
+                }
+            }
+        }
+    }
     if let Some(rect) = ctx.page_panel {
         if ctx.appearance.full_outline(crate::native_box_style::BoxId::Menu) {
             draw_panel_outline(
@@ -5249,6 +5347,9 @@ fn native_loop(
     let mut rendered_tabs: Option<TabStrip> = None;
     let mut rendered_rail: Option<crate::native_tab_rail::RailFrame> = None;
     let mut tab_hovered: Option<crate::native_navigation::SessionRef> = None;
+    // Screen row of the pointer inside a hovered compact rail entry; the
+    // compact tooltip anchors one row above it (`session-tabs.tsx:1250`).
+    let mut tab_hover_y: Option<u16> = None;
     // Press capture binds the click to a stable tab and painted rect.
     let mut tab_press: Option<(crate::native_navigation::SessionRef, crate::native_tabs::TabRect, bool, TabOrientation)> = None;
     // Vertical-rail drag-to-reorder: armed on a session press, previewed while
@@ -6700,6 +6801,7 @@ fn native_loop(
             rail_resize.cancel();
             context_menu = None;
             tab_hovered = None;
+            tab_hover_y = None;
             tab_home_hovered = false;
             tab_add_hovered = false;
             rail_search_press = None;
@@ -6711,6 +6813,7 @@ fn native_loop(
         {
             rail_resize.cancel();
             tab_hovered = None;
+            tab_hover_y = None;
             tab_home_hovered = false;
             tab_add_hovered = false;
             tab_press = None;
@@ -6787,10 +6890,35 @@ fn native_loop(
             }
         }
         let frame_tabs = render_strip(&tab_inputs);
-        let frame_rail = if effective_orientation == TabOrientation::Vertical {
+        // `session-tabs.tsx:1241-1278`: a hovered compact rail entry opens the
+        // four-row title/detail tooltip to the right of the rail; drag and an
+        // open context menu suppress it.
+        let (frame_rail, frame_tooltip) = if effective_orientation == TabOrientation::Vertical {
             let rail_inputs = rail_inputs_for_navigation(&navigation, &tab_inputs);
-            Some(crate::native_tab_rail::RailFrame::render_cells(&rail_inputs, tab_reservation.width, viewport.1, rendered_rail.as_ref().map_or(0, |r| r.scroll_cells), tab_hovered.as_ref(), navigation.active().is_none()))
-        } else { None };
+            let rail = crate::native_tab_rail::RailFrame::render_cells(&rail_inputs, tab_reservation.width, viewport.1, rendered_rail.as_ref().map_or(0, |r| r.scroll_cells), tab_hovered.as_ref(), navigation.active().is_none());
+            let tooltip = if tab_reservation.width < crate::native_tab_rail::COMPACT_BREAKPOINT
+                && tab_drag.dragging().is_none()
+                && context_menu.is_none()
+            {
+                tab_hovered.as_ref().zip(tab_hover_y).and_then(|(session, hover_y)| {
+                    let input = rail_inputs.iter().find(|input| input.session == *session)?;
+                    crate::native_tab_rail::compact_tooltip(
+                        tab_reservation.width,
+                        viewport.0,
+                        viewport.1,
+                        hover_y,
+                        true,
+                        false,
+                        false,
+                        &input.title,
+                        &input.detail,
+                    )
+                })
+            } else {
+                None
+            };
+            (Some(rail), tooltip)
+        } else { (None, None) };
         let mut lines = if help_open && !dialog_open {
             Vec::new()
         } else {
@@ -6998,6 +7126,7 @@ fn native_loop(
                     },
             tabs: Some(frame_tabs.clone()),
             vertical_rail: frame_rail.clone(),
+            compact_tooltip: frame_tooltip,
             context_menu: context_menu.as_ref().map(|menu| menu.frame(crate::native_tab_context_menu::Viewport { width: viewport.0, height: viewport.1 })),
             rename_dialog: rename_input.as_ref().map(|(_,title)| (title.clone(), rename_error.clone())),
             transcript_scrollbar: view.transcript_scrollbar(),
@@ -7637,6 +7766,7 @@ fn native_loop(
                         } else {
                             rendered_tabs.as_ref().and_then(|tabs| tabs.hit(x, y)).map(|hit| hit.session)
                         };
+                        tab_hover_y = tab_hovered.is_some().then_some(y);
                         // Home pseudo-tab hover is identity-free and tracked beside
                         // the session hover fact; session hover wins the glyph.
                         tab_home_hovered = effective_orientation == TabOrientation::Horizontal
