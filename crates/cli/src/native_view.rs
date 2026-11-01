@@ -6338,6 +6338,30 @@ mod tests {
         assert_eq!(view.presentation().main_width, 160);
     }
 
+    /// LAY-09. `component/session-frame.tsx:108` (`if
+    /// data.session.get(id)?.parentID return false`): a child session
+    /// suppresses the information sidebar even when it was manually requested
+    /// (`sidebarOpen()` true), so no width is reserved and no rows paint.
+    #[test]
+    fn child_session_suppresses_manually_requested_sidebar() {
+        // Narrow view: the auto rule is off, so the sidebar is present only
+        // because it was explicitly toggled open (a manual request).
+        let mut view = NativeView::new(100, 30);
+        view.set_session_route(true);
+        assert!(!view.sidebar_visible(), "auto sidebar is off below the threshold");
+        view.toggle_sidebar();
+        assert!(view.sidebar_visible(), "manual open shows the overlay sidebar");
+        assert_eq!(view.presentation().sidebar_width, 42);
+        assert_eq!(view.presentation().sidebar_offset, Some(58));
+        assert_eq!(view.presentation().main_width, 100, "narrow sidebar never shrinks the transcript");
+
+        view.set_parent_session(true);
+        assert!(!view.sidebar_visible(), "a child session suppresses the manual sidebar");
+        assert_eq!(view.presentation().sidebar_width, 0);
+        assert_eq!(view.presentation().sidebar_offset, None);
+        assert_eq!(view.presentation().main_width, 100);
+    }
+
     #[test]
     fn modal_and_manual_sidebar_rows_stay_within_tiny_ascii_viewports() {
         for cols in [0, 1, 2, 3, 4, 5, 40, 60, 120] {

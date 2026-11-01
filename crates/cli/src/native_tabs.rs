@@ -1795,6 +1795,29 @@ pub const fn title_pending(renaming: bool, generating: bool) -> bool {
     renaming || generating
 }
 
+/// Port of `session-tabs.tsx:125-129` `tabFeedbackColor`: dialog attention
+/// paints the accent hue, an error unread paints `text.feedback.error.base`,
+/// otherwise no override. Upstream feeds this into both the indicator number
+/// color and `unreadColor` (`session-tabs.tsx:959-963,1048`). The legacy
+/// palette-only fallback keeps the recorded roles used elsewhere in this
+/// module (attention -> Warning, error -> Error).
+#[must_use]
+pub fn tab_feedback_color(
+    attention: Option<TabAttention>,
+    unread: Option<TabUnread>,
+    palette: &crate::native_theme_runtime::Palette,
+    semantic: Option<&crate::native_theme_runtime::SemanticPalette>,
+) -> Option<[u8; 4]> {
+    use crate::native_theme_runtime::Slot;
+    if attention.is_some() {
+        return Some(semantic.map_or_else(|| palette.get(Slot::Warning), |theme| theme.tab_attention.rgba));
+    }
+    if matches!(unread, Some(TabUnread::Error)) {
+        return Some(semantic.map_or_else(|| palette.get(Slot::Error), |theme| theme.text_feedback_error.rgba));
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------
 // Title fade and marquee overflow.
 //
@@ -3633,6 +3656,78 @@ mod tests {
             0,
             "drag boldness is supplied by the selected flag"
         );
+    }
+
+    /// TAB-07 fixture matrix (`fixtures.json` tab-state-*): the seven tab
+    /// states resolve the upstream feedback color and title attribute.
+    /// idle/busy/unread keep no override; permission and question paint the
+    /// accent hue (`session-tabs.tsx:126`); error_unread paints
+    /// `text.feedback.error.base` (`:127`); renaming is DIM only with motion
+    /// off (`:1033-1041`), otherwise the selected BOLD rule applies.
+    #[test]
+    fn tab_07_state_fixture_color_and_attribute_matrix() {
+        use crate::native_theme_runtime::{Palette, RuntimeTheme, Slot, ThemeMode};
+        let palette = Palette::opencode_dark();
+        let theme = RuntimeTheme::builtin_default(ThemeMode::Dark);
+        let sem = theme.semantic.as_ref();
+        let accent = sem.map_or_else(|| palette.get(Slot::Warning), |t| t.tab_attention.rgba);
+        let error = sem.map_or_else(|| palette.get(Slot::Error), |t| t.text_feedback_error.rgba);
+
+        // tab-state-idle / tab-state-busy / tab-state-unread: no feedback hue.
+        assert_eq!(tab_feedback_color(None, None, &palette, sem), None);
+        assert_eq!(tab_feedback_color(None, Some(TabUnread::Activity), &palette, sem), None);
+        // tab-state-permission / tab-state-question: attention accent.
+        assert_eq!(tab_feedback_color(Some(TabAttention::Permission), None, &palette, sem), Some(accent));
+        assert_eq!(tab_feedback_color(Some(TabAttention::Question), None, &palette, sem), Some(accent));
+        // tab-state-error_unread: error hue, and attention still outranks it.
+        assert_eq!(tab_feedback_color(None, Some(TabUnread::Error), &palette, sem), Some(error));
+        assert_ne!(accent, error, "attention accent and error hue differ");
+        assert_eq!(
+            tab_feedback_color(Some(TabAttention::Permission), Some(TabUnread::Error), &palette, sem),
+            Some(accent),
+            "attention outranks an unread error"
+        );
+        // tab-state-renaming: DIM only while motion is off.
+        assert_eq!(title_attributes(false, true, false), crate::native_ui_style::ATTR_DIM);
+        assert_eq!(title_attributes(true, true, true), crate::native_ui_style::ATTR_BOLD);
+        assert_eq!(title_attributes(false, false, true), 0);
+    }
+
+    /// TAB-08 fixture (`marquee-*` long title): the exact fixture title with
+    /// CJK and a skin-tone ZWJ emoji stays grapheme-aware, and the FADE_WIDTH=4
+    /// window ramps both edges of a 10-cluster title.
+    #[test]
+    fn tab_08_fixture_long_title_is_grapheme_aware() {
+        let title = "A very long session title with 中文 and 👩🏽\u{200d}💻";
+        assert_eq!(display_width("中文"), 4, "two CJK glyphs are four cells");
+        assert!(marquee_overflows(title, 17));
+        // Every 4-cell window consumes <= 4 cells and never emits an empty part.
+        for offset in 0..marquee_cycle_width(title) {
+            let parts = marquee_text_parts(title, 4, offset);
+            assert!(parts.iter().map(|p| display_width(&p.value)).sum::<usize>() <= 4);
+            assert!(parts.iter().all(|p| !p.value.is_empty()));
+        }
+        // Four-cell fade ramps both edges and keeps the middle opaque.
+        let weights: Vec<f32> = (0..10).map(|i| title_fade_weight(i, 10, 1.0)).collect();
+        assert!((weights[0] - 0.92).abs() < 1e-6);
+        assert!(weights[4].abs() < 1e-6);
+        assert!((weights[9] - 0.92).abs() < 1e-6);
+    }
+
+    /// TAB-09 fixture phases (`marquee-0/599/600/680`): nothing before the
+    /// 600 ms delay, the first cell at exactly 600, then one 80 ms step at 680.
+    #[test]
+    fn tab_09_fixture_clock_phases_wait_then_step() {
+        let title = "A very long session title with 中文 and 👩🏽\u{200d}💻";
+        let mut marquee = Marquee::new();
+        marquee.enter("s", title, 17, 0);
+        assert_eq!(marquee.offset(), 0, "clock_ms 0");
+        assert!(!marquee.advance(599), "clock_ms 599 still waits");
+        assert_eq!(marquee.offset(), 0);
+        assert!(marquee.advance(600), "clock_ms 600 starts the cycle");
+        assert_eq!(marquee.offset(), 1);
+        assert!(marquee.advance(680), "clock_ms 680 is one 80 ms step");
+        assert_eq!(marquee.offset(), 2);
     }
 
     #[test]
