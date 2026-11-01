@@ -1,4 +1,6 @@
-//! Golden capture envelope and canonical frame compare (PAR-01/03/04/05/06).
+//! Golden capture envelope and canonical frame compare (PAR-01/03/04/05/06),
+//! plus the PAR-22 provenance manifest that attaches source/fixture hashes,
+//! exact test commands, failures and installed captures to a final Rust SHA.
 //!
 //! PAR-01/03/06 record the capture envelope (selected product/renderer/
 //! runtime/theme pins, one identical deterministic fixture, the baseline
@@ -409,13 +411,78 @@ pub fn validate_capture_set(captures: &[Capture]) -> Result<(), CaptureError> {
     Ok(())
 }
 
+
+/// Provenance bound to one final Rust SHA (PAR-22): the source/fixture
+/// hashes, exact test commands, observed failures and installed captures
+/// that a parity result was produced with. `canonical()` serializes every
+/// field deterministically so the manifest itself can be hashed and
+/// attached to the release, and `ok()` is false while any failure remains.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProvenanceManifest {
+    /// Final Rust build/release SHA this evidence is attached to.
+    pub rust_sha: String,
+    /// Label -> source commit hash (product, renderer, base SHA, ...).
+    pub source_commits: Vec<(String, String)>,
+    /// Fixture identities with their deterministic digests (PAR-03).
+    pub fixtures: Vec<FixtureRef>,
+    /// Exact test commands that were run.
+    pub test_commands: Vec<String>,
+    /// Observed failures; empty means the commands passed.
+    pub failures: Vec<String>,
+    /// Installed capture digests/paths reviewed at this SHA.
+    pub installed_captures: Vec<String>,
+}
+
+impl ProvenanceManifest {
+    #[must_use]
+    pub fn ok(&self) -> bool {
+        self.failures.is_empty()
+    }
+
+    /// Deterministic, hashable serialization of the whole manifest; equal
+    /// manifests hash equal, and any bound field change (including the Rust
+    /// SHA) changes the canonical bytes.
+    #[must_use]
+    pub fn canonical(&self) -> String {
+        let mut lines = vec![
+            format!("rust_sha={}", self.rust_sha),
+            "source:".to_string(),
+        ];
+        let mut sources = self.source_commits.clone();
+        sources.sort();
+        for (label, sha) in sources {
+            lines.push(format!("  {label}={sha}"));
+        }
+        lines.push("fixtures:".to_string());
+        let mut fixtures = self.fixtures.clone();
+        fixtures.sort_by(|a, b| a.id.cmp(&b.id));
+        for fixture in fixtures {
+            lines.push(format!("  {}=0x{:016x}", fixture.id, fixture.digest));
+        }
+        lines.push("commands:".to_string());
+        for command in &self.test_commands {
+            lines.push(format!("  {command}"));
+        }
+        lines.push("failures:".to_string());
+        for failure in &self.failures {
+            lines.push(format!("  {failure}"));
+        }
+        lines.push("captures:".to_string());
+        for capture in &self.installed_captures {
+            lines.push(format!("  {capture}"));
+        }
+        lines.push(String::new());
+        lines.join("\n")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         compare, fixture_digest, validate_capture_set, BaselineEnvironment, Capture,
         CaptureError, CapturePins, Cursor, FixtureRef, Frame, HitTarget, Mismatch,
-        SELECTED_PRODUCT_COMMIT, SELECTED_PRODUCT_VERSION, SELECTED_RENDERER_COMMIT,
-        SELECTED_RENDERER_TAG,
+        ProvenanceManifest, SELECTED_PRODUCT_COMMIT, SELECTED_PRODUCT_VERSION,
+        SELECTED_RENDERER_COMMIT, SELECTED_RENDERER_TAG,
     };
 
     fn base_frame() -> Frame {
@@ -580,5 +647,48 @@ mod tests {
         );
         let wide: Vec<u16> = bases.iter().map(|cell| cell.cells).collect();
         assert_eq!(wide.iter().filter(|w| **w >= 2).count(), 2);
+    }
+
+    #[test]
+    fn par22_manifest_binds_sha_hashes_commands_failures_and_captures() {
+        let manifest = ProvenanceManifest {
+            rust_sha: "471c87d0".to_string(),
+            source_commits: vec![
+                ("product".to_string(), SELECTED_PRODUCT_COMMIT.to_string()),
+                ("renderer".to_string(), SELECTED_RENDERER_COMMIT.to_string()),
+            ],
+            fixtures: vec![FixtureRef {
+                id: "idle-160x48".to_string(),
+                digest: fixture_digest(&["idle-160x48", "theme=opencode", "mode=dark"]),
+            }],
+            test_commands: vec!["cargo test -p oc2 native_capture".to_string()],
+            failures: vec!["par22 probe: style drift at row 0".to_string()],
+            installed_captures: vec!["captures/par22-installed.json".to_string()],
+        };
+        assert!(!manifest.ok(), "a recorded failure keeps the manifest not-ok");
+        let canonical = manifest.canonical();
+        for needle in [
+            "rust_sha=471c87d0",
+            "product=450e7b92412c780a7b5a75226bb8d49aaca24e22",
+            "renderer=8d6065a3e60039d16c6ee697692dcfbc46d3c786",
+            "idle-160x48=0x",
+            "cargo test -p oc2 native_capture",
+            "style drift at row 0",
+            "captures/par22-installed.json",
+        ] {
+            assert!(canonical.contains(needle), "missing {needle:?} in:\n{canonical}");
+        }
+        let mut passed = manifest.clone();
+        passed.failures.clear();
+        assert!(passed.ok());
+        assert_ne!(passed.canonical(), canonical, "failures must change the manifest");
+        let mut other_sha = manifest.clone();
+        other_sha.rust_sha = "deadbeef".to_string();
+        assert_ne!(
+            other_sha.canonical(),
+            canonical,
+            "manifest must be bound to its Rust SHA"
+        );
+        assert_eq!(manifest, manifest.clone(), "canonical source of equal manifests");
     }
 }

@@ -1057,6 +1057,76 @@ async fn get_session(
     }
     Ok(Json(json!({"session":value})))
 }
+/// Upstream `core/src/session/title.ts:20` `MAX_LENGTH`; the generated-title budget.
+const GENERATED_TITLE_MAX_LENGTH: usize = 100;
+
+/// `title.ts:32` `truncate(value)`: unchanged under the cap, else the first
+/// `MAX_LENGTH - 3` chars plus an ellipsis. Char-boundary safe (upstream counts
+/// UTF-16 units; char count is the closest native analog).
+fn truncate_generated_title(value: &str) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() <= GENERATED_TITLE_MAX_LENGTH {
+        return value.to_owned();
+    }
+    let head: String = chars[..GENERATED_TITLE_MAX_LENGTH - 3].iter().collect();
+    format!("{head}...")
+}
+
+/// Smallest source-faithful port of the deterministic core of
+/// `SessionTitle.generate` (`core/src/session/title.ts:105-155`): upstream
+/// derives the title from the conversation's first user message
+/// (`SessionHistory.firstUserMessage`, `title.ts:108`). oc2 has no LLM-backed
+/// title service, so this projects the first non-empty line of that first user
+/// message into a bounded title. `None` means no title can be generated (no user
+/// message), matching the upstream early return `if (!firstUser) return`
+/// (`title.ts:109`).
+fn derived_session_title(first_user_text: &str) -> Option<String> {
+    let line = first_user_text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?;
+    Some(truncate_generated_title(line))
+}
+
+/// Reads the session's first user message and projects the generated title
+/// (`handlers/session.ts:239-240` `SessionTitle.generate`).
+async fn generate_session_title(
+    state: &AppState,
+    id: SessionId,
+) -> Result<Option<String>, ApiFailure> {
+    let messages = state
+        .sessions
+        .messages(id, 100)
+        .await
+        .map_err(ApiFailure::internal)?;
+    Ok(messages
+        .iter()
+        .find(|message| message.role == MessageRole::User)
+        .and_then(|message| match &message.body {
+            PayloadRef::Inline { text } => derived_session_title(text),
+            _ => None,
+        }))
+}
+
+#[cfg(test)]
+mod generated_title_tests {
+    use super::{derived_session_title, truncate_generated_title};
+
+    #[test]
+    fn tab_24_derived_title_uses_first_non_empty_line_and_caps_at_upstream_max() {
+        assert_eq!(
+            derived_session_title("  \n  fix the login bug\nsecond line"),
+            Some("fix the login bug".to_owned())
+        );
+        assert_eq!(derived_session_title("   \n \n"), None);
+        let long = "a".repeat(150);
+        let capped = derived_session_title(&long).expect("a non-empty line yields a title");
+        assert_eq!(capped.chars().count(), 100);
+        assert!(capped.ends_with("..."));
+        assert_eq!(truncate_generated_title("short"), "short");
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct RenameSessionBody {
     title: String,
@@ -1067,9 +1137,22 @@ async fn rename_session(
     Json(body): Json<RenameSessionBody>,
 ) -> Result<Json<Value>, ApiFailure> {
     let id = parse_session_id(&id)?;
+    // `handlers/session.ts:234-244`: a truthy title renames; an EMPTY title
+    // takes the generated-title branch (`SessionTitle.generate`).
+    let title = if body.title.is_empty() {
+        match generate_session_title(&state, id).await? {
+            Some(title) => title,
+            None => {
+                let session = state.sessions.get(id).await.map_err(ApiFailure::internal)?;
+                return Ok(Json(json!({"session":session})));
+            }
+        }
+    } else {
+        body.title
+    };
     state
         .sessions
-        .rename(id, body.title)
+        .rename(id, title)
         .await
         .map_err(ApiFailure::internal)?;
     let session = state.sessions.get(id).await.map_err(ApiFailure::internal)?;
