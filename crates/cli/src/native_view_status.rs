@@ -509,6 +509,27 @@ mod conditional_sidebar_tests {
         }));
         assert!(!view.render_sidebar(38, 30).join("\n").contains("Getting started"));
     }
+
+    /// SIDE-12: the dismiss input (the `footer.tsx:38-50` `✕` mouse-up) reaches
+    /// the view as an explicit fact and hides the box on the next frame while
+    /// reporting whether a box was actually showing (so the caller persists
+    /// only a real dismissal).
+    #[test]
+    fn dismiss_input_hides_the_onboarding_box() {
+        use super::native_sidebar;
+        let mut view = StatusView::default();
+        view.set_onboarding(Some(native_sidebar::Onboarding {
+            dismissed: false,
+            integrations_known: true,
+            connected_provider: false,
+        }));
+        assert!(view.render_sidebar(38, 30).join("\n").contains("Getting started"));
+        assert!(view.dismiss_onboarding(), "a showing box reports the dismissal");
+        assert!(!view.render_sidebar(38, 30).join("\n").contains("Getting started"));
+        // A second press is a no-op: nothing was showing to dismiss.
+        assert!(!view.dismiss_onboarding());
+        assert!(!view.dismiss_onboarding());
+    }
 }
 
 struct SidebarRow {
@@ -1073,6 +1094,22 @@ impl StatusView {
     /// box is claimed.
     pub fn set_onboarding(&mut self, onboarding: Option<native_sidebar::Onboarding>) {
         self.sidebar_onboarding = onboarding;
+    }
+
+    /// SIDE-12: the getting-started dismiss input (`footer.tsx:44-49`, the `✕`
+    /// `onMouseUp`). Marks the onboarding fact dismissed and reports whether a
+    /// box was actually showing, so a caller persists the exact upstream
+    /// `getting-started` key only for a real dismissal. Idempotent: a second
+    /// press changes nothing and reports `false`.
+    #[must_use]
+    pub fn dismiss_onboarding(&mut self) -> bool {
+        match self.sidebar_onboarding.as_mut() {
+            Some(onboarding) if !onboarding.dismissed => {
+                onboarding.dismissed = true;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Confirmed connection observation, if any.

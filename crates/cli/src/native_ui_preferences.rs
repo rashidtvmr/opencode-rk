@@ -42,6 +42,12 @@ pub struct UiPreferences {
     pub theme_mode: Option<String>,
     pub theme_mode_lock: Option<String>,
     pub vertical_tabs_width: Option<u16>,
+    /// Getting-started onboarding dismissal (`footer.tsx:11-16`
+    /// `storage.store("getting-started", { initial: { dismissed: false } })`,
+    /// set by the `sidebar.footer.getting-started.dismiss` mouse-up). Persisted
+    /// beside the other TUI state under the exact upstream key/value shape
+    /// `"getting-started": {"dismissed": bool}`.
+    pub onboarding_dismissed: bool,
     /// Raw `tui.cursor` object from the merged config files, when present.
     /// Kept as JSON so this module stays independent of the theme runtime's
     /// `CursorConfig`; the caller parses it with
@@ -280,6 +286,13 @@ impl UiPreferences {
             .and_then(Value::as_str)
             .map(str::to_owned);
         let sidebar_hidden = state.get("sidebar").and_then(Value::as_str) == Some("hide");
+        // SIDE-12: default `false`, exactly upstream's `initial: { dismissed: false }`.
+        let onboarding_dismissed = state
+            .get("getting-started")
+            .and_then(Value::as_object)
+            .and_then(|value| value.get("dismissed"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         Ok(Self {
             prompt_width,
             theme: configured_theme.or(stored_theme),
@@ -296,6 +309,7 @@ impl UiPreferences {
                 .and_then(|layout| layout.get("verticalTabsWidth"))
                 .and_then(Value::as_u64)
                 .map(|width| width.clamp(5, 72) as u16),
+            onboarding_dismissed,
             cursor,
             diagnostics,
         })
@@ -307,6 +321,19 @@ impl UiPreferences {
             state_path,
             "sidebar",
             Some(Value::String(if hidden { "hide" } else { "auto" }.into())),
+        )
+    }
+
+    /// SIDE-12: persist the getting-started dismissal under the exact upstream
+    /// key and value shape (`footer.tsx:11-16` `storage.store("getting-started",
+    /// { initial: { dismissed: false } })`): `"getting-started": {"dismissed":
+    /// bool}`. Writes only that key, preserving every unrelated KV entry, and
+    /// mirrors the atomic floored state path used by the other preferences.
+    pub fn dismiss_onboarding(state_path: &Path, dismissed: bool) -> Result<(), String> {
+        update_state(
+            state_path,
+            "getting-started",
+            Some(serde_json::json!({ "dismissed": dismissed })),
         )
     }
 
@@ -1295,6 +1322,30 @@ mod tests {
         assert!(prefs.sidebar_hidden);
         assert_eq!(prefs.theme.as_deref(), Some("opencode"));
         assert_eq!(read_state(&path).unwrap()["keep"], 7);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// SIDE-12: the getting-started dismissal round-trips under the exact
+    /// upstream key/value shape (`footer.tsx:11-16`) and defaults to `false`
+    /// when absent, preserving unrelated KV data.
+    #[test]
+    fn onboarding_dismissal_round_trips_under_the_getting_started_key() {
+        let dir = std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "opencode-ui-onboarding-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = dir.join("opencode/kv.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, br#"{"sidebar":"auto","keep":7}"#).unwrap();
+        // Absent key: upstream `initial: { dismissed: false }`.
+        assert!(!UiPreferences::load(&[], &path).unwrap().onboarding_dismissed);
+        UiPreferences::dismiss_onboarding(&path, true).unwrap();
+        assert!(UiPreferences::load(&[], &path).unwrap().onboarding_dismissed);
+        let saved = read_state(&path).unwrap();
+        assert_eq!(saved["getting-started"]["dismissed"], true);
+        assert_eq!(saved["keep"], 7);
+        assert_eq!(saved["sidebar"], "auto");
         fs::remove_dir_all(dir).unwrap();
     }
 }
