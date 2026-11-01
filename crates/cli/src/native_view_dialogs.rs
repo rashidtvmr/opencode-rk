@@ -658,6 +658,19 @@ impl DialogView {
         self.question_capable
     }
 
+    /// The visible dialog's kind when it gates session-tab attention: a
+    /// permission or question dialog. Confirm/error dialogs and a closed stack
+    /// contribute no attention (`component/session-tabs.tsx:163-174`, where the
+    /// tab's attention comes from `permission.list()`/`form.list()`).
+    #[must_use]
+    pub fn attention_dialog_kind(&self) -> Option<DialogKind> {
+        match self.dialog.as_ref().map(|dialog| dialog.kind) {
+            Some(DialogKind::Permission) => Some(DialogKind::Permission),
+            Some(DialogKind::Question) => Some(DialogKind::Question),
+            _ => None,
+        }
+    }
+
     // ---- presentation, focus and dismissal, all owned by the modal stack ----
 
     /// Dialog size class (`dialogWidth(size)`, `ui/dialog.tsx:30-34`). Medium

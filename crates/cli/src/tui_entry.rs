@@ -6932,21 +6932,34 @@ fn native_loop(
         }
         view.set_tab_reservation(tab_reservation);
         // A pending permission decision is the "!" attention flag upstream
-        // derives from `permission.list(session).length > 0`
-        // (`session-tabs.tsx:165-169`); it outranks busy/idle styling.
-        let tab_attention: Vec<crate::native_tabs::Attention> = if view.dialogs.is_open() {
-            navigation
-                .active()
-                .map(|tab| {
-                    vec![crate::native_tabs::Attention {
-                        session: tab.session.clone(),
-                        needs_attention: true,
-                    }]
-                })
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+        // derives from `permission.list(session).length > 0`, and a pending
+        // question is "?" from `form.list(session).length > 0`
+        // (`context/session-tabs.tsx:163-174`); permission outranks question.
+        // `attention_dialog_kind` yields the active tab's kind. A full
+        // per-session feed (background tabs) needs a server-side event the
+        // daemon does not emit yet; this covers the active session.
+        let tab_attention: Vec<crate::native_tabs::Attention> =
+            match view.dialogs.attention_dialog_kind() {
+                Some(kind) => {
+                    let attention_kind = match kind {
+                        crate::native_view_dialogs::DialogKind::Question => {
+                            crate::native_tabs::TabAttention::Question
+                        }
+                        _ => crate::native_tabs::TabAttention::Permission,
+                    };
+                    navigation
+                        .active()
+                        .map(|tab| {
+                            vec![crate::native_tabs::Attention {
+                                session: tab.session.clone(),
+                                needs_attention: true,
+                                kind: attention_kind,
+                            }]
+                        })
+                        .unwrap_or_default()
+                }
+                None => Vec::new(),
+            };
         let mut tab_inputs = TabStrip::from_navigation(&navigation, &tab_attention);
         if tab_drag.preview().is_some() {
             // Paint (and hit-test) the pending drag order until the move is
@@ -12773,6 +12786,7 @@ mod middle_close_hit_tests {
             session: crate::native_navigation::SessionRef(format!("h-{i}")),
             title: format!("Tab{i}"),
             flags: Default::default(),
+            attention: None,
             marquee_offset: 0,
         }).collect();
         let strip = TabStrip::render_with_hover_and_add(&tabs, TabOrientation::Horizontal, 60, 1, 0, None, true);

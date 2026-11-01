@@ -100,6 +100,10 @@ pub struct TabInput {
     pub session: SessionRef,
     pub title: String,
     pub flags: TabFlags,
+    /// Attention kind for the indicator column: `Permission` paints `!`,
+    /// `Question` paints `?` (`component/session-tabs.tsx:172-174`). `None`
+    /// when the tab carries no dialog attention.
+    pub attention: Option<TabAttention>,
     /// Marquee window start for the hovered title (0 paints the plain title).
     /// The strip applies it with the exact title budget its layout reserves.
     pub marquee_offset: usize,
@@ -114,6 +118,7 @@ impl TabInput {
                 busy: nav.work_state(&tab.session) == Some(WorkState::Running),
                 needs_attention: false,
             },
+            attention: None,
             session: tab.session.clone(),
             marquee_offset: 0,
         }
@@ -180,10 +185,16 @@ impl TitleFade {
 }
 
 /// Caller-owned attention facts, kept separate from daemon work state.
+///
+/// `needs_attention` preserves the legacy bool contract (a tab marked
+/// attention is `true`); `kind` carries which dialog gates it, because the
+/// indicator column paints `!` for a permission and `?` for a question
+/// (`component/session-tabs.tsx:172-174`).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Attention {
     pub session: SessionRef,
     pub needs_attention: bool,
+    pub kind: TabAttention,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -665,6 +676,18 @@ impl TabStrip {
                 input.flags.needs_attention = attention
                     .iter()
                     .any(|a| a.session == tab.session && a.needs_attention);
+                // `context/session-tabs.tsx:165-169`: permission outranks
+                // question for the tab's own session.
+                input.attention = attention
+                    .iter()
+                    .filter(|a| a.session == tab.session && a.needs_attention)
+                    .map(|a| a.kind)
+                    .reduce(|current, next| match (current, next) {
+                        (TabAttention::Permission, _) | (_, TabAttention::Permission) => {
+                            TabAttention::Permission
+                        }
+                        _ => TabAttention::Question,
+                    });
                 input
             })
             .collect()
@@ -1326,16 +1349,27 @@ fn adaptive_layout(
 
 /// Upstream `config.tabs.indicators` defaults to "status"
 /// (packages/tui/src/config/index.tsx:336), so the number column paints the
-/// static status glyph: attention permission "!"; question "?" (kind not
-/// representable in canonical Attention facts yet); busy ->
-/// TAB_SPINNERS.dots frames[0] (session-tabs.tsx:57-60, spinner-frames.ts:1);
-/// the promoted Home tab always labels "+"; everything else idleLabel "".
-/// Unread markers need an unread fact the canonical model does not carry
-/// (TAB_UNREAD_MARKERS["small-dot"] = "\u{2022}"); logged as a known gap.
+/// static status glyph: `attention === "permission"` -> "!" and
+/// `attention === "question"` -> "?" (`component/session-tabs.tsx:172-174`);
+/// `attention` is the caller-supplied kind (permission outranks question).
+/// Busy -> TAB_SPINNERS.dots frames[0] (session-tabs.tsx:57-60,
+/// spinner-frames.ts:1); the promoted Home tab always labels "+"; everything
+/// else idleLabel "". Unread markers need an unread fact the canonical model
+/// does not carry (TAB_UNREAD_MARKERS["small-dot"] = "\u{2022}"); logged as a
+/// known gap.
 #[must_use]
-pub fn indicator_label(flags: &TabFlags, is_home: bool) -> &'static str {
+pub fn indicator_label(
+    flags: &TabFlags,
+    attention: Option<TabAttention>,
+    is_home: bool,
+) -> &'static str {
     if is_home {
         return "+";
+    }
+    match attention {
+        Some(TabAttention::Permission) => return "!",
+        Some(TabAttention::Question) => return "?",
+        None => {}
     }
     if flags.needs_attention {
         return "!";
@@ -1366,7 +1400,7 @@ fn format_label(input: &TabInput) -> String {
 /// glyph over the title's second-to-last cell (position absolute right=1
 /// width=1), shrinking the title by two as upstream hoveredTitleWidth does.
 fn horizontal_row(input: &TabInput, slot_width: u16, gauge: usize, hovered: bool) -> (String, Option<TitleFade>) {
-    let glyph = indicator_label(&input.flags, false);
+    let glyph = indicator_label(&input.flags, input.attention, false);
     horizontal_composed_row(
         glyph,
         &input.title,
@@ -2438,6 +2472,7 @@ mod tests {
             session: SessionRef(id.into()),
             title: title.into(),
             flags: TabFlags::default(),
+            attention: None,
             marquee_offset: 0,
         }
     }
@@ -2654,6 +2689,7 @@ mod tests {
                 busy: true,
                 needs_attention: true,
             },
+            attention: None,
             marquee_offset: 0,
         };
         let strip = TabStrip::render(&[tab], TabOrientation::Vertical, 6, 1, 0);
@@ -2854,12 +2890,12 @@ mod tests {
         let mut tab = input("a", "Draft");
         tab.flags = TabFlags { active: true, busy: true, needs_attention: true };
         assert_eq!(format_label(&tab), "Draft");
-        assert_eq!(indicator_label(&tab.flags, false), "!");
+        assert_eq!(indicator_label(&tab.flags, tab.attention, false), "!");
         tab.flags.needs_attention = false;
-        assert_eq!(indicator_label(&tab.flags, false), "\u{280b}", "busy paints the dots spinner frame 0");
+        assert_eq!(indicator_label(&tab.flags, tab.attention, false), "\u{280b}", "busy paints the dots spinner frame 0");
         tab.flags.busy = false;
-        assert_eq!(indicator_label(&tab.flags, false), "", "idle status column is blank in status mode");
-        assert_eq!(indicator_label(&tab.flags, true), "+", "promoted Home always labels +");
+        assert_eq!(indicator_label(&tab.flags, tab.attention, false), "", "idle status column is blank in status mode");
+        assert_eq!(indicator_label(&tab.flags, tab.attention, true), "+", "promoted Home always labels +");
         assert_eq!(number_width(9), 2);
         assert_eq!(number_width(10), 2);
         assert_eq!(number_width(123), 3);
@@ -2999,7 +3035,7 @@ mod tests {
                 display_width(&strip.rows[0]),
                 usize::from(rect.width),
                 "status row conserves the allocated 3-cell slot for glyph {:?}",
-                indicator_label(&tab.flags, false)
+                indicator_label(&tab.flags, tab.attention, false)
             );
             assert_eq!(
                 display_width(&strip.rows[0]) + overflow_width(1) + overflow_width(1),
@@ -3052,7 +3088,7 @@ mod tests {
                 display_width(&strip.rows[0]),
                 usize::from(rect.width),
                 "conservation at allocated 1 for glyph {:?}",
-                indicator_label(&tab.flags, false)
+                indicator_label(&tab.flags, tab.attention, false)
             );
         }
 
@@ -4013,5 +4049,79 @@ mod tests {
         let inputs = TabStrip::from_navigation(&nav, &[]);
         let other = inputs.iter().find(|i| i.session == SessionRef("other".into())).unwrap();
         assert!(!other.flags.busy);
+    }
+
+    /// TAB-04: the live strip paints the attention *kind* — `!` for a
+    /// permission and `?` for a question (`component/session-tabs.tsx:172-174`),
+    /// with permission outranking question for the same tab
+    /// (`context/session-tabs.tsx:165-169`). Before the kind was carried on the
+    /// input, only `!` was reachable.
+    #[test]
+    fn tab_04_live_strip_question_glyph() {
+        use crate::native_navigation::NavigationState;
+        let mut nav = NavigationState::new();
+        nav.open_tab(SessionRef("a".into()));
+        let session = SessionRef("a".into());
+
+        let question = TabStrip::from_navigation(
+            &nav,
+            &[Attention {
+                session: session.clone(),
+                needs_attention: true,
+                kind: TabAttention::Question,
+            }],
+        );
+        assert_eq!(question[0].attention, Some(TabAttention::Question));
+        assert_eq!(
+            indicator_label(&question[0].flags, question[0].attention, false),
+            "?"
+        );
+        let strip = TabStrip::render_with_hover_and_add(
+            &question,
+            TabOrientation::Horizontal,
+            24,
+            1,
+            0,
+            None,
+            true,
+        );
+        assert!(strip.rows[0].contains('?'), "question paints ?: {:?}", strip.rows[0]);
+
+        let permission = TabStrip::from_navigation(
+            &nav,
+            &[Attention {
+                session: session.clone(),
+                needs_attention: true,
+                kind: TabAttention::Permission,
+            }],
+        );
+        assert_eq!(permission[0].attention, Some(TabAttention::Permission));
+        assert_eq!(
+            indicator_label(&permission[0].flags, permission[0].attention, false),
+            "!"
+        );
+
+        // Permission outranks question when both facts name the same tab.
+        let both = TabStrip::from_navigation(
+            &nav,
+            &[
+                Attention {
+                    session: session.clone(),
+                    needs_attention: true,
+                    kind: TabAttention::Question,
+                },
+                Attention {
+                    session: session.clone(),
+                    needs_attention: true,
+                    kind: TabAttention::Permission,
+                },
+            ],
+        );
+        assert_eq!(both[0].attention, Some(TabAttention::Permission));
+
+        // No attention fact: the tab carries no kind and paints idle.
+        let idle = TabStrip::from_navigation(&nav, &[]);
+        assert_eq!(idle[0].attention, None);
+        assert_eq!(indicator_label(&idle[0].flags, idle[0].attention, false), "");
     }
 }
