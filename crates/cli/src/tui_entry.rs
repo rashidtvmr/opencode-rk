@@ -356,6 +356,24 @@ fn composer_enter_plan(
     crate::native_composer::plan_submit(draft, delivery, ctx)
 }
 
+/// CP-08: locate the first queued prompt owned by `active`, not merely the
+/// queue front. Upstream `onEmptySubmit` is session-scoped — it promotes the
+/// first queued prompt *of the current session* (`routes/session/index.tsx:
+/// 1650-1657` `mutatePending("steer", next.id)`), so another session's earlier
+/// entry must never strand the active session's draft. Returns the index and
+/// text of the first owner-matching entry.
+#[cfg(feature = "native")]
+fn next_queued_for_session(
+    queued: &std::collections::VecDeque<(Option<String>, String)>,
+    active: Option<&str>,
+) -> Option<(usize, String)> {
+    queued
+        .iter()
+        .enumerate()
+        .find(|(_, (owner, _))| owner.as_deref() == active)
+        .map(|(index, (_, text))| (index, text.clone()))
+}
+
 #[cfg(feature = "native")]
 fn composer_pointer_event(
     event: native_input_decoder::InputEvent,
@@ -6809,12 +6827,9 @@ fn native_loop(
                 // Enter sends it as a steer (upstream flips the session
                 // inbox entry to steer, `routes/session/index.tsx:1650-1657`).
                 let active = live.as_ref().map(|snapshot| snapshot.session_id.clone());
-                let promote = queued_drafts
-                    .front()
-                    .filter(|(owner, _)| *owner == active)
-                    .map(|(_, text)| text.clone());
-                if let Some(next) = promote {
-                    queued_drafts.pop_front();
+                let promote = next_queued_for_session(&queued_drafts, active.as_deref());
+                if let Some((index, next)) = promote {
+                    queued_drafts.remove(index);
                     crate::native_composer::replace_draft_with_cursor(
                         &mut draft,
                         &mut draft_cursor,
@@ -10300,11 +10315,10 @@ fn native_loop(
                                 // through the ordinary admission chain.
                                 let active =
                                     live.as_ref().map(|snapshot| snapshot.session_id.clone());
-                                let next = queued_drafts.front().filter(|(owner, _)| {
-                                    *owner == active
-                                }).map(|(_, text)| text.clone());
-                                if let Some(next) = next {
-                                    queued_drafts.pop_front();
+                                let next =
+                                    next_queued_for_session(&queued_drafts, active.as_deref());
+                                if let Some((index, next)) = next {
+                                    queued_drafts.remove(index);
                                     crate::native_composer::replace_draft_with_cursor(
                                         &mut draft,
                                         &mut draft_cursor,
@@ -12630,6 +12644,45 @@ mod command_consumption_tests {
                 queued: false,
                 commit_selection: false
             }
+        );
+    }
+
+    /// CP-08 regression: promotion is session-scoped, not queue-front-only.
+    /// Upstream `onEmptySubmit` promotes the first queued prompt *of the
+    /// current session* (`routes/session/index.tsx:1650-1657`); another
+    /// session's earlier entry must never strand the active session's draft.
+    #[test]
+    fn queued_promotion_is_owner_scoped_not_front_only() {
+        use std::collections::VecDeque;
+        // Session A queued before B; A sits at the front.
+        let queued: VecDeque<(Option<String>, String)> = VecDeque::from(vec![
+            (Some("A".to_string()), "a1".to_string()),
+            (Some("B".to_string()), "b1".to_string()),
+            (Some("A".to_string()), "a2".to_string()),
+        ]);
+        // B promotes its own entry (index 1), not the front, leaving A's.
+        assert_eq!(
+            super::next_queued_for_session(&queued, Some("B")),
+            Some((1, "b1".to_string()))
+        );
+        // A promotes its FIRST entry (index 0) and skips B's.
+        assert_eq!(
+            super::next_queued_for_session(&queued, Some("A")),
+            Some((0, "a1".to_string()))
+        );
+        // An owner with nothing queued promotes nothing.
+        assert_eq!(super::next_queued_for_session(&queued, Some("C")), None);
+        // A home window (no active session) never pulls a session-owned entry.
+        assert_eq!(super::next_queued_for_session(&queued, None), None);
+        // Removal by index keeps the other session's drafts intact.
+        let mut q = queued.clone();
+        let (i, _) = super::next_queued_for_session(&q, Some("B")).unwrap();
+        q.remove(i);
+        assert_eq!(
+            q.iter()
+                .map(|(o, t)| (o.as_deref().unwrap(), t.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("A", "a1"), ("A", "a2")]
         );
     }
 
