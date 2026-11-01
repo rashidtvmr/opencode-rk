@@ -2385,6 +2385,57 @@ mod tests {
         assert_eq!(streaming.reused_tokens(), 1);
     }
 
+    /// Streaming table recognition follows upstream GFM parsing: the trailing
+    /// block is reparsed as the separator and body row arrive
+    /// (`markdown-parser.ts:13-24,45-70`; `Markdown.ts:97-109`).
+    #[test]
+    fn md_001_streaming_partial_table_reparses_same_block_as_rows_arrive() {
+        let mut flow = MarkdownFlow::new(MarkdownOptions { streaming: true, ..MarkdownOptions::default() });
+
+        flow.set_content("| a |");
+        assert_eq!(flow.blocks().len(), 1);
+        assert_eq!(flow.blocks()[0].id, 0);
+        assert!(matches!(flow.blocks()[0].kind, BlockKind::Paragraph));
+
+        flow.set_content("| a |\n| --- |");
+        assert_eq!(flow.blocks().len(), 1);
+        assert_eq!(flow.blocks()[0].id, 0);
+        assert!(matches!(flow.blocks()[0].kind, BlockKind::Paragraph));
+
+        flow.set_content("| a |\n| --- |\n| x |");
+        assert_eq!(flow.blocks().len(), 1);
+        assert_eq!(flow.blocks()[0].id, 0);
+        assert!(matches!(flow.blocks()[0].kind, BlockKind::Table));
+        let BlockBody::Table(table) = &flow.blocks()[0].body else { panic!("table body") };
+        assert_eq!(table.rows.len(), 1);
+        assert_eq!(table.rows[0][0].text, "x");
+    }
+
+    /// Incomplete link syntax stays text until Marked recognizes a complete
+    /// link token (`Markdown.ts:598-605,654-683`).
+    #[test]
+    fn md_002_streaming_partial_links_stay_literal_until_closed() {
+        let mut flow = MarkdownFlow::new(MarkdownOptions { streaming: true, ..MarkdownOptions::default() });
+
+        flow.set_content("[lab");
+        assert_eq!(flow.blocks().len(), 1);
+        let BlockBody::Inline(lines) = &flow.blocks()[0].body else { panic!("inline body") };
+        assert_eq!(lines[0].text, "[lab");
+        assert!(lines[0].spans.iter().all(|span| span.role == MarkdownRole::Text));
+
+        flow.set_content("[label](ht");
+        assert_eq!(flow.blocks().len(), 1);
+        let BlockBody::Inline(lines) = &flow.blocks()[0].body else { panic!("inline body") };
+        assert_eq!(lines[0].text, "[label](ht");
+        assert!(lines[0].spans.iter().all(|span| span.role == MarkdownRole::Text));
+
+        flow.set_content("[label](https://example.test)");
+        assert_eq!(flow.blocks().len(), 1);
+        let BlockBody::Inline(lines) = &flow.blocks()[0].body else { panic!("inline body") };
+        assert!(lines[0].spans.iter().any(|span| span.role == MarkdownRole::LinkLabel));
+        assert!(lines[0].spans.iter().any(|span| span.role == MarkdownRole::LinkUrl));
+    }
+
     /// MD-003. Upstream: `Markdown.ts:2170-2192` and
     /// `markdown-parser.ts:13-79` re-parse the final content; block
     /// reconciliation (`Markdown.ts:1995-2085`) keeps one block per token, so
