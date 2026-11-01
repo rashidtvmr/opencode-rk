@@ -304,15 +304,25 @@ impl InterruptArm {
     }
 }
 
-/// `index.tsx:117-136`: arming jumps the flash to 0.75 and tweens it linearly
-/// to zero over 220 ms; with animations disabled the level stays at zero, so
-/// the armed color is the plain warning color.
+/// `index.tsx:117-136`: arming jumps the flash to 0.75 and tweens it to zero
+/// over 220 ms; with animations disabled the level stays at zero, so the armed
+/// color is the plain warning color. `tween` defaults to the `smoothstep` ease
+/// (`ui/animation.ts:32,46-47,177-183`), so `level = 0.75 * (1 - smoothstep(p))`
+/// with `p = elapsed / 220`; a linear ramp would diverge from the painted color.
 #[must_use]
 pub fn interrupt_flash_level(animations: bool, elapsed_since_arm_ms: u64) -> f32 {
     if !animations || elapsed_since_arm_ms >= INTERRUPT_FLASH_MS {
         return 0.0;
     }
-    INTERRUPT_FLASH_PEAK * (1.0 - elapsed_since_arm_ms as f32 / INTERRUPT_FLASH_MS as f32)
+    let progress = elapsed_since_arm_ms as f32 / INTERRUPT_FLASH_MS as f32;
+    let eased = smoothstep(progress);
+    INTERRUPT_FLASH_PEAK * (1.0 - eased)
+}
+
+/// `ui/animation.ts:32`: `tween`'s default ease. `progress * progress * (3 - 2 * progress)`.
+#[must_use]
+fn smoothstep(progress: f32) -> f32 {
+    progress * progress * (3.0 - 2.0 * progress)
 }
 
 // ---------------------------------------------------------------------------
@@ -1631,8 +1641,17 @@ mod native_status_rail_tests {
     #[test]
     fn cp13_interrupt_flash_tween_and_disabled_animations() {
         assert!((interrupt_flash_level(true, 0) - 0.75).abs() < f32::EPSILON);
+        // The tween's default ease is smoothstep (`ui/animation.ts:32`); at the
+        // midpoint, smoothstep(0.5) == 0.5, so it agrees with a linear ramp here.
         assert!((interrupt_flash_level(true, 110) - 0.375).abs() < 0.001);
-        assert!((interrupt_flash_level(true, 219) - 0.003_409).abs() < 1e-5);
+        // Off-midpoint the two diverge: linear would give 0.5625, but
+        // smoothstep(55/220) = smoothstep(0.25) = 0.15625 -> 0.75 * 0.84375.
+        assert!(
+            (interrupt_flash_level(true, 55) - 0.632_812_5).abs() < 1e-6,
+            "smoothstep ease, got {}",
+            interrupt_flash_level(true, 55)
+        );
+        assert!((interrupt_flash_level(true, 219) - 0.75 * (1.0 - smoothstep(219.0 / 220.0))).abs() < 1e-6);
         assert_eq!(interrupt_flash_level(true, 220), 0.0);
         assert_eq!(interrupt_flash_level(false, 0), 0.0);
         assert_eq!(INTERRUPT_FLASH_MS, 220);
