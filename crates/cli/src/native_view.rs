@@ -3027,11 +3027,19 @@ impl NativeView {
             // Queue dock is a composer sibling, inserted immediately above the prompt.
             if !queue_rows.is_empty() {
                 let insert = body.len().saturating_sub(prompt.height);
-                let queue_rows: Vec<String> = queue_rows.into_iter().map(|(text, _)| padded(&text, width)).collect();
-                self.chat_row_classes.splice(insert..insert, std::iter::repeat_n(crate::native_view_chat::ChatRowClass::QueueDock, queue_rows.len()));
-                self.chat_text_bounds.splice(insert..insert, std::iter::repeat_n(None, queue_rows.len()));
-                self.chat_markdown_spans.splice(insert..insert, std::iter::repeat_n(Vec::new(), queue_rows.len()));
-                body.splice(insert..insert, queue_rows);
+                // Honor the per-row classes from `QueueDock::render_rows` (the
+                // two `┃` rails and the summary are `QueueDock`; the trailing
+                // margin row is a `Separator`) instead of retagging every row.
+                let mut queue_texts = Vec::with_capacity(queue_rows.len());
+                let mut queue_classes = Vec::with_capacity(queue_rows.len());
+                for (text, class) in queue_rows {
+                    queue_texts.push(padded(&text, width));
+                    queue_classes.push(class);
+                }
+                self.chat_row_classes.splice(insert..insert, queue_classes);
+                self.chat_text_bounds.splice(insert..insert, std::iter::repeat_n(None, queue_texts.len()));
+                self.chat_markdown_spans.splice(insert..insert, std::iter::repeat_n(Vec::new(), queue_texts.len()));
+                body.splice(insert..insert, queue_texts);
             }
             // The scrollbar reserves its two cells out of the transcript rows
             // only; the composer and footer keep the full padded width, as in
@@ -7983,5 +7991,47 @@ mod composer_dock_tests {
         assert_eq!(view.dock_key(DockKey::Escape), DockKeyOutcome::Closed);
         assert!(!view.dock_open());
         assert!(view.dock_hits().is_empty());
+    }
+
+    // CP-21: the production render boundary publishes queue-dock rows only for
+    // the active session. An empty publish (upstream `queuedPrompts().length >
+    // 0` false, `index.tsx:1591`) paints no `QueueDock` row; a populated
+    // publish paints the upstream rail block (`index.tsx:2485-2513`): two `┃`
+    // rails around the `{n} queued · {flattened next}` summary row.
+    #[test]
+    fn queue_dock_paints_only_the_published_active_session_rows() {
+        use crate::native_view_chat::{ChatRowClass, QueuedPrompt};
+        let mut view = NativeView::new(120, 40);
+        view.set_session_route(true);
+        view.set_model(Some("fixture-model".into()));
+
+        // No publish -> no dock row and no `QueueDock` paint class.
+        view.set_queued_prompts(std::iter::empty());
+        let frame = view.render_typed("draft", &[], false, &[]);
+        assert!(
+            !view.chat_row_classes().contains(&ChatRowClass::QueueDock),
+            "an empty publish paints no queue-dock row"
+        );
+        assert!(
+            !frame.iter().any(|row| row.contains("queued")),
+            "no summary is painted for an empty queue"
+        );
+
+        // Active session's draft published -> the upstream rail block. Newlines
+        // are flattened into the summary (`index.tsx:2487`).
+        view.set_queued_prompts([QueuedPrompt {
+            id: "queued-0".to_string(),
+            text: "hello\nworld".to_string(),
+        }]);
+        let frame = view.render_typed("draft", &[], false, &[]);
+        let queue_rows = view
+            .chat_row_classes()
+            .iter()
+            .filter(|class| **class == ChatRowClass::QueueDock)
+            .count();
+        assert_eq!(queue_rows, 3, "rail, summary, rail (index.tsx:2499-2512)");        assert!(
+            frame.iter().any(|row| row.contains("1 queued · hello world")),
+            "the flattened head prompt is painted: {frame:?}"
+        );
     }
 }

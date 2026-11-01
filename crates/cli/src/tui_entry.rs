@@ -441,6 +441,34 @@ fn next_queued_for_session(
         .map(|(index, (_, text))| (index, text.clone()))
 }
 
+/// CP-21: the active-session queue snapshot published to the composer dock.
+/// Upstream `queuedPrompts` is `route.sessionID`-scoped
+/// (`routes/session/index.tsx:224-228`) and the dock renders only while it is
+/// non-empty (`index.tsx:1591`); with no active session (home) upstream binds
+/// no session route, so nothing is queued and nothing is painted. Ownerless
+/// (`None`) drafts must therefore never be published against a foreign
+/// session. Queue order is preserved and each published id keeps its source
+/// index, so the `queued-{index}` id stays unique across the batch.
+#[cfg(feature = "native")]
+fn publishable_queued_prompts(
+    queued: &std::collections::VecDeque<(Option<String>, String)>,
+    active: Option<&str>,
+) -> Vec<crate::native_view_chat::QueuedPrompt> {
+    let Some(active) = active else {
+        return Vec::new();
+    };
+    queued
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (owner, text))| {
+            (owner.as_deref() == Some(active)).then(|| crate::native_view_chat::QueuedPrompt {
+                id: format!("queued-{index}"),
+                text: text.clone(),
+            })
+        })
+        .collect()
+}
+
 #[cfg(feature = "native")]
 fn composer_pointer_event(
     event: native_input_decoder::InputEvent,
@@ -7636,20 +7664,10 @@ fn native_loop(
         // session (home / no session bound) the queue is never published, so an
         // unowned (`None`) draft can never be shown against a different session.
         let active_queue_session = live.as_ref().map(|snapshot| snapshot.session_id.as_str());
-        if let Some(active) = active_queue_session {
-            view.set_queued_prompts(queued_drafts.iter().enumerate().filter_map(
-                |(index, (owner, text))| {
-                    (owner.as_deref() == Some(active)).then(|| {
-                        crate::native_view_chat::QueuedPrompt {
-                            id: format!("queued-{index}"),
-                            text: text.clone(),
-                        }
-                    })
-                },
-            ));
-        } else {
-            view.set_queued_prompts(std::iter::empty());
-        }
+        view.set_queued_prompts(publishable_queued_prompts(
+            &queued_drafts,
+            active_queue_session,
+        ));
 
         let mut lines = if help_open && !dialog_open {
             Vec::new()
@@ -13001,6 +13019,46 @@ mod command_consumption_tests {
                 .collect::<Vec<_>>(),
             vec![("A", "a1"), ("A", "a2")]
         );
+    }
+
+    /// CP-21: the dock publishes only the ACTIVE session's queued drafts.
+    /// Upstream `queuedPrompts` filters `pending.list(route.sessionID)` to
+    /// `delivery === "queue"` (`routes/session/index.tsx:224-228`) and the dock
+    /// is shown only while that list is non-empty (`index.tsx:1591`). A draft
+    /// owned by another session, or by no session (`None`), must never be
+    /// published; with no active session nothing is published at all.
+    #[test]
+    fn published_queue_dock_is_active_session_scoped() {
+        use std::collections::VecDeque;
+        use crate::native_view_chat::QueuedPrompt;
+        let queued: VecDeque<(Option<String>, String)> = VecDeque::from(vec![
+            (Some("A".to_string()), "a1".to_string()),
+            (Some("B".to_string()), "b1".to_string()),
+            (Some("A".to_string()), "a2".to_string()),
+            (None, "orphan".to_string()),
+        ]);
+
+        // Active B: only B's draft, keeping its source index for a unique id.
+        let published = super::publishable_queued_prompts(&queued, Some("B"));
+        assert_eq!(
+            published,
+            vec![QueuedPrompt { id: "queued-1".to_string(), text: "b1".to_string() }]
+        );
+
+        // Active A: both A drafts, in queue order, foreign/orphan skipped.
+        let published = super::publishable_queued_prompts(&queued, Some("A"));
+        assert_eq!(
+            published,
+            vec![
+                QueuedPrompt { id: "queued-0".to_string(), text: "a1".to_string() },
+                QueuedPrompt { id: "queued-2".to_string(), text: "a2".to_string() },
+            ]
+        );
+
+        // A session with nothing queued publishes nothing.
+        assert!(super::publishable_queued_prompts(&queued, Some("C")).is_empty());
+        // Home window (no active session) publishes nothing (index.tsx:1591).
+        assert!(super::publishable_queued_prompts(&queued, None).is_empty());
     }
 
     #[test]
