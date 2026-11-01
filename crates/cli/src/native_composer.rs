@@ -123,6 +123,8 @@ pub fn apply_line_binding(draft: &str, cursor: &mut usize, byte: u8) -> bool {
     let handled = match byte {
         1 => { buffer.move_to_line_start(); true }
         5 => { buffer.move_to_line_end(); true }
+        11 => buffer.delete_to_line_end(),
+        21 => buffer.delete_to_line_start(),
         _ => false,
     };
     if handled { *cursor = buffer.cursor(); }
@@ -572,6 +574,33 @@ impl EditBuffer {
         self.check();
     }
 
+    /// `input.delete.to.line.end` (Ctrl-K, `keybind.ts:233`): remove from the
+    /// cursor to the end of the logical line, leaving the newline intact.
+    pub fn delete_to_line_end(&mut self) -> bool {
+        let end = self.text[self.cursor..]
+            .find('\n')
+            .map_or(self.text.len(), |i| self.cursor + i);
+        if end == self.cursor {
+            return false;
+        }
+        self.text.replace_range(self.cursor..end, "");
+        self.check();
+        true
+    }
+
+    /// `input.delete.to.line.start` (Ctrl-U, `keybind.ts:234`): remove from the
+    /// start of the logical line to the cursor, leaving the newline intact.
+    pub fn delete_to_line_start(&mut self) -> bool {
+        let start = self.text[..self.cursor].rfind('\n').map_or(0, |i| i + 1);
+        if start == self.cursor {
+            return false;
+        }
+        self.text.replace_range(start..self.cursor, "");
+        self.cursor = start;
+        self.check();
+        true
+    }
+
     /// Up one visual line, keeping the char column when the target line is
     /// long enough. False on the first line.
     pub fn move_up(&mut self) -> bool {
@@ -829,6 +858,10 @@ impl Composer {
                 self.buf.move_to_line_end();
                 true
             }
+            // `input.delete.to.line.end` / `input.delete.to.line.start`
+            // (`keybind.ts:233,234`; Ctrl-K / Ctrl-U).
+            11 => self.buf.delete_to_line_end(),
+            21 => self.buf.delete_to_line_start(),
             _ => false,
         }
     }
@@ -1569,6 +1602,51 @@ mod line_cursor_tests {
         assert_eq!(composer.buffer().cursor(), "a\n".len());
         assert!(composer.handle_line_binding(5));
         assert_eq!(&composer.draft()[composer.buffer().cursor()..], "\nempty\n終");
+    }
+
+    /// CP-05 / `keybind.ts:233,234`: Ctrl-K deletes to the end of the logical
+    /// line and Ctrl-U deletes to its start, both line-local and newline-safe.
+    #[test]
+    fn ctrl_k_and_ctrl_u_delete_to_line_edges() {
+        // Ctrl-K removes the cursor-to-line-end span, keeps the newline.
+        let mut composer = Composer::new();
+        composer.set_draft("first line\nsecond 🦀 tail\nthird").unwrap();
+        composer.buffer_mut().set_cursor("first line\nsecond".len());
+        assert!(composer.handle_line_binding(11));
+        assert_eq!(composer.draft(), "first line\nsecond\nthird");
+        assert_eq!(composer.buffer().cursor(), "first line\nsecond".len());
+        assert!(composer.buffer().is_cursor_on_boundary());
+        // A no-op kill at end of line reports unhandled so the caller can
+        // fall through to its other byte-11 arm.
+        assert!(!composer.handle_line_binding(11));
+        assert_eq!(composer.draft(), "first line\nsecond\nthird");
+
+        // Ctrl-U removes the line-start-to-cursor span, keeps the newline.
+        let mut composer = Composer::new();
+        composer.set_draft("first line\nsecond 🦀 tail\nthird").unwrap();
+        composer.buffer_mut().set_cursor("first line\nsecond 🦀".len());
+        assert!(composer.handle_line_binding(21));
+        assert_eq!(composer.draft(), "first line\n tail\nthird");
+        assert_eq!(composer.buffer().cursor(), "first line\n".len());
+        assert!(composer.buffer().is_cursor_on_boundary());
+        // At line start there is nothing to kill.
+        assert!(!composer.handle_line_binding(21));
+    }
+
+    /// The legacy free-function path used by `tui_entry` shares the same
+    /// semantics.
+    #[test]
+    fn apply_line_binding_kills_to_line_edges() {
+        let draft = "alpha\nbeta 🦀 gamma";
+        let mut cursor = "alpha\nbeta".len();
+        assert!(super::apply_line_binding(draft, &mut cursor, 11));
+        assert_eq!(cursor, "alpha\nbeta".len());
+        let mut cursor = "alpha\nbeta".len();
+        let mut owned = draft.to_owned();
+        assert!(super::apply_line_binding(&owned, &mut cursor, 21));
+        assert_eq!(cursor, "alpha\n".len());
+        owned.replace_range("alpha\n".len().."alpha\nbeta".len(), "");
+        assert_eq!(owned, "alpha\n 🦀 gamma");
     }
 }
 

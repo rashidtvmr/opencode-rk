@@ -9426,13 +9426,19 @@ fn native_loop(
                     }
                 }
             }
-            // Ctrl-K (0x0b): open the local command input — the Commands
-            // page with its static route rows — from Chat. Unoccupied raw
-            // byte (no other arm consumes 0x0b). The composer draft,
-            // including unsent text, is preserved verbatim; typing then
-            // goes exclusively to the bounded command buffer (page
-            // query), never the draft and never a provider turn.
+            // Ctrl-K (0x0b) is upstream `input.delete.to.line.end`
+            // ("Delete to end of line in input", `keybind.ts:233`). When the
+            // composer owns focus and the edit changes the draft, the kill
+            // wins; a no-op kill on an empty/line-end draft falls through to
+            // the Commands page (the local command input) so the advertised
+            // Ctrl-K page entry stays reachable. Draft text is otherwise
+            // preserved verbatim and no provider turn is ever started.
             11 if !page_open && !help_open && matches!(dialog, native_setup::Dialog::None) => {
+                if crate::native_composer::apply_line_binding(&draft, &mut draft_cursor, byte) {
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
                 view.open_commands_page();
                 utf8.reset();
             }
@@ -9469,7 +9475,7 @@ fn native_loop(
                     draft_cursor += 1;
                 }
             }
-            1 | 5 if !page_open && !help_open && matches!(dialog, native_setup::Dialog::None) => {
+            1 | 5 | 21 if !page_open && !help_open && matches!(dialog, native_setup::Dialog::None) => {
                 if crate::native_composer::apply_line_binding(&draft, &mut draft_cursor, byte) {
                     utf8.reset();
                     needs_paint = true;
