@@ -781,6 +781,11 @@ pub enum ChatRowClass {
     /// Cancelled child-completion notice, `Theme.text.feedback.warning.base`
     /// (`index.tsx:2130`).
     NoticeWarning,
+    /// Retry notice row (`AssistantRetry`, `index.tsx:2559-2566`): the
+    /// `⚠ {Retrying in Ns|Retry due} · attempt N · {message}` line paints
+    /// `Theme.text.feedback.warning.base`, not the tool-error fg it used to
+    /// reuse. The row stays in the transcript while the prompt streams/retries.
+    RetryNotice,
     /// `◇ Compaction queued` divider: muted label and glyph between
     /// `Theme.border.base` rules (`index.tsx:2239-2252`).
     CompactionQueued,
@@ -2485,7 +2490,7 @@ fn typed_message_rows_with_prefix_spans_mode(
                     width,
                     &format!("[retry {attempt}] {message}"),
                     "  ",
-                    ChatRowClass::ToolError,
+                    ChatRowClass::RetryNotice,
                 );
             }
             ChatPart::Step { kind, detail } => {

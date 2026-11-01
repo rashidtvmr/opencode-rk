@@ -2690,6 +2690,7 @@ fn chat_row_foreground(class: &crate::native_view_chat::ChatRowClass, text_color
         ChatRowClass::DiffAdded => text_color,
         ChatRowClass::DiffRemoved => error,
         ChatRowClass::ToolError => error,
+        ChatRowClass::RetryNotice => warning,
         ChatRowClass::ToolPermission => warning,
         ChatRowClass::ToolDenied => muted,
         ChatRowClass::FooterError => error,
@@ -2737,6 +2738,7 @@ fn chat_row_is_selectable(class: Option<&crate::native_view_chat::ChatRowClass>)
                 | ChatRowClass::ToolError
                 | ChatRowClass::DiffAdded
                 | ChatRowClass::DiffRemoved
+                | ChatRowClass::RetryNotice
         )
     )
 }
@@ -2808,6 +2810,22 @@ mod footer_v3_painter_tests {
             chat_row_foreground(&ChatRowClass::AssistantFooter, text_color, muted, error, warning),
             muted,
             "upstream footer field spans fg = theme.text.muted"
+        );
+    }
+
+    /// CP-42: a streaming/retry transcript notice paints
+    /// `theme.text.feedback.warning.base` (`index.tsx:2559-2566`), not the
+    /// tool-error fg it previously reused via `ChatRowClass::ToolError`.
+    #[test]
+    fn retry_notice_row_uses_warning_foreground() {
+        let text_color = Rgba::rgb(1, 2, 3);
+        let muted = Rgba::rgb(4, 5, 6);
+        let error = Rgba::rgb(7, 8, 9);
+        let warning = Rgba::rgb(10, 11, 12);
+        assert_eq!(
+            chat_row_foreground(&ChatRowClass::RetryNotice, text_color, muted, error, warning),
+            warning,
+            "upstream retry notice fg = theme.text.feedback.warning.base"
         );
     }
 
