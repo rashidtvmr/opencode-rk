@@ -10474,3 +10474,61 @@ combined 5, xkiro-luna 4, mimo 3, luna-free 1, th-free 1.
 Structural blockers (THEME-14 arena, FFI-02/04/11 scene/frame, TAB-21
 route+client, dialog state-holders) remain recorded and are not re-dispatched as
 small slices.
+
+## Wave-20 integration + wave-21 dispatch (2026-11-01)
+
+**Landed (base `5e63de9d` -> HEAD `5f495128`):**
+- `ac10a10a` **FORM-003** — matcher/validation already landed; only the
+  regex-subset fail-closed decision was unpinned. Added fail-closed doc at
+  `native_view_dialogs.rs:2011` + look-around assertion. CLI 2111/0.
+- `0cb73b0c` **MSG-005** — `user_rail_color`/`user_rail_color_for_delivery`
+  (exact `delivery ? border_base : agent_color`, no blend) + `user_chip_label`.
+  `native_message_rows.rs`. CLI 2112/0.
+- `4765733a` **SIDE-10 part 2** — `SessionService::set_revert` +
+  `Storage::set_session_revert` + `POST /api/sessions/{id}/revert/stage` + test
+  `session_revert_stage.rs`. sessions 44/0, server 305/0.
+- `53192632` **TAB-21 part 2** — `Timestamp::from_epoch_millis`;
+  `SessionService::set_viewed(id, idle)` applying the upstream skip guard
+  (`session.ts:61-69`); `POST /api/sessions/{id}/view` -> `204 No Content`
+  (protocol `session.ts:805-817`); monotone `max(idle, coalesce(viewed, idle))`
+  watermark; test `session_view.rs` proves a newer idle advances and a stale one
+  never regresses. contracts 13/0, storage 124/0, sessions 44/0, server 305/0.
+  Named `(c)`: client `ViewAcknowledgement::observe/poll` + the `time.idle`
+  producer are still absent.
+- `5f495128` **MSG-006 consumer** — wave-19 worker's bounded candidate (the
+  "missing dialog host" premise was wrong: the `MenuFrame` blitter + owner map +
+  `rename_input` input ownership all existed). Mouse-up (kind==2) with no copied
+  selection resolves `chat_message_owner_at(y)` (frame-absolute) and opens
+  `menu_for_message` for a `UserCard`; modal owned-input closes on
+  Escape/Ctrl-C/Ctrl-D/Enter; `message_menu_frame` centers the model's
+  `render_rows`. CLI 2113/0. Named gaps: option-effect dispatch, pointer option
+  selection, native `DialogSelect` chrome.
+
+**Wave-20 verdicts (all handoffs on disk):** W20-VERIFY-SIDE (03/04/05,09
+`needs_fix`; exact seam `tui_entry.rs:6816` Usage arm); W20-VERIFY-CP-HIGH
+(19/24/25 live; 16/18/20/23 partial; 22/26/27 missing host); W20-VERIFY-DIALOG
+(01/03/04/18 `a`; 02/05-17 `needs_fix`: no `DialogSelect`/`DialogPrompt`/
+`DialogConfirm`); W20-VERIFY-LAY (01..16 live; 13/17 `needs_fix`); W20-VERIFY-CP-LOW
+(05/06/10 `a`; 03/07/09/11/13/14/15 `needs_fix`); W20-VERIFY-MSG (004 `a`;
+005/006..010 `needs_fix`, MSG-006+007 share the transcript mouse-up dispatcher
+`tui_entry.rs:9348`, MSG-008+010 share `native_footer.rs:130`); W20-VERIFY-PAR
+(01/23 `a`; most `(c)`/`needs_fix` — only oc2-vs-oc2 goldens, no upstream
+capture); W20-VERIFY-MD-MEDIA (MD-006 orphaned, MD-008/009 fall back — no
+painter/engine injected, MEDIA-001 gallery test-only); W20-VERIFY-TAB13-24 (all
+`a` wiring-verified); W20-VERIFY-STATE-FORM (FORM-001/002 `a`; rest `needs_fix`);
+W20-VERIFY-THEME05-09 (all `needs_fix`); W20-REVIEW-WAVE19 (THEME-16/LAY-08
+approve; CP-21 needs_fix; TAB-21 p1 dead slice -> fixed in p2 above).
+W20-CP12-BLIT / W20-SIDE14-HOVER / W20-DIFF004-WIRE drafted but did not land
+(DIFF-004 worker produced no change — `.new` == `.orig`).
+
+**Wave-21 dispatched (20 workers, base `5f495128`)** — see
+`briefs/WAVE21-TASKS.md`. 8 bounded implementers on `@vyce-deepseek-v41` (cap):
+CP-12 blit, SIDE-14 hover, THEME-09 diff palette, SIDE-03/04/05 usage classes,
+CP-23 dock tabs, TOOL-006 background shell, MSG-008/010 tps, TOOL-008 subtask nav.
+Verifiers/reviewers: CP-RESIDUAL, DIALOG13-18, REVIEW-WAVE20, THEME-RESIDUAL on
+`@9router-vyce-deepseek-v4.1-free-combined`; FFI, LAY-RESIDUAL, DIALOG-SELECT-PROBE
+on `@xkiro-gpt-6-luna`; FORM-STATE, MD-EXEC, PAR2 on `@xkiro-mimo-v2-6-flash`;
+SIDE-RESIDUAL on `@9router-th-free`; OBLIGATION-DELTA5 on `@9router-luna-free`.
+Each implementer brief pins one exact seam `file:line` so a step-capped worker
+still leaves an honest artifact. Structural (`(c)`) families remain: THEME-14
+effect.
