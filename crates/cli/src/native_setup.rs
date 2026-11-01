@@ -1,5 +1,6 @@
 //! Catalogue-backed native model choices and upstream-compatible model recents.
 use serde_json::{json, Value};
+use crate::native_palette::pickers;
 use std::{
     env, fs,
     fs::OpenOptions,
@@ -74,6 +75,41 @@ pub(super) fn move_row(row: usize, visible_len: usize, down: bool) -> usize {
 pub(super) fn selected_row(models: &[Model], query: &str, row: usize) -> Option<Model> {
     let rows = visible_rows(models, query);
     rows.get(clamp_row(row, rows.len())).and_then(|index| models.get(*index)).cloned()
+}
+
+/// Catalogue indices in `ModelPickerState` order. An empty query is the full
+/// picker order (favorites, then recents, then the remaining catalogue);
+/// a non-empty query falls back to the fuzzy `visible_rows` filter. Recents are
+/// the only fact source wired today (`save_model`/`recent_selected` above);
+/// variants/favorites/free flags have no native source yet, so candidates carry
+/// honest `free=false, deprecated=false`.
+pub(super) fn picker_rows(
+    models: &[Model],
+    query: &str,
+    picker: &pickers::ModelPickerState,
+    recents: &[pickers::ModelKey],
+) -> Vec<usize> {
+    if !query.trim().is_empty() {
+        return visible_rows(models, query);
+    }
+    let candidates: Vec<pickers::ModelCandidate> = models
+        .iter()
+        .map(|model| pickers::ModelCandidate {
+            provider: model.provider_id.clone(),
+            id: model.id.clone(),
+            title: model.name.clone(),
+            free: false,
+            deprecated: false,
+        })
+        .collect();
+    pickers::order_models(&candidates, picker.favorites_at_open(), recents, true, false)
+        .iter()
+        .filter_map(|candidate| {
+            models
+                .iter()
+                .position(|model| model.provider_id == candidate.provider && model.id == candidate.id)
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -419,6 +455,21 @@ mod picker_tests {
             Model { id: "x".into(), name: "Acme X".into(), provider_id: "acme".into(), context_window: None },
             Model { id: "gpt-5.6".into(), name: "Fallback".into(), provider_id: "openai".into(), context_window: None },
         ]
+    }
+
+    #[test]
+    fn picker_rows_orders_recents_first_for_empty_query() {
+        let models = vec![
+            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None },
+            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None },
+            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None },
+        ];
+        let picker = pickers::ModelPickerState::open(&[]);
+        let recents = vec![("p".to_owned(), "c".to_owned()), ("p".to_owned(), "a".to_owned())];
+        assert_eq!(picker_rows(&models, "", &picker, &recents), vec![2, 0, 1]);
+        assert_eq!(picker_rows(&models, "  ", &picker, &recents), vec![2, 0, 1]);
+        assert_eq!(picker_rows(&models, "b", &picker, &recents), vec![1]);
+        assert_eq!(picker_rows(&models, "B", &picker, &[]), vec![1]);
     }
 
     #[test]
