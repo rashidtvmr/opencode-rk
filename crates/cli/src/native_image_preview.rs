@@ -443,11 +443,23 @@ pub struct PreviewAction {
     pub key: &'static str,
 }
 
+/// Resource-load phase of the preview image (`diff-viewer-image.tsx:36-42`):
+/// the bytes decode asynchronously, so the surface is `Loading` until the image
+/// resource resolves and then `Ready`. The pinned dialog itself carries only a
+/// `failed` signal (`dialog-image-preview.tsx:17`); this mirrors the load phase
+/// MEDIA-001 ("loading, ready, ... error") requires.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewLoad {
+    Loading,
+    Ready,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ImagePreviewState {
     images: Vec<PreviewImage>,
     index: usize,
     failed: bool,
+    load: PreviewLoad,
 }
 
 impl ImagePreviewState {
@@ -463,6 +475,7 @@ impl ImagePreviewState {
             images,
             index,
             failed: false,
+            load: PreviewLoad::Ready,
         })
     }
 
@@ -504,6 +517,22 @@ impl ImagePreviewState {
     #[must_use]
     pub fn failed(&self) -> bool {
         self.failed
+    }
+
+    /// Mark the image as still decoding; the surface renders the muted
+    /// `Loading image…` slot (`diff-viewer-image.tsx:38-40`) and paints no box.
+    pub fn mark_loading(&mut self) {
+        self.load = PreviewLoad::Loading;
+    }
+
+    /// Mark the image as decoded (`diff-viewer-image.tsx:41-88`).
+    pub fn mark_ready(&mut self) {
+        self.load = PreviewLoad::Ready;
+    }
+
+    #[must_use]
+    pub fn is_loading(&self) -> bool {
+        self.load == PreviewLoad::Loading
     }
 
     /// `dialog-image-preview.tsx:41`
@@ -799,7 +828,7 @@ impl PreviewSurface {
     #[must_use]
     pub fn image_box(&self, width: u16, height: u16) -> Option<FitBox> {
         let body = self.body_rows(width, height);
-        if body == 0 || !self.protocol.draws() || self.state.failed() {
+        if body == 0 || !self.protocol.draws() || self.state.failed() || self.state.is_loading() {
             return None;
         }
         let natural = self.natural.unwrap_or(ImageSize::new(0, 0));
@@ -846,6 +875,13 @@ impl PreviewSurface {
             if let Some(row) = out.get_mut(1) {
                 row.text = centered("No preview", width);
                 row.role = PreviewRole::Error;
+            }
+        } else if self.state.is_loading() && body_rows > 0 {
+            // Decoding in progress (`diff-viewer-image.tsx:38-40`): a muted
+            // slot, never the error fallback. The footer caption is unaffected.
+            if let Some(row) = out.get_mut(1) {
+                row.text = centered("Loading image…", width);
+                row.role = PreviewRole::Caption;
             }
         } else if !self.protocol.draws() && body_rows > 0 {
             if let Some(row) = out.get_mut(1) {
@@ -1523,5 +1559,30 @@ mod tests {
         }
         assert!(surface.rows(0, 10).is_empty());
         assert!(surface.rows(10, 0).is_empty());
+    }
+
+    // MEDIA-001 loading phase: an undecoded image renders the muted
+    // `Loading image…` slot, keeps the footer caption, and has no image box
+    // until it becomes ready (`diff-viewer-image.tsx:36-42`).
+    #[test]
+    fn media001_preview_loading_slot() {
+        let state = ImagePreviewState::open(images(2), 0).expect("two images");
+        let mut surface =
+            PreviewSurface::dialog(state, ImageProtocol::Kitty, Some(ImageSize::new(4, 4)));
+        assert!(!surface.state().is_loading(), "ready by default");
+        assert!(surface.image_box(60, 12).is_some());
+        surface.state_mut().mark_loading();
+        assert!(surface.state().is_loading());
+        assert!(surface.image_box(60, 12).is_none(), "no box while decoding");
+        let rows = surface.rows(60, 12);
+        assert_eq!(rows[1].role, PreviewRole::Caption);
+        assert!(rows[1].text.contains("Loading image"), "{:?}", rows[1].text);
+        assert_eq!(rows[1].text.chars().count(), 60, "slot fills the row");
+        // The footer caption is unaffected by the load phase.
+        assert_eq!(rows[10].text, "[Image 1]");
+        surface.state_mut().mark_ready();
+        assert!(!surface.state().is_loading());
+        assert!(surface.image_box(60, 12).is_some());
+        assert!(surface.rows(60, 12)[1].text.is_empty(), "ready body is blank");
     }
 }
