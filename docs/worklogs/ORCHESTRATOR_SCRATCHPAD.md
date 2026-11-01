@@ -10277,3 +10277,64 @@ lacks specification goldens / an upstream capture adapter, and oc2 self-captures
 must not be treated as proof of parity. Dispatched `W14-EVIDENCE-GOLDENS` to
 produce a concrete upstream-capture adapter plan (styled cells + cursor/focus +
 action traces from the pinned upstream commit).
+
+## Window 2026-11-01 (wave 16 integration) — HEAD `664b7b3f`
+
+**Landed this window** (each: guard GREEN + focused test + full `oc2` suite on
+the integrated SHA):
+- `cd5666cb` **F2 review fix** — `native_paste::reconcile_parts` keeps tracked
+  folded ranges coherent after arbitrary edits / clear-replace (paint-site
+  reconcile covers free helpers); removed the raw paste-size precheck so a large
+  multi-line body folds. 2069/0.
+- `1f60234b` **CP-01/02/04** — prompt rail input cap keyed on TERMINAL height via
+  `native_prompt_layout::editor_max_rows` (13 rows @40, was 14). 2070/0.
+- `2cd282fe` **CP-40** — `expand_directory` + `set_directory`/`directory`; a
+  directory-valued completion expands on accept (autocomplete.tsx:640-663). Fixed
+  the candidate's colliding test fixture (`@src` vs `@src/café.rs`).
+- `4a4e27cd` **CP-39** — anchor-based popup test against the live composer path
+  (`panel_at` × `composer_region`); re-authored (candidate landed its test after
+  the module close). 2072/0.
+- `a111312b` **CP-08/CP-35** — `native_paste::expand_for_submit` expands folded
+  placeholders into the SUBMITTED body (queue enqueue + `Dialog::None` submit),
+  display untouched. Fixed the candidate's borrow error. 2073/0.
+- `648967ad` **THEME-10** — reconciled two overlapping candidates into ONE:
+  experiment-gated `opencode2` (`config_new_designs` strict `=== true`,
+  `named_gated`, `opencode2(mode)`; asset `crates/cli/assets/opencode2.json`
+  byte-identical to pinned upstream, sibling of `opencode-v2.json`); picker never
+  enumerates it. 2076/0.
+- `73db8fc2` **CP-42** — retry notice paints the warning fg (`ChatRowClass::RetryNotice`)
+  not tool-error. 2077/0.
+- `0394c579` **SIDE-12** — `persisted_auth::any_connected_provider` +
+  `view.set_onboarding` after preferences load; fixed the candidate's type
+  mismatch (two `native_sidebar` module instances — use the
+  `native_view_status::native_sidebar` one `StatusView` paints). 2077/0.
+- `c18773a2` **CP-12** — `FooterCell` + `status_paint_cells` (per-cell scanner
+  RGB over the composer bg; `None` for non-running). 2078/0.
+- `56c9ed42` **CP-21** — queue dock producer: `set_queued_prompts` fed each frame
+  with ONLY the active session's drafts; rows spliced as composer siblings.
+  Repaired a corrupted doc/attribute splice from the candidate. 2078/0.
+- `664b7b3f` **TAB-21** — `InputEvent::FocusGained/FocusLost` decoded from exact
+  CSI I/O; native loop edge-dedups into `client_focused` before dialog dispatch.
+  2079/0.
+
+**Rejected/queued:** `W16-SIDE10-RENDER` was a test-only adapter with no producer
+(`SessionRevert.revert` is always `None`) — reverted rather than adding dead code;
+queued as `W17-SIDE10-PRODUCER`.
+
+**Wave-17 dispatched (20 workers, base `664b7b3f`)** — see
+`briefs/WAVE17-TASKS.md`. Targets the reviewer-flagged dead model halves
+(SIDE-14 hover producer, SIDE-10 revert producer, CP-40 wiring, CP-35 migrate,
+MSG-006 menu, F3 dock click, DIALOG-12 render wiring, TAB-24 generate, SIDE-08
+dialog) plus the uncovered `(iii)` obligations (TAB-07/08/09, TAB-10/11/12,
+LAY-01/02/06-09/11, PAR-01/03/04/05/06, PAR-22), an independent
+`W17-REVIEW-WAVE16`, and `W17-OBLIGATION-DELTA` re-bucketing.
+
+**Evidence limitation (unchanged):** `W16-PARITY-GOLDENS-IMPL` ran the pinned
+upstream headlessly via Bun and captured one styled-span+cursor fixture
+(`evidence/W16-PARITY-GOLDENS-IMPL/upstream-basic.json`), but the OpenTUI
+dependency resolves 0.4.5 vs kit-required 0.6.8 — must fail-closed before any
+capture is treated as acceptance. oc2 self-captures are never the oracle.
+
+**Note:** wave-16 lost 10 packages to silent step-capped completion (no
+artifacts). Wave-17 briefs instruct writing `handoff.json` in the last 3 steps
+AND early for LARGE packages.
