@@ -107,7 +107,7 @@ use opencode_rk_agents::agent_executor::AgentExecutor;
 use opencode_rk_catalog::{Catalog, CatalogQuery};
 use opencode_rk_contracts::{
     ArtifactId, ArtifactKind, AttachmentId, MAX_DRAFT_ATTACHMENT_BYTES, MessageId, MessageRecord,
-    MessageRole, PayloadRef, SessionId, Timestamp, WIRE_SCHEMA_VERSION,
+    MessageRole, PayloadRef, SessionId, SessionRevert, Timestamp, WIRE_SCHEMA_VERSION,
 };
 use opencode_rk_providers::custom_provider::{self, CustomProviderConfig};
 use opencode_rk_providers::responses::{
@@ -232,6 +232,7 @@ pub fn router_with_events_and_integration(
         .route("/api/sessions/live", get(list_live_sessions))
         .route("/api/sessions/{id}", get(get_session).patch(rename_session))
         .route("/api/sessions/{id}/archive", post(archive_session))
+        .route("/api/sessions/{id}/revert/stage", post(stage_session_revert))
         .route("/api/sessions/{id}/compact", post(compact_session))
         .route("/api/sessions/{id}/compaction/settings", get(compaction_settings::get).put(compaction_settings::put).layer(DefaultBodyLimit::max(4096)))
         .route("/api/sessions/{id}/context", get(context_http::get))
@@ -1166,6 +1167,43 @@ async fn archive_session(
     state
         .sessions
         .archive(id)
+        .await
+        .map_err(ApiFailure::internal)?;
+    let session = state.sessions.get(id).await.map_err(ApiFailure::internal)?;
+    Ok(Json(json!({"session":session})))
+}
+
+#[derive(Debug, Deserialize)]
+struct StageRevertBody {
+    #[serde(rename = "messageID")]
+    message_id: MessageId,
+}
+
+/// Upstream `POST /api/session/:sessionID/revert/stage`
+/// (`packages/protocol/src/groups/session.ts:465-480`) resolves the revert
+/// boundary in `SessionRevert.stage` (`packages/core/src/session/revert.ts:22-56`)
+/// and returns `Session.Revert`. The full algorithm needs `Snapshot.Service`
+/// (`revert.ts:32`) to capture, restore and diff files; oc2 has no snapshot
+/// service, so this route records the boundary fact (`messageID`) through
+/// `Storage::set_session_revert` and returns the updated session, which get()
+/// serializes with `revert.messageID`. The optional `files` payload field is
+/// accepted by serde's default (unknown fields ignored) but no file changes are
+/// applied.
+async fn stage_session_revert(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<StageRevertBody>,
+) -> Result<Json<Value>, ApiFailure> {
+    let id = parse_session_id(&id)?;
+    let revert = SessionRevert {
+        message_id: body.message_id,
+        part_id: None,
+        snapshot: None,
+        files: None,
+    };
+    state
+        .sessions
+        .set_revert(id, Some(revert))
         .await
         .map_err(ApiFailure::internal)?;
     let session = state.sessions.get(id).await.map_err(ApiFailure::internal)?;

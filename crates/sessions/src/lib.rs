@@ -58,7 +58,8 @@ use chrono::{DateTime, Utc};
 use opencode_rk_contracts::{
     ArtifactDocument, ArtifactId, ArtifactKind, ArtifactSummary, AssistantActivity, AttachmentId,
     DraftAttachment, MAX_REASONING_SUMMARY_BYTES, MAX_TITLE_BYTES, MessageExecution, MessageId,
-    MessageRecord, MessageRole, PayloadRef, SessionId, SessionState, SessionSummary, Timestamp,
+    MessageRecord, MessageRole, PayloadRef, SessionId, SessionRevert, SessionState,
+    SessionSummary, Timestamp,
 };
 use opencode_rk_storage::{CatalogV2, NewMessage, NewSession, Storage, V2Writer};
 pub use opencode_rk_storage::StorageError;
@@ -573,6 +574,21 @@ impl SessionService {
         let storage = Arc::clone(&self.storage);
         run_blocking(move || storage.archive_session(id, Timestamp::now())).await?;
         Ok(())
+    }
+    /// Stage or clear the session's revert boundary fact. Mirrors the persisted
+    /// half of upstream `SessionRevert.stage`
+    /// (`packages/core/src/session/revert.ts:45-53`) -> `RevertEvent.Staged`
+    /// (`packages/core/src/session/projector.ts:761-781`): store the boundary on
+    /// the session row so get/list serialize `revert.messageID`. Upstream's
+    /// snapshot capture/restore/diff (`revert.ts:32-44`) needs `Snapshot.Service`,
+    /// which oc2 does not yet provide; this records the boundary only.
+    pub async fn set_revert(
+        &self,
+        id: SessionId,
+        revert: Option<SessionRevert>,
+    ) -> Result<(), SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.set_session_revert(id, revert.as_ref(), Timestamp::now())).await
     }
     pub async fn append_text(
         &self,
