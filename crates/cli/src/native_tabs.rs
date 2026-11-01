@@ -120,6 +120,29 @@ impl TabInput {
     }
 }
 
+/// Walk a session's `parent` links among the currently open tabs. Returns true
+/// when `session` is a descendant of `ancestor`. Cycle-safe.
+///
+/// Port of the family walk behind `context/session-tabs.tsx:127-131` +
+/// `packages/client/src/solid/data.ts:545-555` (`resolveRoot`), restricted to
+/// the parent links the native navigation retains (`Tab.parent`, set by
+/// `open_forked`). A descendant with no open tab is not reachable here.
+fn is_descendant(nav: &NavigationState, session: &SessionRef, ancestor: &SessionRef) -> bool {
+    let tabs = nav.tabs();
+    let mut current: &SessionRef = session;
+    for _ in 0..tabs.len() {
+        let Some(tab) = tabs.iter().find(|t| &t.session == current) else {
+            return false;
+        };
+        let Some(parent) = &tab.parent else { return false };
+        if parent == ancestor {
+            return true;
+        }
+        current = parent;
+    }
+    false
+}
+
 /// Visible-cluster fade window for an overflowing title, a port of
 /// `session-tabs.tsx:230-236` `fadeTitleColor`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -624,6 +647,17 @@ impl TabStrip {
                         .map(|a| a.session == tab.session)
                         .unwrap_or(false),
                 );
+                // `context/session-tabs.tsx:171-176`: any running family member
+                // marks the root tab busy. Roll open descendant tabs up so a
+                // child's work state reaches its parent tab.
+                if !input.flags.busy
+                    && nav.tabs().iter().any(|candidate| {
+                        is_descendant(nav, &candidate.session, &tab.session)
+                            && nav.work_state(&candidate.session) == Some(WorkState::Running)
+                    })
+                {
+                    input.flags.busy = true;
+                }
                 input.flags.needs_attention = attention
                     .iter()
                     .any(|a| a.session == tab.session && a.needs_attention);
@@ -3723,5 +3757,28 @@ mod tests {
             frames.push(marquee.offset());
         }
         assert_eq!(frames, vec![1, 2, 3, 4, 5, 6, 7, 8, 0, 0]);
+    }
+
+    #[test]
+    fn tab_05_running_child_marks_the_parent_tab_busy() {
+        use crate::native_navigation::{DaemonEvent, NavigationState, WorkState};
+        let mut nav = NavigationState::new();
+        nav.open_tab(SessionRef("parent".into()));
+        nav.open_forked(SessionRef("child".into()), SessionRef("parent".into()));
+        // The child runs; the parent has no work state of its own.
+        nav.apply(DaemonEvent::WorkState {
+            session: SessionRef("child".into()),
+            state: WorkState::Running,
+        });
+        let inputs = TabStrip::from_navigation(&nav, &[]);
+        let parent = inputs.iter().find(|i| i.session == SessionRef("parent".into())).unwrap();
+        let child = inputs.iter().find(|i| i.session == SessionRef("child".into())).unwrap();
+        assert!(parent.flags.busy, "a running family member marks the root tab busy");
+        assert!(child.flags.busy);
+        // An unrelated tab is unaffected.
+        nav.open_tab(SessionRef("other".into()));
+        let inputs = TabStrip::from_navigation(&nav, &[]);
+        let other = inputs.iter().find(|i| i.session == SessionRef("other".into())).unwrap();
+        assert!(!other.flags.busy);
     }
 }
