@@ -10425,3 +10425,52 @@ and recorded the structural blockers.
 
 **Wave-19 planned** — target only clear, bounded seams; leave the multi-crate
 transport blockers recorded rather than re-dispatching them.
+
+## Window — wave-19 collection + integration (base `62e2b106` -> HEAD `5e63de9d`)
+
+Wave-19 was 20 workers on `62e2b106` (see `briefs/WAVE19-TASKS.md`). The
+verification packages completed; the bounded implementers again step-capped with
+draft artifacts. Landed one at a time (compile + focused test + full suite +
+immediate commit):
+
+- `a86f7e6f` **THEME-16** — real behavior fix: upstream `util/selection.ts:44-62`
+  never clears on a successful copy and `handleSelectionKey:78-95` clears only on
+  the FAILURE branch; native was inverted. Added `TextSelection::has_selection`,
+  a production-scope `CtrlCCopy` outcome enum, and rewired the Ctrl+C arm.
+  2107/0.
+- `3e80c81e` **CP-21** — extracted `publishable_queued_prompts` (active-session
+  scope) + two production-boundary tests. The new render test exposed a real
+  splice bug: the queue-dock splice retagged every row `QueueDock` but
+  `QueueDock::render_rows` returns rails+summary as `QueueDock` and a trailing
+  margin as `Separator`; fixed to honor per-row classes. 2109/0.
+- `55653467` **LAY-08 + THEME-15** — added
+  `NativeView::narrow_sidebar_overlay_open()` (visible && !wide) and an
+  Escape/Ctrl+C close arm mirroring `routes/session/index.tsx:252-261`; THEME-15
+  default-cursor test. 2111/0.
+- `5e63de9d` **TAB-21 part 1** — `SessionSummary.viewed_at` contract + storage
+  `viewed_at` column (fresh DDL + pragma-guarded ALTER) + `set_session_viewed` +
+  decoder; the `max(idle, coalesce(viewed, idle))` clamp and POST route are named
+  `(c)` follow-ups. storage 124/0, sessions 44/0, server 305/0, contracts 13/0,
+  cli 2111/0. main fixed the candidate's by-value `Timestamp::to_rfc3339`
+  closure and four missed initializers.
+
+**Wave-19 verdicts collected:** W19-REVIEW-WAVE18 flagged `b820256c` MSG-006,
+`f2749134` FFI-08, `14256579` PAR-22, `71372c9e` SIDE-10 as dead slices (producer
+without a non-test consumer) — FFI-08/SIDE-10 are now genuinely wired by later work
+(FFI-08 by the bridge, SIDE-10 by the storage seam). W19-THEME01-09: 01-04 `a`,
+05-09 `needs_fix` (missing live consumers). W19-TAB08-12, W19-LAY06-11,
+W19-DIALOG01-10, W19-FFI01-11 all returned per-obligation tables. W19-AI-AUDIT
+and W19-OBLIGATION-DELTA3 step-capped before `obligations.md`.
+
+**Wave-20 dispatched (21 workers, base `5e63de9d`)** — see
+`briefs/WAVE20-TASKS.md`. 7 bounded implementers (CP-12 blit, SIDE-14 hover,
+TAB-21 view route, SIDE-10 revert-stage route, DIFF-004 wire, FORM-003 pattern,
+MSG-005 rail) on `@vyce-deepseek-v41`; 5 verifiers (THEME-05-09, MSG, TOOL,
+STATE-FORM) + W20-REVIEW-WAVE19 on `@9router-vyce-deepseek-v4.1-free-combined`;
+4 verifiers (CP-LOW, CP-HIGH, DIALOG, LAY) on `@xkiro-gpt-6-luna`; 3 verifiers
+(PAR, MD-MEDIA, TAB13-24) on `@xkiro-mimo-v2-6-flash`; W20-OBLIGATION-DELTA4 on
+`@9router-luna-free`; W20-VERIFY-SIDE on `@9router-th-free`. Route caps: vyce 7/8,
+combined 5, xkiro-luna 4, mimo 3, luna-free 1, th-free 1.
+Structural blockers (THEME-14 arena, FFI-02/04/11 scene/frame, TAB-21
+route+client, dialog state-holders) remain recorded and are not re-dispatched as
+small slices.
