@@ -9796,3 +9796,30 @@ builds. Two already worked; one had a real root cause and is fixed.
 - **Remaining SIDE gaps**: cost/limit classes need producers (usage classes
   and model limits are not on the live wire), footer hover menu + copy/open
   actions, MCP click semantics, disclosure persistence, onboarding actions.
+
+## 2026-11-01 — TAB-08 four-cell fade (landed, aff6a3a5)
+
+- **Contract**: `packages/tui/src/component/session-tabs.tsx:230-236`
+  `fadeTitleColor`: left ramp only when the marquee's leading opacity is on
+  (`* leading`), right ramp always for an overflowing title, window = the
+  visible clusters of the exact title budget, `titleWidth > FADE_WIDTH`.
+- **Model**: `native_tabs::TitleFade { start, length, leading }` with
+  `weight()`/`color()` over the shared `tint`; `TabStrip.row_fades` carries
+  one window per visible horizontal row; `native_tab_rail::RailRow.fade`
+  carries the expanded title/detail window. Both use the visible cluster
+  count (`take_width` result), never the padded slot width.
+- **Paint**: horizontal title segments use `paint_tab_title_faded` when a
+  window exists; `paint_styled_rail_row` applies the window per cluster for
+  Title/Detail/Search roles before the dim-alpha conversion.
+- **Validation**: `tab_08b_rows_report_the_exact_fade_window`,
+  `expanded_rows_carry_the_four_cell_fade_window`; installed journeys
+  `/tmp/oc2-verify/verify_tab_fade.py` (horizontal) and
+  `/tmp/oc2-verify/verify_rail_fade.py` (vertical) read the replay fg/bg and
+  measure the trailing ratios 0.798/0.558/0.321/0.078 (expected
+  0.8/0.56/0.32/0.08) at rest and a 0.078 leading ratio while scrolling.
+  Full oc2 suite 1977 passed / 0 failed; existing marquee + busy journeys
+  still pass.
+- **Remaining TAB gaps**: TAB-10/11 compact goldens, TAB-12 tooltip wiring
+  check, TAB-13 full mouse matrix, TAB-21 view acknowledgement unread flow,
+  TAB-05 child-status aggregation, TAB-23 chord coverage, TAB-24 reduced
+  motion capture.
