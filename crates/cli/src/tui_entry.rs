@@ -5485,6 +5485,11 @@ fn native_loop(
     // every frame and turn event below. Fetches use the existing bounded
     // authenticated client; the facade itself never performs IO.
     let mut view = crate::native_view::NativeView::new(cols as u16, rows as u16);
+    // Built-in footer `commands` hint (`prompt/footer.tsx:110-120`): the
+    // palette opens on the hardcoded Ctrl-P byte (`16 =>` below), so the live
+    // key label is `ctrl+p`. `agent.cycle` (shift+tab) has no native dispatch,
+    // so the `agents` hint is deliberately not advertised.
+    view.set_rail_shortcuts(Some("ctrl+p".to_owned()), None);
     // First-run import discovery is bounded filesystem work and runs once
     // before the native loop starts. No source is written or executed here;
     // the dialog owns the later human offer/preview/apply decisions.
