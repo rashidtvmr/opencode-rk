@@ -2630,6 +2630,62 @@ mod footer_v3_painter_tests {
         );
     }
 
+    /// TOOL-002 live consumer: a polled pending permission carries the tool
+    /// `callID`; the matching `ChatPart::ToolState { id }` row paints
+    /// `ChatRowClass::ToolPermission` — the whole-row warning fg
+    /// (`routes/session/index.tsx:2793-2799` + `:2837-2847`) — and the row
+    /// text gains nothing (upstream adds no badge, `:2834`).
+    #[test]
+    fn pending_permission_calls_mark_matching_tool_row_warning() {
+        use crate::native_view_chat::{ChatMessage, ChatPart, ChatRole, ChatView};
+        let message = ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![ChatPart::ToolState {
+                name: "write".to_owned(),
+                id: "c9".to_owned(),
+                status: "running".to_owned(),
+                args: r#"{"filePath":"a.rs"}"#.to_owned(),
+                output: String::new(),
+                is_error: false,
+                metadata: String::new(),
+            }],
+            agent: None,
+            model: None,
+            assistant_facts: None,
+        };
+        let messages = vec![message];
+        let mut view = ChatView::default();
+        let before =
+            view.render_typed_classified(80, 20, "ws", &messages, "", false);
+        assert!(
+            !before.iter().any(|(_, class)| *class == ChatRowClass::ToolPermission),
+            "no pending set: the tool row keeps its normal class"
+        );
+        view.set_pending_permission_calls(&["c9".to_owned()]);
+        let after =
+            view.render_typed_classified(80, 20, "ws", &messages, "", false);
+        assert!(
+            after.iter().any(|(_, class)| *class == ChatRowClass::ToolPermission),
+            "matching call id paints the warning row: {after:?}"
+        );
+        // Colour only, never text (`index.tsx:2834`): the rows are identical
+        // before and after the permission fact is joined.
+        assert!(after.iter().all(|(row, _)| !row.contains("Permission")));
+        assert_eq!(
+            before.iter().map(|(row, _)| row).collect::<Vec<_>>(),
+            after.iter().map(|(row, _)| row).collect::<Vec<_>>()
+        );
+        // A different pending call id must not mark this row: upstream joins
+        // by exact call id (`index.tsx:2795`).
+        view.set_pending_permission_calls(&["other".to_owned()]);
+        let cleared =
+            view.render_typed_classified(80, 20, "ws", &messages, "", false);
+        assert!(
+            !cleared.iter().any(|(_, class)| *class == ChatRowClass::ToolPermission),
+            "unrelated call id keeps the normal row class"
+        );
+    }
+
     #[test]
     fn footer_rows_paint_no_surface_background() {
         let root = Rgba::rgb(10, 10, 10);
@@ -4671,6 +4727,12 @@ struct PendingPermission {
     id: String,
     title: String,
     persistent_allowed: bool,
+    /// TOOL-002: the pending request's bounded tool `callID`. Upstream joins
+    /// on `request.source.type === "tool" && request.source.id === part.id`
+    /// (`routes/session/index.tsx:2793-2799`); oc2's `PermissionSource`
+    /// serializes the join key as `source.callID`
+    /// (`crates/server/src/run_owner.rs:40-45`). `None` for non-tool sources.
+    permission_call_id: Option<String>,
 }
 
 #[cfg(feature = "native")]
@@ -4682,6 +4744,49 @@ fn permission_save_eligible(save: Option<&serde_json::Value>) -> bool {
         && values
             .iter()
             .all(serde_json::Value::is_string)
+}
+
+/// TOOL-002 wire join: the oc2 permission list serializes the request source
+/// with serde renames (`crates/server/src/run_owner.rs:40-45`):
+/// `{"type":"tool","messageID":...,"callID":...}`. Upstream compares
+/// `request.source.type === "tool"` and `request.source.id === part()?.id`
+/// (`packages/tui/src/routes/session/index.tsx:2793-2799`), so the oc2 join
+/// key is exactly `source.callID`. Bounded and control-free, matching the
+/// `fetch_permission` id bound (non-empty, <=128 chars).
+#[cfg(feature = "native")]
+fn permission_call_id_from_source(source: Option<&serde_json::Value>) -> Option<String> {
+    let source = source?;
+    if source.get("type").and_then(serde_json::Value::as_str) != Some("tool") {
+        return None;
+    }
+    let call = source.get("callID").and_then(serde_json::Value::as_str)?;
+    if call.is_empty() || call.len() > 128 || call.chars().any(char::is_control) {
+        return None;
+    }
+    Some(call.to_owned())
+}
+
+#[cfg(all(test, feature = "native"))]
+mod permission_call_id_tests {
+    use super::permission_call_id_from_source;
+    use serde_json::json;
+
+    #[test]
+    fn accepts_only_tool_sources_with_bounded_call_ids() {
+        let tool = json!({"type":"tool","messageID":"m1","callID":"c1"});
+        assert_eq!(permission_call_id_from_source(Some(&tool)).as_deref(), Some("c1"));
+        assert_eq!(permission_call_id_from_source(None), None);
+        let agent = json!({"type":"agent","messageID":"m1","agentID":"a1"});
+        assert_eq!(permission_call_id_from_source(Some(&agent)), None);
+        assert_eq!(permission_call_id_from_source(Some(&json!({"type":"tool"}))), None);
+        assert_eq!(permission_call_id_from_source(Some(&json!({"type":"tool","callID":7}))), None);
+        assert_eq!(permission_call_id_from_source(Some(&json!({"type":"tool","callID":""}))), None);
+        assert_eq!(permission_call_id_from_source(Some(&json!({"type":"tool","callID":"c\n1"}))), None);
+        let long = "c".repeat(129);
+        assert_eq!(permission_call_id_from_source(Some(&json!({"type":"tool","callID":long}))), None);
+        let exact = "c".repeat(128);
+        assert_eq!(permission_call_id_from_source(Some(&json!({"type":"tool","callID":exact}))).as_deref(), Some(exact.as_str()));
+    }
 }
 
 #[cfg(all(test, feature = "native"))]
@@ -4741,10 +4846,14 @@ fn fetch_permission(
         // absent, null, scalar, empty, mixed, and object arrays are all
         // ineligible for a persistent grant.
         let persistent_allowed = permission_save_eligible(entry.get("save"));
+        // TOOL-002: carry the tool-call join key when this request's source
+        // is a tool permission (`index.tsx:2793-2799`).
+        let permission_call_id = permission_call_id_from_source(entry.get("source"));
         return Ok(Some(PendingPermission {
             id: id.to_owned(),
             title,
             persistent_allowed,
+            permission_call_id,
         }));
     }
     Ok(None)
@@ -5451,6 +5560,9 @@ fn native_loop(
     let mut model_row: usize = 0;
     let mut last_permission_poll = Instant::now();
     let mut permission_error: Option<String> = None;
+    // TOOL-002: bounded pending-permission tool-call ids joined against
+    // `ChatPart::ToolState { id }` at paint (`index.tsx:2793-2799`).
+    let mut pending_permission_calls: Vec<String> = Vec::new();
     let mut partial = String::new();
     let mut utf8 = NativeUtf8Decoder::default();
     let mut input = native_input_decoder::TerminalInputDecoder::default();
@@ -6642,6 +6754,16 @@ fn native_loop(
             if let Some(snapshot) = live.as_ref() {
                 match fetch_permission(&snapshot.origin, &snapshot.session_id, auth) {
                     Ok(None) => {
+                        // TOOL-002: no pending request remains, so upstream
+                        // unmarks the tool row (the join memo in
+                        // `index.tsx:2793-2799` resolves `false` once the
+                        // permission list is empty). Keeping the row marked
+                        // after the backend response would lie about state.
+                        if !pending_permission_calls.is_empty() {
+                            pending_permission_calls.clear();
+                            view.set_pending_permission_calls(&pending_permission_calls);
+                            needs_paint = true;
+                        }
                         if view.permission_retry_open() && view.dialogs.is_open() {
                             // A dispatched reply did NOT legitimately
                             // resolve the decision: its ACK was rejected
@@ -6676,6 +6798,18 @@ fn native_loop(
                         }
                     }
                     Ok(Some(pending)) => {
+                        // TOOL-002: refresh the bounded pending tool-call id
+                        // set every poll tick while the backend still owns a
+                        // request; the chat render joins the matching
+                        // `ChatPart::ToolState { id }` and paints the row
+                        // warning (`index.tsx:2793-2799` + `:2837-2847`).
+                        let next: Vec<String> =
+                            pending.permission_call_id.clone().into_iter().collect();
+                        if next != pending_permission_calls {
+                            pending_permission_calls = next;
+                            view.set_pending_permission_calls(&pending_permission_calls);
+                            needs_paint = true;
+                        }
                         if !view.dialogs.is_open() {
                             let result = view.dialogs.open_permission_with_persistent(
                                 pending.id,

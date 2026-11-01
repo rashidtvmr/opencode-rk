@@ -2349,6 +2349,15 @@ impl NativeView {
         self.chat.set_scroll(rows);
     }
 
+    /// TOOL-002: replace the bounded pending-permission tool-call id set
+    /// polled from the backend. The chat render joins it against
+    /// `ChatPart::ToolState { id }` and paints the matching row
+    /// `ChatRowClass::ToolPermission` (`routes/session/index.tsx:2793-2799`
+    /// + `:2837-2847`).
+    pub fn set_pending_permission_calls(&mut self, calls: &[String]) {
+        self.chat.set_pending_permission_calls(calls);
+    }
+
     pub fn chat_at_scroll_ceiling(&self) -> bool {
         self.chat.at_scroll_ceiling()
     }

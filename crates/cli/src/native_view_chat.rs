@@ -124,6 +124,16 @@ pub struct ChatView {
     /// scrollbar is painted against these live values, never recomputed.
     transcript_first: Cell<usize>,
     transcript_viewport: Cell<usize>,
+    /// TOOL-002: tool-call ids whose permission decision is pending right
+    /// now. Upstream joins the first pending request whose
+    /// `source.type === "tool"` and `source.id` (oc2 wire `source.callID`,
+    /// `crates/server/src/run_owner.rs:40-45`) against `part()?.id`
+    /// (`packages/tui/src/routes/session/index.tsx:2793-2799`) and paints the
+    /// whole row/header `theme.text.feedback.warning.base` (`:2837-2847`).
+    /// Bounded: at most 8 ids of 1..=128 control-free chars, mirroring the
+    /// `fetch_permission` id bound. The live loop updates it via
+    /// [`ChatView::set_pending_permission_calls`]; renders only read it.
+    pending_permission_calls: std::collections::BTreeSet<String>,
 }
 
 impl ChatView {
@@ -136,6 +146,25 @@ impl ChatView {
     /// rendering; direct unit APIs leave it `None` and key on the pane width.
     pub(crate) fn set_terminal_width(&mut self, terminal_width: u16) {
         self.terminal_width = Some(terminal_width);
+    }
+
+    /// TOOL-002 live join input (`routes/session/index.tsx:2793-2799`):
+    /// bounded pending tool-call ids from the authenticated backend poll.
+    /// Upstream also gates on `local.permission.mode === "autoaccept"`; oc2
+    /// has no autoaccept mode yet, so the polled set passes through as-is.
+    pub fn set_pending_permission_calls(&mut self, calls: &[String]) {
+        self.pending_permission_calls = calls
+            .iter()
+            .take(8)
+            .filter(|call| !call.is_empty() && call.len() <= 128)
+            .cloned()
+            .collect();
+    }
+
+    /// True when `id` is one of the bounded pending-permission tool-call ids.
+    #[must_use]
+    pub fn permission_pending_for(&self, id: &str) -> bool {
+        self.pending_permission_calls.contains(id)
     }
 
     /// Effective terminal width for the composer inset: the recorded real
@@ -851,7 +880,7 @@ fn boxed_message_rows_spans(
     appearance: &crate::native_box_style::BoxAppearance,
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
 ) -> Vec<StyledChatRow> {
-    boxed_message_rows_spans_mode(width, message, separator, appearance, spans_out, crate::markdown_runs::MarkdownMode::Rendered)
+    boxed_message_rows_spans_mode(width, message, separator, appearance, spans_out, crate::markdown_runs::MarkdownMode::Rendered, &std::collections::BTreeSet::new())
 }
 
 fn boxed_message_rows_spans_mode(
@@ -859,6 +888,7 @@ fn boxed_message_rows_spans_mode(
     appearance: &crate::native_box_style::BoxAppearance,
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
     markdown_mode: crate::markdown_runs::MarkdownMode,
+    pending: &std::collections::BTreeSet<String>,
 ) -> Vec<StyledChatRow> {
     use crate::native_box_style::BoxId;
     let id = if message.role == ChatRole::Tool
@@ -889,7 +919,7 @@ fn boxed_message_rows_spans_mode(
     // their full-row text interval (selected template, never decoration).
     let plain = |wrap: usize, spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>| -> Vec<StyledChatRow> {
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(wrap.min(width), message, separator, None, &mut typed_spans, markdown_mode, width);
+        let typed = typed_message_rows_with_prefix_spans_mode(wrap.min(width), message, separator, None, &mut typed_spans, markdown_mode, width, pending);
         let rows: Vec<StyledChatRow> = typed
             .into_iter()
             .map(|(text, class)| (text, class, Some((0, width.min(u16::MAX as usize) as u16))))
@@ -920,7 +950,7 @@ fn boxed_message_rows_spans_mode(
         let limit = MAX_MESSAGE_ROWS.saturating_sub(output.len() + usize::from(user));
         let base = output.len();
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, Some(""), &mut typed_spans, markdown_mode, width);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, Some(""), &mut typed_spans, markdown_mode, width, pending);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
         {
@@ -956,7 +986,7 @@ fn boxed_message_rows_spans_mode(
         for _ in 0..pad { output.push((frame.blank(), ChatRowClass::Blank, None)); }
         let base = output.len();
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, markdown_mode, width);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, markdown_mode, width, pending);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 + 2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit) {
@@ -990,7 +1020,7 @@ fn boxed_message_rows_spans_mode(
         }
         let base = output.len();
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, markdown_mode, width);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, markdown_mode, width, pending);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
@@ -1029,7 +1059,7 @@ fn boxed_message_rows_spans_mode(
         }
         let base = output.len();
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, markdown_mode, width);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, markdown_mode, width, pending);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
@@ -2253,6 +2283,7 @@ fn typed_message_rows_with_prefix_spans(
         width, message, separator, prefix, spans_out,
         crate::markdown_runs::MarkdownMode::Rendered,
         width,
+        &std::collections::BTreeSet::new(),
     )
 }
 
@@ -2261,6 +2292,7 @@ fn typed_message_rows_with_prefix_spans_mode(
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
     markdown_mode: crate::markdown_runs::MarkdownMode,
     terminal_width: usize,
+    pending: &std::collections::BTreeSet<String>,
 ) -> Vec<(String, ChatRowClass)> {
     let mut rows: Vec<(String, ChatRowClass)> = Vec::new();
     if separator {
@@ -2341,6 +2373,7 @@ fn typed_message_rows_with_prefix_spans_mode(
             }
             ChatPart::ToolState {
                 name,
+                id,
                 status,
                 args,
                 output,
@@ -2348,10 +2381,20 @@ fn typed_message_rows_with_prefix_spans_mode(
                 metadata,
                 ..
             } => {
-                let display = crate::tui_entry::native_turn::native_tool_rows::apply_tool_metadata(
+                let mut display = crate::tui_entry::native_turn::native_tool_rows::apply_tool_metadata(
                     crate::tui_entry::native_turn::native_tool_rows::tool_display(width, name, status, args, output, *is_error),
                     metadata,
                 );
+                // TOOL-002 live join (`routes/session/index.tsx:2793-2799`):
+                // the pending request's tool `callID` (wire `callID`,
+                // `crates/server/src/run_owner.rs:40-45`) matches this part's
+                // `id`; upstream then paints the whole row
+                // `theme.text.feedback.warning.base` (`:2837-2847`) and the
+                // header text branch likewise (`:2907,:2935-2941`). No badge
+                // text is added (`:2834`).
+                if pending.contains(id) {
+                    display.mark_permission_pending();
+                }
                 append_tool_rows(&mut rows, width, &crate::tui_entry::native_turn::native_tool_rows::rows_for_display(width, &display));
             }
             ChatPart::File { filename, mime } => {
@@ -2682,7 +2725,16 @@ impl ChatView {
         let target = self.scroll.get().saturating_add(height);
         let mut rev: Vec<(String, ChatRowClass)> = Vec::with_capacity(target.min(4096));
         'walk: for (index, message) in messages.iter().enumerate().rev() {
-            let rows = typed_message_rows(width, message, starts_new_group(index, messages));
+            let rows = typed_message_rows_with_prefix_spans_mode(
+                width,
+                message,
+                starts_new_group(index, messages),
+                None,
+                &mut Vec::new(),
+                self.markdown_mode,
+                width,
+                &self.pending_permission_calls,
+            );
             for row in rows.into_iter().rev() {
                 rev.push(row);
                 if rev.len() >= target {
@@ -2829,6 +2881,7 @@ impl ChatView {
                     appearance,
                     &mut message_spans,
                     markdown_mode,
+                    &self.pending_permission_calls,
                 );
                 let mut dense = vec![Vec::new(); message_rows.len()];
                 for (row, spans) in message_spans {
@@ -2937,6 +2990,9 @@ impl ChatView {
                 appearance,
                 &mut spans,
                 markdown_mode,
+                // Content-height count only: a row-class swap never changes
+                // the row count, so the pending set is irrelevant here.
+                &std::collections::BTreeSet::new(),
             ).len()
         }).sum()
     }
