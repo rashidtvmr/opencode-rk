@@ -679,6 +679,11 @@ pub enum ChatRowClass {
     ToolCall,
     /// Tool result header or successful output row.
     ToolResult,
+    /// Tool row whose call is awaiting a permission decision: the row's
+    /// foreground is `theme.text.feedback.warning.base`
+    /// (`routes/session/index.tsx:2834-2847`). Upstream adds NO badge text —
+    /// only the colour changes.
+    ToolPermission,
     /// Errored tool result header or output row.
     ToolError,
     /// Agent/model/location switch notice body, muted

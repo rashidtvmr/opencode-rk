@@ -343,10 +343,27 @@ pub struct ToolDisplay {
     pub error: Option<String>,
     /// Detached `Background` badge.
     pub background: bool,
+    /// A permission decision is pending for THIS tool call
+    /// (`routes/session/index.tsx:2834`): the row's foreground becomes
+    /// `theme.text.feedback.warning.base` (`:2837`). Upstream adds NO badge
+    /// text for this state — only the colour changes.
+    pub permission_needed: bool,
 }
 
 /// A rendered row: glyph text plus its paint class.
 pub type ToolRow = (String, ChatRowClass);
+
+impl ToolDisplay {
+    /// Mark this call as awaiting a permission decision
+    /// (`routes/session/index.tsx:2793-2799`): upstream resolves the pending
+    /// request whose `source.type == "tool"` and `source.id` equals this
+    /// call's id, then paints the whole row
+    /// `theme.text.feedback.warning.base` (`:2834-2847`). The caller joins the
+    /// pending request to the tool id; this only records the fact.
+    pub fn mark_permission_pending(&mut self) {
+        self.permission_needed = true;
+    }
+}
 
 /// Render a tool call whose result has already been paired with it
 /// (`ChatPart::ToolState`).
@@ -513,6 +530,7 @@ pub fn tool_display(
         body,
         error,
         background,
+        permission_needed: false,
     }
 }
 
@@ -1196,7 +1214,15 @@ pub fn rows_for_display(width: usize, display: &ToolDisplay) -> Vec<ToolRow> {
 }
 
 fn rows(width: usize, display: &ToolDisplay) -> Vec<ToolRow> {
-    let class = display.status.row_class();
+    // Upstream `fg` memo (`routes/session/index.tsx:2837-2847`) checks the
+    // pending-permission state BEFORE the runtime-failure state, so a
+    // permission-pending call paints its whole row `text.feedback.warning`
+    // even while an inner error is present.
+    let class = if display.permission_needed {
+        ChatRowClass::ToolPermission
+    } else {
+        display.status.row_class()
+    };
     let header_prefix = header_prefix(display.icon);
     let mut out = Vec::new();
     push_wrapped(&mut out, width, &display.label, &header_prefix, class);
@@ -1772,6 +1798,32 @@ mod tests {
         assert_eq!(result[0].1, ChatRowClass::ToolResult);
         assert_eq!(tool_display_content("running", Some("x")), None);
         assert_eq!(tool_display_content("completed", Some("x")), Some("x"));
+    }
+
+    #[test]
+    fn permission_needed_changes_tool_row_colour_not_text() {
+        // TOOL-002: upstream adds NO badge for a pending permission — only the
+        // row colour changes (`routes/session/index.tsx:2834-2847`). The fact
+        // is joined from the pending request's `source.id`, never parsed from
+        // the tool `metadata` object.
+        let mut display = tool_display(80, "write", "running", r#"{"filePath":"a.rs"}"#, "", false);
+        display.mark_permission_pending();
+        assert!(display.permission_needed);
+        let rows = rows_for_display(80, &display);
+        assert_eq!(rows[0].1, ChatRowClass::ToolPermission);
+        assert!(!rows.iter().any(|(row, _)| row.contains("Permission")));
+    }
+
+    /// TOOL-002 order: upstream checks the permission branch before the
+    /// runtime-failure branch, so a pending permission paints the row warning
+    /// even when the call also carries an error.
+    #[test]
+    fn permission_needed_beats_the_runtime_error_row_class() {
+        let mut display = tool_display(80, "execute", "completed", r#"{"code":"1"}"#, "", false);
+        display.status = ToolStatus::Error;
+        display.mark_permission_pending();
+        let rows = rows_for_display(80, &display);
+        assert_eq!(rows[0].1, ChatRowClass::ToolPermission);
     }
 
     /// TOOL-006/007/008: `metadata` overlays the transport status.

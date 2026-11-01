@@ -2518,7 +2518,7 @@ fn chat_row_background(class: Option<&crate::native_view_chat::ChatRowClass>, ro
 /// row uses the error fg (`theme.text.feedback.error.base`) and the metadata
 /// line uses the muted fg (`theme.text.muted` on the field spans).
 #[cfg(feature = "native")]
-fn chat_row_foreground(class: &crate::native_view_chat::ChatRowClass, text_color: Rgba, muted: Rgba, error: Rgba) -> Rgba {
+fn chat_row_foreground(class: &crate::native_view_chat::ChatRowClass, text_color: Rgba, muted: Rgba, error: Rgba, warning: Rgba) -> Rgba {
     use crate::native_view_chat::ChatRowClass;
     match class {
         ChatRowClass::Thinking
@@ -2532,6 +2532,7 @@ fn chat_row_foreground(class: &crate::native_view_chat::ChatRowClass, text_color
         ChatRowClass::DiffAdded => text_color,
         ChatRowClass::DiffRemoved => error,
         ChatRowClass::ToolError => error,
+        ChatRowClass::ToolPermission => warning,
         ChatRowClass::FooterError => error,
         _ => text_color,
     }
@@ -2594,15 +2595,38 @@ mod footer_v3_painter_tests {
         let text_color = Rgba::rgb(1, 2, 3);
         let muted = Rgba::rgb(4, 5, 6);
         let error = Rgba::rgb(7, 8, 9);
+        let warning = Rgba::rgb(10, 11, 12);
         assert_eq!(
-            chat_row_foreground(&ChatRowClass::FooterError, text_color, muted, error),
+            chat_row_foreground(&ChatRowClass::FooterError, text_color, muted, error, warning),
             error,
             "upstream error notice fg = theme.text.feedback.error.base"
         );
         assert_eq!(
-            chat_row_foreground(&ChatRowClass::AssistantFooter, text_color, muted, error),
+            chat_row_foreground(&ChatRowClass::AssistantFooter, text_color, muted, error, warning),
             muted,
             "upstream footer field spans fg = theme.text.muted"
+        );
+    }
+
+    /// TOOL-002: a tool row awaiting a permission decision paints
+    /// `theme.text.feedback.warning.base` (`routes/session/index.tsx:2839`);
+    /// the class also beats a runtime error because upstream checks the
+    /// permission branch first.
+    #[test]
+    fn tool_permission_rows_paint_warning_foreground() {
+        let text_color = Rgba::rgb(1, 2, 3);
+        let muted = Rgba::rgb(4, 5, 6);
+        let error = Rgba::rgb(7, 8, 9);
+        let warning = Rgba::rgb(10, 11, 12);
+        assert_eq!(
+            chat_row_foreground(&ChatRowClass::ToolPermission, text_color, muted, error, warning),
+            warning,
+            "permission-pending tool fg = theme.text.feedback.warning.base"
+        );
+        assert_eq!(
+            chat_row_foreground(&ChatRowClass::ToolError, text_color, muted, error, warning),
+            error,
+            "errored tool fg is unchanged"
         );
     }
 
@@ -3552,6 +3576,7 @@ fn native_paint(
     let text_color = paint_color(ctx.palette, Slot::Text);
     let muted = paint_color(ctx.palette, Slot::TextMuted);
     let error = paint_color(ctx.palette, Slot::Error);
+    let warning = paint_color(ctx.palette, Slot::Warning);
     let accent = paint_color(ctx.palette, Slot::Primary);
     fn dim(color: Rgba, alpha: u8) -> Rgba {
         let [r, g, b, a] =
@@ -3652,7 +3677,7 @@ fn native_paint(
             ctx.modal.content_width,
         );
         let normal_fg = match ctx.chat_row_classes.get(row) {
-            Some(class) => chat_row_foreground(class, text_color, muted, error),
+            Some(class) => chat_row_foreground(class, text_color, muted, error, warning),
             None if ctx.home => home_row_fg(lines, row, ctx.palette),
             None => text_color,
         };
