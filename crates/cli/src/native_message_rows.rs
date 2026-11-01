@@ -2729,6 +2729,7 @@ mod tests {
             args: String::new(),
             output: String::new(),
             is_error: false,
+            metadata: String::new(),
         });
         let entries = vec![
             ("u1".to_owned(), ChatMessage::text(ChatRole::User, "prompt")),

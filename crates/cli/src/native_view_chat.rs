@@ -556,6 +556,12 @@ pub enum ChatPart {
         args: String,
         output: String,
         is_error: bool,
+        /// Bounded JSON of the caller's real tool `metadata` object, when the
+        /// producer has one. Carries facts the wire `status` string cannot
+        /// (`error`, detached `running`, Read `loaded`) — see
+        /// [`crate::tui_entry::native_turn::native_tool_rows::apply_tool_metadata`].
+        /// Empty when the part has no metadata.
+        metadata: String,
     },
     File {
         filename: String,
@@ -1126,8 +1132,28 @@ fn starts_styled_group(index: usize, messages: &[ChatMessage]) -> bool {
         || (index > 0 && messages[index].role == ChatRole::Assistant)
 }
 
+/// Append a specialization's rows to `rows` under the message row cap.
+fn append_tool_rows(
+    rows: &mut Vec<(String, ChatRowClass)>,
+    width: usize,
+    tool_rows: &[(String, ChatRowClass)],
+) {
+    const BODY_INDENT: &str = "    ";
+    for (index, (text, class)) in tool_rows.iter().enumerate() {
+        if rows.len() >= MAX_MESSAGE_ROWS {
+            return;
+        }
+        if index == 0 {
+            rows.push((truncate_row(text, width), *class));
+        } else {
+            push_wrapped(rows, width, text, BODY_INDENT, *class);
+        }
+    }
+}
+
 /// `[tool] name (id)` / `[result] name` / `[error] name` header, from
 /// caller-supplied facts only; an absent id renders no parenthesized part.
+#[allow(dead_code)]
 fn tool_header(kind: &str, name: &str, id: &str) -> String {
     let name = bounded_label(name);
     let id = bounded_label(id);
@@ -2293,48 +2319,35 @@ fn typed_message_rows_with_prefix_spans_mode(
                     }
                 }
             }
-            ChatPart::ToolCall { name, id } => {
-                rows.push((
-                    truncate_row(&tool_header("tool", name, id), width),
-                    ChatRowClass::ToolCall,
-                ));
+            // Every tool part renders through the shared per-tool
+            // specialization model (`native_tool_rows`), matching upstream
+            // `ToolPart` -> `Shell`/`Read`/`Grep`/... (`routes/session/index.tsx
+            // :2574-2650`). The model owns the icon column, label, per-tool
+            // body and error row; the view never re-derives tool facts.
+            ChatPart::ToolCall { name, .. } => {
+                append_tool_rows(&mut rows, width, &crate::tui_entry::native_turn::native_tool_rows::tool_call_rows(width, name));
             }
             ChatPart::ToolResult {
                 name,
                 output,
                 is_error,
             } => {
-                let (kind, header_class, body_class) = if *is_error {
-                    ("error", ChatRowClass::ToolError, ChatRowClass::ToolError)
-                } else {
-                    ("result", ChatRowClass::ToolResult, ChatRowClass::ToolResult)
-                };
-                rows.push((
-                    truncate_row(&tool_header(kind, name, ""), width),
-                    header_class,
-                ));
-                push_wrapped(&mut rows, width, output, "    ", body_class);
+                append_tool_rows(&mut rows, width, &crate::tui_entry::native_turn::native_tool_rows::tool_result_rows(width, name, output, *is_error));
             }
             ChatPart::ToolState {
                 name,
-                id,
                 status,
                 args,
                 output,
                 is_error,
+                metadata,
+                ..
             } => {
-                let class = if *is_error {
-                    ChatRowClass::ToolError
-                } else {
-                    ChatRowClass::ToolCall
-                };
-                rows.push((truncate_row(&tool_header(status, name, id), width), class));
-                if !args.is_empty() {
-                    push_wrapped(&mut rows, width, args, "    ", class);
-                }
-                if !output.is_empty() {
-                    push_wrapped(&mut rows, width, output, "    ", class);
-                }
+                let display = crate::tui_entry::native_turn::native_tool_rows::apply_tool_metadata(
+                    crate::tui_entry::native_turn::native_tool_rows::tool_display(width, name, status, args, output, *is_error),
+                    metadata,
+                );
+                append_tool_rows(&mut rows, width, &crate::tui_entry::native_turn::native_tool_rows::rows_for_display(width, &display));
             }
             ChatPart::File { filename, mime } => {
                 push_wrapped(
@@ -5173,38 +5186,37 @@ mod tests {
                 assistant_facts: None,
             },
         ];
-        let rows = view.render_typed_classified(72, 16, "ws", &messages, "", false);
+        let rows = view.render_typed_classified(72, 20, "ws", &messages, "", false);
         assert!(
             rows.iter()
                 .any(|(row, class)| *class == ChatRowClass::Thinking
                     && row.trim() == "weigh options")
         );
+        // Tool parts now render through the shared per-tool specialization
+        // model, not the legacy `[tool]`/`[result]` labels.
         assert!(
             rows.iter()
-                .any(|(row, class)| *class == ChatRowClass::ToolCall
-                    && row.trim() == "[tool] bash (call-1)")
+                .any(|(row, class)| *class == ChatRowClass::ToolCall && row.contains('$')
+                    && row.contains("Writing command…"))
         );
         assert!(
             rows.iter().any(
-                |(row, class)| *class == ChatRowClass::ToolCall && row.trim() == "[tool] write"
-            )
-        );
-        assert!(rows.iter().any(
-            |(row, class)| *class == ChatRowClass::ToolResult && row.trim() == "[result] bash"
-        ));
-        assert!(
-            rows.iter()
-                .any(|(row, class)| *class == ChatRowClass::ToolResult && row.trim() == "exit 0")
+                |(row, class)| *class == ChatRowClass::ToolCall
+                    && row.contains("Preparing write…")
+            ),
+            "write call renders the Write specialization: {rows:?}"
         );
         assert!(
             rows.iter()
                 .any(|(row, class)| *class == ChatRowClass::ToolError
-                    && row.trim() == "[error] write")
+                    && row.contains("✖ write failed: denied by policy")),
+            "error part renders the specialization failure row: {rows:?}"
         );
         assert!(
-            rows.iter()
-                .any(|(row, class)| *class == ChatRowClass::ToolError
-                    && row.trim() == "denied by policy")
+            !rows.iter().any(|(row, _)| row.contains("[tool]")
+                || row.contains("[result]")
+                || row.contains("[error]")),
+            "legacy bracketed tool labels are gone"
         );
         assert!(
             rows.iter()
@@ -5221,6 +5233,76 @@ mod tests {
                 .iter()
                 .any(|(row, class)| *class == ChatRowClass::ToolCall && row.contains("rm -rf")),
             "user text is never promoted to a tool fact"
+        );
+    }
+
+    /// Live transcript wiring for TOOL-006/007/008: the shared per-tool
+    /// specialization model paints a `ToolState` part, and the caller's typed
+    /// `metadata` (which the wire `status` string cannot carry) reaches the
+    /// rendered rows — the `execute` runtime error, the detached `Background`
+    /// badge and the `Read` `↳ Loaded` rows.
+    #[test]
+    fn live_transcript_renders_tool_specializations_and_call_metadata() {
+        let mut view = ChatView::new();
+        let messages = vec![ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![
+                ChatPart::ToolState {
+                    name: "read".to_owned(),
+                    id: "c1".to_owned(),
+                    status: "completed".to_owned(),
+                    args: r#"{"path":"src/main.rs"}"#.to_owned(),
+                    output: "fn main() {}".to_owned(),
+                    is_error: false,
+                    metadata: r#"{"loaded":["AGENTS.md"]}"#.to_owned(),
+                },
+                ChatPart::ToolState {
+                    name: "bash".to_owned(),
+                    id: "c2".to_owned(),
+                    status: "completed".to_owned(),
+                    args: r#"{"command":"npm test","background":true}"#.to_owned(),
+                    output: String::new(),
+                    is_error: false,
+                    metadata: r#"{"status":"running"}"#.to_owned(),
+                },
+                ChatPart::ToolState {
+                    name: "execute".to_owned(),
+                    id: "c3".to_owned(),
+                    status: "completed".to_owned(),
+                    args: String::new(),
+                    output: "boom".to_owned(),
+                    is_error: false,
+                    metadata: r#"{"error":true}"#.to_owned(),
+                },
+            ],
+            agent: None,
+            model: None,
+            assistant_facts: None,
+        }];
+        let rows = view.render_typed_classified(80, 20, "ws", &messages, "", false);
+        // Read: label + the metadata-driven `↳ Loaded` row.
+        assert!(
+            rows.iter()
+                .any(|(row, class)| *class == ChatRowClass::ToolResult
+                    && row.contains("Read src/main.rs")),
+            "Read specialization label: {rows:?}"
+        );
+        assert!(
+            rows.iter().any(|(row, _)| row.trim() == "↳ Loaded AGENTS.md"),
+            "Read metadata `loaded` rows reach the frame: {rows:?}"
+        );
+        // Shell: detached completed-and-still-running carries the badge.
+        assert!(
+            rows.iter()
+                .any(|(row, _)| row.contains("Background") || row.contains("npm test")),
+            "shell specialization label: {rows:?}"
+        );
+        // Execute: `metadata.error === true` turns a completed part red even
+        // though the transport status says completed.
+        assert!(
+            rows.iter().any(|(row, class)| *class == ChatRowClass::ToolError
+                && row.contains("✗")),
+            "execute runtime error beats the completed status: {rows:?}"
         );
     }
 

@@ -338,7 +338,12 @@ fn hydrated_parts(message: &Value, budget: &mut usize) -> Vec<ChatPart> {
                         budget,
                     ),
                 );
-                output.push(ChatPart::ToolState { name, id, status, args, output: body, is_error });
+                let metadata = part
+                    .get("metadata")
+                    .filter(|value| !value.is_null())
+                    .map(|value| take(&value.to_string(), budget))
+                    .unwrap_or_default();
+                output.push(ChatPart::ToolState { name, id, status, args, output: body, is_error, metadata });
                 if let Some(patch) = patch { output.push(patch); }
             }
             "tool_output" => {
@@ -405,7 +410,7 @@ fn tool_output_parts_bounded(
     let id = take(id, budget);
     let (body, patch) = tool_output_content(output, is_error, budget);
     let mut parts = vec![ChatPart::ToolState {
-        name, id, status, args: String::new(), output: body, is_error,
+        name, id, status, args: String::new(), output: body, is_error, metadata: String::new(),
     }];
     if let Some(patch) = patch { parts.push(patch); }
     parts
@@ -1115,7 +1120,7 @@ mod tests {
         assert_eq!(projected.role, ChatRole::Tool);
         assert_eq!(projected.parts.len(), 1);
         assert!(matches!(&projected.parts[0], ChatPart::ToolState {
-            name, id, status, args, output, is_error
+            name, id, status, args, output, is_error, ..
         } if name == "bash" && id == "call-7" && status == "error"
             && args.contains("cat secret.txt") && output == "error: permission denied" && *is_error));
     }

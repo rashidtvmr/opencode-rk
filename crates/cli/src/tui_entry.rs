@@ -1305,7 +1305,7 @@ mod footer_gate_tests {
             role: ChatRole::Tool,
             parts: vec![ChatPart::ToolState {
                 name: name.into(), id: "c1".into(), status: "completed".into(),
-                args: String::new(), output: String::new(), is_error: false,
+                args: String::new(), output: String::new(), is_error: false, metadata: String::new(),
             }],
             agent: None, model: None, assistant_facts: None,
         };
@@ -1357,7 +1357,7 @@ mod footer_gate_tests {
             role: ChatRole::Tool,
             parts: vec![ChatPart::ToolState {
                 name: "task".into(), id: "c1".into(), status: "running".into(),
-                args: String::new(), output: String::new(), is_error: false,
+                args: String::new(), output: String::new(), is_error: false, metadata: String::new(),
             }],
             agent: None, model: None, assistant_facts: None,
         }];
@@ -6288,6 +6288,7 @@ fn native_loop(
                                         args: arguments.to_string(),
                                         output: String::new(),
                                         is_error: false,
+                                        metadata: String::new(),
                                     }],
                                     agent: None,
                                     model: None,

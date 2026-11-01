@@ -1197,6 +1197,13 @@ fn duration_text(ms: u64) -> String {
 // Row emission
 // ---------------------------------------------------------------------------
 
+/// Render a fully-resolved [`ToolDisplay`] (used by the live transcript once
+/// caller metadata has been folded in via [`apply_tool_metadata`]).
+#[must_use]
+pub fn rows_for_display(width: usize, display: &ToolDisplay) -> Vec<ToolRow> {
+    rows(width, display)
+}
+
 fn rows(width: usize, display: &ToolDisplay) -> Vec<ToolRow> {
     let class = display.status.row_class();
     let header_prefix = header_prefix(display.icon);
