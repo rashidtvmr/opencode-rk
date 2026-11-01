@@ -1629,16 +1629,77 @@ mod tab_context_menu_dispatch_tests {
             })
         );
         let add = strip.add_rect.expect("painted add/new hit target");
-        assert_eq!(
+        assert!(matches!(
             tab_menu_target_at(&nav, Some(&strip), None, false, add.x, add.y),
             Some(crate::native_tab_context_menu::MenuTarget::New {
-                recently_closed: None,
+                recently_closed: Some(_)
             })
-        );
+        ));
         assert_eq!(
             tab_menu_target_at(&nav, Some(&strip), None, false, 63, 0),
             None,
             "no fallback to an arbitrary active tab on a miss"
+        );
+    }
+
+    #[test]
+    fn production_new_target_offers_newest_recent_tabs_and_reopens_selected_id() {
+        let mut nav = crate::native_navigation::NavigationState::new();
+        let current = crate::native_navigation::SessionRef("open-now".to_owned());
+        nav.open(current.clone());
+        for name in ["closed-old", "closed-mid", "closed-new"] {
+            let session = crate::native_navigation::SessionRef(name.to_owned());
+            nav.open(session.clone());
+            nav.ingest_snapshot_title(session.clone(), format!("{name} title"));
+            nav.close(&session).expect("close records recent entry");
+        }
+        nav.open(current.clone());
+        let strip = rendered_strip(&nav);
+        let add = strip.add_rect.expect("painted add/new hit target");
+        let target = tab_menu_target_at(&nav, Some(&strip), None, false, add.x, add.y)
+            .expect("New target");
+        let crate::native_tab_context_menu::MenuTarget::New { recently_closed } = target else {
+            panic!("add hit must yield the New target");
+        };
+        let closed = recently_closed.expect("New target carries the live reopen facility");
+        assert_eq!(
+            closed
+                .iter()
+                .map(|tab| tab.session.0.as_str())
+                .collect::<Vec<_>>(),
+            ["closed-new", "closed-mid", "closed-old"],
+            "newest first, matching upstream slice(0, 10)"
+        );
+        assert_eq!(closed[0].title, "closed-new title");
+        // The menu row resolves to the selected session, not a generic reopen.
+        let mut menu = crate::native_tab_context_menu::TabContextMenu::new(
+            add.x,
+            add.y,
+            crate::native_tab_context_menu::MenuTarget::New {
+                recently_closed: Some(closed),
+            },
+        );
+        let frame = menu.frame(crate::native_tab_context_menu::Viewport { width: 80, height: 24 });
+        let row = frame
+            .items
+            .iter()
+            .find(|item| item.label.starts_with("closed-mid title"))
+            .expect("recent row")
+            .rect;
+        assert_eq!(
+            menu.handle(
+                crate::native_tab_context_menu::MenuEvent::PointerUp {
+                    button: crate::native_tab_context_menu::MouseButton::Left,
+                    x: row.x,
+                    y: row.y,
+                },
+                crate::native_tab_context_menu::Viewport { width: 80, height: 24 },
+            ),
+            crate::native_tab_context_menu::MenuOutcome::Invoke(
+                crate::native_tab_context_menu::MenuAction::Reopen {
+                    session: crate::native_navigation::SessionRef("closed-mid".to_owned()),
+                }
+            )
         );
     }
 
@@ -2945,11 +3006,38 @@ fn menu_dismisses(event: &native_input_decoder::InputEvent) -> bool {
 }
 
 #[cfg(feature = "native")]
+fn recent_closed_menu_target(navigation: &crate::native_navigation::NavigationState) -> crate::native_tab_context_menu::MenuTarget {
+    // The reopen facility always exists in production, so this is `Some(..)`:
+    // an empty history then shows upstream's "No recently closed tabs" row
+    // (`session-tabs.tsx:411-414`). Newest first, capped at the upstream
+    // `slice(0, 10)` (`session-tabs.tsx:384`).
+    let mut closed: Vec<_> = navigation
+        .recently_closed()
+        .into_iter()
+        .rev()
+        .map(|entry| {
+            let title = navigation
+                .title(&entry.session)
+                .unwrap_or(entry.session.0.as_str())
+                .to_owned();
+            crate::native_tab_context_menu::ClosedTab {
+                session: entry.session,
+                title,
+            }
+        })
+        .collect();
+    closed.truncate(crate::native_tab_context_menu::MAX_RECENTLY_CLOSED);
+    crate::native_tab_context_menu::MenuTarget::New {
+        recently_closed: Some(closed),
+    }
+}
+
+#[cfg(feature = "native")]
 fn tab_menu_target_at(navigation: &crate::native_navigation::NavigationState, tabs: Option<&TabStrip>, rail: Option<&crate::native_tab_rail::RailFrame>, vertical: bool, x: u16, y: u16) -> Option<crate::native_tab_context_menu::MenuTarget> {
     if vertical {
         return rail?.hit(x,y).and_then(|hit| match hit {
             crate::native_tab_rail::RailHit::Session(session) => navigation.tabs().iter().any(|tab| tab.session == session).then(|| crate::native_tab_context_menu::MenuTarget::Session { title: navigation.title(&session).unwrap_or(&session.0).to_owned(), session, can_add: true }),
-            crate::native_tab_rail::RailHit::New => Some(crate::native_tab_context_menu::MenuTarget::New { recently_closed: None }),
+            crate::native_tab_rail::RailHit::New => Some(recent_closed_menu_target(navigation)),
             crate::native_tab_rail::RailHit::Search => None,
         });
     }
@@ -2957,10 +3045,10 @@ fn tab_menu_target_at(navigation: &crate::native_navigation::NavigationState, ta
     if let Some(hit)=tabs.hit(x,y) { return navigation.tabs().iter().any(|tab| tab.session==hit.session).then(|| crate::native_tab_context_menu::MenuTarget::Session { title:navigation.title(&hit.session).unwrap_or(&hit.session.0).to_owned(), session:hit.session, can_add:true }); }
     // Promoted Home slot owns its menu target directly: upstream NEW_SESSION_TAB
     // has no session identity, so resolving to the active session would invent a
-    // target. The New menu with recently_closed:None keeps the empty-Home reopen
-    // omission truthful (no invented recent history is offered).
-    if tabs.home_hit(x,y) { return Some(crate::native_tab_context_menu::MenuTarget::New { recently_closed:None }); }
-    tabs.add_rect.filter(|r| x>=r.x && x<r.x.saturating_add(r.width) && y>=r.y && y<r.y.saturating_add(r.height)).map(|_| crate::native_tab_context_menu::MenuTarget::New { recently_closed:None })
+    // target. The New menu carries the live recently-closed history
+    // (`session-tabs.tsx:383-417`) so Reopen is serviceable.
+    if tabs.home_hit(x,y) { return Some(recent_closed_menu_target(navigation)); }
+    tabs.add_rect.filter(|r| x>=r.x && x<r.x.saturating_add(r.width) && y>=r.y && y<r.y.saturating_add(r.height)).map(|_| recent_closed_menu_target(navigation))
 }
 
 #[cfg(feature = "native")]
@@ -7335,6 +7423,7 @@ fn native_loop(
                             auth, binding_generation,
                             selected.as_ref().map(|model| model.qualified()),
                             scroll,
+                            None,
                         )
                     }
                     _ => match target {
@@ -7790,7 +7879,13 @@ fn native_loop(
                         crate::native_tab_context_menu::MenuAction::CopySessionId{session}=>{let frame=selection_clipboard_frame(&session.0);let mut out=std::io::stdout().lock();out.write_all(frame.as_bytes())?;out.flush()?;},
                         crate::native_tab_context_menu::MenuAction::Close{session}=>{let scroll=view.chat_scroll_offset();match close_tab_transition(&mut view,&mut transcript,&mut navigation,&draft,draft_cursor,live.as_ref().map(|s|s.origin.as_str()),auth,binding_generation,&session,selected.as_ref().map(|m|m.qualified()),scroll){Ok(result)=>apply_close_tab_result(result,&mut view,&mut live,&mut history_window,&mut binding_generation,&mut draft,&mut draft_cursor,&mut selected,&models,&mut session_route,&mut compact_worker),Err(e)=>append_transcript(&mut transcript,format!("error: close tab: {e}"))}},
                         crate::native_tab_context_menu::MenuAction::Rename{session,current_title}=>{rename_input=Some((session,current_title));rename_error=None;},
-                        crate::native_tab_context_menu::MenuAction::Reopen{..}=>{},
+                        crate::native_tab_context_menu::MenuAction::Reopen{session}=>{
+                            let scroll=view.chat_scroll_offset();
+                            match reopen_tab_transition(&mut view,&mut transcript,&mut navigation,&draft,draft_cursor,live.as_ref().map(|s|s.origin.as_str()),auth,binding_generation,selected.as_ref().map(|m|m.qualified()),scroll,Some(&session)){
+                                Ok(result)=>apply_close_tab_result(result,&mut view,&mut live,&mut history_window,&mut binding_generation,&mut draft,&mut draft_cursor,&mut selected,&models,&mut session_route,&mut compact_worker),
+                                Err(e)=>append_transcript(&mut transcript,format!("error: reopen tab: {e}")),
+                            }
+                        },
                     }} else if !menu.is_open(){context_menu=None;} needs_paint=true; }
                     continue;
                 }
@@ -10931,6 +11026,7 @@ fn reopen_tab_transition(
     generation: u64,
     selected_model: Option<String>,
     scroll: usize,
+    requested: Option<&crate::native_navigation::SessionRef>,
 ) -> Result<CloseTabResult, String> {
     let mut staged = navigation.clone();
     if navigation.active().is_some() {
@@ -10939,7 +11035,7 @@ fn reopen_tab_transition(
             .map_err(|error| format!("reopen refused: {error:?}"))?;
     }
     let session = staged
-        .reopen(None)
+        .reopen(requested)
         .ok_or_else(|| "reopen refused: no closed tab".to_owned())?;
     let target = staged
         .active()
