@@ -590,6 +590,36 @@ impl SessionService {
         let storage = Arc::clone(&self.storage);
         run_blocking(move || storage.set_session_revert(id, revert.as_ref(), Timestamp::now())).await
     }
+    /// Record the idle transition the viewer observed, applying upstream's
+    /// monotone watermark. Mirrors `Session.view`
+    /// (`packages/core/src/session/session.ts:61-69`) + `SessionEvent.Viewed`
+    /// projection (`packages/core/src/session/projector.ts:619`):
+    /// `time_viewed = max(idle, coalesce(time_viewed, idle))`. The route is a
+    /// no-op unless `idle` is newer than the last viewed transition, and a
+    /// stale/duplicate view never regresses the watermark. Returns whether the
+    /// watermark advanced.
+    pub async fn set_viewed(
+        &self,
+        id: SessionId,
+        idle: Timestamp,
+    ) -> Result<bool, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || {
+            let current = storage.get_session(id)?;
+            // `session.ts:62-68`: skip when idle is unknown, not newer than the
+            // session's own idle, or already covered by the viewed watermark.
+            let advanced = match current.viewed_at {
+                None => true,
+                Some(viewed) => idle > viewed,
+            };
+            if !advanced {
+                return Ok(false);
+            }
+            storage.set_session_viewed(id, Some(&idle), Timestamp::now())?;
+            Ok(true)
+        })
+        .await
+    }
     pub async fn append_text(
         &self,
         session_id: SessionId,

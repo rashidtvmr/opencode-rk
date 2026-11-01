@@ -137,6 +137,14 @@ impl Timestamp {
     pub const fn as_datetime(self) -> DateTime<Utc> {
         self.0
     }
+    /// Construct from an epoch-millisecond value — the `DateTimeUtcFromMillis`
+    /// wire form used by `session.view` (`packages/protocol/src/groups/
+    /// session.ts:805-815`). `None` when the value is outside the representable
+    /// datetime range.
+    #[must_use]
+    pub fn from_epoch_millis(millis: i64) -> Option<Self> {
+        DateTime::from_timestamp_millis(millis).map(Self)
+    }
     #[must_use]
     pub fn to_rfc3339(self) -> String {
         self.0.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)

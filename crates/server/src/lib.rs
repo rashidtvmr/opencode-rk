@@ -233,6 +233,7 @@ pub fn router_with_events_and_integration(
         .route("/api/sessions/{id}", get(get_session).patch(rename_session))
         .route("/api/sessions/{id}/archive", post(archive_session))
         .route("/api/sessions/{id}/revert/stage", post(stage_session_revert))
+        .route("/api/sessions/{id}/view", post(view_session))
         .route("/api/sessions/{id}/compact", post(compact_session))
         .route("/api/sessions/{id}/compaction/settings", get(compaction_settings::get).put(compaction_settings::put).layer(DefaultBodyLimit::max(4096)))
         .route("/api/sessions/{id}/context", get(context_http::get))
@@ -1208,6 +1209,37 @@ async fn stage_session_revert(
         .map_err(ApiFailure::internal)?;
     let session = state.sessions.get(id).await.map_err(ApiFailure::internal)?;
     Ok(Json(json!({"session":session})))
+}
+
+#[derive(Debug, Deserialize)]
+struct ViewSessionBody {
+    /// `DateTimeUtcFromMillis` on the wire (`packages/protocol/src/groups/
+    /// session.ts:805-815`): the idle transition (epoch millis) the viewer
+    /// observed.
+    idle: i64,
+}
+
+/// Upstream `POST /api/session/:sessionID/view`
+/// (`packages/protocol/src/groups/session.ts:805-817`; `Session.view`
+/// `packages/core/src/session/session.ts:61-69`) records the idle transition the
+/// viewer observed and returns `204 No Content`. The persisted fact is the
+/// monotone watermark `time_viewed = max(idle, coalesce(time_viewed, idle))`
+/// (`projector.ts:619`); `SessionService::set_viewed` applies that clamp and
+/// get() serializes the result as `viewedAt`.
+async fn view_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<ViewSessionBody>,
+) -> Result<StatusCode, ApiFailure> {
+    let id = parse_session_id(&id)?;
+    let idle = Timestamp::from_epoch_millis(body.idle)
+        .ok_or_else(|| ApiFailure::bad_request("invalid idle timestamp"))?;
+    state
+        .sessions
+        .set_viewed(id, idle)
+        .await
+        .map_err(ApiFailure::internal)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Debug, Deserialize)]
