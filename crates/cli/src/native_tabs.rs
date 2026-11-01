@@ -1770,6 +1770,18 @@ pub fn title_attributes(selected: bool, renaming: bool, animations: bool) -> u32
     }
 }
 
+/// `component/title-shimmer.tsx:33,50-55`: the shimmer renderable reports
+/// `live = animating`, whose steady state is `shimmering = rename.pending`
+/// while motion is enabled, so a pending tab title keeps requesting frames.
+/// oc2 has no shimmer painter yet, but this predicate is the one seam that
+/// lets the loop's animation clock stay live for a pending title exactly as
+/// upstream does (`enabled && shimmering`); with motion off the title is the
+/// static DIM frame from [`title_attributes`] and no clock is needed.
+#[must_use]
+pub const fn title_shimmer_runs(renaming: bool, animations: bool) -> bool {
+    renaming && animations
+}
+
 // ---------------------------------------------------------------------------
 // Title fade and marquee overflow.
 //
@@ -4124,6 +4136,17 @@ mod tests {
         .with_row_colors(&palette)
         .with_title_renaming(&|session: &SessionRef| session == &SessionRef("s".into()), true);
         assert_eq!(bold.row_paints[0].title_attr, crate::native_ui_style::ATTR_BOLD);
+    }
+
+    #[test]
+    fn tab_24_pending_title_keeps_the_animation_clock_live_only_with_motion() {
+        // component/title-shimmer.tsx:50-55: `live = animating` and
+        // `shimmering = rename.pending` while `enabled`, so the render loop
+        // keeps ticking for a pending title only when motion is enabled.
+        assert!(title_shimmer_runs(true, true), "pending + motion keeps the clock live");
+        assert!(!title_shimmer_runs(true, false), "pending + reduced motion is a static DIM frame");
+        assert!(!title_shimmer_runs(false, true), "an idle title never animates");
+        assert!(!title_shimmer_runs(false, false));
     }
 
     #[test]

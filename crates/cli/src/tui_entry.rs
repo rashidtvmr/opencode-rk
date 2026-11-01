@@ -7139,7 +7139,11 @@ fn native_loop(
         if tab_marquee.advance(marquee_now) {
             needs_paint = true;
         }
-        let busy_animation = worker.is_some() || model_load.is_some();
+        // The caller's own pending-title fact keeps the frame clock live
+        // exactly as upstream `component/title-shimmer.tsx:50-55` reports
+        // `live = animating` while a rename is pending and motion is on.
+        let title_animation = crate::native_tabs::title_shimmer_runs(rename_inflight.is_some(), animations);
+        let busy_animation = worker.is_some() || model_load.is_some() || title_animation;
         let next_tick = u128::from(animation_start.now_ms()) / 80;
         if busy_animation && next_tick != animation_tick {
             animation_tick = next_tick;
