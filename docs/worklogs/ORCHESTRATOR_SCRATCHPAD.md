@@ -10008,3 +10008,48 @@ Base advanced `fc4ad7a9` -> `99f56a2e`. Guard GREEN after each; suite 1998/0.
 CP-10 live right-footer wiring; the TAB-11 half-block cap color; consume the
 re-dispatched handoffs (DIALOG-12/13 variant models, MSG-006/007 mouse-up +
 menu, TAB-20/22 scope/tombstone) and land the (b) fixes.
+
+### 2026-11-01 wave 8/9 — reduced-motion, family attention, server wire
+
+Base advanced `fe5e4cec` -> `2b2cf8ec`. Guard GREEN after each; suite 2034/0.
+
+- `788c3c4b` — **TAB-24**: parse `tui.animations` (`config/index.tsx:250`,
+  resolved `?? true`) into `UiPreferences`; thread the resolved flag + the
+  caller's per-session title-pending fact (`rename_inflight`) through
+  `PaintCtx` into `TabStrip::with_title_renaming` and the vertical rail title
+  attr. A renaming title is DIM only while animations are off; a selected
+  non-renaming tab stays BOLD; the promoted Home/add rows keep their
+  unconditional BOLD (`session-tabs.tsx:1061-1074,1201,1210,1713-1720`).
+  Tests: `tab_24_strip_applies_renaming_dim_only_with_animations_off`,
+  `animations_flag_is_surfaced_from_the_last_config_file`. Independent
+  adversarial review dispatched (W9-REVIEW-TAB05/24).
+- `2b2cf8ec` — **TAB-05**: `TabStrip::from_navigation` now aggregates attention
+  over the whole family (root tab + open `is_descendant` members), permission
+  outranking question across the family (`context/session-tabs.tsx:163-171`).
+  Unread/renaming stay root-only; busy still any member. Test
+  `tab_05_child_attention_wakes_the_root_tab`.
+
+Reverted an inert `NativeView.rail_animations` plumbing attempt (the only
+production `RailFacts` site never sets `running`, so the Running status slot —
+the sole `animations` consumer — is unreachable there; the reduced-motion
+fallback lives in `native_progress`/the marquee model instead).
+
+**Wave-8 verdicts consumed** (evidence under `evidence/W8-*`): honest blockers
+for SIDE-08 (no `DialogMcp` model), LAY-19 (no inbound MCP `elicitation/create`
+dispatch + no `form.*` SSE), SIDE-10 (no `revert.messageID` on the wire),
+TAB-21 (view-ack route + focus source absent), TAB-05, TAB-23 (rail search-hover
+`▀` overlay + `<leader>` arrow chord unwired), CP-12 (scanner per-cell RGBA + no
+status-rail painter), CP-25 (dock routing equivalent; only a focus-token API
+gap), THEME-10/11/12 (no `opencode2`/`new-designs`; unknown-name fallback
+divergence; picker preview must persist). All are server/model prerequisites.
+
+**Wave-9 dispatched (20 parallel)**: server wire — SIDE-10 revert field,
+TAB-21 view route, LAY-19 inbound MCP dispatch; implementations — SIDE-14/
+SIDE-01/CP-21/CP-08/CP-12/TAB-22/MSG-006/DIFF-002/TAB-20; audits — THEME-10/11/12,
+TAB-23, CP-30/31/32/33; reviews — TAB-05, TAB-24, CP-12, DIALOG-12. CP-21 must
+target the LIVE dock (`native_dock.rs ComposerDock::queue_line`), not the
+test-only `native_view_chat`/`native_status_rail` pairs.
+
+**Next**: land the wave-9 (b) patches + server wire through the single
+integration writer; consume reviewer verdicts; re-dispatch any step-limited
+workers with a "write handoff in the LAST 3 steps" instruction.
