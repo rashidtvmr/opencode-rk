@@ -673,21 +673,27 @@ impl TabStrip {
                 {
                     input.flags.busy = true;
                 }
-                input.flags.needs_attention = attention
-                    .iter()
-                    .any(|a| a.session == tab.session && a.needs_attention);
-                // `context/session-tabs.tsx:165-169`: permission outranks
-                // question for the tab's own session.
-                input.attention = attention
-                    .iter()
-                    .filter(|a| a.session == tab.session && a.needs_attention)
-                    .map(|a| a.kind)
-                    .reduce(|current, next| match (current, next) {
-                        (TabAttention::Permission, _) | (_, TabAttention::Permission) => {
-                            TabAttention::Permission
+                // `context/session-tabs.tsx:163-171`: attention scans every
+                // family member (the root tab and all open descendants), with
+                // permission outranking question across the whole family. A
+                // descendant's pending permission/question therefore wakes the
+                // root tab's attention indicator.
+                let mut attention_kind: Option<TabAttention> = None;
+                for a in attention.iter().filter(|a| a.needs_attention) {
+                    if a.session != tab.session
+                        && !is_descendant(nav, &a.session, &tab.session)
+                    {
+                        continue;
+                    }
+                    attention_kind = match (attention_kind, a.kind) {
+                        (Some(TabAttention::Permission), _) | (_, TabAttention::Permission) => {
+                            Some(TabAttention::Permission)
                         }
-                        _ => TabAttention::Question,
-                    });
+                        _ => Some(TabAttention::Question),
+                    };
+                }
+                input.flags.needs_attention = attention_kind.is_some();
+                input.attention = attention_kind;
                 input
             })
             .collect()
@@ -4141,6 +4147,69 @@ mod tests {
         let inputs = TabStrip::from_navigation(&nav, &[]);
         let other = inputs.iter().find(|i| i.session == SessionRef("other".into())).unwrap();
         assert!(!other.flags.busy);
+    }
+
+    /// TAB-05: attention aggregates across the whole family
+    /// (`context/session-tabs.tsx:163-171` scans every `family(session)`
+    /// member). A pending permission/question on a descendant wakes the root
+    /// tab's indicator, and permission outranks question across the family.
+    #[test]
+    fn tab_05_child_attention_wakes_the_root_tab() {
+        use crate::native_navigation::NavigationState;
+        let mut nav = NavigationState::new();
+        nav.open_tab(SessionRef("parent".into()));
+        nav.open_forked(SessionRef("child".into()), SessionRef("parent".into()));
+
+        let inputs = TabStrip::from_navigation(
+            &nav,
+            &[Attention {
+                session: SessionRef("child".into()),
+                needs_attention: true,
+                kind: TabAttention::Question,
+            }],
+        );
+        let parent = inputs.iter().find(|i| i.session == SessionRef("parent".into())).unwrap();
+        let child = inputs.iter().find(|i| i.session == SessionRef("child".into())).unwrap();
+        assert!(parent.flags.needs_attention, "a descendant's attention wakes the root tab");
+        assert_eq!(parent.attention, Some(TabAttention::Question));
+        assert_eq!(child.attention, Some(TabAttention::Question));
+
+        // Permission on the child outranks a question anywhere in the family.
+        let inputs = TabStrip::from_navigation(
+            &nav,
+            &[
+                Attention {
+                    session: SessionRef("parent".into()),
+                    needs_attention: true,
+                    kind: TabAttention::Question,
+                },
+                Attention {
+                    session: SessionRef("child".into()),
+                    needs_attention: true,
+                    kind: TabAttention::Permission,
+                },
+            ],
+        );
+        let parent = inputs.iter().find(|i| i.session == SessionRef("parent".into())).unwrap();
+        assert_eq!(
+            parent.attention,
+            Some(TabAttention::Permission),
+            "permission outranks question across the family"
+        );
+
+        // An unrelated tab stays idle.
+        nav.open_tab(SessionRef("other".into()));
+        let inputs = TabStrip::from_navigation(
+            &nav,
+            &[Attention {
+                session: SessionRef("child".into()),
+                needs_attention: true,
+                kind: TabAttention::Question,
+            }],
+        );
+        let other = inputs.iter().find(|i| i.session == SessionRef("other".into())).unwrap();
+        assert!(!other.flags.needs_attention);
+        assert_eq!(other.attention, None);
     }
 
     /// TAB-04: the live strip paints the attention *kind* — `!` for a
