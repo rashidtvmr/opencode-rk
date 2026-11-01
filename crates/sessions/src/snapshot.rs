@@ -39,6 +39,7 @@ pub fn build_snapshot<A>(
         updated_at: last,
         archived_at: (state == SessionState::Archived).then_some(last),
         revert: None,
+        viewed_at: None,
     })
 }
 

@@ -867,7 +867,7 @@ impl Storage {
         }
         let mut connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
         let connection = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        connection.execute("INSERT INTO sessions (id,title,state,created_at,updated_at,archived_at,revert) VALUES (?1,?2,?3,?4,?5,?6,?7)",params![session.id.to_string(),session.title,encode_state(session.state),session.created_at.to_string(),session.updated_at.to_string(),session.archived_at.map(Timestamp::to_rfc3339),encode_revert(session.revert.as_ref())?])?;
+        connection.execute("INSERT INTO sessions (id,title,state,created_at,updated_at,archived_at,revert,viewed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",params![session.id.to_string(),session.title,encode_state(session.state),session.created_at.to_string(),session.updated_at.to_string(),session.archived_at.map(Timestamp::to_rfc3339),encode_revert(session.revert.as_ref())?,session.viewed_at.map(Timestamp::to_rfc3339)])?;
         if let Some(directory) = directory {
             connection.execute(
                 "INSERT INTO session_directories(session_id,directory) VALUES(?1,?2)",
@@ -969,7 +969,7 @@ impl Storage {
         let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
         connection
             .query_row(
-                "SELECT id,title,state,created_at,updated_at,archived_at,revert FROM sessions WHERE id=?1",
+                "SELECT id,title,state,created_at,updated_at,archived_at,revert,viewed_at FROM sessions WHERE id=?1",
                 params![id.to_string()],
                 decode_session,
             )
@@ -982,9 +982,9 @@ impl Storage {
     ) -> Result<Vec<SessionSummary>, StorageError> {
         let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
         let sql = if include_archived {
-            "SELECT id,title,state,created_at,updated_at,archived_at,revert FROM sessions ORDER BY updated_at DESC,id DESC"
+            "SELECT id,title,state,created_at,updated_at,archived_at,revert,viewed_at FROM sessions ORDER BY updated_at DESC,id DESC"
         } else {
-            "SELECT id,title,state,created_at,updated_at,archived_at,revert FROM sessions WHERE state='active' ORDER BY updated_at DESC,id DESC"
+            "SELECT id,title,state,created_at,updated_at,archived_at,revert,viewed_at FROM sessions WHERE state='active' ORDER BY updated_at DESC,id DESC"
         };
         let mut statement = connection.prepare(sql)?;
         let rows = statement.query_map([], decode_session)?;
@@ -1036,6 +1036,30 @@ impl Storage {
         let changed = connection.execute(
             "UPDATE sessions SET revert=?1,updated_at=?2 WHERE id=?3",
             params![encoded, at.to_string(), id.to_string()],
+        )?;
+        if changed == 0 {
+            return Err(StorageError::SessionNotFound(id));
+        }
+        Ok(())
+    }
+    /// Persist the session's viewed watermark: the last idle transition the
+    /// user has seen. Mirrors the upstream `view` route fact
+    /// (`packages/core/src/session/session.ts:61-69` guard,
+    /// `projector.ts:619`: `time_viewed = max(idle, coalesce(time_viewed,
+    /// idle))`). The max-clamp against the current watermark belongs to the
+    /// future POST /api/session/:id/view route; this setter stores the
+    /// reported value (or clears it) and bumps `updated_at` so
+    /// get/list serialize the fact.
+    pub fn set_session_viewed(
+        &self,
+        id: SessionId,
+        viewed: Option<&Timestamp>,
+        at: Timestamp,
+    ) -> Result<(), StorageError> {
+        let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let changed = connection.execute(
+            "UPDATE sessions SET viewed_at=?1,updated_at=?2 WHERE id=?3",
+            params![viewed.map(|viewed| viewed.to_rfc3339()), at.to_string(), id.to_string()],
         )?;
         if changed == 0 {
             return Err(StorageError::SessionNotFound(id));
@@ -1611,7 +1635,7 @@ impl Storage {
             payload TEXT NOT NULL CHECK(length(CAST(payload AS BLOB)) BETWEEN 1 AND 8192),
             PRIMARY KEY(session_id,ordinal)
         );")?;
-        connection.execute_batch("CREATE TABLE IF NOT EXISTS schema_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,title TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('active','archived')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,archived_at TEXT,revert TEXT); CREATE INDEX IF NOT EXISTS sessions_updated_idx ON sessions(updated_at DESC); CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,role TEXT NOT NULL,inline_text TEXT,blob_hash TEXT,byte_len INTEGER NOT NULL CHECK(byte_len>=0),created_at TEXT NOT NULL,CHECK((inline_text IS NULL)!=(blob_hash IS NULL))); CREATE INDEX IF NOT EXISTS messages_session_idx ON messages(session_id,created_at,id); CREATE TABLE IF NOT EXISTS message_activity(message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,reasoning_summary TEXT NOT NULL CHECK(length(CAST(reasoning_summary AS BLOB))<=8192)); CREATE TABLE IF NOT EXISTS recent_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,kind TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS recent_events_session_idx ON recent_events(session_id,seq); INSERT INTO schema_meta(key,value) VALUES('schema_version','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value;")?;
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS schema_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,title TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('active','archived')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,archived_at TEXT,revert TEXT,viewed_at TEXT); CREATE INDEX IF NOT EXISTS sessions_updated_idx ON sessions(updated_at DESC); CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,role TEXT NOT NULL,inline_text TEXT,blob_hash TEXT,byte_len INTEGER NOT NULL CHECK(byte_len>=0),created_at TEXT NOT NULL,CHECK((inline_text IS NULL)!=(blob_hash IS NULL))); CREATE INDEX IF NOT EXISTS messages_session_idx ON messages(session_id,created_at,id); CREATE TABLE IF NOT EXISTS message_activity(message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,reasoning_summary TEXT NOT NULL CHECK(length(CAST(reasoning_summary AS BLOB))<=8192)); CREATE TABLE IF NOT EXISTS recent_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,kind TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS recent_events_session_idx ON recent_events(session_id,seq); INSERT INTO schema_meta(key,value) VALUES('schema_version','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value;")?;
         // SIDE-10 revert fact seam (upstream `projector.ts:761-781` keeps the
         // staged revert on the session row): databases created before this
         // column existed gain it idempotently; fresh databases get it above.
@@ -1622,6 +1646,17 @@ impl Storage {
         )?;
         if has_revert_column == 0 {
             connection.execute_batch("ALTER TABLE sessions ADD COLUMN revert TEXT;")?;
+        }
+        // TAB-21 viewed watermark seam (upstream `packages/core/src/session/
+        // info.ts:56`, `projector.ts:619`): databases created before this
+        // column existed gain it idempotently; fresh databases get it above.
+        let has_viewed_column: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='viewed_at'",
+            [],
+            |row| row.get(0),
+        )?;
+        if has_viewed_column == 0 {
+            connection.execute_batch("ALTER TABLE sessions ADD COLUMN viewed_at TEXT;")?;
         }
         connection.execute_batch(
             "CREATE TABLE IF NOT EXISTS draft_attachments(
@@ -2100,6 +2135,7 @@ fn encode_revert(revert: Option<&SessionRevert>) -> Result<Option<String>, Stora
 fn decode_session(row: &rusqlite::Row<'_>) -> Result<SessionSummary, rusqlite::Error> {
     let archived: Option<String> = row.get(5)?;
     let revert_json: Option<String> = row.get(6)?;
+    let viewed_at: Option<String> = row.get(7)?;
     Ok(SessionSummary {
         id: parse_id(row.get(0)?)?,
         title: row.get(1)?,
@@ -2111,6 +2147,7 @@ fn decode_session(row: &rusqlite::Row<'_>) -> Result<SessionSummary, rusqlite::E
             .map(|json| serde_json::from_str(&json))
             .transpose()
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        viewed_at: viewed_at.map(parse_timestamp).transpose()?,
     })
 }
 fn decode_message(row: &rusqlite::Row<'_>) -> Result<MessageRecord, rusqlite::Error> {
@@ -2155,6 +2192,7 @@ mod tests {
             updated_at: now,
             archived_at: None,
             revert: None,
+            viewed_at: None,
         }
     }
     #[test]
@@ -2200,6 +2238,27 @@ mod tests {
         );
         storage.set_session_revert(expected.id, None, at).unwrap();
         expected.revert = None;
+        assert_eq!(storage.get_session(expected.id).unwrap(), expected);
+    }
+    #[test]
+    fn set_session_viewed_makes_viewed_fact_real() {
+        let temp = tempdir().unwrap();
+        let storage = Storage::open_in_memory(temp.path().join("blobs")).unwrap();
+        let mut expected = session("viewed");
+        storage.create_session(&expected).unwrap();
+        let at = now();
+        storage
+            .set_session_viewed(expected.id, Some(&at), at)
+            .unwrap();
+        expected.viewed_at = Some(at);
+        expected.updated_at = at;
+        assert_eq!(storage.get_session(expected.id).unwrap(), expected);
+        assert_eq!(
+            storage.list_sessions(false).unwrap(),
+            vec![expected.clone()]
+        );
+        storage.set_session_viewed(expected.id, None, at).unwrap();
+        expected.viewed_at = None;
         assert_eq!(storage.get_session(expected.id).unwrap(), expected);
     }
     #[test]

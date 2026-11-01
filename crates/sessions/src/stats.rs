@@ -132,6 +132,7 @@ mod tests {
                 None
             },
             revert: None,
+            viewed_at: None,
         }
     }
 

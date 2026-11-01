@@ -200,6 +200,8 @@ pub struct SessionSummary {
     pub archived_at: Option<Timestamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revert: Option<SessionRevert>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewed_at: Option<Timestamp>,
 }
 impl SessionSummary {
     pub fn validate(&self) -> Result<(), ContractError> {
