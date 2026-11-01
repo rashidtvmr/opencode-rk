@@ -10338,3 +10338,39 @@ capture is treated as acceptance. oc2 self-captures are never the oracle.
 **Note:** wave-16 lost 10 packages to silent step-capped completion (no
 artifacts). Wave-17 briefs instruct writing `handoff.json` in the last 3 steps
 AND early for LARGE packages.
+
+## Window — wave-17 integration (base `664b7b3f` -> HEAD `471c87d0`)
+
+Landed one at a time (compile + focused test + full `oc2` suite + immediate
+commit; guard GREEN after each):
+
+- `8afd1486` **LAY-01** — root frame fills reference viewports (test).
+- `73e7d07b` **CP-40 / CP-21** — mouse directory completion routed through
+  `expand_directory` (`accept_value_or_expand_directory`) at both pointer sites;
+  CP-21 no longer publishes an unowned (`None`) queue on home/no-session
+  (reviewer-flagged cross-view leak). 2081/0.
+- `b48f7869` **TAB-07/08/09 + LAY-09** — `tab_feedback_color` (attention ->
+  accent, unread Error -> `text_feedback_error`, attention outranks error) with a
+  7-state fixture matrix; grapheme-aware long-title + 600/80ms clock-phase pins;
+  manual-open sidebar suppression test. 2085/0.
+- `f4f1290a` **PAR-01..06 + TAB-10** — new `native_capture.rs` capture envelope
+  (pins/fixture-set/structured `compare()`/canonical frame serialization) +9
+  tests; `session_tab_detail` (`{project} <branch>` else branch else project) +
+  test. Re-authored: fixed trait-call hash, missing struct field, three move
+  errors, over-strict assertion, and invalid `\u2387` escapes. 2095/0.
+- `471c87d0` **LAY-19** — MCP server->client requests become answerable:
+  `route_frame` captures non-expected-id frames WITH a method into a bounded
+  unique pending queue; `answer_request`/`reject_request` write the terminal
+  frame WITHOUT the in-flight `serial` permit. Added missing `Debug` derive.
+  Server lib 304/0.
+
+**Skipped (dead model, no host):** `W17-SIDE08-DIALOGMCP` — all
+`#[allow(dead_code)]` with no render host; blocker recorded.
+
+**Wave-18 dispatched (20 workers, base `471c87d0`)** — see
+`briefs/WAVE18-TASKS.md`. Targets producers/wiring for landed-but-dead slices
+(CP-12 blit, SIDE-14 hover, TAB-07 hue, TAB-21 watermark, DIALOG-12 render,
+MSG-006 menu, F3 dock click, TAB-24 generate, CP-35 migrate, SIDE-10 revert) plus
+remaining `(iii)` clusters (SIDE-03/04/05, THEME-01..09, TOOL-005..010,
+DIALOG-01..10, FFI-01..04, PAR-22, CP-22..27) and two read-only reviews
+(`W18-REVIEW-WAVE17`, `W18-OBLIGATION-DELTA2`).
