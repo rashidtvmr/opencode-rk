@@ -576,10 +576,14 @@ impl NavigationState {
         self.record_history(&session);
         let successor = self.close_successor();
         let receipt = self.close(&session)?;
-        if let Some(next) = successor {
-            if self.tabs.iter().any(|tab| tab.session == next) {
+        // Upstream `remove()` routes the selected close to the chosen session,
+        // otherwise to Home (`context/session-tabs.tsx:373`: `route.navigate(
+        // next ? {type:"session"} : {type:"home"})`).
+        match successor.filter(|next| self.tabs.iter().any(|tab| tab.session == *next)) {
+            Some(next) => {
                 let _ = self.switch(&next);
             }
+            None => self.enter_home(),
         }
         Ok(receipt)
     }
@@ -1352,6 +1356,17 @@ mod tests {
         assert_eq!(nav.work_state(&s("b")), Some(WorkState::Running));
         nav.close_active().unwrap();
         assert_eq!(nav.active().unwrap().session, s("a"));
+    }
+
+    #[test]
+    fn close_active_of_the_last_tab_returns_home() {
+        let mut nav = NavigationState::new();
+        nav.open(s("only"));
+        nav.close_active().unwrap();
+        // Upstream `remove()` falls back to the home route when no successor
+        // tab remains (`context/session-tabs.tsx:373`).
+        assert!(nav.is_home(), "closing the final tab routes to Home");
+        assert_eq!(nav.tab_len(), 0);
     }
 
     #[test]
