@@ -530,6 +530,37 @@ mod conditional_sidebar_tests {
         assert!(!view.dismiss_onboarding());
         assert!(!view.dismiss_onboarding());
     }
+
+    /// SIDE-12: the published dismiss row lets a pointer `(x, y)` resolve to
+    /// the getting-started `✕` before calling `dismiss_onboarding`, mirroring
+    /// the `mcp_sidebar_row_hit` seam; it is `None` whenever the box is hidden.
+    #[test]
+    fn onboarding_dismiss_row_is_published_only_while_the_box_shows() {
+        use super::native_sidebar;
+        let mut view = StatusView::default();
+        view.set_onboarding(Some(native_sidebar::Onboarding {
+            dismissed: false,
+            integrations_known: true,
+            connected_provider: false,
+        }));
+        let row = view
+            .onboarding_dismiss_row(38, 30)
+            .expect("a showing box publishes its dismiss row");
+        // The published index addresses the same row `render_sidebar` paints.
+        let painted = view.render_sidebar(38, 30);
+        assert!(painted[row].contains("Getting started"));
+        // Dismissing hides the box and retracts the published row.
+        assert!(view.dismiss_onboarding());
+        assert!(view.onboarding_dismiss_row(38, 30).is_none());
+        // A too-short pane also withholds the row (height gate).
+        let mut short = StatusView::default();
+        short.set_onboarding(Some(native_sidebar::Onboarding {
+            dismissed: false,
+            integrations_known: true,
+            connected_provider: false,
+        }));
+        assert!(short.onboarding_dismiss_row(38, 21).is_none());
+    }
 }
 
 struct SidebarRow {
@@ -1110,6 +1141,22 @@ impl StatusView {
             }
             _ => false,
         }
+    }
+
+    /// SIDE-12: the painted getting-started dismiss row, if the box is
+    /// currently showing, as the sidebar row index whose text is the
+    /// right-justified `Getting started` line ending in the dismiss glyph
+    /// (`footer.tsx:39-52`, `id="sidebar.footer.getting-started.dismiss"`).
+    /// `None` when the box is hidden (height gate, dismissed, provider
+    /// connected, or integrations unobserved). Row indexes address exactly the
+    /// rows [`Self::render_sidebar_styled`] returns, so a caller can hit-test
+    /// the published row against a pointer `(x, y)` before calling
+    /// [`Self::dismiss_onboarding`].
+    #[must_use]
+    pub fn onboarding_dismiss_row(&self, width: usize, height: usize) -> Option<usize> {
+        self.sidebar_rows(width, height)
+            .iter()
+            .position(|row| row.line.text.contains("Getting started") && row.line.text.ends_with('\u{2715}'))
     }
 
     /// Confirmed connection observation, if any.
