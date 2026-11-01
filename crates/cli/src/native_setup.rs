@@ -77,6 +77,63 @@ pub(super) fn selected_row(models: &[Model], query: &str, row: usize) -> Option<
     rows.get(clamp_row(row, rows.len())).and_then(|index| models.get(*index)).cloned()
 }
 
+/// Persisted recents (newest first) as picker keys. This is the only wired
+/// fact source; favorites/variants/free flags have no native producer yet, so
+/// the empty-query picker runs with an empty favorites snapshot and honest
+/// `free=false, deprecated=false` candidates (see `picker_rows` above).
+pub(super) fn recent_keys() -> Vec<pickers::ModelKey> {
+    recent_keys_at(state_path().as_deref())
+}
+
+fn recent_keys_at(path: Option<&Path>) -> Vec<pickers::ModelKey> {
+    let Some(path) = path else { return Vec::new() };
+    let Ok(value) = read_state(path) else { return Vec::new() };
+    let Some(recent) = value["recent"].as_array() else { return Vec::new() };
+    recent
+        .iter()
+        .take(MAX_RECENT)
+        .filter_map(|entry| {
+            let provider = entry["providerID"].as_str()?;
+            let id = entry["modelID"].as_str()?;
+            Some((provider.to_owned(), id.to_owned()))
+        })
+        .collect()
+}
+
+/// Live model-dialog rows in `picker_rows` order (recents-first for an empty
+/// query), reading recents from persisted state. Non-empty queries fall through
+/// to the fuzzy `visible_rows` filter unchanged.
+pub(super) fn dialog_rows(models: &[Model], query: &str) -> Vec<usize> {
+    dialog_rows_with(models, query, &recent_keys())
+}
+
+/// Pure core mirroring `dialog_rows` with explicit recents (testable).
+pub(super) fn dialog_rows_with(
+    models: &[Model],
+    query: &str,
+    recents: &[pickers::ModelKey],
+) -> Vec<usize> {
+    let picker = pickers::ModelPickerState::open(&[]);
+    picker_rows(models, query, &picker, recents)
+}
+
+/// Commit mapping: the focused picker index (recents-first) -> the model it
+/// names. The index is resolved against `dialog_rows` order, never against the
+/// raw catalogue, so reordering cannot desync the committed model.
+pub(super) fn dialog_selected_row(models: &[Model], query: &str, row: usize) -> Option<Model> {
+    dialog_selected_row_with(models, query, row, &recent_keys())
+}
+
+pub(super) fn dialog_selected_row_with(
+    models: &[Model],
+    query: &str,
+    row: usize,
+    recents: &[pickers::ModelKey],
+) -> Option<Model> {
+    let rows = dialog_rows_with(models, query, recents);
+    rows.get(clamp_row(row, rows.len())).and_then(|index| models.get(*index)).cloned()
+}
+
 /// Catalogue indices in `ModelPickerState` order. An empty query is the full
 /// picker order (favorites, then recents, then the remaining catalogue);
 /// a non-empty query falls back to the fuzzy `visible_rows` filter. Recents are
@@ -470,6 +527,24 @@ mod picker_tests {
         assert_eq!(picker_rows(&models, "  ", &picker, &recents), vec![2, 0, 1]);
         assert_eq!(picker_rows(&models, "b", &picker, &recents), vec![1]);
         assert_eq!(picker_rows(&models, "B", &picker, &[]), vec![1]);
+    }
+
+    #[test]
+    fn dialog_rows_resolve_recents_first_index_to_committed_model() {
+        let models = vec![
+            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None },
+            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None },
+            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None },
+        ];
+        let recents = vec![("p".to_owned(), "c".to_owned())];
+        // Empty query -> recents-first picker order, not raw catalogue order.
+        assert_eq!(dialog_rows_with(&models, "", &recents), vec![2, 0, 1]);
+        // Index 0 in picker order is the recent C, not catalogue index 0 (A).
+        assert_eq!(dialog_selected_row_with(&models, "", 0, &recents).unwrap().id, "c");
+        assert_eq!(dialog_selected_row_with(&models, "", 1, &recents).unwrap().id, "a");
+        // Non-empty query keeps the fuzzy `visible_rows` mapping.
+        assert_eq!(dialog_rows_with(&models, "b", &recents), vec![1]);
+        assert_eq!(dialog_selected_row_with(&models, "b", 0, &recents).unwrap().id, "b");
     }
 
     #[test]

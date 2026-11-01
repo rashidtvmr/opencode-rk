@@ -495,10 +495,17 @@ pub fn horizontal_session_paint_with_semantics(
 ) -> TabRowPaint {
     use crate::native_theme_runtime::Slot;
     let mut paint = row_paint_for(color, palette);
-    paint.number_fg = if flags.busy {
-        semantic.map_or_else(|| palette.get(Slot::Primary), |theme| theme.tab_interactive.rgba)
-    } else if flags.needs_attention {
+    // `session-tabs.tsx:1648-1658` resolves the indicator number as
+    // `tabFeedbackColor(attention, unread) ?? busyNumber ?? hovered ? text :
+    // selected ? tint : idleNumber`. Our `needs_attention` flag carries the
+    // attention kind, and a tab can be both busy and attention at once, so
+    // attention must be tested before busy or a crying `!`/`?` indicator would
+    // keep the running hue instead of the accent. (The `unread==Error` half of
+    // `tabFeedbackColor` has no native producer yet — see TAB-21.)
+    paint.number_fg = if flags.needs_attention {
         semantic.map_or_else(|| palette.get(Slot::Warning), |theme| theme.tab_attention.rgba)
+    } else if flags.busy {
+        semantic.map_or_else(|| palette.get(Slot::Primary), |theme| theme.tab_interactive.rgba)
     } else if color == TabCellColor::Hovered {
         palette.get(Slot::Text)
     } else if color == TabCellColor::Selected {
@@ -3284,6 +3291,29 @@ mod tests {
         assert_eq!(strip.row_paints[0].number_fg, semantic.tab_interactive.rgba);
         assert_eq!(strip.row_paints[1].number_fg, semantic.tab_attention.rgba);
         assert_ne!(strip.row_paints[0].number_fg, palette.get(crate::native_theme_runtime::Slot::Warning));
+    }
+
+    /// `session-tabs.tsx:1648-1658`: the indicator number is
+    /// `tabFeedbackColor(attention, unread) ?? busyNumber ?? ...`, so dialog
+    /// attention outranks a simultaneously-running tab. Before this the code
+    /// tested `busy` first and a tab that was both busy and asking kept the
+    /// running hue instead of the accent `!`/`?`.
+    #[test]
+    fn attention_feedback_outranks_busy_for_the_indicator_number() {
+        use crate::native_theme_runtime::{Palette, RuntimeTheme, ThemeMode};
+        let theme = RuntimeTheme::builtin_default(ThemeMode::Dark);
+        let palette = Palette::opencode_dark();
+        let semantic = theme.semantic.as_ref().expect("built-in V2 semantic palette");
+        let mut both = input("both", "running and asking");
+        both.flags = TabFlags { active: false, busy: true, needs_attention: true };
+        let strip = TabStrip::render(&[both], TabOrientation::Horizontal, 40, 1, 0)
+            .with_row_colors_semantic(&palette, theme.semantic.as_ref());
+        assert_eq!(
+            strip.row_paints[0].number_fg,
+            semantic.tab_attention.rgba,
+            "attention feedback outranks the busy hue"
+        );
+        assert_ne!(strip.row_paints[0].number_fg, semantic.tab_interactive.rgba);
     }
 
     #[test]

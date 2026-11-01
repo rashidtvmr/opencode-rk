@@ -6684,7 +6684,7 @@ fn native_loop(
                         // the request was in flight or move its focused row.
                         model_row = native_setup::clamp_row(
                             model_row,
-                            native_setup::visible_rows(&models, &filter_input).len(),
+                            native_setup::dialog_rows(&models, &filter_input).len(),
                         );
                     }
                     if selected.is_none() {
@@ -7373,7 +7373,7 @@ fn native_loop(
                 }
                 // Same buffer fix as Provider: filter and echo read the
                 // dialog-local `filter_input`, never the chat draft.
-                let visible = native_setup::visible_rows(&models, &filter_input);
+                let visible = native_setup::dialog_rows(&models, &filter_input);
                 let active = native_setup::clamp_row(model_row, visible.len());
                 let list_start = 4 + usize::from(model_load.is_some()) + usize::from(setup_error.is_some());
                 let capacity = native_setup::picker_capacity(view.modal_content_height(), list_start, 2);
@@ -9226,7 +9226,7 @@ fn native_loop(
                     let modal = view.modal_presentation();
                     let Some((_column, content_row)) = modal.content_point(x, y, view.modal_content_height()) else { needs_paint = true; continue; };
                     let (visible_len, list_start, footer_rows) = if dialog == native_setup::Dialog::Model {
-                        (native_setup::visible_rows(&models, &filter_input).len(), 4 + usize::from(model_load.is_some()) + usize::from(setup_error.is_some()), 2usize)
+                        (native_setup::dialog_rows(&models, &filter_input).len(), 4 + usize::from(model_load.is_some()) + usize::from(setup_error.is_some()), 2usize)
                     } else {
                         let query = filter_input.trim().to_lowercase();
                         (providers.iter().filter(|row| row.0.to_lowercase().contains(&query) || row.1.to_lowercase().contains(&query)).count(), 4usize, 2 + usize::from(setup_error.is_some()) + usize::from(model_load.is_some()))
@@ -9438,7 +9438,7 @@ fn native_loop(
                     && !view.dialogs.intercepts_input()
                     && matches!(dialog, native_setup::Dialog::Model)
                 {
-                    let visible = native_setup::visible_rows(&models, &filter_input);
+                    let visible = native_setup::dialog_rows(&models, &filter_input);
                     model_row = native_setup::move_row(
                         model_row,
                         visible.len(),
@@ -10781,7 +10781,7 @@ fn native_loop(
                             // Enter commits the focused advertised row. Query text is
                             // never itself a model identity.
                             let choice =
-                                native_setup::selected_row(&models, &filter_input, model_row);
+                                native_setup::dialog_selected_row(&models, &filter_input, model_row);
                             if let Some(model) = choice {
                                 match native_setup::save_model(&model) {
                                     Ok(()) => {
