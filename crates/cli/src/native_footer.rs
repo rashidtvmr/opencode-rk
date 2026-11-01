@@ -247,6 +247,7 @@ mod native_footer_tests {
             agent: agent.map(str::to_owned),
             model: model.map(str::to_owned),
             assistant_facts: Some(facts),
+            message_id: None,
         }
     }
 

@@ -1339,7 +1339,7 @@ mod footer_gate_tests {
                 name: name.into(), id: "c1".into(), status: "completed".into(),
                 args: String::new(), output: String::new(), is_error: false, metadata: String::new(),
             }],
-            agent: None, model: None, assistant_facts: None,
+            agent: None, model: None, assistant_facts: None, message_id: None,
         };
         // Reloaded history projects the call and its result instead of a
         // `ToolState`, and a finished turn leaves only those.
@@ -1349,14 +1349,14 @@ mod footer_gate_tests {
                 ChatPart::ToolCall { name: name.into(), id: "c1".into() },
                 ChatPart::ToolResult { name: name.into(), output: "{}".into(), is_error: false },
             ],
-            agent: None, model: None, assistant_facts: None,
+            agent: None, model: None, assistant_facts: None, message_id: None,
         };
         let subtask = ChatMessage {
             role: ChatRole::Assistant,
             parts: vec![ChatPart::Subtask {
                 agent: "explore".into(), description: "probe".into(), background: true,
             }],
-            agent: None, model: None, assistant_facts: None,
+            agent: None, model: None, assistant_facts: None, message_id: None,
         };
         assert!(!transcript_has_delegation(&[]));
         assert!(!transcript_has_delegation(&[ChatMessage::text(ChatRole::User, "hello")]));
@@ -1391,7 +1391,7 @@ mod footer_gate_tests {
                 name: "task".into(), id: "c1".into(), status: "running".into(),
                 args: String::new(), output: String::new(), is_error: false, metadata: String::new(),
             }],
-            agent: None, model: None, assistant_facts: None,
+            agent: None, model: None, assistant_facts: None, message_id: None,
         }];
         assert!(should_poll_children(0, 0, &live));
     }
@@ -2813,6 +2813,7 @@ mod footer_v3_painter_tests {
             agent: None,
             model: None,
             assistant_facts: None,
+            message_id: None,
         };
         let messages = vec![message];
         let mut view = ChatView::default();
@@ -6684,6 +6685,7 @@ fn native_loop(
                                     agent: None,
                                     model: None,
                                     assistant_facts: None,
+                                    message_id: None,
                                 },
                             );
                         }
@@ -6710,6 +6712,7 @@ fn native_loop(
                                     agent: None,
                                     model: None,
                                     assistant_facts: None,
+                                    message_id: None,
                                 },
                             );
                             if name == "todowrite" {
@@ -6763,6 +6766,7 @@ fn native_loop(
                                     agent: None,
                                     model: None,
                                     assistant_facts: Some(facts),
+                                    message_id: None,
                                 },
                             );
                         }

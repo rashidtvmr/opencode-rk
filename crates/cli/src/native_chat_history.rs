@@ -104,6 +104,22 @@ mod tests {
     }
 
     #[test]
+    fn retained_backend_id_survives_into_session_rows() {
+        use crate::native_message_rows::{SessionEntry, SessionRow, Verbosity};
+        let mut history = NativeChatHistory::default();
+        let mut message = ChatMessage::text(ChatRole::User, "hi");
+        message.message_id = Some("msg_42".to_owned());
+        history.append("user".into(), message);
+        let rows = history.rows(Verbosity::Medium);
+        match &rows[0] {
+            SessionRow::Entry(SessionEntry::Message { message_id }) => {
+                assert_eq!(message_id, "msg_42", "backend id reaches the row model");
+            }
+            other => panic!("expected a message row: {other:?}"),
+        }
+    }
+
+    #[test]
     fn retained_messages_project_into_the_shared_grouped_rows() {
         use crate::native_message_rows::{GroupKind, SessionRow, Verbosity};
         let mut history = NativeChatHistory::default();
@@ -119,6 +135,7 @@ mod tests {
                 agent: None,
                 model: None,
                 assistant_facts: None,
+                message_id: None,
             },
         );
         history.notice("note".into());
@@ -205,7 +222,7 @@ impl NativeChatHistory {
                 return;
             }
         }
-        self.append("reasoning".into(),ChatMessage{role:ChatRole::Assistant,parts:vec![ChatPart::Thinking(self.reasoning.clone())],agent:None,model:None,assistant_facts:None});
+        self.append("reasoning".into(),ChatMessage{role:ChatRole::Assistant,parts:vec![ChatPart::Thinking(self.reasoning.clone())],agent:None,model:None,assistant_facts:None,message_id:None});
         self.reasoning_partial=Some((self.lines.len()-1,self.messages.len()-1));
     }
 
@@ -357,7 +374,13 @@ impl NativeChatHistory {
             .messages
             .iter()
             .enumerate()
-            .map(|(index, message)| (format!("history:{index}"), message.clone()))
+            .map(|(index, message)| {
+                let id = message
+                    .message_id
+                    .clone()
+                    .unwrap_or_else(|| format!("history:{index}"));
+                (id, message.clone())
+            })
             .collect();
         crate::native_message_rows::rows_from_chat_entries(&entries, verbosity)
     }

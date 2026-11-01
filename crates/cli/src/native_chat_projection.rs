@@ -572,6 +572,9 @@ pub fn project_message(message: &Value) -> Option<ChatMessage> {
         // `crates/server/src/lib.rs` turn completion). A record without them
         // projects no footer rather than a fabricated one.
         assistant_facts: AssistantFacts::from_history_record(message),
+        // Stable backend id; the menu keys its dialog by this id
+        // (`routes/session/index.tsx:2403-2422`). Never fabricated.
+        message_id: opt_string(message, "id"),
     })
 }
 
@@ -1592,6 +1595,28 @@ mod tests {
             Some(1_000),
             "duration starts at the id-less input, not the older identified one"
         );
+    }
+
+    #[test]
+    fn message_id_survives_history_projection() {
+        // Upstream keys the per-message menu by `props.message.id`
+        // (`routes/session/index.tsx:2403-2422`); the id must survive the typed
+        // projection and never be fabricated.
+        let records = json!([
+            {"id": "u1", "role": "user", "body": {"storage": "inline", "text": "hi"}},
+            {"role": "user", "body": {"storage": "inline", "text": "id-less"}},
+            {"id": "a1", "role": "assistant", "body": {"storage": "inline", "text": "done"}}
+        ]);
+        let history = project_history(records.as_array().unwrap());
+        assert_eq!(history[0].message_id.as_deref(), Some("u1"));
+        assert_eq!(history[1].message_id, None, "id-less record keeps no id");
+        assert_eq!(history[2].message_id.as_deref(), Some("a1"));
+        let entries = project_history_entries(records.as_array().unwrap());
+        assert_eq!(entries.len(), 2, "id-less record is not an anchor entry");
+        assert!(entries
+            .iter()
+            .all(|(id, msg)| msg.message_id.as_deref() == Some(id.as_str())),
+            "entry pair id must equal the typed message id");
     }
 
     #[test]

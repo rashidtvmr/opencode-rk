@@ -654,6 +654,12 @@ pub struct ChatMessage {
     /// ([`crate::native_assistant_facts::turn_duration_ms`]); nothing is
     /// backfilled from wall time or the currently selected UI model.
     pub assistant_facts: Option<AssistantFacts>,
+    /// Stable backend message id this projection was built from (upstream keys
+    /// the message menu by `props.message.id`,
+    /// `packages/tui/src/routes/session/index.tsx:2403-2422`). `None` for
+    /// live/replayed messages whose producer knew no id; never fabricated
+    /// positionally.
+    pub message_id: Option<String>,
 }
 
 impl ChatMessage {
@@ -666,6 +672,7 @@ impl ChatMessage {
             agent: None,
             model: None,
             assistant_facts: None,
+            message_id: None,
         }
     }
 
@@ -2590,7 +2597,7 @@ mod diff_wiring_v2_regressions {
     use super::*;
 
     fn patch_message(diff: String) -> ChatMessage {
-        ChatMessage { role: ChatRole::Assistant, parts: vec![ChatPart::Patch { path: "many.rs".into(), diff, diagnostics: Vec::new() }], agent: None, model: None, assistant_facts: None }
+        ChatMessage { role: ChatRole::Assistant, parts: vec![ChatPart::Patch { path: "many.rs".into(), diff, diagnostics: Vec::new() }], agent: None, model: None, assistant_facts: None, message_id: None }
     }
 
     #[test]
@@ -2633,6 +2640,7 @@ mod diff_wiring_v2_regressions {
             agent: None,
             model: None,
             assistant_facts: None,
+            message_id: None,
         };
         let rows = typed_message_rows(100, &message, false);
         let diag = rows.iter().position(|(row, _)| row.contains("Error [2:3] boom")).expect("diagnostic row");
@@ -4515,6 +4523,7 @@ mod tests {
                 agent: None,
                 model: None,
                 assistant_facts: None,
+                message_id: None,
             },
         ];
         let appearance = |radius: u8| {
@@ -5264,6 +5273,7 @@ mod tests {
             agent: None,
             model: None,
             assistant_facts: None,
+            message_id: None,
         };
         let rows = ChatView::new().render_typed_classified(48, 6, "ws", &[message], "", false);
         assert!(rows.iter().any(|(row, class)| {
@@ -5277,6 +5287,7 @@ mod tests {
             agent: None,
             model: None,
             assistant_facts: None,
+            message_id: None,
         };
         let rows =
             ChatView::new().render_typed_classified(48, 6, "ws", &[only_placeholder], "", false);
@@ -5297,6 +5308,7 @@ mod tests {
                 agent: None,
                 model: None,
                 assistant_facts: None,
+                message_id: None,
             },
             ChatMessage {
                 role: ChatRole::Assistant,
@@ -5324,6 +5336,7 @@ mod tests {
                 agent: Some("build".to_owned()),
                 model: Some("provider/model-1".to_owned()),
                 assistant_facts: None,
+                message_id: None,
             },
         ];
         let rows = view.render_typed_classified(72, 20, "ws", &messages, "", false);
@@ -5418,6 +5431,7 @@ mod tests {
             agent: None,
             model: None,
             assistant_facts: None,
+            message_id: None,
         }];
         let rows = view.render_typed_classified(80, 20, "ws", &messages, "", false);
         // Read: label + the metadata-driven `↳ Loaded` row.
@@ -5461,6 +5475,7 @@ mod tests {
             agent: Some("agent\nname".to_owned()),
             model: None,
             assistant_facts: None,
+            message_id: None,
         }];
         let rows = view.render_typed_classified(50, MAX_VIEW_ROWS, "ws", &messages, "", false);
         assert!(rows.len() <= MAX_VIEW_ROWS, "frame row cap");
