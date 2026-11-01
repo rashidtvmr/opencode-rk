@@ -56,6 +56,12 @@ pub const MAX_ARGS_BYTES: usize = 64 * 1024;
 pub const MAX_FIELD_BYTES: usize = 8 * 1024;
 /// Bound on rows produced for one tool part.
 pub const MAX_TOOL_ROWS: usize = 64;
+/// Upper bound on `Read` `metadata.loaded` instruction-file rows
+/// (`routes/session/index.tsx:3231-3243`), so a hostile payload cannot grow the
+/// transcript unbounded.
+pub const MAX_LOADED_ROWS: usize = 32;
+/// Upper bound on one loaded-file path's characters.
+pub const MAX_LOADED_PATH_CHARS: usize = 512;
 
 const MAX_CELLS: usize = 64 * 1024;
 
@@ -532,6 +538,25 @@ pub fn apply_tool_metadata(mut display: ToolDisplay, metadata_json: &str) -> Too
     let Ok(Value::Object(meta)) = serde_json::from_str::<Value>(metadata_json) else {
         return display;
     };
+    // `Read` prints one `↳ Loaded <path>` row per loaded instruction file, but
+    // only once the part completed (`routes/session/index.tsx:3211-3243`:
+    // `if state.status !== "completed" return []`), keeping only string entries.
+    if display.kind == ToolKind::Read && display.status == ToolStatus::Completed {
+        if let Some(loaded) = meta.get("loaded").and_then(Value::as_array) {
+            let mut extra: Vec<ToolRow> = Vec::new();
+            for entry in loaded.iter().filter_map(Value::as_str) {
+                // Upstream nests the row under `paddingLeft={3}` + a text
+                // `paddingLeft={3}`, i.e. 6 leading cells; `rows()` already adds
+                // `BODY_INDENT` (4), so bake the remaining two into the text.
+                let path: String = entry.chars().take(MAX_LOADED_PATH_CHARS).collect();
+                extra.push((format!("  ↳ Loaded {path}"), ChatRowClass::Metadata));
+                if extra.len() >= MAX_LOADED_ROWS {
+                    break;
+                }
+            }
+            display.body.extend(extra);
+        }
+    }
     if display.kind == ToolKind::Execute
         && meta.get("error").and_then(Value::as_bool) == Some(true)
         && display.status != ToolStatus::Error
@@ -1734,5 +1759,53 @@ mod tests {
         );
         assert!(!untouched.background);
         assert_eq!(untouched.status, ToolStatus::Completed);
+    }
+
+    /// TOOL-012: `Read` prints one `↳ Loaded <path>` row per loaded
+    /// instruction file, completed parts only, strings only
+    /// (`routes/session/index.tsx:3211-3243`).
+    #[test]
+    fn read_metadata_loaded_rows_render_only_when_completed() {
+        let read = |status: &str, meta: &str| {
+            apply_tool_metadata(
+                tool_display(80, "read", status, r#"{"path":"src/a.rs"}"#, "", false),
+                meta,
+            )
+        };
+        // Completed: every string entry becomes a `↳ Loaded` row, and
+        // non-string entries are dropped (`filter((p) => typeof p === "string")`).
+        let done = read("completed", r#"{"loaded":["AGENTS.md","nested/RULES.md",7,null]}"#);
+        let loaded: Vec<&String> = done
+            .body
+            .iter()
+            .filter(|(row, _)| row.contains("↳ Loaded"))
+            .map(|(row, _)| row)
+            .collect();
+        assert_eq!(loaded.len(), 2, "two string entries: {loaded:?}");
+        assert_eq!(loaded[0], "  ↳ Loaded AGENTS.md");
+        assert_eq!(loaded[1], "  ↳ Loaded nested/RULES.md");
+        assert!(done.body.iter().any(|(_, class)| *class == ChatRowClass::Metadata));
+
+        // Not completed: `loaded` is ignored entirely.
+        let running = read("running", r#"{"loaded":["AGENTS.md"]}"#);
+        assert!(!running.body.iter().any(|(row, _)| row.contains("↳ Loaded")));
+
+        // Missing or non-array `loaded`: no rows.
+        let none = read("completed", r#"{"loaded":"AGENTS.md"}"#);
+        assert!(!none.body.iter().any(|(row, _)| row.contains("↳ Loaded")));
+
+        // The row cap bounds a hostile payload.
+        let many = format!(
+            r#"{{"loaded":[{}]}}"#,
+            (0..(MAX_LOADED_ROWS + 8))
+                .map(|i| format!("\"f{i}\""))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let capped = read("completed", &many);
+        assert_eq!(
+            capped.body.iter().filter(|(row, _)| row.contains("↳ Loaded")).count(),
+            MAX_LOADED_ROWS
+        );
     }
 }
