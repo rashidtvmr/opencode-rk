@@ -1993,6 +1993,14 @@ impl NativeView {
             .set_session_binding(session, title, message_count);
     }
 
+    /// Forward the sidebar title's rename-pending facts into the status
+    /// projection: the title paints DIM while its rename is pending with
+    /// animations off, else BOLD (`routes/session/sidebar.tsx:33-45`). See
+    /// [`crate::native_view_status::StatusView::set_title_state`].
+    pub fn set_title_state(&mut self, pending: bool, animations: bool) {
+        self.status.set_title_state(pending, animations);
+    }
+
     pub fn set_workspace(&mut self, workspace: String) {
         self.workspace = workspace;
     }
@@ -5406,6 +5414,52 @@ pub fn initial_page_rows(backend: bool) -> Vec<PageRow> {
 /// local simulation.
 #[cfg(test)]
 mod tests {
+    /// SIDE-01: `NativeView` forwards the sidebar title's rename-pending
+    /// facts to the status projection that paints the sidebar title
+    /// (`routes/session/sidebar.tsx:33-45`): DIM while pending with
+    /// animations off, else BOLD.
+    #[test]
+    fn side01_title_state_forwards_to_status_projection() {
+        fn sidebar_title_attr(view: &mut NativeView) -> u32 {
+            let frame = view.render("draft", &[], false, &[]);
+            let y = match frame.iter().position(|line| line.contains("Titled")) {
+                Some(y) => y as u16,
+                None => panic!("sidebar title not painted; offset={:?} frame={frame:?}", view.presentation().sidebar_offset),
+            };
+            let left = view.presentation().sidebar_offset.unwrap();
+            view.sidebar_span_styles()
+                .iter()
+                .find(|(x, row, cells, ..)| {
+                    *row == y && *cells as usize >= "Titled".len()
+                        && u32::from(*x) >= u32::from(left)
+                })
+                .or_else(|| {
+                    view.sidebar_span_styles()
+                        .iter()
+                        .find(|(_, row, ..)| *row == y)
+                })
+                .map(|span| span.4)
+                .expect("sidebar title span painted")
+        }
+        let mut view = NativeView::new(148, 30);
+        view.set_session_route(true);
+        if view.presentation().sidebar_offset.is_none() {
+            view.toggle_sidebar();
+        }
+        view.set_session_binding(
+            Some(opencode_rk_contracts::SessionId::new().to_string()),
+            Some("Titled".to_owned()),
+            Some(0),
+        );
+        assert_eq!(sidebar_title_attr(&mut view), crate::native_ui_style::ATTR_BOLD);
+        view.set_title_state(true, false);
+        assert_eq!(sidebar_title_attr(&mut view), crate::native_ui_style::ATTR_DIM);
+        view.set_title_state(true, true);
+        assert_eq!(sidebar_title_attr(&mut view), crate::native_ui_style::ATTR_BOLD);
+        view.set_title_state(false, false);
+        assert_eq!(sidebar_title_attr(&mut view), crate::native_ui_style::ATTR_BOLD);
+    }
+
     #[test]
     fn explicit_outline_prompt_wraps_and_tracks_cursor_through_resize() {
         let mut appearance = crate::native_box_style::BoxAppearance::default();

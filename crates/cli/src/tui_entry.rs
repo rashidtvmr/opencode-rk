@@ -1934,6 +1934,33 @@ mod tab_context_menu_dispatch_tests {
         );
     }
 
+    /// SIDE-01: the sidebar title pending fact matches ONLY the exact
+    /// active session id against the in-flight rename identity
+    /// (`context/data.tsx:22-47` keys `generatingTitles[sessionID]`;
+    /// `sidebar.tsx:33-45` asks it per `props.sessionID`).
+    #[cfg(feature = "native")]
+    #[test]
+    fn side01_sidebar_title_pending_matches_exact_active_session_only() {
+        let inflight = crate::native_navigation::SessionRef("session-a".to_owned());
+        assert!(
+            super::sidebar_title_pending(Some("session-a"), Some(&inflight)),
+            "exact matching id is pending"
+        );
+        let foreign = crate::native_navigation::SessionRef("session-b".to_owned());
+        assert!(
+            !super::sidebar_title_pending(Some("session-a"), Some(&foreign)),
+            "a foreign in-flight id is never pending for this session"
+        );
+        assert!(
+            !super::sidebar_title_pending(Some("session-a"), None),
+            "no in-flight request is never pending"
+        );
+        assert!(
+            !super::sidebar_title_pending(None, Some(&inflight)),
+            "no active identity is never pending"
+        );
+    }
+
     #[test]
     fn dialog_ownership_requires_exact_inflight_session_id() {
         let inflight = crate::native_navigation::SessionRef("session-a".to_owned());
@@ -3071,6 +3098,22 @@ mod rounded_surface_color_tests {
 /// reply can never be confused with another request's ack.
 #[cfg(feature = "native")]
 type RenameInFlight = crate::native_navigation::SessionRef;
+
+/// Sidebar title rename-pending fact for the ACTIVE session:
+/// `routes/session/sidebar.tsx:33-45` reads
+/// `data.session.title.pending(props.sessionID)` and
+/// `context/data.tsx:22-47` keys `generatingTitles[sessionID] === true`, so
+/// the fact holds only while the active session's OWN rename request is
+/// still in flight. A different id, no identity or no in-flight request is
+/// never pending. No title generation is invented here; only the pending
+/// fact is projected.
+#[cfg(feature = "native")]
+fn sidebar_title_pending(
+    active_session: Option<&str>,
+    inflight: Option<&crate::native_navigation::SessionRef>,
+) -> bool {
+    active_session.is_some_and(|active| inflight.is_some_and(|inflight| inflight.0 == active))
+}
 
 /// Decision for one settled rename request, derived from the in-flight
 /// identity only (never from dialog state, so an ack can never retarget):
@@ -7374,6 +7417,17 @@ fn native_loop(
             };
             (Some(rail), tooltip)
         } else { (None, None) };
+        // Sidebar title rename-pending (`sidebar.tsx:33-45`,
+        // `context/data.tsx:22-47`), reprojected from the post-drain
+        // in-flight fact every frame — the same "paint from the post-drain
+        // state" rule the footer busy flag above follows.
+        view.set_title_state(
+            sidebar_title_pending(
+                live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
+                rename_inflight.as_ref(),
+            ),
+            animations,
+        );
         let mut lines = if help_open && !dialog_open {
             Vec::new()
         } else {
