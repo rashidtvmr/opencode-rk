@@ -27,6 +27,26 @@ pub struct SettingsRow {
     pub title: &'static str,
     pub description: &'static str,
     pub keywords: &'static [&'static str],
+    /// Enumerated `values` for this setting (`dialog-config.tsx` `values`).
+    pub values: &'static [&'static str],
+    /// Optional `labels` shown instead of the raw value
+    /// (`dialog-config.tsx` `labels`).
+    pub labels: &'static [&'static str],
+    /// Numeric formatter; `Some` when the row is a numeric setting
+    /// (`dialog-config.tsx:237,298,330`).
+    pub format: Option<ValueFormat>,
+}
+
+/// Exact numeric formatter selected by a numeric `dialog-config.tsx` row.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ValueFormat {
+    /// Scroll speed: `Number(value).toFixed(2)` (`dialog-config.tsx:237`).
+    Fixed2,
+    /// Leader timeout: `` `${value} ms` `` (`dialog-config.tsx:298`).
+    Milliseconds,
+    /// Alert volume: `` `${Math.round(Number(value) * 100)}%` ``
+    /// (`dialog-config.tsx:330`).
+    Percent,
 }
 
 #[derive(Clone, Debug)]
@@ -103,6 +123,9 @@ impl SettingsDialog {
                 title: "Sidebar",
                 description: "Whether the sidebar shows when there is room",
                 keywords: &["side panel"],
+                values: &["hide", "auto"],
+                labels: &[],
+                format: None,
             },
             SettingsRow {
                 id: "tabs.layout",
@@ -110,6 +133,9 @@ impl SettingsDialog {
                 title: "Layout",
                 description: "Whether tabs run along the top or down the side",
                 keywords: &["orientation", "left", "layout", "tabs"],
+                values: &["horizontal", "vertical"],
+                labels: &[],
+                format: None,
             },
         ]
     }
@@ -394,6 +420,69 @@ impl SettingsDialog {
             .take(height)
             .map(|line| crate::native_view_layout::fit(&line, width))
             .collect()
+    }
+}
+
+impl SettingsRow {
+    /// Mirrors `display(setting)` in `dialog-config.tsx:398-402`: a formatted
+    /// numeric row wins, otherwise the enumerated value maps through `labels`
+    /// when present and falls back to `String(current)`.
+    #[must_use]
+    pub fn display(&self, current: &str) -> String {
+        if let Some(format) = self.format {
+            if let Ok(number) = current.parse::<f64>() {
+                return match format {
+                    ValueFormat::Fixed2 => format_fixed2(number),
+                    ValueFormat::Milliseconds => format_milliseconds(number),
+                    ValueFormat::Percent => format_percent(number),
+                };
+            }
+            return current.to_owned();
+        }
+        match self.values.iter().position(|value| *value == current) {
+            Some(index) => self
+                .labels
+                .get(index)
+                .map_or_else(|| current.to_owned(), |label| (*label).to_owned()),
+            None => current.to_owned(),
+        }
+    }
+}
+
+/// `` `${value} ms` `` for a finite number: an integral value drops the
+/// fraction so `2000.0` prints `2000 ms`, matching JS number stringification
+/// (`dialog-config.tsx:298`).
+#[must_use]
+pub fn format_milliseconds(value: f64) -> String {
+    if !value.is_finite() {
+        return format!("{value} ms");
+    }
+    if value.fract() == 0.0 && value.abs() < 1e21 {
+        format!("{value:.0} ms")
+    } else {
+        format!("{value} ms")
+    }
+}
+
+/// `Number(value).toFixed(2)` (`dialog-config.tsx:237`): always two fraction
+/// digits, e.g. `3.00`, `0.25`.
+#[must_use]
+pub fn format_fixed2(value: f64) -> String {
+    if value.is_finite() {
+        format!("{value:.2}")
+    } else {
+        format!("{value}")
+    }
+}
+
+/// `` `${Math.round(Number(value) * 100)}%` `` (`dialog-config.tsx:330`):
+/// e.g. `0.4 -> "40%"`, `1.0 -> "100%"`.
+#[must_use]
+pub fn format_percent(value: f64) -> String {
+    if value.is_finite() {
+        format!("{}%", value.mul_add(100.0, 0.0).round() as i64)
+    } else {
+        format!("{value}%")
     }
 }
 
@@ -698,6 +787,65 @@ mod tests {
         assert_eq!(dialog.current(), TabOrientation::Vertical);
         dialog.close();
         assert_eq!(dialog.query(), "");
+    }
+
+    #[test]
+    fn numeric_formatters_match_upstream_display_strings() {
+        // dialog-config.tsx:237 `Number(value).toFixed(2)`.
+        assert_eq!(format_fixed2(3.0), "3.00");
+        assert_eq!(format_fixed2(0.25), "0.25");
+        assert_eq!(format_fixed2(10.0), "10.00");
+        assert_eq!(format_fixed2(3.25), "3.25");
+        // dialog-config.tsx:298 `` `${value} ms` ``.
+        assert_eq!(format_milliseconds(2000.0), "2000 ms");
+        assert_eq!(format_milliseconds(2250.0), "2250 ms");
+        assert_eq!(format_milliseconds(250.0), "250 ms");
+        // dialog-config.tsx:330 `` `${Math.round(value * 100)}%` ``.
+        assert_eq!(format_percent(0.4), "40%");
+        assert_eq!(format_percent(0.0), "0%");
+        assert_eq!(format_percent(1.0), "100%");
+    }
+
+    #[test]
+    fn rows_display_matches_upstream_labels_and_values() {
+        let rows = SettingsDialog::rows();
+        // session.sidebar values ["hide","auto"], no labels.
+        assert_eq!(rows[0].display("auto"), "auto");
+        assert_eq!(rows[0].display("hide"), "hide");
+        // Unknown value falls back to String(current) (dialog-config.tsx:401).
+        assert_eq!(rows[0].display("legacy"), "legacy");
+        // tabs.layout values ["horizontal","vertical"].
+        assert_eq!(rows[1].display("horizontal"), "horizontal");
+        assert_eq!(rows[1].display("vertical"), "vertical");
+    }
+
+    #[test]
+    fn numeric_row_format_selection_projects_through_display() {
+        let scroll = SettingsRow {
+            id: "scroll.speed",
+            category: "Input",
+            title: "Scroll speed",
+            description: "How far each scroll step moves",
+            keywords: &["scrolling"],
+            values: &[],
+            labels: &[],
+            format: Some(ValueFormat::Fixed2),
+        };
+        assert_eq!(scroll.display("3"), "3.00");
+        let leader = SettingsRow {
+            format: Some(ValueFormat::Milliseconds),
+            values: &[],
+            labels: &[],
+            ..scroll.clone()
+        };
+        assert_eq!(leader.display("2000"), "2000 ms");
+        let volume = SettingsRow {
+            format: Some(ValueFormat::Percent),
+            values: &[],
+            labels: &[],
+            ..leader.clone()
+        };
+        assert_eq!(volume.display("0.4"), "40%");
     }
 
     #[test]
