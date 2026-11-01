@@ -42,6 +42,11 @@ pub struct UiPreferences {
     pub theme_mode: Option<String>,
     pub theme_mode_lock: Option<String>,
     pub vertical_tabs_width: Option<u16>,
+    /// Raw `tui.cursor` object from the merged config files, when present.
+    /// Kept as JSON so this module stays independent of the theme runtime's
+    /// `CursorConfig`; the caller parses it with
+    /// [`crate::native_theme_runtime::CursorConfig::from_json`] (THEME-14).
+    pub cursor: Option<Value>,
     /// Bounded diagnostics for config/state files skipped during startup.
     pub diagnostics: Vec<String>,
 }
@@ -183,9 +188,10 @@ impl UiPreferences {
         let mut budget = crate::native_ui_budget::ReadBudget::default();
         let mut prompt_width = None;
         let mut configured_theme = None;
+        let mut cursor: Option<Value> = None;
         let mut diagnostics = Vec::new();
         for path in config_paths {
-            let loaded = (|| -> Result<Option<(Option<PromptWidth>, Option<String>)>, String> {
+            let loaded = (|| -> Result<Option<(Option<PromptWidth>, Option<String>, Option<Value>)>, String> {
                 let Some(text) = budget.read(path, MAX_CONFIG_BYTES, "TUI config")? else {
                     return Ok(None);
                 };
@@ -238,16 +244,23 @@ impl UiPreferences {
                     })
                     .transpose()?
                     .flatten();
-                Ok(Some((width, theme)))
+                // `tui.cursor` (`config/index.tsx:60-67`). Stored raw so the
+                // caller parses it with the theme runtime's `CursorConfig`
+                // (validated there, THEME-14).
+                let cursor = object.get("cursor").cloned();
+                Ok(Some((width, theme, cursor)))
             })();
 
             match loaded {
-                Ok(Some((width, theme))) => {
+                Ok(Some((width, theme, cursor_value))) => {
                     if let Some(width) = width {
                         prompt_width = Some(width);
                     }
                     if let Some(theme) = theme {
                         configured_theme = Some(theme);
+                    }
+                    if cursor_value.is_some() {
+                        cursor = cursor_value;
                     }
                 }
                 Ok(None) => {}
@@ -283,6 +296,7 @@ impl UiPreferences {
                 .and_then(|layout| layout.get("verticalTabsWidth"))
                 .and_then(Value::as_u64)
                 .map(|width| width.clamp(5, 72) as u16),
+            cursor,
             diagnostics,
         })
     }
@@ -1239,6 +1253,30 @@ mod tests {
         assert_eq!(prefs.prompt_width, Some(PromptWidth::Fixed(88)));
         assert_eq!(prefs.theme.as_deref(), Some("dark"));
         assert_eq!(prefs.diagnostics.len(), 1);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// THEME-14: `tui.cursor` is surfaced raw for the theme runtime to parse;
+    /// the later config file wins, and an absent value stays `None`.
+    #[test]
+    fn cursor_object_is_surfaced_from_the_last_config_file() {
+        let dir = std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "opencode-ui-cursor-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let global = dir.join("global.json");
+        let project = dir.join("project.json");
+        fs::write(&global, r#"{"cursor":{"style":"block","blinking":true}}"#).unwrap();
+        fs::write(&project, r#"{"cursor":{"style":"underline","blinking":false}}"#).unwrap();
+        let prefs = UiPreferences::load(&[global, project], &dir.join("missing-kv.json")).unwrap();
+        assert_eq!(
+            prefs.cursor,
+            Some(serde_json::json!({"style":"underline","blinking":false}))
+        );
+        let empty = UiPreferences::load(&[], &dir.join("missing-kv.json")).unwrap();
+        assert_eq!(empty.cursor, None);
         fs::remove_dir_all(dir).unwrap();
     }
 

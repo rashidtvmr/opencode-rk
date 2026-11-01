@@ -2354,6 +2354,20 @@ impl CursorShape {
             Self::Default => "default",
         }
     }
+
+    /// `CursorStyleOptions.style` wire value for OpenTUI's native ABI. Mirrors
+    /// the OpenTUI `CursorStyle` enum order (`terminal.zig:90-95`) and the TS
+    /// `CURSOR_STYLE_TO_ID = { block: 0, line: 1, underline: 2, default: 3 }`
+    /// (`zig.ts:280`) the renderer forwards through `setCursorStyleOptions`.
+    #[must_use]
+    pub const fn wire_style(self) -> u8 {
+        match self {
+            Self::Block => 0,
+            Self::Line => 1,
+            Self::Underline => 2,
+            Self::Default => 3,
+        }
+    }
 }
 
 /// Errors from the `tui.cursor` config object.
@@ -2461,14 +2475,40 @@ pub fn resolve_cursor(
     }
 }
 
+/// Forwarding decision for OpenTUI's `setCursorStyleOptions` (THEME-14).
+///
+/// Returns `(style, blinking, color)`. `style`/`blinking` are `None` when
+/// `tui.cursor` is absent: upstream only assigns `input.cursorStyle` when
+/// `config.cursor` exists (`prompt/index.tsx:354-356`), so the renderer keeps
+/// the terminal's current shape/blink (the ABI's `255` "no change" sentinel).
+/// When the object is present they carry the resolved style id
+/// ([`CursorShape::wire_style`]) and blink. `color` is always forwarded because
+/// upstream sets `cursorColor` unconditionally to `text.base`, or
+/// `background.raised.base` when the composer is disabled.
+#[must_use]
+pub fn cursor_wire(
+    config: Option<CursorConfig>,
+    theme: &SemanticPalette,
+    state: CursorState,
+) -> (Option<u8>, Option<bool>, [u8; 4]) {
+    let rendered = resolve_cursor(config, theme, state);
+    match config {
+        Some(_) => (
+            Some(rendered.shape.wire_style()),
+            Some(rendered.blinking),
+            rendered.color,
+        ),
+        None => (None, None, rendered.color),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
     fn hex(token: &str) -> [u8; 4] {
-        parse_color(token).expect("test hex token")
-    }
+        parse_color(token).expect("test hex token")    }
 
     // ── source-over compositing (upstream dialog alpha 150 / sidebar 70)
 
@@ -3787,5 +3827,43 @@ fn theme15_cursor_color_is_theme_token_independent_of_prompt_background() {
     let default = resolve_cursor(None, &semantic, CursorState { focused: true, disabled: false });
     assert_eq!(default.shape, CursorShape::Default);
     assert!(!default.blinking);
+}
+
+#[test]
+fn theme14_cursor_wire_matches_abi_ids_and_leaves_shape_unchanged_when_absent() {
+    // OpenTUI `CursorStyle` ids (`zig.ts:280`): block 0, line 1, underline 2,
+    // default 3.
+    for (shape, id) in [
+        (CursorShape::Block, 0u8),
+        (CursorShape::Line, 1),
+        (CursorShape::Underline, 2),
+        (CursorShape::Default, 3),
+    ] {
+        assert_eq!(shape.wire_style(), id);
+    }
+    let semantic = dark_semantic_palette();
+    let state = CursorState { focused: true, disabled: false };
+    // Present config: forward the resolved id and blink, colour text.base.
+    let (style, blinking, color) = cursor_wire(
+        Some(CursorConfig::new(CursorShape::Underline, false)),
+        &semantic,
+        state,
+    );
+    assert_eq!(style, Some(2));
+    assert_eq!(blinking, Some(false));
+    assert_eq!(color, semantic.text_base.rgba);
+    // Absent config: style/blink are `None` (ABI sentinel 255 -> terminal keeps
+    // its own cursor); colour still forwards text.base.
+    let (style, blinking, color) = cursor_wire(None, &semantic, state);
+    assert_eq!(style, None);
+    assert_eq!(blinking, None);
+    assert_eq!(color, semantic.text_base.rgba);
+    // Disabled: colour is background.raised.base, still forwarded.
+    let (_, _, color) = cursor_wire(
+        Some(CursorConfig::new(CursorShape::Block, true)),
+        &semantic,
+        CursorState { focused: true, disabled: true },
+    );
+    assert_eq!(color, hex("#141414"));
 }
 }

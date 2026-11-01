@@ -36,6 +36,8 @@ use rustix::termios::{tcgetattr, tcgetwinsize, tcsetattr, ttyname, OptionalActio
 
 use crate::buffer::NativeHandle;
 use crate::color::Rgba;
+#[cfg(feature = "native")]
+use crate::renderer::CursorStyleOptionsAbi;
 
 /// Invalid/sentinel handle returned on failure.
 const INVALID_HANDLE: NativeHandle = 0;
@@ -299,6 +301,10 @@ extern "C" {
     fn clearTerminal(renderer_handle: NativeHandle);
     fn resizeRenderer(renderer_handle: NativeHandle, width: u32, height: u32);
     fn setCursorPosition(renderer_handle: NativeHandle, x: i32, y: i32, visible: bool);
+    fn setCursorStyleOptions(
+        renderer_handle: NativeHandle,
+        options: *const crate::renderer::CursorStyleOptionsAbi,
+    );
     fn setTerminalTitle(renderer_handle: NativeHandle, titlePtr: *const u8, titleLen: u32);
     fn getCurrentBuffer(renderer_handle: NativeHandle) -> NativeHandle;
     fn getNextBuffer(renderer_handle: NativeHandle) -> NativeHandle;
@@ -1005,6 +1011,58 @@ impl Renderer {
                 .map_err(|_| BridgeError::RenderFailed)?;
             // SAFETY: live handle; bounded coordinates converted to the native ABI.
             unsafe { setCursorPosition(handle, terminal_x, terminal_y, visible) };
+            Ok(())
+        }
+    }
+
+    /// Forward the resolved cursor shape/blink/colour to OpenTUI via
+    /// `setCursorStyleOptions` (THEME-14). OpenTUI core owns the DECSCUSR byte
+    /// serialization (`renderer.zig:2727-2782`); oc2 emits nothing itself and
+    /// only supplies the style id, blink flag and RGBA lanes that the native
+    /// renderer turns into `CSI Ps SP q`.
+    ///
+    /// `style` is the OpenTUI `CursorStyle` id (`0` block, `1` line, `2`
+    /// underline, `3` default); `None` sends the `255` sentinel so the terminal
+    /// keeps its current shape — exactly what upstream does when `tui.cursor`
+    /// is absent (the `Textarea` never sets `cursorStyle`, so
+    /// `setCursorStyle({...undefined, color})` forwards no style).
+    /// `blinking` likewise: `None` leaves the current blink state untouched.
+    /// `color` is always forwarded (upstream sets `cursorColor` unconditionally
+    /// to `text.base` or, when disabled, `background.raised.base`). The
+    /// mouse-pointer field stays the `255` sentinel (no change).
+    pub fn set_cursor_style(
+        &self,
+        style: Option<u8>,
+        blinking: Option<bool>,
+        color: Rgba,
+    ) -> Result<(), BridgeError> {
+        if style.is_some_and(|style| style > 3) {
+            return Err(BridgeError::RenderFailed);
+        }
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = (handle, style, blinking, color);
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            // The native ABI reads 4 `u16` lanes; keep them in a live local.
+            let lanes: [u16; 4] = [
+                u16::from(color.r),
+                u16::from(color.g),
+                u16::from(color.b),
+                u16::from(color.a),
+            ];
+            let options = CursorStyleOptionsAbi {
+                style: style.unwrap_or(255),
+                blinking: blinking.map_or(255, u8::from),
+                color: lanes.as_ptr(),
+                cursor: 255,
+            };
+            // SAFETY: live handle; `lanes` and `options` outlive the call, and
+            // `options.color` points at the 4-lane array declared above.
+            unsafe { setCursorStyleOptions(handle, &raw const options) };
             Ok(())
         }
     }

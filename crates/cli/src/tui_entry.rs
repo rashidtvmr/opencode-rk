@@ -5627,6 +5627,18 @@ fn native_loop(
             crate::native_theme_runtime::RuntimeTheme::builtin_default(theme_mode)
         }
     };
+    // THEME-14: parse `tui.cursor` once (fail-closed: an invalid object logs a
+    // diagnostic and behaves as absent, so the terminal keeps its own cursor).
+    let cursor_config = match preferences.cursor.as_ref() {
+        Some(value) => match crate::native_theme_runtime::CursorConfig::from_json(value) {
+            Ok(config) => config,
+            Err(error) => {
+                append_transcript(&mut transcript, format!("error: {error}"));
+                None
+            }
+        },
+        None => None,
+    };
     view.set_sidebar_hidden(preferences.sidebar_hidden);
     let (scrollbar_enabled, scrollbar_diagnostics) =
         crate::native_ui_preferences::UiPreferences::session_scrollbar(
@@ -7188,6 +7200,32 @@ fn native_loop(
             if renderer.cols() > 0 && renderer.rows() > 0 {
                 let (x, y) = cursor.unwrap_or((0, 0));
                 renderer.set_cursor(u32::from(x), u32::from(y), cursor.is_some())?;
+                // THEME-14: forward the resolved composer cursor shape/blink/
+                // colour to OpenTUI. `setCursorStyleOptions` is OpenTUI-core
+                // owned (`renderer.zig:2727-2782`); oc2 forwards only, never
+                // hand-writing a DECSCUSR byte. `disabled()` upstream
+                // (`prompt/index.tsx:192,355`) is `overlay || !interactive`,
+                // which the `input_overlay`/`dialog` gate already encodes,
+                // plus a pending permission prompt (`index.tsx:238`).
+                if let Some(semantic) = theme.semantic.as_ref() {
+                    let disabled = input_overlay
+                        || !matches!(dialog, native_setup::Dialog::None)
+                        || !matches!(view.page(), crate::native_view_pages::Page::Chat)
+                        || view.dialogs.pending();
+                    let (style, blinking, color) = crate::native_theme_runtime::cursor_wire(
+                        cursor_config,
+                        semantic,
+                        crate::native_theme_runtime::CursorState {
+                            focused: cursor.is_some(),
+                            disabled,
+                        },
+                    );
+                    renderer.set_cursor_style(
+                        style,
+                        blinking,
+                        Rgba::new(color[0], color[1], color[2], color[3]),
+                    )?;
+                }
             }
             let selectable: Vec<String> = lines
                 .iter()

@@ -82,7 +82,7 @@ pub const ARTIFACTS: [ArtifactPin; 3] = [
 /// Kept in sync with the `extern "C"` blocks in `renderer.rs`, `buffer.rs`,
 /// `text.rs` and `safe_renderer.rs`; the probe refuses an artifact that is
 /// missing any of them, which also catches a mismatched upstream revision.
-pub const REQUIRED_SYMBOLS: [&str; 53] = [
+pub const REQUIRED_SYMBOLS: [&str; 54] = [
     "bufferClear",
     "bufferDrawBox",
     "bufferDrawGrid",
@@ -118,6 +118,7 @@ pub const REQUIRED_SYMBOLS: [&str; 53] = [
     "setBackgroundColor",
     "setCursorColor",
     "setCursorPosition",
+    "setCursorStyleOptions",
     "setTerminalEnvVar",
     "setTerminalTitle",
     "setUseThread",
