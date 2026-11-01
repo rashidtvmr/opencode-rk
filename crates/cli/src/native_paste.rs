@@ -292,6 +292,47 @@ pub fn shift_for_insert(parts: &mut [PastedText], at: usize, len: usize) {
     }
 }
 
+/// Re-anchor tracked folded parts to the CURRENT draft text after an arbitrary
+/// edit (character insert/delete, line-binding, drain). The live composer draft
+/// is still a bare `String` (the `TrackedDraft` owner is a follow-up), so a
+/// tracked range can go stale between an edit and the next paste.
+///
+/// Each part's visible `placeholder` is located in the draft from the running
+/// search cursor forward (so identical placeholders keep document order); a
+/// part whose placeholder no longer appears is dropped, exactly as upstream
+/// stops tracking a deleted placeholder (`prompt/index.tsx:1440-1443`,
+/// `1522-1535`). Ranges whose bytes are not a character boundary are dropped
+/// rather than sliced.
+pub fn reconcile_parts(draft: &str, parts: &mut Vec<PastedText>) {
+    let mut search_from = 0usize;
+    parts.retain_mut(|part| {
+        // Trust the recorded range only while it is a valid slice that still
+        // holds this part's placeholder. A stale range may legitimately point
+        // past the (shrunk) draft, so bounds/boundary failures do NOT drop the
+        // part by themselves — they only force a relocation search below.
+        if part.start <= part.end
+            && part.end <= draft.len()
+            && draft.is_char_boundary(part.start)
+            && draft.is_char_boundary(part.end)
+            && draft[part.start..part.end] == part.placeholder
+        {
+            search_from = part.end;
+            return true;
+        }
+        let from = search_from.min(draft.len());
+        match draft[from..].find(&part.placeholder) {
+            Some(relative) => {
+                let start = from + relative;
+                part.start = start;
+                part.end = start + part.placeholder.len();
+                search_from = part.end;
+                true
+            }
+            None => false,
+        }
+    });
+}
+
 /// Apply a [`PastePlan`] to a plain draft.
 ///
 /// `limit` bounds the resulting draft length in bytes. On `Err` the draft,
@@ -2400,5 +2441,74 @@ mod measurement_tests {
         assert_eq!(utf16_len("日本語"), 3);
         assert_eq!(measure_cells("நி"), 1, "Tamil cluster measured once");
         assert_ne!(utf16_len("日本語"), measure_cells("日本語"));
+    }
+}
+
+#[cfg(test)]
+mod reconcile_parts_tests {
+    //! F2 review fix: tracked folded ranges are re-anchored to the CURRENT
+    //! draft after arbitrary edits, and a deleted placeholder stops being
+    //! tracked (`prompt/index.tsx:1440-1443,1522-1535`).
+    use super::*;
+
+    fn part(text: &str, placeholder: &str, start: usize) -> PastedText {
+        PastedText {
+            text: text.to_owned(),
+            placeholder: placeholder.to_owned(),
+            start,
+            end: start + placeholder.len(),
+        }
+    }
+
+    #[test]
+    fn reconcile_reanchors_shifted_and_drops_deleted_placeholders() {
+        // Two parts; an insertion before both shifts them right.
+        let ph_first = "[Pasted ~2 lines]";
+        let ph_second = "[Pasted ~4 lines]";
+        let mut draft = format!("ab{ph_first} cd{ph_second} ");
+        let first_at = draft.find(ph_first).unwrap();
+        let second_at = draft.find(ph_second).unwrap();
+        let mut parts = vec![
+            part("l1\nl2", ph_first, first_at),
+            part("x1\nx2\nx3\nx4", ph_second, second_at),
+        ];
+        reconcile_parts(&draft, &mut parts);
+        assert_eq!(parts[0].start, first_at);
+        assert_eq!(parts[1].start, second_at);
+
+        // Insert a character at the head: both ranges shift by one.
+        draft.insert(0, 'X');
+        reconcile_parts(&draft, &mut parts);
+        assert_eq!(parts[0].start, first_at + 1);
+        assert_eq!(parts[1].start, second_at + 1);
+        assert_eq!(&draft[parts[0].start..parts[0].end], ph_first);
+        assert_eq!(&draft[parts[1].start..parts[1].end], ph_second);
+
+        // Delete the FIRST placeholder text: only the second part survives.
+        let (start, end) = (parts[0].start, parts[0].end);
+        draft.replace_range(start..end, "");
+        reconcile_parts(&draft, &mut parts);
+        assert_eq!(parts.len(), 1, "a deleted placeholder is no longer tracked");
+        assert_eq!(&draft[parts[0].start..parts[0].end], ph_second);
+    }
+
+    #[test]
+    fn reconcile_keeps_identical_placeholders_in_document_order() {
+        let ph = "[Pasted ~3 lines]";
+        let mut draft = format!("{ph} {ph} rest");
+        let second_occurrence = ph.len() + 1;
+        // The second part's recorded range is stale (points at the first
+        // occurrence's prefix, not at a real placeholder); reconcile must
+        // relocate it to the NEXT occurrence after the first part, never
+        // collapsing the two onto the same range.
+        let mut parts = vec![part("a\nb\nc", ph, 0), part("d\ne\nf", ph, 1)];
+        reconcile_parts(&draft, &mut parts);
+        assert_eq!(parts[0].start, 0);
+        assert_eq!(parts[1].start, second_occurrence);
+        assert_eq!(&draft[parts[1].start..parts[1].end], ph);
+        draft.push('!');
+        reconcile_parts(&draft, &mut parts);
+        assert_eq!(parts[0].start, 0);
+        assert_eq!(parts[1].start, second_occurrence);
     }
 }

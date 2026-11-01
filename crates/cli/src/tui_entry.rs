@@ -7402,6 +7402,12 @@ fn native_loop(
         view.set_context_window(selected.as_ref().and_then(|model|model.context_window));
         view.set_prompt_mode(draft.starts_with('!'));
         view.set_prompt_cursor(draft_cursor);
+        // Keep tracked folded-paste ranges coherent with the current draft on
+        // every frame: this covers every clear/replace/command-consumption
+        // mutation site (including the free `consume_local_command` helpers
+        // that cannot touch `draft_parts`) so no stale range can survive a
+        // frame and be used by a later paste/expansion.
+        crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
         let draft_echo = if matches!(dialog, native_setup::Dialog::ApiKey) {
             ""
         } else {
@@ -9456,30 +9462,32 @@ fn native_loop(
                         }
                     }
                     native_setup::Dialog::None => {
-                        if draft
-                            .len()
-                            .checked_add(text.len())
-                            .is_some_and(|len| len <= MAX_NATIVE_DRAFT_BYTES)
+                        // Cursor-aware insertion through the real paste
+                        // machinery (`index.tsx:1446-1455`). There is NO raw
+                        // pre-check: upstream folds a long/multi-line body into
+                        // a small `[Pasted ~N lines]` placeholder regardless of
+                        // its raw size (`prompt/index.tsx:1462-1474`), so the
+                        // raw-size gate lives in the planner/application where
+                        // it applies to the bytes actually inserted. A planner
+                        // refusal (non-boundary / the inserted bytes exceed the
+                        // budget) falls back to a bounded append.
+                        let mode = crate::native_paste::PasteMode::default();
+                        if crate::native_composer::insert_paste_at_cursor(
+                            &mut draft,
+                            &mut draft_cursor,
+                            &mut draft_parts,
+                            &text,
+                            mode,
+                            MAX_NATIVE_DRAFT_BYTES,
+                        )
+                        .is_err()
                         {
-                            // Cursor-aware insertion through the real paste
-                            // machinery (`index.tsx:1446-1455`): the body lands
-                            // at the focused cursor and advances it; a
-                            // long/multi-line body folds into a tracked
-                            // `[Pasted ~N lines]` placeholder instead of being
-                            // appended. Fall back to a bounded append only when
-                            // the planner refuses (non-boundary / over budget).
-                            let mode = crate::native_paste::PasteMode::default();
-                            if crate::native_composer::insert_paste_at_cursor(
-                                &mut draft,
-                                &mut draft_cursor,
-                                &mut draft_parts,
-                                &text,
-                                mode,
-                                MAX_NATIVE_DRAFT_BYTES,
-                            )
-                            .is_err()
+                            crate::native_composer::normalize_cursor(&draft, &mut draft_cursor);
+                            if draft
+                                .len()
+                                .checked_add(text.len())
+                                .is_some_and(|len| len <= MAX_NATIVE_DRAFT_BYTES)
                             {
-                                crate::native_composer::normalize_cursor(&draft, &mut draft_cursor);
                                 draft.push_str(&text);
                                 draft_cursor = draft.len();
                             }
@@ -10060,6 +10068,7 @@ fn native_loop(
             // preserved verbatim and no provider turn is ever started.
             11 if !page_open && !help_open && matches!(dialog, native_setup::Dialog::None) => {
                 if crate::native_composer::apply_line_binding(&draft, &mut draft_cursor, byte) {
+                    crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
                     utf8.reset();
                     needs_paint = true;
                     continue;
@@ -10082,6 +10091,7 @@ fn native_loop(
                         let previous = draft[..draft_cursor].char_indices().next_back().map_or(0, |(i, _)| i);
                         draft.drain(previous..draft_cursor);
                         draft_cursor = previous;
+                        crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
                     }
                 } else {
                     filter_input.pop();
@@ -10098,10 +10108,12 @@ fn native_loop(
                 if draft.len() < MAX_NATIVE_DRAFT_BYTES {
                     draft.insert(draft_cursor, '\n');
                     draft_cursor += 1;
+                    crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
                 }
             }
             1 | 5 | 21 if !page_open && !help_open && matches!(dialog, native_setup::Dialog::None) => {
                 if crate::native_composer::apply_line_binding(&draft, &mut draft_cursor, byte) {
+                    crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
                     utf8.reset();
                     needs_paint = true;
                     continue;
@@ -11667,6 +11679,11 @@ fn native_loop(
                             if draft.len().checked_add(width).is_some_and(|len| len <= MAX_NATIVE_DRAFT_BYTES) {
                                 draft.insert(draft_cursor, character);
                                 draft_cursor += width;
+                                // An ordinary edit can shift or delete a
+                                // folded placeholder; re-anchor the tracked
+                                // ranges to the current draft so a later
+                                // paste/expansion cannot use stale offsets.
+                                crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
                             }
                         } else if matches!(dialog, native_setup::Dialog::ApiKey) {
                             if key_input.len().checked_add(width).is_some_and(|len| len <= 16 * 1024) { key_input.push(character); }

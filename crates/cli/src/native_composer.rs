@@ -168,6 +168,11 @@ pub fn insert_paste_at_cursor(
     limit: usize,
 ) -> Result<(), crate::native_paste::PasteError> {
     normalize_cursor(draft, cursor);
+    // The draft may have been edited since the last paste; re-anchor tracked
+    // ranges to the current bytes (dropping deleted placeholders) BEFORE the
+    // plan inspects them, so an adjacent-identical re-paste expands correctly
+    // and no stale range survives.
+    crate::native_paste::reconcile_parts(draft, parts);
     let plan = crate::native_paste::plan_paste(body, mode, *cursor, parts);
     crate::native_paste::apply_paste_plan(draft, cursor, parts, plan, limit)
 }
@@ -2332,6 +2337,36 @@ mod tests {
         .expect("a boundary insert is admitted");
         assert_eq!(draft, "texttail");
         assert!(parts.is_empty(), "ANSI stripping yields no folded part");
+    }
+
+    /// F2 review fix: a large multi-line paste whose RAW bytes exceed the
+    /// draft budget still folds into a small tracked placeholder, because the
+    /// raw-size gate lives in the planner (which measures the bytes actually
+    /// inserted), not in a pre-check (`prompt/index.tsx:1462-1474`). Re-pasting
+    /// the same body next to the placeholder expands it instead of adding a
+    /// second part.
+    #[test]
+    fn insert_paste_at_cursor_folds_a_large_body_within_the_budget() {
+        use crate::native_paste::{PasteMode, PastedText};
+        let body = "line\n".repeat(400); // 2000 raw bytes, one folded placeholder
+        let mut draft = "keep".to_owned();
+        let mut cursor = 4;
+        let mut parts: Vec<PastedText> = Vec::new();
+        insert_paste_at_cursor(&mut draft, &mut cursor, &mut parts, &body, PasteMode::Fold, 64)
+            .expect("a folded placeholder fits even though the raw body exceeds the budget");
+        assert_eq!(parts.len(), 1);
+        assert!(draft.contains(&parts[0].placeholder));
+        assert!(draft.len() <= 64, "only the placeholder bytes were inserted");
+
+        // Re-pasting the identical body adjacent to the placeholder expands it
+        // in place and consumes the tracked part
+        // (`expandTrackedPastedText`, `prompt/index.tsx:1129,1440-1443`).
+        insert_paste_at_cursor(&mut draft, &mut cursor, &mut parts, &body, PasteMode::Fold, 4096)
+            .expect("an adjacent identical re-paste expands");
+        assert!(parts.is_empty(), "expansion consumes the tracked part");
+        // Expansion restores the TRIMMED recorded content (`js_trim`,
+        // `index.tsx:1431`), leaving the separating space in place.
+        assert_eq!(draft, format!("keep{} ", body.trim_end()));
     }
 
     #[test]
