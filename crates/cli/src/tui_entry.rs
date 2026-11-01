@@ -1686,6 +1686,9 @@ fn native_size() -> (u32, u32) {
 struct PaintCtx {
     palette: crate::native_theme_runtime::Palette,
     markdown: Option<crate::native_theme_runtime::MarkdownPalette>,
+    /// Resolved `theme.semantic.diff` tokens for the `+`/`-` transcript rows
+    /// (THEME-09). `None` falls back to the historical literal RGB.
+    diff: Option<DiffRgba>,
     /// Region geometry for this frame (positions for the style pass).
     presentation: crate::native_view::ViewPresentation,
     /// `Some(n)` when a modal panel owns the frame: `n` content rows
@@ -2191,6 +2194,7 @@ mod surface_paint_regressions {
         native_paint(&mut renderer, &lines, PaintCtx {
             palette: crate::native_theme_runtime::Palette::opencode_dark(),
             markdown: None,
+            diff: None,
             presentation: view.presentation(),
             modal_rows: None,
             modal: view.modal_presentation(),
@@ -2249,6 +2253,7 @@ mod surface_paint_regressions {
         native_paint(&mut renderer, &lines, PaintCtx {
             palette: crate::native_theme_runtime::Palette::opencode_dark(),
             markdown: None,
+            diff: None,
             presentation: view.presentation(),
             modal_rows: None,
             modal: view.modal_presentation(),
@@ -2336,6 +2341,7 @@ mod surface_paint_regressions {
         native_paint(&mut renderer, &lines, PaintCtx {
             palette: crate::native_theme_runtime::Palette::opencode_dark(),
             markdown: None,
+            diff: None,
             presentation: view.presentation(),
             modal_rows: None,
             modal: view.modal_presentation(),
@@ -2402,6 +2408,7 @@ mod surface_paint_regressions {
         native_paint(&mut renderer, &lines, PaintCtx {
             palette: crate::native_theme_runtime::Palette::opencode_dark(),
             markdown: None,
+            diff: None,
             presentation: view.presentation(),
             modal_rows: None,
             modal: view.modal_presentation(),
@@ -2682,15 +2689,44 @@ fn home_composer_border_cell_style(
     }
 }
 
+/// Resolved diff-token paint (`theme.semantic.diff`) for the transcript row
+/// classes. THEME-09: a `+`/`-` diff row paints the resolved
+/// `diff.background.added`/`diff.background.removed` surface and the
+/// `diff.text.added`/`diff.text.removed` prose, not hardcoded RGB
+/// (`theme/src/tui/syntax.ts:79-80`: `rule(["diff.plus"], theme.diff.text.added,
+/// { background: theme.diff.background.added })`).
 #[cfg(feature = "native")]
-fn chat_row_background(class: Option<&crate::native_view_chat::ChatRowClass>, root: Rgba, panel: Rgba, element: Rgba) -> Option<Rgba> {
+#[derive(Clone, Copy, Debug)]
+struct DiffRgba {
+    added_text: Rgba,
+    removed_text: Rgba,
+    added_background: Rgba,
+    removed_background: Rgba,
+}
+
+#[cfg(feature = "native")]
+fn diff_rgba(semantic: &crate::native_theme_runtime::SemanticPalette) -> DiffRgba {
+    let rgba = |hue: &crate::native_theme_runtime::HueColor| {
+        let [r, g, b, a] = hue.rgba;
+        Rgba::new(r, g, b, a)
+    };
+    DiffRgba {
+        added_text: rgba(&semantic.diff.added_text),
+        removed_text: rgba(&semantic.diff.removed_text),
+        added_background: rgba(&semantic.diff.added_background),
+        removed_background: rgba(&semantic.diff.removed_background),
+    }
+}
+
+#[cfg(feature = "native")]
+fn chat_row_background(class: Option<&crate::native_view_chat::ChatRowClass>, root: Rgba, panel: Rgba, element: Rgba, diff: Option<&DiffRgba>) -> Option<Rgba> {
     use crate::native_view_chat::ChatRowClass;
     match class {
         Some(ChatRowClass::UserCard) => Some(panel),
         Some(ChatRowClass::AssistantCard) => Some(root),
         Some(ChatRowClass::SystemCard) => Some(element),
-        Some(ChatRowClass::DiffAdded) => Some(Rgba::new(20, 70, 35, 255)),
-        Some(ChatRowClass::DiffRemoved) => Some(Rgba::new(80, 25, 30, 255)),
+        Some(ChatRowClass::DiffAdded) => Some(diff.map_or(Rgba::new(20, 70, 35, 255), |diff| diff.added_background)),
+        Some(ChatRowClass::DiffRemoved) => Some(diff.map_or(Rgba::new(80, 25, 30, 255), |diff| diff.removed_background)),
         // Assistant completion footer rows (upstream `AssistantFooter`) are
         // plain text on the root surface — upstream draws no box for them.
         Some(ChatRowClass::AssistantFooter) | Some(ChatRowClass::FooterError) => None,
@@ -2704,7 +2740,7 @@ fn chat_row_background(class: Option<&crate::native_view_chat::ChatRowClass>, ro
 /// row uses the error fg (`theme.text.feedback.error.base`) and the metadata
 /// line uses the muted fg (`theme.text.muted` on the field spans).
 #[cfg(feature = "native")]
-fn chat_row_foreground(class: &crate::native_view_chat::ChatRowClass, text_color: Rgba, muted: Rgba, error: Rgba, warning: Rgba) -> Rgba {
+fn chat_row_foreground(class: &crate::native_view_chat::ChatRowClass, text_color: Rgba, muted: Rgba, error: Rgba, warning: Rgba, diff: Option<&DiffRgba>) -> Rgba {
     use crate::native_view_chat::ChatRowClass;
     match class {
         ChatRowClass::Thinking
@@ -2715,8 +2751,8 @@ fn chat_row_foreground(class: &crate::native_view_chat::ChatRowClass, text_color
         ChatRowClass::UserCard => text_color,
         ChatRowClass::AssistantCard => text_color,
         ChatRowClass::SystemCard => muted,
-        ChatRowClass::DiffAdded => text_color,
-        ChatRowClass::DiffRemoved => error,
+        ChatRowClass::DiffAdded => diff.map_or(text_color, |diff| diff.added_text),
+        ChatRowClass::DiffRemoved => diff.map_or(error, |diff| diff.removed_text),
         ChatRowClass::ToolError => error,
         ChatRowClass::RetryNotice => warning,
         ChatRowClass::ToolPermission => warning,
@@ -2775,7 +2811,7 @@ fn chat_row_is_selectable(class: Option<&crate::native_view_chat::ChatRowClass>)
 fn chat_row_background_at(
     class: Option<&crate::native_view_chat::ChatRowClass>,
     presentation: crate::native_view::ViewPresentation, x: u32,
-    root: Rgba, panel: Rgba, element: Rgba,
+    root: Rgba, panel: Rgba, element: Rgba, diff: Option<&DiffRgba>,
 ) -> Option<Rgba> {
     // Message rows are composed inside the scrollbox's horizontal insets.
     // A row role owns that content surface, never the surrounding root cells,
@@ -2785,7 +2821,7 @@ fn chat_row_background_at(
     let right = u32::from(presentation.main_offset)
         + u32::from(presentation.main_width.saturating_sub(inset));
     (x >= left && x < right)
-        .then(|| chat_row_background(class, root, panel, element))
+        .then(|| chat_row_background(class, root, panel, element, diff))
         .flatten()
 }
 
@@ -2807,11 +2843,62 @@ mod chat_surface_inset_tests {
             let right = u32::from(presentation.main_offset + presentation.main_width) - 2;
             for x in 0..269 {
                 let actual = chat_row_background_at(Some(&crate::native_view_chat::ChatRowClass::UserCard),
-                    presentation, x, root, panel, element);
+                    presentation, x, root, panel, element, None);
                 assert_eq!(actual, (x >= left && x < right).then_some(panel),
                     "message surface ownership at x={x} with {orientation:?}");
             }
         }
+    }
+
+    /// THEME-09: a `+`/`-` diff row paints the resolved `theme.semantic.diff`
+    /// tokens — `diff.background.added`/`removed` for the surface and
+    /// `diff.text.added`/`removed` for the prose — instead of the historical
+    /// hardcoded RGB (`theme/src/tui/syntax.ts:79-80`). `None` keeps the
+    /// literal fallback so a semantic-less theme is unchanged.
+    #[test]
+    fn diff_rows_paint_resolved_diff_tokens() {
+        let root = Rgba::rgb(10, 10, 10);
+        let panel = Rgba::rgb(20, 20, 20);
+        let element = Rgba::rgb(30, 30, 30);
+        let text_color = Rgba::rgb(1, 1, 1);
+        let muted = Rgba::rgb(2, 2, 2);
+        let error = Rgba::rgb(3, 3, 3);
+        let warning = Rgba::rgb(4, 4, 4);
+        let diff = DiffRgba {
+            added_text: Rgba::new(11, 111, 11, 255),
+            removed_text: Rgba::new(99, 9, 9, 255),
+            added_background: Rgba::new(22, 222, 22, 255),
+            removed_background: Rgba::new(88, 8, 8, 255),
+        };
+        assert_eq!(
+            chat_row_background(Some(&crate::native_view_chat::ChatRowClass::DiffAdded), root, panel, element, Some(&diff)),
+            Some(diff.added_background),
+            "diff added surface = diff.background.added"
+        );
+        assert_eq!(
+            chat_row_background(Some(&crate::native_view_chat::ChatRowClass::DiffRemoved), root, panel, element, Some(&diff)),
+            Some(diff.removed_background),
+            "diff removed surface = diff.background.removed"
+        );
+        assert_eq!(
+            chat_row_foreground(&crate::native_view_chat::ChatRowClass::DiffAdded, text_color, muted, error, warning, Some(&diff)),
+            diff.added_text,
+            "diff added prose = diff.text.added"
+        );
+        assert_eq!(
+            chat_row_foreground(&crate::native_view_chat::ChatRowClass::DiffRemoved, text_color, muted, error, warning, Some(&diff)),
+            diff.removed_text,
+            "diff removed prose = diff.text.removed"
+        );
+        // Semantic-less theme keeps the historical literal fallback.
+        assert_eq!(
+            chat_row_background(Some(&crate::native_view_chat::ChatRowClass::DiffAdded), root, panel, element, None),
+            Some(Rgba::new(20, 70, 35, 255))
+        );
+        assert_eq!(
+            chat_row_foreground(&crate::native_view_chat::ChatRowClass::DiffAdded, text_color, muted, error, warning, None),
+            text_color
+        );
     }
 }
 
@@ -2830,12 +2917,12 @@ mod footer_v3_painter_tests {
         let error = Rgba::rgb(7, 8, 9);
         let warning = Rgba::rgb(10, 11, 12);
         assert_eq!(
-            chat_row_foreground(&ChatRowClass::FooterError, text_color, muted, error, warning),
+            chat_row_foreground(&ChatRowClass::FooterError, text_color, muted, error, warning, None),
             error,
             "upstream error notice fg = theme.text.feedback.error.base"
         );
         assert_eq!(
-            chat_row_foreground(&ChatRowClass::AssistantFooter, text_color, muted, error, warning),
+            chat_row_foreground(&ChatRowClass::AssistantFooter, text_color, muted, error, warning, None),
             muted,
             "upstream footer field spans fg = theme.text.muted"
         );
@@ -2851,7 +2938,7 @@ mod footer_v3_painter_tests {
         let error = Rgba::rgb(7, 8, 9);
         let warning = Rgba::rgb(10, 11, 12);
         assert_eq!(
-            chat_row_foreground(&ChatRowClass::RetryNotice, text_color, muted, error, warning),
+            chat_row_foreground(&ChatRowClass::RetryNotice, text_color, muted, error, warning, None),
             warning,
             "upstream retry notice fg = theme.text.feedback.warning.base"
         );
@@ -2867,7 +2954,7 @@ mod footer_v3_painter_tests {
         let error = Rgba::rgb(7, 8, 9);
         let warning = Rgba::rgb(10, 11, 12);
         assert_eq!(
-            chat_row_foreground(&ChatRowClass::ToolDenied, text_color, muted, error, warning),
+            chat_row_foreground(&ChatRowClass::ToolDenied, text_color, muted, error, warning, None),
             muted,
             "denied tool fg = theme.text.muted (index.tsx:2837 default branch)"
         );
@@ -2911,12 +2998,12 @@ mod footer_v3_painter_tests {
         let error = Rgba::rgb(7, 8, 9);
         let warning = Rgba::rgb(10, 11, 12);
         assert_eq!(
-            chat_row_foreground(&ChatRowClass::ToolPermission, text_color, muted, error, warning),
+            chat_row_foreground(&ChatRowClass::ToolPermission, text_color, muted, error, warning, None),
             warning,
             "permission-pending tool fg = theme.text.feedback.warning.base"
         );
         assert_eq!(
-            chat_row_foreground(&ChatRowClass::ToolError, text_color, muted, error, warning),
+            chat_row_foreground(&ChatRowClass::ToolError, text_color, muted, error, warning, None),
             error,
             "errored tool fg is unchanged"
         );
@@ -2985,11 +3072,11 @@ mod footer_v3_painter_tests {
         let panel = Rgba::rgb(20, 20, 20);
         let element = Rgba::rgb(30, 30, 30);
         assert_eq!(
-            chat_row_background(Some(&ChatRowClass::FooterError), root, panel, element),
+            chat_row_background(Some(&ChatRowClass::FooterError), root, panel, element, None),
             None
         );
         assert_eq!(
-            chat_row_background(Some(&ChatRowClass::AssistantFooter), root, panel, element),
+            chat_row_background(Some(&ChatRowClass::AssistantFooter), root, panel, element, None),
             None
         );
     }
@@ -4131,7 +4218,7 @@ fn native_paint(
             ctx.modal.content_width,
         );
         let normal_fg = match ctx.chat_row_classes.get(row) {
-            Some(class) => chat_row_foreground(class, text_color, muted, error, warning),
+            Some(class) => chat_row_foreground(class, text_color, muted, error, warning, ctx.diff.as_ref()),
             None if ctx.home => home_row_fg(lines, row, ctx.palette),
             None => text_color,
         };
@@ -4160,7 +4247,7 @@ fn native_paint(
                         && y >= u32::from(top)
                         && y < u32::from(top) + u32::from(height)
                 });
-                let role_bg = chat_row_background_at(ctx.chat_row_classes.get(row), presentation, x, background, panel, element);
+                let role_bg = chat_row_background_at(ctx.chat_row_classes.get(row), presentation, x, background, panel, element, ctx.diff.as_ref());
                 let in_page = ctx.page_panel.is_some_and(|(left, top, width, height)| {
                     x >= u32::from(left) && x < u32::from(left + width)
                         && y >= u32::from(top) && y < u32::from(top + height)
@@ -4661,7 +4748,7 @@ fn native_paint(
                 let home_root = (ctx.home || ctx.rail_prompt) && composer.is_some_and(|rect|
                     home_composer_root_cell(&ctx.appearance,
                         ctx.appearance.effective(crate::native_box_style::BoxId::ChatComposer), rect, x, y));
-                let role = chat_row_background_at(ctx.chat_row_classes.get(y as usize), presentation, x, background, panel, element);
+                let role = chat_row_background_at(ctx.chat_row_classes.get(y as usize), presentation, x, background, panel, element, ctx.diff.as_ref());
                 let mut color = surface_underlay_background(
                     sidebar_cell(presentation, x, y) || ctx.page_panel.is_some_and(contains),
                     role, composer.is_some(), home_root, background, panel, element,
@@ -7928,6 +8015,7 @@ fn native_loop(
                 PaintCtx {
                     palette: theme.palette,
                     markdown: theme.semantic.clone().map(|semantic| semantic.markdown),
+                    diff: theme.semantic.as_ref().map(diff_rgba),
                     presentation,
                     modal_rows: modal_rows.map(|count| count.min(view.modal_content_height())).filter(|count| *count > 0),
                     modal: view.modal_presentation(),
