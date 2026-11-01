@@ -324,6 +324,38 @@ fn normalize_modified_return(
     }
 }
 
+/// The composer Enter submit decision, fed from the live loop's facts.
+/// Upstream Enter invokes textarea `onSubmit` -> `submit()`
+/// (`component/prompt/index.tsx:1790-1795`); delivery is `queue` exactly
+/// while an in-flight turn owns the current binding (`:455,1097-1112`),
+/// steer otherwise. A leading slash token is the upstream
+/// `argumentSlash` fact (`:1136-1139`) and completion visibility blocks
+/// submit (`:1103`). `queued` is capped at
+/// [`crate::native_composer::BUSY_QUEUE_CAP`], the same bound as
+/// `Composer::submit`.
+#[cfg(feature = "native")]
+fn composer_enter_plan(
+    draft: &str,
+    turn_owns_binding: bool,
+    has_session: bool,
+    completion_visible: bool,
+    queued: usize,
+) -> crate::native_composer::SubmitPlan {
+    let delivery = if turn_owns_binding {
+        crate::native_composer::Delivery::Queue
+    } else {
+        crate::native_composer::Delivery::Steer
+    };
+    let ctx = crate::native_composer::SubmitContext {
+        has_session,
+        autocomplete_visible: completion_visible,
+        slash: draft.starts_with('/'),
+        queued: queued.min(crate::native_composer::BUSY_QUEUE_CAP),
+        ..crate::native_composer::SubmitContext::default()
+    };
+    crate::native_composer::plan_submit(draft, delivery, ctx)
+}
+
 #[cfg(feature = "native")]
 fn composer_pointer_event(
     event: native_input_decoder::InputEvent,
@@ -5713,6 +5745,14 @@ fn native_loop(
     let mut worker: Option<crate::native_view::OwnedWorker<native_turn::TurnWorker>> = None;
     let mut compact_worker: Option<NativeCompactWorker> = None;
     let mut pending_submission: Option<crate::native_composer::SubmittedDraft> = None;
+    // CP-08 bounded busy queue: composer Enter while a turn owns the
+    // current binding routes through `plan_submit` Delivery::Queue
+    // (upstream `submit("queue")`, `component/prompt/index.tsx:455`,
+    // bounded at the same `BUSY_QUEUE_CAP` as `Composer::submit`). Each
+    // entry records the owning session so a tab switch can never
+    // promote a foreign session's prompt.
+    let mut queued_drafts: std::collections::VecDeque<(Option<String>, String)> =
+        std::collections::VecDeque::new();
     let mut binding_generation: u64 = 0;
     // History pagination is deliberately separate from turn/completion
     // workers: one bounded request at a time, and every result carries the
@@ -6755,6 +6795,30 @@ fn native_loop(
                 if binding_active {
                     captured.restore(&mut draft, &mut draft_cursor);
                     completion.sync(&draft);
+                }
+            }
+            if binding_active && crate::native_paste::js_trim(&draft).is_empty() {
+                // CP-08: the turn finished with prompts still queued.
+                // Surface ONLY the next prompt of THIS session, and only
+                // into an empty idle composer, so queued restore or
+                // mid-turn typing is never clobbered. The user's next
+                // Enter sends it as a steer (upstream flips the session
+                // inbox entry to steer, `routes/session/index.tsx:1650-1657`).
+                let active = live.as_ref().map(|snapshot| snapshot.session_id.clone());
+                let promote = queued_drafts
+                    .front()
+                    .filter(|(owner, _)| *owner == active)
+                    .map(|(_, text)| text.clone());
+                if let Some(next) = promote {
+                    queued_drafts.pop_front();
+                    crate::native_composer::replace_draft_with_cursor(
+                        &mut draft,
+                        &mut draft_cursor,
+                        next.clone(),
+                        next.len(),
+                    );
+                    completion.sync(&draft);
+                    needs_paint = true;
                 }
             }
             if binding_active {
@@ -10136,6 +10200,130 @@ fn native_loop(
                 // never the chat composer draft; provider/model filters
                 // read their own dialog-local buffer — the chat draft is
                 // preserved verbatim across the whole dialog flow.
+                // CP-08 SUBMITWIRE: the composer Enter submit routes through
+                // the pure queue-vs-steer decision
+                // (`native_composer::plan_submit`). Upstream Enter invokes
+                // textarea `onSubmit` -> `submit()` and chooses delivery
+                // `queue` exactly while the running turn owns the session
+                // (`component/prompt/index.tsx:455,1097-1127,1790-1795`).
+                if command_route.is_none() && matches!(dialog, native_setup::Dialog::None) {
+                    let turn_owns_binding = worker.as_ref().is_some_and(|owned| {
+                        owned.owns(
+                            live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
+                            binding_generation,
+                        )
+                    });
+                    match composer_enter_plan(
+                        &draft,
+                        turn_owns_binding,
+                        live.is_some(),
+                        completion.triggered(),
+                        queued_drafts.len(),
+                    ) {
+                        // Idle steer keeps the existing dispatch path; the
+                        // native model gate below still owns the selection
+                        // dialog (upstream `promptModelWarning`), and no
+                        // location catalog exists yet.
+                        crate::native_composer::SubmitPlan::Steer
+                        | crate::native_composer::SubmitPlan::ModelUnavailable => {}
+                        crate::native_composer::SubmitPlan::Ignored => {
+                            // Completion owner or disabled: never a submit
+                            // (`index.tsx:1100-1104`).
+                            utf8.reset();
+                            needs_paint = true;
+                            continue;
+                        }
+                        crate::native_composer::SubmitPlan::Rejected(reason) => {
+                            // "This prompt cannot be queued" toast, draft
+                            // preserved (`index.tsx:1136-1139`).
+                            append_transcript(
+                                &mut transcript,
+                                format!(
+                                    "warning: this prompt cannot be queued ({reason:?}); draft preserved"
+                                ),
+                            );
+                            utf8.reset();
+                            needs_paint = true;
+                            continue;
+                        }
+                        crate::native_composer::SubmitPlan::Exit => {
+                            // Upstream `void exit()` (`index.tsx:1141-1144`):
+                            // the exit word terminates the client exactly
+                            // like the typed terminal command above.
+                            utf8.reset();
+                            break;
+                        }
+                        crate::native_composer::SubmitPlan::Queue => {
+                            if queued_drafts.len() >= crate::native_composer::BUSY_QUEUE_CAP {
+                                // Bounded queue, same cap as
+                                // `Composer::submit` QueueFull; overflow
+                                // preserves the draft.
+                                append_transcript(
+                                    &mut transcript,
+                                    format!(
+                                        "error: queued prompt limit reached ({limit}/{limit}); draft preserved",
+                                        limit = crate::native_composer::BUSY_QUEUE_CAP
+                                    ),
+                                );
+                            } else {
+                                queued_drafts
+                                    .push_back((live.as_ref().map(|snapshot| snapshot.session_id.clone()), draft.clone()));
+                                // The queued snapshot clears the composer
+                                // (`index.tsx:1172-1174` resetComposer).
+                                crate::native_composer::replace_draft_with_cursor(
+                                    &mut draft,
+                                    &mut draft_cursor,
+                                    String::new(),
+                                    0,
+                                );
+                                completion.sync(&draft);
+                            }
+                            utf8.reset();
+                            needs_paint = true;
+                            continue;
+                        }
+                        crate::native_composer::SubmitPlan::BlankPromotion { queued, .. } => {
+                            if queued {
+                                // Blank idle Enter promotes the FIRST queued
+                                // prompt of THIS session to steer delivery
+                                // (`routes/session/index.tsx:1650-1657`
+                                // `mutatePending("steer", next.id)`); the
+                                // fall-through dispatch below sends it
+                                // through the ordinary admission chain.
+                                let active =
+                                    live.as_ref().map(|snapshot| snapshot.session_id.clone());
+                                let next = queued_drafts.front().filter(|(owner, _)| {
+                                    *owner == active
+                                }).map(|(_, text)| text.clone());
+                                if let Some(next) = next {
+                                    queued_drafts.pop_front();
+                                    crate::native_composer::replace_draft_with_cursor(
+                                        &mut draft,
+                                        &mut draft_cursor,
+                                        next.clone(),
+                                        next.len(),
+                                    );
+                                    completion.sync(&draft);
+                                } else {
+                                    // Next queue entry belongs to another
+                                    // session: no cross-session promotion.
+                                    utf8.reset();
+                                    needs_paint = true;
+                                    continue;
+                                }
+                            } else {
+                                // Blank idle Enter with nothing queued is
+                                // not a provider turn (`onEmptySubmit`
+                                // returns false without a queued prompt,
+                                // `index.tsx:1124-1127`,
+                                // `routes/session/index.tsx:1650-1653`).
+                                utf8.reset();
+                                needs_paint = true;
+                                continue;
+                            }
+                        }
+                    }
+                }
                 let text = match command_route {
                     // Command mode: the recognized local route, fed to the
                     // SAME local-route chain below. Every recognized route
@@ -12371,6 +12559,70 @@ mod command_consumption_tests {
         assert_eq!(super::composer_pointer_event(click.clone(), &view, draft, super::SubmitKeymap::Enter, false), click);
         view.dialogs.open_permission("request", "session", "Run command").unwrap();
         assert_eq!(super::composer_pointer_event(click.clone(), &view, draft, super::SubmitKeymap::Enter, true), click);
+    }
+
+    #[test]
+    fn composer_enter_routes_through_plan_submit_queue_and_steer() {
+        use crate::native_composer::{QueueRejection, SubmitPlan};
+        // Idle + draft: steer straight to the existing dispatch.
+        assert_eq!(
+            super::composer_enter_plan("hello", false, true, false, 0),
+            SubmitPlan::Steer
+        );
+        // Busy + draft: the bounded queue, never a dropped draft.
+        assert_eq!(
+            super::composer_enter_plan("hello", true, true, false, 0),
+            SubmitPlan::Queue
+        );
+        // Queue stays bounded at the same cap as `Composer::submit`; the
+        // loop refuses overflow before enqueueing.
+        assert_eq!(
+            super::composer_enter_plan("hello", true, true, false, crate::native_composer::BUSY_QUEUE_CAP),
+            SubmitPlan::Queue
+        );
+        // Queued refusals: slash commands and exit words can never be
+        // queued (`component/prompt/index.tsx:1136-1139`).
+        assert_eq!(
+            super::composer_enter_plan("/status", true, true, false, 0),
+            SubmitPlan::Rejected(QueueRejection::SlashCommand)
+        );
+        assert_eq!(
+            super::composer_enter_plan("exit", true, true, false, 0),
+            SubmitPlan::Rejected(QueueRejection::ExitWord)
+        );
+        // Completion visible: submit is ignored, selection owns Enter
+        // (`index.tsx:1103`).
+        assert_eq!(
+            super::composer_enter_plan("hello", false, true, true, 0),
+            SubmitPlan::Ignored
+        );
+        // Blank idle Enter with a queued prompt: steer promotion of the
+        // FIRST queued item (`routes/session/index.tsx:1650-1657`).
+        assert_eq!(
+            super::composer_enter_plan("", false, true, false, 1),
+            SubmitPlan::BlankPromotion {
+                queued: true,
+                commit_selection: true
+            }
+        );
+        // Blank idle Enter without a queue: never an empty provider turn
+        // (`onEmptySubmit` returns false, `session/index.tsx:1650-1653`).
+        assert_eq!(
+            super::composer_enter_plan("", false, true, false, 0),
+            SubmitPlan::BlankPromotion {
+                queued: false,
+                commit_selection: true
+            }
+        );
+        // Home (no session) blank Enter: nothing to promote
+        // (`index.tsx:1124-1127`).
+        assert_eq!(
+            super::composer_enter_plan("", false, false, false, 3),
+            SubmitPlan::BlankPromotion {
+                queued: false,
+                commit_selection: false
+            }
+        );
     }
 
     #[test]
