@@ -10157,6 +10157,36 @@ fn native_loop(
                             }
                             needs_paint = true;
                         }
+                    } else if b == b'n' {
+                        // `<leader>n` = `session.new` (`config/keybind.ts:110`):
+                        // route Home; the outgoing tab keeps its draft/model.
+                        let new_scroll = view.chat_scroll_offset();
+                        match new_session_tab_transition(
+                            &mut navigation,
+                            &draft,
+                            draft_cursor,
+                            selected.as_ref().map(|model| model.qualified()),
+                            new_scroll,
+                            binding_generation,
+                        ) {
+                            Ok(result) => {
+                                apply_close_tab_result(
+                                    result, &mut view, &mut live, &mut history_window,
+                                    &mut binding_generation, &mut draft, &mut draft_cursor,
+                                    &mut selected, &models, &mut session_route,
+                                    &mut compact_worker,
+                                );
+                                completion.sync(&draft);
+                                history_pending = false;
+                                history_active = None;
+                                history_navigation_request = None;
+                                blocked_history_scroll = None;
+                                history_tail_refresh_pending = false;
+                                history_browsing = false;
+                            }
+                            Err(error) => append_transcript(&mut transcript, format!("error: new tab: {error}")),
+                        }
+                        needs_paint = true;
                     } else if b == b'b' {
                         view.toggle_sidebar();
                         if let Err(error) =
@@ -10470,6 +10500,36 @@ fn close_tab_transition(
     staged.select_tab(&successor).map_err(|error| format!("close commit invariant failed: {error:?}"))?;
     *navigation = staged;
     Ok(CloseTabResult { snapshot: Some(snapshot), draft: target.draft, cursor: target.cursor, scroll: target.scroll, selected_model: target.selected_model, generation: prospective, home: false })
+}
+
+#[cfg(feature = "native")]
+/// Route to Home as the new-session tab without creating a session yet.
+/// Upstream `session.new` navigates Home and keeps the current model/agent
+/// (`app.tsx:777-796`); the session is created by the next submit.
+fn new_session_tab_transition(
+    navigation: &mut crate::native_navigation::NavigationState,
+    draft: &str,
+    cursor: usize,
+    selected_model: Option<String>,
+    scroll: usize,
+    generation: u64,
+) -> Result<CloseTabResult, String> {
+    let mut staged = navigation.clone();
+    if navigation.active().is_some() {
+        staged.save_active_state(draft.to_owned(), cursor, scroll, selected_model)
+            .map_err(|error| format!("new tab refused: {error:?}"))?;
+    }
+    staged.enter_home();
+    *navigation = staged;
+    Ok(CloseTabResult {
+        snapshot: None,
+        draft: String::new(),
+        cursor: 0,
+        scroll: 0,
+        selected_model: None,
+        generation,
+        home: true,
+    })
 }
 
 #[cfg(feature = "native")]
@@ -11399,6 +11459,38 @@ mod command_consumption_tests {
             navigation.work_state(&session),
             Some(crate::native_navigation::WorkState::Running)
         );
+    }
+
+    #[test]
+    fn new_session_tab_keeps_the_outgoing_tab_state_and_routes_home() {
+        let mut navigation = crate::native_navigation::NavigationState::new();
+        let first = crate::native_navigation::SessionRef("first".into());
+        let second = crate::native_navigation::SessionRef("second".into());
+        navigation.open(first.clone());
+        navigation.open(second.clone());
+        let result = super::new_session_tab_transition(
+            &mut navigation,
+            "second draft",
+            3,
+            Some("fixture/other".into()),
+            9,
+            7,
+        )
+        .expect("routing Home cannot fail");
+        assert!(result.home);
+        assert!(result.snapshot.is_none());
+        assert_eq!(result.draft, "");
+        assert_eq!(result.generation, 7);
+        // Tabs stay open and the outgoing tab keeps its own composer state so
+        // selecting it again restores exactly that draft (`app.tsx:777-796`).
+        assert_eq!(navigation.tab_len(), 2);
+        assert!(navigation.active().is_none());
+        let saved = navigation.tab_at(1).expect("second tab retained");
+        assert_eq!(saved.draft, "second draft");
+        assert_eq!(saved.cursor, 3);
+        assert_eq!(saved.scroll, 9);
+        assert_eq!(saved.selected_model.as_deref(), Some("fixture/other"));
+        assert_eq!(navigation.tab_at(0).expect("first tab retained").draft, "");
     }
 
     #[test]
