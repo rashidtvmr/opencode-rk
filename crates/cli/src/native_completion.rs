@@ -71,6 +71,7 @@ pub struct Completion {
     dismissed: Option<String>,
     kinds: BTreeMap<String, Kind>,
     destructive: BTreeMap<String, String>,
+    directories: BTreeMap<String, bool>,
 }
 
 impl Completion {
@@ -223,6 +224,12 @@ impl Completion {
     }
 
     /// Record the optional kind label for a value (`autocomplete.tsx:844-848`).
+    /// Whether a value was recorded as a directory (`autocomplete.tsx:379`).
+    #[must_use]
+    pub fn directory(&self, value: &str) -> bool {
+        self.directories.get(value).copied().unwrap_or(false)
+    }
+
     pub fn set_kind(&mut self, value: &str, kind: Kind) {
         self.kinds.insert(value.to_owned(), kind);
     }
@@ -232,6 +239,41 @@ impl Completion {
     pub fn set_destructive(&mut self, value: &str, confirm: &str) {
         self.destructive
             .insert(value.to_owned(), confirm.to_owned());
+    }
+
+    /// Record that a value names a directory, so Tab/Enter can expand it
+    /// instead of accepting it (`autocomplete.tsx:42,379,714-723`).
+    pub fn set_directory(&mut self, value: &str, is_directory: bool) {
+        self.directories.insert(value.to_owned(), is_directory);
+    }
+
+    /// Expand the selected directory into a mention path in place
+    /// (`autocomplete.tsx:640-663`). The active token is replaced with
+    /// `@<path>/` (or `<path>/` for a non-`@` argument) and the returned byte
+    /// offset is the cursor immediately after it.
+    pub fn expand_directory(&mut self, draft: &mut String, cursor: usize, limit: usize) -> Option<usize> {
+        let (start, marker, _) = self.trigger_at(draft, cursor)?;
+        let items = self.visible_at(draft, cursor);
+        let item = items.get(self.selected.min(items.len().saturating_sub(1)))?;
+        if !self.directories.get(&item.value).copied().unwrap_or(false) {
+            return None;
+        }
+        let path = item.value.strip_prefix(marker).unwrap_or(item.value.as_str()).trim_end();
+        let path = path.strip_suffix('/').unwrap_or(path);
+        let separator = std::path::MAIN_SEPARATOR;
+        let replacement = if marker == '@' {
+            format!("@{path}{separator}")
+        } else {
+            format!("{path}{separator}")
+        };
+        let new_len = draft.len() - (cursor - start) + replacement.len();
+        if new_len > limit {
+            return None;
+        }
+        draft.replace_range(start..cursor, &replacement);
+        let next = start + replacement.len();
+        self.sync(draft);
+        Some(next)
     }
 
     /// Hover/mouse-move selection. Changing the row clears any pending
@@ -406,6 +448,9 @@ impl Completion {
         let items = self.command_items_at(draft, cursor)?;
         let item = items.get(self.selected.min(items.len().saturating_sub(1)))?;
         let item = item.value.clone();
+        if self.directories.get(&item).copied().unwrap_or(false) {
+            return self.expand_directory(draft, cursor, limit);
+        }
         self.accept_value_at(draft, &item, cursor, limit)
     }
 }
@@ -1011,6 +1056,25 @@ mod popup_geometry_and_style_tests {
             DestructiveOutcome::Run
         );
         assert_eq!(confirming, None);
+    }
+
+    #[test]
+    fn cp40_directory_completion_expands_instead_of_accepting() {
+        let mut completion = fixture();
+        // A value that does NOT collide with the fixture's `@src/café.rs`.
+        completion.mentions.push(Item { value: "@vendor".into(), description: "dir".into(), disabled: false });
+        completion.set_directory("@vendor", true);
+        let mut draft = "see @ven".to_owned();
+        let cursor = draft.len();
+        completion.sync(&draft);
+        assert_eq!(completion.visible_at(&draft, cursor).len(), 1);
+        let sep = std::path::MAIN_SEPARATOR;
+        assert_eq!(
+            completion.complete_key_at(b'\t', &mut draft, cursor, 4096),
+            Some("see @vendor/".len())
+        );
+        assert_eq!(draft, format!("see @vendor{sep}"));
+        assert!(completion.directory("@vendor"));
     }
 
     #[test]
