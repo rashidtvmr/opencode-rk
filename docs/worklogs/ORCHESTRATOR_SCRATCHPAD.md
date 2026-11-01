@@ -9819,7 +9819,30 @@ builds. Two already worked; one had a real root cause and is fixed.
   0.8/0.56/0.32/0.08) at rest and a 0.078 leading ratio while scrolling.
   Full oc2 suite 1977 passed / 0 failed; existing marquee + busy journeys
   still pass.
-- **Remaining TAB gaps**: TAB-10/11 compact goldens, TAB-12 tooltip wiring
-  check, TAB-13 full mouse matrix, TAB-21 view acknowledgement unread flow,
-  TAB-05 child-status aggregation, TAB-23 chord coverage, TAB-24 reduced
-  motion capture.
+- **Remaining TAB gaps**: TAB-10/11 compact goldens, TAB-13 full mouse matrix,
+  TAB-21 view acknowledgement unread flow, TAB-05 child-status aggregation,
+  TAB-23 chord coverage, TAB-24 reduced motion capture.
+
+## 2026-11-01 — TAB-12 compact rail tooltip wired (landed)
+
+- **Contract**: `session-tabs.tsx:1241-1278`; the box opens only while the rail
+  is compact (`width < 12`), no drag/menu is active and an entry is hovered.
+  `left = railWidth`, `top = max(0, min(hoverY - 1, rows - 4))`,
+  `width = min(54, cols - railWidth)`, four rows: `▄` cap on `background.base`
+  with `raised.base` fg, two `raised.base` rows with `text.base` title and
+  `text.muted` detail inset one cell, then a `▀` cap.
+- **Model**: `native_tab_rail::compact_tooltip` already encoded the geometry;
+  the loop now records the pointer row (`tab_hover_y`, reset on viewport and
+  modal changes) and resolves the tooltip from the live `RailInput` title and
+  project detail. `PaintCtx.compact_tooltip` carries it to the painter, which
+  runs before the page-panel outline and is skipped under a modal.
+- **Validation**: unit paint test `compact_rail_tooltip_paints_caps_inset_title_and_detail`
+  plus installed journey `/tmp/oc2-verify/verify_compact_tooltip.py`: a 9-column
+  persisted rail (`state/kv.json` `layout.verticalTabsWidth`) paints one
+  centered grapheme per entry; hovering row 3 opens caps/title/detail at
+  `x=9, top=2, width=54`, the cap fg equals the body background while its bg is
+  the page background, title and detail use different text roles, and the box
+  disappears when the pointer leaves. Full oc2 suite 1978 passed / 0 failed.
+- **Remaining TAB gaps**: TAB-10/11 compact goldens, TAB-13 full mouse matrix,
+  TAB-21 view acknowledgement unread flow, TAB-05 child-status aggregation,
+  TAB-23 chord coverage, TAB-24 reduced motion capture.
