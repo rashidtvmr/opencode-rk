@@ -7435,12 +7435,19 @@ fn native_loop(
         view.set_context_window(selected.as_ref().and_then(|model|model.context_window));
         view.set_prompt_mode(draft.starts_with('!'));
         view.set_prompt_cursor(draft_cursor);
-        // Keep tracked folded-paste ranges coherent with the current draft on
-        // every frame: this covers every clear/replace/command-consumption
-        // mutation site (including the free `consume_local_command` helpers
-        // that cannot touch `draft_parts`) so no stale range can survive a
-        // frame and be used by a later paste/expansion.
-        crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
+        // CP-35: the draft's text and its tracked part anchors are owned by a
+        // single `TrackedDraft` so the text mutation and the anchor realignment
+        // travel together. Loading from the working locals and writing the
+        // result back keeps every reader of `draft`/`draft_cursor`/`draft_parts`
+        // unchanged; the remaining un-migrated mutation sites are listed in
+        // evidence/W18-CP35-MIGRATE/handoff.json.
+        let mut composer = crate::native_paste::TrackedDraft::new(std::mem::take(&mut draft));
+        composer.cursor = draft_cursor;
+        composer.parts.pasted = std::mem::take(&mut draft_parts);
+        composer.realign_after_edit();
+        draft = composer.text.clone();
+        draft_cursor = composer.cursor;
+        draft_parts = composer.parts.pasted;
         let draft_echo = if matches!(dialog, native_setup::Dialog::ApiKey) {
             ""
         } else {

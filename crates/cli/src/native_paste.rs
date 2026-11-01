@@ -1204,6 +1204,13 @@ impl TrackedDraft {
         self.clamp_cursor();
         self.sync_parts_text();
         self.parts.realign();
+        // CP-35: folded pastes are re-anchored against the (possibly edited)
+        // text so a later expansion/submit uses the current placeholder range.
+        // This is the seam the live composer previously reached through the
+        // free `reconcile_parts` helper.
+        let mut pasted = std::mem::take(&mut self.parts.pasted);
+        reconcile_parts(&self.text, &mut pasted);
+        self.parts.pasted = pasted;
     }
 
     fn sync_parts_text(&mut self) {
