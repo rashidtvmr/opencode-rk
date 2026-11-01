@@ -738,7 +738,14 @@ fn split_cell(line: &DiffLine) -> SplitCell {
 pub fn paint_rows_split(patch: &str, max_rows: usize, pane_width: usize) -> SplitPaintResult {
     let classified = classify_patch(patch);
     let inner = pane_width.saturating_sub(1);
-    let left_width = inner / 2;
+    // DIFF-001: upstream `buildSplitView` gives each split side width="50%"
+    // of the diff content box (@opentui/core 0.4.5 index.node.js:6056-6057)
+    // and lets yoga resolve it. At an odd content width yoga rounds edge
+    // positions half-up, so the left side's right edge (inner/2 = x.5) rounds
+    // up: the LEFT pane receives the extra column (inner 9 -> left 5, right
+    // 4). `inner` is the content box after the upstream 1-column diff padding
+    // (index.tsx:3470 `paddingLeft={1}`, mirrored by `pane_width - 1`).
+    let left_width = inner - inner / 2;
     let right_width = inner - left_width;
     let mut rows = Vec::new();
     let mut hit_cap = false;
@@ -1010,8 +1017,37 @@ pub fn virtual_added_patch(patch: &str, scroll_aware: bool) -> Option<VirtualAdd
     Some(VirtualAddedPatch { chunks, total_rows })
 }
 
+/// DIFF-003: converts a raw ScrollBox `scrollTop` into the root-relative
+/// viewport top that `visible_chunk_range` must consume. Upstream
+/// (`component/patch-diff.tsx:164-181`) computes the chunk window inside the
+/// virtual root's lifecycle pass:
+///
+/// ```text
+/// const top = scroll.scrollTop - (root.y - scroll.content.y)
+/// setFirst(Math.floor(top / VIRTUAL_CHUNK_LINES))
+/// setLast(Math.floor((top + scroll.viewport.height) / VIRTUAL_CHUNK_LINES))
+/// ```
+///
+/// `root.y` is the virtual root's absolute y in the same layout pass and
+/// `scroll.content.y` is the scroll content's absolute y; their difference is
+/// the root's scroll-independent offset inside the content, so the caller
+/// MUST subtract it before chunking. A raw scrollTop double-counts that
+/// offset and shifts the rendered window.
+#[must_use]
+pub fn relative_scroll_top(scroll_top: usize, root_y: i64, content_y: i64) -> usize {
+    let offset = root_y - content_y;
+    if offset <= 0 {
+        scroll_top
+    } else {
+        scroll_top.saturating_sub(offset as usize)
+    }
+}
+
 /// Inclusive chunk indexes rendered for a viewport, with one chunk of
-/// overscan on each side (`patch-diff.tsx:164-181`).
+/// overscan on each side (`patch-diff.tsx:164-181`). `scroll_top` MUST be the
+/// root-relative value returned by `relative_scroll_top` (`patch-diff.tsx:168`
+/// subtracts `root.y - scroll.content.y`); a raw ScrollBox scrollTop
+/// double-counts the virtual root's content offset.
 #[must_use]
 pub fn visible_chunk_range(
     chunk_count: usize,
@@ -1861,8 +1897,10 @@ index abc123..def456 100644
 
         let split = paint_rows_split(two_hunk_patch(), 100, 120);
         assert!(!split.malformed);
-        assert_eq!(split.left_width, 59);
-        assert_eq!(split.right_width, 60);
+        // Inner 119 is odd: the left 50% pane rounds up to 60, the right 50%
+        // pane floors to 59 (upstream yoga edge rounding).
+        assert_eq!(split.left_width, 60);
+        assert_eq!(split.right_width, 59);
         let pairs: Vec<_> = split
             .rows
             .iter()
@@ -2103,5 +2141,65 @@ index abc123..def456 100644
         assert_eq!(found.len(), 1);
         assert_eq!(format_diagnostic(&found[0]), "Error [1:1] boom");
         assert!(diagnostics_for_file(&map, "C:\\other.rs", "win32").is_empty());
+    }
+
+    #[test]
+    fn split_panes_take_upstream_fifty_percent_rounding_at_odd_width() {
+        // Upstream: each split side is width="50%" (@opentui/core
+        // index.node.js:6056-6057). Yoga rounds the left side's right edge
+        // half-up, so at an odd inner width the LEFT pane gets the extra
+        // column; the old Rust floor split gave it to the right pane.
+        let odd = paint_rows_split(two_hunk_patch(), 100, 120);
+        assert_eq!(odd.left_width, 60, "inner 119: left pane rounds up to 60");
+        assert_eq!(odd.right_width, 59, "inner 119: right pane floors to 59");
+        let narrow = paint_rows_split(two_hunk_patch(), 100, 10);
+        assert_eq!(narrow.left_width, 5, "inner 9: left pane takes the extra column");
+        assert_eq!(narrow.right_width, 4, "inner 9: right pane floors");
+        let even = paint_rows_split(two_hunk_patch(), 100, 11);
+        assert_eq!(even.left_width, 5, "inner 10: even split");
+        assert_eq!(even.right_width, 5, "inner 10: even split");
+        let zero = paint_rows_split(two_hunk_patch(), 100, 0);
+        assert_eq!(zero.left_width, 0, "saturated empty pane");
+        assert_eq!(zero.right_width, 0, "saturated empty pane");
+    }
+
+    #[test]
+    fn relative_scroll_top_subtracts_the_virtual_root_offset() {
+        // patch-diff.tsx:168:
+        // `top = scroll.scrollTop - (root.y - scroll.content.y)`.
+        // A virtual root that is the content's direct child has a FIXED
+        // offset `root.y - content.y`, independent of scroll.
+        assert_eq!(relative_scroll_top(24, 0, 0), 24, "unshifted root is the identity");
+        assert_eq!(relative_scroll_top(0, 0, 0), 0, "nothing scrolled");
+        // Offset 7 (root sits 7 rows into the content): content.y tracks
+        // -scrollTop, so at scrollTop 135 content.y = -135 and root.y = -128.
+        assert_eq!(
+            relative_scroll_top(135, -128, -135),
+            128,
+            "root 7 rows into content"
+        );
+        assert_eq!(
+            relative_scroll_top(128, -121, -128),
+            121,
+            "same +7 offset after scrolling 128"
+        );
+        // Offset 130: the relative top lands in chunk 0 while the raw
+        // absolute scrollTop lands in chunk 1, so the two windows differ
+        // once the one-chunk overscan is applied.
+        let offset = 130i64;
+        assert_eq!(relative_scroll_top(offset as usize, offset, 0), 0, "relative top is 0");
+        assert_eq!(
+            visible_chunk_range(24, relative_scroll_top(offset as usize, offset, 0), 10),
+            (0, 1),
+            "window uses the relative top"
+        );
+        assert_ne!(
+            visible_chunk_range(24, offset as usize, 10),
+            visible_chunk_range(24, relative_scroll_top(offset as usize, offset, 0), 10),
+            "raw absolute scrollTop shifts the window"
+        );
+        // Saturates when the viewport top sits above this root instead of
+        // wrapping around usize (`usize::MAX`).
+        assert_eq!(relative_scroll_top(3, 12, 0), 0, "viewport above root saturates");
     }
 }

@@ -15,6 +15,13 @@
 //!   (`routes/session/permission.tsx:63`).
 //! - Split thresholds and split row pairing live in `native_diff_view.rs`
 //!   (DIFF-001/DIFF-002 evidence is recorded there).
+//! - DIFF-001/DIFF-003 arithmetic gaps are fixed in `native_diff_view.rs`:
+//!   `paint_rows_split` 50/50 rounding and `relative_scroll_top` feeding the
+//!   root-relative `visible_chunk_range` scroll contract.
+//! - NOT WIRED: `build_edit_diff` / `build_patch_diff` /
+//!   `build_permission_diff` are still unconsumed by `native_view_chat.rs`;
+//!   routing Edit/ApplyPatch/permission chat rows through them is a separate
+//!   consumer step outside this model module.
 //!
 //! Pure row model: no rendering, no IO.
 
