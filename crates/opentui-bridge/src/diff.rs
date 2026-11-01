@@ -725,17 +725,23 @@ impl DiffSelection {
             let Some(text) = layout.row_text(row) else {
                 continue;
             };
-            let from = if row == start_row {
-                start.col.min(text.len())
+            // `Position.col` is a display/char column: `clip` truncates rows by
+            // `char` and `contains` compares columns directly. Slice on char
+            // boundaries, never a raw byte offset, or a multi-byte row panics.
+            let char_count = text.chars().count();
+            let from_col = if row == start_row {
+                start.col.min(char_count)
             } else {
                 0
             };
-            let to = if row == end_row {
-                end.col.min(text.len())
+            let to_col = if row == end_row {
+                end.col.min(char_count)
             } else {
-                text.len()
+                char_count
             };
-            if to > from {
+            if to_col > from_col {
+                let from = byte_index_of_char(&text, from_col);
+                let to = byte_index_of_char(&text, to_col);
                 out.push_str(&text[from..to]);
             }
             if row != end_row {
@@ -991,6 +997,14 @@ fn clip(text: &str, width: usize) -> String {
         return String::new();
     }
     text.chars().take(width).collect()
+}
+
+/// Byte offset of the `char_col`-th char boundary (the row's byte length for an
+/// out-of-range column). Selection columns are char indices, matching [`clip`].
+fn byte_index_of_char(text: &str, char_col: usize) -> usize {
+    text.char_indices()
+        .nth(char_col)
+        .map_or(text.len(), |(byte, _)| byte)
 }
 
 impl DiffLayout {
@@ -1534,5 +1548,30 @@ mod tests {
     fn byte_and_row_caps_fail_closed() {
         let huge = "x".repeat(MAX_PATCH_BYTES + 1);
         assert_eq!(FilePatch::parse(&huge).unwrap_err(), DiffError::TooLarge);
+    }
+
+    #[test]
+    fn selection_copies_multibyte_rows_by_char_column() {
+        // Rows are clipped by `char` (see `clip`), so `Position.col` is a char
+        // column. The selection must slice on char boundaries, not byte
+        // offsets, or a multi-byte row splits a code point and panics.
+        let patch = FilePatch::parse(
+            "--- a/e.rs\n+++ b/e.rs\n@@ -1,2 +1,2 @@\n-caf\u{e9}\n+caf\u{e9}!\n na\u{ef}ve\n",
+        )
+        .unwrap();
+        let layout = DiffLayout::new(&patch, ViewMode::Unified, 80, 10);
+        // Rows: 0 header, 1 "-caf\u{e9}", 2 "+caf\u{e9}!", 3 " na\u{ef}ve".
+        let row = layout.row_text(2).unwrap();
+        assert_eq!(row, "+caf\u{e9}!");
+        assert_eq!(row.chars().count(), 6);
+        assert_eq!(row.len(), 7, "one multi-byte code point");
+        // Whole row: char cols 0..6 map to bytes 0..7.
+        let whole = DiffSelection::new(Position::new(2, 0), Position::new(2, 6));
+        assert_eq!(whole.text(&layout), "+caf\u{e9}!");
+        // Partial span crossing the multi-byte char: cols 3..5 are "f\u{e9}".
+        // Before the fix this byte-slices 3..5 and panics mid code point.
+        let partial = DiffSelection::new(Position::new(2, 3), Position::new(2, 5));
+        assert_eq!(partial.text(&layout), "f\u{e9}");
+        assert!(partial.contains(Position::new(2, 4)));
     }
 }
