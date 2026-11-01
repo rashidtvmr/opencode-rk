@@ -1005,6 +1005,20 @@ impl NativeView {
         self.status.set_connection_unknown();
     }
 
+    /// SIDE-12: getting-started facts for the pinned sidebar footer
+    /// (`sidebar/footer.tsx:18-23`). `None` means the connection list was
+    /// never observed, so no onboarding box is claimed.
+    ///
+    /// Uses the `native_view_status::native_sidebar` instance that `StatusView`
+    /// projects and paints (the canonical `crate::native_sidebar` is a distinct
+    /// module instance and would not type-check).
+    pub fn set_onboarding(
+        &mut self,
+        onboarding: Option<crate::native_view_status::native_sidebar::Onboarding>,
+    ) {
+        self.status.set_onboarding(onboarding);
+    }
+
     /// Active submit keymap fact for truthful Help rows.
     pub fn set_submit_with_ctrl_j(&mut self, submit_with_ctrl_j: bool) {
         self.submit_with_ctrl_j = submit_with_ctrl_j;

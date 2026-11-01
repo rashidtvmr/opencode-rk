@@ -6024,6 +6024,18 @@ fn native_loop(
     for diagnostic in &preferences.diagnostics {
         append_transcript(&mut transcript, format!("error: {diagnostic}"));
     }
+    // SIDE-12: the getting-started box shows only while the connection list
+    // is known AND no provider is connected (`footer.tsx:18-23`). The bounded
+    // native credential store (`auth.json`, the document the daemon's
+    // credential writers maintain) is the connection fact source; the
+    // persisted `getting-started` dismissal is the observed storage fact.
+    // `integrations_known` is true because the integration list is a static
+    // client-side fact, not a fetch that can fail.
+    view.set_onboarding(Some(crate::native_view_status::native_sidebar::Onboarding {
+        dismissed: preferences.onboarding_dismissed,
+        integrations_known: true,
+        connected_provider: opencode_rk_providers::persisted_auth::any_connected_provider(),
+    }));
     // `config.animations ?? true` (`config/index.tsx:250`): the resolved
     // reduced-motion flag. Tab hover/title paint and the marquee gate on it.
     let animations = preferences.animations.unwrap_or(true);

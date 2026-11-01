@@ -373,6 +373,37 @@ fn oauth_from_value(root: &Value, provider: &str) -> Option<PersistedOAuth> {
         enterprise_url: optional("enterpriseUrl"),
     })
 }
+/// SIDE-12: whether any provider holds a stored credential. This is the
+/// native reduction of upstream `hasConnectedProvider`
+/// (`packages/tui/src/util/connected-provider.ts:4`,
+/// `integrations.some(i => i.connections.length > 0)`): oc2 persists one
+/// connection per provider in the same bounded `auth.json` document the
+/// daemon's `save_api_key`/`save_oauth_credential` writers fill, so "any
+/// connected provider" is exactly "any valid credential entry". A missing,
+/// oversized, or malformed document reports `false` (no connection proven),
+/// never a panic.
+pub fn any_connected_provider() -> bool {
+    let Some(path) = auth_path() else { return false };
+    let Some(bytes) = read_bounded_file(&path) else { return false };
+    if bytes.len() > MAX_AUTH_BYTES {
+        return false;
+    }
+    serde_json::from_slice::<Value>(&bytes)
+        .map(|root| any_connected_entry(&root))
+        .unwrap_or(false)
+}
+
+/// Pure predicate over an already-parsed auth document; shares the exact
+/// entry-validation table the credential readers use, so a partially written
+/// or non-credential key never counts as a connection.
+fn any_connected_entry(root: &Value) -> bool {
+    let Some(entries) = root.as_object() else { return false };
+    if entries.len() > MAX_AUTH_ENTRIES {
+        return false;
+    }
+    entries.values().any(valid_auth_entry)
+}
+
 fn unique_suffix() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     format!(
@@ -513,4 +544,22 @@ fn api_key_from_value(root: &Value, provider: &str) -> Option<String> {
     }
     let key = item.get("key")?.as_str()?;
     (!key.trim().is_empty() && key.len() <= MAX_API_KEY_BYTES).then(|| key.to_owned())
+}
+
+#[cfg(test)]
+mod connection_present_tests {
+    use super::any_connected_entry;
+    use serde_json::json;
+
+    /// SIDE-12: a connection is proven only by a valid credential entry.
+    #[test]
+    fn connection_present_only_for_valid_credential_entries() {
+        assert!(!any_connected_entry(&json!({})));
+        assert!(!any_connected_entry(&json!({"x": "nope"})));
+        assert!(!any_connected_entry(&json!({"openai": {"type": "api"}})));
+        assert!(any_connected_entry(&json!({"openai": {"type": "api", "key": "sk"}})));
+        assert!(any_connected_entry(
+            &json!({"openai": {"type": "oauth", "access": "a", "refresh": "r", "expires": 1}})
+        ));
+    }
 }
