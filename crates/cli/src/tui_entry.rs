@@ -6984,6 +6984,8 @@ fn native_loop(
             native_input_decoder::InputEvent::Paste(text) => ("paste", text.len(), None),
             native_input_decoder::InputEvent::ArrowUp => ("up", 0, None),
             native_input_decoder::InputEvent::ArrowDown => ("down", 0, None),
+            native_input_decoder::InputEvent::AltArrowUp => ("alt-up", 0, None),
+            native_input_decoder::InputEvent::AltArrowDown => ("alt-down", 0, None),
             native_input_decoder::InputEvent::ArrowLeft => ("left", 0, None),
             native_input_decoder::InputEvent::ArrowRight => ("right", 0, None),
             native_input_decoder::InputEvent::Escape => ("escape", 0, None),
@@ -7003,6 +7005,56 @@ fn native_loop(
         // inert, and the permission modal / Help gates above keep
         // precedence over both.
         let page_query_open = view.page().accepts_search();
+        // `alt+down`/`alt+up` cycle session tabs (`config/keybind.ts:114,116`).
+        // Like the leader chord, the binding only fires while the chat composer
+        // owns focus; dialogs and pages keep their own arrow navigation.
+        if matches!(
+            &event,
+            native_input_decoder::InputEvent::AltArrowUp | native_input_decoder::InputEvent::AltArrowDown
+        ) {
+            let forward = matches!(&event, native_input_decoder::InputEvent::AltArrowDown);
+            if matches!(dialog, native_setup::Dialog::None)
+                && !page_open
+                && !help_open
+                && !view.dialogs.intercepts_input()
+                && !permission_editor.open
+                && !appearance.open
+                && !children_panel.open
+                && !view.command_palette_open()
+            {
+                let mut probe = navigation.clone();
+                if navigation.active().is_none() {
+                    probe.select_tab_slot(if forward { 1 } else { navigation.tab_len() });
+                } else {
+                    probe.step_tab(forward);
+                }
+                if let Some(target) = probe.active().map(|tab| tab.session.clone()) {
+                    let scroll = view.chat_scroll_offset();
+                    match select_tab_transition(
+                        &mut view, &mut transcript, &mut navigation, &draft, draft_cursor,
+                        live.as_ref().map(|snapshot| snapshot.origin.as_str()),
+                        auth, binding_generation, &target,
+                        selected.as_ref().map(|model| model.qualified()), scroll,
+                    ) {
+                        Ok(result) => {
+                            apply_close_tab_result(
+                                result, &mut view, &mut live, &mut history_window,
+                                &mut binding_generation, &mut draft, &mut draft_cursor,
+                                &mut selected, &models, &mut session_route,
+                                &mut compact_worker,
+                            );
+                            completion.sync(&draft);
+                        }
+                        Err(error) => {
+                            append_transcript(&mut transcript, format!("error: select tab: {error}"))
+                        }
+                    }
+                }
+            }
+            utf8.reset();
+            needs_paint = true;
+            continue;
+        }
         if matches!(dialog, native_setup::Dialog::Settings) {
             let action = match event {
                 native_input_decoder::InputEvent::Escape => { settings_dialog.close(); utf8.reset(); dialog = native_setup::Dialog::None; None }
@@ -8258,7 +8310,9 @@ fn native_loop(
             // An input owner above blocked composer dispatch; keep its
             // horizontal arrows inert rather than converting them to bytes.
             native_input_decoder::InputEvent::ArrowLeft
-            | native_input_decoder::InputEvent::ArrowRight => continue,
+            | native_input_decoder::InputEvent::ArrowRight
+            | native_input_decoder::InputEvent::AltArrowUp
+            | native_input_decoder::InputEvent::AltArrowDown => continue,
         };
         if children_panel.open && !view.dialogs.intercepts_input() && !matches!(byte, 3 | 4) {
             let composing = children_panel.composing;

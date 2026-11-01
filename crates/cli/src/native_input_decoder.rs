@@ -32,6 +32,12 @@ pub(crate) enum InputEvent {
     ArrowDown,
     ArrowLeft,
     ArrowRight,
+    /// CSI 1;3A — Alt+Up (`session.tab.previous`, `config/keybind.ts:116`).
+    /// Decoded separately so modifier chords never become typed text or an
+    /// unmodified arrow that a dialog would consume.
+    AltArrowUp,
+    /// CSI 1;3B — Alt+Down (`session.tab.next`, `config/keybind.ts:114`).
+    AltArrowDown,
     /// Kitty Shift+Return (CSI 13;2u). The caller resolves this as newline;
     /// it must not become Byte(13), which is the bare submit key.
     ShiftEnter,
@@ -268,7 +274,18 @@ impl TerminalInputDecoder {
             }
             // Decode only unmodified keyboard arrows. Other CSI reports and
             // modifier/intermediate forms remain protocol, never typed text.
-            if matches!(byte, b'A' | b'B' | b'C' | b'D')
+            // Alt+Up/Down tab cycling is the only modified arrow that carries
+            // an upstream binding; every other modifier form stays protocol.
+            if matches!(byte, b'A' | b'B')
+                && self.state == State::Csi
+                && &self.sequence[..self.len] == b"1;3"
+            {
+                self.emit(if byte == b'A' {
+                    InputEvent::AltArrowUp
+                } else {
+                    InputEvent::AltArrowDown
+                });
+            } else if matches!(byte, b'A' | b'B' | b'C' | b'D')
                 && (self.len == 0
                     || (self.state == State::Csi && &self.sequence[..self.len] == b"1"))
             {
@@ -514,6 +531,19 @@ impl TerminalInputDecoder {
 #[cfg(test)]
 mod horizontal_cursor_regressions {
     use super::*;
+
+    #[test]
+    fn alt_vertical_arrows_decode_while_other_modifiers_stay_inert() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[1;3B\x1b[1;3A" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::AltArrowDown));
+        assert_eq!(decoder.pop(), Some(InputEvent::AltArrowUp));
+        // Ctrl/Shift (and any other modifier) forms remain protocol: they must
+        // never become an ordinary arrow that a dialog or composer consumes.
+        for byte in b"\x1b[1;5B\x1b[1;2A\x1b[1;4B" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), None);
+    }
 
     #[test]
     fn unmodified_horizontal_cursor_sequences_are_events_not_draft_bytes() {
