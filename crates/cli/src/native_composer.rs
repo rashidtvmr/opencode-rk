@@ -917,12 +917,20 @@ impl Composer {
         }
     }
 
-    /// Restore a history entry exactly, including mode and cursor
-    /// (`index.tsx:1048-1095`). Structured parts live on `DraftEntry` and are
-    /// restored by the caller's tracked-prompt owner.
-    pub fn restore_history_entry(&mut self, entry: &DraftEntry) -> Result<(), ComposerError> {
+    /// Restore a history entry, including mode and structured parts
+    /// (`index.tsx:1048-1095`). Upstream history entries carry no cursor
+    /// (`prompt/history.tsx:18-24` `PromptInfo`), so the cursor is placed at
+    /// the start when walking back (`direction < 0`, `index.tsx:1050`
+    /// `cursorOffset = 0`) and at the end when walking forward
+    /// (`direction > 0`, `index.tsx:1090` `cursorOffset = measure(item.text)`).
+    pub fn restore_history_entry(
+        &mut self,
+        entry: &DraftEntry,
+        direction: i8,
+    ) -> Result<(), ComposerError> {
         self.buf.set_text(entry.text.clone())?;
-        self.buf.set_cursor(entry.cursor);
+        let cursor = if direction < 0 { 0 } else { self.buf.text().len() };
+        self.buf.set_cursor(cursor);
         self.mode = entry.mode;
         Ok(())
     }
@@ -1077,6 +1085,10 @@ pub enum SubmitPlan {
     Rejected(QueueRejection),
     /// Exit word or an unavailable/disabled path; nothing is sent.
     Exit,
+    /// The selected model is not available in this session's location; the
+    /// submission is blocked with a warning and the draft preserved
+    /// (`component/prompt/index.tsx:1171-1179`).
+    ModelUnavailable,
     Ignored,
 }
 
@@ -1090,6 +1102,11 @@ pub struct SubmitContext {
     pub slash: bool,
     pub disabled: bool,
     pub queued: usize,
+    /// The selected model is present in this session's location catalog
+    /// (`context/local.tsx:363-365`, `isModelValid`). Defaults to `true` so an
+    /// unmodelled location never blocks a submission; a live caller sets it
+    /// from the real catalog.
+    pub model_available: bool,
 }
 
 impl Default for SubmitContext {
@@ -1102,6 +1119,7 @@ impl Default for SubmitContext {
             slash: false,
             disabled: false,
             queued: 0,
+            model_available: true,
         }
     }
 }
@@ -1149,6 +1167,16 @@ pub fn plan_submit(text: &str, delivery: Delivery, ctx: SubmitContext) -> Submit
     }
     if exit_word {
         return SubmitPlan::Exit;
+    }
+    // Availability gate (`component/prompt/index.tsx:1171-1179`): a model that
+    // is not in the session's location catalog blocks a normal/queued prompt
+    // before promotion or delivery, while old labels may still display
+    // (`promptDisplay`, `:1537-1573`). Shell mode in a session and slash
+    // commands never use the model
+    // (`usesModel = !sessionID || mode !== "shell"`).
+    let uses_model = !ctx.has_session || ctx.mode != PromptMode::Shell;
+    if uses_model && !ctx.slash && !ctx.model_available {
+        return SubmitPlan::ModelUnavailable;
     }
     if blank {
         return SubmitPlan::BlankPromotion {
@@ -1694,12 +1722,19 @@ mod keymap_and_submit_tests {
         });
         let restored = history.move_through(-1, "").unwrap();
         composer
-            .restore_history_entry(&restored.prompt)
+            .restore_history_entry(&restored.prompt, -1)
             .unwrap();
         assert_eq!(composer.draft(), entry.text);
-        assert_eq!(composer.buffer().cursor(), entry.cursor);
+        // Upstream history entries carry no cursor; walking back lands at the
+        // start (`index.tsx:1050`).
+        assert_eq!(composer.buffer().cursor(), 0);
         assert_eq!(composer.mode(), PromptMode::Shell);
         assert_eq!(restored.prompt.parts, parts);
+        // Walking forward lands at the end (`index.tsx:1090`).
+        composer
+            .restore_history_entry(&restored.prompt, 1)
+            .unwrap();
+        assert_eq!(composer.buffer().cursor(), entry.text.len());
     }
 
     #[test]
@@ -1769,9 +1804,74 @@ mod keymap_and_submit_tests {
     }
 
     #[test]
-    fn cp33_queue_versus_steer_and_blank_enter_promotion() {
+    fn cp08_availability_gate_blocks_submit() {
         let normal = SubmitContext::default();
+        // An unavailable model blocks normal and queued delivery, blank
+        // promotion, and Home submissions, while the draft is preserved.
+        let unavailable = SubmitContext {
+            model_available: false,
+            ..normal
+        };
         assert_eq!(
+            plan_submit("hello", Delivery::Steer, unavailable),
+            SubmitPlan::ModelUnavailable
+        );
+        assert_eq!(
+            plan_submit("hello", Delivery::Queue, unavailable),
+            SubmitPlan::ModelUnavailable
+        );
+        assert_eq!(
+            plan_submit("", Delivery::Steer, unavailable),
+            SubmitPlan::ModelUnavailable
+        );
+        assert_eq!(
+            plan_submit(
+                "hello",
+                Delivery::Steer,
+                SubmitContext {
+                    has_session: false,
+                    ..unavailable
+                }
+            ),
+            SubmitPlan::ModelUnavailable
+        );
+        // Exit word still exits; shell mode and slash commands never use the
+        // model; an available selection is unaffected.
+        assert_eq!(
+            plan_submit("exit", Delivery::Steer, unavailable),
+            SubmitPlan::Exit
+        );
+        assert_eq!(
+            plan_submit(
+                "hello",
+                Delivery::Steer,
+                SubmitContext {
+                    mode: PromptMode::Shell,
+                    ..unavailable
+                }
+            ),
+            SubmitPlan::Steer
+        );
+        assert_eq!(
+            plan_submit(
+                "hello",
+                Delivery::Steer,
+                SubmitContext {
+                    slash: true,
+                    ..unavailable
+                }
+            ),
+            SubmitPlan::Steer
+        );
+        assert_eq!(
+            plan_submit("hello", Delivery::Steer, normal),
+            SubmitPlan::Steer
+        );
+    }
+
+    #[test]
+    fn cp33_queue_versus_steer_and_blank_enter_promotion() {
+        let normal = SubmitContext::default();        assert_eq!(
             plan_submit("hello", Delivery::Steer, normal),
             SubmitPlan::Steer
         );
