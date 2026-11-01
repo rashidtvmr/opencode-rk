@@ -727,9 +727,52 @@ impl TabStrip {
         height: u16,
         scroll: usize,
         hovered: Option<&SessionRef>,
+        show_add: bool,
+        home_active: bool,
+        home_hovered: bool,
+    ) -> Self {
+        Self::render_impl(
+            inputs, orientation, width, height, scroll, hovered, show_add, home_active,
+            home_hovered, None,
+        )
+    }
+
+    /// Render the strip while the pointer holds a physical close cell after a
+    /// close (`session-tabs.tsx:868-900,1348-1363`): the held layout replaces
+    /// the adaptive width solve so the pointer's close cell stays put until
+    /// leave, another close, or the 5 s timer. `held` is ignored for the
+    /// vertical rail (its layout is stride-based, not width-solved).
+    #[must_use]
+    pub fn render_with_held(
+        inputs: &[TabInput],
+        orientation: TabOrientation,
+        width: u16,
+        height: u16,
+        scroll: usize,
+        hovered: Option<&SessionRef>,
+        show_add: bool,
+        home_active: bool,
+        home_hovered: bool,
+        held: Option<&HeldLayout>,
+    ) -> Self {
+        Self::render_impl(
+            inputs, orientation, width, height, scroll, hovered, show_add, home_active,
+            home_hovered, held,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_impl(
+        inputs: &[TabInput],
+        orientation: TabOrientation,
+        width: u16,
+        height: u16,
+        scroll: usize,
+        hovered: Option<&SessionRef>,
         mut show_add: bool,
         home_active: bool,
         home_hovered: bool,
+        held: Option<&HeldLayout>,
     ) -> Self {
         let mut out = Self {
             orientation,
@@ -787,7 +830,20 @@ impl TabStrip {
             inputs.iter().position(|tab| tab.flags.active)
         };
         let solved = if horizontal {
-            adaptive_layout(items_len, layout_active, usize::from(available), scroll)
+            match held {
+                // The pointer holds a physical close cell: upstream swaps the
+                // whole layout memo for `heldSessionTabLayout`
+                // (`session-tabs.tsx:1348-1363`), so the visible window, its
+                // widths and both overflow counts come from the held layout.
+                Some(held) => AdaptiveLayout {
+                    start: held.start,
+                    count: held.tabs.len(),
+                    before: held.start,
+                    after: items_len.saturating_sub(held.start + held.tabs.len()),
+                    widths: held.widths.iter().map(|width| usize::from(*width)).collect(),
+                },
+                None => adaptive_layout(items_len, layout_active, usize::from(available), scroll),
+            }
         } else {
             let start = scroll.min(inputs.len());
             let count = inputs.len().saturating_sub(start).min(usize::from(height));
@@ -3785,6 +3841,35 @@ mod tests {
         );
         // The pre-close list (no removal yet) keeps the original widths.
         assert_eq!(hold.layout(&ids).unwrap().widths, vec![10, 10, 10]);
+        // Render consumption (TAB-16): the held layout replaces the adaptive
+        // width solve, so the painted slots keep the held widths and the
+        // target's close cell stays at the pointer column x=18.
+        let inputs: Vec<TabInput> = after.iter().map(|id| input(&id.0, "tab")).collect();
+        let strip = TabStrip::render_with_held(
+            &inputs,
+            TabOrientation::Horizontal,
+            80,
+            1,
+            0,
+            None,
+            false,
+            false,
+            false,
+            Some(&held),
+        );
+        assert_eq!(
+            strip.rects.iter().map(|(_, rect)| rect.width).collect::<Vec<_>>(),
+            vec![10, 10],
+            "painted slots take the held widths"
+        );
+        assert_eq!(strip.before, 0);
+        let target_x = strip
+            .rects
+            .iter()
+            .find(|(id, _)| id == &SessionRef("c".into()))
+            .map(|(_, rect)| rect.x)
+            .expect("target painted");
+        assert_eq!(target_x + 10 - 2, 18, "target close cell held under the pointer");
     }
 
     #[test]
