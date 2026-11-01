@@ -16,6 +16,8 @@ pub const MAX_TOOLS: usize = 128;
 pub const IO_TIMEOUT: Duration = Duration::from_secs(5);
 pub const MAX_NOTIFICATIONS_SKIPPED: usize = 32;
 pub const MAX_TOOL_NAME_CHARS: usize = 128;
+/// Cap on captured, still-unanswered server→client requests.
+pub const MAX_PENDING_REQUESTS: usize = 8;
 
 #[derive(Clone, Debug)]
 pub struct LocalConfig {
@@ -29,6 +31,16 @@ pub struct DiscoveredTool {
     pub name: String,
     pub description: String,
     pub input_schema: Value,
+}
+
+/// One server→client JSON-RPC request captured while waiting for an
+/// outbound response (e.g. an MCP `elicitation/create` ask). Keeping the
+/// id and params bounded makes the request answerable instead of fatal.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingRequest {
+    pub id: u64,
+    pub method: String,
+    pub params: Value,
 }
 
 #[derive(Debug)]
@@ -58,6 +70,7 @@ struct Connection {
     stdout: Mutex<BufReader<ChildStdout>>,
     serial: Semaphore,
     next_id: Mutex<u64>,
+    pending: Mutex<Vec<PendingRequest>>,
     active: AtomicBool,
 }
 
@@ -92,7 +105,7 @@ impl McpRuntime {
         let mut child = command.spawn().map_err(|e| RuntimeError::Process(e.to_string()))?;
         let stdin = child.stdin.take().ok_or_else(|| RuntimeError::Process("missing MCP stdin".into()))?;
         let stdout = child.stdout.take().ok_or_else(|| RuntimeError::Process("missing MCP stdout".into()))?;
-        let runtime = Self { connection: Arc::new(Connection { child: Mutex::new(child), stdin: Mutex::new(stdin), stdout: Mutex::new(BufReader::new(stdout)), serial: Semaphore::new(1), next_id: Mutex::new(0), active: AtomicBool::new(true) }), tools: Arc::new(Vec::new()) };
+        let runtime = Self { connection: Arc::new(Connection { child: Mutex::new(child), stdin: Mutex::new(stdin), stdout: Mutex::new(BufReader::new(stdout)), serial: Semaphore::new(1), next_id: Mutex::new(0), pending: Mutex::new(Vec::new()), active: AtomicBool::new(true) }), tools: Arc::new(Vec::new()) };
         runtime.handshake().await
     }
 
@@ -147,13 +160,43 @@ impl McpRuntime {
         let mut stdout = self.connection.stdout.lock().await;
         for _ in 0..MAX_NOTIFICATIONS_SKIPPED {
             let value = read_frame(&mut *stdout).await?;
-            if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0") { return Err(RuntimeError::Protocol("invalid jsonrpc version".into())); }
-            if value.get("id").and_then(Value::as_u64) == Some(expected_id) { return Ok(value); }
-            if value.get("id").is_some() { return Err(RuntimeError::Protocol("unexpected response id".into())); }
+            match route_frame(&value, expected_id)? {
+                FrameRoute::Expected => return Ok(value),
+                FrameRoute::Notification => {}
+                FrameRoute::ServerRequest(request) => {
+                    let mut pending = self.connection.pending.lock().await;
+                    queue_request(&mut pending, request)?;
+                }
+            }
         }
         Err(RuntimeError::Protocol("too many MCP notifications".into()))
     }
     pub fn tools(&self) -> &[DiscoveredTool] { &self.tools }
+    /// Snapshot of captured, still-unanswered server→client requests so a
+    /// form/answer broker can surface them and respond while an outbound
+    /// request is in flight.
+    pub async fn pending_requests(&self) -> Vec<PendingRequest> { self.connection.pending.lock().await.clone() }
+    /// Answer one captured server→client request with a JSON-RPC `result`
+    /// (e.g. `{"action":"accept","content":{...}}` for an elicitation ask).
+    /// Transport plumbing only: the caller owns the answer decision. Takes
+    /// no `serial` permit on purpose — the in-flight outbound request holds
+    /// it while the child waits for this answer.
+    pub async fn answer_request(&self, id: u64, result: Value) -> Result<(), RuntimeError> {
+        self.respond(id, answer_frame(id, result)).await
+    }
+    /// Answer one captured request with a JSON-RPC error (decline/cancel).
+    pub async fn reject_request(&self, id: u64, code: i64, message: &str) -> Result<(), RuntimeError> {
+        self.respond(id, reject_frame(id, code, message)).await
+    }
+    async fn respond(&self, id: u64, frame: Value) -> Result<(), RuntimeError> {
+        {
+            let mut pending = self.connection.pending.lock().await;
+            let at = pending.iter().position(|request| request.id == id).ok_or_else(|| RuntimeError::Protocol("unknown MCP request id".into()))?;
+            pending.remove(at);
+        }
+        timeout(IO_TIMEOUT, self.write(frame)).await.map_err(|_| RuntimeError::Timeout)??;
+        Ok(())
+    }
     /// Invoke one previously discovered tool through the owned MCP child.
     /// This is only transport plumbing: the caller must perform the normal
     /// server permission-broker decision before calling it.
@@ -181,6 +224,39 @@ impl McpRuntime {
     }
 }
 
+/// Routing decision for one inbound frame. A frame with a non-expected id
+/// and a `method` is a server→client request: it must be answerable, not
+/// fatal. Only genuine foreign responses remain protocol errors.
+#[derive(Debug)]
+enum FrameRoute {
+    Expected,
+    Notification,
+    ServerRequest(PendingRequest),
+}
+
+fn route_frame(value: &Value, expected_id: u64) -> Result<FrameRoute, RuntimeError> {
+    if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0") { return Err(RuntimeError::Protocol("invalid jsonrpc version".into())); }
+    match value.get("id").and_then(Value::as_u64) {
+        Some(id) if id == expected_id => Ok(FrameRoute::Expected),
+        Some(id) if value.get("method").is_some() => {
+            let method = value.get("method").and_then(Value::as_str).filter(|m| !m.is_empty()).ok_or_else(|| RuntimeError::Protocol("request method missing".into()))?;
+            Ok(FrameRoute::ServerRequest(PendingRequest { id, method: method.to_owned(), params: value.get("params").cloned().unwrap_or(Value::Null) }))
+        }
+        Some(_) => Err(RuntimeError::Protocol("unexpected response id".into())),
+        None => Ok(FrameRoute::Notification),
+    }
+}
+
+fn queue_request(queue: &mut Vec<PendingRequest>, request: PendingRequest) -> Result<(), RuntimeError> {
+    if queue.iter().any(|pending| pending.id == request.id) { return Err(RuntimeError::Protocol("duplicate MCP request id".into())); }
+    if queue.len() >= MAX_PENDING_REQUESTS { return Err(RuntimeError::Protocol("too many pending MCP requests".into())); }
+    queue.push(request);
+    Ok(())
+}
+
+fn answer_frame(id: u64, result: Value) -> Value { json!({"jsonrpc":"2.0","id":id,"result":result}) }
+fn reject_frame(id: u64, code: i64, message: &str) -> Value { json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message}}) }
+
 async fn read_frame<R: AsyncBufRead + Unpin>(reader: &mut R) -> Result<Value, RuntimeError> {
     let mut line = Vec::new();
     loop {
@@ -197,4 +273,47 @@ async fn read_frame<R: AsyncBufRead + Unpin>(reader: &mut R) -> Result<Value, Ru
     if length > MAX_FRAME_BYTES { return Err(RuntimeError::Protocol("frame too large".into())); }
     let mut body = vec![0; length]; reader.read_exact(&mut body).await.map_err(|e| RuntimeError::Process(e.to_string()))?;
     serde_json::from_slice(&body).map_err(|e| RuntimeError::Protocol(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_request_frame_is_captured_not_fatal() {
+        let frame = json!({"jsonrpc":"2.0","id":42,"method":"elicitation/create","params":{"message":"need input"}});
+        match route_frame(&frame, 7).expect("request must route") {
+            FrameRoute::ServerRequest(request) => {
+                assert_eq!(request.id, 42);
+                assert_eq!(request.method, "elicitation/create");
+                assert_eq!(request.params, json!({"message":"need input"}));
+            }
+            other => panic!("expected server request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn expected_notification_and_foreign_response_route_as_before() {
+        assert!(matches!(route_frame(&json!({"jsonrpc":"2.0","id":7,"result":{}}), 7).unwrap(), FrameRoute::Expected));
+        assert!(matches!(route_frame(&json!({"jsonrpc":"2.0","method":"notifications/message","params":{}}), 7).unwrap(), FrameRoute::Notification));
+        assert!(route_frame(&json!({"jsonrpc":"2.0","id":8,"result":{}}), 7).is_err());
+    }
+
+    #[test]
+    fn pending_queue_is_bounded_and_ids_stay_unique() {
+        let mut queue = Vec::new();
+        for id in 0..MAX_PENDING_REQUESTS as u64 {
+            queue_request(&mut queue, PendingRequest { id, method: "elicitation/create".into(), params: Value::Null }).unwrap();
+        }
+        assert!(queue_request(&mut queue, PendingRequest { id: 99, method: "elicitation/create".into(), params: Value::Null }).is_err());
+        queue.clear();
+        queue_request(&mut queue, PendingRequest { id: 3, method: "elicitation/create".into(), params: Value::Null }).unwrap();
+        assert!(queue_request(&mut queue, PendingRequest { id: 3, method: "elicitation/create".into(), params: Value::Null }).is_err());
+    }
+
+    #[test]
+    fn answer_and_reject_frames_echo_the_captured_request_id() {
+        assert_eq!(answer_frame(42, json!({"action":"accept"})), json!({"jsonrpc":"2.0","id":42,"result":{"action":"accept"}}));
+        assert_eq!(reject_frame(42, -32800, "cancelled"), json!({"jsonrpc":"2.0","id":42,"error":{"code":-32800,"message":"cancelled"}}));
+    }
 }
