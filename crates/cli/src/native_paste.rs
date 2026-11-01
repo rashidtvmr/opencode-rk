@@ -136,10 +136,14 @@ pub fn normalize_paste(input: &str) -> String {
         .replace('\r', "\n")
 }
 
-/// JavaScript `String.prototype.trim` uses the Unicode White_Space set plus
-/// U+FEFF; Rust's `char::is_whitespace` lacks the BOM.
+/// ECMAScript `String.prototype.trim` removes WhiteSpace (TAB, VT, FF, SP,
+/// NBSP, ZWNBSP/U+FEFF, and every `Zs` space separator) plus LineTerminator
+/// (LF, CR, LS, PS). Rust's `char::is_whitespace` follows Unicode White_Space,
+/// which additionally includes U+0085 NEL and lacks U+FEFF; exclude NEL and add
+/// the BOM so the trimming set matches ECMAScript exactly (upstream
+/// `index.tsx:1431` `normalizedText.trim()`).
 fn is_js_whitespace(c: char) -> bool {
-    c == '\u{feff}' || c.is_whitespace()
+    c == '\u{feff}' || (c != '\u{85}' && c.is_whitespace())
 }
 
 /// Upstream trim for the folding decision (`index.tsx:1431`).
@@ -1633,6 +1637,28 @@ mod paste_normalization_tests {
         assert_eq!(draft, "prefix 一\n二\n三 🦀 suffix 世界");
         assert_eq!(cursor, "prefix 一\n二\n三 🦀".len());
         assert!(draft.is_char_boundary(cursor));
+    }
+
+    #[test]
+    fn cp36_js_trim_matches_ecmascript_not_unicode_whitespace() {
+        // ECMAScript `trim` does not strip U+0085 NEL: it is a control, not
+        // WhiteSpace (`index.tsx:1431`). Unicode White_Space does include it,
+        // so `char::is_whitespace` alone over-trims.
+        assert_eq!(js_trim("\u{85}x\u{85}"), "\u{85}x\u{85}");
+        // The Zs separators, BOM and line terminators ARE stripped.
+        assert_eq!(js_trim("\u{3000}x\u{3000}"), "x");
+        assert_eq!(js_trim("\u{feff}x\u{feff}"), "x");
+        assert_eq!(js_trim("\u{2028}x\u{2029}"), "x");
+        // Folding boundary: 150 "x" plus a trailing NEL is 151 UTF-16 units for
+        // ECMAScript (NEL survives trim), so the paste folds. Over-trimming NEL
+        // would drop it to 150 and wrongly insert literally.
+        let nel_tail = format!("{}\u{85}", "x".repeat(FOLD_MAX_UNITS));
+        assert!(matches!(
+            plan_paste(&nel_tail, PasteMode::Fold, 0, &[]),
+            PastePlan::Fold(_)
+        ));
+        // A NEL-only wrapper is not blank for the clear-retention check either.
+        assert!(!js_trim("\u{85}").is_empty());
     }
 }
 
