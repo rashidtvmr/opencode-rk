@@ -8305,6 +8305,30 @@ fn native_loop(
                 _ => {}
             }
         }
+        // LAY-08: a narrow sidebar is an overlay and its dedicated Escape /
+        // Ctrl+C layer (`routes/session/index.tsx:252-261`) closes it. This
+        // runs before the composer/session Escape handling below so the
+        // overlay is dismissed first; wide/inline sidebars are unaffected
+        // (their layer is disabled upstream).
+        if view.narrow_sidebar_overlay_open()
+            && !page_open
+            && !help_open
+            && !children_panel.open
+            && !appearance.open
+            && !permission_editor.open
+            && !view.dialogs.intercepts_input()
+            && !view.command_palette_open()
+            && matches!(dialog, native_setup::Dialog::None)
+            && import_dialog.as_ref().is_none_or(|import| !import.is_open())
+            && matches!(
+                event,
+                native_input_decoder::InputEvent::Escape | native_input_decoder::InputEvent::Byte(3)
+            )
+        {
+            view.toggle_sidebar();
+            needs_paint = true;
+            continue;
+        }
         // Completion owns navigation before composer/session shortcuts, but
         // never before a credential, permission or other modal surface.
         if !page_open && !help_open && !children_panel.open && !appearance.open && !permission_editor.open

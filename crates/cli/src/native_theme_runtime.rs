@@ -3900,6 +3900,30 @@ fn theme15_cursor_color_is_theme_token_independent_of_prompt_background() {
 }
 
 #[test]
+fn theme15_present_default_style_forwards_id_three_distinct_from_absent() {
+    // Upstream `config/index.tsx:60-67`: `default` is a real member of the
+    // style literal set; only an ABSENT `tui.cursor` object leaves the
+    // `input.cursorStyle` assignment untouched (`prompt/index.tsx:356`). A
+    // present `{style: "default"}` therefore forwards the OpenTUI `3`
+    // "default" id (preserve the terminal setting) rather than the `255`
+    // no-change sentinel -- the two are NOT interchangeable.
+    let semantic = dark_semantic_palette();
+    let state = CursorState { focused: true, disabled: false };
+    let (style, blinking, color) = cursor_wire(
+        Some(CursorConfig::new(CursorShape::Default, true)),
+        &semantic,
+        state,
+    );
+    assert_eq!(style, Some(3), "present default forwards the ABI default id");
+    assert_eq!(blinking, Some(true), "blinking still carried beside default");
+    assert_eq!(color, semantic.text_base.rgba);
+    let (absent, blink_absent, _) = cursor_wire(None, &semantic, state);
+    assert_eq!(absent, None);
+    assert_ne!(absent, style, "absent (None) must differ from present default (Some(3))");
+    assert_eq!(blink_absent, None);
+}
+
+#[test]
 fn theme14_cursor_wire_matches_abi_ids_and_leaves_shape_unchanged_when_absent() {
     // OpenTUI `CursorStyle` ids (`zig.ts:280`): block 0, line 1, underline 2,
     // default 3.

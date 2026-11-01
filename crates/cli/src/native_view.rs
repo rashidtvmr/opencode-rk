@@ -1757,6 +1757,16 @@ impl NativeView {
             && (self.sidebar_open || (!self.sidebar_hidden && self.sidebar_wide()))
     }
 
+    /// LAY-08: the sidebar is shown as a narrow OVERLAY (visible, but the
+    /// terminal is not wide enough to dock it). Upstream
+    /// `routes/session/index.tsx:252-261` enables the "Close sidebar"
+    /// Escape/Ctrl+C layer exactly on `sidebarVisible && dimensions().width -
+    /// verticalTabsWidth <= 120`, which is `sidebar_visible() && !sidebar_wide()`.
+    #[must_use]
+    pub fn narrow_sidebar_overlay_open(&self) -> bool {
+        self.sidebar_visible() && !self.sidebar_wide()
+    }
+
     fn session_body_height(&self) -> usize {
         let height = self.render_height();
         if height >= 4 { height - 2 } else { height }
@@ -6384,6 +6394,41 @@ mod tests {
         assert_eq!(view.presentation().sidebar_width, 0);
         assert_eq!(view.presentation().sidebar_offset, None);
         assert_eq!(view.presentation().main_width, 100);
+    }
+
+    /// LAY-08. `component/session-frame.tsx:385-397` shows the sidebar as an
+    /// absolute overlay when the pane is not wide, and
+    /// `routes/session/index.tsx:252-261` enables the "Close sidebar"
+    /// Escape/Ctrl+C layer exactly while that overlay is up (sidebarVisible &&
+    /// width - verticalTabsWidth <= 120). The predicate is therefore true only
+    /// for a visible, non-wide sidebar, and toggling it off leaves the overlay.
+    #[test]
+    fn narrow_sidebar_overlay_close_predicate_matches_upstream_layer() {
+        // Narrow manual open: overlay up, predicate true, toggle closes it.
+        let mut view = NativeView::new(100, 30);
+        view.set_session_route(true);
+        assert!(!view.narrow_sidebar_overlay_open(), "no sidebar, no layer");
+        view.toggle_sidebar();
+        assert!(view.sidebar_visible());
+        assert!(view.narrow_sidebar_overlay_open(), "narrow visible overlay");
+        view.toggle_sidebar();
+        assert!(!view.narrow_sidebar_overlay_open(), "closed overlay disables the layer");
+
+        // Wide auto sidebar: visible but inline, so the layer stays off.
+        let mut wide = NativeView::new(160, 30);
+        wide.set_session_route(true);
+        assert!(wide.sidebar_visible());
+        assert!(
+            !wide.narrow_sidebar_overlay_open(),
+            "a wide inline sidebar never arms the close layer"
+        );
+
+        // A child session suppresses the sidebar entirely: no layer.
+        let mut child = NativeView::new(100, 30);
+        child.set_session_route(true);
+        child.toggle_sidebar();
+        child.set_parent_session(true);
+        assert!(!child.narrow_sidebar_overlay_open());
     }
 
     #[test]
