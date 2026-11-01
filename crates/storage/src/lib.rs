@@ -2068,6 +2068,7 @@ fn decode_session(row: &rusqlite::Row<'_>) -> Result<SessionSummary, rusqlite::E
         created_at: parse_timestamp(row.get(3)?)?,
         updated_at: parse_timestamp(row.get(4)?)?,
         archived_at: archived.map(parse_timestamp).transpose()?,
+        revert: None,
     })
 }
 fn decode_message(row: &rusqlite::Row<'_>) -> Result<MessageRecord, rusqlite::Error> {
@@ -2111,6 +2112,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             archived_at: None,
+            revert: None,
         }
     }
     #[test]

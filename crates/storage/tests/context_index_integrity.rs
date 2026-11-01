@@ -15,6 +15,7 @@ fn session(storage: &Storage) -> SessionId {
     storage.create_session(&SessionSummary {
         id, title: "index-fixture".into(), state: SessionState::Active,
         created_at: now, updated_at: now, archived_at: None,
+        revert: None,
     }).unwrap();
     id
 }

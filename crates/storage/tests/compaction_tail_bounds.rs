@@ -11,7 +11,7 @@ fn durable_now() -> Timestamp {
 fn session(storage: &Storage) -> SessionId {
     let id = SessionId::new();
     let now = Timestamp::now();
-    storage.create_session(&SessionSummary { id, title:"Compaction tail".into(), state:SessionState::Active, created_at:now, updated_at:now, archived_at:None }).unwrap();
+    storage.create_session(&SessionSummary { id, title:"Compaction tail".into(), state:SessionState::Active, created_at:now, updated_at:now, archived_at:None, revert: None}).unwrap();
     id
 }
 

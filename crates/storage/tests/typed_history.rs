@@ -155,6 +155,7 @@ fn create_session(storage: &Storage) -> SessionId {
             created_at: now,
             updated_at: now,
             archived_at: None,
+            revert: None,
         })
         .expect("create_session");
     id

@@ -160,6 +160,13 @@ pub enum SessionState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SessionRevert {
+    #[serde(rename = "messageID")]
+    pub message_id: MessageId,
+    #[serde(rename = "partID", default, skip_serializing_if = "Option::is_none")]
+    pub part_id: Option<String>,
+}
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SessionSummary {
     pub id: SessionId,
     pub title: String,
@@ -167,6 +174,8 @@ pub struct SessionSummary {
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
     pub archived_at: Option<Timestamp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revert: Option<SessionRevert>,
 }
 impl SessionSummary {
     pub fn validate(&self) -> Result<(), ContractError> {
@@ -437,5 +446,27 @@ mod tests {
     fn provider_ids_reject_path_characters() {
         assert!(ProviderId::new("openai").is_ok());
         assert!(ProviderId::new("../../etc/passwd").is_err());
+    }
+    #[test]
+    fn session_summary_without_revert_omits_wire_key() {
+        let json = r#"{"id":"00000000-0000-4000-8000-000000000001","title":"t","state":"active","created_at":"2024-01-01T00:00:00.000Z","updated_at":"2024-01-01T00:00:00.000Z","archived_at":null}"#;
+        let summary: SessionSummary = serde_json::from_str(json).unwrap();
+        assert!(summary.revert.is_none());
+        let value = serde_json::to_value(&summary).unwrap();
+        assert!(value.get("revert").is_none());
+    }
+    #[test]
+    fn session_summary_with_revert_round_trips_message_id() {
+        let json = r#"{"id":"00000000-0000-4000-8000-000000000001","title":"t","state":"active","created_at":"2024-01-01T00:00:00.000Z","updated_at":"2024-01-01T00:00:00.000Z","archived_at":null,"revert":{"messageID":"00000000-0000-4000-8000-000000000002"}}"#;
+        let summary: SessionSummary = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            summary.revert.as_ref().unwrap().message_id,
+            MessageId::from_str("00000000-0000-4000-8000-000000000002").unwrap()
+        );
+        let value = serde_json::to_value(&summary).unwrap();
+        assert_eq!(
+            value.get("revert").and_then(|r| r.get("messageID")),
+            Some(&serde_json::json!("00000000-0000-4000-8000-000000000002"))
+        );
     }
 }

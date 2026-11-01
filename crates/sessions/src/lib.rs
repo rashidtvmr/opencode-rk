@@ -250,6 +250,7 @@ fn decode_session(
         created_at: decode_ts(row.get(2)?)?,
         updated_at: decode_ts(row.get(3)?)?,
         archived_at: row.get::<_, Option<i64>>(4)?.map(decode_ts).transpose()?,
+        revert: None,
     })
 }
 fn decode_summary_row(row: &rusqlite::Row<'_>) -> Result<SessionSummary, rusqlite::Error> {
@@ -262,6 +263,7 @@ fn decode_summary_row(row: &rusqlite::Row<'_>) -> Result<SessionSummary, rusqlit
         created_at: decode_ts(row.get(3)?)?,
         updated_at: decode_ts(row.get(4)?)?,
         archived_at: row.get::<_, Option<i64>>(5)?.map(decode_ts).transpose()?,
+        revert: None,
     })
 }
 fn decode_message_row(
@@ -488,6 +490,7 @@ impl SessionService {
             created_at: now,
             updated_at: now,
             archived_at: None,
+            revert: None,
         };
         let storage = Arc::clone(&self.storage);
         let candidate = session.clone();

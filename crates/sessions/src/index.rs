@@ -152,6 +152,7 @@ mod tests {
             created_at: Timestamp::now(),
             updated_at: Timestamp::now(),
             archived_at: None,
+            revert: None,
         }
     }
 

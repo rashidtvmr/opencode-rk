@@ -9,7 +9,7 @@ fn oversized_or_misaccounted_persisted_checkpoint_is_rejected() {
     let storage = Storage::open(paths.clone()).unwrap();
     let session = SessionId::new();
     let now = Timestamp::now();
-    storage.create_session(&SessionSummary { id:session, title:"Checkpoint bounds".into(), state:SessionState::Active, created_at:now, updated_at:now, archived_at:None }).unwrap();
+    storage.create_session(&SessionSummary { id:session, title:"Checkpoint bounds".into(), state:SessionState::Active, created_at:now, updated_at:now, archived_at:None, revert: None}).unwrap();
     let boundary = MessageId::new();
     storage.append_message(&MessageRecord { id:boundary, session_id:session, role:MessageRole::Assistant, body:PayloadRef::inline("boundary").unwrap(), created_at:now }).unwrap();
     let checkpoint = CompactionCheckpoint { boundary_message_id:boundary, provider_id:"openai".into(), model_id:"fixture".into(), window_json:r#"{"id":"window"}"#.into() };

@@ -11,7 +11,7 @@ fn paths(dir: &Path) -> StoragePaths { StoragePaths::under(dir.join("db")) }
 fn session(storage: &Storage, title: &str) -> SessionId {
     let id = SessionId::new(); let now = Timestamp::now();
     storage.create_session(&SessionSummary { id, title: title.into(), state: SessionState::Active,
-        created_at: now, updated_at: now, archived_at: None }).unwrap(); id
+        created_at: now, updated_at: now, archived_at: None, revert: None}).unwrap(); id
 }
 fn message(session_id: SessionId, role: MessageRole, text: &str) -> MessageRecord {
     MessageRecord { id: MessageId::new(), session_id, role,

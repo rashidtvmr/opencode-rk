@@ -147,6 +147,7 @@ fn decode_session(
         created_at,
         updated_at,
         archived_at,
+        revert: None,
     })
 }
 
@@ -174,6 +175,7 @@ fn decode_session_row(row: &rusqlite::Row<'_>) -> Result<SessionRecord, rusqlite
         created_at,
         updated_at,
         archived_at,
+        revert: None,
     })
 }
 
@@ -211,6 +213,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             archived_at: None,
+            revert: None,
         }
     }
 
