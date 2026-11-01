@@ -729,9 +729,8 @@ impl PermissionPrompt {
                 .map(|(index, text)| if index == 0 { PromptLine::muted(text) } else { PromptLine::base(text) })
                 .collect();
         }
-        // Upstream renders `EditBody` for every `edit` request, so a missing
-        // diff falls back to "No diff provided" (`permission.tsx:145-151`).
-        if self.action == "edit" || presentation.diff.is_some() || presentation.patch.is_some() {
+        // Upstream selects `EditBody` only for `action === "edit"` (`permission.tsx:169`).
+        if self.action == "edit" {
             return edit_body_lines(presentation);
         }
         presentation.lines.iter().cloned().map(PromptLine::base).collect()
@@ -815,6 +814,25 @@ mod tests {
     // permission.tsx:217-257 (body + selection semantics),
     // util/permission.ts:154-175 (always lines + labels),
     // permission.tsx:144-155,248-254 (nested rejection stage).
+    #[test]
+    fn form_001_non_edit_action_never_renders_edit_body_from_diff_or_patch() {
+        // Upstream branches on action, not on optional diff/patch data.
+        let prompt = PermissionPrompt::new("shell", Vec::new(), false);
+        let presentation = PermissionPresentation {
+            icon: "#".into(),
+            title: "Shell command".into(),
+            lines: vec!["$ echo ok".into()],
+            diff: Some("-old\n+new".into()),
+            patch: Some("*** Begin Patch".into()),
+            file: None,
+        };
+
+        assert_eq!(
+            prompt.body(&presentation),
+            vec![PromptLine::base("$ echo ok".into())],
+        );
+    }
+
     #[test]
     fn form_001_permission_variants_save_gate_body_and_reject_scope() {
         // Option order and labels are fixed.
