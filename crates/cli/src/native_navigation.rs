@@ -333,6 +333,11 @@ struct TabHistory {
 pub struct ClosedTab {
     pub session: SessionRef,
     pub index: usize,
+    /// Display title captured at close time. The live title caches are bounded
+    /// (`MAX_SNAPSHOT_TITLES`), so a recently-closed tab must retain its own
+    /// title to keep painting the menu label after eviction
+    /// (`session-tabs-model.ts:64-80`).
+    pub title: Option<String>,
 }
 
 /// Serialized tab layout. Only order and titles survive a restart; the
@@ -550,9 +555,11 @@ impl NavigationState {
             .position(|tab| &tab.session == session)
             .ok_or(NavRefusal::NoSuchTab)?;
         self.closed.retain(|entry| &entry.session != session);
+        let title = self.title(session).map(str::to_owned);
         self.closed.push(ClosedTab {
             session: session.clone(),
             index,
+            title,
         });
         if self.closed.len() > CLOSED_SESSION_TAB_LIMIT {
             self.closed.remove(0);
@@ -1861,6 +1868,29 @@ mod tests {
         assert!(nav.recently_closed().is_empty());
         assert_eq!(nav.reopen(None), None);
         assert_eq!(nav.reopen(Some(&s("missing"))), None);
+    }
+
+    #[test]
+    fn tab_18_closed_tab_retains_title_after_snapshot_cache_eviction() {
+        // `session-tabs-model.ts:64-80`: a recently-closed tab keeps its own
+        // display title so the reopen menu can still label it once the bounded
+        // live title cache has evicted the session.
+        let mut nav = NavigationState::new();
+        nav.open(s("keep"));
+        nav.ingest_snapshot_title(s("keep"), "Kept title".to_owned());
+        nav.close(&s("keep")).unwrap();
+        for index in 0..=MAX_SNAPSHOT_TITLES {
+            nav.ingest_snapshot_title(
+                SessionRef(format!("cache-{index}")),
+                format!("Cache title {index}"),
+            );
+        }
+        assert_eq!(nav.title(&s("keep")), None, "live cache evicted the closed tab");
+        assert_eq!(
+            nav.recently_closed().last().unwrap().title.as_deref(),
+            Some("Kept title"),
+            "close-time title survives cache eviction"
+        );
     }
 
     #[test]

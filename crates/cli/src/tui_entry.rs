@@ -3018,6 +3018,7 @@ fn recent_closed_menu_target(navigation: &crate::native_navigation::NavigationSt
         .map(|entry| {
             let title = navigation
                 .title(&entry.session)
+                .or(entry.title.as_deref())
                 .unwrap_or(entry.session.0.as_str())
                 .to_owned();
             crate::native_tab_context_menu::ClosedTab {
