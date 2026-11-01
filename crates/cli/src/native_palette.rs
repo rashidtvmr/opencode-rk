@@ -2521,6 +2521,91 @@ pub mod pickers {
         }
     }
 
+    /// `Locale.truncate(title, titleWidth ?? 61)` row-title budget used by
+    /// every select row (`ui/dialog-select.tsx:947-951`).
+    pub const ROW_TITLE_WIDTH: usize = 61;
+
+    /// The `session.rename` action's target (`dialog-session-list.tsx:286-291`).
+    /// Upstream passes the option's rendered `title` to
+    /// `DialogSessionRename.show` as `currentTitle`; the action itself renders
+    /// the title `"rename"`.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct RenameSession {
+        session_id: String,
+        value: String,
+        open: bool,
+    }
+
+    impl RenameSession {
+        /// Footer action title for the `session.rename` command
+        /// (`dialog-session-list.tsx:288`).
+        pub const ACTION_TITLE: &'static str = "rename";
+        /// `DialogPrompt` header (`dialog-session-rename.tsx:11`).
+        pub const DIALOG_TITLE: &'static str = "Rename session";
+        /// `DialogPrompt` placeholder (`dialog-session-rename.tsx:12`).
+        pub const PLACEHOLDER: &'static str = "Session title";
+
+        /// `DialogSessionRename.show(dialog, option.value, option.title)`:
+        /// the prompt opens focused, prefilled with `currentTitle`
+        /// (`dialog-session-rename.tsx:1-38`, `ui/dialog-prompt.tsx:161-166`).
+        #[must_use]
+        pub fn open(session_id: &str, current_title: &str) -> Self {
+            Self {
+                session_id: session_id.to_owned(),
+                value: current_title.to_owned(),
+                open: true,
+            }
+        }
+
+        #[must_use]
+        pub fn session_id(&self) -> &str {
+            &self.session_id
+        }
+
+        #[must_use]
+        pub fn is_open(&self) -> bool {
+            self.open
+        }
+
+        /// The current textarea value, i.e. `props.currentTitle` on open
+        /// (`dialog-prompt.tsx:161-166`).
+        #[must_use]
+        pub fn value(&self) -> &str {
+            &self.value
+        }
+
+        /// Replace the textarea contents, as a keystroke edit would.
+        pub fn set_value(&mut self, value: &str) {
+            self.value = value.to_owned();
+        }
+
+        /// `onConfirm` (`dialog-session-rename.tsx:15-25`): `title =
+        /// value.trim()`; an empty title returns without submitting, so the
+        /// dialog stays open. Otherwise the trimmed title is returned to the
+        /// caller and the dialog clears (`dialog.clear()`).
+        pub fn confirm(&mut self) -> Option<String> {
+            let title = self.value.trim().to_owned();
+            if title.is_empty() {
+                return None;
+            }
+            self.open = false;
+            Some(title)
+        }
+
+        /// `onCancel` (`dialog-session-rename.tsx:26`): `dialog.clear()`;
+        /// nothing is submitted.
+        pub fn cancel(&mut self) {
+            self.open = false;
+        }
+
+        /// The row title as the select list renders it, truncated to
+        /// `titleWidth ?? 61` (`ui/dialog-select.tsx:947-951`).
+        #[must_use]
+        pub fn row_label(title: &str) -> String {
+            super::dialog::truncate(title, ROW_TITLE_WIDTH)
+        }
+    }
+
     /// MCP server states (`dialog-mcp.tsx:15-33,84-107`).
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum McpStatus {
@@ -3611,6 +3696,67 @@ mod dialog_parity_tests {
             ..row
         };
         assert_eq!(picker.group_of(&older), "2026-10-01");
+    }
+
+    // DIALOG-13: the `session.rename` action opens the rename prompt
+    // prefilled with the row's rendered title; confirm trims and rejects an
+    // empty title while staying open; cancel clears; titles truncate to 61
+    // (dialog-session-list.tsx:286-291, dialog-session-rename.tsx:1-38,
+    // ui/dialog-select.tsx:947-951).
+    #[test]
+    fn session_rename_flow_prefills_commits_and_truncates_title() {
+        assert_eq!(RenameSession::ACTION_TITLE, "rename");
+        assert_eq!(RenameSession::DIALOG_TITLE, "Rename session");
+        assert_eq!(RenameSession::PLACEHOLDER, "Session title");
+        assert_eq!(ROW_TITLE_WIDTH, 61);
+
+        // A title longer than 61 cells truncates with a trailing ellipsis.
+        let long = "x".repeat(80);
+        let label = RenameSession::row_label(&long);
+        assert_eq!(label.chars().count(), 61);
+        assert!(label.ends_with('\u{2026}'));
+        assert_eq!(RenameSession::row_label("Alpha"), "Alpha");
+
+        // show(dialog, option.value, option.title) prefills the current title
+        // and opens focused.
+        let mut rename = RenameSession::open("ses_1", "Alpha");
+        assert!(rename.is_open());
+        assert_eq!(rename.session_id(), "ses_1");
+        assert_eq!(rename.value(), "Alpha");
+
+        // An empty or whitespace-only confirm is a no-op that stays open.
+        rename.set_value("   ");
+        assert_eq!(rename.confirm(), None, "empty title is rejected");
+        assert!(rename.is_open(), "the dialog stays open on empty confirm");
+
+        // A real confirm trims and clears the dialog.
+        rename.set_value("  Alpha renamed  ");
+        assert_eq!(rename.confirm(), Some("Alpha renamed".to_owned()));
+        assert!(!rename.is_open(), "confirm clears the dialog");
+
+        // Cancel clears without submitting.
+        let mut cancelled = RenameSession::open("ses_2", "Kept");
+        cancelled.set_value("Kept");
+        cancelled.cancel();
+        assert!(!cancelled.is_open(), "cancel clears the dialog");
+        assert_eq!(cancelled.value(), "Kept", "cancel does not submit");
+
+        // The action prefill is the option's *rendered* title: for an armed
+        // row that is the delete-confirmation text
+        // (dialog-session-list.tsx:163-170,289).
+        let mut picker = SessionPicker::new(false, "/work", "2026-10-30");
+        let row = SessionRow {
+            id: "a".into(),
+            title: "Alpha".into(),
+            parent: false,
+            updated_date: "2026-10-30".into(),
+            pinned: false,
+            directory: "/work".into(),
+        };
+        assert!(!picker.arm_delete("a"));
+        let armed_title = picker.row_title(&row, "ctrl+d");
+        let rename = RenameSession::open("a", &armed_title);
+        assert_eq!(rename.value(), "Press ctrl+d again to confirm");
     }
 
     // DIALOG-15: MCP pending/error/auth states stay distinct
