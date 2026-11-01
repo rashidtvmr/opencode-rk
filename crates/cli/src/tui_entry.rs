@@ -7622,6 +7622,15 @@ fn native_loop(
             ),
             animations,
         );
+        // CP-21: expose only drafts owned by the active session.
+        let active_queue_session = live.as_ref().map(|snapshot| snapshot.session_id.as_str());
+        view.set_queued_prompts(queued_drafts.iter().enumerate().filter_map(|(index, (owner, text))| {
+            (owner.as_deref() == active_queue_session).then(|| crate::native_view_chat::QueuedPrompt {
+                id: format!("queued-{index}"),
+                text: text.clone(),
+            })
+        }));
+
         let mut lines = if help_open && !dialog_open {
             Vec::new()
         } else {

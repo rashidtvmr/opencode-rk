@@ -186,6 +186,8 @@ pub struct NativeView {
     /// have no live session facts here, so advertising them would promise keys
     /// and rows this page cannot honor.
     dock: ComposerDock,
+    /// Active-session queued prompts shown above the composer.
+    queued_prompts: crate::native_view_chat::QueueDock,
     /// Subagents tab state fed from the observed `/children` listing.
     dock_tab: SubagentsTab,
     /// Session the retained child rows belong to.
@@ -867,6 +869,7 @@ impl NativeView {
             rail_command_shortcut: None,
             rail_agent_shortcut: None,
             rail_interactive: true,
+            queued_prompts: crate::native_view_chat::QueueDock::default(),
             dock: {
                 let mut dock = ComposerDock::new();
                 dock.register(DockTabId::Subagents);
@@ -1206,6 +1209,14 @@ impl NativeView {
     #[must_use]
     pub fn dock_open(&self) -> bool {
         self.dock.visible()
+    }
+
+    /// Update the active-session queue snapshot; ownership is filtered by the loop.
+    pub fn set_queued_prompts(
+        &mut self,
+        prompts: impl IntoIterator<Item = crate::native_view_chat::QueuedPrompt>,
+    ) {
+        self.queued_prompts = crate::native_view_chat::QueueDock::new(prompts);
     }
 
     /// Active dock tab while open.
@@ -2858,12 +2869,18 @@ impl NativeView {
             } else {
                 self.dock_block_for(width.saturating_sub(4))
             };
+            let queue_rows = if has_permission {
+                Vec::new()
+            } else {
+                self.queued_prompts.render_rows(width.saturating_sub(4) as usize)
+            };
+            let queue_height = queue_rows.len();
             let dock_height = dock.as_ref().map_or(0, |block| usize::from(block.height()));
             let body_height = if let Some(permission_height) = permission_height {
                 // The shared shell footer is still a non-prompt sibling.
                 height.saturating_sub(1).saturating_sub(permission_height)
             } else {
-                self.session_body_height().saturating_sub(dock_height)
+                self.session_body_height().saturating_sub(dock_height).saturating_sub(queue_height)
             };
             let mut body = if let Some(messages) = messages {
                 let (rows, markdown_spans) = if has_permission {
@@ -2990,6 +3007,15 @@ impl NativeView {
                 self.chat_markdown_spans
                     .splice(insert..insert, std::iter::repeat_n(Vec::new(), dock_rows.len()));
                 body.splice(insert..insert, dock_rows);
+            }
+            // Queue dock is a composer sibling, inserted immediately above the prompt.
+            if !queue_rows.is_empty() {
+                let insert = body.len().saturating_sub(prompt.height);
+                let queue_rows: Vec<String> = queue_rows.into_iter().map(|(text, _)| padded(&text, width)).collect();
+                self.chat_row_classes.splice(insert..insert, std::iter::repeat_n(crate::native_view_chat::ChatRowClass::QueueDock, queue_rows.len()));
+                self.chat_text_bounds.splice(insert..insert, std::iter::repeat_n(None, queue_rows.len()));
+                self.chat_markdown_spans.splice(insert..insert, std::iter::repeat_n(Vec::new(), queue_rows.len()));
+                body.splice(insert..insert, queue_rows);
             }
             // The scrollbar reserves its two cells out of the transcript rows
             // only; the composer and footer keep the full padded width, as in
