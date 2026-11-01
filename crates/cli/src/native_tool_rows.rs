@@ -471,7 +471,7 @@ pub fn tool_display(
             };
             ("←", label)
         }
-        ToolKind::Subagent => subagent_display(&args, state, background),
+        ToolKind::Subagent => subagent_display(&args, state),
         ToolKind::Execute => execute_display(width, &args, state, visible_output, &mut body),
         ToolKind::Patch => {
             let label = patch_label(&args);
@@ -568,9 +568,6 @@ pub fn apply_tool_metadata(mut display: ToolDisplay, metadata_json: &str) -> Too
         && meta.get("status").and_then(Value::as_str) == Some("running");
     if detached {
         display.background = true;
-        if display.kind == ToolKind::Subagent && !display.label.ends_with(" Background ") {
-            display.label.push_str("  Background ");
-        }
     }
     display
 }
@@ -664,7 +661,6 @@ fn titlecase(text: &str) -> String {
 fn subagent_display(
     args: &Option<Map<String, Value>>,
     state: ToolStatus,
-    background: bool,
 ) -> (&'static str, String) {
     let continuation = str_field(args, "sessionID").is_some();
     let agent = str_field(args, "agent")
@@ -695,11 +691,6 @@ fn subagent_display(
     label.push_str(description.as_deref().unwrap_or("Subagent"));
     if let Some(model) = str_field(args, "model") {
         label.push_str(&format!(" · {}", subagent_model_label(&model)));
-    }
-    if background && state == ToolStatus::Completed {
-        // `StatusBadge` renders ` Background ` as one padded item
-        // (`index.tsx:2884-2892`); the row wraps it as a unit.
-        label.push_str("  Background ");
     }
     (icon, label)
 }
@@ -1209,6 +1200,15 @@ fn rows(width: usize, display: &ToolDisplay) -> Vec<ToolRow> {
     let header_prefix = header_prefix(display.icon);
     let mut out = Vec::new();
     push_wrapped(&mut out, width, &display.label, &header_prefix, class);
+    // `StatusBadge` (`routes/session/index.tsx:2875-2883`) is a separate,
+    // non-shrinking flex item in the inline tool row: `" Background "` stays a
+    // single padded token (one gap + the badge's own `" " + text + " "`), so it
+    // wraps to its own row instead of splitting mid-word. Upstream paints it
+    // for a detached shell block (`:3149-3151`) and a detached subagent
+    // (`:3317`).
+    if display.background {
+        push_badge(&mut out, width, &header_prefix, "Background", class);
+    }
     if display.status == ToolStatus::Error {
         if display.kind == ToolKind::Execute && !display.body.is_empty() {
             // Runtime errors show exactly the bounded output preview
@@ -1240,6 +1240,24 @@ fn header_prefix(icon: &str) -> String {
     let used = cells(icon);
     let pad = ICON_COLUMN_CELLS.saturating_sub(used);
     format!("{ROW_INDENT}{icon}{}", " ".repeat(pad))
+}
+
+/// Append one `StatusBadge` as an atomic padded token (`"  Background "`): the
+/// one-cell flex gap plus the badge's own leading/trailing spaces
+/// (`routes/session/index.tsx:2875-2883`). It joins the previous row when it
+/// fits there, otherwise it starts a new row — never split across cells.
+fn push_badge(rows_out: &mut Vec<ToolRow>, width: usize, prefix: &str, label: &str, class: ChatRowClass) {
+    if rows_out.len() >= MAX_TOOL_ROWS {
+        return;
+    }
+    let token = format!("  {label} ");
+    if let Some((last, _)) = rows_out.last_mut() {
+        if width > 0 && cells(last).saturating_add(cells(&token)) <= width {
+            last.push_str(&token);
+            return;
+        }
+    }
+    rows_out.push((truncate_cells(&format!("{prefix}{token}"), width), class));
 }
 
 fn push_wrapped(rows_out: &mut Vec<ToolRow>, width: usize, text: &str, prefix: &str, class: ChatRowClass) {
@@ -1533,11 +1551,53 @@ mod tests {
             "completed",
             json!({"agent": "build", "description": "x", "background": true}),
         );
-        assert!(background.label.ends_with(" Background "));
+        // The label itself never carries the badge; `rows()` emits the
+        // atomic `StatusBadge` token instead (`index.tsx:2875-2883,3317`).
+        assert!(!background.label.ends_with(" Background "));
         assert!(background.background);
         assert!(is_background_subagent(Some("running"), "completed"));
         assert!(!is_background_subagent(Some("running"), "running"));
         assert!(!is_background_subagent(None, "completed"));
+    }
+
+    /// TOOL-003: the `Background` `StatusBadge` is a non-shrinking sibling of
+    /// the inline tool row (`routes/session/index.tsx:2875-2883,3149-3151,
+    /// 3317`): it paints as one padded token (`"  Background "`), joining the
+    /// label row when it fits and otherwise wrapping whole to its own row —
+    /// never split mid-word.
+    #[test]
+    fn background_badge_wraps_atomically_never_split_mid_word() {
+        let mut background = label(
+            "subagent",
+            "completed",
+            json!({"agent": "build", "description": "inspect logs"}),
+        );
+        background.background = true;
+
+        // Wide: the badge joins the label row.
+        let wide = rows_for_display(80, &background);
+        assert_eq!(wide.len(), 1, "wide badge joins the label row: {wide:?}");
+        assert!(wide[0].0.contains("  Background "), "intact token: {wide:?}");
+
+        // Narrower than label+badge but wider than prefix+badge: the token
+        // wraps whole to its own row, still intact.
+        let narrow = rows_for_display(26, &background);
+        let badge_rows: Vec<&String> = narrow
+            .iter()
+            .map(|(row, _)| row)
+            .filter(|row| row.contains("Background"))
+            .collect();
+        assert_eq!(badge_rows.len(), 1, "badge painted exactly once: {narrow:?}");
+        assert!(
+            badge_rows[0].contains("  Background "),
+            "token stays intact on its own row: {narrow:?}"
+        );
+        assert!(
+            narrow
+                .iter()
+                .all(|(row, _)| !row.ends_with("Backgrou") && !row.ends_with(" Backgroun")),
+            "no row splits the badge mid-word: {narrow:?}"
+        );
     }
 
     #[test]
@@ -1757,7 +1817,13 @@ mod tests {
             r#"{"status":"running"}"#,
         );
         assert!(sub.background);
-        assert!(sub.label.ends_with(" Background "));
+        assert!(!sub.label.contains("Background"));
+        // The badge is emitted by `rows()` as one padded token, never in-label.
+        let sub_rows = rows_for_display(80, &sub);
+        assert!(
+            sub_rows.iter().any(|(row, _)| row.contains("  Background ")),
+            "badge token painted: {sub_rows:?}"
+        );
 
         // Absent / malformed metadata changes nothing.
         let untouched = apply_tool_metadata(
