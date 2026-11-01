@@ -542,6 +542,10 @@ pub struct TabStrip {
     pub overflow_before: bool,
     pub overflow_after: bool,
     pub scroll: usize,
+    /// Count of tabs hidden by the leading overflow marker (`layout().before`).
+    /// Together with the painted `rects` it lets a pointer column resolve to an
+    /// absolute slot exactly as upstream `slotAt` does (`session-tabs.tsx:1490-1500`).
+    pub before: usize,
     /// Session whose upstream close child is currently hovered.  The child is
     /// structural for every tab wide enough to contain `right=1,width=1`, but
     /// it is only a close hit while its parent is hovered.
@@ -742,6 +746,7 @@ impl TabStrip {
             overflow_before: false,
             overflow_after: false,
             scroll: 0,
+            before: 0,
             hovered: hovered.cloned(),
             visible_close_session: None,
             row_paints: Vec::new(),
@@ -795,6 +800,7 @@ impl TabStrip {
             }
         };
         out.scroll = solved.start;
+        out.before = solved.before;
         out.overflow_before = solved.before > 0;
         out.overflow_after = solved.after > 0;
         let home_visible = home_active && solved.start + solved.count > inputs.len();
@@ -953,6 +959,27 @@ impl TabStrip {
         self.home_rect.is_some_and(|rect| rect.contains(x, y))
     }
 
+    /// Map an absolute pointer column to the absolute slot index of the
+    /// painted tab beneath it, exactly as upstream `slotAt`
+    /// (`component/session-tabs.tsx:1490-1500`): walk the painted slot edges
+    /// (the first rect already begins after the overflow marker) and return
+    /// `before + painted_index` for the first edge past `x`, else the last
+    /// painted slot. `None` when nothing is painted yet. The caller clamps the
+    /// result via [`crate::native_tabs::DragState::drag_to`].
+    #[must_use]
+    pub fn drag_slot(&self, x: u16, tab_len: usize) -> Option<usize> {
+        if self.rects.is_empty() || tab_len == 0 {
+            return None;
+        }
+        let mut edge = self.rects[0].1.x;
+        for (index, (_, rect)) in self.rects.iter().enumerate() {
+            edge = edge.saturating_add(rect.width);
+            if x < edge {
+                return Some(self.before + index);
+            }
+        }
+        Some(self.before + self.rects.len() - 1)
+    }
 
     #[must_use]
     pub fn visible_close_rect(&self) -> Option<TabRect> {
@@ -2282,6 +2309,52 @@ mod tests {
             flags: TabFlags::default(),
             marquee_offset: 0,
         }
+    }
+
+    /// TAB-15: `TabStrip::drag_slot` maps a pointer column to the absolute tab
+    /// slot the way upstream `slotAt` does (`session-tabs.tsx:1490-1500`):
+    /// painted edges accumulate from the leading overflow marker, a column past
+    /// the first edge resolves to `before + 0`, and no painted strip resolves
+    /// to `None`.
+    #[test]
+    fn tab_strip_drag_slot_matches_slotat() {
+        let tabs: Vec<_> = (0..10)
+            .map(|i| input(&format!("s{i}"), &format!("title-{i}")))
+            .collect();
+        // Narrow strip with a mid-list scroll: leading and trailing overflow,
+        // so `before > 0` and the first painted rect starts after the `‹N`
+        // marker.
+        let strip =
+            TabStrip::render_with_hover_and_add(&tabs, TabOrientation::Horizontal, 30, 1, 5, None, true);
+        assert!(strip.before > 0 && strip.overflow_before, "leading overflow");
+        assert!(strip.overflow_after, "trailing overflow");
+        let first = strip.rects[0].1;
+        // A column inside the leading overflow marker swallows into slot `before`
+        // (edge accumulation reaches `before + 0` first, upstream `slotAt`).
+        assert_eq!(strip.drag_slot(0, tabs.len()), Some(strip.before));
+        // Each painted rect resolves to its own absolute slot.
+        for (index, (_, rect)) in strip.rects.iter().enumerate() {
+            assert_eq!(
+                strip.drag_slot(rect.x, tabs.len()),
+                Some(strip.before + index),
+                "left edge of painted slot {index}"
+            );
+            assert_eq!(
+                strip.drag_slot(rect.x + rect.width.saturating_sub(1), tabs.len()),
+                Some(strip.before + index),
+                "right edge of painted slot {index}"
+            );
+        }
+        assert_eq!(
+            strip.drag_slot(first.x + 40, tabs.len()),
+            Some(strip.before + strip.rects.len() - 1),
+            "a column past the last edge clamps to the last painted slot"
+        );
+        // An empty strip has no slot.
+        let empty = TabStrip::render_with_hover_and_add(&[], TabOrientation::Horizontal, 40, 1, 0, None, false);
+        assert!(empty.rects.is_empty());
+        assert_eq!(empty.drag_slot(3, 0), None);
+        assert_eq!(empty.drag_slot(3, 5), None);
     }
 
     #[test]

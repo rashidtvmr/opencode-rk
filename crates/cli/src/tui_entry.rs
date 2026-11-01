@@ -7910,16 +7910,27 @@ fn native_loop(
                     && !help_open && !view.command_palette_open() && matches!(dialog, native_setup::Dialog::None)
                     && modifiers == 0
                 {
-                    if kind == 1 && effective_orientation == TabOrientation::Vertical
-                        && tab_drag.dragging().is_some()
-                    {
-                        // Left-drag over the vertical rail: move the preview
-                        // slot, never the persisted order (that lands once on
-                        // release, `session-tabs.tsx:685-702`).
-                        if let Some(rail) = rendered_rail.as_ref() {
-                            if let Some(slot) = rail.drag_slot(y, navigation.tab_len()) {
-                                tab_drag.drag_to(slot, navigation.tab_len());
-                                needs_paint = true;
+                    if kind == 1 && tab_drag.dragging().is_some() {
+                        // Left-drag over the strip/rail: move the preview slot,
+                        // never the persisted order (that lands once on release,
+                        // `session-tabs.tsx:685-702,1508-1523`).
+                        match effective_orientation {
+                            TabOrientation::Vertical => {
+                                if let Some(rail) = rendered_rail.as_ref() {
+                                    if let Some(slot) = rail.drag_slot(y, navigation.tab_len()) {
+                                        tab_drag.drag_to(slot, navigation.tab_len());
+                                        needs_paint = true;
+                                    }
+                                }
+                            }
+                            TabOrientation::Horizontal => {
+                                if let Some(slot) = rendered_tabs
+                                    .as_ref()
+                                    .and_then(|tabs| tabs.drag_slot(x, navigation.tab_len()))
+                                {
+                                    tab_drag.drag_to(slot, navigation.tab_len());
+                                    needs_paint = true;
+                                }
                             }
                         }
                         continue;
@@ -8075,6 +8086,18 @@ fn native_loop(
                                             && x < close.x.saturating_add(close.width)
                                             && y < close.y.saturating_add(close.height)
                                     });
+                                    // Upstream arms the drag on the tab body
+                                    // itself; the close child keeps its own
+                                    // click semantics (`session-tabs.tsx:1508-1523,1738-1753`).
+                                    if !close {
+                                        if let Some(index) = navigation
+                                            .tabs()
+                                            .iter()
+                                            .position(|tab| tab.session == session)
+                                        {
+                                            tab_drag.press(&session, index);
+                                        }
+                                    }
                                     tab_press = Some((session, *rect, close, effective_orientation));
                                 }
                             } else if tabs.home_hit(x, y) {
