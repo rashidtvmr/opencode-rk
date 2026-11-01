@@ -1882,6 +1882,8 @@ impl HistoryPrepend {
 pub struct RoleGutter {
     /// Left rail glyph, if the role draws one.
     pub border: Option<char>,
+    /// User rail color source; the renderer resolves this against the theme.
+    pub rail_color: Option<UserRailColor>,
     /// Left padding inside the card (user) or gutter (others).
     pub padding_left: u16,
     /// Vertical padding inside the card.
@@ -1892,14 +1894,127 @@ pub struct RoleGutter {
     pub hover_background: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UserRailColor {
+    Agent,
+    BorderBase,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UserCardSurface {
+    RaisedBase,
+    DecreasedRaisedBase,
+}
+
+#[must_use]
+pub fn user_card_surface(hovered: bool) -> UserCardSurface {
+    if hovered {
+        UserCardSurface::DecreasedRaisedBase
+    } else {
+        UserCardSurface::RaisedBase
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UserChipLayout {
+    pub top_padding: u16,
+    pub gap: u16,
+    pub wraps: bool,
+}
+
+#[must_use]
+pub const fn user_chip_layout() -> UserChipLayout {
+    UserChipLayout {
+        top_padding: 1,
+        gap: 1,
+        wraps: true,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UserChipKind {
+    Skill,
+    File,
+    Directory,
+}
+
+#[must_use]
+pub fn user_file_chip_kind(mime: &str) -> UserChipKind {
+    if mime == "application/x-directory" {
+        UserChipKind::Directory
+    } else {
+        UserChipKind::File
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UserImageStripLayout {
+    /// Each preview cell's height (`SessionImages` `height()`).
+    pub height: u16,
+    /// Each preview cell's width (`height() * 2`).
+    pub width: u16,
+    /// Preview cells actually painted (`images().slice(0, 3)`).
+    pub visible: usize,
+    /// Painted `+N more` overflow chip and its count (`images().length - visible`).
+    pub overflow: Option<usize>,
+    pub padding_top: u16,
+    pub padding_bottom: u16,
+    pub padding_left: u16,
+    pub padding_right: u16,
+    pub gap: u16,
+    /// Fixed width of the `+N more` chip box (`SessionImages` overflow box).
+    pub overflow_width: u16,
+}
+
+/// `SessionImages` (`routes/session/index.tsx:2660-2700`): `height() =
+/// max(4, min(8, floor(terminal.height / 4)))`, preview cells `height() * 2`
+/// wide, at most three shown plus a fixed-width `+N more` chip when there are
+/// more. `padding_left` defaults to 3 and is passed `2` from the user card
+/// (`:2383`).
+#[must_use]
+pub fn user_image_strip_layout(
+    terminal_height: u16,
+    image_count: usize,
+    padding_left: u16,
+) -> Option<UserImageStripLayout> {
+    if image_count == 0 {
+        return None;
+    }
+    let height = (terminal_height / 4).clamp(4, 8);
+    let visible = image_count.min(3);
+    Some(UserImageStripLayout {
+        height,
+        width: height * 2,
+        visible,
+        overflow: (image_count > visible).then_some(image_count - visible),
+        padding_top: 1,
+        padding_bottom: 1,
+        padding_left,
+        padding_right: 2,
+        gap: 1,
+        overflow_width: 8,
+    })
+}
+
 /// User cards draw the one-cell heavy `┃` rail with two cells of padding and
 /// one row above/below; every other row starts at content column three with no
 /// rail (`index.tsx:2382-2427`, `message-parts.tsx:77,184,222`).
 #[must_use]
 pub fn role_gutter(role: ChatRole) -> RoleGutter {
+    role_gutter_for_delivery(role, false)
+}
+
+/// Pending delivery overrides the user rail with `theme.border.base`.
+#[must_use]
+pub fn role_gutter_for_delivery(role: ChatRole, delivery_pending: bool) -> RoleGutter {
     match role {
         ChatRole::User => RoleGutter {
             border: Some(USER_RAIL_CHAR),
+            rail_color: Some(if delivery_pending {
+                UserRailColor::BorderBase
+            } else {
+                UserRailColor::Agent
+            }),
             padding_left: 2,
             padding_vertical: 1,
             content_column: CONTENT_GUTTER,
@@ -1907,6 +2022,7 @@ pub fn role_gutter(role: ChatRole) -> RoleGutter {
         },
         ChatRole::Assistant | ChatRole::Tool | ChatRole::System => RoleGutter {
             border: None,
+            rail_color: None,
             padding_left: CONTENT_GUTTER,
             padding_vertical: 0,
             content_column: CONTENT_GUTTER,
@@ -2278,6 +2394,49 @@ mod tests {
             assert_eq!(gutter.padding_vertical, 0);
             assert!(!gutter.hover_background);
         }
+    }
+
+    #[test]
+    fn msg005_user_card_delivery_chips_hover_and_image_strip_match_upstream() {
+        assert_eq!(
+            role_gutter_for_delivery(ChatRole::User, false).rail_color,
+            Some(UserRailColor::Agent)
+        );
+        assert_eq!(
+            role_gutter_for_delivery(ChatRole::User, true).rail_color,
+            Some(UserRailColor::BorderBase)
+        );
+        assert_eq!(role_gutter_for_delivery(ChatRole::Assistant, true).rail_color, None);
+        assert_eq!(user_card_surface(false), UserCardSurface::RaisedBase);
+        assert_eq!(user_card_surface(true), UserCardSurface::DecreasedRaisedBase);
+        assert_eq!(
+            user_chip_layout(),
+            UserChipLayout { top_padding: 1, gap: 1, wraps: true }
+        );
+        assert_eq!(user_file_chip_kind("application/x-directory"), UserChipKind::Directory);
+        assert_eq!(user_file_chip_kind("image/png"), UserChipKind::File);
+        let strip = user_image_strip_layout(24, 5, 2).expect("images make a strip");
+        assert_eq!((strip.height, strip.width, strip.visible), (6, 12, 3));
+        assert_eq!(strip.overflow, Some(2));
+        assert_eq!(
+            (
+                strip.padding_top,
+                strip.padding_bottom,
+                strip.padding_left,
+                strip.padding_right,
+                strip.gap,
+                strip.overflow_width,
+            ),
+            (1, 1, 2, 2, 1, 8)
+        );
+        // Default paddingLeft is 3 for a non-card caller (`:2665`).
+        assert_eq!(user_image_strip_layout(24, 3, 3).unwrap().padding_left, 3);
+        // Fewer than four images: no overflow chip.
+        assert_eq!(user_image_strip_layout(24, 3, 2).unwrap().overflow, None);
+        assert_eq!(user_image_strip_layout(24, 0, 2), None);
+        // Height is bounded to [4, 8].
+        assert_eq!(user_image_strip_layout(4, 1, 2).unwrap().height, 4);
+        assert_eq!(user_image_strip_layout(400, 1, 2).unwrap().height, 8);
     }
 
     // MSG-006 ---------------------------------------------------------------
