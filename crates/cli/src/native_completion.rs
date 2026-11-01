@@ -405,6 +405,26 @@ impl Completion {
         self.accept_value_at(draft, value, draft.len(), limit).is_some()
     }
 
+    /// Accept a clicked value using the same directory-expansion path as
+    /// keyboard completion. Mouse activation supplies the row value directly,
+    /// so first reconcile selection with that row before expanding it.
+    pub fn accept_value_or_expand_directory(
+        &mut self,
+        draft: &mut String,
+        value: &str,
+        cursor: usize,
+        limit: usize,
+    ) -> Option<usize> {
+        let items = self.visible_at(draft, cursor);
+        let selected = items.iter().position(|item| item.value == value)?;
+        self.selected = selected;
+        if self.directory(value) {
+            self.expand_directory(draft, cursor, limit)
+        } else {
+            self.accept_value_at(draft, value, cursor, limit)
+        }
+    }
+
     /// Accept a command at the cursor without consuming the suffix.  The
     /// returned byte offset is the cursor immediately after the inserted
     /// token (including its separating space), allowing the native composer
@@ -1075,6 +1095,21 @@ mod popup_geometry_and_style_tests {
         );
         assert_eq!(draft, format!("see @vendor{sep}"));
         assert!(completion.directory("@vendor"));
+    }
+
+    #[test]
+    fn cp40_mouse_directory_acceptance_expands_selected_row() {
+        let mut completion = fixture();
+        completion.mentions.push(Item { value: "@workspace".into(), description: "dir".into(), disabled: false });
+        completion.set_directory("@workspace", true);
+        let mut draft = "see @work".to_owned();
+        let cursor = draft.len();
+        completion.sync(&draft);
+        assert_eq!(
+            completion.accept_value_or_expand_directory(&mut draft, "@workspace", cursor, 4096),
+            Some("see @workspace/".len())
+        );
+        assert_eq!(draft, format!("see @workspace{}", std::path::MAIN_SEPARATOR));
     }
 
     #[test]

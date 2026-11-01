@@ -7625,14 +7625,24 @@ fn native_loop(
             ),
             animations,
         );
-        // CP-21: expose only drafts owned by the active session.
+        // CP-21: expose only drafts owned by the active session. With no active
+        // session (home / no session bound) the queue is never published, so an
+        // unowned (`None`) draft can never be shown against a different session.
         let active_queue_session = live.as_ref().map(|snapshot| snapshot.session_id.as_str());
-        view.set_queued_prompts(queued_drafts.iter().enumerate().filter_map(|(index, (owner, text))| {
-            (owner.as_deref() == active_queue_session).then(|| crate::native_view_chat::QueuedPrompt {
-                id: format!("queued-{index}"),
-                text: text.clone(),
-            })
-        }));
+        if let Some(active) = active_queue_session {
+            view.set_queued_prompts(queued_drafts.iter().enumerate().filter_map(
+                |(index, (owner, text))| {
+                    (owner.as_deref() == Some(active)).then(|| {
+                        crate::native_view_chat::QueuedPrompt {
+                            id: format!("queued-{index}"),
+                            text: text.clone(),
+                        }
+                    })
+                },
+            ));
+        } else {
+            view.set_queued_prompts(std::iter::empty());
+        }
 
         let mut lines = if help_open && !dialog_open {
             Vec::new()
@@ -8342,7 +8352,7 @@ fn native_loop(
             if let Some(panel) = view.composer_region(&draft).and_then(|anchor| completion.panel_at(&draft, draft_cursor, anchor)) {
                             if let Some(value) = panel.value_at(x, y).map(str::to_owned).filter(|_| !panel.is_disabled_at(x, y)) {
                                 if !value.starts_with('/') {
-                                    if let Some(cursor) = completion.accept_value_at(&mut draft, &value, draft_cursor, MAX_NATIVE_DRAFT_BYTES) {
+                                    if let Some(cursor) = completion.accept_value_or_expand_directory(&mut draft, &value, draft_cursor, MAX_NATIVE_DRAFT_BYTES) {
                                         draft_cursor = cursor;
                                         utf8.reset();
                                     }
@@ -8351,7 +8361,7 @@ fn native_loop(
                                 }
                                 let route = value;
                     if route == "/cd" {
-                        if let Some(cursor) = completion.accept_value_at(
+                        if let Some(cursor) = completion.accept_value_or_expand_directory(
                             &mut draft,
                             &route,
                             draft_cursor,
