@@ -1947,6 +1947,55 @@ pub fn user_file_chip_kind(mime: &str) -> UserChipKind {
     }
 }
 
+/// Resolve the user card's left-rail colour (`index.tsx:2384`):
+/// `delivery() ? theme.border.base : color()`. The choice is MUTUALLY
+/// EXCLUSIVE - the pending rail is the flat border colour and never a blend
+/// with the agent colour. `agent_color` is the upstream `local.agent.color`
+/// result (`context/local.tsx:128-134`); when the caller has no agent colour it
+/// falls back to `border_base`, matching the prompt rail's own fallback.
+#[must_use]
+pub fn user_rail_color(
+    rail: UserRailColor,
+    agent_color: Option<[u8; 4]>,
+    border_base: [u8; 4],
+) -> [u8; 4] {
+    match rail {
+        UserRailColor::BorderBase => border_base,
+        UserRailColor::Agent => agent_color.unwrap_or(border_base),
+    }
+}
+
+/// The full delivery-dependent rail colour for a user message
+/// (`index.tsx:2370,2384`): the pending state selects `border_base`, the
+/// settled state selects the agent colour. No blend, no tint.
+#[must_use]
+pub fn user_rail_color_for_delivery(
+    delivery_pending: bool,
+    agent_color: Option<[u8; 4]>,
+    border_base: [u8; 4],
+) -> [u8; 4] {
+    user_rail_color(
+        if delivery_pending {
+            UserRailColor::BorderBase
+        } else {
+            UserRailColor::Agent
+        },
+        agent_color,
+        border_base,
+    )
+}
+
+/// Accent-chip label for one user-card chip (`index.tsx:2438` `" skill "`,
+/// `:2457` `file.mime === "application/x-directory" ? "dir" : "file"`).
+#[must_use]
+pub fn user_chip_label(kind: UserChipKind) -> &'static str {
+    match kind {
+        UserChipKind::Skill => "skill",
+        UserChipKind::File => "file",
+        UserChipKind::Directory => "dir",
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UserImageStripLayout {
     /// Each preview cell's height (`SessionImages` `height()`).
@@ -2437,6 +2486,31 @@ mod tests {
         // Height is bounded to [4, 8].
         assert_eq!(user_image_strip_layout(4, 1, 2).unwrap().height, 4);
         assert_eq!(user_image_strip_layout(400, 1, 2).unwrap().height, 8);
+    }
+
+    #[test]
+    fn msg005_user_rail_color_is_delivery_exclusive_no_blend() {
+        const GREEN: [u8; 4] = [0, 128, 0, 255];
+        const BORDER: [u8; 4] = [72, 72, 72, 255];
+        // Pending delivery selects the flat border base, never a blend.
+        assert_eq!(
+            user_rail_color_for_delivery(true, Some(GREEN), BORDER),
+            BORDER
+        );
+        // Settled delivery selects the agent colour.
+        assert_eq!(
+            user_rail_color_for_delivery(false, Some(GREEN), BORDER),
+            GREEN
+        );
+        // No agent colour falls back to border base (prompt-rail fallback).
+        assert_eq!(user_rail_color_for_delivery(false, None, BORDER), BORDER);
+        // The enum resolver is the same mutually exclusive choice.
+        assert_eq!(user_rail_color(UserRailColor::BorderBase, Some(GREEN), BORDER), BORDER);
+        assert_eq!(user_rail_color(UserRailColor::Agent, Some(GREEN), BORDER), GREEN);
+        // Chip labels match upstream `" skill " | " dir " | " file "`.
+        assert_eq!(user_chip_label(UserChipKind::Skill), "skill");
+        assert_eq!(user_chip_label(UserChipKind::Directory), "dir");
+        assert_eq!(user_chip_label(UserChipKind::File), "file");
     }
 
     // MSG-006 ---------------------------------------------------------------
