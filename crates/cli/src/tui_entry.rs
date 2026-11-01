@@ -4926,14 +4926,41 @@ fn native_loop(
     // the production native_composer line-binding adapter; buffer Home/End
     // remain intentionally unbound by default.
     let mut draft_cursor = 0usize;
+    // Persisted stores live under the same data dir the rest of the TUI uses.
+    let state_path = data_dir.join("state/kv.json");
+    let tabs_path = data_dir.join("state/tabs.json");
     // One bounded client-side roster backs both tab presentations.  It is
     // deliberately initialized from the authenticated startup binding; later
     // routes may add sessions without replacing this state machine.
     let mut navigation = crate::native_navigation::NavigationState::new();
+    // Restore the persisted open-tab order/titles for this working directory
+    // before the startup route binds, so the routed session slots into the
+    // restored strip instead of replacing it. No live binding starts on Home
+    // with the restored tabs still visible (the active route is not
+    // persisted; `context/session-tabs.tsx:72-102`).
+    let tab_scope = std::env::current_dir()
+        .map(|dir| dir.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    match crate::native_ui_preferences::UiPreferences::load_session_tabs(&tabs_path, &tab_scope) {
+        Ok(persisted) if !persisted.order.is_empty() => {
+            navigation.restore_tabs(&persisted);
+            if live.is_none() {
+                navigation.enter_home();
+            }
+        }
+        Ok(_) => {}
+        Err(error) => crate::native_debug::event(
+            "tabs.restore.error",
+            serde_json::json!({"error": error}),
+        ),
+    }
     if let Some(snapshot) = live.as_ref() {
         navigation.open(crate::native_navigation::SessionRef(snapshot.session_id.clone()));
         seed_navigation_titles(&mut navigation, snapshot);
     }
+    // Persist once on the first loop iteration so a tab opened by the startup
+    // route is durable before the user changes anything.
+    let mut saved_tabs = crate::native_navigation::PersistedTabs::default();
     let mut selection = crate::native_text_selection::TextSelection::default();
     // Setup is an action from Home, not a mandatory startup modal. In
     // particular, custom-provider discovery must never steal composer input.
@@ -5183,7 +5210,6 @@ fn native_loop(
     // every frame and turn event below. Fetches use the existing bounded
     // authenticated client; the facade itself never performs IO.
     let mut view = crate::native_view::NativeView::new(cols as u16, rows as u16);
-    let state_path = data_dir.join("state/kv.json");
     // First-run import discovery is bounded filesystem work and runs once
     // before the native loop starts. No source is written or executed here;
     // the dialog owns the later human offer/preview/apply decisions.
@@ -5426,6 +5452,23 @@ fn native_loop(
     let mut completion_loaded = false;
     let mut byte = [0u8; 1];
     loop {
+        // Persist the open-tab order/titles whenever open/close/move/rename
+        // changed them. One small bounded write per actual change; titles are
+        // refreshed by the same events that already repaint the strip.
+        let tabs_now = navigation.persist_tabs();
+        if tabs_now != saved_tabs {
+            if let Err(error) = crate::native_ui_preferences::UiPreferences::persist_session_tabs(
+                &tabs_path,
+                &tab_scope,
+                &tabs_now,
+            ) {
+                crate::native_debug::event(
+                    "tabs.persist.error",
+                    serde_json::json!({"error": error}),
+                );
+            }
+            saved_tabs = tabs_now;
+        }
         let current_memory_binding = live.as_ref().map(|snapshot| (snapshot.session_id.clone(), binding_generation));
         if memory_binding != current_memory_binding {
             *view.memory_mut() = crate::native_memory::Memory::new();
@@ -8853,6 +8896,16 @@ fn native_loop(
                                     Ok((snapshot, restored_draft)) => {
                                         session_route = true;
                                         view.set_session_route(session_route);
+                                        // Enter routes to the row's session, so
+                                        // the rail opens-or-focuses its tab
+                                        // (`session-tabs.tsx:203-228`) before
+                                        // the title seed reaches it.
+                                        let existing_cursor = navigation
+                                            .tabs()
+                                            .iter()
+                                            .find(|tab| tab.session.0 == id)
+                                            .map(|tab| tab.cursor);
+                                        navigation.open(crate::native_navigation::SessionRef(id.clone()));
                                         seed_navigation_titles(&mut navigation, &snapshot);
                                         live = Some(snapshot);
                                         history_window = live.as_ref().map(|snapshot| crate::native_chat_projection::NativeHistoryWindow::new(&snapshot.raw_history, snapshot.history_next_before.clone()));
@@ -8861,7 +8914,7 @@ fn native_loop(
                                          history_navigation_request = None;
                                         history_tail_refresh_pending = false;
                                         history_browsing = false;
-                                        let restored_cursor = navigation.active().map(|tab| tab.cursor).unwrap_or(restored_draft.len());
+                                        let restored_cursor = existing_cursor.unwrap_or(restored_draft.len());
                                         crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, restored_draft, restored_cursor);
                                         // Committed ONLY on a real bind
                                         // success.
@@ -8884,6 +8937,10 @@ fn native_loop(
                                                 ),
                                             }
                                         }
+                                        // Upstream closes the session list once
+                                        // the route lands (`dialog-session-list.tsx:248-250`).
+                                        view.close_page();
+                                        needs_paint = true;
                                     }
                                     Err(error) => {
                                         // Rejected: the transaction kept
@@ -10401,7 +10458,7 @@ fn close_tab_transition(
         *navigation = staged;
         return Ok(CloseTabResult { snapshot: None, draft: String::new(), cursor: 0, scroll: 0, selected_model: None, generation, home: true });
     }
-    let successor = navigation.active_successor().ok_or_else(|| "close refused: successor missing".to_owned())?;
+    let successor = navigation.close_successor().ok_or_else(|| "close refused: successor missing".to_owned())?;
     let prospective = crate::native_view::reserve_generation(generation)
         .ok_or_else(|| "close refused: binding generation exhausted".to_owned())?;
     let origin = origin.ok_or_else(|| "close refused: daemon unavailable".to_owned())?;

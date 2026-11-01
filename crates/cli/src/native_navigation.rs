@@ -566,10 +566,7 @@ impl NavigationState {
             .map(|tab| tab.session.clone())
             .ok_or(NavRefusal::NoTabOpen)?;
         self.record_history(&session);
-        let open: Vec<SessionRef> = self.tabs.iter().map(|tab| tab.session.clone()).collect();
-        let successor = self
-            .history_previous(&open, &session)
-            .or_else(|| self.active_successor());
+        let successor = self.close_successor();
         let receipt = self.close(&session)?;
         if let Some(next) = successor {
             if self.tabs.iter().any(|tab| tab.session == next) {
@@ -577,6 +574,19 @@ impl NavigationState {
             }
         }
         Ok(receipt)
+    }
+
+    /// Successor the focused tab's close should focus: the newest still-open
+    /// history entry, falling back to the right/left neighbor. This is the
+    /// same choice `close_active` makes, exposed so the fallible native close
+    /// transition can preflight the target before binding
+    /// (`context/session-tabs.tsx:349-374`).
+    #[must_use]
+    pub fn close_successor(&self) -> Option<SessionRef> {
+        let session = self.active()?.session.clone();
+        let open: Vec<SessionRef> = self.tabs.iter().map(|tab| tab.session.clone()).collect();
+        self.history_previous(&open, &session)
+            .or_else(|| self.active_successor())
     }
 
     /// Return the upstream close fallback without consulting history: the
@@ -1760,6 +1770,30 @@ mod tests {
         assert!(nav.recently_closed().is_empty());
         assert_eq!(nav.reopen(None), None);
         assert_eq!(nav.reopen(Some(&s("missing"))), None);
+    }
+
+    #[test]
+    fn tab_19b_close_successor_preflights_the_same_target_as_close_active() {
+        // The fallible native close transition must pick the tab that
+        // `close_active` would focus, before any daemon call.
+        let mut nav = NavigationState::new();
+        for id in ["a", "b", "c", "d"] {
+            nav.open(s(id));
+        }
+        nav.switch(&s("a")).unwrap();
+        nav.switch(&s("c")).unwrap();
+        assert_eq!(nav.close_successor(), Some(s("a")), "MRU before neighbor");
+        // With no older history entry the right neighbor wins.
+        let mut linear = NavigationState::new();
+        linear.open(s("x"));
+        linear.open(s("y"));
+        assert_eq!(linear.close_successor(), Some(s("x")), "left neighbor at the end");
+        let mut first = NavigationState::new();
+        first.open(s("x"));
+        first.open(s("y"));
+        first.switch(&s("x")).unwrap();
+        assert_eq!(first.close_successor(), Some(s("y")), "right neighbor at the start");
+        assert_eq!(NavigationState::new().close_successor(), None);
     }
 
     #[test]

@@ -16,6 +16,12 @@ use std::{
 
 const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 const MAX_STATE_BYTES: usize = 64 * 1024;
+/// Bounds for the persisted tab store (`state/tabs.json`): at most this many
+/// scopes are retained, and each session id / title is length-capped so the
+/// store stays far below `MAX_STATE_BYTES`.
+const MAX_TAB_SCOPES: usize = 8;
+const MAX_SESSION_ID_BYTES: usize = 128;
+const MAX_TAB_TITLE_BYTES: usize = 200;
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
 /// A `tui.prompt.max_width` value. `None` means use the pinned upstream default
@@ -339,6 +345,105 @@ impl UiPreferences {
             let layout = state.entry("layout").or_insert_with(|| Value::Object(Map::new()));
             if let Some(layout) = layout.as_object_mut() { layout.insert("verticalTabsWidth".into(), Value::from(width)); }
         })
+    }
+
+    /// Load the persisted open-tab layout for `scope` from `state/tabs.json`.
+    /// The on-disk shape mirrors upstream `context/session-tabs.tsx:72-102`
+    /// (`{"cwd": {"<cwd>": {"tabs": [{"sessionID","title"}]}}}`); only order
+    /// and titles are read back, and malformed rows are skipped rather than
+    /// failing the whole restore.
+    pub fn load_session_tabs(
+        path: &Path,
+        scope: &str,
+    ) -> Result<crate::native_navigation::PersistedTabs, String> {
+        use crate::native_navigation::{PersistedTabs, SessionRef};
+        let Some(location) = StateLocation::open(path, false)? else {
+            return Ok(PersistedTabs::default());
+        };
+        let state = location.read()?;
+        let Some(rows) = state
+            .get("cwd")
+            .and_then(Value::as_object)
+            .and_then(|scopes| scopes.get(scope))
+            .and_then(Value::as_object)
+            .and_then(|entry| entry.get("tabs"))
+            .and_then(Value::as_array)
+        else {
+            return Ok(PersistedTabs::default());
+        };
+        let mut persisted = PersistedTabs::default();
+        for row in rows.iter().take(crate::native_navigation::MAX_TABS) {
+            let Some(id) = row.get("sessionID").and_then(Value::as_str) else {
+                continue;
+            };
+            if !Self::valid_tab_field(id, MAX_SESSION_ID_BYTES) {
+                continue;
+            }
+            let session = SessionRef(id.to_owned());
+            if persisted.order.iter().any(|open| *open == session) {
+                continue;
+            }
+            persisted.order.push(session.clone());
+            if let Some(title) = row.get("title").and_then(Value::as_str) {
+                if Self::valid_tab_field(title, MAX_TAB_TITLE_BYTES) {
+                    persisted.titles.push((session, title.to_owned()));
+                }
+            }
+        }
+        Ok(persisted)
+    }
+
+    /// Replace the persisted tab layout for `scope`, retaining other scopes
+    /// up to `MAX_TAB_SCOPES`. Invalid entries are dropped at the boundary so
+    /// the store can never grow without bound.
+    pub fn persist_session_tabs(
+        path: &Path,
+        scope: &str,
+        persisted: &crate::native_navigation::PersistedTabs,
+    ) -> Result<(), String> {
+        if scope.is_empty() || scope.len() > 4096 || scope.chars().any(char::is_control) {
+            return Err("invalid tabs scope".into());
+        }
+        let location = StateLocation::open(path, true)?.ok_or("tabs state parent unavailable")?;
+        let mut state = location.read()?;
+        let scopes = state
+            .entry("cwd")
+            .or_insert_with(|| Value::Object(Map::new()));
+        let scopes = scopes.as_object_mut().ok_or("tabs state cwd is not an object")?;
+        let rows: Vec<Value> = persisted
+            .order
+            .iter()
+            .take(crate::native_navigation::MAX_TABS)
+            .filter(|session| Self::valid_tab_field(&session.0, MAX_SESSION_ID_BYTES))
+            .map(|session| {
+                let mut row = Map::new();
+                row.insert("sessionID".into(), Value::String(session.0.clone()));
+                if let Some((_, title)) = persisted
+                    .titles
+                    .iter()
+                    .find(|(open, _)| open == session)
+                    .filter(|(_, title)| Self::valid_tab_field(title, MAX_TAB_TITLE_BYTES))
+                {
+                    row.insert("title".into(), Value::String(title.clone()));
+                }
+                Value::Object(row)
+            })
+            .collect();
+        let mut entry = Map::new();
+        entry.insert("tabs".into(), Value::Array(rows));
+        entry.insert("unread".into(), Value::Object(Map::new()));
+        while scopes.len() >= MAX_TAB_SCOPES && !scopes.contains_key(scope) {
+            let Some(oldest) = scopes.keys().next().cloned() else {
+                break;
+            };
+            scopes.remove(&oldest);
+        }
+        scopes.insert(scope.to_owned(), Value::Object(entry));
+        location.write(state)
+    }
+
+    fn valid_tab_field(value: &str, limit: usize) -> bool {
+        !value.is_empty() && value.len() <= limit && !value.chars().any(char::is_control)
     }
 
 }
@@ -997,6 +1102,103 @@ mod tab_config_tests {
         let (orientation, diagnostics) = UiPreferences::tab_orientation(None, Some(&oversized));
         assert_eq!(orientation, TabOrientation::Horizontal);
         assert_eq!(diagnostics.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod tab_persistence_tests {
+    use super::*;
+    use crate::native_navigation::{PersistedTabs, SessionRef};
+
+    fn session(id: &str) -> SessionRef {
+        SessionRef(id.to_owned())
+    }
+
+    #[test]
+    fn tabs_roundtrip_per_scope_and_preserve_other_scopes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tabs.json");
+        let first = PersistedTabs {
+            order: vec![session("one"), session("two")],
+            titles: vec![(session("two"), "Second".to_owned())],
+        };
+        UiPreferences::persist_session_tabs(&path, "/work/a", &first).unwrap();
+        let second = PersistedTabs {
+            order: vec![session("three")],
+            titles: Vec::new(),
+        };
+        UiPreferences::persist_session_tabs(&path, "/work/b", &second).unwrap();
+        assert_eq!(UiPreferences::load_session_tabs(&path, "/work/a").unwrap(), first);
+        assert_eq!(UiPreferences::load_session_tabs(&path, "/work/b").unwrap(), second);
+        assert_eq!(
+            UiPreferences::load_session_tabs(&path, "/work/missing").unwrap(),
+            PersistedTabs::default()
+        );
+        // On-disk shape follows upstream `{"cwd": {"<cwd>": {"tabs": [...]}}}`.
+        let saved: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["cwd"]["/work/a"]["tabs"][1]["sessionID"], "two");
+        assert_eq!(saved["cwd"]["/work/a"]["tabs"][1]["title"], "Second");
+        assert_eq!(saved["cwd"]["/work/b"]["tabs"][0]["sessionID"], "three");
+    }
+
+    #[test]
+    fn malformed_rows_are_skipped_without_failing_restore() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tabs.json");
+        fs::write(
+            &path,
+            r#"{"cwd":{"/work/a":{"tabs":[
+                {"sessionID":"keep","title":"ok"},
+                {"sessionID":"keep","title":"duplicate"},
+                {"title":"no id"},
+                {"sessionID":""},
+                {"sessionID":42},
+                {"sessionID":"ctl\u0001"},
+                {"sessionID":"long-title","title":""}
+            ]}}}"#,
+        )
+        .unwrap();
+        let loaded = UiPreferences::load_session_tabs(&path, "/work/a").unwrap();
+        assert_eq!(loaded.order, vec![session("keep"), session("long-title")]);
+        assert_eq!(loaded.titles, vec![(session("keep"), "ok".to_owned())]);
+        // An invalid scope is refused before touching the file.
+        assert!(UiPreferences::persist_session_tabs(&path, "", &loaded).is_err());
+        assert!(UiPreferences::persist_session_tabs(&path, "bad\u{0}", &loaded).is_err());
+    }
+
+    #[test]
+    fn missing_or_invalid_file_loads_default_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            UiPreferences::load_session_tabs(&dir.path().join("missing.json"), "/work").unwrap(),
+            PersistedTabs::default()
+        );
+        let path = dir.path().join("tabs.json");
+        fs::write(&path, "not-json").unwrap();
+        assert!(UiPreferences::load_session_tabs(&path, "/work").is_err());
+        fs::write(&path, r#"{"cwd":{"/work":{"tabs":"nope"}}}"#).unwrap();
+        assert_eq!(
+            UiPreferences::load_session_tabs(&path, "/work").unwrap(),
+            PersistedTabs::default()
+        );
+    }
+
+    #[test]
+    fn scope_count_is_bounded_and_new_scope_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tabs.json");
+        for index in 0..=MAX_TAB_SCOPES {
+            let scope = format!("/work/{index}");
+            UiPreferences::persist_session_tabs(
+                &path,
+                &scope,
+                &PersistedTabs { order: vec![session("s")], titles: Vec::new() },
+            )
+            .unwrap();
+        }
+        let saved: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["cwd"].as_object().unwrap().len(), MAX_TAB_SCOPES);
+        assert!(saved["cwd"][format!("/work/{MAX_TAB_SCOPES}")].is_object());
     }
 }
 
