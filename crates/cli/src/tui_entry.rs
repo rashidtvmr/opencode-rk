@@ -324,6 +324,73 @@ fn normalize_modified_return(
     }
 }
 
+/// TAB-23: a `<leader>` follow-up key is a printable byte or one of the
+/// arrow follow-ups `<leader>left` / `<leader>right`
+/// (`config/keybind.ts:97-98`). The upstream chord is a timed registration
+/// (`context/keymap.tsx:137-145`), not a printable-byte-only path, so the
+/// leader matcher must accept decoded arrow events too.
+#[cfg(feature = "native")]
+fn leader_followup_key(event: &native_input_decoder::InputEvent) -> bool {
+    matches!(
+        event,
+        native_input_decoder::InputEvent::Byte(byte) if *byte >= 0x20 && *byte != b'\t'
+    ) || leader_followup_pane_event(event).is_some()
+}
+
+/// TAB-23: map a leader follow-up arrow to its pane-focus `HostEvent`
+/// (`native_host.rs:192-194`): `<leader>right` -> `pane.focus.right`
+/// (focus right pane), `<leader>left` -> `pane.focus.left` (focus session
+/// pane). Non-follow-up events map to `None` and merely end the chord.
+#[cfg(feature = "native")]
+fn leader_followup_pane_event(
+    event: &native_input_decoder::InputEvent,
+) -> Option<crate::native_host::HostEvent> {
+    match event {
+        native_input_decoder::InputEvent::ArrowRight => {
+            Some(crate::native_host::HostEvent::PaneFocusRight)
+        }
+        native_input_decoder::InputEvent::ArrowLeft => {
+            Some(crate::native_host::HostEvent::PaneFocusSession)
+        }
+        _ => None,
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod tab23_leader_followup_tests {
+    use super::{leader_followup_key, leader_followup_pane_event};
+
+    /// RED before: the leader follow-up matcher was byte-only, so arrows
+    /// never reached leader matching and no pane-focus dispatch existed.
+    /// GREEN after: arrows qualify and dispatch the upstream-bound
+    /// `HostEvent`s (`config/keybind.ts:97-98`).
+    #[test]
+    fn tab_23_leader_followup_accepts_arrows_and_dispatches_pane_focus() {
+        use crate::native_host::HostEvent;
+        use super::native_input_decoder::InputEvent;
+        // The follow-up key set is not byte-only (`keymap.tsx:137-145`).
+        assert!(leader_followup_key(&InputEvent::ArrowLeft));
+        assert!(leader_followup_key(&InputEvent::ArrowRight));
+        assert!(leader_followup_key(&InputEvent::Byte(b'b')));
+        // Tab/control bytes are not follow-ups; ArrowUp merely ends the
+        // chord (`terminal.select` is not implemented natively).
+        assert!(!leader_followup_key(&InputEvent::Byte(b'\t')));
+        assert!(!leader_followup_key(&InputEvent::Byte(24)));
+        assert!(!leader_followup_key(&InputEvent::ArrowUp));
+        // Dispatch mapping (`native_host.rs:192-194,411-424`).
+        assert_eq!(
+            leader_followup_pane_event(&InputEvent::ArrowRight),
+            Some(HostEvent::PaneFocusRight)
+        );
+        assert_eq!(
+            leader_followup_pane_event(&InputEvent::ArrowLeft),
+            Some(HostEvent::PaneFocusSession)
+        );
+        assert_eq!(leader_followup_pane_event(&InputEvent::ArrowUp), None);
+        assert_eq!(leader_followup_pane_event(&InputEvent::Byte(b'x')), None);
+    }
+}
+
 /// The composer Enter submit decision, fed from the live loop's facts.
 /// Upstream Enter invokes textarea `onSubmit` -> `submit()`
 /// (`component/prompt/index.tsx:1790-1795`); delivery is `queue` exactly
@@ -7836,8 +7903,7 @@ fn native_loop(
             needs_paint = true;
             continue;
         }
-        let leader_followup_pending = leader_pending
-            && matches!(&event, native_input_decoder::InputEvent::Byte(byte) if *byte >= 0x20 && *byte != b'\t');
+        let leader_followup_pending = leader_pending && leader_followup_key(&event);
         // Every popped event expires pending state; Ctrl-X re-arms in dispatch below.
         leader_pending = false;
         let memory_source_direction = match &event {
@@ -8258,6 +8324,30 @@ fn native_loop(
             match &event {
                 native_input_decoder::InputEvent::ArrowLeft
                 | native_input_decoder::InputEvent::ArrowRight => {
+                    // TAB-23 leader follow-up arrows, dispatched BEFORE the
+                    // printable leader arm and before composer cursor motion:
+                    // `<leader>right` is `pane.focus.right`, `<leader>left` is
+                    // `pane.focus.left` (`config/keybind.ts:97-98`); the chord
+                    // accepts non-byte follow-ups (`context/keymap.tsx:137-145`).
+                    // The follow-up is consumed WITHOUT touching the composer
+                    // draft, exactly like the printable leader arm.
+                    if leader_followup_pending {
+                        if let Some(host_event) = leader_followup_pane_event(&event) {
+                            // HostEvent::PaneFocusRight / PaneFocusSession
+                            // (`native_host.rs:192-194`, stepped semantics at
+                            // `:411-424`): right-pane focus drops composer
+                            // interactivity (`useInteractivity`,
+                            // `footer.tsx:60` -> `set_rail_interactive`).
+                            view.set_rail_interactive(matches!(
+                                host_event,
+                                crate::native_host::HostEvent::PaneFocusSession
+                            ));
+                        }
+                        leader_pending = false;
+                        utf8.reset();
+                        needs_paint = true;
+                        continue;
+                    }
                     let left = matches!(&event, native_input_decoder::InputEvent::ArrowLeft);
                     crate::native_composer::apply_horizontal_binding(&draft, &mut draft_cursor, left);
                     utf8.reset();
