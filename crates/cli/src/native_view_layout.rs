@@ -1757,6 +1757,30 @@ mod tests {
         assert_eq!(session_content_width(116), 112, "120-wide docked column - 4");
         assert_eq!(session_content_width(0), 0, "tiny viewport saturates");
     }
+    /// LAY-01. The root frame fills the terminal at the checklist sizes
+    /// (`routes/session/index.tsx:1510-1517`): exactly `rows` rows, each
+    /// exactly `cols` display cells, and pane widths tile `cols` with no
+    /// separator cell. Above 120 cols the fixed 42-col sidebar is the only
+    /// extra pane; 80/120 stay main-only.
+    #[test]
+    fn lay_01_root_fills_reference_viewports() {
+        for (cols, rows) in [(80u16, 24u16), (120, 40), (160, 48), (200, 60)] {
+            let layout = Layout::new(cols, rows);
+            let frame = compose_frame(&layout, &[], &[line("body")], &[line("side")]);
+            assert_eq!(frame.len(), usize::from(rows), "{cols}x{rows}: every row");
+            for (index, row) in frame.iter().enumerate() {
+                assert_eq!(cells(row), usize::from(cols), "{cols}x{rows} row {index}");
+            }
+            assert_eq!(
+                layout.left_width + layout.center_width + layout.right_width,
+                cols,
+                "{cols}x{rows}: panes tile the viewport"
+            );
+            let expected_sidebar = u16::from(cols > 120) * SIDEBAR_WIDTH;
+            assert_eq!(layout.right_width, expected_sidebar, "{cols}x{rows}: sidebar");
+        }
+    }
+
 
     /// LAY-03 and LAY-05. `ui/layout.ts:11-13`: vertical tabs fit when
     /// `total >= rail + 64`. Default rail 42 crosses at 105/106, rail 60 at
