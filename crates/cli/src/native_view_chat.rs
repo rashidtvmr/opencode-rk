@@ -6160,6 +6160,48 @@ mod tests {
             .iter()
             .all(|(_, class, _)| *class == ChatRowClass::Composer));
     }
+
+    /// CP-04 (second lie): the chat renderer keys the rail inset on the
+    /// recorded TERMINAL width, never the pane width it must fall back to.
+    /// Upstream `component/prompt/index.tsx:1691-1692`
+    /// (`dimensions().width < 44 ? 1 : 2`). RED before `03c0d7dd`, which
+    /// plumbed `ChatView::set_terminal_width`; GREEN after.
+    #[test]
+    fn rail_inset_follows_the_recorded_terminal_width_not_the_pane() {
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let editor_row = |rows: &[StyledChatRow]| {
+            rows.iter()
+                .find(|(text, _, _)| text.contains("hello"))
+                .map(|(text, _, _)| text.clone())
+                .expect("rail editor row")
+        };
+        // No recorded terminal: direct unit APIs fall back to the 80-column
+        // pane (>= 44), so the editor row carries the two-cell inset.
+        let mut view = ChatView::new();
+        let fallback = view.render_styled(80, 20, "ws", &[], "hello", false, &appearance);
+        assert!(
+            editor_row(&fallback).starts_with("\u{2503}  hello"),
+            "pane-width fallback keeps inset 2: {:?}",
+            editor_row(&fallback)
+        );
+        // Recorded 43-column terminal: the inset flips to 1 even though the
+        // composer pane is still 80 columns wide.
+        view.set_terminal_width(43);
+        let narrow = view.render_styled(80, 20, "ws", &[], "hello", false, &appearance);
+        assert!(
+            editor_row(&narrow).starts_with("\u{2503} hello"),
+            "43-column terminal flips the inset to 1: {:?}",
+            editor_row(&narrow)
+        );
+        // Strict boundary `< 44`: 44 keeps inset 2.
+        view.set_terminal_width(44);
+        let at_44 = view.render_styled(80, 20, "ws", &[], "hello", false, &appearance);
+        assert!(
+            editor_row(&at_44).starts_with("\u{2503}  hello"),
+            "44 keeps inset 2: {:?}",
+            editor_row(&at_44)
+        );
+    }
 }
 
 /// Assistant completion footer consumer slice (upstream `AssistantFooter`,
