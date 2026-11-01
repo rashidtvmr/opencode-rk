@@ -7947,7 +7947,7 @@ fn native_loop(
                         let scroll = view.chat_scroll_offset();
                         reopen_tab_transition(
                             &mut view, &mut transcript, &mut navigation, &draft, draft_cursor,
-                            live.as_ref().map(|snapshot| snapshot.origin.as_str()),
+                            daemon_origin,
                             auth, binding_generation,
                             selected.as_ref().map(|model| model.qualified()),
                             scroll,
@@ -7959,7 +7959,7 @@ fn native_loop(
                             let scroll = view.chat_scroll_offset();
                             select_tab_transition(
                                 &mut view, &mut transcript, &mut navigation, &draft, draft_cursor,
-                                live.as_ref().map(|snapshot| snapshot.origin.as_str()),
+                                daemon_origin,
                                 auth, binding_generation, &target,
                                 selected.as_ref().map(|model| model.qualified()), scroll,
                             )
@@ -8405,11 +8405,11 @@ fn native_loop(
                     if let Some(me)=me { let outcome=menu.handle(me,menu_vp); if let crate::native_tab_context_menu::MenuOutcome::Invoke(action)=outcome { context_menu=None; match action {
                         crate::native_tab_context_menu::MenuAction::NewSession => { let model=selected.as_ref().map(|m|m.qualified()); let saved=if navigation.active().is_some(){navigation.save_active_state(draft.clone(),draft_cursor,view.chat_scroll_offset(),model)}else{Ok(())}; if let Err(e)=saved{append_transcript(&mut transcript,format!("error: new tab: state save refused: {e:?}"));}else{live=None;history_window=None;history_pending=false;history_active=None;history_navigation_request=None;blocked_history_scroll=None;history_tail_refresh_pending=false;history_browsing=false;draft.clear();draft_cursor=0;navigation.enter_home();session_route=false;view.reset_to_home_after_tab_close();view.set_chat_scroll_offset(0);} },
                         crate::native_tab_context_menu::MenuAction::CopySessionId{session}=>{let frame=selection_clipboard_frame(&session.0);let mut out=std::io::stdout().lock();out.write_all(frame.as_bytes())?;out.flush()?;},
-                        crate::native_tab_context_menu::MenuAction::Close{session}=>{close_hold=None;let scroll=view.chat_scroll_offset();match close_tab_transition(&mut view,&mut transcript,&mut navigation,&draft,draft_cursor,live.as_ref().map(|s|s.origin.as_str()),auth,binding_generation,&session,selected.as_ref().map(|m|m.qualified()),scroll){Ok(result)=>apply_close_tab_result(result,&mut view,&mut live,&mut history_window,&mut binding_generation,&mut draft,&mut draft_cursor,&mut selected,&models,&mut session_route,&mut compact_worker),Err(e)=>append_transcript(&mut transcript,format!("error: close tab: {e}"))}},
+                        crate::native_tab_context_menu::MenuAction::Close{session}=>{close_hold=None;let scroll=view.chat_scroll_offset();match close_tab_transition(&mut view,&mut transcript,&mut navigation,&draft,draft_cursor,daemon_origin,auth,binding_generation,&session,selected.as_ref().map(|m|m.qualified()),scroll){Ok(result)=>apply_close_tab_result(result,&mut view,&mut live,&mut history_window,&mut binding_generation,&mut draft,&mut draft_cursor,&mut selected,&models,&mut session_route,&mut compact_worker),Err(e)=>append_transcript(&mut transcript,format!("error: close tab: {e}"))}},
                         crate::native_tab_context_menu::MenuAction::Rename{session,current_title}=>{rename_input=Some((session,current_title));rename_error=None;},
                         crate::native_tab_context_menu::MenuAction::Reopen{session}=>{
                             let scroll=view.chat_scroll_offset();
-                            match reopen_tab_transition(&mut view,&mut transcript,&mut navigation,&draft,draft_cursor,live.as_ref().map(|s|s.origin.as_str()),auth,binding_generation,selected.as_ref().map(|m|m.qualified()),scroll,Some(&session)){
+                            match reopen_tab_transition(&mut view,&mut transcript,&mut navigation,&draft,draft_cursor,daemon_origin,auth,binding_generation,selected.as_ref().map(|m|m.qualified()),scroll,Some(&session)){
                                 Ok(result)=>apply_close_tab_result(result,&mut view,&mut live,&mut history_window,&mut binding_generation,&mut draft,&mut draft_cursor,&mut selected,&models,&mut session_route,&mut compact_worker),
                                 Err(e)=>append_transcript(&mut transcript,format!("error: reopen tab: {e}")),
                             }
@@ -8569,7 +8569,7 @@ fn native_loop(
                         if let Some(session) = middle_session {
                             close_hold = None;
                             let close_scroll = view.chat_scroll_offset();
-                            match close_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|m| m.qualified()), close_scroll) {
+                            match close_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, daemon_origin, auth, binding_generation, &session, selected.as_ref().map(|m| m.qualified()), close_scroll) {
                                 Ok(result) => {
                                     apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route, &mut compact_worker);
                                     completion.sync(&draft);
@@ -8590,7 +8590,7 @@ fn native_loop(
                                 if tabs.home_hit(x, y) {
                                     if let Some(target) = navigation.home_dispatch_target() {
                                         let scroll = view.chat_scroll_offset();
-                                        match select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &target, selected.as_ref().map(|m| m.qualified()), scroll) {
+                                        match select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, daemon_origin, auth, binding_generation, &target, selected.as_ref().map(|m| m.qualified()), scroll) {
                                             Ok(result) => {
                                                 apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route, &mut compact_worker);
                                                 completion.sync(&draft);
@@ -8690,7 +8690,7 @@ fn native_loop(
                                     tab_drag.settle(&ids);
                                     tab_drag.clear_suppress();
                                     let scroll = view.chat_scroll_offset();
-                                    match select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|m| m.qualified()), scroll) {
+                                    match select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, daemon_origin, auth, binding_generation, &session, selected.as_ref().map(|m| m.qualified()), scroll) {
                                       Ok(result) => {
                                         apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route, &mut compact_worker);
                                         completion.sync(&draft);
@@ -8774,7 +8774,7 @@ fn native_loop(
                                         .collect();
                                     let hold_origin = tabs.strip_origin_x();
                                     let close_scroll = view.chat_scroll_offset();
-                                    match close_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|m| m.qualified()), close_scroll) {
+                                    match close_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, daemon_origin, auth, binding_generation, &session, selected.as_ref().map(|m| m.qualified()), close_scroll) {
                                       Ok(result) => {
                                         if let Some(index) = hold_items.iter().position(|id| id == &session) {
                                             if let Some(target) = hold_items.get(index + 1).or_else(|| index.checked_sub(1).and_then(|i| hold_items.get(i))) {
@@ -8803,7 +8803,7 @@ fn native_loop(
                                     needs_paint = true; continue;
                                 }
                                 let scroll = view.chat_scroll_offset();
-                                match select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|model| model.qualified()), scroll) {
+                                match select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, daemon_origin, auth, binding_generation, &session, selected.as_ref().map(|model| model.qualified()), scroll) {
                                   Ok(result) => {
                                     apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route, &mut compact_worker);
                                     completion.sync(&draft);
@@ -8870,7 +8870,7 @@ fn native_loop(
                             if still_home && pressed_close {
                                 if let Some(target) = navigation.home_dispatch_target() {
                                     let scroll = view.chat_scroll_offset();
-                                    match select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &target, selected.as_ref().map(|m| m.qualified()), scroll) {
+                                    match select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, daemon_origin, auth, binding_generation, &target, selected.as_ref().map(|m| m.qualified()), scroll) {
                                         Ok(result) => {
                                             apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route, &mut compact_worker);
                                             completion.sync(&draft);
@@ -11409,7 +11409,7 @@ fn native_loop(
                             match select_tab_transition(
                                 &mut view, &mut transcript, &mut navigation,
                                 &draft, draft_cursor,
-                                live.as_ref().map(|snapshot| snapshot.origin.as_str()),
+                                daemon_origin,
                                 auth, binding_generation,
                                 &target, selected.as_ref().map(|m| m.qualified()), scroll,
                             ) {
@@ -11437,7 +11437,7 @@ fn native_loop(
                             let scroll_result = close_tab_transition(
                                 &mut view, &mut transcript, &mut navigation,
                                 &draft, draft_cursor,
-                                live.as_ref().map(|snapshot| snapshot.origin.as_str()),
+                                daemon_origin,
                                 auth, binding_generation, &session,
                                 selected.as_ref().map(|m| m.qualified()), close_scroll,
                             );
@@ -12414,6 +12414,46 @@ mod tab_binding_tests {
         assert!(history.is_some());
         let outgoing = navigation.tabs().iter().find(|tab| tab.session.0 == A).unwrap();
         assert_eq!((&outgoing.draft, outgoing.cursor, outgoing.scroll), (&"A unsent".to_owned(), 3, 7));
+    }
+
+    /// F1 regression: an existing tab must reopen from New/Home. The
+    /// navigation transition (select/close/reopen) is authorized by the stable
+    /// `daemon_origin`, NOT the active session binding (`live`), which is
+    /// `None` on Home and while a New tab is pending
+    /// (`tui_entry.rs:~8406` New clears `live`; `enter_home` unsets `active`).
+    /// This mirrors upstream where clearing the active session view does not
+    /// disconnect the daemon (`context/session-tabs.tsx`).
+    #[test]
+    fn home_select_binds_target_with_stable_daemon_origin_absent_live() {
+        let fixture = Fixture::new();
+        let mut view = crate::native_view::NativeView::new(100, 32);
+        let mut transcript = NativeChatHistory::default();
+        let mut navigation = navigation();
+        // New/Home: no active session binding, but the daemon stays reachable.
+        navigation.enter_home();
+        assert!(navigation.active().is_none());
+        let mut live: Option<LiveSnapshot> = None;
+        // The transition must succeed with a live binding absent, because the
+        // loop forwards `daemon_origin` — not `live` — to the transition.
+        let result = select_tab_transition(
+            &mut view, &mut transcript, &mut navigation, "", 0,
+            Some(&fixture.origin), Some(&fixture.token), 4,
+            &SessionRef(B.into()), None, 0,
+        )
+        .expect("reopening an existing tab from Home must bind the target");
+        assert_eq!(result.snapshot.as_ref().map(|s| s.session_id.as_str()), Some(B));
+        assert_eq!(navigation.active().unwrap().session.0, B);
+        let mut history = None;
+        let mut generation = 4;
+        let mut draft = String::new();
+        let mut cursor = 0;
+        let mut selected = None;
+        let mut route = false;
+        let mut compact_worker = None;
+        let models = [native_setup::Model { id: "target".into(), name: "Target".into(), provider_id: "fixture".into(), context_window: None }];
+        apply_close_tab_result(result, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut selected, &models, &mut route, &mut compact_worker);
+        assert_eq!(live.as_ref().map(|s| s.session_id.as_str()), Some(B));
+        assert_eq!(generation, 5);
     }
 
     #[test]
