@@ -561,6 +561,65 @@ pub fn composite_rgba(front: Rgba, back: Rgba) -> Rgba {
     )
 }
 
+/// One painted cell of the running status row: its glyph and resolved
+/// foreground color over the composer background.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FooterCell {
+    pub glyph: char,
+    pub fg: Rgba,
+}
+
+/// Styled per-cell paint path for the `prompt.footer.status` running row
+/// (`index.tsx:1913-1923`): a one-cell `marginLeft`, the eight scanner cells
+/// colored by [`scanner_cell_colors`] and composited over `background`
+/// (`index.tsx:1676` `promptBg`), the `gap={1}` cell, then the interrupt
+/// prefix/label cells. `None` for every non-running slot (idle location, move
+/// progress, pending new worktree, animations off), whose caller keeps the
+/// plain rail text. This is the only consumer of [`scanner_cell_colors`]; it
+/// turns the per-cell model into glyph+RGB cells the view blits.
+#[must_use]
+pub fn status_paint_cells(
+    base: Rgba,
+    background: Rgba,
+    elapsed_ms: u64,
+    animations: bool,
+    interrupt_armed: bool,
+    prefix_fg: Rgba,
+    label_fg: Rgba,
+) -> Option<Vec<FooterCell>> {
+    if !animations {
+        return None; // `[⋯]` static marker paints through the text path
+    }
+    let frame_index = scanner_frame_index(elapsed_ms);
+    let glyphs: Vec<char> = scanner_frame(frame_index).chars().collect();
+    if glyphs.len() != SCANNER_WIDTH {
+        return None; // defenceless caller: only the eight-cell frame paints
+    }
+    let colors = scanner_cell_colors(base, frame_index);
+    let mut cells = Vec::with_capacity(SCANNER_WIDTH + 2 + 16);
+    cells.push(FooterCell { glyph: ' ', fg: base });
+    for (index, glyph) in glyphs.into_iter().enumerate() {
+        cells.push(FooterCell {
+            glyph,
+            fg: composite_rgba(colors[index], background),
+        });
+    }
+    cells.push(FooterCell { glyph: ' ', fg: base });
+    // `index.tsx:139-145`: `esc ` prefix then the armed/unarmed label.
+    let label = if interrupt_armed {
+        "again to interrupt"
+    } else {
+        "interrupt"
+    };
+    for glyph in "esc ".chars() {
+        cells.push(FooterCell { glyph, fg: prefix_fg });
+    }
+    for glyph in label.chars() {
+        cells.push(FooterCell { glyph, fg: label_fg });
+    }
+    Some(cells)
+}
+
 // ---------------------------------------------------------------------------
 
 // One-cell spinner (mini footer sibling of the scanner)
@@ -2483,5 +2542,29 @@ mod cp12_scanner_color_tests {
         let front = Rgba::new(255, 255, 255, 128);
         let back = Rgba::rgb(0, 0, 0);
         assert_eq!(composite_rgba(front, back), Rgba::rgb(128, 128, 128));
+    }
+
+    #[test]
+    fn cp12_status_paint_cells_distinct_frames_yield_distinct_cells() {
+        let base = Rgba::rgb(0x48, 0x48, 0x48);
+        let bg = Rgba::rgb(0x1e, 0x1e, 0x1e);
+        let a = status_paint_cells(base, bg, 0, true, false, base, base).expect("running paints");
+        let b = status_paint_cells(base, bg, 7 * 40, true, false, base, base).expect("running paints");
+        // margin + 8 scanner cells + gap + `esc ` + `interrupt`.
+        assert_eq!(a.len(), 1 + SCANNER_WIDTH + 1 + 4 + 9);
+        assert_eq!(a.len(), b.len());
+        // Frame 0 head at cell 0 is opaque base over bg; frame 7 head at cell 7.
+        assert_eq!(a[1].fg, base);
+        let scan_a: Vec<Rgba> = a[1..1 + SCANNER_WIDTH].iter().map(|c| c.fg).collect();
+        let scan_b: Vec<Rgba> = b[1..1 + SCANNER_WIDTH].iter().map(|c| c.fg).collect();
+        assert_ne!(scan_a, scan_b, "distinct frames must yield distinct RGB");
+        let glyphs_a: String = a[1..1 + SCANNER_WIDTH].iter().map(|c| c.glyph).collect();
+        let glyphs_b: String = b[1..1 + SCANNER_WIDTH].iter().map(|c| c.glyph).collect();
+        assert_ne!(glyphs_a, glyphs_b);
+        // Interrupt cells carry the caller's role colors.
+        assert_eq!(a[a.len() - 1].fg, base);
+        assert_eq!(a[a.len() - 1].glyph, 't');
+        // Animations off (and every non-running slot) keeps the text path.
+        assert!(status_paint_cells(base, bg, 0, false, false, base, base).is_none());
     }
 }
