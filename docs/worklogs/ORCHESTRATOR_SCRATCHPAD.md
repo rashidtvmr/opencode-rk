@@ -10093,3 +10093,36 @@ title tiers).
 **Recurring worker failure mode:** several workers exhaust their step budget
 during investigation and write NO artifact. Mitigation in wave 9b: explicit
 "do exactly these reads, then write; write handoff in the FINAL step" briefs.
+
+## Wave-10 landings + canonical-write incident — 2026-11-01 (HEAD `8503bf67`)
+
+Landings after `d10bc975` (each: guard GREEN + full `oc2` suite OK):
+
+- `4469aed2` **TAB-22** cancelled-tab tombstone + title-fallback tier. The worker's
+  own focused test asserted a `focus_index`-clears-the-mark behaviour its hunks never
+  implemented; landed the independent `W10-REVIEW-TAB22` evaluator's corrected patch
+  (adds the `focus_index` clear). Tier 4 `withTimestampedFallback` stays `(c)` (needs
+  per-session `time.created`/`parentID` the navigation model lacks).
+- `22e37b03` **CP-12** per-cell scanner trail colours (`scanner_trail_colors`,
+  `scanner_inactive_color`, `scanner_inactive_fade`, `scanner_cell_colors`,
+  `composite_rgba`). Landed the `W9-REVIEW-CP12` corrected patch (fixed `f32::from(i32)`
+  and wrong frame-index assertions); numbers re-verified against `spinner.ts:141-250`
+  and `prompt/index.tsx:1650-1676`. Model-only: no status-rail painter consumes it yet.
+- `c7a62124` **DIALOG-12** model variant picker + detail facts. `W10-DIALOG12`
+  re-derived the `W9-REVIEW-DIALOG12` corrected patch byte-identically; no production
+  model-picker caller yet.
+- `8503bf67` **TAB-23** compact search-control hover overlay. Main re-derived the
+  `W10-TAB23` peer patch (its colours and call shape were wrong) against
+  `session-tabs-rail.tsx:14-20,54-66`. Pane-switch chord half stays `(c)`.
+
+**CANONICAL-WRITE ISOLATION INCIDENT (repeat of the 2026-10-30 F05 class).** While
+`W10-TAB23` was in flight its uncommitted edits (`native_tab_rail.rs` `CellColor::
+SearchHover` etc.) appeared in the canonical working tree though the brief granted
+read-only; they were then reverted externally within ~20s (observed exactly as in the
+recorded incident). No landing was lost; the work was re-authored and landed by main.
+Do not continue a worker that writes canonical. Preserve bytes; never reset/clean.
+
+**Wave-10 no-artifact workers (step-limited):** `W10-REVIEW-TOOL011`,
+`W10-REVIEW-TAB20`, `W10-REVIEW-DIALOG11`, `W10-SIDE01`, `W10-DIFF002` completed with
+no evidence file. `W10-MSG006` and `W10-CP21` reported `(c)` blockers with named
+seams. These five need re-dispatch with the "write handoff in the LAST 3 steps" rule.
