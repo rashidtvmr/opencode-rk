@@ -1037,6 +1037,12 @@ pub mod select {
         pub description: Option<String>,
         /// Supplemental fuzzy-search text (`searchText`).
         pub search_text: Option<String>,
+        /// Right-aligned footer shown while the list is *grouped*
+        /// (`footer`, `dialog-select.tsx:102,807`).
+        pub footer: Option<String>,
+        /// Right-aligned footer shown while the list is *flattened*, i.e. a
+        /// search is active (`searchFooter`, `dialog-select.tsx:102,807`).
+        pub search_footer: Option<String>,
         /// Extra rows rendered under the title (`details`).
         pub details: Vec<String>,
         /// Selected-detail region (`detail`), new-designs only.
@@ -1055,6 +1061,8 @@ pub mod select {
                 category: None,
                 description: None,
                 search_text: None,
+                footer: None,
+                search_footer: None,
                 details: Vec::new(),
                 detail: None,
                 disabled: false,
@@ -1076,6 +1084,18 @@ pub mod select {
         #[must_use]
         pub fn with_search_text(mut self, search_text: impl Into<String>) -> Self {
             self.search_text = Some(search_text.into());
+            self
+        }
+
+        #[must_use]
+        pub fn with_footer(mut self, footer: impl Into<String>) -> Self {
+            self.footer = Some(footer.into());
+            self
+        }
+
+        #[must_use]
+        pub fn with_search_footer(mut self, search_footer: impl Into<String>) -> Self {
+            self.search_footer = Some(search_footer.into());
             self
         }
 
@@ -1105,6 +1125,22 @@ pub mod select {
                     Some(description)
                 }
                 _ => None,
+            }
+        }
+
+        /// The row's right-aligned footer (`dialog-select.tsx:807`): while the
+        /// list is flattened (a search is active) the option's own
+        /// `searchFooter` wins, falling back to its category and then its
+        /// grouped `footer`; grouped lists show only `footer`.
+        #[must_use]
+        pub fn row_footer(&self, flattened: bool) -> Option<&str> {
+            if flattened {
+                self.search_footer
+                    .as_deref()
+                    .or(self.category.as_deref())
+                    .or(self.footer.as_deref())
+            } else {
+                self.footer.as_deref()
             }
         }
     }

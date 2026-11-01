@@ -18,6 +18,7 @@
 
 
 use crate::native_view_layout::fit;
+use crate::native_view_layout::visit_unpadded_cells;
 
 pub const MAX_QUERY_CHARS: usize = 256;
 const MAX_ENTRIES: usize = 16;
@@ -25,6 +26,10 @@ const MAX_ENTRIES: usize = 16;
 /// (`command-palette.tsx:71`). The threshold is applied to the same weighted
 /// score as `DialogSelect` (title ×2, category + searchText ×1).
 pub const FILTER_THRESHOLD: f32 = 0.7;
+/// Body rows reserve the shared two-cell right inset (`DIALOG_LIST_INSET - 1`,
+/// `dialog-select.tsx:938-941`), which is also where the right-aligned,
+/// flattened footer lands.
+const ROW_RIGHT_INSET: u16 = 2;
 
 #[cfg(test)]
 mod filtered_command_regressions {
@@ -100,6 +105,9 @@ pub struct PaletteEntry {
     pub route: &'static str,
     /// None means the native client has no truthful direct shortcut for it.
     pub key_label: Option<&'static str>,
+    /// `searchFooter` (`command-palette.tsx:26,41`): `"<group> · <keys>"` for
+    /// command rows, `"Settings · <category>"` for setting rows.
+    pub search_footer: Option<&'static str>,
     pub action: PaletteAction,
 }
 
@@ -346,8 +354,12 @@ impl CommandPalette {
         let mut selected_row = 0;
         let mut last_category = None;
         let selected = self.selected_id;
+        // `flatten` (`dialog-select.tsx:233`) for this palette: a non-empty
+        // query drops the category groups, so no heading is painted and the
+        // row footer becomes `searchFooter ?? category ?? footer`.
+        let flattened = !self.query.is_empty();
         for item in visible {
-            if last_category != Some(item.category) {
+            if !flattened && last_category != Some(item.category) {
                 if roomy && last_category.is_some() {
                     body.push((String::new(), Role::Description, 0, 0));
                 }
@@ -362,14 +374,33 @@ impl CommandPalette {
             if selected == Some(item.id) {
                 selected_row = body.len();
             }
+            // Upstream row (`dialog-select.tsx:795-820`): the title flex-grows,
+            // an optional `" " + description` span follows it, and the footer is
+            // the last right-aligned child; while flattened the footer is
+            // `searchFooter ?? category ?? footer`.
             let key = item
                 .key_label
                 .map_or(String::new(), |label| format!("  {label}"));
+            let mut row = format!("{marker}{}{key}", item.title);
+            if flattened {
+                let footer = item.search_footer.unwrap_or(item.category).trim();
+                // Body rows reserve the shared two-cell right inset
+                // (`DIALOG_LIST_INSET - 1`), so the footer right-aligns inside
+                // the content width, not the terminal width.
+                let inner = usize::from(width).saturating_sub(usize::from(ROW_RIGHT_INSET));
+                let title_cells = visit_unpadded_cells(&row, inner, |_, _| {});
+                let footer_cells = visit_unpadded_cells(footer, inner, |_, _| {});
+                if !footer.is_empty() && title_cells + footer_cells < inner {
+                    let gap = inner - title_cells - footer_cells;
+                    row.push_str(&" ".repeat(gap));
+                    row.push_str(footer);
+                }
+            }
             body.push((
-                format!("{marker}{}{key}", item.title),
+                row,
                 if selected == Some(item.id) { Role::Selected } else { Role::Item },
                 0,
-                2,
+                ROW_RIGHT_INSET,
             ));
         }
         if self.visible().is_empty() {
@@ -514,6 +545,10 @@ fn entry(
         // Native currently implements no direct model/session key bindings
         // matching pinned upstream leader bindings; do not invent labels.
         key_label: None,
+        // Upstream `searchFooter = [group, footer].join(" · ")`; with no
+        // native shortcut labels that reduces to the group, so the row render
+        // falls back to the category (`searchFooter ?? category`).
+        search_footer: None,
         action: PaletteAction::Route(route),
     }
 }
@@ -521,6 +556,7 @@ fn entry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::native_palette::select::SelectOption;
 
     #[test]
     fn groups_source_commands_and_preserves_source_identity() {
@@ -624,6 +660,7 @@ mod tests {
             command_name: "mode",
             route: "/weak",
             key_label: None,
+            search_footer: None,
             action: PaletteAction::Route("/weak"),
         };
         assert!(search_quality("e", &weak).expect("searchText matches") < FILTER_THRESHOLD);
@@ -657,5 +694,66 @@ mod tests {
             rendered.last().map(|line| line.trim().to_owned()),
             Some("↑/↓ move · Enter select · Esc close".to_owned())
         );
+    }
+
+    // DIALOG-11 / `dialog-select.tsx:807`: while the list is flattened (a
+    // search is active) the row's right-aligned footer is
+    // `searchFooter ?? category ?? footer`; a grouped list shows no footer and
+    // keeps its category heading.
+    #[test]
+    fn flattened_rows_paint_search_footer_and_drop_category_headings() {
+        let mut palette = CommandPalette::default();
+        palette.open(true);
+
+        // Grouped (empty query): category headings, no right-aligned footer.
+        let grouped = palette.render(40, 20);
+        assert!(grouped.iter().any(|line| line.trim() == "Agent"));
+        assert!(
+            grouped.iter().any(|line| line.trim() == "Switch model"),
+            "grouped row keeps its bare title: {grouped:?}"
+        );
+        assert!(
+            !grouped.iter().any(|line| line.contains("Switch model  Agent")),
+            "grouped rows carry no footer: {grouped:?}"
+        );
+
+        // Flattened (`session` query): no headings, footer = category, and the
+        // footer overrides the category when the entry supplies one.
+        for ch in "session".chars() {
+            assert!(palette.push_query(ch));
+        }
+        let flattened = palette.render(40, 20);
+        assert!(
+            !flattened.iter().any(|line| line.trim() == "Session"),
+            "flattened rows paint no category heading: {flattened:?}"
+        );
+        let row = flattened
+            .iter()
+            .find(|line| line.contains("Switch session"))
+            .expect("session row");
+        // Body rows reserve the shared two-cell right inset, so the footer
+        // right-aligns at `width - 2`.
+        assert_eq!(row.trim_end().len(), 38, "footer is right-aligned: {row:?}");
+        assert_eq!(row.len(), 40, "row fills the content width: {row:?}");
+        assert!(
+            row.trim_end().ends_with("Session"),
+            "flattened footer falls back to the category: {row:?}"
+        );
+        assert!(row.contains("Switch session  "), "title then gap then footer: {row:?}");
+
+        // An explicit `searchFooter` wins over the category, exactly as the
+        // option-level `searchFooter ?? category` chain.
+        let option = crate::native_palette::select::SelectOption::new("s", "Switch session")
+            .with_category("Session")
+            .with_footer("ctrl+x s")
+            .with_search_footer("Session · ctrl+x s");
+        assert_eq!(option.row_footer(true), Some("Session · ctrl+x s"));
+        assert_eq!(option.row_footer(false), Some("ctrl+x s"));
+        assert_eq!(
+            SelectOption::new("s", "T").with_category("Group").row_footer(true),
+            Some("Group")
+        );
+        assert_eq!(SelectOption::new("s", "T").with_footer("f").row_footer(true), Some("f"));
+        assert_eq!(SelectOption::new("s", "T").row_footer(true), None);
     }
 }
