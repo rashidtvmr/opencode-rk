@@ -2008,6 +2008,15 @@ pub mod form_overlay {
                         return Some(format!("Must be at most {max} characters"));
                     }
                 }
+                // FORM-003 regex subset: upstream evaluates raw JS
+                // `new RegExp(field.pattern).test(value)` (`util/form.ts:82-86`),
+                // which also accepts look-around and backreferences. The native
+                // engine is `regex_automata::meta::Regex` (regex-syntax 0.8),
+                // which rejects those constructs. Decision: FAIL CLOSED. A
+                // pattern the engine cannot compile is reported with upstream's
+                // exact `Invalid pattern: {p}` message (rejecting the answer)
+                // rather than silently accepting it. No JS-only pattern can
+                // therefore pass unpoliced.
                 if let Some(pattern) = &field.pattern {
                     match Regex::new(pattern) {
                         Ok(regex) if !regex.is_match(text) => {
@@ -6644,6 +6653,14 @@ mod form_tests {
         assert_eq!(
             validate(&invalid_pattern, Some(&FormValue::Text("value".into()))).as_deref(),
             Some("Invalid pattern: ["),
+        );
+        // Fail closed on engine-unsupported JS constructs (look-around): a
+        // pattern JS would compile is rejected as "Invalid pattern" rather
+        // than silently accepted. Documented subset decision at `validate`.
+        let lookaround = FormField::new("la", FieldKind::Text).with_pattern("foo(?=bar)");
+        assert_eq!(
+            validate(&lookaround, Some(&FormValue::Text("foobar".into()))).as_deref(),
+            Some("Invalid pattern: foo(?=bar)"),
         );
 
         let free_text = FormField::new("free", FieldKind::Text);
