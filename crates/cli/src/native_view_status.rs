@@ -257,6 +257,12 @@ pub struct StatusView {
     /// off, else BOLD (`routes/session/sidebar.tsx:41-45`). Default `false`
     /// preserves the previous always-BOLD behavior.
     sidebar_title_dim: bool,
+    /// Pinned footer hover fact (`footer.tsx:98-109` `onMouseOver`/`onMouseOut`
+    /// on the `sidebar.footer.location` box). The path paints base text while
+    /// hovered and muted text otherwise; default `false` keeps the resting
+    /// muted paint. Only a producer that hit-tests the pinned footer row sets
+    /// it via [`Self::set_footer_hovered`].
+    footer_hovered: bool,
 }
 
 /// Confirmed location facts for the pinned sidebar footer.
@@ -561,6 +567,48 @@ mod conditional_sidebar_tests {
         }));
         assert!(short.onboarding_dismiss_row(38, 21).is_none());
     }
+
+    /// SIDE-14: the pinned footer path paints base text (`Role::Item`) while
+    /// the producer reports a hover over the `sidebar.footer.location` row and
+    /// muted text (`Role::Description`) otherwise (`footer.tsx:107`,
+    /// `working-directory-actions.tsx:14/61-63`). Hover is paint-only: the
+    /// visible label never changes.
+    #[test]
+    fn footer_hover_switches_the_pinned_path_between_base_and_muted_text() {
+        use super::native_sidebar;
+        use crate::native_ui_style::Role;
+        let mut view = StatusView::default();
+        view.set_working_directory(Some("/projects/oc2".into()), Some("main".into()));
+        let roles = |view: &StatusView| -> Vec<Role> {
+            view.render_sidebar_styled(38, 30)
+                .into_iter()
+                .filter(|line| line.text.starts_with("/projects/oc2:main"))
+                .map(|line| line.role)
+                .collect()
+        };
+        assert_eq!(
+            roles(&view),
+            [Role::Description],
+            "resting footer path is muted"
+        );
+        view.set_footer_hovered(true);
+        assert_eq!(
+            roles(&view),
+            [Role::Item],
+            "hovered footer path uses base text"
+        );
+        // The label is byte-identical under hover: only the role changed.
+        assert!(view
+            .render_sidebar(38, 30)
+            .iter()
+            .any(|row| row.starts_with("/projects/oc2:main")));
+        view.set_footer_hovered(false);
+        assert_eq!(
+            roles(&view),
+            [Role::Description],
+            "leaving the row restores muted text"
+        );
+    }
 }
 
 struct SidebarRow {
@@ -814,7 +862,7 @@ impl StatusView {
             footer: self.footer.as_ref().map(|footer| native_sidebar::Footer {
                 directory: footer.directory.as_str(),
                 branch: footer.branch.as_deref(),
-                hovered: false,
+                hovered: self.footer_hovered,
             }),
             onboarding: self.sidebar_onboarding,
         };
@@ -1118,6 +1166,15 @@ impl StatusView {
             directory,
             branch: non_empty(branch),
         });
+    }
+
+    /// Pinned footer hover input (`footer.tsx:98-109`): the
+    /// `sidebar.footer.location` box sets hover on `onMouseOver` and clears it
+    /// on `onMouseOut`. `Footer::role()` then paints the path base text while
+    /// hovered and muted otherwise. Text and truncation are unaffected: hover
+    /// is a paint-only fact.
+    pub fn set_footer_hovered(&mut self, hovered: bool) {
+        self.footer_hovered = hovered;
     }
 
     /// Getting-started facts for the pinned footer (`footer.tsx:18-23`).
