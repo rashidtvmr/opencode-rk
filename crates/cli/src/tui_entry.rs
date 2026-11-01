@@ -5472,10 +5472,19 @@ fn native_loop(
     // restored strip instead of replacing it. No live binding starts on Home
     // with the restored tabs still visible (the active route is not
     // persisted; `context/session-tabs.tsx:72-102`).
-    let tab_scope = std::env::current_dir()
+    let tab_cwd = std::env::current_dir()
         .map(|dir| dir.to_string_lossy().into_owned())
         .unwrap_or_default();
-    match crate::native_ui_preferences::UiPreferences::load_session_tabs(&tabs_path, &tab_scope) {
+    let (tab_scope, tab_scope_diagnostics) = {
+        let cli_path = native_cli_config_path();
+        let inline_cli = env::var("OPENCODE_CLI_CONFIG_CONTENT").ok();
+        crate::native_ui_preferences::UiPreferences::tab_scope(
+            cli_path.as_deref(),
+            inline_cli.as_deref(),
+            &tab_cwd,
+        )
+    };
+    match crate::native_ui_preferences::UiPreferences::load_session_tabs(&tabs_path, tab_scope) {
         Ok(persisted) if !persisted.order.is_empty() => {
             navigation.restore_tabs(&persisted);
             if live.is_none() {
@@ -5854,6 +5863,9 @@ fn native_loop(
     for diagnostic in tab_diagnostics {
         append_transcript(&mut transcript, format!("error: {diagnostic}"));
     }
+    for diagnostic in tab_scope_diagnostics {
+        append_transcript(&mut transcript, format!("error: {diagnostic}"));
+    }
     // V2 cli.json theme is authoritative when valid; legacy tui/kv state is
     // retained as the compatibility fallback. `system` remains dark until a
     // terminal-color probe is available, matching the runtime default.
@@ -6030,7 +6042,7 @@ fn native_loop(
         if tabs_now != saved_tabs {
             if let Err(error) = crate::native_ui_preferences::UiPreferences::persist_session_tabs(
                 &tabs_path,
-                &tab_scope,
+                tab_scope,
                 &tabs_now,
             ) {
                 crate::native_debug::event(

@@ -24,6 +24,22 @@ const MAX_SESSION_ID_BYTES: usize = 128;
 const MAX_TAB_TITLE_BYTES: usize = 200;
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
+/// Resolved `tabs.scope` (`config/index.tsx:193-195,334`, default `cwd`) and
+/// the store key it selects (`context/session-tabs.tsx:105-113,115-118`):
+/// `global` persists one shared layout, `cwd` a separate set per working
+/// directory.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TabPersistenceScope<'a> {
+    Global,
+    Cwd(&'a str),
+}
+
+impl<'a> From<&'a str> for TabPersistenceScope<'a> {
+    fn from(value: &'a str) -> Self {
+        TabPersistenceScope::Cwd(value)
+    }
+}
+
 /// A `tui.prompt.max_width` value. `None` means use the pinned upstream default
 /// of 75 columns; `Auto` means max(75, floor(terminal width * .7)).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -169,6 +185,45 @@ impl UiPreferences {
             }
         }
         (orientation, diagnostics)
+    }
+
+    /// Resolve pinned upstream `tabs.scope` (`config/index.tsx:193-195`, default
+    /// `cwd` at `:334`). Disk config applies first, an inline override second;
+    /// the last valid value wins and an invalid value only adds a diagnostic.
+    pub fn tab_scope<'a>(
+        cli_path: Option<&Path>,
+        inline: Option<&str>,
+        cwd: &'a str,
+    ) -> (TabPersistenceScope<'a>, Vec<String>) {
+        let mut global = false;
+        let mut diagnostics = Vec::new();
+        if let Some(path) = cli_path {
+            let mut budget = crate::native_ui_budget::ReadBudget::default();
+            match budget.read(path, MAX_CONFIG_BYTES, "CLI config") {
+                Ok(Some(text)) => match parse_cli_tab_scope(&text) {
+                    Ok(Some(value)) => global = value,
+                    Ok(None) => {}
+                    Err(()) => diagnostics.push("invalid global CLI tab scope configuration".into()),
+                },
+                Ok(None) => {}
+                Err(_) => diagnostics.push("unable to read bounded global CLI configuration".into()),
+            }
+        }
+        if let Some(text) = inline.filter(|text| !text.is_empty()) {
+            match parse_cli_tab_scope(text) {
+                Ok(Some(value)) => global = value,
+                Ok(None) => {}
+                Err(()) => diagnostics.push("invalid or oversized inline CLI tab scope configuration".into()),
+            }
+        }
+        (
+            if global {
+                TabPersistenceScope::Global
+            } else {
+                TabPersistenceScope::Cwd(cwd)
+            },
+            diagnostics,
+        )
     }
 
     pub fn appearance(state_path: &Path) -> Result<crate::native_box_style::BoxAppearance, String> {
@@ -414,23 +469,27 @@ impl UiPreferences {
     /// (`{"cwd": {"<cwd>": {"tabs": [{"sessionID","title"}]}}}`); only order
     /// and titles are read back, and malformed rows are skipped rather than
     /// failing the whole restore.
-    pub fn load_session_tabs(
+    pub fn load_session_tabs<'a, S: Into<TabPersistenceScope<'a>>>(
         path: &Path,
-        scope: &str,
+        scope: S,
     ) -> Result<crate::native_navigation::PersistedTabs, String> {
+        let scope = scope.into();
         use crate::native_navigation::{PersistedTabs, SessionRef};
         let Some(location) = StateLocation::open(path, false)? else {
             return Ok(PersistedTabs::default());
         };
         let state = location.read()?;
-        let Some(rows) = state
-            .get("cwd")
-            .and_then(Value::as_object)
-            .and_then(|scopes| scopes.get(scope))
-            .and_then(Value::as_object)
-            .and_then(|entry| entry.get("tabs"))
-            .and_then(Value::as_array)
-        else {
+        let rows = match scope {
+            TabPersistenceScope::Global => state.get("global"),
+            TabPersistenceScope::Cwd(cwd) => state
+                .get("cwd")
+                .and_then(Value::as_object)
+                .and_then(|scopes| scopes.get(cwd)),
+        }
+        .and_then(Value::as_object)
+        .and_then(|entry| entry.get("tabs"))
+        .and_then(Value::as_array);
+        let Some(rows) = rows else {
             return Ok(PersistedTabs::default());
         };
         let mut persisted = PersistedTabs::default();
@@ -458,20 +517,19 @@ impl UiPreferences {
     /// Replace the persisted tab layout for `scope`, retaining other scopes
     /// up to `MAX_TAB_SCOPES`. Invalid entries are dropped at the boundary so
     /// the store can never grow without bound.
-    pub fn persist_session_tabs(
+    pub fn persist_session_tabs<'a, S: Into<TabPersistenceScope<'a>>>(
         path: &Path,
-        scope: &str,
+        scope: S,
         persisted: &crate::native_navigation::PersistedTabs,
     ) -> Result<(), String> {
-        if scope.is_empty() || scope.len() > 4096 || scope.chars().any(char::is_control) {
-            return Err("invalid tabs scope".into());
+        let scope = scope.into();
+        if let TabPersistenceScope::Cwd(cwd) = scope {
+            if cwd.is_empty() || cwd.len() > 4096 || cwd.chars().any(char::is_control) {
+                return Err("invalid tabs scope".into());
+            }
         }
         let location = StateLocation::open(path, true)?.ok_or("tabs state parent unavailable")?;
         let mut state = location.read()?;
-        let scopes = state
-            .entry("cwd")
-            .or_insert_with(|| Value::Object(Map::new()));
-        let scopes = scopes.as_object_mut().ok_or("tabs state cwd is not an object")?;
         let rows: Vec<Value> = persisted
             .order
             .iter()
@@ -494,13 +552,22 @@ impl UiPreferences {
         let mut entry = Map::new();
         entry.insert("tabs".into(), Value::Array(rows));
         entry.insert("unread".into(), Value::Object(Map::new()));
-        while scopes.len() >= MAX_TAB_SCOPES && !scopes.contains_key(scope) {
-            let Some(oldest) = scopes.keys().next().cloned() else {
-                break;
-            };
-            scopes.remove(&oldest);
+        match scope {
+            TabPersistenceScope::Global => {
+                state.insert("global".into(), Value::Object(entry));
+            }
+            TabPersistenceScope::Cwd(cwd) => {
+                let scopes = state.entry("cwd").or_insert_with(|| Value::Object(Map::new()));
+                let scopes = scopes.as_object_mut().ok_or("tabs state cwd is not an object")?;
+                while scopes.len() >= MAX_TAB_SCOPES && !scopes.contains_key(cwd) {
+                    let Some(oldest) = scopes.keys().next().cloned() else {
+                        break;
+                    };
+                    scopes.remove(&oldest);
+                }
+                scopes.insert(cwd.to_owned(), Value::Object(entry));
+            }
         }
-        scopes.insert(scope.to_owned(), Value::Object(entry));
         location.write(state)
     }
 
@@ -998,6 +1065,22 @@ fn merge_cli_theme(
     if mode.is_some() { current.1 = mode; }
 }
 
+fn parse_cli_tab_scope(text: &str) -> Result<Option<bool>, ()> {
+    if text.len() > MAX_CONFIG_BYTES {
+        return Err(());
+    }
+    let value: Value = serde_json::from_str(&strip_jsonc(text).map_err(|_| ())?).map_err(|_| ())?;
+    let object = value.as_object().ok_or(())?;
+    let Some(tabs) = object.get("tabs") else { return Ok(None) };
+    let tabs = tabs.as_object().ok_or(())?;
+    match tabs.get("scope") {
+        None => Ok(None),
+        Some(Value::String(scope)) if scope == "global" => Ok(Some(true)),
+        Some(Value::String(scope)) if scope == "cwd" => Ok(Some(false)),
+        Some(_) => Err(()),
+    }
+}
+
 fn parse_cli_tab_orientation(text: &str) -> Result<Option<crate::native_navigation::TabOrientation>, ()> {
     if text.len() > MAX_CONFIG_BYTES {
         return Err(());
@@ -1204,6 +1287,39 @@ mod tab_persistence_tests {
     }
 
     #[test]
+    fn global_scope_is_parsed_and_roundtrips_the_global_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tabs.json");
+        let (scope, diagnostics) = UiPreferences::tab_scope(
+            None,
+            Some(r#"{"tabs":{"scope":"global"}}"#),
+            "/work/a",
+        );
+        assert_eq!(scope, TabPersistenceScope::Global);
+        assert!(diagnostics.is_empty());
+        let tabs = PersistedTabs {
+            order: vec![session("one")],
+            titles: Vec::new(),
+        };
+        UiPreferences::persist_session_tabs(&path, scope, &tabs).unwrap();
+        assert_eq!(UiPreferences::load_session_tabs(&path, scope).unwrap(), tabs);
+        // `context/session-tabs.tsx:105-113`: global writes the `global` store,
+        // not a `cwd` entry.
+        let saved: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["global"]["tabs"][0]["sessionID"], "one");
+        assert!(saved.get("cwd").is_none());
+        // Default is `cwd` (`config/index.tsx:334`).
+        assert_eq!(
+            UiPreferences::tab_scope(None, None, "/work/a").0,
+            TabPersistenceScope::Cwd("/work/a")
+        );
+        assert_eq!(
+            UiPreferences::tab_scope(None, Some(r#"{"tabs":{"scope":"cwd"}}"#), "/work/a").0,
+            TabPersistenceScope::Cwd("/work/a")
+        );
+    }
+
+    #[test]
     fn malformed_rows_are_skipped_without_failing_restore() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("tabs.json");
@@ -1253,7 +1369,7 @@ mod tab_persistence_tests {
             let scope = format!("/work/{index}");
             UiPreferences::persist_session_tabs(
                 &path,
-                &scope,
+                scope.as_str(),
                 &PersistedTabs { order: vec![session("s")], titles: Vec::new() },
             )
             .unwrap();
