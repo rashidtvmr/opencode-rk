@@ -314,12 +314,21 @@ pub struct NavigationState {
     /// (`context/session-tabs.tsx:120-123`); the native single-client loop
     /// marks it on a Running -> Idle transition for a non-active tab.
     unread: Vec<SessionRef>,
+    /// Sessions removed from the strip whose queued re-registration becomes a
+    /// no-op. Upstream keeps `cancelledTabs` so a registration landing after
+    /// a removal cannot resurrect the tab; navigating to the session again
+    /// clears the mark (`context/session-tabs.tsx:84-91`, `212-213`,
+    /// `349-374`).
+    cancelled: Vec<SessionRef>,
 }
 
 /// In-memory tab history. Upstream bounds it at 100 entries and keeps the
 /// newest at `index` (`session-tabs-model.ts:147-176`).
 const SESSION_TAB_HISTORY_LIMIT: usize = 100;
 const CLOSED_SESSION_TAB_LIMIT: usize = 25;
+/// New-tab fallback title for a routed session with no title yet
+/// (`session-tabs-model.ts:8`, applied at `context/session-tabs.tsx:216-224`).
+pub const NEW_SESSION_TAB_TITLE: &str = "New session";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct TabHistory {
@@ -401,6 +410,10 @@ impl NavigationState {
         self.active = index;
         self.home = false;
         let session = self.tabs[index].session.clone();
+        // Navigating to the session again clears the cancellation mark so it
+        // is re-admitted (`context/session-tabs.tsx:212-213`, `421-429`,
+        // `459-470`).
+        self.cancelled.retain(|candidate| *candidate != session);
         // Focusing the route views it (`context/session-tabs.tsx:229-267`).
         self.unread.retain(|candidate| *candidate != session);
         self.record_history(&session);
@@ -462,6 +475,13 @@ impl NavigationState {
             .collect()
     }
 
+    /// Whether the session was removed from the strip and has not been routed
+    /// to again. Mirrors the upstream `cancelledTabs` set
+    /// (`context/session-tabs.tsx:84-91`).
+    #[must_use]
+    pub fn is_cancelled(&self, session: &SessionRef) -> bool {
+        self.cancelled.iter().any(|candidate| candidate == session)
+    }
     /// Reopen a closed tab at its original slot. Without an explicit session
     /// the most recent entry is used. Already-open entries are consumed so
     /// repeated reopens walk the stack (`session-tabs-model.ts:91-111`).
@@ -528,6 +548,7 @@ impl NavigationState {
         }
         self.history = TabHistory::default();
         self.closed.clear();
+        self.cancelled.clear();
         self.unread.clear();
     }
 
@@ -554,6 +575,13 @@ impl NavigationState {
             .iter()
             .position(|tab| &tab.session == session)
             .ok_or(NavRefusal::NoSuchTab)?;
+        // Removing marks the session cancelled so any late registration
+        // becomes a no-op (`context/session-tabs.tsx:349-351`, the shared
+        // `remove()` behind both close paths). The Rust model has no queued
+        // storage-write race, so the mark is simply cleared on the next
+        // routed focus below.
+        self.cancelled.retain(|candidate| candidate != session);
+        self.cancelled.push(session.clone());
         self.closed.retain(|entry| &entry.session != session);
         let title = self.title(session).map(str::to_owned);
         self.closed.push(ClosedTab {
@@ -1013,6 +1041,21 @@ impl NavigationState {
             .find(|(s, _, _)| s == session)
             .map(|(_, t, _)| t.as_str())
             .or_else(|| self.snapshot_titles.iter().find(|(s, _)| s == session).map(|(_, t)| t.as_str()))
+    }
+
+    /// Title tiers (`context/session-tabs.tsx:119-122`): the daemon rename
+    /// store is the `session?.title` tier, the snapshot store the persisted
+    /// tier, and `fallback` is the caller-supplied new-tab fallback
+    /// (`session-tabs-model.ts:8`). The final upstream tier,
+    /// `withTimestampedFallback(session)`, needs session creation metadata
+    /// the native model does not carry and is therefore not produced here.
+    #[must_use]
+    pub fn title_with_fallback<'a>(
+        &'a self,
+        session: &SessionRef,
+        fallback: Option<&'a str>,
+    ) -> Option<&'a str> {
+        self.title(session).or(fallback)
     }
 
     fn bound_snapshot_title(title: String) -> String {
@@ -1608,6 +1651,46 @@ mod tests {
         // Closing a tab before the focused one keeps focus on the session.
         nav.close(&s("s5")).unwrap();
         assert_eq!(nav.active().unwrap().session, s("s10"));
+    }
+
+    #[test]
+    fn tab_22_cancel_marks_and_title_fallback_tier() {
+        let mut nav = NavigationState::new();
+        // Title tiers (`context/session-tabs.tsx:119-122`): the daemon-rename
+        // tier outranks the snapshot tier, and the caller-supplied new-tab
+        // fallback (`session-tabs-model.ts:8`) applies only when both miss.
+        assert_eq!(nav.title(&s("a")), None);
+        assert_eq!(
+            nav.title_with_fallback(&s("a"), Some(NEW_SESSION_TAB_TITLE)),
+            Some(NEW_SESSION_TAB_TITLE)
+        );
+        nav.ingest_snapshot_title(s("a"), "Listed title".to_owned());
+        assert_eq!(nav.title(&s("a")), Some("Listed title"));
+        assert_eq!(
+            nav.title_with_fallback(&s("a"), Some(NEW_SESSION_TAB_TITLE)),
+            Some("Listed title")
+        );
+        // Closing marks the session cancelled so a late registration cannot
+        // resurrect the tab (`context/session-tabs.tsx:349-351`).
+        nav.open(s("a"));
+        assert!(nav.close(&s("a")).is_ok());
+        assert!(nav.is_cancelled(&s("a")));
+        nav.open(s("b"));
+        assert!(nav.is_cancelled(&s("a")));
+        // Routing to the session again clears the mark
+        // (`context/session-tabs.tsx:212-213`, `421-429`).
+        nav.open(s("a"));
+        assert!(!nav.is_cancelled(&s("a")));
+        assert!(nav.close(&s("a")).is_ok());
+        // Reopen clears the mark too (`context/session-tabs.tsx:459-470`).
+        assert_eq!(nav.reopen(None), Some(s("a")));
+        assert!(!nav.is_cancelled(&s("a")));
+        // A restart-style restore drops in-memory cancellation marks with the
+        // recently-closed stack (`context/session-tabs.tsx:84`).
+        assert!(nav.close(&s("a")).is_ok());
+        nav.restore_tabs(&PersistedTabs::default());
+        assert!(!nav.is_cancelled(&s("a")));
+        assert!(nav.recently_closed().is_empty());
     }
 
     #[test]
