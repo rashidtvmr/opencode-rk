@@ -278,12 +278,26 @@ pub const TAB_STRIDE: u16 = TAB_HEIGHT + TAB_GAP;
 pub const COMPACT_BREAKPOINT: u16 = 12;
 pub const COMPACT_STRIDE: u16 = 2;
 
+/// Title cell budget for the expanded rail's first row. Mirrors
+/// `render_expanded_cells`: `max(2, digits)` indicator cells plus a one-cell
+/// gap, then the trailing pad. A hovered row wide enough for the close child
+/// (width >= 4) reserves two trailing cells instead of one.
+#[must_use]
+pub fn expanded_title_width(width: u16, items: usize, hovered: bool) -> u16 {
+    let indicator_width = items.to_string().len().max(2) as u16;
+    let pad = width.min(indicator_width.saturating_add(1));
+    let tail = if hovered && width >= 4 { 2 } else { 1 };
+    width.saturating_sub(pad).saturating_sub(tail)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RailInput {
     pub session: crate::native_navigation::SessionRef,
     pub title: String,
     pub detail: String,
     pub flags: TabFlags,
+    /// Marquee window start for the hovered title (0 paints the plain title).
+    pub marquee_offset: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -334,6 +348,8 @@ pub struct RailRow {
     pub flags: TabFlags,
     /// Whether this row's session was hovered when rendered.
     pub is_hovered: bool,
+    /// Four-cell fade window for the title/detail text of this row.
+    pub fade: Option<crate::native_tabs::TitleFade>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -466,6 +482,7 @@ impl RailFrame {
                     color_spans: Vec::new(),
                     flags: TabFlags::default(),
                     is_hovered: false,
+                    fade: None,
                 });
                 continue;
             }
@@ -497,15 +514,29 @@ impl RailFrame {
                         ""
                     };
                     let prefix = fit(&format!("{indicator:>indicator_width$} "), row_pad);
-                    let available = width.saturating_sub(row_pad).saturating_sub(tail);
-                    let text = fit(
-                        if part == 0 {
-                            &input.title
-                        } else {
-                            &input.detail
-                        },
-                        available,
-                    );
+                    let available = if part == 0 {
+                        expanded_title_width(width, inputs.len(), hovered == Some(&input.session))
+                    } else {
+                        width.saturating_sub(row_pad).saturating_sub(tail)
+                    };
+                    let source = if part == 0 { &input.title } else { &input.detail };
+                    // `session-tabs.tsx:1590-1596`: only the hovered title
+                    // takes the marquee window; the detail line never scrolls.
+                    let displayed = if part == 0 && input.marquee_offset > 0 {
+                        crate::native_tabs::marquee_text(source, available, input.marquee_offset)
+                    } else {
+                        crate::native_tabs::take_width(source, available)
+                    };
+                    let text = fit(&displayed, available);
+                    let fade = (crate::native_tabs::marquee_overflows(source, available)
+                        && usize::from(available) > crate::native_tabs::FADE_WIDTH)
+                        .then(|| crate::native_tabs::TitleFade {
+                            start: row_pad,
+                            // `visibleTitleParts().length`: the clusters actually
+                            // painted, excluding the fit's padding tail.
+                            length: grapheme_count(&displayed).min(usize::from(u16::MAX)) as u16,
+                            leading: part == 0 && input.marquee_offset > 0,
+                        });
                     let text = if close {
                         frame.visible_close = Some((
                             input.session.clone(),
@@ -561,6 +592,7 @@ impl RailFrame {
                         color_spans,
                         flags: input.flags,
                         is_hovered: hovered == Some(&input.session),
+                        fade,
                     });
                 } else {
                     frame.rows.push(RailRow {
@@ -571,6 +603,7 @@ impl RailFrame {
                         color_spans: Vec::new(),
                         flags: TabFlags::default(),
                         is_hovered: false,
+                    fade: None,
                     });
                 }
             } else if logical == new_top {
@@ -590,6 +623,7 @@ impl RailFrame {
                     color_spans,
                     flags: TabFlags::default(),
                     is_hovered: false,
+                    fade: None,
                 });
             } else {
                 frame.rows.push(RailRow {
@@ -600,6 +634,7 @@ impl RailFrame {
                     color_spans: Vec::new(),
                     flags: TabFlags::default(),
                     is_hovered: false,
+                    fade: None,
                 });
             }
         }
@@ -685,6 +720,7 @@ impl RailFrame {
             color_spans: vec![(0, role)],
             flags: TabFlags::default(),
             is_hovered: false,
+                    fade: None,
         };
 
         for y in 0..height {
@@ -784,6 +820,7 @@ impl RailFrame {
                     color_spans,
                     flags: input.flags,
                     is_hovered,
+                    fade: None,
                 });
             } else if item == inputs.len() {
                 frame.new_rect = Some(RailRect { x: 0, y, width, height: 1 });
@@ -797,6 +834,7 @@ impl RailFrame {
                     color_spans: vec![(0, CellColor::CompactPadding), (start, CellColor::NewIndicator), (start + 1, CellColor::CompactPadding)],
                     flags: TabFlags::default(),
                     is_hovered: false,
+                    fade: None,
                 });
             } else {
                 frame.rows.push(inert(y, " ".repeat(usize::from(width)), RailRowKind::Gap, CellColor::CompactPadding));
@@ -896,6 +934,13 @@ impl RailFrame {
     pub fn display_width(text: &str) -> usize {
         visit_unpadded_cells(text, usize::MAX, |_, _| {})
     }
+}
+
+/// Visible grapheme clusters (the fade's `visibleTitleParts().length`).
+fn grapheme_count(text: &str) -> usize {
+    let mut count = 0usize;
+    visit_unpadded_cells(text, usize::MAX, |_, _| count += 1);
+    count
 }
 
 // ---------------------------------------------------------------------------
@@ -1028,6 +1073,80 @@ mod tests {
     }
 
     #[test]
+    fn expanded_title_width_matches_the_painted_first_row() {
+        let inputs = sessions(2);
+        let width = 30;
+        let indicator = inputs.len().to_string().len().max(2) as u16;
+        let pad = indicator + 1;
+        assert_eq!(expanded_title_width(width, 2, false), width - pad - 1);
+        assert_eq!(expanded_title_width(width, 2, true), width - pad - 2);
+        let hovered = RailFrame::render(&inputs, width, 10, 0, Some(&inputs[0].session));
+        let row = hovered
+            .rows
+            .iter()
+            .find(|row| row.kind == RailRowKind::Session(inputs[0].session.clone()))
+            .unwrap();
+        let line = row.text.lines().next().unwrap();
+        assert_eq!(RailFrame::display_width(line), usize::from(width));
+        // prefix + title budget + "✕ " consumes the full rail width.
+        assert_eq!(
+            RailFrame::display_width(line),
+            usize::from(pad + expanded_title_width(width, 2, true) + 2)
+        );
+        // Below the 4-column close threshold the hovered budget matches resting.
+        assert_eq!(expanded_title_width(3, 2, true), expanded_title_width(3, 2, false));
+    }
+
+    #[test]
+    fn expanded_rows_carry_the_four_cell_fade_window() {
+        // session-tabs.tsx:754-766,812-818: the title fades against exactly
+        // the visible clusters of the painted budget; the detail line fades
+        // on its own overflow and never scrolls.
+        let inputs = sessions(2);
+        let frame = RailFrame::render(&inputs, 20, 10, 0, None);
+        let title = frame
+            .rows
+            .iter()
+            .find(|row| row.kind == RailRowKind::Session(inputs[0].session.clone()))
+            .unwrap();
+        let fade = title.fade.expect("17 cells overflow a 16-cell budget");
+        assert_eq!((fade.start, fade.length), (3, 13), "界面😀 + 9 ASCII clusters fit 16 cells");
+        assert!(!fade.leading);
+        assert_eq!(fade.weight(0), 0.0, "at rest the leading ramp is disabled");
+        assert_eq!(fade.weight(8), 0.0);
+        assert!((fade.weight(12) - 0.92).abs() < 1e-6);
+        let detail = frame
+            .rows
+            .iter()
+            .filter(|row| row.kind == RailRowKind::Session(inputs[0].session.clone()))
+            .nth(1)
+            .unwrap();
+        assert_eq!(detail.fade, None, "the short detail never fades");
+
+        let hovered = RailFrame::render(&inputs, 20, 10, 0, Some(&inputs[0].session));
+        let title = hovered
+            .rows
+            .iter()
+            .find(|row| row.kind == RailRowKind::Session(inputs[0].session.clone()))
+            .unwrap();
+        let fade = title.fade.expect("hovered close shrinks the budget to 15 cells");
+        assert_eq!((fade.start, fade.length), (3, 12));
+
+        let mut scrolling = sessions(2);
+        scrolling[0].marquee_offset = 4;
+        let frame = RailFrame::render(&scrolling, 20, 10, 0, None);
+        let title = frame
+            .rows
+            .iter()
+            .find(|row| row.kind == RailRowKind::Session(scrolling[0].session.clone()))
+            .unwrap();
+        let fade = title.fade.expect("the marquee window still fades");
+        assert_eq!((fade.start, fade.length), (3, 15), "12 title clusters + the · gap");
+        assert!(fade.leading, "a scrolling title ramps its leading edge");
+        assert!((fade.weight(0) - 0.92).abs() < 1e-6);
+    }
+
+    #[test]
     fn hovered_close_fits_narrow_rails_without_overrunning() {
         let inputs = sessions(1);
         for width in 0..=6 {
@@ -1112,6 +1231,7 @@ mod tests {
                     busy: false,
                     needs_attention: false,
                 },
+                marquee_offset: 0,
             })
             .collect()
     }
@@ -1631,6 +1751,7 @@ mod tests {
                     busy: false,
                     needs_attention: false,
                 },
+                marquee_offset: 0,
             })
             .collect();
         let frame = RailFrame::render_with_active_new(&inputs, 42, 10, 0, None, true);
@@ -1757,18 +1878,21 @@ mod tests {
                 title: "First session".into(),
                 detail: "project-alpha".into(),
                 flags: TabFlags { active: true, busy: false, needs_attention: false },
+                marquee_offset: 0,
             },
             RailInput {
                 session: crate::native_navigation::SessionRef("second".into()),
                 title: "Second session".into(),
                 detail: "project-alpha".into(),
                 flags: TabFlags::default(),
+                marquee_offset: 0,
             },
             RailInput {
                 session: crate::native_navigation::SessionRef("third".into()),
                 title: "Third session".into(),
                 detail: "project-alpha".into(),
                 flags: TabFlags::default(),
+                marquee_offset: 0,
             },
         ];
         let frame = RailFrame::render_cells(&inputs, 5, 24, 0, None, false);
@@ -1791,6 +1915,7 @@ mod tests {
             title: "Status".into(),
             detail: "project".into(),
             flags: TabFlags { active: false, busy: true, needs_attention: true },
+            marquee_offset: 0,
         };
         let compact = RailFrame::render_cells(std::slice::from_ref(&input), 11, 10, 0, None, false);
         assert_eq!(compact.rows[3].text.trim(), "!");
@@ -1953,18 +2078,21 @@ mod tests {
                 title: "First session".into(),
                 detail: "project-alpha".into(),
                 flags: TabFlags { active: true, busy: false, needs_attention: false },
+                marquee_offset: 0,
             },
             RailInput {
                 session: crate::native_navigation::SessionRef("second".into()),
                 title: "Second session".into(),
                 detail: "project-alpha".into(),
                 flags: TabFlags::default(),
+                marquee_offset: 0,
             },
             RailInput {
                 session: crate::native_navigation::SessionRef("third".into()),
                 title: "Third session".into(),
                 detail: "project-alpha".into(),
                 flags: TabFlags::default(),
+                marquee_offset: 0,
             },
         ];
         let frame = RailFrame::render_cells(&inputs, 5, 24, 0, None, false);

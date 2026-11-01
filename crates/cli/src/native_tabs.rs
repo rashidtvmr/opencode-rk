@@ -100,6 +100,9 @@ pub struct TabInput {
     pub session: SessionRef,
     pub title: String,
     pub flags: TabFlags,
+    /// Marquee window start for the hovered title (0 paints the plain title).
+    /// The strip applies it with the exact title budget its layout reserves.
+    pub marquee_offset: usize,
 }
 
 impl TabInput {
@@ -112,6 +115,43 @@ impl TabInput {
                 needs_attention: false,
             },
             session: tab.session.clone(),
+            marquee_offset: 0,
+        }
+    }
+}
+
+/// Visible-cluster fade window for an overflowing title, a port of
+/// `session-tabs.tsx:230-236` `fadeTitleColor`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TitleFade {
+    /// Cell offset of the first title cluster inside the composed row.
+    pub start: u16,
+    /// Number of visible title clusters (`visibleTitleParts().length`).
+    pub length: u16,
+    /// The leading edge ramps only while the marquee is running.
+    pub leading: bool,
+}
+
+impl TitleFade {
+    /// Opacity toward the background for visible cluster `index`
+    /// (0 keeps the text color, 1 dissolves it).
+    #[must_use]
+    pub fn weight(&self, index: u16) -> f64 {
+        f64::from(title_fade_weight(
+            usize::from(index),
+            usize::from(self.length),
+            if self.leading { 1.0 } else { 0.0 },
+        ))
+    }
+
+    /// Apply the fade to one cell color.
+    #[must_use]
+    pub fn color(&self, index: u16, base: [u8; 4], background: [u8; 4]) -> [u8; 4] {
+        let weight = self.weight(index);
+        if weight <= 0.0 {
+            base
+        } else {
+            crate::native_tab_rail::tint(base, background, weight)
         }
     }
 }
@@ -511,6 +551,9 @@ pub struct TabStrip {
     /// `row_colors`; they slot the number/indicator column color into the
     /// resolved paints.
     row_flags: Vec<TabFlags>,
+    /// Fade window per visible session row, aligned with `rects` (horizontal
+    /// only). `None` means every title cell keeps its solid color.
+    pub row_fades: Vec<Option<TitleFade>>,
     /// Palette-free color fact for the promoted Home slot, if painted.
     home_color: Option<TabCellColor>,
 }
@@ -519,6 +562,21 @@ impl TabStrip {
     /// Width available to session tabs, excluding the horizontal add control.
     #[must_use]
     pub fn content_width(&self) -> u16 { self.available_width }
+
+    /// Title cell budget this strip's layout gave `session`, for the marquee's
+    /// overflow test. `hovered` is the caller's pointer fact, not the strip's
+    /// previous frame, because the close child shrinks the title by two.
+    /// Only horizontal strips carry per-tab slot rects; the vertical rail
+    /// computes its budget from `native_tab_rail::expanded_title_width`.
+    #[must_use]
+    pub fn title_width(&self, session: &SessionRef, hovered: bool) -> Option<u16> {
+        let (_, rect) = self.rects.iter().find(|(id, _)| id == session)?;
+        Some(horizontal_title_cells(
+            rect.width,
+            usize::from(self.indicator_cells),
+            hovered,
+        ))
+    }
 
     /// Translate both paint and hit rectangles by the same viewport origin.
     #[must_use]
@@ -659,6 +717,7 @@ impl TabStrip {
             home_active: false,
             row_colors: Vec::new(),
             row_flags: Vec::new(),
+            row_fades: Vec::new(),
             home_color: None,
             indicator_cells: 0,
         };
@@ -735,7 +794,9 @@ impl TabStrip {
                 } else {
                     None
                 };
-                out.rows.push(horizontal_row(input, slot_width, gauge, hovered == Some(&input.session)));
+                let (row, fade) = horizontal_row(input, slot_width, gauge, hovered == Some(&input.session));
+                out.rows.push(row);
+                out.row_fades.push(fade);
                 out.rects.push((input.session.clone(), slot));
                 if let Some(close) = close {
                     out.close_rects.push((input.session.clone(), close));
@@ -1172,35 +1233,78 @@ fn format_label(input: &TabInput) -> String {
 /// region spanning to the strip edge; the hovered close child paints its
 /// glyph over the title's second-to-last cell (position absolute right=1
 /// width=1), shrinking the title by two as upstream hoveredTitleWidth does.
-fn horizontal_row(input: &TabInput, slot_width: u16, gauge: usize, hovered: bool) -> String {
+fn horizontal_row(input: &TabInput, slot_width: u16, gauge: usize, hovered: bool) -> (String, Option<TitleFade>) {
     let glyph = indicator_label(&input.flags, false);
-    horizontal_composed_row(glyph, &input.title, slot_width, gauge, hovered)
+    horizontal_composed_row(
+        glyph,
+        &input.title,
+        input.marquee_offset,
+        slot_width,
+        gauge,
+        hovered,
+    )
 }
 
 /// The promoted Home row: "+" indicator glyph and the upstream
 /// NEW_SESSION_TAB_TITLE text, with the same gauge/title/close geometry.
 fn horizontal_row_home(slot_width: u16, gauge: usize, hovered: bool) -> String {
-    horizontal_composed_row("+", TabReservation::HOME_TITLE, slot_width, gauge, hovered)
+    horizontal_composed_row("+", TabReservation::HOME_TITLE, 0, slot_width, gauge, hovered).0
 }
 
-fn horizontal_composed_row(glyph: &str, title: &str, slot_width: u16, gauge: usize, hovered: bool) -> String {
+/// Indicator column width clamped so a slot always keeps a title cell and the
+/// close overlay, mirroring upstream MIN width 8.
+fn horizontal_indicator_cells(slot_width: u16, gauge: usize) -> usize {
     let w = usize::from(slot_width);
-    // The gauge never eats the whole slot: at least one title cell remains and
-    // the close cell stays overlay-able, mirroring upstream MIN width 8.
-    let col = gauge.min(w.saturating_sub(2)).max(if w >= 3 { 1 } else { w });
+    gauge.min(w.saturating_sub(2)).max(if w >= 3 { 1 } else { w })
+}
+
+/// Title cell budget for one horizontal slot. `hovered` reserves the
+/// two-cell close child (`✕ `) that `horizontal_composed_row` writes there;
+/// the marquee's overflow test must use this exact budget.
+fn horizontal_title_cells(slot_width: u16, gauge: usize, hovered: bool) -> u16 {
+    let w = usize::from(slot_width);
+    let col = horizontal_indicator_cells(slot_width, gauge);
     if hovered && w >= col + 2 {
-        // title cells shrink by two; close glyph lands at w-2; final cell pads.
-        let title_cells = w - col - 2;
-        let mut row = format_indicator_column(glyph, col);
-        row.push_str(&fit(title, title_cells as u16));
-        row.push_str("\u{2715} ");
-        row
+        (w - col - 2) as u16
     } else {
-        let title_cells = w - col;
-        let mut row = format_indicator_column(glyph, col);
-        row.push_str(&fit(title, title_cells as u16));
-        row
+        w.saturating_sub(col) as u16
     }
+}
+
+fn horizontal_composed_row(
+    glyph: &str,
+    title: &str,
+    offset: usize,
+    slot_width: u16,
+    gauge: usize,
+    hovered: bool,
+) -> (String, Option<TitleFade>) {
+    let w = usize::from(slot_width);
+    let col = horizontal_indicator_cells(slot_width, gauge);
+    let budget = horizontal_title_cells(slot_width, gauge, hovered);
+    let overflows = marquee_overflows(title, budget);
+    let displayed = if offset > 0 {
+        marquee_text(title, budget, offset)
+    } else {
+        take_width(title, budget)
+    };
+    let close = hovered && w >= col + 2;
+    let title_cells = if close { w - col - 2 } else { w - col };
+    let mut row = format_indicator_column(glyph, col);
+    row.push_str(&fit(&displayed, title_cells as u16));
+    if close {
+        row.push_str("\u{2715} ");
+    }
+    // `session-tabs.tsx:764-770`: the fade tracks the full title's overflow,
+    // so a marquee window keeps the edge ramps of its visible clusters.
+    let fade = (overflows && usize::from(budget) > FADE_WIDTH).then(|| TitleFade {
+        // The title segment is painted from its own first cluster, so the
+        // window starts at cluster 0 of the strip's `displayed` text.
+        start: 0,
+        length: graphemes(&displayed).len().min(usize::from(u16::MAX)) as u16,
+        leading: offset > 0,
+    });
+    (row, fade)
 }
 
 fn format_indicator_column(glyph: &str, col: usize) -> String {
@@ -1525,7 +1629,7 @@ fn graphemes(value: &str) -> Vec<String> {
     out
 }
 
-fn take_width(value: &str, width: u16) -> String {
+pub(crate) fn take_width(value: &str, width: u16) -> String {
     let mut out = String::new();
     let mut used = 0usize;
     visit_unpadded_cells(value, usize::from(width), |glyph, cells| {
@@ -1646,6 +1750,21 @@ impl Marquee {
     #[must_use]
     pub const fn leading(&self) -> bool {
         self.offset > 0
+    }
+
+    /// Next deterministic clock instant at which `advance` can change the
+    /// visible frame: the 600 ms delay expiry, then each 80 ms step. The live
+    /// loop wakes exactly here instead of rounding to its 80 ms animation tick,
+    /// so the first frame lands on the upstream timer boundary.
+    #[must_use]
+    pub fn next_wake(&self) -> Option<u64> {
+        if self.active.is_none() {
+            return None;
+        }
+        if self.offset == 0 {
+            return self.started_at.map(|started| started.saturating_add(MARQUEE_DELAY_MS));
+        }
+        self.next_tick
     }
 
     /// `session-tabs.tsx:272-290`: a fitting title resets; re-entering the
@@ -2127,6 +2246,7 @@ mod tests {
             session: SessionRef(id.into()),
             title: title.into(),
             flags: TabFlags::default(),
+            marquee_offset: 0,
         }
     }
 
@@ -2296,6 +2416,7 @@ mod tests {
                 busy: true,
                 needs_attention: true,
             },
+            marquee_offset: 0,
         };
         let strip = TabStrip::render(&[tab], TabOrientation::Vertical, 6, 1, 0);
         assert_eq!(strip.rects[0].0, SessionRef("busy".into()));
@@ -3224,6 +3345,111 @@ mod tests {
         }
         assert!(marquee_overflows("東京abc", 6));
         assert!(!marquee_overflows("東京abc", 7));
+    }
+
+    #[test]
+    fn tab_09b_marquee_wakes_on_the_delay_then_eighty_millisecond_steps() {
+        // session-tabs.tsx:79-80 MARQUEE_DELAY = 600, MARQUEE_INTERVAL = 80.
+        let mut marquee = Marquee::new();
+        marquee.enter("s", "0123456789abcdefghij", 4, 1_000);
+        assert_eq!(marquee.next_wake(), Some(1_600), "delay boundary, not an 80 ms multiple");
+        assert!(!marquee.advance(1_599));
+        assert_eq!(marquee.offset(), 0);
+        assert!(marquee.advance(1_600));
+        assert_eq!(marquee.offset(), 1);
+        assert!(marquee.leading(), "the leading fade turns on with the first step");
+        assert_eq!(marquee.next_wake(), Some(1_680));
+        assert!(marquee.advance(1_680));
+        assert_eq!(marquee.offset(), 2);
+        // cycleWidth = 20 title cells + " · " = 23; the cycle stops after 22.
+        assert!(marquee.advance(3_360));
+        assert_eq!(marquee.active(), None, "exactly one cycle");
+        assert_eq!(marquee.offset(), 0);
+        assert_eq!(marquee.next_wake(), None);
+
+        // Leaving mid-cycle resets immediately; re-entering restarts the delay.
+        marquee.enter("s", "0123456789abcdefghij", 4, 1_000);
+        assert!(marquee.advance(1_600));
+        marquee.leave("s");
+        assert_eq!(marquee.active(), None);
+        assert_eq!(marquee.next_wake(), None);
+    }
+
+    #[test]
+    fn tab_09c_strip_reports_the_exact_title_budget_it_paints() {
+        let inputs = vec![input("a", "alpha"), input("b", "beta")];
+        let strip = TabStrip::render_with_hover(
+            &inputs,
+            TabOrientation::Horizontal,
+            90,
+            1,
+            0,
+            Some(&inputs[0].session),
+        );
+        let slot = strip
+            .rects
+            .iter()
+            .find(|(id, _)| *id == inputs[0].session)
+            .unwrap()
+            .1
+            .width;
+        let gauge = strip.indicator_cells;
+        assert_eq!(gauge, number_width(2) + 1);
+        assert_eq!(
+            strip.title_width(&inputs[0].session, false),
+            Some(slot - gauge),
+            "resting titles keep the whole slot after the indicator column"
+        );
+        assert_eq!(
+            strip.title_width(&inputs[0].session, true),
+            Some(slot - gauge - 2),
+            "the hovered close child reserves two cells"
+        );
+        assert_eq!(
+            strip.title_width(&SessionRef("gone".into()), true),
+            None,
+            "a tab outside the painted window has no budget"
+        );
+    }
+
+    #[test]
+    fn tab_08b_rows_report_the_exact_fade_window() {
+        // session-tabs.tsx:764,870: the fade only exists while the title
+        // overflows the exact painted title budget, and its window is the
+        // visible cluster count, not the padded slot width.
+        let mut long = input("a", "abcdefghijklmnopqrst");
+        let inputs = vec![long.clone(), input("b", "beta")];
+        let strip = TabStrip::render(&inputs, TabOrientation::Horizontal, 40, 1, 0);
+        let fade = strip.row_fades[0].expect("20 cells overflow a 17-cell budget");
+        assert_eq!((fade.start, fade.length), (0, 17));
+        assert!(!fade.leading);
+        assert_eq!(fade.weight(0), 0.0, "at rest the leading ramp is disabled");
+        assert_eq!(fade.weight(12), 0.0, "the middle of the title stays opaque");
+        assert!((fade.weight(13) - 0.2).abs() < 1e-6);
+        assert!((fade.weight(16) - 0.92).abs() < 1e-6);
+        assert_eq!(strip.row_fades[1], None, "a fitting title has no fade");
+
+        let hovered = TabStrip::render_with_hover(
+            &inputs,
+            TabOrientation::Horizontal,
+            40,
+            1,
+            0,
+            Some(&inputs[0].session),
+        );
+        let fade = hovered.row_fades[0].expect("hovered close shrinks the budget");
+        assert_eq!((fade.start, fade.length), (0, 15));
+
+        // A scrolling marquee keeps the visible-cluster window and turns the
+        // leading ramp on, so both edges fade.
+        long.marquee_offset = 5;
+        let scrolling = TabStrip::render(&[long, input("b", "beta")], TabOrientation::Horizontal, 40, 1, 0);
+        let fade = scrolling.row_fades[0].expect("the marquee window still fades");
+        assert_eq!((fade.start, fade.length), (0, 17));
+        assert!(fade.leading);
+        assert!((fade.weight(0) - 0.92).abs() < 1e-6);
+        assert_eq!(fade.weight(4), 0.0);
+        assert!((fade.weight(16) - 0.92).abs() < 1e-6);
     }
 
     #[test]

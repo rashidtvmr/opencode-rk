@@ -1898,7 +1898,7 @@ mod surface_paint_regressions {
             kind: RailRowKind::Empty, style: RailStyle::Idle,
             rect: RailRect { x: 0, y: 0, width: 12, height: 2 },
             text: "abcdefghijkl\nmnopqrstuvwx".into(),
-            color_spans: Vec::new(), flags: Default::default(), is_hovered: false,
+            color_spans: Vec::new(), flags: Default::default(), is_hovered: false, fade: None,
         };
         paint_rail_row(&mut renderer, &row, Some((3, 0, 5, 1)), foreground, background).unwrap();
         renderer.frame(|_| {}).unwrap();
@@ -3227,9 +3227,12 @@ fn paint_styled_rail_row(
         if y >= renderer.rows() { continue; }
         let mut failure = None;
         let mut column = 0usize;
+        let mut cluster = 0usize;
         crate::native_view_layout::visit_unpadded_cells(line, usize::from(row.rect.width), |grapheme, width| {
             let current = column;
+            let index = cluster;
             column = column.saturating_add(width);
+            cluster += 1;
             if failure.is_some() { return; }
             let x = left.saturating_add(current as u32);
             let end = x.saturating_add(width as u32);
@@ -3251,6 +3254,15 @@ fn paint_styled_rail_row(
                 CellColor::NewText => (paint.new_text_fg, paint.new_attr),
                 CellColor::CapTop => (paint.cap_top_fg, 0),
                 CellColor::CapBottom => (paint.cap_bottom_fg, 0),
+            };
+            // `session-tabs.tsx:817,869-877`: the title/detail ramps blend each
+            // visible cluster toward the row background over four cells.
+            let fg = match (row.fade, role) {
+                (Some(fade), CellColor::Title | CellColor::Detail | CellColor::Search)
+                    if index >= usize::from(fade.start)
+                        && index < usize::from(fade.start).saturating_add(usize::from(fade.length)) =>
+                    fade.color((index - usize::from(fade.start)) as u16, fg, paint.background),
+                _ => fg,
             };
             if let Err(error) = renderer.draw_text_styled(x, y, grapheme, color(fg), Some(background), attr) {
                 failure = Some(error);
@@ -3297,6 +3309,66 @@ fn paint_tab_segment(
                 y >= my && y < my.saturating_add(mh) && x < mx.saturating_add(mw) && end > mx
             ) { return; }
             if let Err(error) = renderer.draw_text_styled(x, y, cluster, foreground, Some(background), attributes) {
+                failure = Some(error);
+            }
+        });
+        if let Some(error) = failure { return Err(error.into()); }
+    }
+    Ok(())
+}
+
+/// Title segment with the upstream four-cell fade: each visible cluster
+/// blends its foreground toward the tab background (`session-tabs.tsx:230-236`).
+#[cfg(feature = "native")]
+fn paint_tab_title_faded(
+    renderer: &mut NativeRenderer,
+    rect: (u16, u16, u16, u16),
+    text: &str,
+    modal: Option<(u32, u32, u32, u32)>,
+    foreground: Rgba,
+    background: Rgba,
+    attributes: u32,
+    fade: crate::native_tabs::TitleFade,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (left, top, width, height) = rect;
+    let left = u32::from(left);
+    let right = left.saturating_add(u32::from(width)).min(renderer.cols());
+    for offset in 0..height {
+        let y = u32::from(top).saturating_add(u32::from(offset));
+        if y >= renderer.rows() || left >= right { continue; }
+        let spans = match modal {
+            Some((x, modal_top, modal_width, modal_height))
+                if y >= modal_top && y < modal_top.saturating_add(modal_height) =>
+                [(left, right.min(x)), (left.max(x.saturating_add(modal_width)), right)],
+            _ => [(left, right), (right, right)],
+        };
+        for (start, end) in spans {
+            if start < end { renderer.fill_rect(start, y, end - start, 1, background)?; }
+        }
+        let line = text.split('\n').nth(usize::from(offset)).unwrap_or("");
+        let mut column = 0usize;
+        let mut visible = 0usize;
+        let mut failure = None;
+        crate::native_view_layout::visit_unpadded_cells(line, usize::from(width), |cluster, cells| {
+            let index = visible;
+            visible += 1;
+            let x = left.saturating_add(column as u32);
+            column = column.saturating_add(cells);
+            let end = x.saturating_add(cells as u32);
+            if failure.is_some() || end > right || modal.is_some_and(|(mx, my, mw, mh)|
+                y >= my && y < my.saturating_add(mh) && x < mx.saturating_add(mw) && end > mx
+            ) { return; }
+            let color = if usize::from(index) < usize::from(fade.length) && index >= usize::from(fade.start) {
+                let [r, g, b, a] = fade.color(
+                    (usize::from(index) - usize::from(fade.start)) as u16,
+                    [foreground.r, foreground.g, foreground.b, foreground.a],
+                    [background.r, background.g, background.b, background.a],
+                );
+                Rgba::new(r, g, b, a)
+            } else {
+                foreground
+            };
+            if let Err(error) = renderer.draw_text_styled(x, y, cluster, color, Some(background), attributes) {
                 failure = Some(error);
             }
         });
@@ -3803,9 +3875,15 @@ fn native_paint(
                     paint.map_or(fallback_fg, |p| dim_tab(p.number_fg, base_alpha)), row_bg, 0)?;
             }
             if width > indicator {
-                paint_tab_segment(renderer, (rect.x.saturating_add(indicator), rect.y, width - indicator, rect.height), &title, modal,
-                    paint.map_or(fallback_fg, |p| dim_tab(p.title_fg, base_alpha)), row_bg,
-                    paint.map_or(0, |p| p.title_attr))?;
+                let title_rect = (rect.x.saturating_add(indicator), rect.y, width - indicator, rect.height);
+                let title_fg = paint.map_or(fallback_fg, |p| dim_tab(p.title_fg, base_alpha));
+                let title_attr = paint.map_or(0, |p| p.title_attr);
+                match tabs.row_fades.get(index).copied().flatten() {
+                    Some(fade) => paint_tab_title_faded(renderer, title_rect, &title, modal,
+                        title_fg, row_bg, title_attr, fade)?,
+                    None => paint_tab_segment(renderer, title_rect, &title, modal,
+                        title_fg, row_bg, title_attr)?,
+                }
             }
         }
         if let Some(rect) = tabs.visible_close_rect() {
@@ -4034,6 +4112,7 @@ fn rail_inputs_for_navigation(
     tabs.iter().map(|tab| crate::native_tab_rail::RailInput {
         session: tab.session.clone(), title: tab.title.clone(),
         detail: navigation.project_label(&tab.session).unwrap_or_default().to_owned(), flags: tab.flags,
+        marquee_offset: tab.marquee_offset,
     }).collect()
 }
 
@@ -5183,6 +5262,10 @@ fn native_loop(
     let mut home_press: Option<(crate::native_tabs::TabRect, TabOrientation, bool)> = None;
     let mut tab_home_hovered = false;
     let mut tab_add_hovered = false;
+    // Hovered-title marquee clock. Upstream only runs it for the tab under the
+    // pointer (`session-tabs.tsx:1650`); offset>0 replaces the rendered title
+    // with the wrapping ` · ` window.
+    let mut tab_marquee = crate::native_tabs::TabMarquee::new();
     let mut context_menu: Option<crate::native_tab_context_menu::TabContextMenu> = None;
     let mut rename_input: Option<(crate::native_navigation::SessionRef, String)> = None;
     let mut rename_error: Option<String> = None;
@@ -6414,6 +6497,21 @@ fn native_loop(
         // Center dialog overlay (native_setup): credentials stay masked in
         // its own lines; the facade keeps all three panes visible and
         // echoes the composer draft (never an API key) below it.
+        // Marquee clock: a cycle whose tab left the rail stops
+        // (`session-tabs.tsx:616-618`); otherwise advance on the upstream
+        // 600 ms delay / 80 ms cadence.
+        let marquee_now = animation_start
+            .elapsed()
+            .as_millis()
+            .min(u128::from(u64::MAX)) as u64;
+        if let Some(active) = tab_marquee.marquee().active().map(str::to_owned) {
+            if !navigation.tabs().iter().any(|tab| tab.session.0 == active) {
+                tab_marquee.reset();
+            }
+        }
+        if tab_marquee.advance(marquee_now) {
+            needs_paint = true;
+        }
         let busy_animation = worker.is_some() || model_load.is_some();
         let next_tick = animation_start.elapsed().as_millis() / 80;
         if busy_animation && next_tick != animation_tick {
@@ -6654,23 +6752,41 @@ fn native_loop(
         // item is the Home slot (adaptive member, active) and the idle plus is
         // suppressed; home_hovered gates its close glyph like session tabs.
         let home_active = effective_orientation == TabOrientation::Horizontal && navigation.is_home();
-        let frame_tabs = TabStrip::render_with_hover_add_home(
-            &tab_inputs,
-            effective_orientation,
-            match effective_orientation {
-                TabOrientation::Horizontal => viewport.0,
-                TabOrientation::Vertical => tab_reservation.width,
-            },
-            match effective_orientation {
-                TabOrientation::Horizontal => 1,
-                TabOrientation::Vertical => viewport.1,
-            },
-            rendered_tabs.as_ref().map_or(0, |tabs| tabs.scroll),
-            tab_hovered.as_ref(),
-            matches!(effective_orientation, TabOrientation::Horizontal),
-            home_active,
-            home_active && tab_home_hovered,
-        ).with_row_colors_semantic(&theme.palette, theme.semantic.as_ref()).with_add_hovered(tab_add_hovered, &theme.palette);
+        let strip_width = match effective_orientation {
+            TabOrientation::Horizontal => viewport.0,
+            TabOrientation::Vertical => tab_reservation.width,
+        };
+        let strip_height = match effective_orientation {
+            TabOrientation::Horizontal => 1,
+            TabOrientation::Vertical => viewport.1,
+        };
+        let render_strip = |inputs: &[crate::native_tabs::TabInput]| {
+            TabStrip::render_with_hover_add_home(
+                inputs,
+                effective_orientation,
+                strip_width,
+                strip_height,
+                rendered_tabs.as_ref().map_or(0, |tabs| tabs.scroll),
+                tab_hovered.as_ref(),
+                matches!(effective_orientation, TabOrientation::Horizontal),
+                home_active,
+                home_active && tab_home_hovered,
+            )
+            .with_row_colors_semantic(&theme.palette, theme.semantic.as_ref())
+            .with_add_hovered(tab_add_hovered, &theme.palette)
+        };
+        // A running cycle projects the hovered tab's marquee window; the strip
+        // and rail each apply it at the exact title budget they paint.
+        if let Some(active) = tab_marquee.marquee().active().map(str::to_owned) {
+            let offset = tab_marquee.marquee().offset();
+            if offset > 0 {
+                let session = crate::native_navigation::SessionRef(active);
+                if let Some(input) = tab_inputs.iter_mut().find(|tab| tab.session == session) {
+                    input.marquee_offset = offset;
+                }
+            }
+        }
+        let frame_tabs = render_strip(&tab_inputs);
         let frame_rail = if effective_orientation == TabOrientation::Vertical {
             let rail_inputs = rail_inputs_for_navigation(&navigation, &tab_inputs);
             Some(crate::native_tab_rail::RailFrame::render_cells(&rail_inputs, tab_reservation.width, viewport.1, rendered_rail.as_ref().map_or(0, |r| r.scroll_cells), tab_hovered.as_ref(), navigation.active().is_none()))
@@ -6909,16 +7025,23 @@ fn native_loop(
         input.expire(now);
         let worker_deadline =
             (worker.is_some() || compact_worker.is_some() || model_load.is_some()).then(|| now + Duration::from_millis(20));
-        let timeout = match (worker_deadline, input.next_deadline()) {
-            (Some(a), Some(b)) => a.min(b).saturating_duration_since(now),
-            (Some(a), None) => a.saturating_duration_since(now),
-            (None, Some(b)) => b.saturating_duration_since(now),
+        // The marquee's delay expiry (600 ms) and 80 ms steps do not align with
+        // the generic animation tick, so wake on its own boundary.
+        let marquee_deadline = tab_marquee
+            .marquee()
+            .next_wake()
+            .map(|at| animation_start + Duration::from_millis(at));
+        let timeout = [worker_deadline, input.next_deadline(), marquee_deadline]
+            .into_iter()
+            .flatten()
+            .min()
             // There is no SIGWINCH path in this small native bridge.  A
             // bounded idle wake lets us observe kernel geometry without
             // repainting unchanged frames or waiting for input.
-            (None, None) => Duration::from_millis(100),
-        }
-        .min(Duration::from_millis(100));
+            .map_or(Duration::from_millis(100), |deadline| {
+                deadline.saturating_duration_since(now)
+            })
+            .min(Duration::from_millis(100));
         let ready = if input.has_event() {
             true
         } else {
@@ -7521,6 +7644,45 @@ fn native_loop(
                             && rendered_tabs.as_ref().is_some_and(|tabs| tabs.home_hit(x, y));
                         tab_add_hovered = effective_orientation == TabOrientation::Horizontal
                             && rendered_tabs.as_ref().is_some_and(|tabs| tabs.add_hit(x, y));
+                        // `session-tabs.tsx:1650,1678` / `:888,915`: pointer-over
+                        // starts the title marquee at the hovered title width;
+                        // leaving the tab schedules the zero-delay clear.
+                        let hover_now = animation_start
+                            .elapsed()
+                            .as_millis()
+                            .min(u128::from(u64::MAX)) as u64;
+                        match tab_hovered.as_ref() {
+                            Some(session) => {
+                                let title = navigation
+                                    .title(session)
+                                    .unwrap_or(&session.0)
+                                    .to_owned();
+                                let width = match effective_orientation {
+                                    TabOrientation::Vertical
+                                        if tab_reservation.width < crate::native_tab_rail::COMPACT_BREAKPOINT =>
+                                    {
+                                        // Compact rows pass `Infinity` upstream, so
+                                        // an overflowing title never scrolls there.
+                                        u16::MAX
+                                    }
+                                    TabOrientation::Vertical => {
+                                        crate::native_tab_rail::expanded_title_width(
+                                            tab_reservation.width,
+                                            navigation.tab_len(),
+                                            true,
+                                        )
+                                    }
+                                    TabOrientation::Horizontal => rendered_tabs
+                                        .as_ref()
+                                        .and_then(|tabs| tabs.title_width(session, true))
+                                        // A strip not yet painted for this tab must
+                                        // not start a cycle at a guessed width.
+                                        .unwrap_or(u16::MAX),
+                                };
+                                tab_marquee.enter(&session.0, &title, width, hover_now);
+                            }
+                            None => tab_marquee.leave_hovered(hover_now),
+                        }
                         needs_paint = true;
                         continue;
                     }
@@ -12103,8 +12265,8 @@ mod middle_close_hit_tests {
 
     fn nav_inputs() -> Vec<RailInput> {
         vec![
-            RailInput { session: crate::native_navigation::SessionRef("s-a".into()), title: "Alpha".into(), detail: "alpha detail".into(), flags: Default::default() },
-            RailInput { session: crate::native_navigation::SessionRef("s-b".into()), title: "Beta".into(), detail: "".into(), flags: Default::default() },
+            RailInput { session: crate::native_navigation::SessionRef("s-a".into()), title: "Alpha".into(), detail: "alpha detail".into(), flags: Default::default(), marquee_offset: 0 },
+            RailInput { session: crate::native_navigation::SessionRef("s-b".into()), title: "Beta".into(), detail: "".into(), flags: Default::default(), marquee_offset: 0 },
         ]
     }
 
@@ -12157,6 +12319,7 @@ mod middle_close_hit_tests {
             session: crate::native_navigation::SessionRef(format!("h-{i}")),
             title: format!("Tab{i}"),
             flags: Default::default(),
+            marquee_offset: 0,
         }).collect();
         let strip = TabStrip::render_with_hover_and_add(&tabs, TabOrientation::Horizontal, 60, 1, 0, None, true);
         // Some session rects exist.
