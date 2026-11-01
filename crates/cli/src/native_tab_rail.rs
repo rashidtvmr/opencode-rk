@@ -29,6 +29,10 @@ pub enum CellColor {
     NewText,
     /// Compact search glyph. Fg: TextMuted, never bold.
     Search,
+    /// Compact search-control hover overlay row (`▀`). Upstream
+    /// `session-tabs-rail.tsx:55-66`: fg = `tint(raised.base, raised.high,
+    /// raised.high.a)`, bg = `raised.base`.
+    SearchHover,
     CapTop,
     CapBottom,
 }
@@ -57,6 +61,11 @@ pub struct RowPaint {
     pub new_attr: u32,
     pub cap_top_fg: [u8; 4],
     pub cap_bottom_fg: [u8; 4],
+    /// Compact search-hover overlay fg: `tint(raised.base, raised.high,
+    /// raised.high.a)` (`session-tabs-rail.tsx:17-19,61`).
+    pub search_hover_fg: [u8; 4],
+    /// Compact search-hover overlay bg: `raised.base` (`session-tabs-rail.tsx:62`).
+    pub search_hover_bg: [u8; 4],
 }
 
 /// tint(base, overlay, alpha) = round(base + (overlay - base) * alpha), per color.ts:43.
@@ -84,6 +93,19 @@ pub fn idle_number(palette: &crate::native_theme_runtime::Palette) -> [u8; 4] {
         palette.get(Slot::BackgroundPanel),
         0.55,
     )
+}
+
+/// `session-tabs-rail.tsx:17-19`: the compact search control's hover tint,
+/// `tint(background.raised.base, background.raised.high,
+/// background.raised.high.a)`. `raised.base == backgroundPanel` and
+/// `raised.high == backgroundElement` are the native slot mapping used
+/// throughout this module.
+#[inline]
+fn search_hover_fg(palette: &crate::native_theme_runtime::Palette) -> [u8; 4] {
+    use crate::native_theme_runtime::Slot;
+    let base = palette.get(Slot::BackgroundPanel);
+    let high = palette.get(Slot::BackgroundElement);
+    tint(base, high, f64::from(high[3]) / 255.0)
 }
 
 impl RowPaint {
@@ -117,6 +139,8 @@ impl RowPaint {
             new_attr: 0,
             cap_top_fg: panel,
             cap_bottom_fg: element,
+            search_hover_fg: search_hover_fg(palette),
+            search_hover_bg: panel,
         }
     }
 
@@ -136,7 +160,26 @@ impl RowPaint {
             new_attr: 0,
             cap_top_fg: background,
             cap_bottom_fg: background,
+            search_hover_fg: search_hover_fg(palette),
+            search_hover_bg: background,
         }
+    }
+
+    /// Compact search-control hover overlay row (`session-tabs-rail.tsx:54-66`):
+    /// fg = `tint(raised.base, raised.high, raised.high.a)`; bg = that tint when
+    /// the row below is highlighted, else `raised.base`.
+    pub fn compact_search_hover_row(
+        palette: &crate::native_theme_runtime::Palette,
+        below_highlighted: bool,
+    ) -> Self {
+        let mut paint = Self::compact_search_row(palette);
+        paint.title_fg = paint.search_hover_fg;
+        paint.background = if below_highlighted {
+            paint.search_hover_fg
+        } else {
+            paint.search_hover_bg
+        };
+        paint
     }
 
     /// Resolve paint for a session row. Upstream priority: attention > busy >
@@ -201,6 +244,8 @@ impl RowPaint {
             new_attr: 0,
             cap_top_fg: [0, 0, 0, 0],
             cap_bottom_fg: [0, 0, 0, 0],
+            search_hover_fg: [0, 0, 0, 0],
+            search_hover_bg: [0, 0, 0, 0],
         }
     }
 
@@ -253,6 +298,8 @@ impl RowPaint {
             new_attr,
             cap_top_fg: palette.get(Slot::BackgroundPanel),
             cap_bottom_fg: palette.get(Slot::BackgroundElement),
+            search_hover_fg: search_hover_fg(palette),
+            search_hover_bg: palette.get(Slot::BackgroundPanel),
         }
     }
 }
@@ -328,6 +375,8 @@ pub enum RailHit {
 pub enum RailRowKind {
     Padding,
     Search,
+    /// Compact search-control hover overlay row (`session-tabs-rail.tsx:54-66`).
+    SearchHover,
     CapTop,
     CapBottom,
     Session(crate::native_navigation::SessionRef),
@@ -405,11 +454,34 @@ impl RailFrame {
         hovered: Option<&crate::native_navigation::SessionRef>,
         active_new: bool,
     ) -> Self {
+        Self::render_cells_with_search_hover(
+            inputs,
+            width,
+            height,
+            requested_scroll,
+            hovered,
+            active_new,
+            false,
+        )
+    }
+
+    /// TAB-23: as [`Self::render_cells`], plus the compact search-control
+    /// hover fact (`session-tabs-rail.tsx:14-20`). Only the live vertical-rail
+    /// render path needs the extra fact.
+    pub fn render_cells_with_search_hover(
+        inputs: &[RailInput],
+        width: u16,
+        height: u16,
+        requested_scroll: usize,
+        hovered: Option<&crate::native_navigation::SessionRef>,
+        active_new: bool,
+        search_hovered: bool,
+    ) -> Self {
         // Five cells is the upstream compact minimum.  Sub-minimum test
         // viewports retain the bounded expanded projection so legacy close
         // hit geometry remains well-defined without exposing compact search.
         if width >= 5 && width < COMPACT_BREAKPOINT {
-            return Self::render_compact_cells(inputs, width, height, requested_scroll, hovered, active_new);
+            return Self::render_compact_cells(inputs, width, height, requested_scroll, hovered, active_new, search_hovered);
         }
         Self::render_expanded_cells(inputs, width, height, requested_scroll, hovered, active_new)
     }
@@ -653,6 +725,7 @@ impl RailFrame {
         requested_scroll: usize,
         hovered: Option<&crate::native_navigation::SessionRef>,
         active_new: bool,
+        search_hovered: bool,
     ) -> Self {
         let mut frame = Self {
             width,
@@ -746,7 +819,24 @@ impl RailFrame {
                 let highlighted = inputs.first().is_some_and(|input| {
                     input.flags.active || hovered == Some(&input.session)
                 });
-                if highlighted {
+                if search_hovered {
+                    // `session-tabs-rail.tsx:54-66`: the controls' absolute
+                    // overlay wins the cell directly below the search glyph and
+                    // paints `▀` (fg = tint(raised.base, raised.high,
+                    // raised.high.a)) while the search control is hovered. The
+                    // overlay bg is that same tint when the row below is
+                    // highlighted (`belowHighlighted`), else `raised.base`;
+                    // `inert` marks the row `is_hovered = false`, so carry the
+                    // decision on `is_hovered` (unused for this row kind).
+                    let mut overlay = inert(
+                        y,
+                        "▀".repeat(usize::from(width)),
+                        RailRowKind::SearchHover,
+                        CellColor::SearchHover,
+                    );
+                    overlay.is_hovered = highlighted;
+                    frame.rows.push(overlay);
+                } else if highlighted {
                     frame.rows.push(inert(
                         y,
                         "▄".repeat(usize::from(width)),
@@ -2008,6 +2098,35 @@ mod tests {
         assert_eq!(expanded.rows[1].kind, RailRowKind::Session(input.session));
         assert_eq!(expanded.rows[2].kind, RailRowKind::Session(crate::native_navigation::SessionRef("status".into())));
         assert_eq!(expanded.rows[3].kind, RailRowKind::Gap);
+    }
+
+    #[test]
+    fn compact_search_hover_paints_upstream_overlay_glyph() {
+        // `session-tabs-rail.tsx:54-66`: while the compact search control is
+        // hovered the row directly below the `⌕` glyph paints `▀` at the hover
+        // tint (fg), with the tint as bg only when the row below is highlighted.
+        let inputs = vec![RailInput {
+            session: crate::native_navigation::SessionRef("s".into()),
+            title: "S".into(),
+            detail: "p".into(),
+            flags: TabFlags::default(),
+            marquee_offset: 0,
+        }];
+        let plain = RailFrame::render_cells_with_search_hover(&inputs, 5, 8, 0, None, false, false);
+        let overlay = RailFrame::render_cells_with_search_hover(&inputs, 5, 8, 0, None, false, true);
+        assert_eq!(plain.rows[2].kind, RailRowKind::Gap);
+        assert_eq!(overlay.rows[2].kind, RailRowKind::SearchHover);
+        assert_eq!(overlay.rows[2].text, "▀▀▀▀▀");
+        assert_eq!(overlay.rows[2].color_spans, vec![(0, CellColor::SearchHover)]);
+        // `belowHighlighted` (the row-below cap) is carried on `is_hovered`.
+        let below = RailFrame::render_cells_with_search_hover(
+            &inputs, 5, 8, 0, Some(&inputs[0].session), false, true,
+        );
+        assert!(below.rows[2].is_hovered, "highlighted row below raises the overlay bg");
+        assert!(!overlay.rows[2].is_hovered);
+        // The overlay never appears in the expanded rail.
+        let expanded = RailFrame::render_cells_with_search_hover(&inputs, 12, 8, 0, None, false, true);
+        assert!(!expanded.rows.iter().any(|row| row.kind == RailRowKind::SearchHover));
     }
 
     #[test]

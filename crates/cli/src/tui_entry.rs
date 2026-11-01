@@ -3584,6 +3584,8 @@ fn paint_styled_rail_row(
                 CellColor::Spinner => (paint.spinner_fg, paint.title_attr),
                 CellColor::Close => (paint.close_fg, 0),
                 CellColor::Search => (paint.title_fg, 0),
+                // TAB-23 overlay fg (`session-tabs-rail.tsx:61`): the hover tint.
+                CellColor::SearchHover => (paint.search_hover_fg, 0),
                 CellColor::NewIndicator => (paint.plus_fg, paint.new_attr),
                 CellColor::NewText => (paint.new_text_fg, paint.new_attr),
                 CellColor::CapTop => (paint.cap_top_fg, 0),
@@ -4181,6 +4183,11 @@ fn native_paint(
                 crate::native_tab_rail::RowPaint::cap_row(&ctx.palette, false)
             } else if matches!(row.kind, crate::native_tab_rail::RailRowKind::CapBottom) {
                 crate::native_tab_rail::RowPaint::cap_row(&ctx.palette, true)
+            } else if matches!(row.kind, crate::native_tab_rail::RailRowKind::SearchHover) {
+                // `session-tabs-rail.tsx:54-66`: overlay fg = the hover tint;
+                // bg = the tint when the row below is highlighted, else
+                // `raised.base` (carried on `row.is_hovered`).
+                crate::native_tab_rail::RowPaint::compact_search_hover_row(&ctx.palette, row.is_hovered)
             } else if matches!(row.kind, crate::native_tab_rail::RailRowKind::Search) {
                 crate::native_tab_rail::RowPaint::compact_search_row(&ctx.palette)
             } else if rail.width < crate::native_tab_rail::COMPACT_BREAKPOINT
@@ -5713,6 +5720,10 @@ fn native_loop(
     let mut close_hold: Option<crate::native_tabs::CloseHold> = None;
     let mut add_press: Option<(crate::native_tabs::TabRect, TabOrientation)> = None;
     let mut rail_search_press: Option<(crate::native_tabs::TabRect, TabOrientation)> = None;
+    // TAB-23: the compact search control's live hover fact
+    // (`session-tabs-rail.tsx:14-20` `onMouseOver`/`onMouseOut`); drives the
+    // `▀` overlay row.
+    let mut rail_search_hovered = false;
     // Promoted Home slot state: pointer-over fact drives the close glyph, a
     // captured press (body or close child) absorbs the click so it can never
     // leak into composer/send regions while already on Home.
@@ -7327,7 +7338,7 @@ fn native_loop(
         // open context menu suppress it.
         let (frame_rail, frame_tooltip) = if effective_orientation == TabOrientation::Vertical {
             let rail_inputs = rail_inputs_for_navigation(&navigation, &tab_inputs);
-            let rail = crate::native_tab_rail::RailFrame::render_cells(&rail_inputs, tab_reservation.width, viewport.1, rendered_rail.as_ref().map_or(0, |r| r.scroll_cells), tab_hovered.as_ref(), navigation.active().is_none());
+            let rail = crate::native_tab_rail::RailFrame::render_cells_with_search_hover(&rail_inputs, tab_reservation.width, viewport.1, rendered_rail.as_ref().map_or(0, |r| r.scroll_cells), tab_hovered.as_ref(), navigation.active().is_none(), rail_search_hovered);
             let tooltip = if tab_reservation.width < crate::native_tab_rail::COMPACT_BREAKPOINT
                 && tab_drag.dragging().is_none()
                 && context_menu.is_none()
@@ -8305,6 +8316,16 @@ fn native_loop(
                         } else {
                             rendered_tabs.as_ref().and_then(|tabs| tabs.hit(x, y)).map(|hit| hit.session)
                         };
+                        // TAB-23: the compact search control's hover fact
+                        // (`session-tabs-rail.tsx:14-20`). `search_hit` targets
+                        // the painted `⌕` row, so the overlay only appears while
+                        // the pointer is physically over the control.
+                        let search_hovered = effective_orientation == TabOrientation::Vertical
+                            && rendered_rail.as_ref().is_some_and(|rail| rail.search_hit(x, y));
+                        if search_hovered != rail_search_hovered {
+                            rail_search_hovered = search_hovered;
+                            needs_paint = true;
+                        }
                         tab_hover_y = tab_hovered.is_some().then_some(y);
                         // Home pseudo-tab hover is identity-free and tracked beside
                         // the session hover fact; session hover wins the glyph.
