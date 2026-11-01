@@ -95,6 +95,29 @@ pub fn idle_number(palette: &crate::native_theme_runtime::Palette) -> [u8; 4] {
     )
 }
 
+/// `session-tabs-model.ts:14-22` `sessionTabDetail`: when the tab is a linked
+/// worktree whose current branch differs from the default, show
+/// `"<project> \u{2387} <branch>"`; otherwise fall back to the branch alone, then
+/// the project. TAB-10.
+#[must_use]
+pub fn session_tab_detail(
+    project: &str,
+    current: Option<&str>,
+    default_branch: Option<&str>,
+    worktree: bool,
+) -> String {
+    let branch = if worktree && current != default_branch {
+        current
+    } else {
+        None
+    };
+    match (branch, project.is_empty()) {
+        (Some(branch), false) => format!("{project} \u{2387} {branch}"),
+        (Some(branch), true) => branch.to_owned(),
+        (None, _) => project.to_owned(),
+    }
+}
+
 /// `session-tabs-rail.tsx:17-19`: the compact search control's hover tint,
 /// `tint(background.raised.base, background.raised.high,
 /// background.raised.high.a)`. `raised.base == backgroundPanel` and
@@ -2269,6 +2292,23 @@ mod tests {
         );
         assert_eq!(compact.rows[3].rect.height, 1);
         assert_eq!(compact.rows[5].rect.y, compact.rows[3].rect.y + 2);
+    }
+
+    #[test]
+    fn tab_10_detail_matches_project_branch_worktree_rules() {
+        // session-tabs-model.ts:14-22: `branch = worktree && current !==
+        // defaultBranch ? current : undefined`; result is
+        // `branch && project ? "<project> \u{2387} <branch>" : branch ?? project`.
+        assert_eq!(session_tab_detail("proj", Some("feat"), Some("main"), true), "proj \u{2387} feat");
+        // current == default under a worktree drops the branch.
+        assert_eq!(session_tab_detail("proj", Some("main"), Some("main"), true), "proj");
+        // a plain checkout never shows a branch even when it differs.
+        assert_eq!(session_tab_detail("proj", Some("feat"), Some("main"), false), "proj");
+        // an empty project keeps the branch alone.
+        assert_eq!(session_tab_detail("", Some("feat"), Some("main"), true), "feat");
+        // no branch info falls back to the project.
+        assert_eq!(session_tab_detail("proj", None, None, true), "proj");
+        assert_eq!(session_tab_detail("proj", None, None, false), "proj");
     }
 
     #[test]
