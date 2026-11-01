@@ -2887,6 +2887,295 @@ pub mod pickers {
             None
         }
     }
+
+    // ------------------------------------------------------------------
+    // DIALOG-17: stash / workspaces / workspace-file-changes row models.
+    // ------------------------------------------------------------------
+
+    /// `getStashPreview` preview budget (`dialog-stash.tsx:24`).
+    pub const STASH_PREVIEW_MAX: usize = 50;
+    /// `MAX_STASH_ENTRIES` (`prompt/stash.tsx:14`).
+    pub const MAX_STASH_ENTRIES: usize = 50;
+
+    /// One persisted prompt-stash entry (`prompt/stash.tsx:9-12`). `text` is
+    /// `entry.prompt.text`; the dialog never needs the rest of `PromptInfo`.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct StashEntry {
+        pub text: String,
+        pub timestamp: i64,
+    }
+
+    /// `getRelativeTime` (`dialog-stash.tsx:9-22`). `now` is injected so the
+    /// model stays clock-free; the `>= 7d` branch defers to the caller's
+    /// `Locale.datetime` rendering, passed as `datetime_fallback`.
+    #[must_use]
+    pub fn stash_relative_time(now_ms: i64, timestamp_ms: i64, datetime_fallback: &str) -> String {
+        let seconds = (now_ms - timestamp_ms).div_euclid(1000);
+        let minutes = seconds.div_euclid(60);
+        let hours = minutes.div_euclid(60);
+        let days = hours.div_euclid(24);
+        if seconds < 60 {
+            return "just now".to_owned();
+        }
+        if minutes < 60 {
+            return format!("{minutes}m ago");
+        }
+        if hours < 24 {
+            return format!("{hours}h ago");
+        }
+        if days < 7 {
+            return format!("{days}d ago");
+        }
+        datetime_fallback.to_owned()
+    }
+
+    /// `getStashPreview` (`dialog-stash.tsx:24-27`): first line, trimmed,
+    /// then `Locale.truncate(.., 50)`.
+    #[must_use]
+    pub fn stash_preview(input: &str, max_length: usize) -> String {
+        let first_line = input.split('\n').next().unwrap_or("").trim();
+        super::dialog::truncate(first_line, max_length)
+    }
+
+    /// One stash option row (`dialog-stash.tsx:44-53`).
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct StashRow {
+        pub title: String,
+        pub description: String,
+        pub footer: Option<String>,
+        pub value: usize,
+        pub armed: bool,
+    }
+
+    /// Build the stash list: `title`/`description`/`footer` per entry, armed
+    /// title when `to_delete` matches, then `.toReversed()` so the most recent
+    /// entry renders first while `value` keeps the original index
+    /// (`dialog-stash.tsx:37-56,65-73`).
+    #[must_use]
+    pub fn stash_rows(
+        entries: &[StashEntry],
+        to_delete: Option<usize>,
+        now_ms: i64,
+        datetime_fallback: &str,
+        delete_key: &str,
+    ) -> Vec<StashRow> {
+        let mut rows: Vec<StashRow> = entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                let armed = to_delete == Some(index);
+                let line_count = entry.text.matches('\n').count() + 1;
+                StashRow {
+                    title: if armed {
+                        format!("Press {delete_key} again to confirm")
+                    } else {
+                        stash_preview(&entry.text, STASH_PREVIEW_MAX)
+                    },
+                    description: stash_relative_time(now_ms, entry.timestamp, datetime_fallback),
+                    footer: if line_count > 1 {
+                        Some(format!("~{line_count} lines"))
+                    } else {
+                        None
+                    },
+                    value: index,
+                    armed,
+                }
+            })
+            .collect();
+        rows.reverse();
+        rows
+    }
+
+    /// Workspaces dialog chrome (`dialog-workspaces.tsx:326-365`).
+    pub const WORKSPACES_TITLE: &'static str = "Worktrees";
+    pub const WORKSPACES_EMPTY_LOADING: &'static str = "Loading worktrees\u{2026}";
+    pub const WORKSPACES_EMPTY: &'static str = "No worktrees available";
+    pub const WORKSPACES_EMPTY_ERROR_TITLE: &'static str = "Could not load worktrees";
+    pub const WORKSPACES_EMPTY_ERROR_RETRY: &'static str = "Close and reopen Worktrees to try again.";
+    pub const WORKSPACES_NO_MATCH: &'static str = "No worktrees found";
+
+    /// Which empty view the Worktrees list renders
+    /// (`dialog-workspaces.tsx:342-360`): a locked error, the loading text, or
+    /// the "no worktrees" placeholder.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum WorkspacesEmpty {
+        Error,
+        Loading,
+        Empty,
+    }
+
+    impl WorkspacesEmpty {
+        /// Primary (bold) line, or `None` when only the muted placeholder shows.
+        #[must_use]
+        pub fn title(&self) -> Option<&'static str> {
+            match self {
+                Self::Error => Some(WORKSPACES_EMPTY_ERROR_TITLE),
+                Self::Loading => Some(WORKSPACES_EMPTY_LOADING),
+                Self::Empty => Some(WORKSPACES_EMPTY),
+            }
+        }
+
+        /// `showError() || loading` locks the list (`dialog-workspaces.tsx:366`).
+        #[must_use]
+        pub const fn locks_list(&self) -> bool {
+            matches!(self, Self::Error | Self::Loading)
+        }
+    }
+
+    /// `WorkspaceSelection` (`dialog-workspaces.tsx:23-25`).
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum WorkspaceSelection {
+        Directory { directory: String, subdirectory: bool },
+        New { name: String },
+    }
+
+    /// One worktree root (`WorktreeListOutput[number]`): a directory and,
+    /// when it is a linked worktree, its strategy label
+    /// (`dialog-workspaces.tsx:26,135,391`).
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct WorkspaceRoot {
+        pub directory: String,
+        pub strategy: Option<String>,
+    }
+
+    /// Root ordering (`dialog-workspaces.tsx:132-138`): the current root first,
+    /// then plain checkouts before strategy worktrees, then shorter paths.
+    pub fn sort_workspace_roots(roots: &mut [WorkspaceRoot], current: Option<&str>) {
+        roots.sort_by(|a, b| {
+            if Some(a.directory.as_str()) == current {
+                return std::cmp::Ordering::Less;
+            }
+            if Some(b.directory.as_str()) == current {
+                return std::cmp::Ordering::Greater;
+            }
+            match (a.strategy.is_some(), b.strategy.is_some()) {
+                (true, false) => std::cmp::Ordering::Greater,
+                (false, true) => std::cmp::Ordering::Less,
+                (false, false) => a.directory.len().cmp(&b.directory.len()),
+                (true, true) => std::cmp::Ordering::Equal,
+            }
+        });
+    }
+
+    /// One worktree option row (`dialog-workspaces.tsx:167-198`). `suffix` is
+    /// the muted `sep + relative(root, location)` tail for a subdirectory row;
+    /// `deleting` / `removing` carry the destructive title states.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct WorkspaceRow {
+        pub location: String,
+        pub title: String,
+        pub suffix: Option<String>,
+        pub category: &'static str,
+        pub subdirectory: bool,
+        pub deleting: bool,
+        pub removing: bool,
+    }
+
+    impl WorkspaceRow {
+        /// `category` is `"Current"` for the current root's rows and `"Other"`
+        /// otherwise (`dialog-workspaces.tsx:195`).
+        #[must_use]
+        pub fn value(&self) -> WorkspaceSelection {
+            WorkspaceSelection::Directory {
+                directory: self.location.clone(),
+                subdirectory: self.subdirectory,
+            }
+        }
+
+        /// The destructive title text (`dialog-workspaces.tsx:177-188`):
+        /// removing wins, then the armed-confirm prompt.
+        #[must_use]
+        pub fn armed_title(&self, delete_key: &str) -> Option<String> {
+            if self.removing {
+                return Some(format!("Deleting {}", self.location));
+            }
+            if self.deleting {
+                return Some(format!("Press {delete_key} again to confirm"));
+            }
+            None
+        }
+    }
+
+    /// A root row's `category` given the current root (`dialog-workspaces.tsx:195`).
+    #[must_use]
+    pub fn workspace_category(root_directory: &str, current: Option<&str>) -> &'static str {
+        if Some(root_directory) == current {
+            "Current"
+        } else {
+            "Other"
+        }
+    }
+
+    /// `WorkspaceFileChangesChoice` (`dialog-workspace-file-changes.tsx:19-21`).
+    pub const FILE_CHANGE_CHOICES: [&str; 2] = ["no", "yes"];
+    /// Header default (`dialog-workspace-file-changes.tsx:100`).
+    pub const FILE_CHANGES_TITLE: &'static str = "File Changes Found";
+    /// Message default (`dialog-workspace-file-changes.tsx:132`).
+    pub const FILE_CHANGES_MESSAGE: &'static str = "Do you want to move these changes with the session?";
+
+    /// One row of the file-changes list (`VcsFileStatus`,
+    /// `types.ts:298-303`; `dialog-workspace-file-changes.tsx:141-167`).
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct FileChange {
+        pub file: String,
+        pub additions: u32,
+        pub deletions: u32,
+        /// `"added" | "deleted" | "modified"`.
+        pub status: String,
+    }
+
+    /// `statusLabel` (`dialog-workspace-file-changes.tsx:23-27`): `A`/`D`/`M`.
+    #[must_use]
+    pub fn status_label(status: &str) -> &'static str {
+        match status {
+            "added" => "A",
+            "deleted" => "D",
+            _ => "M",
+        }
+    }
+
+    /// `changeCountWidth` (`dialog-workspace-file-changes.tsx:29-32`): the
+    /// rendered `"+N -M"` length plus two spaces; a zero side is omitted.
+    #[must_use]
+    pub fn change_count_width(file: &FileChange) -> usize {
+        let mut text = String::new();
+        if file.additions != 0 {
+            text.push('+');
+            text.push_str(&file.additions.to_string());
+        }
+        if file.deletions != 0 {
+            text.push_str(" -");
+            text.push_str(&file.deletions.to_string());
+        }
+        text.chars().count() + 2
+    }
+
+    /// Scrollbox height `min(files.length, 8)`
+    /// (`dialog-workspace-file-changes.tsx:50`).
+    #[must_use]
+    pub const fn file_changes_height(count: usize) -> usize {
+        if count < 8 {
+            count
+        } else {
+            8
+        }
+    }
+
+    /// The rendered counts cell (`dialog-workspace-file-changes.tsx:156-164`):
+    /// a leading space, `+N` when additions, ` -M` when deletions.
+    #[must_use]
+    pub fn change_counts(file: &FileChange) -> String {
+        let mut text = String::from(" ");
+        if file.additions != 0 {
+            text.push('+');
+            text.push_str(&file.additions.to_string());
+        }
+        if file.deletions != 0 {
+            text.push_str(" -");
+            text.push_str(&file.deletions.to_string());
+        }
+        text
+    }
 }
 
 #[cfg(test)]
@@ -3885,6 +4174,161 @@ mod dialog_parity_tests {
         assert_eq!(delete.resolve("d"), Some(true));
         assert_eq!(delete.resolve("return"), None);
         assert_eq!(delete.resolve("esc"), Some(false));
+    }
+
+    // DIALOG-17: stash row labels/order/empty, workspaces categories + empty
+    // states, file-changes label/width/height (dialog-stash.tsx:9-85,
+    // dialog-workspaces.tsx:132-198,342-365,
+    // dialog-workspace-file-changes.tsx:19-50,141-167).
+    #[test]
+    fn stash_rows_reverse_order_and_preview() {
+        let now = 1_000_000_000i64;
+        let entries = vec![
+            StashEntry {
+                text: "first".into(),
+                timestamp: now - 5_000,
+            },
+            StashEntry {
+                text: "line one\nline two\nline three".into(),
+                timestamp: now - 30 * 60_000,
+            },
+        ];
+        let rows = stash_rows(&entries, None, now, "Oct 30", "ctrl+d");
+        // Most recent (highest index) first; `value` keeps the original index.
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].value, 1);
+        assert_eq!(rows[1].value, 0);
+        // Preview takes the first line only and truncates to 50.
+        assert_eq!(rows[0].title, "line one");
+        assert_eq!(rows[0].description, "30m ago");
+        assert_eq!(rows[0].footer, Some("~3 lines".to_owned()));
+        assert_eq!(rows[1].title, "first");
+        assert_eq!(rows[1].description, "just now");
+        assert_eq!(rows[1].footer, None, "single-line preview has no footer");
+        // Arming replaces the title with the confirm prompt.
+        let armed = stash_rows(&entries, Some(0), now, "Oct 30", "ctrl+d");
+        let armed_row = armed.iter().find(|r| r.value == 0).unwrap();
+        assert!(armed_row.armed);
+        assert_eq!(armed_row.title, "Press ctrl+d again to confirm");
+        // Relative-time ladder and the >=7d fallback.
+        assert_eq!(stash_relative_time(now, now - 59_000, "X"), "just now");
+        assert_eq!(stash_relative_time(now, now - 3 * 3_600_000, "X"), "3h ago");
+        assert_eq!(stash_relative_time(now, now - 2 * 86_400_000, "X"), "2d ago");
+        assert_eq!(stash_relative_time(now, now - 8 * 86_400_000, "Oct 22"), "Oct 22");
+        assert_eq!(MAX_STASH_ENTRIES, 50);
+        // Preview truncates on the char budget with a trailing ellipsis.
+        assert_eq!(stash_preview(&"y".repeat(80), STASH_PREVIEW_MAX).chars().count(), 50);
+        assert!(stash_preview(&"y".repeat(80), STASH_PREVIEW_MAX).ends_with('\u{2026}'));
+    }
+
+    #[test]
+    fn workspace_rows_categories_and_empty_states() {
+        assert_eq!(WORKSPACES_TITLE, "Worktrees");
+        assert_eq!(WORKSPACES_EMPTY, "No worktrees available");
+        assert_eq!(WORKSPACES_EMPTY_LOADING, "Loading worktrees\u{2026}");
+        assert_eq!(WORKSPACES_NO_MATCH, "No worktrees found");
+        assert_eq!(WORKSPACES_EMPTY_ERROR_TITLE, "Could not load worktrees");
+        assert!(WorkspacesEmpty::Error.locks_list());
+        assert!(WorkspacesEmpty::Loading.locks_list());
+        assert!(!WorkspacesEmpty::Empty.locks_list());
+        assert_eq!(WorkspacesEmpty::Empty.title(), Some("No worktrees available"));
+
+        // Current root first, then plain checkouts (shortest first), then
+        // strategy worktrees.
+        let mut roots = vec![
+            WorkspaceRoot {
+                directory: "/w/feature".into(),
+                strategy: Some("worktree".into()),
+            },
+            WorkspaceRoot {
+                directory: "/w".into(),
+                strategy: None,
+            },
+            WorkspaceRoot {
+                directory: "/w/current".into(),
+                strategy: None,
+            },
+        ];
+        sort_workspace_roots(&mut roots, Some("/w/current"));
+        let order: Vec<&str> = roots.iter().map(|r| r.directory.as_str()).collect();
+        assert_eq!(order, vec!["/w/current", "/w", "/w/feature"]);
+        assert_eq!(workspace_category("/w/current", Some("/w/current")), "Current");
+        assert_eq!(workspace_category("/w", Some("/w/current")), "Other");
+
+        // A subdirectory row carries the muted suffix and the armed/removing
+        // destructive titles.
+        let row = WorkspaceRow {
+            location: "/w/current/sub".into(),
+            title: "sub".into(),
+            suffix: Some("/sub".into()),
+            category: "Current",
+            subdirectory: true,
+            deleting: false,
+            removing: false,
+        };
+        assert_eq!(row.value(), WorkspaceSelection::Directory {
+            directory: "/w/current/sub".into(),
+            subdirectory: true,
+        });
+        assert_eq!(row.armed_title("ctrl+d"), None);
+        let deleting = WorkspaceRow {
+            deleting: true,
+            ..row.clone()
+        };
+        assert_eq!(deleting.armed_title("ctrl+d"), Some("Press ctrl+d again to confirm".into()));
+        let removing = WorkspaceRow {
+            deleting: false,
+            removing: true,
+            ..row.clone()
+        };
+        assert_eq!(
+            removing.armed_title("ctrl+d"),
+            Some("Deleting /w/current/sub".into())
+        );
+    }
+
+    #[test]
+    fn file_change_rows_label_width_and_height() {
+        assert_eq!(FILE_CHANGE_CHOICES, ["no", "yes"]);
+        assert_eq!(FILE_CHANGES_TITLE, "File Changes Found");
+        assert_eq!(
+            FILE_CHANGES_MESSAGE,
+            "Do you want to move these changes with the session?"
+        );
+        assert_eq!(status_label("added"), "A");
+        assert_eq!(status_label("deleted"), "D");
+        assert_eq!(status_label("modified"), "M");
+        assert_eq!(status_label("anything-else"), "M");
+
+        let both = FileChange {
+            file: "a.rs".into(),
+            additions: 12,
+            deletions: 3,
+            status: "modified".into(),
+        };
+        assert_eq!(change_counts(&both), " +12 -3");
+        // "+12 -3" (6 chars) + 2 = 8.
+        assert_eq!(change_count_width(&both), 8);
+        let add_only = FileChange {
+            additions: 5,
+            deletions: 0,
+            ..both.clone()
+        };
+        assert_eq!(change_counts(&add_only), " +5");
+        assert_eq!(change_count_width(&add_only), 4);
+        let none = FileChange {
+            additions: 0,
+            deletions: 0,
+            ..both.clone()
+        };
+        assert_eq!(change_counts(&none), " ");
+        assert_eq!(change_count_width(&none), 2);
+
+        // Scrollbox height clamps at 8.
+        assert_eq!(file_changes_height(0), 0);
+        assert_eq!(file_changes_height(3), 3);
+        assert_eq!(file_changes_height(8), 8);
+        assert_eq!(file_changes_height(100), 8);
     }
 }
 
