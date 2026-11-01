@@ -1064,6 +1064,93 @@ pub fn preserve_mentionless_attachments(
     out
 }
 
+/// The live composer draft: the visible text, the caret offset in bytes, and
+/// the tracked input parts (mentions, attachments, folded pastes) that must
+/// survive edits (CP-35, `index.tsx:809-878`).
+///
+/// `text` is what the user sees and is the single source of truth; the embedded
+/// [`TrackedPrompt`] carries the part anchors. Call [`Self::realign_after_edit`]
+/// after any text mutation so the anchors follow the edit (re-anchored, reordered
+/// or dropped) exactly like upstream `syncExtmarksWithPromptParts`.
+///
+/// This is the owning state the production edit pipeline must migrate to: the
+/// live draft is currently a bare `String` + `usize` cursor in `tui_entry.rs`.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TrackedDraft {
+    pub text: String,
+    pub cursor: usize,
+    pub parts: TrackedPrompt,
+}
+
+impl TrackedDraft {
+    #[must_use]
+    pub fn new(text: impl Into<String>) -> Self {
+        let text = text.into();
+        let cursor = text.len();
+        let parts = TrackedPrompt::new(text.clone());
+        Self { text, cursor, parts }
+    }
+
+    /// Replace the visible text (the caret is clamped to a char boundary)
+    /// without touching the tracked parts. Call [`Self::realign_after_edit`]
+    /// afterwards.
+    pub fn set_text(&mut self, text: impl Into<String>) {
+        self.text = text.into();
+        self.clamp_cursor();
+    }
+
+    /// Insert `text` at byte offset `at`, moving the caret to the end of the
+    /// insertion. All tracked ranges shift the way textarea extmarks do.
+    pub fn insert_text(&mut self, at: usize, text: &str) -> bool {
+        self.sync_parts_text();
+        if !self.parts.insert_text(at, text) {
+            return false;
+        }
+        self.text = self.parts.text.clone();
+        self.cursor = at + text.len();
+        true
+    }
+
+    /// Delete `[start, end)` from the draft. Mentioned parts that the deletion
+    /// removed follow [`TrackedPrompt::delete_range`]: files survive mentionless,
+    /// agents/skills/pastes disappear.
+    pub fn delete_range(&mut self, start: usize, end: usize) -> bool {
+        self.sync_parts_text();
+        if !self.parts.delete_range(start, end) {
+            return false;
+        }
+        self.text = self.parts.text.clone();
+        self.cursor = start;
+        true
+    }
+
+    /// Re-derive every tracked part from the current `text`
+    /// (`prompt/mention.ts:20-48`, `index.tsx:809-878`). Mentions whose text no
+    /// longer occurs are dropped; reordered duplicates are reassigned to the
+    /// nearest occurrence. This is the seam the production edit pipeline calls
+    /// after it mutates the draft.
+    pub fn realign_after_edit(&mut self) {
+        self.clamp_cursor();
+        self.sync_parts_text();
+        self.parts.realign();
+    }
+
+    fn sync_parts_text(&mut self) {
+        if self.parts.text != self.text {
+            self.parts.text = self.text.clone();
+        }
+    }
+
+    fn clamp_cursor(&mut self) {
+        if self.cursor > self.text.len() {
+            self.cursor = self.text.len();
+        }
+        while self.cursor > 0 && !self.text.is_char_boundary(self.cursor) {
+            self.cursor -= 1;
+        }
+    }
+}
+
 /// Snapshot of the paste-relevant state before an asynchronous paste starts
 /// (`index.tsx:376-392`).
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2022,6 +2109,30 @@ mod tracked_parts_tests {
         }];
         prompt.realign();
         assert!(prompt.agents.is_empty());
+    }
+
+    #[test]
+    fn cp35_tracked_draft_realigns_reordered_and_deleted_mentions() {
+        // "@src/a" (file) and "@agent/x" (agent) are swapped by the user.
+        let mut draft = TrackedDraft::new("@src/a and @agent/x");
+        draft.parts.files = vec![file("file:///a", Some(mention("@src/a", 0)))];
+        draft.parts.agents = vec![LabelPart {
+            id: "a".to_owned(),
+            mention: Some(mention("@agent/x", 11)),
+        }];
+        draft.set_text("@agent/x and @src/a");
+        draft.realign_after_edit();
+        // "@agent/x and " is 13 bytes, so "@src/a" now starts at 13 and the
+        // agent mention moved back to 0.
+        assert_eq!(draft.parts.files[0].mention.as_ref().unwrap().start, 13);
+        assert_eq!(draft.parts.agents[0].mention.as_ref().unwrap().start, 0);
+        // The user deletes "@src/a": its file survives mentionless and the
+        // caret clamps to the new length ("index.tsx:868-878").
+        draft.set_text("@agent/x and ");
+        draft.realign_after_edit();
+        assert_eq!(draft.cursor, 13);
+        assert!(draft.parts.files[0].mention.is_none());
+        assert_eq!(draft.parts.agents[0].mention.as_ref().unwrap().start, 0);
     }
 }
 
