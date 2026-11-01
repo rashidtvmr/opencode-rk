@@ -5443,6 +5443,9 @@ fn native_loop(
     // Vertical-rail drag-to-reorder: armed on a session press, previewed while
     // the left button moves, and persisted once on release.
     let mut tab_drag = crate::native_tabs::DragState::new();
+    // Upstream keeps the pointer's physical close cell after a close until
+    // leave/another close/5 s (`session-tabs.tsx:868-900,1348-1363`).
+    let mut close_hold: Option<crate::native_tabs::CloseHold> = None;
     let mut add_press: Option<(crate::native_tabs::TabRect, TabOrientation)> = None;
     let mut rail_search_press: Option<(crate::native_tabs::TabRect, TabOrientation)> = None;
     // Promoted Home slot state: pointer-over fact drives the close glyph, a
@@ -6707,6 +6710,15 @@ fn native_loop(
             animation_tick = next_tick;
             needs_paint = true;
         }
+        // The pointer close-hold auto-releases after 5 s (`session-tabs.tsx:
+        // 868-900`); a released hold repaints the ordinary adaptive strip.
+        if close_hold
+            .as_ref()
+            .is_some_and(|hold| hold.expired(animation_start.elapsed().as_millis() as u64))
+        {
+            close_hold = None;
+            needs_paint = true;
+        }
         let mut overlay: Vec<String> = match dialog {
             native_setup::Dialog::Settings => {
                 let mut rows = settings_dialog.render(view.modal_presentation().content_width, view.modal_content_height());
@@ -6894,6 +6906,9 @@ fn native_loop(
             tab_add_hovered = false;
             rail_search_press = None;
             home_press = None;
+            // A resize reflows the strip; the held close cell no longer names a
+            // stable physical cell (`session-tabs.tsx:1416-1419`).
+            close_hold = None;
             tab_viewport = Some(viewport);
         }
         if dialog_open || help_open || view.command_palette_open() || permission_editor.open
@@ -6939,6 +6954,16 @@ fn native_loop(
             let ids: Vec<_> = navigation.tabs().iter().map(|tab| tab.session.clone()).collect();
             tab_drag.project(&mut tab_inputs, &ids);
         }
+        // A live close-hold replaces the adaptive width solve so the pointer's
+        // close cell stays put (`session-tabs.tsx:1348-1363`); it clears when the
+        // layout can no longer apply to the current tab order.
+        let held_layout = close_hold.as_ref().and_then(|hold| {
+            let ids: Vec<_> = navigation.tabs().iter().map(|tab| tab.session.clone()).collect();
+            hold.layout(&ids)
+        });
+        if close_hold.is_some() && held_layout.is_none() {
+            close_hold = None;
+        }
         // Upstream promoted NEW_SESSION_TAB: on the Home route the strip's last
         // item is the Home slot (adaptive member, active) and the idle plus is
         // suppressed; home_hovered gates its close glyph like session tabs.
@@ -6952,7 +6977,7 @@ fn native_loop(
             TabOrientation::Vertical => viewport.1,
         };
         let render_strip = |inputs: &[crate::native_tabs::TabInput]| {
-            TabStrip::render_with_hover_add_home(
+            TabStrip::render_with_held(
                 inputs,
                 effective_orientation,
                 strip_width,
@@ -6962,6 +6987,7 @@ fn native_loop(
                 matches!(effective_orientation, TabOrientation::Horizontal),
                 home_active,
                 home_active && tab_home_hovered,
+                held_layout.as_ref(),
             )
             .with_row_colors_semantic(&theme.palette, theme.semantic.as_ref())
             .with_add_hovered(tab_add_hovered, &theme.palette)
@@ -7877,7 +7903,7 @@ fn native_loop(
                     if let Some(me)=me { let outcome=menu.handle(me,menu_vp); if let crate::native_tab_context_menu::MenuOutcome::Invoke(action)=outcome { context_menu=None; match action {
                         crate::native_tab_context_menu::MenuAction::NewSession => { let model=selected.as_ref().map(|m|m.qualified()); let saved=if navigation.active().is_some(){navigation.save_active_state(draft.clone(),draft_cursor,view.chat_scroll_offset(),model)}else{Ok(())}; if let Err(e)=saved{append_transcript(&mut transcript,format!("error: new tab: state save refused: {e:?}"));}else{live=None;history_window=None;history_pending=false;history_active=None;history_navigation_request=None;blocked_history_scroll=None;history_tail_refresh_pending=false;history_browsing=false;draft.clear();draft_cursor=0;navigation.enter_home();session_route=false;view.reset_to_home_after_tab_close();view.set_chat_scroll_offset(0);} },
                         crate::native_tab_context_menu::MenuAction::CopySessionId{session}=>{let frame=selection_clipboard_frame(&session.0);let mut out=std::io::stdout().lock();out.write_all(frame.as_bytes())?;out.flush()?;},
-                        crate::native_tab_context_menu::MenuAction::Close{session}=>{let scroll=view.chat_scroll_offset();match close_tab_transition(&mut view,&mut transcript,&mut navigation,&draft,draft_cursor,live.as_ref().map(|s|s.origin.as_str()),auth,binding_generation,&session,selected.as_ref().map(|m|m.qualified()),scroll){Ok(result)=>apply_close_tab_result(result,&mut view,&mut live,&mut history_window,&mut binding_generation,&mut draft,&mut draft_cursor,&mut selected,&models,&mut session_route,&mut compact_worker),Err(e)=>append_transcript(&mut transcript,format!("error: close tab: {e}"))}},
+                        crate::native_tab_context_menu::MenuAction::Close{session}=>{close_hold=None;let scroll=view.chat_scroll_offset();match close_tab_transition(&mut view,&mut transcript,&mut navigation,&draft,draft_cursor,live.as_ref().map(|s|s.origin.as_str()),auth,binding_generation,&session,selected.as_ref().map(|m|m.qualified()),scroll){Ok(result)=>apply_close_tab_result(result,&mut view,&mut live,&mut history_window,&mut binding_generation,&mut draft,&mut draft_cursor,&mut selected,&models,&mut session_route,&mut compact_worker),Err(e)=>append_transcript(&mut transcript,format!("error: close tab: {e}"))}},
                         crate::native_tab_context_menu::MenuAction::Rename{session,current_title}=>{rename_input=Some((session,current_title));rename_error=None;},
                         crate::native_tab_context_menu::MenuAction::Reopen{session}=>{
                             let scroll=view.chat_scroll_offset();
@@ -7949,6 +7975,27 @@ fn native_loop(
                             && rendered_tabs.as_ref().is_some_and(|tabs| tabs.home_hit(x, y));
                         tab_add_hovered = effective_orientation == TabOrientation::Horizontal
                             && rendered_tabs.as_ref().is_some_and(|tabs| tabs.add_hit(x, y));
+                        // Leaving the strip box releases the close-hold
+                        // (`session-tabs.tsx:1459-1470` onMouseOut bounds).
+                        if close_hold.is_some() && effective_orientation == TabOrientation::Horizontal {
+                            let inside = rendered_tabs.as_ref().is_some_and(|tabs| {
+                                let row = tabs
+                                    .rects
+                                    .first()
+                                    .map(|(_, rect)| rect.y)
+                                    .or(tabs.home_rect.map(|rect| rect.y))
+                                    .unwrap_or(0);
+                                let origin = tabs.strip_origin_x();
+                                y == row
+                                    && x >= origin
+                                    && u32::from(x)
+                                        < u32::from(origin) + u32::from(tabs.available_width)
+                            });
+                            if !inside {
+                                close_hold = None;
+                                needs_paint = true;
+                            }
+                        }
                         // `session-tabs.tsx:1650,1678` / `:888,915`: pointer-over
                         // starts the title marquee at the hovered title width;
                         // leaving the tab schedules the zero-delay clear.
@@ -8011,6 +8058,7 @@ fn native_loop(
                             rendered_tabs.as_ref().and_then(|tabs| tabs.hit(x, y)).map(|hit| hit.session)
                         };
                         if let Some(session) = middle_session {
+                            close_hold = None;
                             let close_scroll = view.chat_scroll_offset();
                             match close_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|m| m.qualified()), close_scroll) {
                                 Ok(result) => {
@@ -8196,9 +8244,42 @@ fn native_loop(
                                 }) };
                                 if pressed_close && !close_hit { continue; }
                                 if pressed_close && close_hit {
+                                    // Capture the pre-close order and painted
+                                    // widths so the pointer's close cell can be
+                                    // held through the reflow
+                                    // (`session-tabs.tsx:868-900`).
+                                    let hold_items: Vec<_> = navigation
+                                        .tabs()
+                                        .iter()
+                                        .map(|tab| tab.session.clone())
+                                        .collect();
+                                    let hold_visible: Vec<_> = tabs
+                                        .rects
+                                        .iter()
+                                        .map(|(id, _)| id.clone())
+                                        .collect();
+                                    let hold_widths: Vec<_> = tabs
+                                        .rects
+                                        .iter()
+                                        .map(|(_, rect)| rect.width)
+                                        .collect();
+                                    let hold_origin = tabs.strip_origin_x();
                                     let close_scroll = view.chat_scroll_offset();
                                     match close_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|m| m.qualified()), close_scroll) {
                                       Ok(result) => {
+                                        if let Some(index) = hold_items.iter().position(|id| id == &session) {
+                                            if let Some(target) = hold_items.get(index + 1).or_else(|| index.checked_sub(1).and_then(|i| hold_items.get(i))) {
+                                                close_hold = Some(crate::native_tabs::CloseHold::new(
+                                                    &hold_items,
+                                                    &hold_visible,
+                                                    &hold_widths,
+                                                    &session,
+                                                    target,
+                                                    x.saturating_sub(hold_origin),
+                                                    animation_start.elapsed().as_millis() as u64,
+                                                ));
+                                            }
+                                        }
                                         apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route, &mut compact_worker);
                                         completion.sync(&draft);
                                         history_pending = false;

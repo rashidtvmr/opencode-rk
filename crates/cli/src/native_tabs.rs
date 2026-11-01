@@ -1015,6 +1015,21 @@ impl TabStrip {
         self.home_rect.is_some_and(|rect| rect.contains(x, y))
     }
 
+    /// Screen column of the strip element's left edge: the first painted tab
+    /// minus the leading overflow marker. Upstream `strip.screenX`
+    /// (`session-tabs.tsx:1483,1491`); used to convert a pointer column into
+    /// [`Self::drag_slot`]/[`CloseHold`] space.
+    #[must_use]
+    pub fn strip_origin_x(&self) -> u16 {
+        let first = self.rects.first().map(|(_, rect)| rect.x).unwrap_or(0);
+        let gutter = if self.overflow_before {
+            u16::try_from(overflow_width(self.before)).unwrap_or(u16::MAX)
+        } else {
+            0
+        };
+        first.saturating_sub(gutter)
+    }
+
     /// Map an absolute pointer column to the absolute slot index of the
     /// painted tab beneath it, exactly as upstream `slotAt`
     /// (`component/session-tabs.tsx:1490-1500`): walk the painted slot edges
@@ -2345,6 +2360,66 @@ mod tests {
             assert!(strip.add_hit(add.x + 1, 0));
             assert!(strip.mouse_action(add.x + 1, 0).is_none());
         }
+    }
+
+    /// TAB-16 live mapping (`session-tabs.tsx:1468-1489`): after closing the
+    /// first visible tab of a 5-tab strip, the pointer column keeps the close
+    /// cell of the neighbouring tab. Reproduces the live caller: painted widths
+    /// for `visible`, the close x off the closed tab's own close cell, strip
+    /// space via `strip_origin_x`.
+    #[test]
+    fn close_hold_keeps_pointer_column_on_the_neighbouring_close_cell() {
+        let ids: Vec<SessionRef> = ["a", "b", "c", "d", "e"]
+            .into_iter()
+            .map(|id| SessionRef(id.into()))
+            .collect();
+        let inputs: Vec<_> = ids.iter().map(|id| input(&id.0, "tab")).collect();
+        // Narrow strip with trailing overflow, scrolled to the front.
+        let strip =
+            TabStrip::render_with_hover_and_add(&inputs, TabOrientation::Horizontal, 30, 1, 0, None, false);
+        assert!(strip.rects.len() < ids.len(), "the strip overflows");
+        let (closed_id, closed_rect) = strip.rects[0].clone();
+        assert_eq!(closed_id, ids[0]);
+        let origin = strip.strip_origin_x();
+        assert_eq!(origin, closed_rect.x, "no leading gutter at scroll 0");
+        // The pointer presses the closed tab's own close cell.
+        let pointer = closed_rect.x + closed_rect.width - 2;
+        let hold = CloseHold::new(
+            &ids,
+            &strip.rects.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
+            &strip.rects.iter().map(|(_, rect)| rect.width).collect::<Vec<_>>(),
+            &closed_id,
+            &ids[1],
+            pointer - origin,
+            0,
+        );
+        let after: Vec<SessionRef> = ids[1..].to_vec();
+        let held = hold.layout(&after).expect("held layout applies to the removal");
+        let held_inputs: Vec<_> = after.iter().map(|id| input(&id.0, "tab")).collect();
+        let held_strip = TabStrip::render_with_held(
+            &held_inputs,
+            TabOrientation::Horizontal,
+            30,
+            1,
+            0,
+            None,
+            false,
+            false,
+            false,
+            Some(&held),
+        );
+        let (target_id, target_rect) = held_strip
+            .rects
+            .iter()
+            .find(|(id, _)| id == &ids[1])
+            .expect("target painted")
+            .clone();
+        assert_eq!(target_id, ids[1]);
+        assert_eq!(
+            target_rect.x + target_rect.width - 2,
+            pointer,
+            "the pointer keeps the same physical close cell after the reflow"
+        );
     }
 
     #[test]
