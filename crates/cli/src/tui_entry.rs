@@ -6115,6 +6115,14 @@ fn native_loop(
             }
         }
         if worker_finished {
+            if let Some(owned) = worker.as_ref() {
+                // Settle the tab spinner with the same fact that clears the
+                // footer loader. Stale workers settle their own session.
+                navigation.apply(crate::native_navigation::DaemonEvent::WorkState {
+                    session: crate::native_navigation::SessionRef(owned.session_id().to_owned()),
+                    state: crate::native_navigation::WorkState::Idle,
+                });
+            }
             worker = None;
             if let Some(captured) = pending_submission.take() {
                 if binding_active {
@@ -6619,7 +6627,23 @@ fn native_loop(
             );
         }
         view.set_tab_reservation(tab_reservation);
-        let mut tab_inputs = TabStrip::from_navigation(&navigation, &[]);
+        // A pending permission decision is the "!" attention flag upstream
+        // derives from `permission.list(session).length > 0`
+        // (`session-tabs.tsx:165-169`); it outranks busy/idle styling.
+        let tab_attention: Vec<crate::native_tabs::Attention> = if view.dialogs.is_open() {
+            navigation
+                .active()
+                .map(|tab| {
+                    vec![crate::native_tabs::Attention {
+                        session: tab.session.clone(),
+                        needs_attention: true,
+                    }]
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let mut tab_inputs = TabStrip::from_navigation(&navigation, &tab_attention);
         if tab_drag.preview().is_some() {
             // Paint (and hit-test) the pending drag order until the move is
             // persisted on release.
@@ -10050,11 +10074,21 @@ fn native_loop(
                                 // Capture the binding identity this
                                 // worker is launched under: events only
                                 // apply while both still match.
-                                worker = Some(crate::native_view::OwnedWorker::new(
+                                let started = crate::native_view::OwnedWorker::new(
                                     next,
                                     snapshot.session_id.clone(),
                                     binding_generation,
-                                ));
+                                );
+                                // The rail/tab busy spinner is sourced from the
+                                // same authoritative fact as the footer loader
+                                // (`session-tabs.tsx:169-172`), not a guess.
+                                navigation.apply(crate::native_navigation::DaemonEvent::WorkState {
+                                    session: crate::native_navigation::SessionRef(
+                                        snapshot.session_id.clone(),
+                                    ),
+                                    state: crate::native_navigation::WorkState::Running,
+                                });
+                                worker = Some(started);
                                 partial.clear();
                             });
                             if let Err(error) = result {
