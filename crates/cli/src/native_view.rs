@@ -155,6 +155,10 @@ pub struct NativeView {
     send_pointer: Option<(u16, u16)>,
     /// Bounds from the same frame that paints the Context Usage footer label.
     context_usage_hit: Option<(u16, u16, u16)>,
+    /// Failed plugin runtime count for the Home footer plugin block
+    /// (`packages/tui/src/feature-plugins/home/footer.tsx:52-75`). No live
+    /// source exists yet (LAY-20 blocker); default 0 keeps the block hidden.
+    home_plugins_failed: usize,
     composer_variant: Option<String>,
     composer_model: Option<(String, String)>,
     composer_effort: Option<String>,
@@ -853,6 +857,7 @@ impl NativeView {
             composer_agent: None,
             send_pointer: None,
             context_usage_hit: None,
+            home_plugins_failed: 0,
             composer_variant: None,
             composer_model: None,
             composer_effort: None,
@@ -1843,6 +1848,13 @@ impl NativeView {
     /// Actual Context Usage footer cells, absent until a matching frame renders.
     pub fn context_usage_region(&self) -> Option<(u16, u16, u16)> {
         self.context_usage_hit
+    }
+
+    /// Feed the Home footer plugin-failure block. No plugin status surface
+    /// exists in the cli yet, so this stays 0 and the block stays hidden,
+    /// matching the upstream `Show when={failed()}` gate.
+    pub fn set_home_plugins_failed(&mut self, failed: usize) {
+        self.home_plugins_failed = failed;
     }
 
     /// Admit a click only within the exact last-rendered usage label.
@@ -3866,24 +3878,45 @@ impl NativeView {
         }
         if footer_rows == 0 { return rows; }
         let right = if width >= 64 { env!("CARGO_PKG_VERSION") } else { "" };
-        let mut status = String::new();
-        if self.status.mcp_acknowledged() && !self.status.entries().is_empty() {
-            let connected = self
-                .status
-                .entries()
-                .iter()
-                .filter(|entry| {
-                    matches!(
-                        entry.status,
-                        crate::native_view_status::McpStatus::Connected
-                    )
-                })
-                .count();
-            let failed = self.status.entries().iter().filter(|entry|
-                matches!(entry.status, crate::native_view_status::McpStatus::Failed { .. })).count();
-            status = if failed > 0 { format!("⊙ {failed} MCP failed") } else { format!("⊙ {connected} MCP") };
-            if width >= 64 { status.push_str(" /mcps"); }
+        let (mcp_total, mcp_failed, mcp_connected) =
+            if self.status.mcp_acknowledged() && !self.status.entries().is_empty() {
+                let entries = self.status.entries();
+                let connected = entries
+                    .iter()
+                    .filter(|entry| {
+                        matches!(entry.status, crate::native_view_status::McpStatus::Connected)
+                    })
+                    .count();
+                let failed = entries
+                    .iter()
+                    .filter(|entry| {
+                        matches!(entry.status, crate::native_view_status::McpStatus::Failed { .. })
+                    })
+                    .count();
+                (entries.len(), failed, connected)
+            } else {
+                (0, 0, 0)
+            };
+        // Single source of truth for both footer blocks and their gates
+        // (`home/footer.tsx:15-75`): `footer_status` hides the MCP block with
+        // no entries, hides the plugin block when nothing failed, gates
+        // /mcps at 64 and /plugins at 80.
+        let visible = crate::native_home::footer_status(
+            width,
+            mcp_total,
+            mcp_failed,
+            mcp_connected,
+            self.home_plugins_failed,
+        );
+        let mut parts: Vec<&str> = Vec::new();
+        if let Some(mcp) = visible.mcp.as_deref() {
+            parts.push(mcp);
         }
+        if let Some(plugins) = visible.plugins.as_deref() {
+            parts.push(plugins);
+        }
+        // Blocks join with `FOOTER_GAP` (2) as in `native_home::footer_line`.
+        let status = parts.join("  ");
         let inner = width.saturating_sub(4);
         let right_width = (right.chars().count().min(usize::from(inner))) as u16;
         let left_width = inner.saturating_sub(right_width).saturating_sub(2);
@@ -5615,6 +5648,43 @@ mod tests {
             assert!(frame[body_end].trim().is_empty());
             assert!(frame[body_end + 2].trim().is_empty());
         }
+    }
+
+    #[test]
+    fn lay20b_home_footer_paints_plugin_failure_block() {
+        use super::*;
+        let mut view = NativeView::new(80, 24);
+        view.set_session_route(false);
+        let footer_rows = view.home_footer_rows();
+        let footer_row = 24 - footer_rows + usize::from(footer_rows == 3);
+        assert!(
+            !view.render("", &[], false, &[])[footer_row].contains("plugin"),
+            "plugin block hidden while the failure count is 0"
+        );
+        view.set_home_plugins_failed(1);
+        let frame = view.render("", &[], false, &[]);
+        assert!(frame[footer_row].contains("\u{2299} 1 plugin failed /plugins"));
+        assert!(frame[footer_row].contains(env!("CARGO_PKG_VERSION")));
+        // Width 64..79 keeps the plugin block and version but gates `/plugins`.
+        let mut narrow = NativeView::new(64, 24);
+        narrow.set_session_route(false);
+        narrow.set_home_plugins_failed(2);
+        let narrow_rows = narrow.home_footer_rows();
+        let narrow_row = 24 - narrow_rows + usize::from(narrow_rows == 3);
+        let frame = narrow.render("", &[], false, &[]);
+        assert!(frame[narrow_row].contains("\u{2299} 2 plugins failed"));
+        assert!(!frame[narrow_row].contains("/plugins"));
+        assert!(frame[narrow_row].contains(env!("CARGO_PKG_VERSION")));
+        // Below 64 the version is gated off; the plugin block survives.
+        let mut tiny = NativeView::new(63, 24);
+        tiny.set_session_route(false);
+        tiny.set_home_plugins_failed(1);
+        let tiny_rows = tiny.home_footer_rows();
+        let tiny_row = 24 - tiny_rows + usize::from(tiny_rows == 3);
+        let frame = tiny.render("", &[], false, &[]);
+        assert!(frame[tiny_row].contains("\u{2299} 1 plugin failed"));
+        assert!(!frame[tiny_row].contains("/plugins"));
+        assert!(!frame[tiny_row].contains(env!("CARGO_PKG_VERSION")));
     }
     #[test]
     fn tab_reservations_shift_chat_paint_and_selection_with_text() {
