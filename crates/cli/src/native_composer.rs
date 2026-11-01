@@ -150,6 +150,28 @@ pub fn replace_draft_with_cursor(draft: &mut String, cursor: &mut usize, replace
     normalize_cursor(draft, cursor);
 }
 
+/// Insert a pasted body at the focused cursor through the real paste planner
+/// (`native_paste::plan_paste` + `apply_paste_plan`).
+///
+/// This connects the production paste-event handler to the cursor-aware,
+/// normalization/folding machinery so a paste lands at `cursor` and advances
+/// it, rather than being appended to the end of the draft. `parts` tracks any
+/// folded placeholder. Returns `Err(PasteError)` (draft/cursor/parts
+/// unchanged) when the paste would exceed `limit` bytes or the cursor is not a
+/// character boundary — the caller can then fall back to a bounded append.
+pub fn insert_paste_at_cursor(
+    draft: &mut String,
+    cursor: &mut usize,
+    parts: &mut Vec<crate::native_paste::PastedText>,
+    body: &str,
+    mode: crate::native_paste::PasteMode,
+    limit: usize,
+) -> Result<(), crate::native_paste::PasteError> {
+    normalize_cursor(draft, cursor);
+    let plan = crate::native_paste::plan_paste(body, mode, *cursor, parts);
+    crate::native_paste::apply_paste_plan(draft, cursor, parts, plan, limit)
+}
+
 #[cfg(test)]
 mod native_submission_ack_tests {
     use super::acknowledge_submitted_draft;
@@ -2231,6 +2253,43 @@ fn draft_line_count(draft: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// F2: the production paste handler must insert at the cursor through the
+    /// real paste machinery, not append. A short body inserts at the cursor
+    /// and advances it; a long body folds into a tracked placeholder.
+    #[test]
+    fn insert_paste_at_cursor_lands_at_the_focus_and_folds_long_bodies() {
+        use crate::native_paste::{PasteMode, PastedText};
+        // Short paste in the middle of a draft lands at the cursor.
+        let mut draft = "helloworld".to_owned();
+        let mut cursor = 5;
+        let mut parts: Vec<PastedText> = Vec::new();
+        insert_paste_at_cursor(&mut draft, &mut cursor, &mut parts, " ", PasteMode::Fold, 4096)
+            .expect("a boundary insert is admitted");
+        assert_eq!(draft, "hello world");
+        assert_eq!(cursor, 6, "the cursor advances past the inserted text");
+        assert!(parts.is_empty(), "a short paste records no folded part");
+
+        // A multi-line body folds into a tracked placeholder at the cursor.
+        let mut draft = "ab".to_owned();
+        let mut cursor = 1;
+        let mut parts: Vec<PastedText> = Vec::new();
+        insert_paste_at_cursor(&mut draft, &mut cursor, &mut parts, "l1\nl2\nl3", PasteMode::Fold, 4096)
+            .expect("a fold is admitted");
+        assert_eq!(draft, "a[Pasted ~3 lines] b");
+        assert_eq!(cursor, draft.find(']').unwrap() + 1 + 1);
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].placeholder, "[Pasted ~3 lines]");
+
+        // `full` mode never folds: the literal normalized text is inserted.
+        let mut draft = String::new();
+        let mut cursor = 0;
+        let mut parts: Vec<PastedText> = Vec::new();
+        insert_paste_at_cursor(&mut draft, &mut cursor, &mut parts, "l1\nl2\nl3", PasteMode::Full, 4096)
+            .expect("full mode is admitted");
+        assert_eq!(draft, "l1\nl2\nl3");
+        assert!(parts.is_empty());
+    }
 
     #[test]
     fn grapheme_navigation_and_delete_preserve_flags_keycaps_spacing_prepend_tamil_and_zwj() {

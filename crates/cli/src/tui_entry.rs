@@ -5554,6 +5554,10 @@ fn native_loop(
     // the production native_composer line-binding adapter; buffer Home/End
     // remain intentionally unbound by default.
     let mut draft_cursor = 0usize;
+    // Tracked folded-paste parts for the composer draft (CP-36): a long or
+    // multi-line paste folds into a `[Pasted ~N lines]` placeholder and records
+    // its range here, so later edits realign instead of appending raw text.
+    let mut draft_parts: Vec<crate::native_paste::PastedText> = Vec::new();
     // Persisted stores live under the same data dir the rest of the TUI uses.
     let state_path = data_dir.join("state/kv.json");
     let tabs_path = data_dir.join("state/tabs.json");
@@ -8153,7 +8157,7 @@ fn native_loop(
                             // directory before it can run).
                             if route != "/cd" {
                                 let route_cursor = route.len();
-                                crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, route, route_cursor);
+                                crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, route, route_cursor); draft_parts.clear();
                                 completion.sync(&draft);
                             } else if let Some(cursor) = completion.complete_key_at(*key, &mut draft, draft_cursor, MAX_NATIVE_DRAFT_BYTES) {
                                 draft_cursor = cursor;
@@ -8223,7 +8227,7 @@ fn native_loop(
                     // immediately; there is no tab-close command anymore.
                     if native_process_exit_route(&route) { break; }
                     let route_cursor = route.len();
-                    crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, route, route_cursor);
+                    crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, route, route_cursor); draft_parts.clear();
                     completion.sync(&draft);
                     event = native_input_decoder::InputEvent::Byte(13);
                 }
@@ -8403,7 +8407,7 @@ fn native_loop(
                 if let Some(menu)=context_menu.as_mut() {
                     let me=match kind { 0=>Some(crate::native_tab_context_menu::MenuEvent::PointerDown{button:crate::native_tab_context_menu::MouseButton::Left,x,y}),2=>Some(crate::native_tab_context_menu::MenuEvent::PointerUp{button:crate::native_tab_context_menu::MouseButton::Left,x,y}),5=>Some(crate::native_tab_context_menu::MenuEvent::PointerDown{button:crate::native_tab_context_menu::MouseButton::Right,x,y}),6=>Some(crate::native_tab_context_menu::MenuEvent::PointerUp{button:crate::native_tab_context_menu::MouseButton::Right,x,y}),7=>Some(crate::native_tab_context_menu::MenuEvent::PointerMove{x,y}),3|4=>Some(crate::native_tab_context_menu::MenuEvent::Scroll{delta:if kind==3{-3}else{3},x,y}),_=>None};
                     if let Some(me)=me { let outcome=menu.handle(me,menu_vp); if let crate::native_tab_context_menu::MenuOutcome::Invoke(action)=outcome { context_menu=None; match action {
-                        crate::native_tab_context_menu::MenuAction::NewSession => { let model=selected.as_ref().map(|m|m.qualified()); let saved=if navigation.active().is_some(){navigation.save_active_state(draft.clone(),draft_cursor,view.chat_scroll_offset(),model)}else{Ok(())}; if let Err(e)=saved{append_transcript(&mut transcript,format!("error: new tab: state save refused: {e:?}"));}else{live=None;history_window=None;history_pending=false;history_active=None;history_navigation_request=None;blocked_history_scroll=None;history_tail_refresh_pending=false;history_browsing=false;draft.clear();draft_cursor=0;navigation.enter_home();session_route=false;view.reset_to_home_after_tab_close();view.set_chat_scroll_offset(0);} },
+                        crate::native_tab_context_menu::MenuAction::NewSession => { let model=selected.as_ref().map(|m|m.qualified()); let saved=if navigation.active().is_some(){navigation.save_active_state(draft.clone(),draft_cursor,view.chat_scroll_offset(),model)}else{Ok(())}; if let Err(e)=saved{append_transcript(&mut transcript,format!("error: new tab: state save refused: {e:?}"));}else{live=None;history_window=None;history_pending=false;history_active=None;history_navigation_request=None;blocked_history_scroll=None;history_tail_refresh_pending=false;history_browsing=false;draft.clear(); draft_parts.clear();draft_cursor=0;navigation.enter_home();session_route=false;view.reset_to_home_after_tab_close();view.set_chat_scroll_offset(0);} },
                         crate::native_tab_context_menu::MenuAction::CopySessionId{session}=>{let frame=selection_clipboard_frame(&session.0);let mut out=std::io::stdout().lock();out.write_all(frame.as_bytes())?;out.flush()?;},
                         crate::native_tab_context_menu::MenuAction::Close{session}=>{close_hold=None;let scroll=view.chat_scroll_offset();match close_tab_transition(&mut view,&mut transcript,&mut navigation,&draft,draft_cursor,daemon_origin,auth,binding_generation,&session,selected.as_ref().map(|m|m.qualified()),scroll){Ok(result)=>apply_close_tab_result(result,&mut view,&mut live,&mut history_window,&mut binding_generation,&mut draft,&mut draft_cursor,&mut selected,&models,&mut session_route,&mut compact_worker),Err(e)=>append_transcript(&mut transcript,format!("error: close tab: {e}"))}},
                         crate::native_tab_context_menu::MenuAction::Rename{session,current_title}=>{rename_input=Some((session,current_title));rename_error=None;},
@@ -8844,7 +8848,7 @@ fn native_loop(
                                 blocked_history_scroll = None;
                                 history_tail_refresh_pending = false;
                                 history_browsing = false;
-                                draft.clear(); draft_cursor = 0;
+                                draft.clear(); draft_parts.clear(); draft_cursor = 0;
                                 navigation.enter_home();
                                 session_route = false;
                                 view.reset_to_home_after_tab_close();
@@ -9351,19 +9355,55 @@ fn native_loop(
                 }
                 // API-key input is segregated: it lands in the native_setup
                 // key buffer, never in the chat composer draft.
-                let (target, limit) = if matches!(dialog, native_setup::Dialog::ApiKey) {
-                    (&mut key_input, 16 * 1024)
-                } else if matches!(dialog, native_setup::Dialog::None) {
-                    (&mut draft, MAX_NATIVE_DRAFT_BYTES)
-                } else {
-                    (&mut filter_input, MAX_NATIVE_DRAFT_BYTES)
-                };
-                if target
-                    .len()
-                    .checked_add(text.len())
-                    .is_some_and(|len| len <= limit)
-                {
-                    target.push_str(&text);
+                match dialog {
+                    native_setup::Dialog::ApiKey => {
+                        if key_input
+                            .len()
+                            .checked_add(text.len())
+                            .is_some_and(|len| len <= 16 * 1024)
+                        {
+                            key_input.push_str(&text);
+                        }
+                    }
+                    native_setup::Dialog::None => {
+                        if draft
+                            .len()
+                            .checked_add(text.len())
+                            .is_some_and(|len| len <= MAX_NATIVE_DRAFT_BYTES)
+                        {
+                            // Cursor-aware insertion through the real paste
+                            // machinery (`index.tsx:1446-1455`): the body lands
+                            // at the focused cursor and advances it; a
+                            // long/multi-line body folds into a tracked
+                            // `[Pasted ~N lines]` placeholder instead of being
+                            // appended. Fall back to a bounded append only when
+                            // the planner refuses (non-boundary / over budget).
+                            let mode = crate::native_paste::PasteMode::default();
+                            if crate::native_composer::insert_paste_at_cursor(
+                                &mut draft,
+                                &mut draft_cursor,
+                                &mut draft_parts,
+                                &text,
+                                mode,
+                                MAX_NATIVE_DRAFT_BYTES,
+                            )
+                            .is_err()
+                            {
+                                crate::native_composer::normalize_cursor(&draft, &mut draft_cursor);
+                                draft.push_str(&text);
+                                draft_cursor = draft.len();
+                            }
+                        }
+                    }
+                    _ => {
+                        if filter_input
+                            .len()
+                            .checked_add(text.len())
+                            .is_some_and(|len| len <= MAX_NATIVE_DRAFT_BYTES)
+                        {
+                            filter_input.push_str(&text);
+                        }
+                    }
                 }
                 // Paste has no key actions, even in a dialog or a busy turn.
                 continue;
@@ -9729,7 +9769,7 @@ fn native_loop(
             27 => {
                 dialog = native_setup::Dialog::None;
                 key_input.clear();
-                draft.clear();
+                draft.clear(); draft_parts.clear();
                 draft_cursor = 0;
                 utf8.reset();
             }
@@ -9906,7 +9946,7 @@ fn native_loop(
                             history_tail_refresh_pending = false;
                             history_browsing = false;
                             let restored_cursor = navigation.active().map(|tab| tab.cursor).unwrap_or(restored_draft.len());
-                            crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, restored_draft, restored_cursor);
+                            crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, restored_draft, restored_cursor); draft_parts.clear();
                             // Committed ONLY on a successful bind.
                             binding_generation = prospective;
                             needs_paint = true;
@@ -10077,7 +10117,7 @@ fn native_loop(
                                         history_tail_refresh_pending = false;
                                         history_browsing = false;
                                         let restored_cursor = existing_cursor.unwrap_or(restored_draft.len());
-                                        crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, restored_draft, restored_cursor);
+                                        crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, restored_draft, restored_cursor); draft_parts.clear();
                                         // Committed ONLY on a real bind
                                         // success.
                                         binding_generation = prospective;
@@ -10152,7 +10192,7 @@ fn native_loop(
                             let prefix_bytes = format!("/{name} ").len();
                             let insertion_cursor = prefix_bytes + draft_cursor;
                             let replacement = format!("/{name} {draft}");
-                            crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, replacement, insertion_cursor);
+                            crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, replacement, insertion_cursor); draft_parts.clear();
                             view.close_page();
                             utf8.reset();
                             needs_paint = true;
@@ -10999,7 +11039,7 @@ fn native_loop(
                                     // Visible draft updates ONLY on this
                                     // successful commit.
                                     let restored_cursor = navigation.active().map(|tab| tab.cursor).unwrap_or(restored_draft.len());
-                                    crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, restored_draft, restored_cursor);
+                                    crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, restored_draft, restored_cursor); draft_parts.clear();
                                     binding_generation = prospective;
                                     append_transcript(
                                         &mut transcript,
@@ -11076,7 +11116,7 @@ fn native_loop(
                                     seed_navigation_titles(&mut navigation, &snapshot);
                                     live = Some(snapshot);
                                     let restored_cursor = navigation.active().map(|tab| tab.cursor).unwrap_or(restored.len());
-                                    crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, restored, restored_cursor);
+                                    crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, restored, restored_cursor); draft_parts.clear();
                                     session_route = true;
                                     view.set_session_route(true);
                                     history_window = live.as_ref().map(|snapshot| crate::native_chat_projection::NativeHistoryWindow::new(&snapshot.raw_history, snapshot.history_next_before.clone()));
