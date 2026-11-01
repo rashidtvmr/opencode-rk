@@ -804,6 +804,7 @@ pub(crate) fn prompt_geometry(
     draft: &str,
     frame: EffectiveBox,
     allow_rail: bool,
+    terminal_width: u16,
 ) -> PromptPaneGeometry {
     let height = height.min(crate::native_view_chat::MAX_VIEW_ROWS);
     let width = width.min(u16::MAX as usize);
@@ -819,10 +820,12 @@ pub(crate) fn prompt_geometry(
         };
     }
     if allow_rail && frame.has_border() && frame.padding == 0 && width > 5 && height >= 6 {
-        // `index.tsx:1691-1692`: the inset keyed on the terminal width is
-        // supplied by the pane width here; the painter uses the same value.
+        // `index.tsx:1691-1692`: the horizontal inset keys on the TERMINAL
+        // width (`dimensions().width < 44 ? 1 : 2`), never the pane width. The
+        // pane-derived width only coincides with it when no rail/sidebar is
+        // present. `prompt_inset` owns the strict `< 44` rule.
         let max_input = ((height + 2) / 3).max(6).min(height - 4);
-        let inset = if width < 40 { 1 } else { 2 };
+        let inset = usize::from(crate::native_prompt_layout::prompt_inset(terminal_width));
         let text_width = width.saturating_sub(1 + 2 * inset);
         let input = wrap_prompt(draft, text_width.max(1), draft.len())
             .rows
@@ -961,7 +964,7 @@ impl<'a> PromptPane<'a> {
         // An editor offset beyond the visible source, or one that would split
         // UTF-8, is not a cursor: the caller's view reports no caret for it.
         let cursor_valid = input.cursor <= draft.len() && draft.is_char_boundary(input.cursor);
-        let geometry = prompt_geometry(input.width, input.height, draft, input.frame, input.allow_rail);
+        let geometry = prompt_geometry(input.width, input.height, draft, input.frame, input.allow_rail, input.terminal_width);
         let text_width = geometry.text_width.max(1);
         let wrapped = wrap_prompt(draft, text_width, input.cursor);
         let window_start = if geometry.input_rows == 0 { 0 } else { wrapped.window_start(geometry.input_rows) };
@@ -1905,5 +1908,31 @@ mod tests {
             ..input
         };
         assert_eq!(metadata_layout(&shell, 120).effort, None);
+    }
+
+    /// CP-04: the rail composer inset keys on the TERMINAL width, not the pane
+    /// width (`packages/tui/src/component/prompt/index.tsx:1691-1692`,
+    /// `dimensions().width < 44 ? 1 : 2`). A narrow pane inside a wide
+    /// terminal therefore keeps inset 2; a wide pane inside a narrow terminal
+    /// gets inset 1.
+    #[test]
+    fn cp04_rail_inset_follows_terminal_not_pane() {
+        let frame = crate::native_box_style::EffectiveBox {
+            border_style: crate::native_box_style::BorderStyle::Single,
+            preset: crate::native_box_style::RadiusPreset::Sharp,
+            radius: 0,
+            thickness: 1,
+            padding: 0,
+        };
+        // Narrow pane (24 cols), wide terminal (52): upstream inset is 2.
+        let wide_term = prompt_geometry(24, 20, "x", frame, true, 52);
+        assert_eq!(wide_term.style, PromptPaneStyle::Rail);
+        assert_eq!(wide_term.text_left, 3, "wide terminal keeps inset 2: {wide_term:?}");
+        // Wide pane (80 cols), narrow terminal (43): upstream inset is 1.
+        let narrow_term = prompt_geometry(80, 20, "x", frame, true, 43);
+        assert_eq!(narrow_term.style, PromptPaneStyle::Rail);
+        assert_eq!(narrow_term.text_left, 2, "narrow terminal flips to inset 1: {narrow_term:?}");
+        // The flip is strict at 44 (`< 44`).
+        assert_eq!(prompt_geometry(80, 20, "x", frame, true, 44).text_left, 3);
     }
 }

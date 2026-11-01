@@ -9846,3 +9846,43 @@ builds. Two already worked; one had a real root cause and is fixed.
 - **Remaining TAB gaps**: TAB-10/11 compact goldens, TAB-13 full mouse matrix,
   TAB-21 view acknowledgement unread flow, TAB-05 child-status aggregation,
   TAB-23 chord coverage, TAB-24 reduced motion capture.
+
+## 2026-11-01 — tab/sidebar parity wave (canonical `main-v2` @ `db6ffb16`)
+
+Suite **1982/0**. Release `target/release/oc2` sha256 `e76eccb4…9e4fea`.
+
+Landed (sole integration writer, guarded publisher, `recovery_state` token):
+
+- `127d8d91` — `session.tab.*` chords: `ctrl+tab`, `ctrl+shift+tab`, `ctrl+1..9`,
+  `ctrl+0`, `ctrl+shift+t`, `alt+shift+down/up`; `NavigationState` unread
+  tracking with upstream `cycleUnread` wrap (`session-tabs-model.ts:82-95`) and
+  slot-restoring reopen. **Two fabricated chords removed** (`alt+tab`,
+  `alt+backspace` — the latter is `input.delete.word.backward`,
+  `config/keybind.ts:244`); the worker test that locked them in was corrected.
+- `f40f32bc` — running descendant tabs roll `busy` up to the ancestor tab
+  (`context/session-tabs.tsx:171-176`, `TabStrip::from_navigation`).
+- `107897d2` — `close_active` routes to Home when no successor remains
+  (`context/session-tabs.tsx:373`).
+- `db6ffb16` — sidebar MCP status word right-aligned
+  (`feature-plugins/sidebar/mcp.tsx:53-84`, name `flexGrow={1}`); updated the
+  `#[path]`-included `native_view_status` assertions that encoded the old
+  left-packed text.
+
+**BREAKTHROUGH — a genuine upstream oracle IS buildable offline.**
+`@opentui/{core,keymap,solid}@0.6.8` are in `~/.bun/install/cache/`; direct
+symlinks into a private `node_modules/` work with no network. Probe
+`.../oracle-probe/probe2.tsx` captures real frames, and `captureSpans()` returns
+exactly the certification format: `{cols, rows, cursor:[x,y], lines[].spans[]
+{text,fg:{buffer},bg:{buffer},attributes,width}}` — merged styled cells AND the
+cursor in one call. Worker `ORACLE-HARNESS` is building the app-level capturer.
+
+**Measured parity** (`ui_parity.py --check --max-diffs 400`, all 5 fixtures):
+**119 cell diffs each** = 109 in row 0 (the tab strip; upstream does not render
+it on Home with zero sessions) + 10 in the composer border (col 3; adjudicated
+INTENDED — `border.base` #484848 dark / #b8b8b8 light, confirmed against
+`crates/cli/assets/opencode-v2.json`). The goldens are stale self-captures; they
+are NOT re-recorded by main to force green.
+
+**Blocker pattern**: most remaining gaps are blocked on server-side data —
+per-session attention kind (TAB-04/05), `time.viewed` view acknowledgement
+(TAB-21), tab vcs branch detail (TAB-04 detail), live `TabStatus` adapter.

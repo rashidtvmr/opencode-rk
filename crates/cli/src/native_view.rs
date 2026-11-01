@@ -1712,6 +1712,7 @@ impl NativeView {
                 body_height,
                 draft,
                 &self.box_appearance,
+                self.layout.cols,
             );
             let composer_height = layout.height;
             Some((
@@ -1766,7 +1767,7 @@ impl NativeView {
     pub fn session_prompt_rail(&self, draft: &str) -> bool {
         self.session_route && crate::native_view_chat::session_composer_layout(
             usize::from(self.presentation().main_width.saturating_sub(4)),
-            self.session_body_height(), draft, &self.box_appearance,
+            self.session_body_height(), draft, &self.box_appearance, self.layout.cols,
         ).rail
     }
 
@@ -1881,10 +1882,13 @@ impl NativeView {
             body_height,
             draft,
             &self.box_appearance,
+            self.layout.cols,
         );
         let pad = usize::from(frame.padding);
         let (text_left, text_top, text_width, text_height) = if layout.rail {
-            let inset: u16 = if width < 40 { 1 } else { 2 };
+            // Inset keys on the TERMINAL width (`prompt/index.tsx:1691-1692`),
+            // never the pane width; `prompt_inset` owns the strict `< 44`.
+            let inset: u16 = crate::native_prompt_layout::prompt_inset(self.layout.cols);
             (left.checked_add(1 + inset)?, top.checked_add(1)?,
                 usize::from(width).checked_sub(1 + 2 * usize::from(inset))?,
                 usize::from(height).checked_sub(4)?)
@@ -2641,6 +2645,7 @@ impl NativeView {
         self.transcript_scrollbar = None;
         self.sidebar_scrollbar = None;
         self.chat.set_markdown_mode(self.markdown_mode);
+        self.chat.set_terminal_width(self.layout.cols);
         self.context_usage_hit = None;
         self.live_footer_hit = None;
         self.dock_hit.clear();
@@ -2831,11 +2836,12 @@ impl NativeView {
             }
             let prompt = crate::native_view_chat::session_composer_layout(
                 usize::from(inner_width), body_height, draft, &self.box_appearance,
+                self.layout.cols,
             );
             let mut body = body;
             if prompt.rail && !has_permission {
                 let row = body.len().saturating_sub(2);
-                let inset = if inner_width < 40 { " " } else { "  " };
+                let inset = if crate::native_prompt_layout::prompt_inset(self.layout.cols) == 1 { " " } else { "  " };
                 // In-box `PromptMetadataRow` (`component/prompt/index.tsx:1856`);
                 // the live count belongs to the footer slot below it.
                 let metadata = self.composer_metadata();
@@ -5253,7 +5259,8 @@ mod tests {
             let frame = view.render_typed(draft, &[], false, &[]);
             let (left, top, region_width, height) = view.composer_region(draft).unwrap();
             let layout = crate::native_view_chat::session_composer_layout(
-                usize::from(region_width), view.session_body_height(), draft, &appearance);
+                usize::from(region_width), view.session_body_height(), draft, &appearance,
+                view.layout.cols);
             assert!(layout.framed);
             let wrapped = crate::native_prompt_layout::wrap_prompt(draft, usize::from(region_width - 4), draft.len());
             assert!(wrapped.rows.len() > 1);
