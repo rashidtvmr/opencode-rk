@@ -2568,6 +2568,35 @@ fn chat_row_attribute_override(class: Option<&crate::native_view_chat::ChatRowCl
     }
 }
 
+/// Whether a chat row class carries selectable transcript text.
+///
+/// Upstream's row `clickable` memo (`routes/session/index.tsx:2836`) gates only
+/// the row's mouse click/hover *actions* (`props.onClick || failed()`); it does
+/// NOT gate OpenTUI text selection, which applies to every rendered message
+/// row. A denied tool row (`ToolDenied`) is therefore still selectable, exactly
+/// like a failed (`ToolError`) row. Card rows (permission/question/inline
+/// diff) are decoration/affordance surfaces, not prose, and stay out.
+#[cfg(feature = "native")]
+fn chat_row_is_selectable(class: Option<&crate::native_view_chat::ChatRowClass>) -> bool {
+    use crate::native_view_chat::ChatRowClass;
+    matches!(
+        class,
+        Some(
+            ChatRowClass::UserCard
+                | ChatRowClass::AssistantCard
+                | ChatRowClass::SystemCard
+                | ChatRowClass::Text
+                | ChatRowClass::Thinking
+                | ChatRowClass::ToolCall
+                | ChatRowClass::ToolResult
+                | ChatRowClass::ToolDenied
+                | ChatRowClass::ToolError
+                | ChatRowClass::DiffAdded
+                | ChatRowClass::DiffRemoved
+        )
+    )
+}
+
 #[cfg(feature = "native")]
 fn chat_row_background_at(
     class: Option<&crate::native_view_chat::ChatRowClass>,
@@ -2663,6 +2692,22 @@ mod footer_v3_painter_tests {
             "an ordinary completed tool result is not struck"
         );
         assert_eq!(chat_row_attribute_override(None), crate::native_ui_style::ATTR_NONE);
+    }
+
+    /// TOOL-005: a denied tool row remains text-selectable. Upstream's
+    /// `clickable` memo (`routes/session/index.tsx:2836`) gates only mouse
+    /// click/hover actions, not OpenTUI text selection, which applies to every
+    /// rendered message row. oc2 previously omitted `ToolDenied` from the
+    /// selectable class list.
+    #[test]
+    fn denied_tool_rows_remain_text_selectable() {
+        assert!(chat_row_is_selectable(Some(&ChatRowClass::ToolDenied)));
+        assert!(chat_row_is_selectable(Some(&ChatRowClass::ToolError)));
+        assert!(chat_row_is_selectable(Some(&ChatRowClass::ToolResult)));
+        assert!(chat_row_is_selectable(Some(&ChatRowClass::Text)));
+        // Decoration/affordance rows carry no prose.
+        assert!(!chat_row_is_selectable(Some(&ChatRowClass::FooterError)));
+        assert!(!chat_row_is_selectable(None));
     }
 
     /// TOOL-002: a tool row awaiting a permission decision paints
@@ -7447,24 +7492,11 @@ fn native_loop(
                 .iter()
                 .enumerate()
                 .map(|(row, line)| {
-                    use crate::native_view_chat::ChatRowClass as C;
                     if !home
                         && modal_rows.is_none()
                         && !help_open
-                        && matches!(
+                        && crate::tui_entry::chat_row_is_selectable(
                             view.chat_row_classes().get(row),
-                            Some(
-                                C::UserCard
-                                    | C::AssistantCard
-                                    | C::SystemCard
-                                    | C::Text
-                                    | C::Thinking
-                                    | C::ToolCall
-                                    | C::ToolResult
-                                    | C::ToolError
-                                    | C::DiffAdded
-                                    | C::DiffRemoved
-                            )
                         )
                     {
                         if let Some((left, width)) =
