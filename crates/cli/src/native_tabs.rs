@@ -1166,6 +1166,29 @@ impl TabStrip {
         self.with_row_colors_semantic(palette, None)
     }
 
+    /// TAB-24: record the caller's per-session title-pending fact
+    /// (`data.session.title.pending`, `context/data.tsx:22-47`) and the
+    /// resolved `config.animations ?? true`, then stamp the matching title
+    /// attribute onto the resolved paints. A renaming title is DIM only while
+    /// animations are disabled; otherwise the selected tab keeps BOLD
+    /// (`session-tabs.tsx:1061-1074,1713-1720`). The promoted Home/add rows are
+    /// left untouched: upstream keeps them BOLD unconditionally
+    /// (`session-tabs.tsx:1201,1210`).
+    #[must_use]
+    pub fn with_title_renaming(
+        mut self,
+        renaming: &dyn Fn(&SessionRef) -> bool,
+        animations: bool,
+    ) -> Self {
+        let selected: Vec<bool> = self.row_flags.iter().map(|flags| flags.active).collect();
+        for (index, paint) in self.row_paints.iter_mut().enumerate() {
+            let Some((session, _)) = self.rects.get(index) else { continue };
+            let is_selected = selected.get(index).copied().unwrap_or(false);
+            paint.title_attr = title_attributes(is_selected, renaming(session), animations);
+        }
+        self
+    }
+
     #[must_use]
     pub fn with_row_colors_semantic(
         mut self,
@@ -4042,6 +4065,59 @@ mod tests {
             frames.push(marquee.offset());
         }
         assert_eq!(frames, vec![1, 2, 3, 4, 5, 6, 7, 8, 0, 0]);
+    }
+
+    #[test]
+    fn tab_24_strip_applies_renaming_dim_only_with_animations_off() {
+        // session-tabs.tsx:1061-1074: the renaming title is DIM only while
+        // animations are disabled; a selected non-renaming tab is BOLD.
+        use crate::native_theme_runtime::Palette;
+        let palette = Palette::opencode_dark();
+        let selected = || {
+            let mut tab = input("s", "selected");
+            tab.flags = TabFlags { active: true, busy: false, needs_attention: false };
+            tab
+        };
+        let base = TabStrip::render_with_hover(
+            &[selected(), input("i", "idle")],
+            TabOrientation::Horizontal,
+            80,
+            1,
+            0,
+            None,
+        )
+        .with_row_colors(&palette);
+        assert_eq!(base.row_paints[0].title_attr, crate::native_ui_style::ATTR_BOLD);
+        assert_eq!(base.row_paints[1].title_attr, 0);
+
+        // Renaming the selected tab with animations OFF dims it; the selected
+        // non-renaming tab stays BOLD.
+        let dim = TabStrip::render_with_hover(
+            &[selected(), input("i", "idle")],
+            TabOrientation::Horizontal,
+            80,
+            1,
+            0,
+            None,
+        )
+        .with_row_colors(&palette)
+        .with_title_renaming(&|session: &SessionRef| session == &SessionRef("s".into()), false);
+        assert_eq!(dim.row_paints[0].title_attr, crate::native_ui_style::ATTR_DIM);
+        assert_eq!(dim.row_paints[1].title_attr, 0);
+
+        // Renaming with animations ON is NOT dimmed: the selected tab keeps
+        // BOLD (title_shimmer consumes `renaming && !animations`).
+        let bold = TabStrip::render_with_hover(
+            &[selected(), input("i", "idle")],
+            TabOrientation::Horizontal,
+            80,
+            1,
+            0,
+            None,
+        )
+        .with_row_colors(&palette)
+        .with_title_renaming(&|session: &SessionRef| session == &SessionRef("s".into()), true);
+        assert_eq!(bold.row_paints[0].title_attr, crate::native_ui_style::ATTR_BOLD);
     }
 
     #[test]

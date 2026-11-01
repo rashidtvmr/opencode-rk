@@ -53,6 +53,12 @@ pub struct UiPreferences {
     /// `CursorConfig`; the caller parses it with
     /// [`crate::native_theme_runtime::CursorConfig::from_json`] (THEME-14).
     pub cursor: Option<Value>,
+    /// `tui.animations` (`config/index.tsx:250` `animations?: boolean`,
+    /// consumed as `config.animations ?? true`). `None` means the config did
+    /// not set it, so the caller resolves to the upstream default `true`.
+    /// Drives reduced-motion tab/hover paint (TAB-24) and the existing
+    /// spinner/status fallbacks.
+    pub animations: Option<bool>,
     /// Bounded diagnostics for config/state files skipped during startup.
     pub diagnostics: Vec<String>,
 }
@@ -195,9 +201,10 @@ impl UiPreferences {
         let mut prompt_width = None;
         let mut configured_theme = None;
         let mut cursor: Option<Value> = None;
+        let mut animations: Option<bool> = None;
         let mut diagnostics = Vec::new();
         for path in config_paths {
-            let loaded = (|| -> Result<Option<(Option<PromptWidth>, Option<String>, Option<Value>)>, String> {
+            let loaded = (|| -> Result<Option<(Option<PromptWidth>, Option<String>, Option<Value>, Option<bool>)>, String> {
                 let Some(text) = budget.read(path, MAX_CONFIG_BYTES, "TUI config")? else {
                     return Ok(None);
                 };
@@ -254,11 +261,21 @@ impl UiPreferences {
                 // caller parses it with the theme runtime's `CursorConfig`
                 // (validated there, THEME-14).
                 let cursor = object.get("cursor").cloned();
-                Ok(Some((width, theme, cursor)))
+                // `tui.animations` (`config/index.tsx:250`). A non-boolean is a
+                // malformed config value, matching the other typed keys.
+                let animations = object
+                    .get("animations")
+                    .map(|value| {
+                        value.as_bool().ok_or_else(|| {
+                            format!("invalid TUI config animations: {}", path.display())
+                        })
+                    })
+                    .transpose()?;
+                Ok(Some((width, theme, cursor, animations)))
             })();
 
             match loaded {
-                Ok(Some((width, theme, cursor_value))) => {
+                Ok(Some((width, theme, cursor_value, animations_value))) => {
                     if let Some(width) = width {
                         prompt_width = Some(width);
                     }
@@ -267,6 +284,9 @@ impl UiPreferences {
                     }
                     if cursor_value.is_some() {
                         cursor = cursor_value;
+                    }
+                    if animations_value.is_some() {
+                        animations = animations_value;
                     }
                 }
                 Ok(None) => {}
@@ -311,6 +331,7 @@ impl UiPreferences {
                 .map(|width| width.clamp(5, 72) as u16),
             onboarding_dismissed,
             cursor,
+            animations,
             diagnostics,
         })
     }
@@ -1280,6 +1301,28 @@ mod tests {
         assert_eq!(prefs.prompt_width, Some(PromptWidth::Fixed(88)));
         assert_eq!(prefs.theme.as_deref(), Some("dark"));
         assert_eq!(prefs.diagnostics.len(), 1);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// TAB-24: `tui.animations` is surfaced as the resolved reduced-motion
+    /// flag source; the later config file wins and absent stays `None`
+    /// (consumed as `?? true`).
+    #[test]
+    fn animations_flag_is_surfaced_from_the_last_config_file() {
+        let dir = std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "opencode-ui-anim-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let global = dir.join("global.json");
+        let project = dir.join("project.json");
+        fs::write(&global, r#"{"animations":true}"#).unwrap();
+        fs::write(&project, r#"{"animations":false}"#).unwrap();
+        let prefs = UiPreferences::load(&[global, project], &dir.join("missing-kv.json")).unwrap();
+        assert_eq!(prefs.animations, Some(false), "later config wins");
+        let absent = UiPreferences::load(&[], &dir.join("missing-kv.json")).unwrap();
+        assert_eq!(absent.animations, None, "absent => caller resolves `?? true`");
         fs::remove_dir_all(dir).unwrap();
     }
 

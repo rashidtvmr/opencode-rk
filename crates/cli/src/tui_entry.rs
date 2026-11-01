@@ -1569,6 +1569,12 @@ struct PaintCtx {
     page_panel: Option<(u16, u16, u16, u16)>,
     logo: Option<(u16, u16)>,
     tabs: Option<TabStrip>,
+    /// `config.animations` resolved to the upstream default `true` when unset
+    /// (`config/index.tsx:250`). Gates the reduced-motion title DIM (TAB-24).
+    animations: bool,
+    /// Caller's per-session title-pending fact (`data.session.title.pending`,
+    /// `context/data.tsx:22-47`); `None` keeps the plain selected-BOLD paint.
+    title_renaming: Option<Box<dyn Fn(&crate::native_navigation::SessionRef) -> bool>>,
     vertical_rail: Option<crate::native_tab_rail::RailFrame>,
     compact_tooltip: Option<crate::native_tab_rail::CompactTooltip>,
     context_menu: Option<crate::native_tab_context_menu::MenuFrame>,
@@ -2034,6 +2040,8 @@ mod surface_paint_regressions {
             page_panel: view.page_panel(),
             logo: None,
             tabs: None,
+            animations: true,
+            title_renaming: None,
             vertical_rail: None,
             compact_tooltip: None,
             context_menu: None,
@@ -2090,6 +2098,8 @@ mod surface_paint_regressions {
             page_panel: view.page_panel(),
             logo: None,
             tabs: None,
+            animations: true,
+            title_renaming: None,
             vertical_rail: None,
             compact_tooltip: None,
             context_menu: None,
@@ -2175,6 +2185,8 @@ mod surface_paint_regressions {
             page_panel: view.page_panel(),
             logo: None,
             tabs: None,
+            animations: true,
+            title_renaming: None,
             vertical_rail: None,
             compact_tooltip: None,
             context_menu: None,
@@ -2239,6 +2251,8 @@ mod surface_paint_regressions {
             page_panel: view.page_panel(),
             logo: None,
             tabs: None,
+            animations: true,
+            title_renaming: None,
             vertical_rail: None,
             compact_tooltip: Some(tooltip.clone()),
             context_menu: None,
@@ -4116,7 +4130,7 @@ fn native_paint(
         for row in &rail.rows {
             let x = u32::from(row.rect.x); let y = u32::from(row.rect.y);
             if x >= cols || y >= rows { continue; }
-            let paint = if matches!(row.kind, crate::native_tab_rail::RailRowKind::New) {
+            let mut paint = if matches!(row.kind, crate::native_tab_rail::RailRowKind::New) {
                 crate::native_tab_rail::RowPaint::new_control_row(&ctx.palette, rail.active_new, row.is_hovered)
             } else if matches!(row.kind, crate::native_tab_rail::RailRowKind::CapTop) {
                 crate::native_tab_rail::RowPaint::cap_row(&ctx.palette, false)
@@ -4130,13 +4144,34 @@ fn native_paint(
             } else {
                 crate::native_tab_rail::RowPaint::session_row(&ctx.palette, &row.flags, row.is_hovered)
             };
+            // TAB-24: a renaming rail title is DIM while animations are off,
+            // else unchanged; the New/add rows keep their own BOLD
+            // (`session-tabs.tsx:1713-1720`).
+            if let (Some(renaming), crate::native_tab_rail::RailRowKind::Session(session)) =
+                (ctx.title_renaming.as_ref(), &row.kind)
+            {
+                paint.title_attr = crate::native_tabs::title_attributes(
+                    row.flags.active,
+                    renaming(session),
+                    ctx.animations,
+                );
+            }
             // Modal body cells were painted by the general row pass above.
             // Exclude their whole rectangle, not just the later border pass.
             paint_styled_rail_row(renderer, row, modal, paint, base_alpha)?;
         }
     }
     if let Some(tabs) = ctx.tabs.filter(|_| ctx.vertical_rail.is_none()) {
-        let tabs = tabs.clone().with_row_colors(&ctx.palette);
+        // TAB-24: when the caller supplies the title-pending fact, stamp the
+        // reduced-motion DIM over the resolved paints; otherwise keep the
+        // plain selected-BOLD row paint.
+        let tabs = match ctx.title_renaming.as_ref() {
+            Some(renaming) => tabs
+                .clone()
+                .with_row_colors(&ctx.palette)
+                .with_title_renaming(renaming.as_ref(), ctx.animations),
+            None => tabs.clone().with_row_colors(&ctx.palette),
+        };
         let fallback_fg = accent;
         let fallback_bg = dim(background, base_alpha);
         for (index, row) in tabs.rows.iter().enumerate() {
@@ -5733,6 +5768,9 @@ fn native_loop(
     for diagnostic in &preferences.diagnostics {
         append_transcript(&mut transcript, format!("error: {diagnostic}"));
     }
+    // `config.animations ?? true` (`config/index.tsx:250`): the resolved
+    // reduced-motion flag. Tab hover/title paint and the marquee gate on it.
+    let animations = preferences.animations.unwrap_or(true);
     let cli_path = native_cli_config_path();
     let inline_cli = env::var("OPENCODE_CLI_CONFIG_CONTENT").ok();
     let (configured_markdown, markdown_diagnostics) = crate::native_ui_preferences::UiPreferences::markdown_mode(cli_path.as_deref(), inline_cli.as_deref());
@@ -7503,6 +7541,13 @@ fn native_loop(
                         view.home_logo_region(draft_echo)
                     },
             tabs: Some(frame_tabs.clone()),
+            animations,
+            title_renaming: Some(Box::new({
+                let inflight = rename_inflight.clone();
+                move |session: &crate::native_navigation::SessionRef| {
+                    inflight.as_ref() == Some(session)
+                }
+            })),
             vertical_rail: frame_rail.clone(),
             compact_tooltip: frame_tooltip,
             context_menu: context_menu.as_ref().map(|menu| menu.frame(crate::native_tab_context_menu::Viewport { width: viewport.0, height: viewport.1 })),
