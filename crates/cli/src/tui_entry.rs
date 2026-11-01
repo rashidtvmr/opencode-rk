@@ -5754,7 +5754,7 @@ fn native_loop(
         crate::native_ui_preferences::UiPreferences::appearance(&state_path).unwrap_or_default(),
     );
     let mut permission_editor = crate::native_permissions::Editor::default();
-    let animation_start = Instant::now();
+    let animation_start = crate::native_clock::FrameClock::new();
     let mut animation_tick = 0u128;
     let config_paths = native_tui_config_paths().unwrap_or_else(|error| {
         append_transcript(&mut transcript, format!("error: {error}"));
@@ -6955,10 +6955,7 @@ fn native_loop(
         // Marquee clock: a cycle whose tab left the rail stops
         // (`session-tabs.tsx:616-618`); otherwise advance on the upstream
         // 600 ms delay / 80 ms cadence.
-        let marquee_now = animation_start
-            .elapsed()
-            .as_millis()
-            .min(u128::from(u64::MAX)) as u64;
+        let marquee_now = animation_start.now_ms();
         if let Some(active) = tab_marquee.marquee().active().map(str::to_owned) {
             if !navigation.tabs().iter().any(|tab| tab.session.0 == active) {
                 tab_marquee.reset();
@@ -6968,7 +6965,7 @@ fn native_loop(
             needs_paint = true;
         }
         let busy_animation = worker.is_some() || model_load.is_some();
-        let next_tick = animation_start.elapsed().as_millis() / 80;
+        let next_tick = u128::from(animation_start.now_ms()) / 80;
         if busy_animation && next_tick != animation_tick {
             animation_tick = next_tick;
             needs_paint = true;
@@ -6977,7 +6974,7 @@ fn native_loop(
         // 868-900`); a released hold repaints the ordinary adaptive strip.
         if close_hold
             .as_ref()
-            .is_some_and(|hold| hold.expired(animation_start.elapsed().as_millis() as u64))
+            .is_some_and(|hold| hold.expired(animation_start.now_ms()))
         {
             close_hold = None;
             needs_paint = true;
@@ -7511,7 +7508,7 @@ fn native_loop(
                     loading: (binding_active && !worker_finished).then(|| {
                         (
                             crate::native_box_style::frame(
-                                animation_start.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                                animation_start.now_ms(),
                             ),
                             if dialog_open { "Waiting approval" } else { "Thinking…" },
                         )
@@ -7582,7 +7579,7 @@ fn native_loop(
         let marquee_deadline = tab_marquee
             .marquee()
             .next_wake()
-            .map(|at| animation_start + Duration::from_millis(at));
+            .map(|at| animation_start.deadline(at));
         let timeout = [worker_deadline, input.next_deadline(), marquee_deadline]
             .into_iter()
             .flatten()
@@ -8172,7 +8169,7 @@ fn native_loop(
                 if !resize_allowed || modifiers != 0 {
                     rail_resize.cancel();
                 } else {
-                    let now_ms = animation_start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+                    let now_ms = animation_start.now_ms();
                     let mut resize_consumed = false;
                     let mut commit_width = None;
                     if rail_resize.is_resizing() {
@@ -8308,10 +8305,7 @@ fn native_loop(
                         // `session-tabs.tsx:1650,1678` / `:888,915`: pointer-over
                         // starts the title marquee at the hovered title width;
                         // leaving the tab schedules the zero-delay clear.
-                        let hover_now = animation_start
-                            .elapsed()
-                            .as_millis()
-                            .min(u128::from(u64::MAX)) as u64;
+                        let hover_now = animation_start.now_ms();
                         match tab_hovered.as_ref() {
                             Some(session) => {
                                 let title = navigation
@@ -8585,7 +8579,7 @@ fn native_loop(
                                                     &session,
                                                     target,
                                                     x.saturating_sub(hold_origin),
-                                                    animation_start.elapsed().as_millis() as u64,
+                                                    animation_start.now_ms(),
                                                 ));
                                             }
                                         }

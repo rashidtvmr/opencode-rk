@@ -63,6 +63,8 @@ mod native_completion;
 mod native_workspace;
 mod native_debug;
 #[cfg(feature = "native")]
+mod native_clock;
+#[cfg(feature = "native")]
 mod native_memory;
 #[cfg(feature = "native")]
 mod native_compaction_settings;
