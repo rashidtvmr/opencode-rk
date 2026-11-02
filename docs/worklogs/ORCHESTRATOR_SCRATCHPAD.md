@@ -11493,3 +11493,47 @@ Verdicts this wave:
 In flight (wave-40 cont.): REVIEWCP23, REVIEWMEDIA01, REVIEWFORMHOST, REVIEWLAY17,
 DIALOG05FIX, TAB07FIX, CP36, LAY20, MSG006, SIDE12, THEME10, THEME14FIX, TOOL011,
 TOOL002-fix.
+
+## 2026-11-02 (cont.) — wave-41 landings, HEAD `1226b355`, pushed
+
+Landed and pushed (`27c6c208..1226b355`):
+- `4a259a9e` **THEME-10** — `crates/cli/src/native_theme_runtime.rs`: add the
+  Light-mode four-way default/new-designs x opencode/opencode2 gate matrix test
+  `default_and_new_designs_gate_names_independently_light`. Test-only; production
+  gate code already matched upstream `theme/index.ts:27-46`. Reviewed
+  `REVIEWTHEME10` APPROVE.
+- `1226b355` **SIDE-07** — `crates/cli/src/native_sidebar.rs`: add
+  `pending_and_disabled_paint_muted_dots_with_exact_labels` (Pending/Disabled dot
+  + literal labels). Test-only; renderer already matched `mcp.tsx:16-84`.
+  Reviewed `REVIEWSIDE07` APPROVED. The absent `pending` wire producer is
+  recorded, not faked.
+- Full CLI suite on each landing: 2152 then 2154 passed / 0 failed.
+
+Verdicts / holds this wave:
+- **REVIEWTAB07 NEEDS_FIX** on the stale `candidate.patch` (357 lines, byte-identical
+  to wave37). The repaired `TAB07FIX/patch.diff` (377 lines) DOES carry the
+  `native_tabs.rs:3437` `BackgroundElement -> BackgroundPanel` assertion fix and
+  applies cleanly; locally verified (focused `home_and_add_paint_metadata_follow_upstream_styles`
+  + all 64 `native_tabs::` tests + full suite 2155 pass). Re-review `REVIEWTAB07FIX2`
+  in flight against the correct file; commit held until it returns.
+- **REVIEWDIALOG05 NEEDS_FIX** and **REVIEWDIALOG05FIX APPROVE** conflict on F2.
+  Orchestrator applied `DIALOG05FIX/patch.diff` and ran its test: it FAILS
+  (`native_palette.rs:3654`: asserts `EmptyState::Empty` but impl returns `None`
+  for a `render_filter(false)` non-empty list). Reverted; not landed. F3 (dead
+  symbol: `empty_view_row`/`EmptyViewRow`/`with_render_filter` have no non-test
+  consumer; the real fallback row hardcodes insets 2,2 at
+  `native_command_palette.rs:419`). Repair `DIALOG05FIX2` dispatched to fix the
+  test to real upstream semantics and wire the real consumer.
+- **LAY-17** applied then reverted: its own test fails
+  (`tui_entry.rs:1414:67: browsing anchor`, `capture_tab_scroll_anchor` returns
+  None). Repair `LAY17FIX2` dispatched.
+- ALREADY_CORRECT (no change): LAY-02, LAY-06, LAY-07, LAY-13, LAY-0607 (doc-only),
+  SIDE-01, SIDE-12 (render path; dismiss-click consumer is the real gap).
+- BLOCKED (recorded, no fabricated producer): SIDE-03, TOOL-012, TAB-21, MSG-008,
+  MSG-005 chips, W35-MEDIA01 transport, THEME-14 (no native SyntaxStyle consumer
+  in `native_paint`; theme-replacement seam is a multi-file `tui_entry.rs` change),
+  DIALOG-20 crash/error-details half.
+
+In flight (wave-41): REVIEWTAB07FIX2, REVIEWCP23, REVIEWTOOL002, REVIEWFORMHOST,
+REVIEWSIDE13, DIALOG05FIX2, LAY17FIX2, SIDE12FIX, SIDE09, TAB24, CP12, MD006,
+MSG009, LAY16.
