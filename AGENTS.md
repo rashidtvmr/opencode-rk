@@ -7,9 +7,9 @@ This repository is in **product-convergence mode**. The goal is a working OpenCo
 The user's latest direction is larger end-to-end expert implementation ownership,
 direct porting from pinned OpenCode, less redundant research/review, and a
 devil's-advocate/evaluator-optimizer check of these rules. The operative policy is
-`docs/IMPLEMENTATION_FIRST_DELIVERY.md`; predefined responsibilities and dispatch
-templates are in `docs/AGENT_ROLES.md`. Read those and
-`docs/AGENT_WORKER_PRACTICES.md` before assignments. They supersede conflicting
+`docs/AGENT_STRATEGY_V2.md`; predefined roles, responsibilities and dispatch
+templates are in `docs/AGENT_WORKER_PRACTICES.md`. Read both before assignments.
+They supersede conflicting
 older scheduling/staffing/handoff prose below; dated historical directions are
 evidence, not additional active schedulers. Product/security/acceptance rules remain.
 
@@ -39,9 +39,9 @@ evidence, not additional active schedulers. Product/security/acceptance rules re
 
 ### Maximum-parallelism rule — no artificial bottleneck or blocker
 
-The user's explicit current direction supersedes **every** older parallelism,
-serialization, integration-writer, candidate-high-water and refill instruction
-in this file, in `docs/*`, and in `config/*.json`:
+The user's maximum-parallelism direction supersedes older coordination-only
+ceilings. Its safe execution is clarified by the current implementation-first
+contract above; numeric authorization is not implemented runtime concurrency:
 
 > "update our parallel task rules to max possible and then update all the rules
 > to obey the updates and then delegate to complete it fast, lets not have any
@@ -53,20 +53,22 @@ independence. Any ceiling that exists only for coordination comfort is a
 bottleneck and must be raised to the measured limit or removed. Where a number
 is still required by code, it is set to a non-binding value.
 
-Measured host envelope (do not invent limits below it):
+Reported host envelope and authorized maxima (recheck live headroom for admission):
 
 | Resource | Measured | Rule |
 | --- | --- | --- |
-| CPU cores | **10** | Heavy validation runs up to **3** concurrent builds × **3** cargo jobs = 9 of 10 cores |
-| RAM | **24 GiB** | `hostBudgetMiB` 24576, `reservedMemoryMiB` 4096, admit while ≥ 512 MiB available |
-| Disk | shared volume | Reclaim after every merge (see worktree lifecycle below); a low-disk condition is a **blocker to fix**, never a reason to stop |
-| Test threads | 10 cores | `rustTestThreads` **4** per build |
+| CPU cores | **10** | Up to **3** builds × **3** Cargo jobs authorized; actual admission includes linkers/tests and implemented locks |
+| RAM | **24 GiB** | Reserve **4096 MiB**; admit against measured peak job memory, not the legacy 512 MiB emergency floor alone |
+| Disk | shared volume | Check reclamation eligibility after merges; low disk queues affected writes/builds while safe repair and independent work continue |
+| Test threads | 10 cores | Up to **4** per build; test subprocess fan-out is included in resource admission |
 | Agents | network-bound, not CPU-bound | `logicalAgentCeiling` **96**, `maxWorkers` **48**, `targetWorkers` **30** |
 
-**Multiple parallel integration lanes are authorized.** `integrationWriters` is
-**4**, not 1. Each lane owns a disjoint path set and serializes only its own
-fast-forward publish. Canonical publication stays fast-forward-only,
-token-guarded and never forced. The single-writer rule is retired.
+**Multiple parallel integration-preparation lanes are authorized.**
+`integrationWriters` **4** is a preparation-capacity target, not permission for
+simultaneous mutation of the canonical index/ref. All lanes share one short,
+atomic, token-guarded fast-forward publication transaction with an expected-base
+check. Parallel preparation beyond the existing single `integration_turn` needs
+a verified runtime change; it is not enabled merely by this setting.
 
 **The verification queue is not a bottleneck either.** `candidateHighWater` and
 `maxUnverifiedCandidates` are **48** (non-binding). `parallelPreverificationCeiling`
@@ -83,9 +85,10 @@ park the fleet waiting for a batch.
 - fast-forward-only, non-forced canonical publication;
 - preservation of user work, databases, the running daemon and frozen legacy refs.
 
-Raising parallelism never authorizes weakening, skipping or parallelizing a
-correctness check. If a correctness gate becomes throughput-limiting, add
-reviewers or preverifiers — do not remove the gate.
+Raising parallelism never authorizes weakening or skipping a correctness check.
+Independent checks may execute concurrently only with isolated resources and
+preserved semantics. If a gate limits throughput, improve its measured execution
+capacity and add useful reviewers/preverifiers; do not remove the gate.
 
 ### Worktree lifecycle — merged **and pushed**, then reclaim
 
@@ -98,17 +101,24 @@ A worktree or its local branch may be deleted **only after both conditions are
 individually verified**:
 
 1. its tip is an **ancestor of the current `main-v2`** (`git merge-base --is-ancestor`);
-2. that **same tip exists on the push remote** (`git ls-remote` against
-   `git@github.com:rashidtvmr/opencode-rk.git`).
+2. that **same tip exists on the push remote**: either it is freshly advertised
+   by `git ls-remote` against `git@github.com:rashidtvmr/opencode-rk.git`, or verified
+   ancestry proves it reachable from the freshly advertised remote `main-v2`.
+   `ls-remote` does not enumerate every reachable commit.
 
 Never delete on the strength of being "probably merged", a stale tracking ref, or
 a branch *name* that looks merged. The local `origin/*` tracking refs are not
 evidence: `origin` fetches from a local path while it pushes to GitHub, so
 `refs/remotes/origin/*` can be arbitrarily stale. Verify against the push remote.
 
-Order of operations, per worktree: verify ancestor → verify on push remote →
-remove worktree → prune branch ref → report reclaimed bytes. The executable form
-is `tools/worktree_reclaim.py` (dry-run by default; `--apply` to mutate).
+Order per worktree: verify inactive lease/process/task ownership → verify local
+and push-remote ancestry → inspect all unique content including ignored files →
+exclude canonical/remote paths and frozen refs → retain required evidence →
+recheck identities and ownership under lifecycle coordination → exact-path removal
+→ permitted non-frozen branch deletion → report actual reclaimed bytes.
+`tools/worktree_reclaim.py` is currently report/dry-run only under this contract:
+its missing lease/content/frozen-ref/race guards must be fixed and verified before
+unattended `--apply`. A saved patch alone does not permit deletion of unmerged work.
 
 **Never reclaim:** an unmerged worktree; a worktree whose tip is absent from the
 push remote; the canonical worktree; a dirty worktree carrying uncommitted or
@@ -626,8 +636,9 @@ unfinished task to another allowed, available route and preserve its evidence.
   uncontrolled writers, new branch families or weakened semantic assertions.
 - Integrate each independently reviewed, verified, ready feature into `main-v2`
   promptly through **one of the parallel integration lanes** (4 authorized). Each
-  lane serializes only its own fast-forward publish and owns disjoint paths; no
-  lane force-pushes. Do not hold a ready feature behind unrelated work.
+  lane owns disjoint candidate paths; final publication shares the global atomic
+  ref/index lock. No lane force-pushes or bypasses current runtime gates. Drain
+  ready features promptly; implement parallel prep rather than claiming it exists.
 - Investigate blockers, repair them, and continue. Redirect other workers to
   independent work while the blocker is being resolved. Preserve negative review
   verdicts until the corrected exact candidate is reviewed again.
@@ -680,12 +691,15 @@ that wider OpenCode parity is already complete.
 - Scratchpads preserve reasoning and point to raw evidence; they are not acceptance
   records or replacements for actual source/test verification. Keep secrets out.
 
-## Temporary user override — finish Phase 1 first (2026-10-21)
+## Historical override — finish Phase 1 first (2026-10-21; superseded)
 
 The user explicitly directed: "lets ignore the guards and running python script
 and focus on compelte the phase-1 task, we can hardne the rules afterward" and
-asked that this direction be recorded here. This section takes precedence over
-conflicting Recovery Mode process requirements below while completing Phase 1.
+asked that this direction be recorded here. The 2026-10-28 guarded-delivery
+direction superseded this temporary exception. The following bullets record what
+was authorized then; they are NOT current authority for direct commits or hook
+bypass. Current publication uses the guarded delivery contract. Preserve this
+history without reactivating it.
 
 - Do not block product implementation, integration or installed verification on
   recovery guard scripts, queue-state transitions, controller migration,
@@ -726,14 +740,19 @@ Recovery Mode overrides older merge-wave, Ralph-queue, branch-inventory and heri
 - Do **not** create review, verification, custody, repair, candidate or test-owner branches. Those are queue states, not Git topology.
 - Only the fixed mutable branches listed in `config/recovery-mode.json` may be created or advanced during Recovery Mode.
 - A worker or subagent normally returns evidence, a patch/commit candidate and verification results to its lane owner. It does not create a persistent worktree.
-- `main-v2` is the canonical product line. It advances only by fast-forward publish from one of the authorized integration lanes (4); no lane force-pushes.
+- `main-v2` is the canonical product line. Four preparation lanes may feed its
+  globally locked atomic fast-forward publisher; no lane races its index/ref.
 - Recovery activation installs a Git `reference-transaction` guard. New local branches, stashes/tags/custom refs, movement/deletion of frozen legacy refs, and post-activation changes to frozen evaluator files are rejected rather than merely detected later.
 - A candidate that fails after rebasing/preparing against current `main-v2` is ejected from the integration queue; reopen the failure instead of creating a descendant repair branch.
 - Legacy refs are frozen by `recovery/legacy-snapshot.json`. Never reset, force-push, delete or advance them.
 - `ralph.json`, completion claims and legacy task inventories are requirement/evidence databases, not schedulers.
 - Product progress means the count of failing/unproven Phase-1 behaviors decreases on the exact integrated SHA.
 - Mutable queue/gate/salvage state lives under the shared Git common directory (`recovery-state/`), **outside tracked history**. Never hand-edit operational state or commit acceptance bookkeeping; use `tools/recovery_state.py`.
-- Before any product claim or implementation delegation, `python3 tools/recovery_guard.py` must be GREEN from the activated canonical Recovery Mode. A bootstrap/controller branch is never a production execution lane.
+- For the historical Recovery Mode queue only, `python3 tools/recovery_guard.py`
+  must be GREEN before its product claims or implementation delegation. New
+  dynamic delivery uses its source/policy gate (`docs/CONTINUOUS_DELIVERY.md`),
+  not this legacy scheduling prerequisite. Product/security checks remain required;
+  do not run both schedulers. A bootstrap branch is not a product execution lane.
 - A fixed recovery lane owns at most one active failure, starts from the current `main-v2`, has an explicit non-overlapping path grant, and is reset/fast-forwarded after disposition. If `main-v2` moves, stale candidates are reopened/reapplied rather than turned into a branch family.
 
 ### Evaluator-optimizer loop (mandatory)
@@ -774,7 +793,8 @@ Use subagents aggressively for independent investigation, upstream comparison, l
 - implementation subagents: only for currently OPEN/CLAIMED failures with non-overlapping path grants;
 - reviewers/verifiers: return verdicts/evidence; do not create branches;
 - only a lane owner may mutate one of the fixed recovery lanes;
-- lanes advance `main-v2` only through fast-forward publish; none may force-push.
+- lanes prepare candidates; `main-v2` advances through one globally locked atomic
+  fast-forward transaction. None may force-push or bypass the active controller.
 
 The verified-candidate high-water mark is **48** and non-binding in practice. Keep spawning implementers while independent, useful work exists; drain the ready queue with the parallel integration lanes rather than throttling intake.
 
@@ -812,7 +832,8 @@ Do not split a behavior into one task per file. Create a child only when indepen
 4. Assign one coherent repair package.
 5. Allow a second competing implementation only when uncertainty warrants it.
 6. Independently preverify.
-7. Integrate through the single trusted integration writer.
+7. Prepare in an authorized integration lane; publish through the globally locked
+   trusted fast-forward transaction after exact-candidate checks.
 8. Rerun the same gate on the exact integrated SHA.
 9. Only then accept and unlock dependencies.
 
@@ -827,8 +848,8 @@ envelope at the top of this file for the authoritative numbers.
 
 - candidate high-water: **48** (non-binding in practice);
 - never park the fleet waiting for a batch: refill continuously (`stopWhenNoReadyWork: false`);
-- **4** parallel integration lanes publish fast-forward to `main-v2`, each over
-  disjoint paths; no lane force-pushes;
+- **4** parallel integration-preparation lanes are authorized over disjoint
+  candidate paths; canonical publication is globally atomic and never forced;
 - heavy local validation: up to **3** concurrent builds × **3** cargo jobs, per
   `config/convergence-v2.json`.
 
@@ -865,7 +886,10 @@ not inspected.
 
 ## Non-destructive salvage
 
-Pre-V2 branches/worktrees are valuable evidence. Never delete, force-push, reset or prune them during convergence **unless** the worktree lifecycle rule above is satisfied: the tip is an ancestor of the current `main-v2` **and** that same tip is verified present on the push remote. Only then may the worktree be removed and its local branch pruned, by `tools/worktree_reclaim.py`.
+Pre-V2 branches/worktrees are valuable evidence. Retirement must satisfy every
+worktree-lifecycle check above, including merged-and-pushed proof and frozen-ref
+exclusion. Nothing here authorizes force-push/reset, blanket pruning, deletion of
+unique content or automatic use of the currently incomplete reclaim script.
 
 Legacy branches receive dispositions only when a current product failure requires inspecting that lineage. Do not create hundreds of disposition tasks merely to complete an inventory. Terminal dispositions are `ALREADY_PRESENT`, `SALVAGED_PRODUCT`, `SALVAGED_TEST`, `SUPERSEDED_BY <ref>`, `DUPLICATE`, `PROCESS_ONLY`, `EVIDENCE_ONLY`, and `CONFLICTING_IMPL_PRESERVED`. There is no durable `PENDING_REVIEW` salvage queue.
 
@@ -875,7 +899,10 @@ Useful code/tests are integrated selectively. Superseded/process-only branches s
 
 No unrestricted secret access, shell-string concatenation, automatic replay of ambiguous side effects, unbounded queues/output, fake sandbox claims, or modification of the user's existing OpenCode database during tests. Use disposable fixtures and explicit capabilities. Permission `*` cannot bypass mandatory protection or human-only authority.
 
-Run heavy commands serially unless measured headroom proves otherwise. Default `CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2`; reduce under pressure. Prefer focused test -> target -> crate -> workspace.
+Use the active runtime's resource admission and shared locks. Authorized maxima
+are 3 builds × 3 Cargo jobs with up to 4 test threads per build, not a guarantee
+that concurrent peak memory/I/O fits. Until the lock consumers support multiple
+slots, obey their serialization. Prefer focused test -> target -> crate -> workspace.
 
 ## Completion report
 

@@ -25,26 +25,28 @@
   "ceilingBasis": {
     "hostCores": 10,
     "hostMemoryMiB": 24576,
-    "heavyValidation": "3 concurrent builds x 3 cargo jobs = 9 of 10 measured cores; overlap on the 10th is accepted so the scheduler is not idle on I/O waits",
-    "rustTestThreads": "4 per build matches the 10-core box without thrashing",
-    "agentCeiling": "agents are network-bound, not CPU-bound; 96 is the dispatch ceiling, gated at runtime by authorized route concurrency and resident memory, never by this number alone"
+    "heavyValidation": "Authorization ceiling only: up to 3 builds x 3 Cargo jobs. Admit against measured CPU, linker/test peak memory and I/O; tools/delivery/jobs.py heavy_lock remains exclusive until a verified shared admission implementation replaces it.",
+    "rustTestThreads": "Up to 4 per build; include test subprocess fan-out and actual concurrent memory/CPU usage. This number alone does not prove the workload fits.",
+    "agentCeiling": "96 is a ceiling, not a target or measured execution count. Follow docs/AGENT_STRATEGY_V2.md: useful expert implementation ownership, actual provider/harness limits and resource admission. No invented jobs to fill slots."
   },
   "bottleneckPolicy": {
     "mode": "no-artificial-bottleneck",
     "rule": "A ceiling may only exist for a measured physical resource (cores, memory, disk, provider concurrency, evaluator independence). Any ceiling that exists only for coordination comfort must be raised to the measured limit or removed.",
-    "integrationWritersRationale": "Multiple parallel integration lanes are authorized. Each lane owns a disjoint path set and serializes only its own fast-forward publish; canonical publication itself stays an ff-only, token-guarded, non-force operation.",
-    "candidateHighWaterRationale": "No practical backpressure: a large ready queue is drained by the integration fleet, not throttled by a queue cap.",
+    "integrationWritersRationale": "Four parallel preparation lanes are authorized, not four concurrent canonical index/ref writers. Final publication shares a global atomic guarded ff-only transaction. The delivery engine still has one integration_turn until a verified runtime change enables parallel preparation.",
+    "candidateHighWaterRationale": "48 is the configured cap, not proof of throughput. Refill useful independent work continuously and shift capacity toward aged review/build/integration queues; physical resource admission remains binding.",
     "independentReviewIsNotABottleneck": "Review separation (author != reviewer) is a correctness invariant, not a concurrency limit. It must still be honoured at any parallelism."
   },
   "worktreeLifecycle": {
     "reclaimPolicy": "merged-and-pushed-only",
-    "rule": "A worktree or local branch may be deleted ONLY after BOTH: (1) its tip is an ancestor of the current main-v2, and (2) that tip is present on the push remote. Nothing is deleted on the strength of being 'probably merged'.",
+    "rule": "Deletion requires merged-and-pushed proof AND inactive ownership, absence of unique ignored/untracked work, frozen-ref/canonical/remote-path exclusions, evidence retention and immediate race rechecks. See docs/AGENT_STRATEGY_V2.md section 8. Current reclaim script is report-only until missing guards are implemented and verified.",
     "order": [
       "verify tip is ancestor of main-v2",
-      "verify tip exists on push remote (git ls-remote)",
+      "verify tip is advertised or an ancestor of freshly advertised push-remote main-v2 (ls-remote alone lists only ref tips)",
+      "verify inactive task/lease/process ownership, all unique content, frozen refs and path identity",
+      "retain required evidence and recheck under lifecycle coordination immediately before removal",
       "remove the worktree directory",
       "prune the local branch ref",
-      "report reclaimed bytes"
+      "report actually reclaimed bytes after successful removals"
     ],
     "tool": "tools/worktree_reclaim.py",
     "neverDelete": [

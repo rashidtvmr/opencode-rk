@@ -1,5 +1,136 @@
 # Orchestrator scratchpad
 
+## 2026-11-02 — Consolidation into existing instruction files
+
+Owner requested existing-file updates rather than additional rule documents.
+The implementation-first policy now lives in `docs/AGENT_STRATEGY_V2.md`; the
+16-role catalog, dispatch template and worker rules live in
+`docs/AGENT_WORKER_PRACTICES.md`. Existing gate/salvage and worker-preservation
+requirements were retained. Active references in AGENTS, delivery/recovery/TDD
+docs, configuration descriptions and the TDD skill now use those existing files.
+The two extra policy/catalog documents were removed after consolidation. Their
+previous review hashes below are historical evidence, not approval of new bytes.
+The separate review record was also consolidated here to avoid another new file.
+
+General independently APPROVED the consolidated existing files in session
+`ses_e6450cf76ffetMJhYT9FxDULRv`, confirming retained safety/staffing/ownership,
+all 16 roles, no stale active links and no numeric/runtime-control changes.
+Exact strategy hash: `de38752708c42eb895a6e08ac8667683b19f14c2283bc246be52cdb2caaa42c7`.
+Exact worker hash: `61fe8028bc1f6c93cab1d2e5113faf3ed4078c29db404c81a1fa4dfd4240cb50`.
+Main verified both hashes, 16 unique roles, valid JSON configs, balanced fences,
+absence of the three redundant files and `git diff --check`: PASS.
+
+### Preserved implementation-first evaluator/optimizer record
+
+Scope: owner requested draft -> devil's advocate -> optimizer -> independent
+evaluation -> written expert-owned implementation-first rules. No product fleet,
+controller rewrite, installation or cleanup was started by this orchestrator.
+
+Initial base: `9f995514a7242905be093dd0996ee2cd1b496fd3`, with another agent's
+orchestration edits. Those became `ae20a31c`; another agent subsequently committed
+our original policy/catalog/preamble as `d588979f`. This orchestrator issued no
+commit/push, reset, stash or cleanup; edits were refreshed against current bytes.
+
+1. Initial draft: persistent expert subsystem owners, embedded upstream reading,
+   implementation-heavy staffing, continuously delivered wired checkpoints,
+   parallel preparation with atomic publication, honest runtime limits and safe
+   workspace retirement.
+2. Initial direct Vyce session `ses_e6473dcb0ffekBtIzKJSbvBazP` and combined session
+   `ses_e64737d09ffe8i4c2rS5aALWhC` returned `Invalid request`, without reviews.
+   No usage balance inferred; neither retried. User selected Luna Free and River.
+3. River `ses_e6472fcdfffeowWhCtvqtbYsAJ` found stale quotas, publication/build
+   contradictions, ambiguous lanes and unsupported lifecycle capability claims.
+   Optimizer aligned eight docs and embedded production wiring. A suggested
+   wait-for-build-before-next-checkpoint barrier was rejected: independent work
+   must continue while verification waits.
+4. Luna `ses_e64733c62ffegbH4d2jeWp6ZtH` returned NEEDS_FIX for active AGENTS
+   paragraphs still overstating parallel publication and automatic reclamation.
+   Optimizer corrected them directly; exact-SHA checks remained and resource
+   fit claims became measured-admission requirements. No runtime gate bypass.
+5. River approved the policy/catalog/eight-doc package and separately the three
+   config-description changes. Numeric controls, route arrays, controller code
+   and product test assertions were not changed by this policy-update turn.
+6. The inherited TDD skill said "Delete, restart" and hardcoded an 8GB/2-job
+   envelope. Optimizer replaced this with preserved-byte baseline RED proof and
+   actual runtime resource admission. River APPROVED exact skill hash
+   `ea688567fde6bb7e8878836a1ed2932e63725220d1c45cee82d7beed6c057132`.
+7. Luna's second NEEDS_FIX identified an active-looking hook-bypass exception,
+   unscoped recovery-guard prerequisite and stale route config/documentation.
+   Optimizer marked the exception historical, scoped the legacy guard to its
+   own queue, and prohibited fleet launch from stale routes until owner alignment.
+   No stored-state edit or live route migration occurred.
+8. Luna's focused final review APPROVED those corrections at AGENTS hash
+   `c06c139d49097689e41e7ff807ffa2d30a3b9c9188d8482543a4cc66d4aa7389`
+   and CONTINUOUS_DELIVERY hash
+   `373df685b74dafde6a7ec63e872713c2893dadbd4f9ad00a0d613ee37f0ce877`.
+9. Owner requested @general. Session `ses_e6450cf76ffetMJhYT9FxDULRv` returned
+   NEEDS_FIX: automatic `cleanup.collect()` ran even without publication and
+   omitted retention proofs; strategy retained an exhaustive salvage recipe.
+   Main personally checked `engine.py:374`, `cleanup.py:42–51` and the recipe.
+   Corrections added collector preflight before launch examples, behavior-scoped
+   salvage, moved route preflight earlier and changed "evidence-only" to
+   "research-only" so ordinary reviews need no invented blocker.
+10. General's focused re-evaluation APPROVED the corrected instructions. This
+    approved policy, not runtime safety or supervisor launch. Prior negatives
+    remain evidence; later consolidation does not inherit exact-byte approvals.
+
+Historical reviewed artifact hashes (old filenames refer to pre-consolidation
+content, not live instruction links):
+- Original IMPLEMENTATION_FIRST_DELIVERY.md:
+  `4b50469ea5990a2777670af7400756b27acfae01143be6a460987ef0a44a50e4`
+- Original AGENT_ROLES.md:
+  `3e115b13d3cb518572b1ef713a078bb28c658d0cca1a2ef0764da45ce6233a5b`
+- Intermediate AGENTS.md submitted to Luna:
+  `0a6b49d4fd40d5f7376a37999b35f3baaa765053d631ae904189e4eb55c67e4c`
+- River-approved convergence config:
+  `3ed08ad8e2915f938a708f7d5c2a4d3fa27c51202db9860c371a92ff8545eea5`
+- River-approved completion config:
+  `0470d20614829ebf1d9efbca7fd8c33a54f88a2e54129d87d40971cb39ad4b1b`
+- River-approved compatibility settings:
+  `9e388356fb8120a45ac58600916174285b71dfb37053a58d7b19e53c89f4ba3e`
+- General-approved CONTINUOUS_DELIVERY.md:
+  `ae343636e0eaba7b1ea9c6e31ae39b0eb1732c6bca1086a36f8f63c5b0fd6edd`
+- General-approved IMPLEMENTATION_FIRST_DELIVERY.md:
+  `9c1632a6295c11a53871492439466993721c7924e525640c0f1e437b6e761fd0`
+- General-approved DELIVERY_OPERATING_CONTRACT.md:
+  `9e65eda8d45ae97ae337a3ef09e5cdbebc92965547dc353caa0f1e079cfa8e05`
+- General-approved AGENT_STRATEGY_V2.md:
+  `ab2f0f9f55367179d69a76ec13e36cea68dec28868756cef80884edac511cfdc`
+- General-approved AGENT_WORKER_PRACTICES.md:
+  `fd996ebe32d54d2989c0b27d736134613b6599dd928d9665654c7bfcbd7514c5`
+
+Checks executed before consolidation: git diff --check; four configs parsed;
+recursive numeric/bool comparisons unchanged against HEAD; delivery model config
+validator accepted; ten document fence/reference checks; 16 unique roles. All
+passed. No Cargo/product test, user DB access, daemon restart, workspace deletion
+or provider change occurred. These are policy checks, not product acceptance.
+
+Runtime backlog remains explicit: one integration turn and exclusive heavy lock;
+candidate stacks/review reuse/pooled slots/distributed builds are unimplemented;
+automatic collection requires a verified retention-safe implementation or a
+supported verified non-destructive mode before supervisor launch. Independent
+isolated implementation can continue. Prose does not implement these capabilities.
+
+## 2026-11-02 — Implementation-first policy update
+
+User requested draft -> devil's advocate -> optimizer -> evaluated written rules,
+with expert predefined roles, larger end-to-end owners and less research overhead.
+Current policy: `docs/AGENT_STRATEGY_V2.md`; catalog:
+`docs/AGENT_WORKER_PRACTICES.md` (16 roles). Review/verification record is preserved
+in the consolidation section above in this existing scratchpad.
+Independent routes: Luna Free `ses_e64733c62ffegbH4d2jeWp6ZtH`, River
+`ses_e6472fcdfffeowWhCtvqtbYsAJ`. River approved docs and config-description delta;
+Luna's initial NEEDS_FIX drove direct corrections to active AGENTS paragraphs;
+final Luna disposition is recorded in the review record. Earlier direct/combined
+Vyce calls returned Invalid request; no quota or execution claim inferred.
+Another agent committed initial policy/catalog/preamble as d588979f during this
+turn; this orchestrator issued no commit/push or cleanup. Remaining edits align
+worker/strategy/delivery/recovery/TDD docs and config explanations without changing
+numeric controls or protected runtime code. Exact-SHA checks remain; four prep
+lanes and three builds are authorized targets, NOT implemented concurrency:
+engine integration_turn and jobs heavy_lock still serialize. No product fleet,
+runtime performance improvement or installed acceptance claimed from these rules.
+
 ## 2026-10-30 — Confirmed canonical reset and executable validation
 
 - F25V8NEEDS_FIX714e456d confirmsproductionstageddesignsource-correct but

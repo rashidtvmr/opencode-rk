@@ -2,6 +2,15 @@
 
 Status: **ACTIVE**
 
+**Current orchestration clarification (2026-11-02):**
+`AGENT_STRATEGY_V2.md` governs staffing, expert ownership and handoffs.
+For new dynamically scheduled work, use the single delivery controller described
+in `CONTINUOUS_DELIVERY.md`; do not run this historical recovery queue alongside
+it. The protected Phase-1 acceptance contract, frozen references, permissions and
+applicable hooks remain binding. Historical four-lane/candidate scheduling below
+does not establish the delivery fleet's current capacity. Numeric authorization
+alone does not remove the delivery engine's current integration/heavy-check locks.
+
 Recovery Mode replaces the failed strategy of treating hundreds of divergent Git refs as a merge queue. The existing branch/worktree universe is preserved as read-only evidence. The running product on `main-v2` is the only completion authority.
 
 ## 1. Objective

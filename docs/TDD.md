@@ -1,5 +1,11 @@
 # TDD contract: trusted RED/GREEN pipeline
 
+Current ownership/staffing policy: `AGENT_STRATEGY_V2.md`. Test work
+is part of an expert-owned behavior checkpoint, not a mandatory separate research
+handoff. Implementers may add new tests in explicitly granted paths; they cannot
+rewrite protected acceptance tests or approve their own candidate. Existing
+frozen test/command hashes and exact-SHA checks remain binding.
+
 This document is the authoritative test-driven development contract for the Lean
 Harness. Every worker (main and subagents) must follow it before modifying product
 code. It is binding: a worker cannot accept its own slice and cannot rewrite these
@@ -8,9 +14,10 @@ this document operationalizes.
 
 ## 1. Scope and authority
 
-- Tests and verifier configuration are **not writable by the implementation
-  sandbox**. The implementer proposes tests; the trusted controller freezes them
-  and the independent verifier runs them (ADR-007, PLAN.md section 6).
+- Protected tests and verifier configuration are **not writable by the
+  implementation sandbox**. New checkpoint tests may be authored in granted
+  paths, independently reviewed and frozen by the trusted controller before
+  authoritative verification (ADR-007, PLAN.md section 6).
 - A slice is ready only when its dependency revisions and required contracts are
   accepted (PLAN.md section 5). A worker owns only its leased task and approved
   paths (AGENTS.md, Authority and ownership).
@@ -32,9 +39,9 @@ For each slice, in order:
 3. Author tests. Establish a **compiling RED** that fails for the missing
    behavior.
 4. Freeze tests and the command manifest.
-5. Implement the minimum behavior natively in Rust; retain protocol and
-   behavioral semantics rather than translating files line by line (ADR-003,
-   AGENTS.md step 4).
+5. Port the pinned behavior through production callers. Prefer structure-preserving
+   translation with explicit Rust ownership/async/reactivity mappings; preserve
+   semantics rather than assuming syntactic line-by-line equivalence.
 6. Run **GREEN**, refactor, and rerun.
 7. Run independent regressions, negative/security tests, lifecycle/resource
    tests and differential fixtures.
@@ -46,8 +53,9 @@ For each slice, in order:
   failures, missing imports, tests that never execute, disabled tests,
   `#[ignore]`, a fabricated successful log and a worker-edited `passes:true` are
   not valid evidence (PLAN.md section 6).
-- Five named tests per task are a minimum taxonomy, not five sufficient tests.
-  Expand into concrete cases.
+- Choose meaningful tests for the changed behavior and its negative cases; do
+  not manufacture a fixed count of shallow tests. Required acceptance scenarios
+  and existing semantic assertions still apply.
 - A denied permission must assert **absence of side effects**, not just an error
   string. Cancellation must assert tasks/processes/FDs are actually reclaimed.
   Partial streams, provider errors and process crashes need fixtures
@@ -67,8 +75,9 @@ For each slice, in order:
 
 ## 5. GREEN and refactor
 
-- Implement the minimum behavior that turns the frozen RED green. Retain
-  protocol and behavioral semantics rather than line-by-line translation.
+- Implement the complete checkpoint that turns the frozen RED green, including
+  production wiring. Preserve upstream protocol and behavioral semantics using
+  the agreed Rust mappings; avoid unrelated redesign.
 - After GREEN, refactor and rerun the full affected suite. Green on the frozen
   tests plus clean independent regressions is the bar before submission.
 - Submit **evidence and a patch**, never acceptance. The verifier, not the

@@ -1,6 +1,12 @@
 # Subagent lifecycle control - complete specification
 
-This document specifies every subagent control surface the lean harness exposes.
+Status: product design specification, not a claim that every surface exists in
+the installed harness. Each capability needs production wiring and executed
+verification before being described as implemented. For development-worker roles,
+ownership and scheduling use `AGENT_WORKER_PRACTICES.md` and `AGENT_STRATEGY_V2.md`;
+the product API sketches below do not grant tools, permissions or nested agents.
+
+This document specifies intended subagent control surfaces.
 It covers spawn modes, failure recovery, runtime model switching, context management,
 settings, observability, permissions, output handling, and cleanup. Each section
 maps to one or more ralph.json stories and test obligations.

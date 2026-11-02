@@ -20,7 +20,7 @@
   "allowBudgetIncrease": false,
   "respectHarnessConcurrencyLimit": true,
   "legacyAutomaticAcceptanceApproved": false,
-  "note": "Recovery Mode is active. Schedule only unresolved items from recovery/failures.json or executable probes for UNPROVEN Phase-1 gates. Legacy branches/worktrees, ralph.json and claims are evidence only. Parallelism ceilings are set to the measured host capacity; they are not coordination caps. Persistent subagent branch/worktree creation stays forbidden: lanes are queue states, not Git topology.",
+  "note": "Compatibility controller settings, not authority to run a second scheduler beside continuous_delivery.py. Use docs/AGENT_STRATEGY_V2.md and docs/AGENT_WORKER_PRACTICES.md: implementation-heavy expert owners, embedded source inspection, small end-to-end checkpoints. Numeric ceilings and legacy reserved-worker fields are not fixed staffing quotas or evidence of runtime concurrency. Admission must account for measured peak memory/CPU/I/O; 512 MiB is an emergency floor, not sufficient build headroom. Preserve actual runtime locks, product gates and protected policy. Legacy inventories are evidence only; no new persistent worker topology is authorized by this file.",
   "schedulingMode": "phase1-observed-failure-burndown",
   "minimumUsefulWorkersWhenSupported": 30,
   "reservedIntegrationWorkers": 4,

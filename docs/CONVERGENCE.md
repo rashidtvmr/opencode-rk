@@ -2,6 +2,9 @@
 
 The integrated running product is the completion authority. See `docs/AGENT_STRATEGY_V2.md` and `AGENTS.md`.
 
+Current orchestration: `AGENT_STRATEGY_V2.md`; predefined expert
+roles: `AGENT_WORKER_PRACTICES.md`. Historical inventories are evidence, not a release gate.
+
 ## Hard golden journey
 
 The core application is not accepted until a release-built `oc2`/`opencode2` from a fresh disposable HOME can, on the exact integrated revision:
@@ -20,7 +23,8 @@ The core application is not accepted until a release-built `oc2`/`opencode2` fro
 
 ## Gates
 
-- G0 Salvage: every pre-V2 worktree/branch has disposition and detached/dirty work is preserved.
+- G0 Preservation: preserve unique/dirty work; salvage only for an active product
+  need. Exhaustive legacy disposition is not a prerequisite to Phase-1 delivery.
 - G1 Startup: fresh launch and authenticated daemon ownership/reuse.
 - G2 Provider: persisted/in-app provider config drives a real request and first response.
 - G3 Tool: real permission broker + tool + typed result + provider continuation.
@@ -34,7 +38,13 @@ Gates may advance in parallel when path ownership does not overlap. A gate is GR
 
 ## Scheduling
 
-Work from observed gate failures. Packages may span the files required by one behavior. Active path grants must not overlap. Keep a non-binding candidate high-water of 48 and up to four parallel integration lanes (no lane force-pushes).
+Work from observed failures or approved upstream parity gaps. Expert owners span
+the files needed for end-to-end behavior, with non-overlapping checkpoint grants.
+Deliver small wired checkpoints continuously; source inspection is embedded.
+Use the current configured ceilings, not the historical four-candidate cap.
+Four integration-preparation lanes are authorized; final canonical publication is
+one guarded atomic transaction. Actual concurrency depends on implemented runtime
+support and measured resource admission, not configuration numbers alone.
 
 Historical `ralph.json`, claims and worklogs are evidence/requirements inventory, not the V2 execution queue.
 

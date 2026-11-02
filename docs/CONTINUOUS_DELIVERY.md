@@ -1,5 +1,10 @@
 # Continuous, dynamically owned software delivery
 
+Current task/staffing policy: `AGENT_STRATEGY_V2.md`; expert roles:
+`AGENT_WORKER_PRACTICES.md`. Large implementation ownership delivers small complete
+checkpoints. This document describes the current executable pipeline, not every
+authorized future concurrency capability.
+
 `tools/continuous_delivery.py` is the executable supervisor. It replaces the
 previous unconnected allocation function + integration pump for new work.
 It does not use the legacy `ralph.json` driver or assign four permanent coding
@@ -22,10 +27,14 @@ all 30 slots may implement. As candidates arrive, reviewers, test runners,
 conflict repair and integration preparation take slots. `workers` is 30 and
 `max_wip` 60 (`config/delivery-workflow.json`); raising them permits more
 eligible jobs but does not create tasks or override a route's real
-concurrency/authorization limit. Heavy validation is bounded by the measured
-host, not serialized to one: up to **3** concurrent builds of **3** cargo jobs
-(9 of 10 cores). Up to **4** integration lanes publish fast-forward in parallel,
-each over a disjoint path set; other independent work continues throughout.
+concurrency/authorization limit. Up to **3** heavy builds and **4** integration
+preparation lanes are authorized ceilings, subject to CPU/RAM/I/O admission.
+At the 2026-11-02 audit, `jobs.py:heavy_lock` still takes one exclusive
+`heavy-validation.lock`, and `engine.py:eligible_tasks` holds a single
+`integration_turn` across prepare/publish/postcheck. Raising config numbers does
+not remove those bottlenecks. Parallel preparation must be implemented and tested;
+all final canonical updates retain one atomic publication lock and expected-base
+check. No worker bypasses these locks. See the policy's runtime capability ledger.
 
 ## Installation and first run
 
@@ -33,6 +42,20 @@ Python 3.9+ and Git are sufficient for the controller. The included production
 adapter uses the installed OpenCode V2 `run --agent ... --format json` interface.
 A separate, explicitly configured command adapter is available for another
 trusted runtime; it is **not** an automatic fallback on provider failure.
+
+**Preflight before using the examples below:** the checked-in route list is stale;
+align exact authorized routes/limits and inspect the actual stored configuration
+as described under Route preflight below. In addition, `run` unconditionally calls
+`cleanup.collect()` from `tools/delivery/engine.py`, even without `--publish`.
+That collector (`tools/delivery/cleanup.py`) can remove superseded candidates
+after retaining only a commit diff, without merged-and-pushed or dirty/ignored-
+content proof. Disabling manual `worktree_reclaim.py --apply` does not disable it.
+Do not execute the supervisor against retained work until the collector meets
+the retention contract or a supported, verified non-destructive mode prevents
+collection. No such mode is established by this policy; do not invent a flag or
+edit runtime state to simulate one. The following are command-reference examples,
+not authorization to bypass these preconditions. Read-only status/source review
+and independently isolated implementation work can continue.
 
 ```sh
 cd /Users/mymac/Projects/opencode-rk-recovery-20261005
@@ -70,7 +93,8 @@ accepted, 2 means blocked/drained, 3 means a caller-specified time budget ended.
 imported backlog. Replace its paths, goal and checks with real behavior. Every
 specification requires:
 
-* Stable ID, observable goal, evidence/source reference, exact path grants and
+* Stable ID, expert role, observable goal, production caller chain, small delivery
+  checkpoints, evidence/source reference, exact path grants and
   dependencies. A manifest update may add new tasks but cannot silently change
   an admitted task's contract. Dependency cycles and missing parents are errors.
 * Trusted `checks` containing argv arrays, timeouts and optional required-output
@@ -84,6 +108,13 @@ The owner/planning orchestrator creates meaningful behavioral tasks and may keep
 adding them to the watched manifest. This is not an agent inventing unbounded
 new features, and branch inventory is never imported as a task queue. The same
 pipeline handles additions and fixes; independent checks determine completion.
+
+The same expert owner follows a subsystem through implementation and repairs.
+Source inspection belongs inside that assignment. No research-only stage is
+required when pinned upstream resolves the behavior. Checkpoint review/build waits
+do not block independent eligible work. Current dependencies still require
+ACCEPTED; speculative stacks are a separate unimplemented capability, not an
+implicit exception to `eligible_tasks`.
 
 Existing semantic acceptance tests are frozen by configured prefixes. New tests
 can be included in a task grant, but an ordinary implementation worker cannot
@@ -110,8 +141,11 @@ Reported token usage is UNKNOWN unless actually supplied; no invented balance.
 
 Each job uses a separate detached Git repository under the controller-owned
 state directory. It does not add a branch or worktree to the product repository.
-Successful obsolete workspaces are retired after audit patches are retained.
-Failed/ambiguous partial candidates remain available for investigation.
+Successful obsolete workspaces may be retired only after the merged-and-pushed,
+inactive-ownership and unique-content checks in `AGENT_STRATEGY_V2.md`.
+Neither a clean status nor a saved patch alone proves deletion is safe.
+Failed/ambiguous partial candidates remain available for investigation; reusable
+slots and compact reconstructable archives need an implemented lifecycle first.
 
 The trusted publisher requires a clean canonical worktree on the configured
 branch, a current prepared base, exact-candidate independent reviews, current
@@ -162,9 +196,19 @@ second scheduler. Its product acceptance contract and security protections are
 not weakened. `tools/recovery_delivery.py` remains a compatibility inspection/
 publication bridge for old queue entries, not a second agent launcher.
 
-The initial route configuration includes only the exact authorized alias observed
-in the installed catalog (`9router-luna-free`). Inventory presence does not prove
-service health or 40-way provider capacity. The selected agent definition is read
+**Route preflight is mandatory before launching or reconfiguring the supervisor.**
+The checked-in `config/delivery-workflow.json` route list is historical, not an
+approved current launch configuration: it lists River/Token Harbor at 40 and MiMo,
+which conflicts with the standing authorization/limits in `AGENTS.md`. Do NOT
+initialize, launch or reconfigure a product fleet from that list until an owner
+aligns exact aliases and per-route limits with current authorization and verifies
+the installed catalog. Also inspect the actual stored controller config through
+supported read-only status/config inspection: editing a file does not update it.
+Do not silently migrate live assignments or edit state JSON/SQLite to fix routes.
+For this policy-review task, only the explicitly selected Luna Free and River
+reviewers are used; that task-specific selection does not silently replace an
+existing product fleet. Inventory presence does not prove service health or
+40-way provider capacity. The selected agent definition is read
 from the explicit `runtime.agent_config` JSON path and copied without provider
 secrets into the temporary scoped overlay. Bounded inventory retries require
 an observed complete route and exact effective permission tail. `doctor` reports missing aliases and

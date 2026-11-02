@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "note": "Compatibility settings only. Recovery Mode schedules from recovery/failures.json, never from Ralph or the legacy branch inventory. Concurrency is a ceiling; research/review subagents may fan out, persistent Git topology may not.",
+  "note": "Compatibility settings only; do not run this scheduler alongside the active delivery controller. docs/AGENT_STRATEGY_V2.md and docs/AGENT_WORKER_PRACTICES.md govern implementation-heavy expert ownership and continuous checkpoints. Concurrency is a ceiling, not measured capacity; old worker pools do not override current user-authorized routes. No standing research quota or new persistent Git topology.",
   "maxConcurrentLanes": 16,
   "perTaskTimeoutSeconds": 7200,
   "maxAttemptsPerTask": 5,

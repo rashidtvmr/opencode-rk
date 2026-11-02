@@ -5,7 +5,10 @@ description: Enforce Rust RED-GREEN-refactor for features and bugfixes, compilin
 
 # TDD Discipline
 
-Iron law: no prod code without failing test first. Wrote code first? Delete, restart.
+Use `docs/TDD.md` and the current implementation-first policy. Establish a
+meaningful compiling RED before the repair. If a candidate already exists,
+preserve its bytes and demonstrate RED on its base in an isolated fixture;
+never delete or reset user/peer work to manufacture test ordering.
 
 ## RED
 
@@ -17,10 +20,15 @@ Minimal real code only. No `todo!()`, `unimplemented!()`, stubs, mocks for succe
 
 ## Verify
 
-Scope order: one test, then target, crate, workspace. Bounded:
+Scope order: focused behavior, then target, affected crate and required workspace
+checks. Use the controller's granted argv, timeout, resources and shared locks.
+Configured maxima are not actual headroom: account for linker/test memory, CPU,
+I/O and other jobs. Do not bypass the existing exclusive heavy-validation lock
+until a tested shared admission implementation replaces it. Never share a mutable
+Cargo target between concurrent builds.
 
-```sh
-CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 120 rtk cargo test -p <crate> --test <target>
-```
-
-Keep 8GB budget: one heavy command at time, narrow on timeout. Deterministic fixtures only: no net, clock, `#[ignore]`.
+Expert implementation owners may author new tests in granted paths and continue
+independent work while verification waits. Protected semantic tests stay frozen.
+Use deterministic disposable fixtures (including controlled local provider stubs
+and injected clocks); never user databases, external side effects or ignored tests
+to manufacture GREEN. See `docs/AGENT_STRATEGY_V2.md` sections 5–7.

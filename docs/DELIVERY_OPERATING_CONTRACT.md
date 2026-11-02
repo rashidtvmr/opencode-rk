@@ -1,5 +1,10 @@
 # Delivery operating contract — compact restart reference
 
+Current task sizing, expert roles and staffing are defined in
+`AGENT_STRATEGY_V2.md` and `AGENT_WORKER_PRACTICES.md`. Historical audit baselines
+below are not current controller telemetry. Preserve exact-SHA acceptance and
+existing guarded publication while improving the runtime incrementally.
+
 ## Authority and purpose
 
 On 2026-10-28 the user requested a complete audit and preservation of
@@ -18,8 +23,9 @@ the versioned v2 transcript and instruction summary. Do not invent missing conte
 
 ## Mandatory workflow
 
-1. Admit owner-defined observable tasks, exact source evidence, immutable path
-   grants, dependencies, trusted argv checks and expected RED patterns.
+1. Admit expert-owned end-to-end behaviors with production wiring, small delivery
+   checkpoints, exact upstream evidence, path grants, dependencies, trusted argv
+   checks and meaningful RED patterns. Source inspection is implementation work.
 2. Allocate a single dynamic pool by current eligible demand. Twenty independent
    tasks may use twenty implementation slots; forty slots do not mean forty
    invented tasks. No fixed role quotas or permanent four-lane scheduler.
@@ -30,8 +36,9 @@ the versioned v2 transcript and instruction summary. Do not invent missing conte
 5. Run trusted focused checks and meaningful RED probes. Test logs must contain
    positive executed counts; compiler errors alone are not behavioral RED proof.
 6. Prepare on current main. A changed/rebased candidate invalidates its approvals
-   and focused results; repeat them. Parallel integration lanes (4) publish over
-   disjoint paths, so a lane is not blocked by unrelated merges.
+   and focused results; repeat them. Four parallel preparation lanes are authorized,
+   not four concurrent canonical Git writers. The current engine's integration
+   turn remains serialized; another publication can stale a prepared base.
 7. Require full checks, a clean configured canonical branch, approved policy,
    shared publication lock and existing hook/capability. Publish fast-forward only.
 8. Run post-merge checks in a fresh checkout of the exact published SHA. Only
@@ -52,13 +59,17 @@ the versioned v2 transcript and instruction summary. Do not invent missing conte
   postchecks, and ambiguous other HEAD. Reconcile; never blindly replay or reset.
 - One supervisor per product repository, even if callers name different state
   directories. Reuse the existing state; do not start the old scheduler in parallel.
-- Heavy validation is bounded by the measured host: up to 3 concurrent builds of
-  3 cargo jobs, coordinated through the shared heavy-validation locks. It is no
-  longer serialized to a single build.
-- After a worktree's work is merged into `main-v2` **and** verified on the push
-  remote, reclaim it (`tools/worktree_reclaim.py --apply`). Never reclaim unmerged
-  or unpushed work, dirty worktrees, the canonical checkout, or a path configured
-  as a remote URL.
+- Before supervisor launch, satisfy both route and automatic-collector preflight
+  in `CONTINUOUS_DELIVERY.md`. `run` without `--publish` still invokes destructive
+  collection; the manual reclaim script's report-only rule does not protect it.
+- Heavy validation has an authorized ceiling of 3 builds, subject to actual
+  memory/CPU/I/O admission. `jobs.py:heavy_lock` still serializes delivery checks
+  at this audit. A shared resource scheduler must replace it safely before
+  claiming parallel execution; no ad-hoc lock bypass.
+- After merged-and-pushed proof, apply the complete ownership/unique-content/
+  frozen-ref/race checks in `AGENT_STRATEGY_V2.md` before retirement.
+  The current reclaim script is report-only until those missing guards are fixed
+  and verified. Never infer remote ancestry solely from stale tracking refs.
 - Preserve failed/ambiguous candidates. Retire only proven controller-owned,
   obsolete workspaces after required patches are retained and live ownership ends.
 - Do not infer health or quota from a configured route. Respect current exact
