@@ -11626,3 +11626,28 @@ Route assignment (8 vyce / 18 combined / 1 river / 1 luna):
 On completion: consolidate all wave44 JSONs into `docs/ui-parity/PARITY_STATUS.md`,
 land any PREVERIFIED patch one artifact at a time (compile + focused test + full
 CLI suite single-threaded + immediate commit), push after each landing.
+
+## 2026-11-02 — FORM-001 sub-behavior 1 is a product extension, not a parity bug
+
+Investigated the one "bounded candidate" flagged by the FORM-001 gap owner
+(realign the live permission dialog from 6 choices to upstream's 3). Finding:
+
+- Live `open_permission_with_persistent` (`native_view_dialogs.rs:1090-1119`)
+  emits 6 choices: Allow once / Deny once / Allow for this session /
+  Always allow / Deny for this session / Always deny.
+- Upstream `permission.tsx:232-240` emits 3 (`once`/`always`/`reject`) or 2.
+- BUT the canonical server **supports** the richer set: `run_owner.rs:232
+  reply_scoped(request_id, allow, scope)` accepts `scope ∈ {once, session,
+  always}` and `tui_entry.rs:5785-5786` maps the scoped intents to
+  `{reply, scope}`. The 6-choice set is therefore a deliberate opencode-rk
+  extension, protected by semantic tests
+  (`six_choices_have_exact_scopes_and_no_implicit_approval`,
+  `save_ineligible_prompt_keeps_only_scoped_and_deny_choices`).
+
+Per the authority order and "preserve approved extensions", **do not** remove
+the scoped choices to match upstream. FORM-001 remains a genuine parity gap
+only for sub-behaviors 3 (always-body swap, static body
+`native_view_dialogs.rs:1420`) and 4 (nested rejection stage); those need a
+stage+textarea in `DialogView` plus nested key handling — not bounded.
+
+Decision: no unilateral change; recorded as a product-choice divergence.
