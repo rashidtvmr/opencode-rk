@@ -476,6 +476,9 @@ def run(binary, library, manifest, artifacts):
             "OPENAI_BASE_URL": "http://127.0.0.1:%d/v1" % server.server_port,
         }
         (root / "home" / ".config").mkdir()
+        tui_config = root / "home" / ".config" / "opencode"
+        tui_config.mkdir()
+        (tui_config / "tui.json").write_text(json.dumps({"prompt": {"paste": "full"}}) + "\n")
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
         os.set_blocking(master, False)
