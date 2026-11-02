@@ -104,6 +104,12 @@ pub struct TabInput {
     /// `Question` paints `?` (`component/session-tabs.tsx:172-174`). `None`
     /// when the tab carries no dialog attention.
     pub attention: Option<TabAttention>,
+    /// Activity-unread fact from the live `NavigationState`: a background
+    /// completion the route has not acknowledged. Idle status mode paints the
+    /// `TAB_UNREAD_MARKERS["small-dot"]` glyph (`session-tabs.tsx:63-70,176-178`)
+    /// in the accent `unreadColor` (`:125-129,565`). Error-unread has no native
+    /// producer yet (TAB-21).
+    pub unread: bool,
     /// Marquee window start for the hovered title (0 paints the plain title).
     /// The strip applies it with the exact title budget its layout reserves.
     pub marquee_offset: usize,
@@ -120,6 +126,7 @@ impl TabInput {
             },
             attention: None,
             session: tab.session.clone(),
+            unread: false,
             marquee_offset: 0,
         }
     }
@@ -495,13 +502,15 @@ pub fn horizontal_session_paint_with_semantics(
 ) -> TabRowPaint {
     use crate::native_theme_runtime::Slot;
     let mut paint = row_paint_for(color, palette);
-    // `session-tabs.tsx:1648-1658` resolves the indicator number as
-    // `tabFeedbackColor(attention, unread) ?? busyNumber ?? hovered ? text :
-    // selected ? tint : idleNumber`. Our `needs_attention` flag carries the
+    // `session-tabs.tsx:958-963,1648-1658` on the non-numbers path resolves
+    // the indicator color as `tabFeedbackColor(attention, unread) ?? (runs ?
+    // activeNumber : foreground())`. Our `needs_attention` flag carries the
     // attention kind, and a tab can be both busy and attention at once, so
     // attention must be tested before busy or a crying `!`/`?` indicator would
-    // keep the running hue instead of the accent. (The `unread==Error` half of
-    // `tabFeedbackColor` has no native producer yet — see TAB-21.)
+    // keep the running hue instead of the accent. The activity-unread accent
+    // override is applied for the row's `unread` fact in
+    // `with_row_colors_semantic`. (The `unread == Error` half has no native
+    // producer yet — see TAB-21.)
     paint.number_fg = if flags.needs_attention {
         semantic.map_or_else(|| palette.get(Slot::Warning), |theme| theme.tab_attention.rgba)
     } else if flags.busy {
@@ -596,6 +605,11 @@ pub struct TabStrip {
     /// `row_colors`; they slot the number/indicator column color into the
     /// resolved paints.
     row_flags: Vec<TabFlags>,
+    /// Activity-unread fact per visible session row, aligned with `row_colors`
+    /// and `row_flags` (horizontal only). `with_row_colors_semantic` swaps the
+    /// indicator color to the accent `unreadColor` when the row is unread and
+    /// not pending (`session-tabs.tsx:148-169`).
+    row_unread: Vec<bool>,
     /// Fade window per visible session row, aligned with `rects` (horizontal
     /// only). `None` means every title cell keeps its solid color.
     pub row_fades: Vec<Option<TitleFade>>,
@@ -701,6 +715,10 @@ impl TabStrip {
                 }
                 input.flags.needs_attention = attention_kind.is_some();
                 input.attention = attention_kind;
+                // `context/session-tabs.tsx:139-146`: unread reads the root
+                // session only, so a tab's activity-unread fact is the exact
+                // `NavigationState` mark for that session.
+                input.unread = nav.is_unread(&tab.session);
                 input
             })
             .collect()
@@ -835,6 +853,7 @@ impl TabStrip {
             home_active: false,
             row_colors: Vec::new(),
             row_flags: Vec::new(),
+            row_unread: Vec::new(),
             row_fades: Vec::new(),
             home_color: None,
             indicator_cells: 0,
@@ -944,6 +963,7 @@ impl TabStrip {
                     );
                     out.row_colors.push(color);
                     out.row_flags.push(input.flags);
+                    out.row_unread.push(input.unread);
                 }
                 x_or_y = x_or_y.saturating_add(slot_width);
             }
@@ -1212,7 +1232,28 @@ impl TabStrip {
             .row_colors
             .iter()
             .zip(self.row_flags.iter())
-            .map(|(color, flags)| horizontal_session_paint_with_semantics(*color, flags, palette, semantic))
+            .zip(self.row_unread.iter())
+            .map(|((color, flags), unread)| {
+                let mut paint =
+                    horizontal_session_paint_with_semantics(*color, flags, palette, semantic);
+                // `TabIndicator` color expression for a non-pending tab prefers
+                // `tabFeedbackColor ?? (runs ? activeNumber : foreground())`, but
+                // its own `unreadColor` memo (`session-tabs.tsx:148-169`) swaps in
+                // the accent `unreadColor` (`:125-129,565`) whenever the tab is
+                // unread and not pending. Status mode's idle indicator is blank,
+                // so the accent shows through the marker glyph painted in
+                // `indicator_label`. A selected tab keeps `theme.text.base`.
+                if *unread
+                    && !flags.needs_attention
+                    && !flags.busy
+                    && *color != TabCellColor::Selected
+                {
+                    use crate::native_theme_runtime::Slot;
+                    paint.number_fg =
+                        semantic.map_or_else(|| palette.get(Slot::Warning), |theme| theme.tab_attention.rgba);
+                }
+                paint
+            })
             .collect();
         self.home_paint = self.home_color.map(|color| row_paint_for(color, palette));
         self.add_paint = self.add_rect.map(|_| {
@@ -1389,15 +1430,15 @@ fn adaptive_layout(
 /// `attention === "question"` -> "?" (`component/session-tabs.tsx:172-174`);
 /// `attention` is the caller-supplied kind (permission outranks question).
 /// Busy -> TAB_SPINNERS.dots frames[0] (session-tabs.tsx:57-60,
-/// spinner-frames.ts:1); the promoted Home tab always labels "+"; everything
-/// else idleLabel "". Unread markers need an unread fact the canonical model
-/// does not carry (TAB_UNREAD_MARKERS["small-dot"] = "\u{2022}"); logged as a
-/// known gap.
+/// spinner-frames.ts:1); the promoted Home tab always labels "+"; an
+/// activity-unread idle tab paints TAB_UNREAD_MARKERS["small-dot"] "•"
+/// (`session-tabs.tsx:63-70,176-178`); everything else idleLabel "".
 #[must_use]
 pub fn indicator_label(
     flags: &TabFlags,
     attention: Option<TabAttention>,
     is_home: bool,
+    unread: bool,
 ) -> &'static str {
     if is_home {
         return "+";
@@ -1412,6 +1453,11 @@ pub fn indicator_label(
     }
     if flags.busy {
         return "\u{280b}";
+    }
+    if unread {
+        // `TAB_UNREAD_MARKERS["small-dot"]` (`session-tabs.tsx:63-70`), the
+        // default `config.tabs.unread_marker`.
+        return "\u{2022}";
     }
     ""
 }
@@ -1436,7 +1482,7 @@ fn format_label(input: &TabInput) -> String {
 /// glyph over the title's second-to-last cell (position absolute right=1
 /// width=1), shrinking the title by two as upstream hoveredTitleWidth does.
 fn horizontal_row(input: &TabInput, slot_width: u16, gauge: usize, hovered: bool) -> (String, Option<TitleFade>) {
-    let glyph = indicator_label(&input.flags, input.attention, false);
+    let glyph = indicator_label(&input.flags, input.attention, false, input.unread);
     horizontal_composed_row(
         glyph,
         &input.title,
@@ -2561,6 +2607,7 @@ mod tests {
             title: title.into(),
             flags: TabFlags::default(),
             attention: None,
+            unread: false,
             marquee_offset: 0,
         }
     }
@@ -2778,6 +2825,7 @@ mod tests {
                 needs_attention: true,
             },
             attention: None,
+            unread: false,
             marquee_offset: 0,
         };
         let strip = TabStrip::render(&[tab], TabOrientation::Vertical, 6, 1, 0);
@@ -2978,12 +3026,13 @@ mod tests {
         let mut tab = input("a", "Draft");
         tab.flags = TabFlags { active: true, busy: true, needs_attention: true };
         assert_eq!(format_label(&tab), "Draft");
-        assert_eq!(indicator_label(&tab.flags, tab.attention, false), "!");
+        assert_eq!(indicator_label(&tab.flags, tab.attention, false, tab.unread), "!");
         tab.flags.needs_attention = false;
-        assert_eq!(indicator_label(&tab.flags, tab.attention, false), "\u{280b}", "busy paints the dots spinner frame 0");
+        assert_eq!(indicator_label(&tab.flags, tab.attention, false, tab.unread), "\u{280b}", "busy paints the dots spinner frame 0");
         tab.flags.busy = false;
-        assert_eq!(indicator_label(&tab.flags, tab.attention, false), "", "idle status column is blank in status mode");
-        assert_eq!(indicator_label(&tab.flags, tab.attention, true), "+", "promoted Home always labels +");
+        assert_eq!(indicator_label(&tab.flags, tab.attention, false, tab.unread), "", "idle status column is blank in status mode");
+        assert_eq!(indicator_label(&tab.flags, tab.attention, false, true), "\u{2022}", "activity-unread paints TAB_UNREAD_MARKERS[\"small-dot\"]");
+        assert_eq!(indicator_label(&tab.flags, tab.attention, true, tab.unread), "+", "promoted Home always labels +");
         assert_eq!(number_width(9), 2);
         assert_eq!(number_width(10), 2);
         assert_eq!(number_width(123), 3);
@@ -3123,7 +3172,7 @@ mod tests {
                 display_width(&strip.rows[0]),
                 usize::from(rect.width),
                 "status row conserves the allocated 3-cell slot for glyph {:?}",
-                indicator_label(&tab.flags, tab.attention, false)
+                indicator_label(&tab.flags, tab.attention, false, tab.unread)
             );
             assert_eq!(
                 display_width(&strip.rows[0]) + overflow_width(1) + overflow_width(1),
@@ -3176,7 +3225,7 @@ mod tests {
                 display_width(&strip.rows[0]),
                 usize::from(rect.width),
                 "conservation at allocated 1 for glyph {:?}",
-                indicator_label(&tab.flags, tab.attention, false)
+                indicator_label(&tab.flags, tab.attention, false, tab.unread)
             );
         }
 
@@ -4406,7 +4455,7 @@ mod tests {
         );
         assert_eq!(question[0].attention, Some(TabAttention::Question));
         assert_eq!(
-            indicator_label(&question[0].flags, question[0].attention, false),
+            indicator_label(&question[0].flags, question[0].attention, false, false),
             "?"
         );
         let strip = TabStrip::render_with_hover_and_add(
@@ -4430,7 +4479,7 @@ mod tests {
         );
         assert_eq!(permission[0].attention, Some(TabAttention::Permission));
         assert_eq!(
-            indicator_label(&permission[0].flags, permission[0].attention, false),
+            indicator_label(&permission[0].flags, permission[0].attention, false, false),
             "!"
         );
 
@@ -4455,6 +4504,48 @@ mod tests {
         // No attention fact: the tab carries no kind and paints idle.
         let idle = TabStrip::from_navigation(&nav, &[]);
         assert_eq!(idle[0].attention, None);
-        assert_eq!(indicator_label(&idle[0].flags, idle[0].attention, false), "");
+        assert_eq!(indicator_label(&idle[0].flags, idle[0].attention, false, false), "");
+    }
+
+    /// TAB-07: a background completion marked unread on the live
+    /// `NavigationState` projects into the strip as the accent small-dot marker
+    /// (`session-tabs.tsx:63-70,125-129,176-178,958-963`): the live
+    /// `from_navigation` -> `with_row_colors_semantic` path paints "•" in the
+    /// indicator column and colors it the accent `unreadColor`, not idleNumber.
+    #[test]
+    fn tab_07_live_unread_projects_marker_and_accent() {
+        use crate::native_navigation::NavigationState;
+        use crate::native_theme_runtime::{Palette, Slot};
+        let palette = Palette::opencode_dark();
+        let mut nav = NavigationState::new();
+        nav.open_tab(SessionRef("a".into()));
+        nav.open_tab(SessionRef("b".into()));
+        nav.mark_unread(&SessionRef("b".into()));
+        // Focusing a route views it (`context/session-tabs.tsx:229-267`), so
+        // re-open "a" to make "b" an unread, non-selected background tab.
+        nav.open_tab(SessionRef("a".into()));
+
+        let inputs = TabStrip::from_navigation(&nav, &[]);
+        let unread = inputs.iter().find(|i| i.session == SessionRef("b".into())).unwrap();
+        assert!(unread.unread, "live unread fact projects onto the tab input");
+        assert!(!inputs.iter().find(|i| i.session == SessionRef("a".into())).unwrap().unread);
+
+        let strip = TabStrip::render_with_hover(&inputs, TabOrientation::Horizontal, 40, 1, 0, None)
+            .with_row_colors_semantic(&palette, None);
+        let index = strip.rects.iter().position(|(id, _)| id == &SessionRef("b".into())).unwrap();
+        assert!(
+            strip.rows[index].contains('\u{2022}'),
+            "unread tab paints the small-dot marker: {:?}",
+            strip.rows[index]
+        );
+        assert_eq!(
+            strip.row_paints[index].number_fg,
+            palette.get(Slot::Warning),
+            "activity unread uses the accent unreadColor fallback, not idleNumber()"
+        );
+        assert_ne!(
+            strip.row_paints[index].number_fg,
+            crate::native_tab_rail::idle_number(&palette)
+        );
     }
 }

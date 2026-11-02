@@ -14760,6 +14760,7 @@ mod middle_close_hit_tests {
             title: format!("Tab{i}"),
             flags: Default::default(),
             attention: None,
+            unread: false,
             marquee_offset: 0,
         }).collect();
         let strip = TabStrip::render_with_hover_and_add(&tabs, TabOrientation::Horizontal, 60, 1, 0, None, true);
