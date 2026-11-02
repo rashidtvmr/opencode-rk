@@ -1793,7 +1793,7 @@ struct PaintCtx {
     composer: Option<(u16, u16, u16, u16)>,
     completion: Option<crate::native_completion::Panel>,
     ui_regions: Vec<crate::native_ui_style::Region>,
-    context_usage_styles: Vec<(u16, u16, u16, crate::native_theme_runtime::Slot)>,
+    context_usage_styles: Vec<(u16, u16, u16, crate::native_theme_runtime::Slot, u32)>,
     /// Absolute `(x, y, cells, slot, attributes)` sidebar spans. The sidebar
     /// publishes one role per row, so per-span colour and the cancelled-todo
     /// strikethrough only reach the painter through this channel.
@@ -4667,8 +4667,8 @@ fn native_paint(
                 // every other chat cell, so dropping the page gate cannot
                 // color transcript content.
                 if !in_modal && !composer && !sidebar {
-                    if let Some((_, _, _, slot)) = ctx.context_usage_styles.iter().find(
-                        |(left, row, width, _)| {
+                    if let Some((_, _, _, slot, attrs)) = ctx.context_usage_styles.iter().find(
+                        |(left, row, width, _, _)| {
                             u32::from(*row) == y
                                 && x >= u32::from(*left)
                                 && x.saturating_add(u32::from(cells))
@@ -4676,6 +4676,7 @@ fn native_paint(
                         },
                     ) {
                         fg = paint_color(ctx.palette, *slot);
+                        attributes |= *attrs;
                     }
                 }
                 // Sidebar spans win over the row role for the cells they

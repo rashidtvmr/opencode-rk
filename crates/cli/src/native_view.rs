@@ -98,7 +98,14 @@ pub struct NativeView {
     memory: crate::native_memory::Memory,
     compaction: crate::native_compaction_settings::CompactionSettingsView,
     context: crate::native_context::ContextView,
-    context_usage_styles: Vec<(u16, u16, u16, crate::native_theme_runtime::Slot)>,
+    /// Per-span foreground styling in absolute frame coordinates
+    /// `(x, y, cells, slot, attributes)`. The context page publishes its own
+    /// usage spans here; the composer dock publishes its tab/hint spans on the
+    /// chat route, where the tab title and hint labels are `bold` upstream
+    /// (`routes/session/index.tsx:102-104,113-114,136-138`) and the esc label
+    /// is muted and not bold. The attribute channel lets the painter keep that
+    /// distinction without a second vec.
+    context_usage_styles: Vec<(u16, u16, u16, crate::native_theme_runtime::Slot, u32)>,
     /// Per-span sidebar styling in absolute frame coordinates
     /// `(x, y, cells, slot, attributes)`. The sidebar rows carry one role for
     /// the whole row, so dot/name/status and struck-through todo colours have
@@ -781,7 +788,7 @@ impl NativeView {
     pub fn ui_regions(&self) -> Vec<crate::native_ui_style::Region> {
         self.ui_regions.clone()
     }
-    pub fn context_usage_styles(&self) -> &[(u16, u16, u16, crate::native_theme_runtime::Slot)] { &self.context_usage_styles }
+    pub fn context_usage_styles(&self) -> &[(u16, u16, u16, crate::native_theme_runtime::Slot, u32)] { &self.context_usage_styles }
     pub fn sidebar_span_styles(&self) -> &[(u16, u16, u16, crate::native_theme_runtime::Slot, u32)] { &self.sidebar_span_styles }
     pub fn set_overlay_roles(&mut self, roles: Vec<crate::native_ui_style::Role>) {
         self.overlay_roles = roles;
@@ -2896,6 +2903,7 @@ impl NativeView {
                                 y,
                                 span.cells.min(u16::MAX as usize) as u16,
                                 span.slot,
+                                crate::native_ui_style::ATTR_NONE,
                             ));
                         }
                         crate::native_ui_style::Line {
@@ -3065,6 +3073,11 @@ impl NativeView {
                         }
                         // `context_usage_styles` are absolute and never shifted,
                         // so the tab reservation is folded in here.
+                        let attrs = if span.bold {
+                            crate::native_ui_style::ATTR_BOLD
+                        } else {
+                            crate::native_ui_style::ATTR_NONE
+                        };
                         self.context_usage_styles.push((
                             u16::try_from(x_shift.saturating_add(u32::from(span.x)))
                                 .unwrap_or(u16::MAX),
@@ -3072,6 +3085,7 @@ impl NativeView {
                                 .unwrap_or(u16::MAX),
                             cells,
                             slot,
+                            attrs,
                         ));
                     }
                     dock_rows.push(row.text.clone());
@@ -5407,7 +5421,9 @@ fn padded(line: &str, width: u16) -> String {
 
 /// Foreground slot for a painted dock span. `DockSurface` is a background
 /// fill, which the native painter does not own in this package, so it maps to
-/// no foreground span. Bold is likewise not published by this channel.
+/// no foreground span. The span's `bold` flag rides the same
+/// `context_usage_styles` channel as an attribute bit, so the active tab title
+/// and hint labels stay bold while the muted `esc`/shortcut labels do not.
 fn dock_span_slot(style: DockStyle) -> Option<crate::native_theme_runtime::Slot> {
     use crate::native_theme_runtime::Slot;
     match style {
@@ -8154,13 +8170,16 @@ mod composer_dock_tests {
         assert_eq!(painted_cells, crate::native_dock::DOCK_ESC_LABEL);
         // The right-aligned `esc` is a positioned span, not part of the row's
         // left-aligned text, so its paint proof is the foreground-span channel.
-        let painted = view.context_usage_styles().iter().any(|(sx, sy, scells, slot)| {
+        // The esc label is muted and NOT bold (`index.tsx:132-151`: only the
+        // hint label is bold), so its attribute bit must stay clear.
+        let painted = view.context_usage_styles().iter().any(|(sx, sy, scells, slot, attrs)| {
             *sy == y
                 && *sx == x
                 && *scells == cells
                 && *slot == crate::native_theme_runtime::Slot::TextMuted
+                && *attrs == crate::native_ui_style::ATTR_NONE
         });
-        assert!(painted, "the esc hit must cover a painted muted span");
+        assert!(painted, "the esc hit must cover a painted muted, non-bold span");
         assert!(
             frame[usize::from(y)].contains("Subagents"),
             "the esc sits on the title row: {:?}",
@@ -8188,6 +8207,37 @@ mod composer_dock_tests {
         assert_eq!(view.dock_key(DockKey::Escape), DockKeyOutcome::Closed);
         assert!(!view.dock_open());
         assert!(view.dock_hits().is_empty());
+    }
+
+    // CP-23: the active tab title is bold upstream
+    // (`routes/session/index.tsx:102-104,113-114`), and the dock hint labels
+    // are bold (`:136-138`). The painter only learns that through the
+    // attribute bit on the `context_usage_styles` channel, so an open dock must
+    // publish at least one `Slot::Text` span carrying `ATTR_BOLD`, while the
+    // muted `esc` span stays non-bold (asserted above).
+    #[test]
+    fn dock_active_tab_and_hint_labels_publish_the_bold_attribute() {
+        let mut view = view_with(children());
+        view.toggle_dock();
+        let _ = view.render_typed("draft", &[], false, &[]);
+        let bold_spans: Vec<_> = view
+            .context_usage_styles()
+            .iter()
+            .filter(|(_, _, _, slot, attrs)| {
+                *slot == crate::native_theme_runtime::Slot::Text
+                    && *attrs == crate::native_ui_style::ATTR_BOLD
+            })
+            .collect();
+        assert!(
+            !bold_spans.is_empty(),
+            "an open dock must publish a bold Slot::Text span (active tab / hint label)"
+        );
+        // The frame really paints the active tab title the span belongs to.
+        let frame = view.render_typed("draft", &[], false, &[]);
+        assert!(
+            frame.iter().any(|row| row.contains("Subagents")),
+            "the active tab title is painted: {frame:?}"
+        );
     }
 
     // CP-21: the production render boundary publishes queue-dock rows only for
