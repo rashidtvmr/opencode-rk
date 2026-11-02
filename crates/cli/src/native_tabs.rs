@@ -4548,4 +4548,33 @@ mod tests {
             crate::native_tab_rail::idle_number(&palette)
         );
     }
+
+    /// TAB-07 live-path color: when a built-in V2 semantic palette is present,
+    /// the unread activity marker resolves to `semantic.tab_attention` (the
+    /// `hue.accent[200]` `unreadColor`, `session-tabs.tsx:125-129,565`), and the
+    /// live painter passes that palette through. Guards against silently
+    /// dropping `SemanticPalette` on the final paint path.
+    #[test]
+    fn tab_07_live_unread_uses_semantic_tab_attention() {
+        use crate::native_navigation::NavigationState;
+        use crate::native_theme_runtime::{Palette, RuntimeTheme, ThemeMode, Slot};
+        let theme = RuntimeTheme::builtin_default(ThemeMode::Dark);
+        let palette = Palette::opencode_dark();
+        let semantic = theme.semantic.as_ref().expect("built-in V2 semantic palette");
+        let mut nav = NavigationState::new();
+        nav.open_tab(SessionRef("a".into()));
+        nav.open_tab(SessionRef("b".into()));
+        nav.mark_unread(&SessionRef("b".into()));
+        nav.open_tab(SessionRef("a".into()));
+        let inputs = TabStrip::from_navigation(&nav, &[]);
+        let strip = TabStrip::render_with_hover(&inputs, TabOrientation::Horizontal, 40, 1, 0, None)
+            .with_row_colors_semantic(&palette, theme.semantic.as_ref());
+        let index = strip.rects.iter().position(|(id, _)| id == &SessionRef("b".into())).unwrap();
+        assert_eq!(
+            strip.row_paints[index].number_fg,
+            semantic.tab_attention.rgba,
+            "live semantic path paints the unread marker with hue.accent[200]"
+        );
+        assert_ne!(strip.row_paints[index].number_fg, palette.get(Slot::Warning));
+    }
 }

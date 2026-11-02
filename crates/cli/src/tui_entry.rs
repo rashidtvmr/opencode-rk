@@ -1767,6 +1767,10 @@ struct PaintCtx {
     /// override.
     dialog: crate::native_theme_runtime::Palette,
     markdown: Option<crate::native_theme_runtime::MarkdownPalette>,
+    /// Resolved `theme.semantic` tokens. TAB-07 reads `semantic.tab_attention`
+    /// for the unread activity-marker color (`session-tabs.tsx:125-129,565`),
+    /// falling back to the `Warning` slot when no semantic palette is resolved.
+    semantic: Option<crate::native_theme_runtime::SemanticPalette>,
     /// Resolved `theme.semantic.diff` tokens for the `+`/`-` transcript rows
     /// (THEME-09). `None` falls back to the historical literal RGB.
     diff: Option<DiffRgba>,
@@ -2276,6 +2280,7 @@ mod surface_paint_regressions {
             palette: crate::native_theme_runtime::Palette::opencode_dark(),
             dialog: crate::native_theme_runtime::RuntimeTheme::builtin_default(crate::native_theme_runtime::ThemeMode::Dark).dialog,
             markdown: None,
+            semantic: None,
             diff: None,
             presentation: view.presentation(),
             modal_rows: None,
@@ -2336,6 +2341,7 @@ mod surface_paint_regressions {
             palette: crate::native_theme_runtime::Palette::opencode_dark(),
             dialog: crate::native_theme_runtime::RuntimeTheme::builtin_default(crate::native_theme_runtime::ThemeMode::Dark).dialog,
             markdown: None,
+            semantic: None,
             diff: None,
             presentation: view.presentation(),
             modal_rows: None,
@@ -2425,6 +2431,7 @@ mod surface_paint_regressions {
             palette: crate::native_theme_runtime::Palette::opencode_dark(),
             dialog: crate::native_theme_runtime::RuntimeTheme::builtin_default(crate::native_theme_runtime::ThemeMode::Dark).dialog,
             markdown: None,
+            semantic: None,
             diff: None,
             presentation: view.presentation(),
             modal_rows: None,
@@ -2493,6 +2500,7 @@ mod surface_paint_regressions {
             palette: crate::native_theme_runtime::Palette::opencode_dark(),
             dialog: crate::native_theme_runtime::RuntimeTheme::builtin_default(crate::native_theme_runtime::ThemeMode::Dark).dialog,
             markdown: None,
+            semantic: None,
             diff: None,
             presentation: view.presentation(),
             modal_rows: None,
@@ -4970,9 +4978,11 @@ fn native_paint(
         let tabs = match ctx.title_renaming.as_ref() {
             Some(renaming) => tabs
                 .clone()
-                .with_row_colors(&ctx.palette)
+                .with_row_colors_semantic(&ctx.palette, ctx.semantic.as_ref())
                 .with_title_renaming(renaming.as_ref(), ctx.animations),
-            None => tabs.clone().with_row_colors(&ctx.palette),
+            None => tabs
+                .clone()
+                .with_row_colors_semantic(&ctx.palette, ctx.semantic.as_ref()),
         };
         let fallback_fg = accent;
         let fallback_bg = dim(background, base_alpha);
@@ -8483,6 +8493,7 @@ fn native_loop(
                         view.home_logo_region(draft_echo)
                     },
             tabs: Some(frame_tabs.clone()),
+            semantic: theme.semantic.clone(),
             animations,
             title_renaming: Some(Box::new({
                 let inflight = rename_inflight.clone();
