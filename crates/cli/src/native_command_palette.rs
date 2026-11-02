@@ -91,6 +91,8 @@ pub enum PaletteAction {
     /// Hand the exact existing local command to the native command dispatcher.
     /// This is an intent, not an execution or acknowledgement.
     Route(&'static str),
+    /// Focus a live native settings row without applying a change.
+    Settings(&'static str),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -102,6 +104,8 @@ pub struct PaletteEntry {
     /// Exact pinned upstream registration name (not a locally invented
     /// alias); row id is separate because Suggested duplicates an entry.
     pub command_name: &'static str,
+    /// Upstream `searchText`: supplemental searchable text such as setting keywords.
+    pub search_text: &'static str,
     pub route: &'static str,
     /// None means the native client has no truthful direct shortcut for it.
     pub key_label: Option<&'static str>,
@@ -246,6 +250,10 @@ impl CommandPalette {
             "/exit",
         ));
         let needle = self.query.to_lowercase();
+        if !needle.is_empty() {
+            // Search only settings the native settings dialog can edit.
+            regular.extend(crate::native_settings::SettingsDialog::rows().iter().map(setting_entry));
+        }
         let mut entries = Vec::with_capacity(MAX_ENTRIES);
         if needle.is_empty() {
             // Pinned upstream `dialog-select.tsx` duplicates suggested
@@ -298,8 +306,8 @@ impl CommandPalette {
                 }
                 let title = fuzzy_score(&needle, item.title);
                 let category = fuzzy_score(&needle, item.category);
-                let command = fuzzy_score(&needle, item.command_name);
-                Some((title.unwrap_or(0) * 2 + category.unwrap_or(0) + command.unwrap_or(0), item))
+                let search = fuzzy_score(&needle, item.search_text);
+                Some((title.unwrap_or(0) * 2 + category.unwrap_or(0) + search.unwrap_or(0), item))
             })
             .collect();
         filtered.sort_by(|a, b| b.0.cmp(&a.0));
@@ -474,7 +482,7 @@ pub fn search_quality(query: &str, item: &PaletteEntry) -> Option<f32> {
     let query: Vec<char> = needle.chars().collect();
     let title = character_quality(&query, item.title);
     let category = character_quality(&query, item.category);
-    let search = character_quality(&query, item.command_name);
+    let search = character_quality(&query, item.search_text);
     if title.is_none() && category.is_none() && search.is_none() {
         return None;
     }
@@ -541,6 +549,7 @@ fn entry(
         title,
         category,
         command_name,
+        search_text: command_name,
         route,
         // Native currently implements no direct model/session key bindings
         // matching pinned upstream leader bindings; do not invent labels.
@@ -550,6 +559,25 @@ fn entry(
         // falls back to the category (`searchFooter ?? category`).
         search_footer: None,
         action: PaletteAction::Route(route),
+    }
+}
+
+fn setting_entry(row: &crate::native_settings::SettingsRow) -> PaletteEntry {
+    let search_text = match row.id {
+        "session.sidebar" => "side panel",
+        "tabs.layout" => "orientation left layout tabs",
+        _ => "",
+    };
+    PaletteEntry {
+        id: row.id,
+        title: row.title,
+        category: row.category,
+        command_name: row.id,
+        search_text,
+        route: "/settings",
+        key_label: None,
+        search_footer: None,
+        action: PaletteAction::Settings(row.id),
     }
 }
 
@@ -586,19 +614,27 @@ mod tests {
         palette.push_query('n');
         // Independently superseded against pinned DialogSelect: filtering
         // removes Suggested duplicates and resets to the first regular row.
+        // The live `session.sidebar` setting also matches on its `Session`
+        // category (`command-palette.tsx:36-46`), so the filtered set is the
+        // three Session-categoried rows.
         let visible = palette.visible();
-        assert_eq!(visible.len(), 2);
+        assert_eq!(visible.len(), 3);
         assert!(visible.iter().all(|entry| entry.category == "Session"));
         assert!(
             visible
                 .iter()
                 .all(|entry| !entry.id.starts_with("suggested:"))
         );
+        assert!(visible.iter().any(|entry| entry.id == "session.sidebar"));
         assert_eq!(palette.selected().unwrap().id, "session:session.list");
         assert_eq!(palette.activate(), Some(PaletteAction::Route("/sessions")));
+        // The two Session commands outrank the setting row (which matches only
+        // on its category), so `prev` wraps past them to the appended setting.
         palette.prev();
-        assert_eq!(palette.selected().unwrap().id, "session:session.new");
+        assert_eq!(palette.selected().unwrap().id, "session.sidebar");
+        assert_eq!(palette.activate(), Some(PaletteAction::Settings("session.sidebar")));
         palette.next();
+        assert_eq!(palette.selected().unwrap().id, "session:session.list");
         assert_eq!(palette.activate(), Some(PaletteAction::Route("/sessions")));
         palette.close();
         assert!(!palette.is_open());
@@ -646,6 +682,38 @@ mod tests {
         assert!(narrow.iter().all(|line| line.text.chars().count() <= 1));
     }
 
+    #[test]
+    fn settings_search_uses_live_rows_in_source_order_without_fake_shortcuts() {
+        let mut palette = CommandPalette::default();
+        palette.open(true);
+        // Unfiltered: upstream omits `settingOptions` from the non-filtered
+        // list (`command-palette.tsx:36-46`, `ref?.filter` gate).
+        assert!(palette.visible().iter().all(|row| !matches!(row.action, PaletteAction::Settings(_))));
+
+        // "layout" surfaces the live Tabs row by its own title.
+        for ch in "layout".chars() { assert!(palette.push_query(ch)); }
+        let layout: Vec<_> = palette.visible().into_iter()
+            .filter(|row| matches!(row.action, PaletteAction::Settings(_)))
+            .collect();
+        assert_eq!(layout.iter().map(|row| row.id).collect::<Vec<_>>(), ["tabs.layout"]);
+        assert!(layout[0].key_label.is_none());
+
+        // "side panel" reaches the Session row only through its upstream
+        // `searchText` (`setting.keywords.join(" ")`, `command-palette.tsx:38-39`);
+        // neither its title nor category contains that phrase.
+        let mut palette = CommandPalette::default();
+        palette.open(true);
+        for ch in "side panel".chars() { assert!(palette.push_query(ch)); }
+        let side: Vec<_> = palette.visible().into_iter()
+            .filter(|row| matches!(row.action, PaletteAction::Settings(_)))
+            .collect();
+        assert_eq!(side.iter().map(|row| row.id).collect::<Vec<_>>(), ["session.sidebar"]);
+        assert_eq!(side[0].action, PaletteAction::Settings("session.sidebar"));
+        // No shortcut hint is invented for a setting the native client cannot
+        // trigger directly (`dialog-select.tsx:193-208`).
+        assert!(side[0].key_label.is_none() && side[0].search_footer.is_none());
+    }
+
     // DIALOG-11: suggestions are duplicated only before filtering, the 0.7
     // threshold gates weak matches, and no shortcut hint is invented for a
     // command the native client cannot trigger directly
@@ -658,6 +726,7 @@ mod tests {
             title: "Zoo",
             category: "Zoo",
             command_name: "mode",
+            search_text: "mode",
             route: "/weak",
             key_label: None,
             search_footer: None,

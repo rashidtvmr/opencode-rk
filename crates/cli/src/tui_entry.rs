@@ -10523,16 +10523,21 @@ fn native_loop(
                     view.command_palette_backspace();
                 }
                 13 | 10 => {
-                    if let Some(crate::native_command_palette::PaletteAction::Route(route)) =
-                        view.command_palette_activate()
-                    {
-                        // Routes activated from the palette (including
-                        // /exit) re-enter the same local dispatch chain as
-                        // completion and normal composer input, so the
-                        // exit-word contract is identical for all three
-                        // sources.
-                        palette_route = Some(route);
+                    if let Some(action) = view.command_palette_activate() {
                         view.close_command_palette();
+                        match action {
+                            crate::native_command_palette::PaletteAction::Route(route) => {
+                                // Palette routes re-enter the shared local dispatcher.
+                                palette_route = Some(route);
+                            }
+                            crate::native_command_palette::PaletteAction::Settings(id) => {
+                                settings_dialog.open_with_state(view.sidebar_hidden(), navigation.orientation());
+                                settings_dialog.select_id(id);
+                                settings_error = None;
+                                dialog = native_setup::Dialog::Settings;
+                                needs_paint = true;
+                            }
+                        }
                     }
                 }
                 value if value >= 0x20 => {
@@ -13921,7 +13926,12 @@ mod command_consumption_tests {
         let mut palette = crate::native_command_palette::CommandPalette::default();
         palette.open(true);
         for entry in palette.visible() {
-            let crate::native_command_palette::PaletteAction::Route(route) = entry.action;
+            // An unfiltered palette carries no settings rows (DIALOG-11 only
+            // surfaces them while searching), so every visible entry here is a
+            // plain local route.
+            let crate::native_command_palette::PaletteAction::Route(route) = entry.action else {
+                unreachable!("unfiltered palette surfaced a non-route action: {:?}", entry.action)
+            };
             assert!(
                 super::native_exit_route(route)
                     || super::native_local_page_route(route).is_some()

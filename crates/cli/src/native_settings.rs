@@ -268,6 +268,22 @@ impl SettingsDialog {
         true
     }
 
+    /// Focus a live row selected by the command palette, without applying it.
+    pub fn select_id(&mut self, id: &str) -> bool {
+        if !self.open {
+            return false;
+        }
+        let Some(index) = Self::rows().iter().position(|row| row.id == id) else {
+            return false;
+        };
+        let visible = self.visible_indices();
+        let Some(position) = visible.iter().position(|item| *item == index) else {
+            return false;
+        };
+        self.selected = position;
+        true
+    }
+
     pub fn next(&mut self) {
         let count = self.visible_indices().len();
         if self.open && count > 0 {
