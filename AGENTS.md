@@ -106,12 +106,27 @@ untracked work; or any frozen legacy ref.
 
 `config/recovery-mode.json`, `tools/recovery_state.py`, `tools/recovery_guard.py`,
 `tools/recovery_ref_hook.py`, `tools/phase1_judge.py` and the frozen e2e fixtures
-are **hook-protected**. Raising the ceilings inside them requires the documented
-two-approval transition (independent reviewer + independent test evaluator,
-exact-blob capability via `tools/recovery_transition.py`). Until that transition
-lands, the values above are already enforced wherever the non-protected configs
-are read, and the protected file's `maxVerifiedUnintegratedCandidates: 4` remains
-the only outstanding cap to close.
+are **hook-protected**. The reference hook rejects any change to those paths
+unless an ARMED transition window admits it, and `tools/recovery_transition.py`
+structurally permits only its own historical `transitionPolicy` delta — so
+`config/recovery-mode.json` cannot be amended by a routine worker commit at all.
+
+One cap still lives in that protected file:
+`maxVerifiedUnintegratedCandidates: 4`. Its measured blast radius is narrow and
+must be stated accurately rather than treated as fleet throttling:
+
+- it is read by `tools/recovery_state.py` `ready` (`:730`), which refuses to move
+  a fifth row into `INTEGRATION_READY` while four already sit in
+  `INTEGRATION_READY`/`INTEGRATING`;
+- it is also read by `tools/recovery_guard.py` (`:464`) for reporting;
+- it does **not** gate the delivery fleet, `config/completion-controller.json`,
+  independent review, preverification volume or publication.
+
+The `recovery_state.py` queue is the **historical** queue and is not run
+concurrently as a second scheduler (`docs/CONTINUOUS_DELIVERY.md`). So this value
+is a residual of the retired queue, not a bottleneck on current work. Closing it
+requires an operator-authorized amendment of a protected file, not a worker
+commit; do not invent a bypass, and do not describe it as blocking delegation.
 
 ## Current user operating instructions — 2026-10-26
 
