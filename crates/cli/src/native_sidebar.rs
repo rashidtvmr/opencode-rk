@@ -1681,6 +1681,59 @@ mod tests {
         assert!(!headings(&sidebar).contains(&"Limit".to_owned()));
     }
 
+    /// SIDE-05: the painted limit rows carry the upstream colour contract
+    /// (`limit.tsx:27-32`): the heading is bold base text and the remaining
+    /// amount paints error red exactly for `out`/`reached`, muted otherwise.
+    #[test]
+    fn limit_rows_paint_error_only_for_out_and_reached() {
+        for (level, dangerous) in [
+            (UsageLevel::Plenty, false),
+            (UsageLevel::Low, false),
+            (UsageLevel::Out, true),
+            (UsageLevel::Reached, true),
+        ] {
+            let section = LimitSection::new(3.5, level);
+            let sidebar = Sidebar {
+                limit: Some(section),
+                ..Sidebar::default()
+            };
+            let rows = sidebar.render(content_width(SESSION_SIDEBAR_WIDTH), 40, 0);
+            let remaining = rows
+                .iter()
+                .position(|row| row.text.trim() == section.line())
+                .expect("limit amount row painted");
+            let heading = &rows[remaining - 1];
+            assert_eq!(
+                heading.text.trim(),
+                "Limit",
+                "heading directly above the amount"
+            );
+            let heading_span = heading.spans.first().expect("bold heading span");
+            assert_eq!(heading_span.slot, Slot::Text);
+            assert_eq!(heading_span.attributes, ATTR_BOLD);
+            assert_eq!(
+                rows[remaining].role,
+                if dangerous {
+                    Role::Error
+                } else {
+                    Role::Description
+                },
+                "{level:?} row role"
+            );
+            let span = rows[remaining].spans.first().expect("whole-row amount span");
+            assert_eq!(
+                span.slot,
+                if dangerous {
+                    Slot::Error
+                } else {
+                    Slot::TextMuted
+                },
+                "{level:?} slot"
+            );
+            assert_eq!(span.attributes, ATTR_NONE);
+        }
+    }
+
     /// SIDE-06/SIDE-11: 0/1/2/3 servers and collapsed counts.
     #[test]
     fn mcp_counts_and_disclosure_match_upstream() {
