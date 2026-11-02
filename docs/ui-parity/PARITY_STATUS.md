@@ -36,6 +36,8 @@ These have a faithful model + test but no live consumer.
 | SIDE-05 | `set_limit` (`native_view_status.rs:1175`) is called only from tests; the Limit section cannot appear live. |
 | SIDE-14 | `footer_menu`/`FooterMenuItem` (`native_sidebar.rs:1020`) has no caller outside its module; footer hover/copy/open/workspaces never reach live input. |
 | TOOL-011 | `DialogKind::Execute`/`execute_dialog` (`native_tool_rows.rs:1159`) is never opened live; only `Question` (`tui_entry.rs:8197`) and `Confirm` (`native_view.rs:7737`) are consumed. The Execute dialog body renderer is also a placeholder (`native_view_dialogs.rs:1429`), so wiring alone would not reach parity. |
+| DIFF-001 | Split-mode boundary arithmetic is correct (`native_diff_view.rs:600`, constants `:540-544`) but has no live consumer: `resolve_view_mode` is called only from unconsumed `build_*` fns (`native_diff_inline.rs:125,169,198`); the live render hardcodes unified (`native_view_chat.rs:2707`). `DiffSurface::Viewer` + `viewer_patch_pane_width` (`:659`) have zero callers. Needs config/width threading + a `SplitRow→ChatRowClass` mapping + a diff-viewer component. |
+| DIFF-003 | Added-file virtualization model + tests are correct (`native_diff_view.rs:1014-1076`, tests `:1962-2209`) but have zero callers outside the module; `AddedPatchChunk` (`:926-930`) carries no highlight field, so source highlighting cannot survive chunk crossing. Needs a scroll-aware producer feeding `relative_scroll_top→visible_chunk_range` + a highlight-carrying chunk model. |
 
 ## Genuine gaps — missing producer/transport (`BLOCKED`)
 
@@ -62,7 +64,7 @@ These have a faithful model + test but no live consumer.
 - **Dialogs:** DIALOG-05, DIALOG-06, DIALOG-07, DIALOG-08, DIALOG-09, DIALOG-11, DIALOG-12, DIALOG-13, DIALOG-14, DIALOG-15.
 - **FFI:** FFI-03 .. FFI-11.
 - **Tools:** TOOL-007, TOOL-008, TOOL-009, TOOL-010, TOOL-012.
-- **Diffs:** DIFF-001, DIFF-002, DIFF-003, DIFF-004, DIFF-005.
+- **Diffs:** DIFF-002, DIFF-004, DIFF-005.
 - **Forms:** FORM-001 .. FORM-008.
 - **State:** STATE-001, STATE-003, STATE-004.
 - **Composer/CP:** CP-12 .. CP-39 (rail, dock, sidebar, composer, paste, completion) — each has an impl + focused test + live consumer.
