@@ -573,7 +573,13 @@ def prepare_observer_correction(
         "kind": "observer-correction", "status": "PENDING", "author": author,
         "baseSha": base, "canonicalHead": "main-v2",
         "allowedPaths": sorted(OBSERVER_PATHS), "proposedBlobs": proposed,
-        "proposedContent": content, "authorizedObserverBlobs": proposed,
+        "proposedContent": content,
+        # The reference hook authorizes observer corrections through
+        # ``proposedBlobs``; ``authorizedObserverBlobs`` is a bootstrap-only
+        # manifest. ``_activation_blockers`` deliberately rejects a non-empty
+        # value for any non-bootstrap kind, so an observer correction must
+        # leave it empty or it can never activate.
+        "authorizedObserverBlobs": {},
         "originalProtectedEvaluatorBlobs": original_map,
         "createdAt": now(),
         "expiresAt": (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=900)).isoformat(),
