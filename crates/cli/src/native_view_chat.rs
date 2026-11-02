@@ -2421,6 +2421,52 @@ fn push_block_markdown(
     spans
 }
 
+/// OpenAI-style reasoning-summary extraction, an exact mirror of upstream
+/// `packages/tui/src/context/thinking.ts:8-14`: a leading `**title**` block
+/// that is its own paragraph (a blank line, or end of content, follows the
+/// closing `**`) is disclosure metadata; ordinary initial bold prose never
+/// matches. Returns `(Some(title), body_without_title_block)` on a match and
+/// `(None, trimmed_input)` otherwise. The title is `*`-free and single-line
+/// (`[^*\n]+`), and the separator is `\r?\n\r?\n` — a lone `\n` after the
+/// closing `**` keeps the input ordinary prose.
+pub fn reasoning_summary(text: &str) -> (Option<&str>, &str) {
+    let content = text.trim();
+    let bytes = content.as_bytes();
+    // `/^\*\*([^*\n]+)\*\*/`: a `*` or `\n` inside the title, an empty
+    // title, or an unterminated opener all fail the match. ASCII `*`/`\n`
+    // never occur inside UTF-8 sequences, so byte scanning is safe.
+    if !bytes.starts_with(b"**") {
+        return (None, content);
+    }
+    let mut scan = 2;
+    let title_end = loop {
+        if scan + 1 >= bytes.len() {
+            return (None, content);
+        }
+        match bytes[scan] {
+            b'\n' => return (None, content),
+            b'*' if bytes[scan + 1] == b'*' => break scan,
+            b'*' => return (None, content),
+            _ => scan += 1,
+        }
+    };
+    let title = content[2..title_end].trim();
+    if title.is_empty() {
+        return (None, content);
+    }
+    // `(?:\r?\n\r?\n|$)`: end of content or exactly one blank line.
+    let sep_len = match &bytes[title_end + 2..] {
+        [] => 0,
+        [b'\n', b'\n', ..] => 2,
+        [b'\n', b'\r', b'\n', ..] => 3,
+        [b'\r', b'\n', b'\n', ..] => 3,
+        [b'\r', b'\n', b'\r', b'\n', ..] => 4,
+        _ => return (None, content),
+    };
+    let body = content[title_end + 2 + sep_len..].trim_end();
+    (Some(title), body)
+}
+
 /// Display rows of one typed message: optional group separator, optional
 /// agent/model metadata row, then its parts in order. Tool results are
 /// labeled `[result]`/`[error]` with indented output — the view never
@@ -2518,7 +2564,25 @@ fn typed_message_rows_with_prefix_spans_mode(
                 // cannot allocate in proportion to an untrusted provider string.
                 let text = clip_utf8_prefix_bytes(text, MAX_INPUT_ROW_BYTES);
                 let display = text.replace("[REDACTED]", "");
-                let display = display.trim();
+                // MD-006: a valid bold first-block title is disclosure metadata
+                // (`context/thinking.ts:8-14`). Upstream shows it as the
+                // collapsed `Thought: {title}` header
+                // (`routes/session/message-parts.tsx:89,143-162`); canonical's
+                // live render is always expanded, so the title becomes a
+                // summary-metadata row and the body renders without the title
+                // block. No title -> ordinary prose, body-only render.
+                let (summary_title, display) = reasoning_summary(&display);
+                if let Some(title) = summary_title {
+                    if rows.len() < MAX_MESSAGE_ROWS {
+                        push_wrapped(
+                            &mut rows,
+                            width,
+                            &format!("Thought: {title}"),
+                            "  ",
+                            ChatRowClass::Thinking,
+                        );
+                    }
+                }
                 if !display.is_empty() {
                     let before = rows.len();
                     push_markdown_wrapped_mode(&mut rows, width, display, "  ", ChatRowClass::Thinking, markdown_mode);
@@ -5756,6 +5820,121 @@ mod tests {
                 .iter()
                 .any(|(_, class)| *class == ChatRowClass::Thinking)
         );
+    }
+
+    #[test]
+    fn reasoning_summary_matches_upstream_title_block_rule() {
+        // Mirror of `packages/tui/src/context/thinking.ts:9-14`:
+        // `^\*\*([^*\n]+)\*\*(?:\r?\n\r?\n|$)` on the trimmed input.
+        assert_eq!(
+            reasoning_summary("**Inspecting PR workflow**\n\nbody text"),
+            (Some("Inspecting PR workflow"), "body text")
+        );
+        assert_eq!(
+            reasoning_summary("**Inspecting PR workflow**"),
+            (Some("Inspecting PR workflow"), "")
+        );
+        assert_eq!(
+            reasoning_summary("  **Title**\r\n\r\nbody  "),
+            (Some("Title"), "body")
+        );
+        assert_eq!(
+            reasoning_summary("**Title**\n\r\nbody"),
+            (Some("Title"), "body")
+        );
+        assert_eq!(
+            reasoning_summary("**Title**\r\n\nbody"),
+            (Some("Title"), "body")
+        );
+        assert_eq!(
+            reasoning_summary("**Title**\r\n\r\nbody"),
+            (Some("Title"), "body")
+        );
+        assert_eq!(
+            reasoning_summary("**  padded  **\n\nbody"),
+            (Some("padded"), "body")
+        );
+        assert_eq!(
+            reasoning_summary("**Title**\n\n  body"),
+            (Some("Title"), "  body")
+        );
+        // Ordinary initial bold prose never matches: content after the
+        // closing `**`, `*` inside the title, a newline inside the title,
+        // and a lone `\n` (single line break) separator.
+        assert_eq!(
+            reasoning_summary("**bold** continues here"),
+            (None, "**bold** continues here")
+        );
+        assert_eq!(
+            reasoning_summary("**multi\nline**\n\nbody"),
+            (None, "**multi\nline**\n\nbody")
+        );
+        assert_eq!(
+            reasoning_summary("**a*b**\n\nbody"),
+            (None, "**a*b**\n\nbody")
+        );
+        assert_eq!(
+            reasoning_summary("**Title**\nsingle newline"),
+            (None, "**Title**\nsingle newline")
+        );
+        assert_eq!(
+            reasoning_summary("**Title**\r\nbody"),
+            (None, "**Title**\r\nbody")
+        );
+        assert_eq!(reasoning_summary("plain prose"), (None, "plain prose"));
+        assert_eq!(reasoning_summary("**"), (None, "**"));
+        assert_eq!(reasoning_summary("***"), (None, "***"));
+        assert_eq!(
+            reasoning_summary("**Title** trailing"),
+            (None, "**Title** trailing")
+        );
+    }
+
+    #[test]
+    fn reasoning_title_block_renders_as_summary_metadata_row() {
+        // MD-006: a valid first-block bold title becomes the
+        // `Thought: {title}` summary-metadata row and the body renders
+        // without the title block (canonical's always-expanded adaptation of
+        // upstream's collapsed `Thought: {title}` header,
+        // `routes/session/message-parts.tsx:143-162`).
+        let message = ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![ChatPart::Thinking(
+                "**Inspecting PR workflow**\n\nSearching the diff for intent.".to_owned(),
+            )],
+            agent: None,
+            model: None,
+            assistant_facts: None,
+            message_id: None,
+        };
+        let rows = ChatView::new().render_typed_classified(60, 8, "ws", &[message], "", false);
+        assert!(rows.iter().any(|(row, class)| {
+            *class == ChatRowClass::Thinking && row.trim() == "Thought: Inspecting PR workflow"
+        }));
+        assert!(rows.iter().any(|(row, class)| {
+            *class == ChatRowClass::Thinking && row.contains("Searching the diff for intent.")
+        }));
+        assert!(!rows.iter().any(|(row, _)| row.contains("**")));
+    }
+
+    #[test]
+    fn ordinary_bold_leading_prose_keeps_body_only_render() {
+        // thinking.ts:11: `**bold** continues` has no blank-line separator, so
+        // it stays ordinary reasoning prose and renders without a metadata
+        // row (the `**` markers are stripped by the rendered markdown mode).
+        let message = ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![ChatPart::Thinking("**bold** continues".to_owned())],
+            agent: None,
+            model: None,
+            assistant_facts: None,
+            message_id: None,
+        };
+        let rows = ChatView::new().render_typed_classified(60, 6, "ws", &[message], "", false);
+        assert!(rows.iter().any(|(row, class)| {
+            *class == ChatRowClass::Thinking && row.contains("bold continues")
+        }));
+        assert!(!rows.iter().any(|(row, _)| row.contains("Thought:")));
     }
 
     #[test]
