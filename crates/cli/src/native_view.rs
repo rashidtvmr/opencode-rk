@@ -1878,6 +1878,23 @@ impl NativeView {
         if height >= 4 { height - 2 } else { height }
     }
 
+    /// CP-01: the live session composer slot, resolved by the single authority
+    /// `native_prompt_pane::prompt_slot` (`routes/session/index.tsx:1591-1660`).
+    /// `composer_open` is the auxiliary composer/dock; a child session with no
+    /// forms also takes the auxiliary slot; `form_pending` is the global form
+    /// count. Upstream has no session-route location-missing or disabled fact
+    /// reaching this view, so those two inputs stay false (honest-capability).
+    fn session_prompt_slot(&self, permission_pending: bool) -> crate::native_prompt_pane::PromptSlot {
+        crate::native_prompt_pane::prompt_slot(
+            self.dock.visible(),
+            self.parent_session && self.global_forms == 0,
+            permission_pending,
+            self.global_forms > 0,
+            false,
+            false,
+        )
+    }
+
     /// Rows the auxiliary dock currently consumes above the composer.
     fn painted_dock_height(&self, width: u16) -> usize {
         self.dock_block_for(width)
@@ -3053,7 +3070,14 @@ impl NativeView {
             }
             center
         } else if self.session_route {
-            let has_permission = permission_rows.is_some();
+            let slot = self.session_prompt_slot(permission_rows.is_some());
+            // The live slot authority: only the Permission slot replaces the
+            // composer with the inline prompt. An open auxiliary composer/dock
+            // (or a child session without forms) wins the slot (upstream Switch
+            // at 1591-1660), so a queued permission is not painted over it.
+            let has_permission =
+                matches!(slot, crate::native_prompt_pane::PromptSlot::Permission);
+            let permission_rows = if has_permission { permission_rows } else { None };
             // Upstream `SessionQuestion` (`permission.tsx:514-523`) renders the
             // permission prompt inline at the conversation bottom with
             // `maxHeight: 15` and REPLACES the composer (index.tsx Switch at
@@ -5884,6 +5908,60 @@ mod tests {
         assert!(rows[30].contains("Allow once · Deny once"));
         assert!(!view.chat_row_classes().contains(&crate::native_view_chat::ChatRowClass::Composer));
     }
+
+    // CP-01: the live session composer slot is resolved by the single authority
+    // `native_prompt_pane::prompt_slot`, not the ad-hoc `permission_rows.is_some()`.
+    #[test]
+    fn cp01_live_session_slot_defers_to_prompt_slot_authority() {
+        use crate::native_prompt_pane::{prompt_slot, PromptSlot};
+        let mut view = NativeView::new(100, 32);
+        view.set_session_route(true);
+        // No dock, no form, no permission: the editable Prompt.
+        assert_eq!(view.session_prompt_slot(false), PromptSlot::Prompt);
+        // Permission pending: Permission wins over Prompt.
+        assert_eq!(view.session_prompt_slot(true), PromptSlot::Permission);
+        // A pending permission still outranks a pending form (upstream Switch
+        // order: promptedPermissions before forms).
+        view.set_global_forms(1);
+        assert_eq!(view.session_prompt_slot(true), PromptSlot::Permission);
+        assert_eq!(view.session_prompt_slot(false), PromptSlot::Form);
+        view.set_global_forms(0);
+        // The live resolver is exactly the pure authority, over the inputs the
+        // session route reaches (location-missing/disabled never reach it).
+        assert_eq!(
+            view.session_prompt_slot(true),
+            prompt_slot(false, false, true, false, false, false)
+        );
+        assert_eq!(
+            view.session_prompt_slot(false),
+            prompt_slot(false, false, false, false, false, false)
+        );
+    }
+
+    // CP-01: an open auxiliary composer (the dock) wins the slot, so the live
+    // path must not paint a queued permission over it and must keep the composer.
+    #[test]
+    fn cp01_live_dock_slot_beats_permission_rows() {
+        let mut view = NativeView::new(120, 40);
+        view.set_session_route(true);
+        view.toggle_dock();
+        assert!(view.dock_open());
+        assert_eq!(
+            view.session_prompt_slot(true),
+            crate::native_prompt_pane::PromptSlot::AuxiliaryComposer
+        );
+        let permission = vec!["Permission required".into(), "Allow once".into()];
+        let frame = view.render_typed_permission("draft", &[], false, &[], &permission);
+        assert!(
+            !frame.iter().any(|row| row.contains("Permission required")),
+            "an open auxiliary composer owns the slot; the permission must not replace it"
+        );
+        assert!(
+            frame.iter().any(|row| row.contains('╹')),
+            "the composer lip stays painted under the auxiliary slot"
+        );
+    }
+
     #[test]
     fn sidebar_breakpoint_uses_width_remaining_after_vertical_tabs() {
         use super::*;
