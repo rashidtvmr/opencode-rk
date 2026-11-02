@@ -440,15 +440,28 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 }
 
 /// `Locale.number`: `1.0K`/`1.0M` at 1,000/999,950.
+///
+/// One decimal digit with JS `toFixed(1)` rounding semantics: on an exact
+/// `.x5` tie `toFixed` picks the larger value (ECMA-262: "if there are two
+/// such n, pick the larger n"), whereas Rust's `{:.1}` is ties-to-even and
+/// would render `1250` as `1.2K` instead of upstream `1.3K`
+/// (`packages/tui/src/util/locale.ts:19-26`). `scale` is the value of one
+/// tenth of the unit (`100` for K, `100000` for M).
 #[must_use]
 pub fn locale_number(value: u64) -> String {
     if value >= 999_950 {
-        format!("{:.1}M", value as f64 / 1_000_000.0)
+        format_compact(value, 100_000, "M")
     } else if value >= 1_000 {
-        format!("{:.1}K", value as f64 / 1_000.0)
+        format_compact(value, 100, "K")
     } else {
         value.to_string()
     }
+}
+
+/// Format `value`'s tenths-of-unit with round-half-away-from-zero.
+fn format_compact(value: u64, scale: u64, suffix: &str) -> String {
+    let tenths = value.saturating_add(scale / 2) / scale;
+    format!("{}.{}{suffix}", tenths / 10, tenths % 10)
 }
 
 /// Usage counters carried by one assistant step.
@@ -1078,6 +1091,15 @@ mod tests {
         assert_eq!(locale_number(999_949), "999.9K");
         assert_eq!(locale_number(999_950), "1.0M");
         assert_eq!(locale_number(1_234_567), "1.2M");
+        // Exact `.x5` ties follow JS `toFixed(1)` (round half AWAY from zero),
+        // not Rust's ties-to-even (`locale.ts:19-26`).
+        assert_eq!(locale_number(1_250), "1.3K");
+        assert_eq!(locale_number(2_250), "2.3K");
+        assert_eq!(locale_number(1_750), "1.8K");
+        assert_eq!(locale_number(1_250_000), "1.3M");
+        // The pre-tie neighbours still round to the lower digit.
+        assert_eq!(locale_number(1_249), "1.2K");
+        assert_eq!(locale_number(1_249_999), "1.2M");
     }
 
     #[test]

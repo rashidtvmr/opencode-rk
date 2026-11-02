@@ -655,7 +655,7 @@ impl StatusView {
     /// token total, plus `" (percent%)"` when the model context limit is
     /// known. This is the live right-footer usage row (`footer.tsx:38-46`);
     /// `None` until a matching provider usage observation exists. With no
-    /// confirmed limit the bare grouped number is shown, never a fabricated
+    /// confirmed limit the bare compact number is shown, never a fabricated
     /// percentage.
     #[must_use]
     pub fn usage_status_label(&self) -> Option<String> {
@@ -665,13 +665,7 @@ impl StatusView {
         // i.e. compact `1.0K`/`1.2M` units rather than grouped thousands. The
         // grouped `format_thousands` remains correct for the sidebar context
         // row, which uses `.toLocaleString()` (`sidebar/context.tsx:29`).
-        let value = if used >= 999_950 {
-            format!("{:.1}M", used as f64 / 1_000_000.0)
-        } else if used >= 1_000 {
-            format!("{:.1}K", used as f64 / 1_000.0)
-        } else {
-            used.to_string()
-        };
+        let value = crate::native_progress::locale_number(used);
         Some(match window {
             Some(window) => {
                 let percent = crate::native_sidebar::percent_used(used, window);
