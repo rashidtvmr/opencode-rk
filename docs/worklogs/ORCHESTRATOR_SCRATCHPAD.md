@@ -11599,3 +11599,30 @@ Reliable wave-43 verdicts:
 Conclusion recorded: remaining items are live-wiring (`REAL_GAP`) or missing
 backend producers (`BLOCKED`); neither is unblocked by more agents. group1/2/4/
 6/7 JSON files are stubs and must not be read as verdicts.
+
+## 2026-11-02 — wave-44 dispatch (28 parallel workers)
+
+User directive: 20–30 parallel workers with equal responsibility, on the 4
+authorized routes only (`@vyce-deepseek-v41` ≤8, `@9router-vyce-deepseek-v4.1-free-combined`
+overflow, `@9router-river-glm-5-3-flash` ≤1, `@9router-luna-free` ≤1).
+
+Base SHA `e20f9327` (remote verified). Output dir:
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave44/`.
+
+Each worker is artifact-first (writes its JSON stub before investigating), read-only
+on canonical, no git/cargo, and must cite file:line for every verdict. Verdict
+taxonomy: PREVERIFIED | ALREADY_CORRECT | REAL_GAP | BLOCKED | UNVERIFIED.
+A bounded fix => `<ID>.patch.diff` + verdict PREVERIFIED.
+
+Route assignment (8 vyce / 18 combined / 1 river / 1 luna):
+- vyce (8): PAR-01..12, PAR-13..24, LAY-01..10, LAY-11..20, THEME-02..10,
+  THEME-11..18, CP-01..11, CP-40..42+DIALOG-01..04.
+- combined (18): MSG-001..010, MD-001..009, TOOL-001..006+MEDIA-001, TAB-01..12,
+  DIALOG-06..19, FFI-01..11+SIDE light, TAB-21, TAB-23, SIDE-03, SIDE-04,
+  SIDE-05, SIDE-14, TOOL-011, STATE-002, FORM-001, MSG-005, MSG-008,
+  MSG-009+DIALOG-20+SIDE-08.
+- river (1): DIFF-001. luna (1): DIFF-003.
+
+On completion: consolidate all wave44 JSONs into `docs/ui-parity/PARITY_STATUS.md`,
+land any PREVERIFIED patch one artifact at a time (compile + focused test + full
+CLI suite single-threaded + immediate commit), push after each landing.
