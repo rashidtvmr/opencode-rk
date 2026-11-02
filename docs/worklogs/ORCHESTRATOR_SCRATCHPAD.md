@@ -11009,3 +11009,68 @@ MSG-009 splice (th-free), SIDE-14 footer (luna), CP-40 destructive/skill kinds
 MSG-008/010 (mimo), LAY-13 pane (mimo). Verifiers: CP-36 fix (luna), CP-40 dir
 review (luna). Route limits preserved: vyce ≤8; each of
 th/river/luna/combined/apimaster ≤1 (apimaster still `$0`, no dispatch).
+
+---
+
+## Priority pivot to Phase 1 (2026-11-02, user-directed)
+
+User asked "how close are we to complete UI parity, and Phase 1 completed?" Measured
+ground truth, then the user chose **"Split: Phase 1 P0/P1 first, parity for overflow."**
+
+### Measured state (exact, not prose)
+- UI-parity kit: `checklist.json` = **223/223 `unverified_rust`** (zero marked verified
+  against the kit). Worker-dispositioned so far ≈ **17–20/223** (~8%): landed
+  CP-28/CP-36/CP-40, TAB-07 horiz, THEME-10, DIFF-002, DIFF-004 (`cf36f364`), TOOL-008,
+  SIDE-07; closed already-correct TAB-03/TAB-21/THEME-07/LAY-20; the rest are honest
+  verdict-(c) file:line seams. 100 `feat(native)` commits since Oct 28; 12/54 evidence
+  dirs produced a patch.
+- Phase 1: `recovery_state.py status` → **`accepted_gates=0/7`**, `unresolved=10`
+  (2 P0: `RECOVERY-JUDGE-001`, `RECOVERY-DURABILITY-001`; 8 P1 `OBS-*-INSTALLED`).
+- **KEY FINDING:** Phase 1 was fully **PASS at `d367fd89`** (454 commits before HEAD
+  `cf36f364`, and `d367fd89` IS an ancestor of HEAD). That artifact-mode judge run had
+  ALL 7 gates PASS, ALL 15 checks exit 0. Acceptance state was later reset to UNPROVEN,
+  so the product regressed across the 454 intervening commits.
+- `python3 tools/convergence_gate.py --structure-only` → **CONVERGENCE BLOCKED** with one
+  error: `AUTH: serve path still does not call router_with_auth; minted token is not
+  enforcement`. Gate check is a *literal substring* test (`tools/convergence_gate.py:62`)
+  for `router_with_auth` after `async fn serve`; live `serve` now calls
+  `router_with_provider_integration(AppState, Some(credential), integration)`
+  (`crates/cli/src/main.rs:835+`) which delegates to `router_with_events_and_integration`
+  WITH `Some(auth)` (`crates/server/src/lib.rs:141-165`) → suspected false positive.
+  `tools/convergence_gate.py` is an `evaluatorSensitivePath` (needs 2 approvals incl. test
+  evaluator), NOT in `protectedEvaluatorPaths`.
+
+### Phase-1 critical path (identified)
+Acceptance needs `phase1_judge.py` in **artifact mode**: `--binary --native-library
+--build-json --artifact-evidence-dir`, from a CLEAN `main-v2` at the exact canonical SHA,
+with a `profile:"release", native:true, target:"installed-binary", platform:"mac"` build
+receipt whose `source_sha == main-v2`. Receipt schema + prior example:
+`$(git rev-parse --git-common-dir)/recovery-evidence/d367fd89.../installed-judge-custody-v3/verified-copy/build.json`.
+Dylib for `--native-library`: `crates/opentui-bridge/native/lib/aarch64-apple-darwin/libopentui.dylib`
+(the older DEFAULT_DYLIB path in `tests/e2e/native_interactive_pty.py:30-34` is in a
+deleted temp dir → stale). A release build with
+`RUSTFLAGS=-C link-arg=-Wl,-rpath,@executable_path/../lib` is running.
+
+### Dispatched this pass (Phase-1 primary; parity overflow)
+- `W32-P1-AUTH-CHECK` (vyce) — real defect vs false positive + minimal fix + whether to amend
+  `convergence_gate.py` (2-approval evaluator path).
+- `W32-P1-SECONDCLIENT-DIAG` (luna) — is `tests/e2e/native_second_client.py` real;
+  is `RECOVERY-DURABILITY-001` stale.
+- `W32-P1-JUDGE-EVIDENCE-MAP` (mimo) — STALE vs REAL for utf8/escape/resize/paste_reset,
+  plus `native_custom_command_parity` location.
+- `W32-VER-TOOL002-SPIN` (vyce) — pick ONE of three competing TOOL-002 spinner patches.
+- `W32-VER-TOOL005-BUDGET` (luna) — verify TOOL-005 code-point budget change.
+
+### Pending parity candidate patches (apply-check at HEAD `cf36f364`)
+OK-APPLY: W31R-TOOL005-BUDGET4(178L), W31-LAY19-20-RETRY(78L), W31-STATE001-FOOTER(133L),
+W30-TOOL002-SPIN(126L), W30-MSG008-010-TPS(52L), W31-TOOL012-META(230L).
+CONFLICT: W31-THEME06-DIALOG(30L), W30-TOOL002-SPIN-REAL(264L), W30-CP40-KINDS(33L),
+W30-FORM-LIVE-PRODUCER(33L), W30-MD006-THINKING(27L), W30-LAY13-PANE(6L),
+W30-TOOL012-META(177L+sibling 230L).
+Note: `W30-MSG008-010-TPS` = (c) — target `native_message_rows.rs` `RowMessage` has NO live
+render consumer, so landing it would be producer-only dead code; do NOT land.
+
+### Runtime-state bookkeeping needed
+- `RECOVERY-STRUCTURE-001` is `SUPERSEDED` in runtime (only `RECOVERY-JUDGE-001` and
+  `RECOVERY-DURABILITY-001` remain OPEN) — `recovery_state.py status` listing it is stale
+  vs the tracking file; re-check after the second-client diagnostic.
