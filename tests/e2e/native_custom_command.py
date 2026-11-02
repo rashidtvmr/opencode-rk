@@ -59,6 +59,21 @@ class CommandJourney(Journey):
         wait_frame(self.master, self.child, self.screen, self.captured, predicate,
                    len(self.captured), timeout=20)
 
+    def settle_startup(self):
+        # The first-run config-import offer is an approved oc2 extension that
+        # overlays the composer whenever an OpenCode source (here, the project
+        # `opencode.json` this journey writes) is discovered. This journey
+        # asserts configured-command behavior, so dismiss the offer with Esc
+        # (its documented `Not now` dismiss) and continue to the composer it
+        # guards. When no offer is present the composer is already reachable.
+        wait_frame(self.master, self.child, self.screen, self.captured,
+                   lambda screen: ("Import settings from OpenCode?" in screen.text()
+                                   or "Ask anything" in screen.text()),
+                   len(self.captured), timeout=20)
+        if "Import settings from OpenCode?" in self.screen.text():
+            os.write(self.master, b"\x1b")
+            self.wait(lambda screen: "Ask anything" in screen.text())
+
 
 def run(binary, library, manifest, artifacts):
     binary, library, source, binary_hash, library_hash = checked_artifact(binary, library, manifest)
@@ -88,7 +103,7 @@ def run(binary, library, manifest, artifacts):
         markdown.mkdir(parents=True)
         (markdown / "simple.md").write_text("---\ndescription: Markdown discovery\n---\nExplain $ARGUMENTS.")
         journey.start()
-        journey.wait(lambda screen: "Ask anything" in screen.text())
+        journey.settle_startup()
         listing = journey.session_api("/api/commands")["commands"]
         assert {item["name"] for item in listing} == {"inspect", "team/simple"}
         os.write(journey.master, b"/commands\r")
