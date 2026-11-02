@@ -6223,6 +6223,37 @@ fn native_tui_config_paths() -> Result<Vec<std::path::PathBuf>, String> {
 }
 
 #[cfg(feature = "native")]
+/// Accepting an executable command completion, as the live Enter/mouse arms do.
+///
+/// Replaces the draft with the exact selected route (dropping folded-paste
+/// parts, which no longer cover the draft), syncs the completion, then hides
+/// the popup (`select()` -> `hide(true)`, `autocomplete.tsx:749-751`).
+///
+/// Returns `None` when the accepted route is an argument-bearing completion
+/// (`/cd`, upstream keeps it a completion — the directory still has to be
+/// chosen), in which case the caller must fall through to
+/// [`crate::native_completion::Completion::complete_key_at`]. Returns
+/// `Some(route)` for a dispatchable command: the caller sets the draft and then
+/// emits the submit, exactly like a typed `/models` Enter.
+#[cfg(feature = "native")]
+fn accept_command_completion(
+    completion: &mut crate::native_completion::Completion,
+    draft: &mut String,
+    draft_cursor: &mut usize,
+    draft_parts: &mut Vec<crate::native_paste::PastedText>,
+    route: &str,
+) -> Option<String> {
+    if route == "/cd" {
+        return None;
+    }
+    let route_cursor = route.len();
+    crate::native_composer::replace_draft_with_cursor(draft, draft_cursor, route.to_owned(), route_cursor);
+    draft_parts.clear();
+    completion.sync(draft);
+    completion.dismiss();
+    Some(route.to_owned())
+}
+
 fn native_loop(
     memory: &[MemoryFile],
     mut live: Option<LiveSnapshot>,
@@ -8965,18 +8996,21 @@ fn native_loop(
                 native_input_decoder::InputEvent::Byte(key) => {
                     if matches!(*key, b'\r' | b'\n') {
                         if let Some(route) = completion.selected_command().map(str::to_owned) {
-                            // /exit is the upstream `app.exit` action and is
-                            // dispatched below as a global client exit, the
-                            // same as /quit and :q/:quit (a selected exit
-                            // route is never a tab close).
-                            // Executable commands are dispatched by this same
-                            // Enter event. Argument-bearing commands remain a
-                            // completion (for example `/cd` must still get a
-                            // directory before it can run).
                             if route != "/cd" {
-                                let route_cursor = route.len();
-                                crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, route, route_cursor); draft_parts.clear();
-                                completion.sync(&draft);
+                                // Accepting an executable completion hides the
+                                // popup (upstream `select()` -> `hide(true)`,
+                                // `autocomplete.tsx:749-751`) and leaves the
+                                // exact command as the draft, so this same Enter
+                                // reaches the local-route chain instead of the
+                                // submit planner returning `Ignored` on a still
+                                // visible panel (`prompt/index.tsx:1124`).
+                                let _ = accept_command_completion(
+                                    &mut completion,
+                                    &mut draft,
+                                    &mut draft_cursor,
+                                    &mut draft_parts,
+                                    &route,
+                                );
                             } else if let Some(cursor) = completion.complete_key_at(*key, &mut draft, draft_cursor, MAX_NATIVE_DRAFT_BYTES) {
                                 draft_cursor = cursor;
                                 utf8.reset();
@@ -9044,9 +9078,17 @@ fn native_loop(
                     // A clicked/pressed exit route terminates the client
                     // immediately; there is no tab-close command anymore.
                     if native_process_exit_route(&route) { break; }
-                    let route_cursor = route.len();
-                    crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, route, route_cursor); draft_parts.clear();
-                    completion.sync(&draft);
+                    // Same hide-on-accept contract as the keyboard arm: the
+                    // re-armed Enter must not see a visible panel, or the
+                    // submit planner returns `Ignored` and the route never
+                    // dispatches (`autocomplete.tsx:749-751`).
+                    let _ = accept_command_completion(
+                        &mut completion,
+                        &mut draft,
+                        &mut draft_cursor,
+                        &mut draft_parts,
+                        &route,
+                    );
                     event = native_input_decoder::InputEvent::Byte(13);
                 }
             }
@@ -13654,6 +13696,82 @@ mod tab_binding_tests {
         let listing = serde_json::json!({"sessions":[{"id":A,"title":"A","state":"idle","updated_at":"2026-10-26T00:00:00Z","parent_session_id":"not-a-uuid"}]});
         assert!(snapshot_from_listing(&fixture.origin, &listing, Some(A), Some(&fixture.token)).is_err());
         assert!(!fixture.requests.lock().unwrap().iter().any(|route| route.contains("/history?")));
+    }
+
+    #[test]
+    fn accepting_executable_command_completion_hides_popup_and_allows_dispatch() {
+        use crate::native_completion::{Completion, Item};
+        // Reproduce the live `/models` Enter at HEAD: a visible slash panel
+        // whose selected row is the exact command. Upstream `select()` hides
+        // the popup on accept (`prompt/autocomplete.tsx:749-751`); the native
+        // submit planner mirrors `submitInner`'s `if (auto()?.visible) return`
+        // (`prompt/index.tsx:1124`) through `autocomplete_visible`. If the
+        // accept leaves the panel visible, Enter is swallowed (`Ignored`) and
+        // `/models` / `/connect` never open their dialog.
+        let mut completion = Completion::default();
+        completion.commands = vec![
+            Item { value: "/models".into(), description: "Select model".into(), disabled: false },
+            Item { value: "/mcp".into(), description: "MCP status".into(), disabled: false },
+        ];
+        let mut draft = "/models".to_owned();
+        completion.sync(&draft);
+        let route = completion.selected_command().map(str::to_owned);
+        assert_eq!(route.as_deref(), Some("/models"));
+        assert!(completion.triggered(), "precondition: the slash panel is visible");
+
+        // A still-visible panel is exactly what gates the submit.
+        let blocked = composer_enter_plan(&draft, false, true, completion.triggered(), 0);
+        assert_eq!(
+            blocked,
+            crate::native_composer::SubmitPlan::Ignored,
+            "a visible panel must gate the submit: {blocked:?}"
+        );
+
+        let mut cursor = draft.len();
+        let mut parts: Vec<crate::native_paste::PastedText> = Vec::new();
+        let accepted = accept_command_completion(
+            &mut completion,
+            &mut draft,
+            &mut cursor,
+            &mut parts,
+            route.as_deref().unwrap(),
+        );
+        assert_eq!(accepted.as_deref(), Some("/models"));
+        assert_eq!(draft, "/models");
+        assert!(
+            !completion.triggered(),
+            "accepting the command must hide the popup (`autocomplete.tsx:749-751`)"
+        );
+
+        // The SAME Enter now dispatches like a typed `/models` Enter did.
+        let dispatched = composer_enter_plan(&draft, false, true, completion.triggered(), 0);
+        assert_eq!(
+            dispatched,
+            crate::native_composer::SubmitPlan::Steer,
+            "accepting must let the command reach the local-route chain: {dispatched:?}"
+        );
+    }
+
+    #[test]
+    fn accepting_argument_bearing_command_keeps_the_completion() {
+        use crate::native_completion::{Completion, Item};
+        // `/cd` stays a completion: it still needs a directory argument, so no
+        // draft replacement and no dismissal (`tui_entry.rs` `/cd` branch).
+        let mut completion = Completion::default();
+        completion.commands = vec![Item {
+            value: "/cd".into(),
+            description: "Change workspace directory (requires a path)".into(),
+            disabled: false,
+        }];
+        let mut draft = "/cd".to_owned();
+        completion.sync(&draft);
+        let mut cursor = draft.len();
+        let mut parts: Vec<crate::native_paste::PastedText> = Vec::new();
+        assert_eq!(
+            accept_command_completion(&mut completion, &mut draft, &mut cursor, &mut parts, "/cd"),
+            None
+        );
+        assert!(completion.triggered(), "/cd must remain a completion awaiting its path");
     }
 
     #[test]
