@@ -9809,6 +9809,62 @@ fn native_loop(
                         // early-returns while a selection has text; that
                         // gate is `click_acts(has_text_selection, ...)`.
                         let has_text_selection = selection.selected_text().is_some();
+                        // MSG-002 consumer (upstream `group-view.tsx:219,256`
+                        // + `useDisclosure.toggle` at `:278-282`): a left
+                        // click-release on a group's first member row (the
+                        // header stand-in) flips that group's disclosure.
+                        // Upstream only fires on the summary header row;
+                        // without a styled header row the first member stands
+                        // in (see handoff remaining_gaps).
+                        if crate::native_message_rows::click_acts(
+                            has_text_selection,
+                            crate::native_message_rows::RowAction::GroupToggle,
+                        ) {
+                            if let (Some(snapshot), Some(message_id)) =
+                                (live.as_ref(), view.chat_message_owner_at(usize::from(y)))
+                            {
+                                let entries: Vec<(String, crate::native_view_chat::ChatMessage)> =
+                                    transcript.messages.iter().enumerate().map(|(index, message)| {
+                                        let id = message
+                                            .message_id
+                                            .clone()
+                                            .unwrap_or_else(|| format!("history:{index}"));
+                                        (id, message.clone())
+                                    }).collect();
+                                let rows = crate::native_message_rows::rows_from_chat_entries(
+                                    &entries,
+                                    crate::native_message_rows::Verbosity::Medium,
+                                );
+                                let found = rows.iter().find_map(|row| match row {
+                                    crate::native_message_rows::SessionRow::Group(group) => {
+                                        let refs = crate::native_message_rows::group_refs(group, true);
+                                        let header = refs
+                                            .first()
+                                            .is_some_and(|reference| reference.message_id == message_id);
+                                        header.then(|| {
+                                            crate::native_message_rows::group_id(group, 0)
+                                                .map(|id| (group.kind, id))
+                                        })?
+                                    }
+                                    _ => None,
+                                });
+                                if let Some((kind, group_id)) = found {
+                                    view.chat_set_session(
+                                        Some(snapshot.session_id.clone()),
+                                        Some(crate::native_message_rows::Verbosity::Medium),
+                                    );
+                                    let expanded = view.chat_group_expanded(
+                                        &snapshot.session_id,
+                                        crate::native_message_rows::Verbosity::Medium,
+                                        &group_id,
+                                        kind,
+                                    );
+                                    view.chat_set_group_expanded(&snapshot.session_id, &group_id, !expanded);
+                                    needs_paint = true;
+                                    continue;
+                                }
+                            }
+                        }
                         if crate::native_message_rows::click_acts(
                             has_text_selection,
                             crate::native_message_rows::RowAction::MessageActions,

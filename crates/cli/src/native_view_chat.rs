@@ -143,6 +143,14 @@ pub struct ChatView {
     /// `onMouseUp` -> `navigate({type:"session",sessionID:id})`). `None` for
     /// rows whose owning message carries no subtask child id.
     child_owners: RefCell<Vec<Option<String>>>,
+    /// MSG-002: per-session disclosure store plus the session identity bound
+    /// to it. Upstream keeps `groupExpanded` at the session-tabs level keyed
+    /// by `sessionID` (`context/session-tabs.tsx:411-415`); one ChatView per
+    /// tab is the same scope, so the render gate stays inactive (all rows
+    /// visible) until the live loop binds a session via [`ChatView::set_session`].
+    disclosure: crate::native_message_rows::DisclosureState,
+    session_id: Option<String>,
+    verbosity: Option<crate::native_message_rows::Verbosity>,
     /// TOOL-002: tool-call ids whose permission decision is pending right
     /// now. Upstream joins the first pending request whose
     /// `source.type === "tool"` and `source.id` (oc2 wire `source.callID`,
@@ -3057,9 +3065,66 @@ impl ChatView {
             .unwrap_or(rows.len());
         let transcript_h = body_h.saturating_sub(1);
         let target = self.scroll.get().saturating_add(transcript_h);
+        // MSG-002 disclosure gate (`group-view.tsx:224,260`): a collapsed
+        // group paints only its first member message as the clickable header
+        // (upstream renders the summary `InlineToolRow` outside the `Show`)
+        // plus its permission-pending leaves; an expanded group paints all
+        // members. The gate is message-level, exact for the live
+        // single-part-per-message shape; a multi-part message is kept or
+        // hidden whole. Inactive (all rows visible) until `set_session`.
+        let visible_messages: std::collections::HashSet<String> =
+            match (&self.session_id, self.verbosity) {
+                (Some(session_id), Some(verbosity)) => {
+                    let entries: Vec<(String, ChatMessage)> = messages
+                        .iter()
+                        .enumerate()
+                        .map(|(index, message)| {
+                            let id = message
+                                .message_id
+                                .clone()
+                                .unwrap_or_else(|| format!("history:{index}"));
+                            (id, message.clone())
+                        })
+                        .collect();
+                    let rows = crate::native_message_rows::rows_from_chat_entries(&entries, verbosity);
+                    let mut visible: Vec<crate::native_message_rows::PartRef> = Vec::new();
+                    for row in &rows {
+                        match row {
+                            crate::native_message_rows::SessionRow::Group(group) => {
+                                let expanded = crate::native_message_rows::group_id(group, 0)
+                                    .is_some_and(|id| {
+                                        self.disclosure.group_expanded(session_id, &id, verbosity, group.kind)
+                                    });
+                                if !expanded {
+                                    if let Some(first) = crate::native_message_rows::group_refs(group, true).first() {
+                                        visible.push(first.clone());
+                                    }
+                                }
+                                visible.extend(self.disclosure.visible_leaves(session_id, verbosity, row));
+                            }
+                            crate::native_message_rows::SessionRow::Entry(entry) => {
+                                if let Some(reference) = crate::native_message_rows::entry_ref(entry) {
+                                    visible.push(reference);
+                                }
+                            }
+                        }
+                    }
+                    visible.into_iter().map(|reference| reference.message_id).collect()
+                }
+                _ => std::collections::HashSet::new(),
+            };
         let mut reversed: Vec<(StyledChatRow, Vec<ChatRunSpan>, Option<String>, Option<String>)> = Vec::new();
         if transcript_h > 0 {
             'messages: for (index, message) in messages.iter().enumerate().rev() {
+                if !visible_messages.is_empty() {
+                    let id = message
+                        .message_id
+                        .clone()
+                        .unwrap_or_else(|| format!("history:{index}"));
+                    if !visible_messages.contains(&id) {
+                        continue;
+                    }
+                }
                 let mut message_spans: Vec<(usize, Vec<ChatRunSpan>)> = Vec::new();
                 let mut message_children: Vec<(usize, String)> = Vec::new();
                 let message_rows = boxed_message_rows_spans_mode(
@@ -3207,6 +3272,36 @@ impl ChatView {
     /// Transcript viewport height in rows from the last render.
     #[must_use]
     pub fn transcript_viewport_rows(&self) -> usize { self.transcript_viewport.get() }
+
+    /// MSG-002: bind the session whose disclosure this view paints
+    /// (`context/session-tabs.tsx` scope). `None` keeps the render gate
+    /// inactive so direct unit renders never change behavior.
+    pub fn set_session(
+        &mut self,
+        session_id: Option<String>,
+        verbosity: Option<crate::native_message_rows::Verbosity>,
+    ) {
+        self.session_id = session_id;
+        self.verbosity = verbosity;
+    }
+
+    /// MSG-002: upstream `groupExpanded(groupID, kind)`; the store defaults
+    /// an unset group to `verbosity == High && opens_by_default(kind)`.
+    #[must_use]
+    pub fn group_expanded(
+        &self,
+        session_id: &str,
+        verbosity: crate::native_message_rows::Verbosity,
+        group_id: &str,
+        kind: crate::native_message_rows::GroupKind,
+    ) -> bool {
+        self.disclosure.group_expanded(session_id, group_id, verbosity, kind)
+    }
+
+    /// MSG-002: persist one expansion choice (`setGroupExpanded`).
+    pub fn set_group_expanded(&mut self, session_id: &str, group_id: &str, expanded: bool) {
+        self.disclosure.set_group_expanded(session_id, group_id, expanded);
+    }
 
     /// Backend message id owning each painted body row of the last styled
     /// render, indexed by frame row. This is the transcript hit-test the

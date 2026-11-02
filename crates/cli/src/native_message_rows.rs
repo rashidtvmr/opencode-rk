@@ -198,6 +198,33 @@ impl DisclosureState {
     pub fn saved_len(&self) -> usize {
         self.saved.len()
     }
+
+    /// Ordered leaf refs the transcript still paints for one row at the
+    /// current disclosure, mirroring upstream `group-view.tsx:224,260`:
+    /// an expanded group paints all of its descendants, while a collapsed
+    /// group paints only its permission-`pending` leaves (`PendingEntries`
+    /// renders outside the `Show`). Bare entries always paint their ref.
+    #[must_use]
+    pub fn visible_leaves(
+        &self,
+        session_id: &str,
+        verbosity: Verbosity,
+        row: &SessionRow,
+    ) -> Vec<PartRef> {
+        match row {
+            SessionRow::Entry(entry) => entry_ref(entry).into_iter().collect(),
+            SessionRow::Group(group) => {
+                let expanded = group_id(group, 0).is_some_and(|id| {
+                    self.group_expanded(session_id, &id, verbosity, group.kind)
+                });
+                if expanded {
+                    group_refs(group, true)
+                } else {
+                    group.pending.clone()
+                }
+            }
+        }
+    }
 }
 
 fn opens_by_default(kind: GroupKind) -> bool {
@@ -2275,6 +2302,36 @@ mod tests {
         state.set_group_expanded("session-a", "g1", false);
         assert!(!state.group_expanded("session-a", "g1", Verbosity::High, GroupKind::Exploration));
         assert_eq!(state.saved_len(), 1);
+    }
+
+    #[test]
+    fn msg002_header_toggle_changes_visible_members() {
+        let rows = reduce_session_rows(
+            &[RowMessage::assistant("m1", vec![read("call_1"), read("call_2")])],
+            Verbosity::Medium,
+            false,
+        );
+        let SessionRow::Group(group) = &rows[0] else {
+            panic!("expected an exploration group: {rows:?}");
+        };
+        let sid = "ses1";
+        let id = group_id(group, 0).expect("group has a stable id");
+        let mut state = DisclosureState::new();
+        assert!(
+            state.visible_leaves(sid, Verbosity::Medium, &rows[0]).is_empty(),
+            "a collapsed header hides its members"
+        );
+        state.set_group_expanded(sid, &id, true);
+        assert_eq!(
+            state.visible_leaves(sid, Verbosity::Medium, &rows[0]),
+            vec![PartRef::new("m1", "call_1"), PartRef::new("m1", "call_2")],
+            "toggling the header open reveals exactly its members"
+        );
+        state.set_group_expanded(sid, &id, false);
+        assert!(
+            state.visible_leaves(sid, Verbosity::Medium, &rows[0]).is_empty(),
+            "toggling back closed re-hides them"
+        );
     }
 
     // MSG-003 ---------------------------------------------------------------
