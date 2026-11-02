@@ -46,10 +46,12 @@
 //! - `packages/tui/src/routes/session/index.tsx:2485-2513`
 //!   (`QueuedPromptDock`) — dock dimensions, hover background, label.
 //!
-//! Scope honesty: this module is pure text/state. It renders no colors, owns
-//! no terminal and performs no IO; it chooses span text, span order and the
-//! semantic role the view maps onto the active theme. Nothing is inferred
-//! from timers or wall-clock: every dynamic value (elapsed animation time,
+//! Scope honesty: this module is pure text/state and per-cell color
+//! resolution. It owns no terminal and performs no IO; it chooses span text,
+//! span order, the semantic role the view maps onto the active theme, and
+//! (CP-12) the resolved RGBA of each running-scanner cell before the view
+//! composites it over the composer background. Nothing is inferred from
+//! timers or wall-clock: every dynamic value (elapsed animation time,
 //! interrupt state, counts, usage strings) is a caller-supplied fact.
 
 use crate::native_status::live_counts_label;
