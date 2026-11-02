@@ -221,6 +221,10 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | DIALOG-02 | `REAL_GAP` | shell gap/row-pad/footer-band helpers (`native_palette.rs:667-733`, test `:3808`) zero production callers; live `native_view_dialogs.rs:1408-1510` never calls them |
 | DIALOG-03 | `ALREADY_CORRECT` | live stack `native_modal_layer.rs:437/382/387/532`; remount/refocus tests `:1150/:1292`, `native_view.rs:7728`; consumed `tui_entry.rs:7865/10676` |
 | DIALOG-04 | `REAL_GAP` | ordered routes `escape_route:808`/`ctrl_c_route:821` (test `:7316`) no production caller; live `tui_entry.rs:10671-10700` does own selection/clear then `dialogs.cancel()` |
+| DIALOG-16 | `ALREADY_CORRECT` | `native_settings.rs:53/561/517/352`; tests `:930` (numeric clamp+save-lock), `:959` (experiments empty+save-lock); live `tui_entry.rs:6340,7963,8845`. **Refutes** wave-43. Caveat: `ThemePreview` (`native_palette.rs:2946`) no live consumer; live theme path `native_view.rs:2395` |
+| DIALOG-17 | `REAL_GAP` | `native_palette.rs:2999,3037,3141,3287` (tests `:4393,4423,4464`); no live consumer |
+| DIALOG-18 | `REAL_GAP` | `native_view_dialogs.rs:3432,3609,3661,3767` (tests `:5351,5365,5430,5464,5493`); `diff_dialog` module test-only |
+| DIALOG-19 | `REAL_GAP` | `native_overlay_stack.rs:38,360,243` + `native_modal_layer.rs:775` (tests `:1001..1181`); `ChromeModel`/Startup-Loading test-only |
 
 ## Genuine gaps — live wiring (`REAL_GAP`)
 
