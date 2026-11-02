@@ -143,6 +143,15 @@ pub enum DialogKind {
     /// backend decision. The row text model lives in
     /// `native_tool_rows::ExecuteDialog`.
     Execute,
+    /// SIDE-08: DialogMcp server list (`component/dialog-mcp.tsx`), opened
+    /// from a sidebar MCP row click (`feature-plugins/sidebar/mcp.tsx:56-60`
+    /// `onMouseUp` -> `dialog.show(<DialogMcp initialServer details />)`). A
+    /// local select list of every MCP server: the clicked server is focused
+    /// (`initialServer`), each row carries the exact upstream status footer
+    /// word, and a failed server's error is shown as the details message.
+    /// Enter surfaces the focused server's toggle identity to the caller and
+    /// Esc closes locally; it never pends a permission ack.
+    Mcp,
 }
 
 /// Static, safe error-card categories. Defined in this file so raw backend
@@ -396,6 +405,10 @@ struct OpenDialog {
     /// Parallel Permission decision mapping (same length as `choices`);
     /// empty for non-Permission kinds.
     permission: Vec<PermissionChoice>,
+    /// Parallel per-choice status footer (same length as `choices`); only
+    /// populated for [`DialogKind::Mcp`] (the exact upstream status word,
+    /// `dialog-mcp.tsx:24-37`), empty otherwise.
+    mcp_status: Vec<String>,
     message_lines: Vec<String>,
     error: StaticError,
 }
@@ -594,6 +607,7 @@ impl DialogView {
     pub fn production_viewport_policy(&self) -> DialogViewportPolicy {
         match self.dialog.as_ref().map(|dialog| dialog.kind) {
             Some(DialogKind::Select) => DialogViewportPolicy::SelectTerminal,
+            Some(DialogKind::Mcp) => DialogViewportPolicy::SelectTerminal,
             Some(DialogKind::Permission)
             | Some(DialogKind::Question)
             | Some(DialogKind::Confirm)
@@ -1021,6 +1035,7 @@ impl DialogView {
             choices: sanitized_choices,
             disabled,
             permission,
+            mcp_status: Vec::new(),
             message_lines: request
                 .message
                 .as_deref()
@@ -1049,6 +1064,89 @@ impl DialogView {
         self.modal
             .replace(entry_id, DialogSize::Medium, false, None, self.focus);
         Ok(())
+    }
+
+    /// SIDE-08: open the `DialogMcp` server list (`component/dialog-mcp.tsx`).
+    ///
+    /// `servers` is the full `(name, status_word)` list in the order the
+    /// caller wants painted (upstream sorts by name, `dialog-mcp.tsx:53-58`);
+    /// `focused` is the index of the clicked server (`initialServer`,
+    /// `sidebar/mcp.tsx:57`); `details` is the failed server's error text,
+    /// shown as the dialog body when the click carried `details` (a failed
+    /// server, `dialog-mcp.tsx:59-60`).
+    ///
+    /// This is a local select list, not a backend decision: it never enters
+    /// the pending phase and never issues a [`DecisionIntent`]. Enter is
+    /// handled by the caller reading [`DialogView::focused_choice`]; Esc
+    /// closes through [`DialogView::close`].
+    pub fn open_mcp(
+        &mut self,
+        servers: &[(String, String)],
+        focused: Option<usize>,
+        details: Option<String>,
+    ) -> Result<(), DialogError> {
+        if self.is_open() {
+            return Err(DialogError::AlreadyOpen);
+        }
+        if servers.is_empty() {
+            return Err(DialogError::NoChoices);
+        }
+        if servers.len() > MAX_CHOICES {
+            return Err(DialogError::TooManyChoices);
+        }
+        let mut choices = Vec::with_capacity(servers.len());
+        let mut mcp_status = Vec::with_capacity(servers.len());
+        for (name, status) in servers {
+            if name.len() > MAX_CHOICE_LEN {
+                return Err(DialogError::ChoiceTooLong);
+            }
+            choices.push(sanitize_inline(name));
+            mcp_status.push(sanitize_inline(status));
+        }
+        let message_lines = details
+            .as_deref()
+            .map(sanitize_block)
+            .unwrap_or_default();
+        self.dialog = Some(OpenDialog {
+            id: "mcp".to_owned(),
+            session_id: String::new(),
+            kind: DialogKind::Mcp,
+            title: "MCP servers".to_owned(),
+            choices,
+            disabled: vec![false; servers.len()],
+            permission: Vec::new(),
+            mcp_status,
+            message_lines,
+            error: StaticError::BackendUnavailable,
+        });
+        // `DialogSelect` seeds `selected` to the focused row
+        // (`dialog-select.tsx:152`, `dialog-mcp.tsx:61` `preserveSelection`).
+        self.selection = focused.filter(|index| *index < servers.len()).or(Some(0));
+        self.rejected = false;
+        self.phase = Phase::Open;
+        self.open_sequence = self.open_sequence.saturating_add(1);
+        let entry_id = self.open_sequence;
+        self.modal
+            .replace(entry_id, DialogSize::Medium, false, None, self.focus);
+        Ok(())
+    }
+
+    /// The visible dialog's kind, or `None` while closed. Used by the live
+    /// loop to route Enter/Esc for a local (non-decision) dialog such as the
+    /// MCP server list before calling [`DialogView::answer`].
+    #[must_use]
+    pub fn open_kind(&self) -> Option<DialogKind> {
+        self.dialog.as_ref().map(|dialog| dialog.kind)
+    }
+
+    /// The focused choice's display text, or `None` when closed/unselected.
+    /// For [`DialogKind::Mcp`] this is the focused server name
+    /// (`dialog-mcp.tsx:81-84` `option.value`).
+    #[must_use]
+    pub fn focused_choice(&self) -> Option<&str> {
+        let dialog = self.dialog.as_ref()?;
+        let index = self.selection?;
+        dialog.choices.get(index).map(String::as_str)
     }
 
     /// `dialog.show()` followed by `dialog.set()` (`plugin/api.tsx:334-341`):
@@ -1149,6 +1247,7 @@ impl DialogView {
         match dialog.kind {
             DialogKind::Error => return Err(DialogError::NotAnswerable),
             DialogKind::Execute => return Err(DialogError::NotAnswerable),
+            DialogKind::Mcp => return Err(DialogError::NotAnswerable),
             DialogKind::Question if !self.question_capable => {
                 return Err(DialogError::QuestionUnavailable)
             }
@@ -1197,6 +1296,7 @@ impl DialogView {
                 attempt,
             },
             DialogKind::Prompt => return Err(DialogError::NotAnswerable),
+            DialogKind::Mcp => unreachable!("not answerable"),
             DialogKind::Execute => unreachable!("answered above"),
             DialogKind::Error => unreachable!("answered above"),
         };
@@ -1219,6 +1319,7 @@ impl DialogView {
             DialogKind::Question => return Err(DialogError::QuestionCancelUnsupported),
             DialogKind::Error => return Err(DialogError::NotAnswerable),
             DialogKind::Execute => return Err(DialogError::NotAnswerable),
+            DialogKind::Mcp => return Err(DialogError::NotAnswerable),
             _ => {}
         }
         let request_id = dialog.id.clone();
@@ -1236,7 +1337,7 @@ impl DialogView {
                 attempt,
             },
             DialogKind::Prompt => return Err(DialogError::NotAnswerable),
-            DialogKind::Question | DialogKind::Error | DialogKind::Execute => unreachable!("handled above"),
+            DialogKind::Question | DialogKind::Error | DialogKind::Execute | DialogKind::Mcp => unreachable!("handled above"),
         };
         self.pending_attempt = attempt;
         self.phase = Phase::Pending;
@@ -1427,6 +1528,7 @@ impl DialogView {
                 DialogKind::Select => lines.push(line("select: use up/down then Enter".to_string(), Role::Description)),
                 DialogKind::Prompt => lines.push(line("prompt: type then Enter".to_string(), Role::Description)),
                 DialogKind::Execute => lines.push(line("execute — code and output".to_string(), Role::Description)),
+                DialogKind::Mcp => lines.push(line("select a server · Enter toggle".to_string(), Role::Description)),
                 DialogKind::Error => {
                     lines.push(line(dialog.error.headline().to_string(), Role::Error));
                     lines.push(line(dialog.error.detail().to_string(), Role::Description));
@@ -1473,7 +1575,16 @@ impl DialogView {
                 } else {
                     ""
                 };
-                lines.push(line(format!("{marker}{}. {}{suffix}", index + 1, choice),
+                // SIDE-08: the MCP list prints the server name then the exact
+                // upstream status word (`dialog-mcp.tsx:79-85`), with no
+                // numeric index (upstream `DialogSelect` rows carry no number).
+                let text = if dialog.kind == DialogKind::Mcp {
+                    let status = dialog.mcp_status.get(index).map(String::as_str).unwrap_or("");
+                    format!("{marker}{choice}  {status}")
+                } else {
+                    format!("{marker}{}. {}{suffix}", index + 1, choice)
+                };
+                lines.push(line(text,
                     if self.selection == Some(index) { Role::Selected } else if dialog.disabled[index] { Role::Description } else if dialog.kind == DialogKind::Permission { Role::Action } else { Role::Item }));
             }
             if roomy && has_footer {
@@ -1483,6 +1594,8 @@ impl DialogView {
                 "decision sent — waiting for backend acknowledgement"
             } else if self.rejected {
                 "Decision rejected — ↑/↓ choose · Enter retry · Esc deny"
+            } else if dialog.kind == DialogKind::Mcp {
+                "↑↓ choose · Enter toggle · Esc close"
             } else {
                 "1–9 / ↑↓ choose · Enter / click here confirm · Esc deny"
             };
@@ -5814,6 +5927,57 @@ mod tests {
         assert_eq!(rows[choice - 1], "");
         let footer = rows.iter().position(|row| row.contains("Enter")).unwrap();
         assert_eq!(rows[footer - 1], "");
+    }
+
+    #[test]
+    fn mcp_dialog_lists_sorted_servers_with_status_words_and_details() {
+        // SIDE-08: the row-click dialog is a local select list of servers
+        // (`component/dialog-mcp.tsx`): the clicked server is focused, each
+        // row carries the exact upstream status word, and a failed server's
+        // error is the details body. Enter is not a decision; Esc closes
+        // locally.
+        let mut view = DialogView::new();
+        let servers = vec![
+            ("alpha".to_string(), "Connected ✓".to_string()),
+            ("beta".to_string(), "Failed !".to_string()),
+        ];
+        view.open_mcp(&servers, Some(1), Some("boom".to_string()))
+            .unwrap();
+        assert_eq!(view.open_kind(), Some(DialogKind::Mcp));
+        assert!(view.intercepts_input());
+        assert_eq!(view.focused_choice(), Some("beta"));
+        let rows = view.render(56, 14);
+        assert!(rows.iter().any(|row| row.contains("MCP servers")), "{rows:?}");
+        assert!(
+            rows.iter().any(|row| row.contains("alpha") && row.contains("Connected ✓")),
+            "{rows:?}"
+        );
+        assert!(
+            rows.iter().any(|row| row.contains("> beta") && row.contains("Failed !")),
+            "{rows:?}"
+        );
+        assert!(rows.iter().any(|row| row.contains("boom")), "{rows:?}");
+        // Enter is not a permission decision for this kind; the caller reads
+        // `focused_choice` and performs the toggle itself.
+        assert_eq!(view.answer().unwrap_err(), DialogError::NotAnswerable);
+        assert!(view.is_open(), "a refused answer must not close the list");
+        // Esc closes locally (no pending decision, no fabricated intent).
+        view.close();
+        assert!(!view.is_open());
+        assert_eq!(view.open_kind(), None);
+    }
+
+    #[test]
+    fn mcp_dialog_without_focus_selects_the_first_server() {
+        // `DialogSelect` seeds `selected: 0` when no `initialServer` matches
+        // (`dialog-select.tsx:152`).
+        let mut view = DialogView::new();
+        let servers = vec![
+            ("alpha".to_string(), "Disabled ○".to_string()),
+            ("beta".to_string(), "Sign in required →".to_string()),
+        ];
+        view.open_mcp(&servers, None, None).unwrap();
+        assert_eq!(view.focused_choice(), Some("alpha"));
     }
 
     fn permission_request() -> DialogRequest {

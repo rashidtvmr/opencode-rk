@@ -5771,6 +5771,51 @@ fn fetch_permission(
 /// Question / confirm intents have no permission route and never produce
 /// a POST.
 #[cfg(feature = "native")]
+/// SIDE-08: perform the MCP connect/disconnect toggle shared by the sidebar
+/// row and the `DialogMcp` action (`component/dialog-mcp.tsx:113-124`).
+/// `included` is the server's *current* session inclusion; the request flips
+/// it. The confirmed response is applied through `apply_mcp`; a failure is
+/// reported, never faked.
+fn dispatch_mcp_toggle(
+    view: &mut crate::native_view::NativeView,
+    transcript: &mut NativeChatHistory,
+    live: Option<&LiveSnapshot>,
+    auth: Option<&str>,
+    name: &str,
+    included: bool,
+) {
+    let Some(snapshot) = live else {
+        append_transcript(
+            transcript,
+            "error: mcp toggle: daemon unavailable".to_owned(),
+        );
+        return;
+    };
+    let encoded: String = name
+        .bytes()
+        .flat_map(|byte| {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+                vec![byte as char]
+            } else {
+                format!("%{byte:02X}").chars().collect()
+            }
+        })
+        .collect();
+    let path = format!("/api/sessions/{}/mcp/{}", snapshot.session_id, encoded);
+    let body = serde_json::json!({"included": !included});
+    match http_request(&snapshot.origin, "PUT", &path, Some(&body.to_string()), auth)
+        .and_then(|body| {
+            serde_json::from_str::<serde_json::Value>(&body).map_err(|error| error.to_string())
+        }) {
+        Ok(value) => {
+            if let Err(error) = view.apply_mcp(&value) {
+                append_transcript(transcript, format!("error: mcp toggle rejected: {error}"));
+            }
+        }
+        Err(error) => append_transcript(transcript, format!("error: mcp toggle failed: {error}")),
+    }
+}
+
 fn dispatch_permission_reply(
     view: &mut crate::native_view::NativeView,
     transcript: &mut NativeChatHistory,
@@ -10077,27 +10122,15 @@ fn native_loop(
                         needs_paint = true;
                         continue;
                     }
-                    if let Some((name, included)) = view.mcp_sidebar_action(x, y) {
-                        if let Some(snapshot) = live.as_ref() {
-                            let encoded: String = name.bytes().flat_map(|byte| {
-                                if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-                                    vec![byte as char]
-                                } else {
-                                    format!("%{byte:02X}").chars().collect()
-                                }
-                            }).collect();
-                            let path = format!("/api/sessions/{}/mcp/{}", snapshot.session_id, encoded);
-                            let body = serde_json::json!({"included": !included});
-                            match http_request(&snapshot.origin, "PUT", &path, Some(&body.to_string()), auth)
-                                .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).map_err(|error| error.to_string()))
-                            {
-                                Ok(value) => {
-                                    if let Err(error) = view.apply_mcp(&value) {
-                                        append_transcript(&mut transcript, format!("error: mcp toggle rejected: {error}"));
-                                    }
-                                }
-                                Err(error) => append_transcript(&mut transcript, format!("error: mcp toggle failed: {error}")),
-                            }
+                    if let Some((name, _included)) = view.mcp_sidebar_action(x, y) {
+                        // SIDE-08: a sidebar MCP row click opens `DialogMcp`
+                        // with the clicked server focused and, for a failed
+                        // server, its error as the details body
+                        // (`feature-plugins/sidebar/mcp.tsx:56-60`), instead of
+                        // toggling the server in place.
+                        let failed = view.mcp_server_failed(&name);
+                        if let Err(error) = view.mcp_dialog_open(&name, failed) {
+                            append_transcript(&mut transcript, format!("error: mcp dialog: {}", error.code()));
                         }
                         needs_paint = true;
                         continue;
@@ -10707,6 +10740,36 @@ fn native_loop(
         // exit priority above every modal: they fall through here and break
         // in the dispatch below.
         if view.dialogs.intercepts_input() && !matches!(byte, 3 | 4) {
+            // SIDE-08: the `DialogMcp` server list is a local select, not a
+            // backend decision. Enter toggles the focused server through the
+            // same `PUT /api/sessions/{id}/mcp/{name}` the sidebar row used
+            // (`dialog-mcp.tsx:113-124`), and Esc closes it locally
+            // (`dialog-mcp.tsx:141-146` `onBack`/dialog close). Every other
+            // kind keeps the permission decision lifecycle below.
+            let mcp_open = view.dialogs.open_kind()
+                == Some(crate::native_view_dialogs::DialogKind::Mcp);
+            if mcp_open {
+                match byte {
+                    14 => view.dialogs.next(),
+                    2 => view.dialogs.prev(),
+                    13 | 10 => {
+                        if let Some((name, included)) = view.mcp_dialog_toggle() {
+                            dispatch_mcp_toggle(
+                                &mut view,
+                                &mut transcript,
+                                live.as_ref(),
+                                auth,
+                                &name,
+                                included,
+                            );
+                        }
+                    }
+                    27 => view.dialogs.close(),
+                    _ => {}
+                }
+                utf8.reset();
+                continue;
+            }
             match byte {
                 14 => view.dialogs.next(),
                 2 => view.dialogs.prev(),

@@ -145,6 +145,32 @@ impl McpStatus {
             _ => None,
         }
     }
+
+    /// SIDE-08: the exact `DialogMcp` status footer word
+    /// (`component/dialog-mcp.tsx:24-37`). Upstream's `Status` renders
+    /// `Connecting …` while loading/pending, `Connected ✓`, `Failed !`,
+    /// `Sign in required →`, and falls back to `Disabled ○` for every other
+    /// state — including the opencode-rk-only `needs_client_registration`,
+    /// which upstream has no branch for.
+    #[must_use]
+    pub fn footer_word(&self) -> &'static str {
+        match self {
+            McpStatus::Connected => "Connected ✓",
+            McpStatus::Failed { .. } => "Failed !",
+            McpStatus::NeedsAuth => "Sign in required →",
+            McpStatus::Disabled | McpStatus::NeedsClientRegistration { .. } => "Disabled ○",
+        }
+    }
+
+    /// SIDE-08: the failed server's error text, when this status carries one
+    /// (`dialog-mcp.tsx:17-20` `statusError`).
+    #[must_use]
+    pub fn error_text(&self) -> Option<&str> {
+        match self {
+            McpStatus::Failed { error } => Some(error.as_str()),
+            _ => None,
+        }
+    }
 }
 
 /// Frontend action intent. Carries no effect: the caller performs the HTTP
@@ -1086,6 +1112,13 @@ impl StatusView {
 
     pub fn mcp_included(&self, name: &str) -> Option<bool> {
         self.mcp.iter().find(|entry| entry.name == name).and_then(|entry| entry.included)
+    }
+
+    /// SIDE-08: the parsed MCP entries in wire order. The `DialogMcp` caller
+    /// sorts by name (`dialog-mcp.tsx:53-58`).
+    #[must_use]
+    pub fn mcp_entries(&self) -> &[McpEntry] {
+        &self.mcp
     }
 
     /// Resolve clicks against the rendered sidebar, never a guessed row

@@ -398,6 +398,47 @@ mod page_spacing_tests {
     }
 
     #[test]
+    fn mcp_row_click_opens_the_server_list_with_the_clicked_server_focused() {
+        // SIDE-08: a sidebar MCP row click opens `DialogMcp` with the clicked
+        // server focused (`sidebar/mcp.tsx:56-60`); a failed server's click
+        // carries its error as the details body.
+        let mut view = NativeView::new(148, 30);
+        view.set_session_route(true);
+        view.apply_mcp(&serde_json::json!({
+            "status": {
+                "zeta": {"status": "connected"},
+                "alpha": {"status": "failed", "error": "enoent"},
+                "mid": {"status": "disabled"}
+            },
+            "included": {"zeta": true, "alpha": true, "mid": false}
+        }))
+        .unwrap();
+        assert!(view.mcp_server_failed("alpha"));
+        assert!(!view.mcp_server_failed("zeta"));
+        view.mcp_dialog_open("alpha", true).unwrap();
+        assert_eq!(
+            view.dialogs.open_kind(),
+            Some(crate::native_view_dialogs::DialogKind::Mcp)
+        );
+        // The list is name-sorted, so the focused server is `alpha` (index 0),
+        // and its toggle identity is the current inclusion.
+        assert_eq!(
+            view.mcp_dialog_toggle(),
+            Some(("alpha".to_string(), true))
+        );
+        let rows = view.dialogs.render(56, 14);
+        assert!(rows.iter().any(|row| row.contains("MCP servers")), "{rows:?}");
+        assert!(
+            rows.iter().any(|row| row.contains("Failed !")),
+            "the failed status word must render: {rows:?}"
+        );
+        assert!(
+            rows.iter().any(|row| row.contains("enoent")),
+            "the failed server's error must render as details: {rows:?}"
+        );
+    }
+
+    #[test]
     fn sidebar_scrolling_keeps_the_last_server_visible_and_clickable() {
         for (cols, framed) in [(148, false), (100, false), (148, true)] {
             let mut view = NativeView::new(cols, 30);
@@ -2348,6 +2389,64 @@ impl NativeView {
             })
             .filter(|(name, included, _, _, _)| self.status.mcp_included(name) == Some(*included))
             .map(|(name, included, _, _, _)| (name.clone(), *included))
+    }
+
+    /// SIDE-08: open the `DialogMcp` server list (`component/dialog-mcp.tsx`)
+    /// with `name` focused. Every server is listed in name order
+    /// (`dialog-mcp.tsx:53-58`) carrying the exact upstream status footer
+    /// word; when `details` is set (a click on a *failed* server,
+    /// `sidebar/mcp.tsx:57` `details={status === "failed"}`) that server's
+    /// error text becomes the dialog body.
+    pub fn mcp_dialog_open(
+        &mut self,
+        name: &str,
+        details: bool,
+    ) -> Result<(), crate::native_view_dialogs::DialogError> {
+        let mut servers: Vec<(String, String)> = self
+            .status
+            .mcp_entries()
+            .iter()
+            .map(|entry| (entry.name.clone(), entry.status.footer_word().to_owned()))
+            .collect();
+        servers.sort_by(|a, b| a.0.cmp(&b.0));
+        let focused = servers.iter().position(|(server, _)| server == name);
+        let detail_text = if details {
+            self.status
+                .mcp_entries()
+                .iter()
+                .find(|entry| entry.name == name)
+                .and_then(|entry| entry.status.error_text())
+                .map(str::to_owned)
+        } else {
+            None
+        };
+        self.dialogs.open_mcp(&servers, focused, detail_text)
+    }
+
+    /// SIDE-08: the focused MCP server's toggle identity `(name, included)`,
+    /// or `None` when the MCP dialog is closed or the focused server has no
+    /// toggle authority. The caller performs the same `PUT
+    /// /api/sessions/{id}/mcp/{name}` the sidebar row toggle uses.
+    #[must_use]
+    pub fn mcp_dialog_toggle(&self) -> Option<(String, bool)> {
+        if self.dialogs.open_kind() != Some(crate::native_view_dialogs::DialogKind::Mcp) {
+            return None;
+        }
+        let name = self.dialogs.focused_choice()?;
+        let included = self.status.mcp_included(name)?;
+        Some((name.to_owned(), included))
+    }
+
+    /// SIDE-08: whether the named MCP server's status is `failed`, which is
+    /// what makes a sidebar row click open the dialog in details mode
+    /// (`sidebar/mcp.tsx:57` `details={item.status.status === "failed"}`).
+    #[must_use]
+    pub fn mcp_server_failed(&self, name: &str) -> bool {
+        self.status
+            .mcp_entries()
+            .iter()
+            .find(|entry| entry.name == name)
+            .is_some_and(|entry| entry.status.error_text().is_some())
     }
 
     pub fn scroll_sidebar_at(&mut self, x: u16, y: u16, lines: isize) -> bool {
