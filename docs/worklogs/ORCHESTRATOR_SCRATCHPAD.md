@@ -11337,3 +11337,94 @@ command, not a lane-specific one.
 - `reviewer` and `coder` subagent types return
   `No active credentials for provider: opencode-go`. Use `general` (or `explore`) until
   that route is restored. Do not silently treat an errored dispatch as work in progress.
+
+## Wave-35/36 — paste gate unblock + integration (2026-11-02)
+
+### Protected-hook amendment (operator-authorized)
+- `e37521b0` "fix(recovery): let an observer correction name a subset of the observer
+  set". The observer-correction mechanism could never apply a one-file correction
+  (`transition_window_allows` required all six observer paths; the schema forced
+  `allowedPaths` to the full set). Fix: hook accepts a non-empty subset of the closed
+  six-path observer set; `validate_capability_schema` accepts a subset for
+  `observer-correction` only; `prepare_observer_correction` names only changed paths.
+  Bootstrap/lane-sync/two-approval/expiry/base-binding/fail-closed checks unchanged.
+- Hook was temporarily disabled for that single commit (operator-authorized), then
+  restored byte-identical (sha256 `c279dacf…`).
+- Because the commit bypassed the transition tool, `policy.json`
+  `protectedEvaluatorBlobs["tools/recovery_ref_hook.py"]` was stale (`f737165d` vs
+  actual `1e8fd275`). Re-pinned via `tools/recovery_guard.py repin --allow-tooling`
+  with independent test review (`th-free-hook-test` APPROVE, `hook-fix-review-test.json`
+  + `repin-review.json`). Policy now matches main-v2; `repinHistory` has 2 entries.
+- Capability `observer-correction-37bebc4509bad1bd` re-prepared at `e37521b0` (only
+  `tests/e2e/native_bracketed_paste.py`, blob `1dbe4c08…`; digest
+  `b32d6c3317a58d6e257663bc2cd8c25a62b5b5a309a7952f77c2c61c78ae0fea`). Two fresh
+  independent receipts (test + security) being re-issued; then `record-receipts` +
+  `activate`.
+
+### Paste-gate root cause (confirmed)
+- Upstream `packages/tui/src/component/prompt/index.tsx:1462` folds a >=3-line paste
+  unless `config.prompt.paste === "full"`. The frozen fixture pastes exactly 3 lines
+  without seeding that config, so the draft showed `[Pasted ~3 lines]` and
+  `native_paste_reset_installed` failed. Product is upstream-correct; the fixture was
+  under-configured. Fix = seed `$XDG_CONFIG_HOME/opencode/tui.json`
+  `{"prompt":{"paste":"full"}}`.
+
+### Ready wave-35 deliverables (all apply clean on `e37521b0`)
+- `W35-RETENTION` PREVERIFIED — `tools/delivery/cleanup.py` (+327), `engine.py` (2),
+  `tests/delivery/test_cleanup_retention.py` (new). Report-only default; merged+pushed+
+  clean guards.
+- `W35-TOOL005` PREVERIFIED — `crates/cli/src/native_tool_rows.rs`; code-point budget +
+  grapheme shell command. Superseded test `wide_glyph_lines_stay_within_cell_budget`
+  independently approved by contract evaluator (`contract-evaluation.json` APPROVE).
+- `W35-LAY19` PREVERIFIED — `crates/cli/src/native_view.rs` (+98); global-forms field.
+- `W35-MSG008` BLOCKED (no wire slot for `time.streamed`); `W35-TAB21` BLOCKED (no
+  server `time.idle` producer). Reviews APPROVE: REV-AE20, REV-E153, REV-4989, REV-D588.
+  VER-RECLAIM NEEDS_FIX (4 missing guards); AUDIT-DOCS 9 findings.
+
+### Wave-36 re-dispatches (step-cap retries with embedded seam maps)
+- TOOL012, MD006, DIALOG20, THEME14, TOOL011, FORM-HOST, MEDIA01, CUSTOMCMD, PAR-SURVEY.
+- PAR-SURVEY worklist materialized by the orchestrator (worker returned the full table).
+- TOOL011 returned the full settled design (5 files) but no patch; implement next.
+
+### Wave-36 landings on main-v2 (2026-11-02)
+- `fb49d60c` **TOOL-005** — `crates/cli/src/native_tool_rows.rs`: `collapse_tool_output`
+  budgets on code points (`Array.from`, `collapse-tool-output.ts:6,13,16-18`),
+  `collapse_shell_command` iterates graphemes (`Locale.graphemes`, `:51-87`). Superseded
+  test `wide_glyph_lines_stay_within_cell_budget` approved by contract evaluator.
+  Focused: `tool_output_budget_counts_code_points_not_display_cells`,
+  `shell_command_pops_grapheme_clusters_not_code_points`.
+- `fd639888` **LAY-19** — `crates/cli/src/native_view.rs`: Home `global_forms` field +
+  `home_prompt_disabled()` gate driving `native_home::form_overlay`; `home_cursor_at`
+  returns None while a global form owns the prompt. Focused `lay19b_...`.
+- `7aa0a2cd` **MD-006** — `crates/cli/src/native_view_chat.rs`: `reasoning_summary`
+  byte-mirrors `context/thinking.ts:8-14`; Thinking arm pushes `Thought: {title}`.
+  Focused `reasoning_summary_matches_upstream_title_block_rule`.
+- Full CLI suite (single-threaded, `DYLD_LIBRARY_PATH=crates/opentui-bridge/native/lib/
+  aarch64-apple-darwin`, `--test-threads=1`): **2147 passed; 0 failed** on the combined
+  tree. Commits landed with `OC2_RECOVERY_CANONICAL_TOKEN` exported.
+- Commit recipe: `export OC2_RECOVERY_CANONICAL_TOKEN="$(cat "$(git rev-parse
+  --git-common-dir)/recovery-state/canonical-write.token")"`; the `AUTO_MERGE` /
+  `'prepared' phase` abort lines are spurious — the commit lands (confirm via `git log`).
+
+### W35-RETENTION — landed `47487b93`
+- The full `tests/delivery` suite (104 tests) first failed only
+  `test_fleet.FleetTests.test_twenty_features_converge_without_source_branch_growth`
+  (reached 13/20 accepted in 360s). Root cause: the report-only default never
+  retires, so owned workspaces accumulate (100 after 20 tasks × 5 stages) and the
+  supervisor's per-tick `collect` ran ~4 git subprocesses per workspace every
+  0.2s — an O(N) per-tick regression.
+- Fix: throttle the report path (`REPORT_INTERVAL = 30.0`, module-level
+  `_report_cache` keyed by store root); the apply path is never throttled and
+  re-evaluates the exact bytes before removal. Fleet test alone then **passed in
+  154.5s** (exit 0). Focused retention tests: 6 tests OK.
+- Landed `47487b93` (tools/delivery/cleanup.py, engine.py,
+  tests/delivery/test_cleanup_retention.py).
+
+### Wave-36 verifier outcomes (ALREADY_CORRECT, no patch)
+- LAY-13 (pane resize): width 2, 1-cell highlight, strict `<300`ms dbl-click all match
+  upstream (`native_pane_resize.rs:65-71,290-293,455-459`). Wiring gap noted separately.
+- SIDE-07 (MCP status): all five states match (`native_sidebar.rs:368-389,565-576`).
+- CUSTOMCMD: canonical dispatches every slash-prefixed input to `start_command`
+  (`tui_entry.rs:12489-12497`) vs upstream dispatching only listed commands
+  (`prompt/index.tsx:1154-1158`); `tests/e2e/native_custom_command.py:108-115` encodes
+  the divergent behavior. Needs a contract decision — not on the 7-gate path.
