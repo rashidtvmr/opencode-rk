@@ -660,7 +660,18 @@ impl StatusView {
     #[must_use]
     pub fn usage_status_label(&self) -> Option<String> {
         let (used, window) = self.context?;
-        let value = crate::native_sidebar::format_thousands(used);
+        // Upstream `formatContextUsage` (`util/session.ts:63-66`) renders the
+        // footer token count through `Locale.number` (`util/locale.ts:19-27`),
+        // i.e. compact `1.0K`/`1.2M` units rather than grouped thousands. The
+        // grouped `format_thousands` remains correct for the sidebar context
+        // row, which uses `.toLocaleString()` (`sidebar/context.tsx:29`).
+        let value = if used >= 999_950 {
+            format!("{:.1}M", used as f64 / 1_000_000.0)
+        } else if used >= 1_000 {
+            format!("{:.1}K", used as f64 / 1_000.0)
+        } else {
+            used.to_string()
+        };
         Some(match window {
             Some(window) => {
                 let percent = crate::native_sidebar::percent_used(used, window);
@@ -2861,5 +2872,33 @@ mod sidebar_span_style_tests {
         let view = StatusView::default();
         assert!(view.sidebar_span_styles().is_empty());
         assert!(view.sidebar_span_styles_at(38, 30).is_empty());
+    }
+
+    /// The footer usage label renders compact `Locale.number` units
+    /// (`util/locale.ts:19-27`), NOT the grouped `.toLocaleString()` shape the
+    /// sidebar context row uses (`sidebar/context.tsx:29`). The `999950`
+    /// threshold avoids a rounded `1000.0K`.
+    #[test]
+    fn footer_usage_label_uses_compact_locale_number_units() {
+        let mut view = StatusView::default();
+        view.set_usage(999, 0, None, None, None);
+        assert_eq!(view.usage_status_label().as_deref(), Some("999"));
+        let mut view = StatusView::default();
+        view.set_usage(1_000, 0, None, None, None);
+        assert_eq!(view.usage_status_label().as_deref(), Some("1.0K"));
+        let mut view = StatusView::default();
+        view.set_usage(999_949, 0, None, None, None);
+        assert_eq!(view.usage_status_label().as_deref(), Some("999.9K"));
+        let mut view = StatusView::default();
+        view.set_usage(999_950, 0, None, None, None);
+        assert_eq!(view.usage_status_label().as_deref(), Some("1.0M"));
+        // A known window appends `" (percent%)"` with the compact value.
+        let mut view = StatusView::default();
+        view.set_usage(500, 500, None, None, Some(10_000));
+        assert_eq!(view.usage_status_label().as_deref(), Some("1.0K (10%)"));
+        // The sidebar row keeps grouped thousands.
+        let mut view = StatusView::default();
+        view.set_usage(1_000, 0, None, None, None);
+        assert!(view.render_sidebar(120, 30).iter().any(|r| r == "1,000 tokens"));
     }
 }

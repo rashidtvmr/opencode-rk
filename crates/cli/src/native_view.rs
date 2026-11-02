@@ -5293,9 +5293,10 @@ mod context_pointer_regression {
         view.render_typed("", &[], false, &[]);
         let frame = view.render_typed("", &[], false, &[]);
         let row = frame.last().unwrap();
-        // `formatContextUsage` (`util/session.ts:63-66`): grouped tokens +
+        // `formatContextUsage` (`util/session.ts:63-66`) -> `Locale.number`
+        // (`util/locale.ts:19-27`): compact `1.2K` tokens +
         // `round(1234/5609*100)=22` percent.
-        assert!(row.contains("1,234 (22%)"), "usage row: {row:?}");
+        assert!(row.contains("1.2K (22%)"), "usage row: {row:?}");
         assert!(row.contains("$1.23"), "cost row: {row:?}");
         assert!(!row.contains("Context Usage"), "divergent label removed: {row:?}");
         // The live subagent count is painted by the in-body `prompt.footer`
@@ -7443,7 +7444,7 @@ mod p05_footer_caller_regression {
         assert!(!idle_row.contains("esc shell"));
         assert!(!idle_row.contains("exit shell mode"));
         assert!(idle_row.contains("/fixture/project"), "directory restored: {idle_row:?}");
-        assert!(idle_row.contains("1,000 (10%)"), "persistent context restored: {idle_row:?}");
+        assert!(idle_row.contains("1.0K (10%)"), "persistent context restored: {idle_row:?}");
     }
 }
 
