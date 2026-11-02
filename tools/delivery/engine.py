@@ -371,7 +371,7 @@ def supervise(store, *, publish=False, watch=False, max_seconds=0, poll=0.2, tas
                 reconcile_locks(store)
                 consume(store)
                 if watch: store.resume_paused()
-                cleanup.collect(store)
+                cleanup.collect(store, apply=False)  # report-only; retirement needs merged+pushed+clean proof
                 dispatched = dispatch(store, publish, children, owned)
                 rows = store.tasks(); active = store.jobs({"running"})
                 summary = {"states":dict(collections.Counter(r["state"] for r in rows)),
