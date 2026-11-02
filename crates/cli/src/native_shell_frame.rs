@@ -525,8 +525,9 @@ fn sidebar_row(descriptor: &FrameDescriptor, input: &ShellFrameInput<'_>, y: u16
     row.blank(descriptor.sidebar_pad_left);
     if regions.sidebar_title.h > 0 && y >= regions.sidebar_title.y && y < regions.sidebar_title.y + regions.sidebar_title.h {
         // Title box: text width minus its `paddingRight={2}` (`sidebar.tsx:32`).
-        row.text(input.sidebar.title, descriptor.sidebar_text_width);
-        row.blank(inner_w.saturating_sub(descriptor.sidebar_text_width));
+        let title_width = regions.sidebar_title_width().min(inner_w);
+        row.text(input.sidebar.title, title_width);
+        row.blank(inner_w.saturating_sub(title_width));
     } else if regions.sidebar_scroll.h > 0
         && y >= regions.sidebar_scroll.y
         && y < regions.sidebar_scroll.y + regions.sidebar_scroll.h
@@ -924,7 +925,8 @@ mod tests {
         let sidebar_content = [s(&"y".repeat(200))];
         let mut input = ShellFrameInput::new(160, 12);
         input.sidebar.open = true;
-        input.sidebar.title = "Heading";
+        let long_heading = "H".repeat(200);
+        input.sidebar.title = &long_heading;
         input.sidebar.content = &sidebar_content;
         input.transcript = &transcript;
 
@@ -948,6 +950,15 @@ mod tests {
         assert_eq!(without.regions.sidebar_scroll, with.regions.sidebar_scroll);
         assert_eq!(sidebar_scrollbar_reservation(true), 0);
         let heading_row = with.regions.sidebar_title.y;
+        assert_eq!(
+            slice_cells(
+                &with.rows[usize::from(heading_row)],
+                with.regions.sidebar_title.x,
+                with.regions.sidebar_title.w,
+            ),
+            format!("{}  ", "H".repeat(36)),
+            "title reserves its own two right-padding cells"
+        );
         assert_eq!(
             with.rows[usize::from(heading_row)],
             without.rows[usize::from(heading_row)],
