@@ -30,7 +30,6 @@ These have a faithful model + test but no live consumer.
 
 | Item | Seam |
 | --- | --- |
-| TAB-21 | `ViewAcknowledgement` (`native_navigation.rs:1133`, test `:2067`) has no production caller; `client_focused` (`tui_entry.rs:6552,8700`) is produced but never consumed. The unread **paint** transition is live (`native_navigation.rs:1016-1021` → `TabInput.unread`); only the focus-confirmed acknowledgement path is unwired. |
 | TAB-23 | `resolve_tab_shortcut` (`native_navigation.rs:1294`, `DEFAULT_TAB_KEYBINDS` `:1260`) has no caller outside its module; `tui_entry.rs:8727` hardcodes decoded events. Needs a user-keybind config source, which the CLI does not currently load (only `SubmitKeymap` enter/ctrl-j exists). |
 | SIDE-05 | `set_limit` (`native_view_status.rs:1175`) is called only from tests; the Limit section cannot appear live. |
 | SIDE-14 | `footer_menu`/`FooterMenuItem` (`native_sidebar.rs:1020`) has no caller outside its module; footer hover/copy/open/workspaces never reach live input. |
@@ -61,7 +60,7 @@ These have a faithful model + test but no live consumer.
 - **Tabs:** TAB-13, TAB-14, TAB-15, TAB-16, TAB-17, TAB-18, TAB-19, TAB-20, TAB-22, TAB-24.
 - **Sidebar:** SIDE-01, SIDE-02, SIDE-06, SIDE-07, SIDE-09, SIDE-10, SIDE-11, SIDE-12, SIDE-13, SIDE-15.
 - **Theme:** THEME-01.
-- **Dialogs:** DIALOG-05, DIALOG-06, DIALOG-07, DIALOG-08, DIALOG-09, DIALOG-11, DIALOG-12, DIALOG-13, DIALOG-14, DIALOG-15.
+- **Dialogs:** DIALOG-06, DIALOG-07, DIALOG-08, DIALOG-09, DIALOG-11, DIALOG-12, DIALOG-13, DIALOG-14, DIALOG-15.
 - **FFI:** FFI-03 .. FFI-11.
 - **Tools:** TOOL-007, TOOL-008, TOOL-009, TOOL-010, TOOL-012.
 - **Diffs:** DIFF-002, DIFF-004, DIFF-005.
