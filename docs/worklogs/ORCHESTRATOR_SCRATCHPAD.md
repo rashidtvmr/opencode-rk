@@ -10859,3 +10859,61 @@ Routes: vyce ≤8, xkiro-luna, xkiro-mimo, th-free/luna-free/river/combined 1 ea
 
 Route errors: `@apimaster-gpt-6-luna` still `$0` — no dispatches. Canonical-relative
 `evidence/` recreated by workers is relocated to the external root each pass.
+
+## Wave-29 closures + wave-30 dispatch (2026-11-02, cont.)
+
+### Canonical HEAD `da70b7d1`; two uncommitted re-authored fixes in the working tree.
+- Landed since wave-28: `33c58a02` (worklog), `2a1aa69c` (CP-36 paste fold +
+  CP-40 `Kind::Agent`), `da70b7d1` (THEME-10 gated opencode2 offered/resolved live).
+- Full CLI suite on `da70b7d1`: **2130 passed / 0 failed** (single-threaded).
+
+### Uncommitted (this pass), both full-suite GREEN at 2131 / 0:
+- **TAB-07 unread marker (re-authored by main).** The wave-29 worker patch was
+  LIVE-INVISIBLE: it recolored `number_fg` for unread rows, but in status mode the
+  idle indicator glyph is `""`, so nothing painted. Upstream instead paints the
+  `TAB_UNREAD_MARKERS["small-dot"]` "•" glyph in the indicator column colored by
+  `unreadColor` = `hue.accent[200]` (`session-tabs.tsx:63-70,125-129,148-169,176-178,958-963`).
+  Re-authored: added `TabInput.unread: bool`, populated from the LIVE
+  `NavigationState::is_unread` in `from_navigation` (`context/session-tabs.tsx:139-146`
+  root-only unread), pushed a private `row_unread` lane, `indicator_label` now takes
+  `unread` and returns "•", and `with_row_colors_semantic` overrides `number_fg` to
+  the accent for an unread, non-pending, non-selected row. New live test
+  `tab_07_live_unread_projects_marker_and_accent`.
+- **TOOL-003 adapter geometry.** `append_tool_rows` re-wrapped every non-first
+  `native_tool_rows` row with `BODY_INDENT`, but those rows are already fully formed
+  (`push_wrapped` bakes `header_prefix`/`BODY_INDENT` and wraps to `width`,
+  `native_tool_rows.rs:1267-1290`), so body rows got an extra 4-cell indent and
+  were re-split at `width-4`. Now emits each model row through `push_wrapped(..., "", ...)`.
+  New test `tool_rows_keep_baked_geometry_without_double_indent`.
+
+Independent reviews dispatched (authors never self-accept):
+`REVIEW-TAB07-REAUTH`, `REVIEW-TOOL003-GEOMETRY`.
+
+### Wave-29 evidence collected (all `verified:false`)
+- `W29-TOOL003-ROUTE` (b) → reconciled into the uncommitted TOOL-003 fix above.
+- `W29-TOOL005-BUDGET` (b) — but the patch is syntactically CORRUPT
+  (`format!("{{visible}}…")`, invalid `concat` literals in the test); re-dispatched
+  as `W30-TOOL005-BUDGET2`.
+- `W29R-TOOL010-011-EXEC` DRAFT (no patch) → re-dispatched as `W30-TOOL010-011-EXEC`.
+- `W29R-THEME06-FIX` scratchpad only (THEME-06 dialog override action merge +
+  panel paint role) → carried forward.
+- `W29-TAB07-FEEDBACK` (b) — advisory patch live-invisible; superseded by the
+  main re-author above.
+
+### Wave-30 dispatch (20+ across allowed routes)
+Implementers: SIDE-07 MCP align, TAB-07 vertical rail, TOOL-005 budget re-author,
+CP-28 AgentCycle effect, MD-006 collapsed reasoning, THEME-07 alpha, LAY-12 focus,
+STATE-001 spinner, SIDE-14 sidebar router, TOOL-010/011 execute dialog, CP-40
+destructive/directory/skill kinds, SIDE-08/09/12, FORM live producer, TOOL-002 spin,
+TOOL-007 notice, MSG-008/010 tps, LAY-13 pane. Verifiers: THEME-10, CP-36/40, TOOL-008.
+Routes: vyce ≤8, xkiro-luna, xkiro-mimo, th-free/luna-free/combined ≤1 each;
+`@apimaster-gpt-6-luna` still `$0`.
+
+### DIALOG-12 C1 dead-code flag RESOLVED (not a defect)
+The wave-29 `W29-VER-DIALOG11R` raised C1: `crates/catalog/src/lib.rs:341`
+`r.extra.get("cost")` looked like dead code. Reading the source: `ModelsDevModel`
+documents the fallback as INTENTIONAL (`:67-68`, "Older models.dev payloads may
+leave it in `extra`, so summarization accepts both"), and `extra` is the
+`#[serde(flatten)]` catch-all, so the fallback is live whenever a real payload
+carries `cost` in the flatten bucket. Not dead code; the normalization test
+(`cost` array/object/absent) verifies the fallback. No change needed.
