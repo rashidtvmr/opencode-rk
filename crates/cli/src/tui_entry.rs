@@ -9241,7 +9241,7 @@ fn native_loop(
             // MSG-007: tolerate a resync while the menu is open by refreshing
             // the captured snapshot from the live projection before dispatch.
             if let Some(snapshot) = live.as_ref() {
-                menu.resync(&crate::native_chat_projection::project_history_entries(&snapshot.raw_history));
+                menu.resync(&snapshot.session_id, &crate::native_chat_projection::project_history_entries(&snapshot.raw_history));
             }
             if menu_dismisses(&event) {
                 keep = false;

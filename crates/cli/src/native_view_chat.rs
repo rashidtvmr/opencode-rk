@@ -3987,9 +3987,17 @@ impl SessionMessageMenu {
     /// Refresh the captured message snapshot of an open action menu after the
     /// caller's projection resynced (`dialog-message.tsx:23`). Pending-steer
     /// menus carry no message snapshot, so they are a no-op.
-    pub fn resync(&mut self, messages: &[(String, ChatMessage)]) {
+    ///
+    /// The refresh is scoped to the captured session: upstream keys the memo
+    /// by both `props.sessionID` and `props.messageID`
+    /// (`dialog-message.tsx:23`), so a live-session switch must never refresh
+    /// the snapshot from a different session whose message id happens to
+    /// collide.
+    pub fn resync(&mut self, session_id: &str, messages: &[(String, ChatMessage)]) {
         if let SessionMessageMenu::Actions(actions) = self {
-            actions.resync(messages);
+            if actions.session_id() == Some(session_id) {
+                actions.resync(messages);
+            }
         }
     }
 }
@@ -4623,11 +4631,26 @@ mod tests {
             actions.open("s", "m1", Some(&original));
         }
         let replacement = ChatMessage { message_id: Some("m1".into()), ..original.clone() };
-        menu.resync(&[("m1".to_owned(), replacement.clone())]);
+        menu.resync("s", &[("m1".to_owned(), replacement.clone())]);
         match &menu {
             SessionMessageMenu::Actions(actions) => {
                 assert_eq!(actions.message_id(), Some("m1"));
                 assert_eq!(actions.snapshot(), Some(&replacement));
+            }
+            SessionMessageMenu::PendingSteer(_) => panic!("expected actions menu"),
+        }
+        // A live-session switch must not refresh the snapshot from a different
+        // session whose message id collides (`dialog-message.tsx:23` keys the
+        // memo by both session and message id).
+        let foreign = ChatMessage { message_id: Some("m1".into()), ..original.clone() };
+        menu.resync("other-session", &[("m1".to_owned(), foreign.clone())]);
+        match &menu {
+            SessionMessageMenu::Actions(actions) => {
+                assert_eq!(
+                    actions.snapshot(),
+                    Some(&replacement),
+                    "a foreign session must not retarget the captured snapshot"
+                );
             }
             SessionMessageMenu::PendingSteer(_) => panic!("expected actions menu"),
         }

@@ -1711,14 +1711,42 @@ impl NativeView {
     /// `PromptMetadataRow` to agent/model facts; this row is that slot. A
     /// label that would be clipped is not painted, so the count is never
     /// truncated mid-word and its hit rectangle always covers painted cells.
+    /// CP-11: the `prompt.footer.status` Switch text for a given running
+    /// state (`index.tsx:1901-1967`). Running paints the scanner + interrupt
+    /// label; with no live move/pending facts the idle branch is empty so the
+    /// caller keeps the directory label.
+    fn composer_status_text(&self, running: bool) -> String {
+        let facts = crate::native_status_rail::RailFacts {
+            running,
+            animations: self.rail_animations,
+            elapsed_ms: self.rail_elapsed_ms,
+            ..crate::native_status_rail::RailFacts::new(usize::from(self.layout.cols))
+        };
+        crate::native_status_rail::slot_text(
+            &crate::native_status_rail::rail_spans(&facts),
+            crate::native_status_rail::RailSlot::Status,
+        )
+    }
+
     fn composer_footer_row(
         &self,
         row_width: u16,
         inner_width: u16,
         rail: bool,
+        running: bool,
     ) -> (String, Option<(u16, u16)>) {
+        // CP-11: the `prompt.footer.status` slot owns the left term. While a
+        // provider turn is running it paints the scanner + interrupt label and
+        // replaces the idle directory (`index.tsx:1911-1967`); idle keeps the
+        // directory. `rail` selects the status slot (directory) over the
+        // in-box metadata row.
         let base = if rail {
-            footer_directory(&self.workspace, inner_width)
+            let status = self.composer_status_text(running);
+            if status.is_empty() {
+                footer_directory(&self.workspace, inner_width)
+            } else {
+                status
+            }
         } else {
             self.composer_metadata()
         };
@@ -3416,7 +3444,7 @@ impl NativeView {
                 // Permission prompt replaces the composer — no composer
                 // metadata / blank separator row beneath it (upstream Switch).
             } else if height >= 4 {
-                let (footer, live) = self.composer_footer_row(width, inner_width, prompt.rail);
+                let (footer, live) = self.composer_footer_row(width, inner_width, prompt.rail, busy);
                 let row = body.len();
                 body.push(padded(&footer, width));
                 if let Some((x, cells)) = live {
@@ -4001,10 +4029,6 @@ impl NativeView {
             command_shortcut: self.rail_command_shortcut.as_deref(),
             agent_shortcut: self.rail_agent_shortcut.as_deref(),
             interactive: self.rail_interactive,
-            // CP-11: `data.session.status(sessionID) == "running"`
-            // (`index.tsx:1911`). The provider-turn fact is the authoritative
-            // running state and drives the `prompt.footer.status` Switch.
-            running: loading,
             animations: self.rail_animations,
             elapsed_ms: self.rail_elapsed_ms,
             ..crate::native_status_rail::RailFacts::new(usize::from(width))
@@ -4014,15 +4038,10 @@ impl NativeView {
             &rail_spans,
             crate::native_status_rail::RailSlot::Footer,
         );
-        // CP-11: the status slot (`prompt.footer.status`, `index.tsx:1901-1967`)
-        // owns the left term. While running it paints the scanner + interrupt
-        // label and replaces the idle directory; with no live move/pending
-        // facts the idle branch leaves this empty so the directory below is
-        // retained unchanged.
-        let status_text = crate::native_status_rail::slot_text(
-            &rail_spans,
-            crate::native_status_rail::RailSlot::Status,
-        );
+        // CP-11: the `prompt.footer.status` Switch (`index.tsx:1901-1967`)
+        // lives in the composer footer slot (`composer_footer_row`), not this
+        // shared shell row, so a running session replaces the directory there.
+        // This row keeps the idle directory as its left term.
         // The `/context` click target is the usage/cost status list only
         // (`footer.tsx:38-46`), never the adjacent `commands` hint.
         let usage_width = rail_spans
@@ -4060,11 +4079,7 @@ impl NativeView {
             usage_width,
         ));
         let directory = fit(
-            &if status_text.is_empty() {
-                footer_directory(&self.workspace, left_width as u16)
-            } else {
-                status_text
-            },
+            &footer_directory(&self.workspace, left_width as u16),
             left_width as u16,
         );
         let footer = padded(
@@ -5149,26 +5164,40 @@ mod footer_layout_tests {
     }
 
     #[test]
-    fn project_directory_and_loader_share_only_the_footer_row() {
+    fn project_directory_and_loader_share_only_the_composer_footer_row() {
         let mut view = NativeView::new(72, 20);
         view.set_session_route(true);
         view.set_project_directory("/tmp/工作🦀/project".to_owned());
         view.set_loading(true); // deprecated no-op: frame argument is authority
         let rows = view.render_typed("draft", &[], true, &[]);
         assert_eq!(rows.len(), 20);
-        // CP-11: `prompt.footer.status` paints exactly one branch, so a
-        // running session replaces the idle directory with the scanner +
-        // interrupt label (`index.tsx:1911-1967`).
-        assert!(rows[19].contains("interrupt"), "running status: {:?}", rows[19]);
-        assert!(rows[..19].iter().any(|row| row.contains("Thinking")));
-        assert!(!rows[19].contains("Thinking"));
+        // CP-11: `prompt.footer.status` lives in the composer footer slot
+        // (`prompt.footer`, `index.tsx:1901-1967`) and paints exactly one
+        // branch, so a running session replaces the idle directory there with
+        // the scanner + interrupt label.
+        let composer_footer = rows.len() - 2;
+        assert!(
+            rows[composer_footer].contains("interrupt"),
+            "running status: {:?}",
+            rows[composer_footer]
+        );
+        assert!(rows[..composer_footer]
+            .iter()
+            .any(|row| row.contains("Thinking")));
+        assert!(!rows[composer_footer].contains("Thinking"));
         let idle = view.render_typed("draft", &[], false, &[]);
         assert!(
-            idle[19].contains("/tmp/") || idle[19].contains("project"),
-            "idle footer shows the directory: {:?}",
-            idle[19]
+            idle[composer_footer].contains("/tmp/") || idle[composer_footer].contains("project"),
+            "idle composer footer shows the directory: {:?}",
+            idle[composer_footer]
         );
-        assert!(!idle[19].contains("Thinking"));
+        assert!(!idle[composer_footer].contains("Thinking"));
+        // The shared shell row keeps the idle directory in both states.
+        assert!(
+            rows[19].contains("/tmp/") || rows[19].contains("project"),
+            "shell footer keeps the directory while running: {:?}",
+            rows[19]
+        );
     }
 
     // Usability contract proposal (RED): active Thinking belongs to the
@@ -5370,18 +5399,27 @@ mod footer_layout_tests {
 
     // CP-11 (`index.tsx:1901-1967`): the `prompt.footer.status` Switch paints
     // exactly one branch, so a running session replaces the idle directory
-    // with the scanner + interrupt label while keeping the frame geometry.
+    // with the scanner + interrupt label in the composer footer slot while
+    // keeping the frame geometry.
     #[test]
     fn cp11_running_status_replaces_idle_directory() {
         let mut view = NativeView::new(80, 24);
+        view.set_session_route(true);
         view.set_workspace("/x".to_owned());
-        let idle = view.render_typed("", &[], false, &[]).pop().unwrap();
-        assert!(idle.contains("/x"), "idle footer shows the directory: {idle:?}");
-        assert!(!idle.contains("interrupt"), "idle footer has no status: {idle:?}");
-        let running = view.render_typed("", &[], true, &[]).pop().unwrap();
+        let composer_footer = |rows: &[String]| rows[rows.len() - 2].clone();
+        let idle = composer_footer(&view.render_typed("", &[], false, &[]));
+        assert!(
+            idle.contains("/x"),
+            "idle composer footer shows the directory: {idle:?}"
+        );
+        assert!(
+            !idle.contains("interrupt"),
+            "idle composer footer has no status: {idle:?}"
+        );
+        let running = composer_footer(&view.render_typed("", &[], true, &[]));
         assert!(
             running.contains("interrupt"),
-            "running footer shows the interrupt label: {running:?}"
+            "running composer footer shows the interrupt label: {running:?}"
         );
         assert!(
             !running.contains("/x"),
@@ -5392,7 +5430,7 @@ mod footer_layout_tests {
         assert_eq!(running.chars().count(), 80);
         // The static marker is used when animations are disabled.
         view.set_rail_status_clock(false, 0);
-        let static_running = view.render_typed("", &[], true, &[]).pop().unwrap();
+        let static_running = composer_footer(&view.render_typed("", &[], true, &[]));
         assert!(
             static_running.contains("[⋯]"),
             "animations off paints the static marker: {static_running:?}"
