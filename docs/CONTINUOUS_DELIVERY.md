@@ -17,14 +17,15 @@ admit task -> independent implementation workspace -> independent review
 ```
 
 A single worker pool is allocated from **current eligible tasks**, not reserved
-role counts. With 20 independent implementation tasks and no downstream work,
-all 20 slots may implement. As candidates arrive, reviewers, test runners,
-conflict repair and integration preparation take slots. Raising `workers` to 40
-permits 40 eligible jobs; it does not create tasks or override a route's real
-concurrency/authorization limit. Heavy validation stays serialized on this Mac;
-20 agents do not authorize 20 Cargo builds. One dynamic integration turn is held
-while a candidate is reprepared/reviewed/tested/published, avoiding an endless
-rebase storm after each individual merge. Other independent work continues.
+role counts. With 30 independent implementation tasks and no downstream work,
+all 30 slots may implement. As candidates arrive, reviewers, test runners,
+conflict repair and integration preparation take slots. `workers` is 30 and
+`max_wip` 60 (`config/delivery-workflow.json`); raising them permits more
+eligible jobs but does not create tasks or override a route's real
+concurrency/authorization limit. Heavy validation is bounded by the measured
+host, not serialized to one: up to **3** concurrent builds of **3** cargo jobs
+(9 of 10 cores). Up to **4** integration lanes publish fast-forward in parallel,
+each over a disjoint path set; other independent work continues throughout.
 
 ## Installation and first run
 

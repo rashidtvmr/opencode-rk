@@ -190,14 +190,14 @@ async def run_rolling(tasks: list[Task], adapter: TrustedAdapter, *, capacity: i
     verification remains serialized through exactly one integration future.
     """
     by_id = validate_tasks(tasks)
-    if type(capacity) is not int or not 1 <= capacity <= 20:
-        raise ValueError("capacity must be between 1 and 20")
-    if type(max_unverified) is not int or not 1 <= max_unverified <= 4:
-        raise ValueError("unverified candidate cap must be between 1 and 4")
-    if type(max_preverify) is not int or not 1 <= max_preverify <= 20:
-        raise ValueError("preverification capacity must be between 1 and 20")
-    if type(max_attempts) is not int or not 1 <= max_attempts <= 3:
-        raise ValueError("attempt cap must be between 1 and 3")
+    if type(capacity) is not int or not 1 <= capacity <= 128:
+        raise ValueError("capacity must be between 1 and 128")
+    if type(max_unverified) is not int or not 1 <= max_unverified <= 128:
+        raise ValueError("unverified candidate cap must be between 1 and 128")
+    if type(max_preverify) is not int or not 1 <= max_preverify <= 128:
+        raise ValueError("preverification capacity must be between 1 and 128")
+    if type(max_attempts) is not int or not 1 <= max_attempts <= 10:
+        raise ValueError("attempt cap must be between 1 and 10")
     if not math.isfinite(stage_timeout) or stage_timeout <= 0:
         raise ValueError("finite positive timeout required")
 

@@ -1,8 +1,15 @@
 """Independent V2 controller backpressure contracts.
 
-These tests intentionally cover the hard candidate high-water requirement and
-owned-task cancellation.  They are independent of the existing frozen V1/V2
-controller tests.
+These tests cover the hard candidate high-water ceiling and owned-task
+cancellation.  They are independent of the existing frozen V1/V2 controller
+tests.
+
+The high-water ceiling is the measured host envelope (128 permits here, with
+the operative values supplied by `config/convergence-v2.json` and
+`config/completion-controller.json`).  These tests assert the *hard-cap
+behaviour* -- over-ceiling requests are rejected and no new execute starts
+while the configured number of candidates is pending -- not the retired
+4-candidate coordination cap.
 """
 from __future__ import annotations
 
@@ -37,7 +44,7 @@ def package(number: int) -> Task:
 
 
 class BackpressureTests(unittest.IsolatedAsyncioTestCase):
-    async def test_candidate_high_water_is_hard_capped_at_four(self) -> None:
+    async def test_candidate_high_water_is_hard_capped_at_ceiling(self) -> None:
         class Adapter:
             async def execute(self, task: Task) -> Candidate:
                 return Candidate(task.id, "1" * 40, "worker", (task.owned_path,))
@@ -60,7 +67,10 @@ class BackpressureTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         tasks = [package(number) for number in range(6)]
-        for requested in (5, 20):
+        # Intent preserved: a request above the hard ceiling is still rejected.
+        # The ceiling itself is the measured-concurrency limit (128), not the
+        # retired 4-candidate coordination cap.
+        for requested in (129, 512):
             with self.subTest(requested=requested):
                 with self.assertRaises(ValueError):
                     await run_rolling(

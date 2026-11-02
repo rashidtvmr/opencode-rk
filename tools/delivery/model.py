@@ -121,9 +121,9 @@ def config(raw: dict) -> dict:
         raise ValueError("invalid canonical branch")
     if ".." in c["branch"] or c["branch"].endswith(("/", ".")) or "//" in c["branch"] or any(part.startswith(".") or part.endswith(".lock") for part in c["branch"].split("/")):
         raise ValueError("invalid canonical branch")
-    c["workers"] = positive(raw.get("workers", 20), "workers", 48)
-    c["max_wip"] = positive(raw.get("max_wip", c["workers"] * 2), "max_wip", 192)
-    c["heavy_checks"] = positive(raw.get("heavy_checks", 1), "heavy_checks", 1)
+    c["workers"] = positive(raw.get("workers", 30), "workers", 128)
+    c["max_wip"] = positive(raw.get("max_wip", c["workers"] * 2), "max_wip", 512)
+    c["heavy_checks"] = positive(raw.get("heavy_checks", 3), "heavy_checks", 8)
     c["lease_seconds"] = positive(raw.get("lease_seconds", 60), "lease_seconds", 3600)
     c["min_free_bytes"] = positive(raw.get("min_free_bytes", 536870912), "min_free_bytes", 1099511627776)
     c["stage_timeout"] = positive(raw.get("stage_timeout", 1800), "stage_timeout", 86400)

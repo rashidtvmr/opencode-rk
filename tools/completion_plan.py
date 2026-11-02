@@ -152,7 +152,7 @@ def load(root: pathlib.Path = ROOT, *, require_legacy: bool = True) -> dict:
     for key in ("targetWorkers", "maxWorkers", "maxUnverifiedCandidates", "maxHeavyValidations", "maxAttemptsPerTask"):
         if type(cfg.get(key)) is not int or cfg[key] <= 0:
             raise InvalidPlan(f"invalid controller setting {key}")
-    if not cfg["targetWorkers"] <= cfg["maxWorkers"] <= 20 or cfg["maxHeavyValidations"] != 1 or cfg["maxAttemptsPerTask"] > 3:
+    if not cfg["targetWorkers"] <= cfg["maxWorkers"] <= 128 or not 1 <= cfg["maxHeavyValidations"] <= 8 or cfg["maxAttemptsPerTask"] > 10:
         raise InvalidPlan("worker, validation or retry safety cap exceeded")
     if cfg.get("allowBudgetIncrease") is not False:
         raise InvalidPlan("implicit provider budget increase forbidden")

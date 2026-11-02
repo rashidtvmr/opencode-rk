@@ -3,15 +3,15 @@
   "canonicalBranch": "main-v2",
   "upstreamPinFile": "sources/upstream.lock.json",
   "schedulingMode": "observed-product-failure",
-  "logicalAgentCeiling": 48,
-  "maxConcurrentImplementationPackages": 12,
+  "logicalAgentCeiling": 96,
+  "maxConcurrentImplementationPackages": 48,
   "maxCompetingCandidatesPerFailure": 2,
-  "candidateHighWater": 4,
-  "parallelPreverificationCeiling": 8,
-  "integrationWriters": 1,
-  "maxHeavyLocalValidations": 1,
-  "cargoBuildJobs": 2,
-  "rustTestThreads": 2,
+  "candidateHighWater": 48,
+  "parallelPreverificationCeiling": 32,
+  "integrationWriters": 4,
+  "maxHeavyLocalValidations": 3,
+  "cargoBuildJobs": 3,
+  "rustTestThreads": 4,
   "dependencyUnlockState": "ACCEPTED",
   "claimsAreAcceptance": false,
   "oneFileOwnership": false,
@@ -20,5 +20,39 @@
   "legacyTaskInventoryIsExecutionQueue": false,
   "preserveLegacyBranches": true,
   "deleteLegacyBranchesDuringConvergence": false,
-  "forcePushAllowed": false
+  "forcePushAllowed": false,
+  "ceilingsAreMeasuredNotArbitrary": true,
+  "ceilingBasis": {
+    "hostCores": 10,
+    "hostMemoryMiB": 24576,
+    "heavyValidation": "3 concurrent builds x 3 cargo jobs = 9 of 10 measured cores; overlap on the 10th is accepted so the scheduler is not idle on I/O waits",
+    "rustTestThreads": "4 per build matches the 10-core box without thrashing",
+    "agentCeiling": "agents are network-bound, not CPU-bound; 96 is the dispatch ceiling, gated at runtime by authorized route concurrency and resident memory, never by this number alone"
+  },
+  "bottleneckPolicy": {
+    "mode": "no-artificial-bottleneck",
+    "rule": "A ceiling may only exist for a measured physical resource (cores, memory, disk, provider concurrency, evaluator independence). Any ceiling that exists only for coordination comfort must be raised to the measured limit or removed.",
+    "integrationWritersRationale": "Multiple parallel integration lanes are authorized. Each lane owns a disjoint path set and serializes only its own fast-forward publish; canonical publication itself stays an ff-only, token-guarded, non-force operation.",
+    "candidateHighWaterRationale": "No practical backpressure: a large ready queue is drained by the integration fleet, not throttled by a queue cap.",
+    "independentReviewIsNotABottleneck": "Review separation (author != reviewer) is a correctness invariant, not a concurrency limit. It must still be honoured at any parallelism."
+  },
+  "worktreeLifecycle": {
+    "reclaimPolicy": "merged-and-pushed-only",
+    "rule": "A worktree or local branch may be deleted ONLY after BOTH: (1) its tip is an ancestor of the current main-v2, and (2) that tip is present on the push remote. Nothing is deleted on the strength of being 'probably merged'.",
+    "order": [
+      "verify tip is ancestor of main-v2",
+      "verify tip exists on push remote (git ls-remote)",
+      "remove the worktree directory",
+      "prune the local branch ref",
+      "report reclaimed bytes"
+    ],
+    "tool": "tools/worktree_reclaim.py",
+    "neverDelete": [
+      "unmerged worktrees",
+      "worktrees whose branch tip is absent from the push remote",
+      "the canonical worktree",
+      "dirty worktrees with uncommitted or untracked user work",
+      "frozen legacy refs"
+    ]
+  }
 }

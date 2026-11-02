@@ -104,8 +104,8 @@ class LeaseStore:
     """Crash-safe file-backed lease table with monotonic fencing tokens."""
 
     def __init__(self, path: str | os.PathLike, *, max_leases: int = MAX_LEASES) -> None:
-        if isinstance(max_leases, bool) or not isinstance(max_leases, int) or not 1 <= max_leases <= 20:
-            raise LeaseCapacityError("max_leases must be an int in 1..20")
+        if isinstance(max_leases, bool) or not isinstance(max_leases, int) or not 1 <= max_leases <= 512:
+            raise LeaseCapacityError("max_leases must be an int in 1..512")
         self.path = pathlib.Path(path)
         self.max_leases = max_leases
 

@@ -2,6 +2,117 @@
 
 This repository is in **product-convergence mode**. The goal is a working OpenCode-compatible Rust application, not a larger task graph.
 
+## Current user operating instructions — 2026-11-02
+
+### Maximum-parallelism rule — no artificial bottleneck or blocker
+
+The user's explicit current direction supersedes **every** older parallelism,
+serialization, integration-writer, candidate-high-water and refill instruction
+in this file, in `docs/*`, and in `config/*.json`:
+
+> "update our parallel task rules to max possible and then update all the rules
+> to obey the updates and then delegate to complete it fast, lets not have any
+> bottleneck or blocker anymore"
+
+**Governing principle.** A ceiling may exist only for a *measured physical or
+external* resource — CPU cores, RAM, disk, provider concurrency, or evaluator
+independence. Any ceiling that exists only for coordination comfort is a
+bottleneck and must be raised to the measured limit or removed. Where a number
+is still required by code, it is set to a non-binding value.
+
+Measured host envelope (do not invent limits below it):
+
+| Resource | Measured | Rule |
+| --- | --- | --- |
+| CPU cores | **10** | Heavy validation runs up to **3** concurrent builds × **3** cargo jobs = 9 of 10 cores |
+| RAM | **24 GiB** | `hostBudgetMiB` 24576, `reservedMemoryMiB` 4096, admit while ≥ 512 MiB available |
+| Disk | shared volume | Reclaim after every merge (see worktree lifecycle below); a low-disk condition is a **blocker to fix**, never a reason to stop |
+| Test threads | 10 cores | `rustTestThreads` **4** per build |
+| Agents | network-bound, not CPU-bound | `logicalAgentCeiling` **96**, `maxWorkers` **48**, `targetWorkers` **30** |
+
+**Multiple parallel integration lanes are authorized.** `integrationWriters` is
+**4**, not 1. Each lane owns a disjoint path set and serializes only its own
+fast-forward publish. Canonical publication stays fast-forward-only,
+token-guarded and never forced. The single-writer rule is retired.
+
+**The verification queue is not a bottleneck either.** `candidateHighWater` and
+`maxUnverifiedCandidates` are **48** (non-binding). `parallelPreverificationCeiling`
+is **32**. `maxAttemptsPerTask` is **5**. `stopWhenNoReadyWork` is **false**;
+`refillPolicy` is `continuous-unbounded-refill` — refill continuously and never
+park the fleet waiting for a batch.
+
+**What is *not* a bottleneck, and must never be traded away for speed:**
+
+- independent review separation (an author may never approve its own candidate);
+- preverification and post-merge checks running on the *exact* SHA;
+- semantic acceptance assertions;
+- permission/security enforcement;
+- fast-forward-only, non-forced canonical publication;
+- preservation of user work, databases, the running daemon and frozen legacy refs.
+
+Raising parallelism never authorizes weakening, skipping or parallelizing a
+correctness check. If a correctness gate becomes throughput-limiting, add
+reviewers or preverifiers — do not remove the gate.
+
+### Worktree lifecycle — merged **and pushed**, then reclaim
+
+The user's explicit rule:
+
+> "donot let any work go waste so, once you are sure its merged with our main-v2
+> and its pushed to remote repo, then only delete it"
+
+A worktree or its local branch may be deleted **only after both conditions are
+individually verified**:
+
+1. its tip is an **ancestor of the current `main-v2`** (`git merge-base --is-ancestor`);
+2. that **same tip exists on the push remote** (`git ls-remote` against
+   `git@github.com:rashidtvmr/opencode-rk.git`).
+
+Never delete on the strength of being "probably merged", a stale tracking ref, or
+a branch *name* that looks merged. The local `origin/*` tracking refs are not
+evidence: `origin` fetches from a local path while it pushes to GitHub, so
+`refs/remotes/origin/*` can be arbitrarily stale. Verify against the push remote.
+
+Order of operations, per worktree: verify ancestor → verify on push remote →
+remove worktree → prune branch ref → report reclaimed bytes. The executable form
+is `tools/worktree_reclaim.py` (dry-run by default; `--apply` to mutate).
+
+**Never reclaim:** an unmerged worktree; a worktree whose tip is absent from the
+push remote; the canonical worktree; a dirty worktree carrying uncommitted or
+untracked work; or any frozen legacy ref.
+
+### Current ceiling values (single source of truth)
+
+| Setting | File | Old | Now |
+| --- | --- | --- | --- |
+| `logicalAgentCeiling` | `config/convergence-v2.json` | 48 | **96** |
+| `maxConcurrentImplementationPackages` | `config/convergence-v2.json` | 12 | **48** |
+| `candidateHighWater` | `config/convergence-v2.json` | 4 | **48** |
+| `parallelPreverificationCeiling` | `config/convergence-v2.json` | 8 | **32** |
+| `integrationWriters` | `config/convergence-v2.json` | 1 | **4** |
+| `maxHeavyLocalValidations` | `config/convergence-v2.json` | 1 | **3** |
+| `cargoBuildJobs` / `rustTestThreads` | `config/convergence-v2.json` | 2 / 2 | **3 / 4** |
+| `targetWorkers` / `maxWorkers` | `config/completion-controller.json` | 0 / 20 | **30 / 48** |
+| `maxUnverifiedCandidates` | `config/completion-controller.json` | 4 | **48** |
+| `maxHeavyValidations` | `config/completion-controller.json` | 1 | **3** |
+| `maxAttemptsPerTask` | `config/completion-controller.json` | 2 | **5** |
+| `maxBreadthWorkersBeforeLocalE2eGreen` | `config/completion-controller.json` | 0 | **24** |
+| `maxConcurrentLanes` | `config/controller.settings.json` | 4 | **16** |
+| `v2CandidateHighWater` | `config/controller.settings.json` | 4 | **48** |
+| `stopWhenNoReadyWork` | `config/controller.settings.json` | true | **false** |
+| `workers` / `max_wip` | `config/delivery-workflow.json` | 20 / 40 | **30 / 60** |
+| `heavy_checks` / `attempts` | `config/delivery-workflow.json` | 1 / 3 | **3 / 5** |
+| `maxVerifiedUnintegratedCandidates` | `config/recovery-mode.json` | 4 | **48** (protected; see below) |
+
+`config/recovery-mode.json`, `tools/recovery_state.py`, `tools/recovery_guard.py`,
+`tools/recovery_ref_hook.py`, `tools/phase1_judge.py` and the frozen e2e fixtures
+are **hook-protected**. Raising the ceilings inside them requires the documented
+two-approval transition (independent reviewer + independent test evaluator,
+exact-blob capability via `tools/recovery_transition.py`). Until that transition
+lands, the values above are already enforced wherever the non-protected configs
+are read, and the protected file's `maxVerifiedUnintegratedCandidates: 4` remains
+the only outstanding cap to close.
+
 ## Current user operating instructions — 2026-10-26
 
 ### Latest route distribution and fallback — 2026-10-30
@@ -452,22 +563,23 @@ unfinished task to another allowed, available route and preserve its evidence.
 
 ### Continuous delegation and prompt integration
 
-- Maintain **20 or more concurrent, useful subagent assignments** while product
-  tasks remain and independent work is available. Replenish completed assignments
-  promptly; do not wait for unrelated workers or a whole batch to finish.
+- Maintain **30 or more concurrent, useful subagent assignments** while product
+  tasks remain and independent work is available, and refill continuously instead
+  of waiting for a batch. `logicalAgentCeiling` is 96 and `maxWorkers` is 48.
+  Do not manufacture duplicate tasks or claim idle agents are active.
 - Cover research, upstream comparison, implementation, independent review, audit,
   testing, integration preparation, merge preparation and blocker diagnosis.
-  Reassign pending work as capacity becomes available. If dependencies, available
-  routes or resources prevent 20 useful assignments, record the actual constraint
-  and work to unblock it; do not manufacture duplicate tasks or claim idle agents
-  are active. The eight-assignment limit for `vyce-deepseek-v41` still applies.
-- Keep implementation path grants non-overlapping and heavy validation serialized.
-  Parallel research/review capacity does not authorize concurrent Cargo/PTY runs,
+  Reassign pending work as capacity becomes available. If a route or resource
+  genuinely prevents 30 useful assignments, record the actual constraint and work
+  to unblock it.
+- Keep implementation path grants non-overlapping. Heavy validation may run up to
+  `maxHeavyLocalValidations` (3) concurrent builds of `cargoBuildJobs` (3) each.
+  Parallel capacity never authorizes concurrent writes to the same path,
   uncontrolled writers, new branch families or weakened semantic assertions.
 - Integrate each independently reviewed, verified, ready feature into `main-v2`
-  promptly through the **single integration writer**. Integration/merge workers
-  prepare scoped patches, exact hashes, reviews and checks; they do not race to
-  mutate canonical history. Do not hold a ready feature for unrelated work.
+  promptly through **one of the parallel integration lanes** (4 authorized). Each
+  lane serializes only its own fast-forward publish and owns disjoint paths; no
+  lane force-pushes. Do not hold a ready feature behind unrelated work.
 - Investigate blockers, repair them, and continue. Redirect other workers to
   independent work while the blocker is being resolved. Preserve negative review
   verdicts until the corrected exact candidate is reviewed again.
@@ -566,7 +678,7 @@ Recovery Mode overrides older merge-wave, Ralph-queue, branch-inventory and heri
 - Do **not** create review, verification, custody, repair, candidate or test-owner branches. Those are queue states, not Git topology.
 - Only the fixed mutable branches listed in `config/recovery-mode.json` may be created or advanced during Recovery Mode.
 - A worker or subagent normally returns evidence, a patch/commit candidate and verification results to its lane owner. It does not create a persistent worktree.
-- `main-v2` is the canonical product line. Exactly one integration writer lands there.
+- `main-v2` is the canonical product line. It advances only by fast-forward publish from one of the authorized integration lanes (4); no lane force-pushes.
 - Recovery activation installs a Git `reference-transaction` guard. New local branches, stashes/tags/custom refs, movement/deletion of frozen legacy refs, and post-activation changes to frozen evaluator files are rejected rather than merely detected later.
 - A candidate that fails after rebasing/preparing against current `main-v2` is ejected from the integration queue; reopen the failure instead of creating a descendant repair branch.
 - Legacy refs are frozen by `recovery/legacy-snapshot.json`. Never reset, force-push, delete or advance them.
@@ -614,9 +726,9 @@ Use subagents aggressively for independent investigation, upstream comparison, l
 - implementation subagents: only for currently OPEN/CLAIMED failures with non-overlapping path grants;
 - reviewers/verifiers: return verdicts/evidence; do not create branches;
 - only a lane owner may mutate one of the fixed recovery lanes;
-- only the integration writer may advance `main-v2`.
+- lanes advance `main-v2` only through fast-forward publish; none may force-push.
 
-When the verified-candidate high-water mark is reached, stop spawning implementers and move subagents to review, salvage lookup, integration prep and failure diagnosis.
+The verified-candidate high-water mark is **48** and non-binding in practice. Keep spawning implementers while independent, useful work exists; drain the ready queue with the parallel integration lanes rather than throttling intake.
 
 ## Authority order
 
@@ -660,16 +772,21 @@ Do not recursively turn every implementation detail into planning/review/registr
 
 ## Parallelism and backpressure
 
-The current user instruction above requires 20+ useful concurrent assignments
-when independent product work is available. The configured ceiling and resource
-limits still apply; writing packages must be independently useful and non-overlapping.
+The current user instruction above requires **30+ useful concurrent assignments**
+when independent product work is available, with continuous refill. Ceilings
+exist only for measured physical or external resources; see the measured host
+envelope at the top of this file for the authoritative numbers.
 
-- candidate high-water: **4** verified/unintegrated candidates;
-- at high-water, stop new implementation and move capacity to verification, rebase/integration prep, conflict resolution and upstream analysis;
-- exactly one trusted integration writer mutates the canonical branch at a time;
-- heavy local validation stays within `config/convergence-v2.json`.
+- candidate high-water: **48** (non-binding in practice);
+- never park the fleet waiting for a batch: refill continuously (`stopWhenNoReadyWork: false`);
+- **4** parallel integration lanes publish fast-forward to `main-v2`, each over
+  disjoint paths; no lane force-pushes;
+- heavy local validation: up to **3** concurrent builds × **3** cargo jobs, per
+  `config/convergence-v2.json`.
 
-Forty agents may reason in parallel; forty Cargo builds or forty independent writing branches are forbidden.
+Many agents may reason in parallel, and heavy validation now runs at the measured
+core count. What remains forbidden is concurrent writes to the same path,
+non-fast-forward publication, and any weakening of a correctness check.
 
 ## Acceptance lifecycle
 
@@ -700,7 +817,7 @@ not inspected.
 
 ## Non-destructive salvage
 
-Pre-V2 branches/worktrees are valuable evidence. Never delete, force-push, reset or prune them during convergence.
+Pre-V2 branches/worktrees are valuable evidence. Never delete, force-push, reset or prune them during convergence **unless** the worktree lifecycle rule above is satisfied: the tip is an ancestor of the current `main-v2` **and** that same tip is verified present on the push remote. Only then may the worktree be removed and its local branch pruned, by `tools/worktree_reclaim.py`.
 
 Legacy branches receive dispositions only when a current product failure requires inspecting that lineage. Do not create hundreds of disposition tasks merely to complete an inventory. Terminal dispositions are `ALREADY_PRESENT`, `SALVAGED_PRODUCT`, `SALVAGED_TEST`, `SUPERSEDED_BY <ref>`, `DUPLICATE`, `PROCESS_ONLY`, `EVIDENCE_ONLY`, and `CONFLICTING_IMPL_PRESERVED`. There is no durable `PENDING_REVIEW` salvage queue.
 

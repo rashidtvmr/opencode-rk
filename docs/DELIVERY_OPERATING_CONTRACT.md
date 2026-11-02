@@ -30,7 +30,8 @@ the versioned v2 transcript and instruction summary. Do not invent missing conte
 5. Run trusted focused checks and meaningful RED probes. Test logs must contain
    positive executed counts; compiler errors alone are not behavioral RED proof.
 6. Prepare on current main. A changed/rebased candidate invalidates its approvals
-   and focused results; repeat them. One integration turn prevents rebase storms.
+   and focused results; repeat them. Parallel integration lanes (4) publish over
+   disjoint paths, so a lane is not blocked by unrelated merges.
 7. Require full checks, a clean configured canonical branch, approved policy,
    shared publication lock and existing hook/capability. Publish fast-forward only.
 8. Run post-merge checks in a fresh checkout of the exact published SHA. Only
@@ -51,7 +52,13 @@ the versioned v2 transcript and instruction summary. Do not invent missing conte
   postchecks, and ambiguous other HEAD. Reconcile; never blindly replay or reset.
 - One supervisor per product repository, even if callers name different state
   directories. Reuse the existing state; do not start the old scheduler in parallel.
-- Heavy validation is serialized through the shared heavy-validation lock.
+- Heavy validation is bounded by the measured host: up to 3 concurrent builds of
+  3 cargo jobs, coordinated through the shared heavy-validation locks. It is no
+  longer serialized to a single build.
+- After a worktree's work is merged into `main-v2` **and** verified on the push
+  remote, reclaim it (`tools/worktree_reclaim.py --apply`). Never reclaim unmerged
+  or unpushed work, dirty worktrees, the canonical checkout, or a path configured
+  as a remote URL.
 - Preserve failed/ambiguous candidates. Retire only proven controller-owned,
   obsolete workspaces after required patches are retained and live ownership ends.
 - Do not infer health or quota from a configured route. Respect current exact

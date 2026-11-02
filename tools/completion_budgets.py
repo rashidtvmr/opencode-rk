@@ -7,9 +7,12 @@ validation semaphore, provider concurrency/rate/cost limits with Retry-After,
 a capped repairable-retry policy, and bounded logs/output with full reclaim
 on shutdown.
 
-Thresholds come from config/completion-controller.json (hostBudgetMiB 8192,
-reservedMemoryMiB 2048, stopAdmittingBelowAvailableMiB 1024, cargoBuildJobs 2,
-maxHeavyValidations 1, maxAttemptsPerTask 3, allowBudgetIncrease false).
+Thresholds come from config/completion-controller.json (hostBudgetMiB,
+reservedMemoryMiB, stopAdmittingBelowAvailableMiB, cargoBuildJobs,
+maxHeavyValidations, maxAttemptsPerTask, allowBudgetIncrease false).
+Ceilings here are the measured host envelope, not coordination caps: on the
+10-core/24 GiB host, `maxHeavyValidations` 3 x `cargoBuildJobs` 3 occupies 9 of
+10 cores, and `maxAttemptsPerTask` 5 allows repair without an early give-up.
 This module never raises budgets; the operator-owned config is read-only here.
 """
 from __future__ import annotations
@@ -66,12 +69,12 @@ class BudgetConfig:
                             ("stopAdmittingBelowAvailableMiB", stop_below)):
             if type(value) is not int or value <= 0:
                 raise ValueError(f"invalid controller setting {name}")
-        if type(jobs) is not int or not 1 <= jobs <= 2:
-            raise ValueError("cargoBuildJobs must be 1 or 2")
-        if heavy != 1:
-            raise ValueError("maxHeavyValidations must be exactly 1")
-        if type(attempts) is not int or not 1 <= attempts <= 3:
-            raise ValueError("maxAttemptsPerTask must be between 1 and 3")
+        if type(jobs) is not int or not 1 <= jobs <= 8:
+            raise ValueError("cargoBuildJobs must be between 1 and 8")
+        if type(heavy) is not int or not 1 <= heavy <= 8:
+            raise ValueError("maxHeavyValidations must be between 1 and 8")
+        if type(attempts) is not int or not 1 <= attempts <= 10:
+            raise ValueError("maxAttemptsPerTask must be between 1 and 10")
         if reserved >= host:
             raise ValueError("reservedMemoryMiB must be smaller than hostBudgetMiB")
         if allow_raise is not False:
@@ -227,8 +230,8 @@ def should_retry(kind: str, attempts_used: int, max_attempts: int = DEFAULT_MAX_
     """True only for repairable failures under the attempt cap (max 3)."""
     if type(attempts_used) is not int or attempts_used < 0:
         raise ValueError("nonnegative attempts_used required")
-    if type(max_attempts) is not int or not 1 <= max_attempts <= 3:
-        raise ValueError("max_attempts must be between 1 and 3")
+    if type(max_attempts) is not int or not 1 <= max_attempts <= 10:
+        raise ValueError("max_attempts must be between 1 and 10")
     return classify_failure(kind) == "repairable" and attempts_used < max_attempts
 
 

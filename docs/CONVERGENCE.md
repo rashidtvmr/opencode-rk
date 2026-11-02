@@ -34,7 +34,7 @@ Gates may advance in parallel when path ownership does not overlap. A gate is GR
 
 ## Scheduling
 
-Work from observed gate failures. Packages may span the files required by one behavior. Active path grants must not overlap. Keep at most four verified/unintegrated candidates and one integration writer.
+Work from observed gate failures. Packages may span the files required by one behavior. Active path grants must not overlap. Keep a non-binding candidate high-water of 48 and up to four parallel integration lanes (no lane force-pushes).
 
 Historical `ralph.json`, claims and worklogs are evidence/requirements inventory, not the V2 execution queue.
 
