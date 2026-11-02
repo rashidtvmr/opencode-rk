@@ -95,7 +95,7 @@ pub enum PaletteAction {
     Settings(&'static str),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PaletteEntry {
     /// Unique display-row identity. Suggested duplicates have their own id.
     pub id: &'static str,
@@ -104,14 +104,18 @@ pub struct PaletteEntry {
     /// Exact pinned upstream registration name (not a locally invented
     /// alias); row id is separate because Suggested duplicates an entry.
     pub command_name: &'static str,
-    /// Upstream `searchText`: supplemental searchable text such as setting keywords.
-    pub search_text: &'static str,
+    /// Upstream `searchText`: `[command.id, command.description].join(" ")` for
+    /// command rows (`command-palette.tsx:24`) or `setting.keywords.join(" ")`
+    /// for setting rows (`:38-39`). Owned because the setting join is derived
+    /// from live row data at runtime.
+    pub search_text: String,
     pub route: &'static str,
     /// None means the native client has no truthful direct shortcut for it.
     pub key_label: Option<&'static str>,
     /// `searchFooter` (`command-palette.tsx:26,41`): `"<group> · <keys>"` for
-    /// command rows, `"Settings · <category>"` for setting rows.
-    pub search_footer: Option<&'static str>,
+    /// command rows, `"Settings · <category>"` for setting rows. Owned for the
+    /// setting form; `None` falls back to the bare category at render time.
+    pub search_footer: Option<String>,
     pub action: PaletteAction,
 }
 
@@ -306,7 +310,7 @@ impl CommandPalette {
                 }
                 let title = fuzzy_score(&needle, item.title);
                 let category = fuzzy_score(&needle, item.category);
-                let search = fuzzy_score(&needle, item.search_text);
+                let search = fuzzy_score(&needle, &item.search_text);
                 Some((title.unwrap_or(0) * 2 + category.unwrap_or(0) + search.unwrap_or(0), item))
             })
             .collect();
@@ -391,7 +395,7 @@ impl CommandPalette {
                 .map_or(String::new(), |label| format!("  {label}"));
             let mut row = format!("{marker}{}{key}", item.title);
             if flattened {
-                let footer = item.search_footer.unwrap_or(item.category).trim();
+                let footer = item.search_footer.as_deref().unwrap_or(item.category).trim();
                 // Body rows reserve the shared two-cell right inset
                 // (`DIALOG_LIST_INSET - 1`), so the footer right-aligns inside
                 // the content width, not the terminal width.
@@ -482,7 +486,7 @@ pub fn search_quality(query: &str, item: &PaletteEntry) -> Option<f32> {
     let query: Vec<char> = needle.chars().collect();
     let title = character_quality(&query, item.title);
     let category = character_quality(&query, item.category);
-    let search = character_quality(&query, item.search_text);
+    let search = character_quality(&query, &item.search_text);
     if title.is_none() && category.is_none() && search.is_none() {
         return None;
     }
@@ -549,7 +553,7 @@ fn entry(
         title,
         category,
         command_name,
-        search_text: command_name,
+        search_text: command_name.to_owned(),
         route,
         // Native currently implements no direct model/session key bindings
         // matching pinned upstream leader bindings; do not invent labels.
@@ -563,11 +567,10 @@ fn entry(
 }
 
 fn setting_entry(row: &crate::native_settings::SettingsRow) -> PaletteEntry {
-    let search_text = match row.id {
-        "session.sidebar" => "side panel",
-        "tabs.layout" => "orientation left layout tabs",
-        _ => "",
-    };
+    // Upstream `searchText: setting.keywords?.join(" ")` (`command-palette.tsx:38-39`).
+    // Derive from the live row so a future setting keeps keyword search
+    // without a hand-maintained map.
+    let search_text = row.keywords.join(" ");
     PaletteEntry {
         id: row.id,
         title: row.title,
@@ -576,7 +579,9 @@ fn setting_entry(row: &crate::native_settings::SettingsRow) -> PaletteEntry {
         search_text,
         route: "/settings",
         key_label: None,
-        search_footer: None,
+        // Upstream `searchFooter: \`Settings · ${setting.category}\``
+        // (`command-palette.tsx:40`), rendered right-aligned while flattened.
+        search_footer: Some(format!("Settings · {}", row.category)),
         action: PaletteAction::Settings(row.id),
     }
 }
@@ -710,8 +715,10 @@ mod tests {
         assert_eq!(side.iter().map(|row| row.id).collect::<Vec<_>>(), ["session.sidebar"]);
         assert_eq!(side[0].action, PaletteAction::Settings("session.sidebar"));
         // No shortcut hint is invented for a setting the native client cannot
-        // trigger directly (`dialog-select.tsx:193-208`).
-        assert!(side[0].key_label.is_none() && side[0].search_footer.is_none());
+        // trigger directly (`dialog-select.tsx:193-208`), but the row carries
+        // upstream's `Settings · <category>` footer (`command-palette.tsx:40`).
+        assert!(side[0].key_label.is_none());
+        assert_eq!(side[0].search_footer.as_deref(), Some("Settings · Session"));
     }
 
     // DIALOG-11: suggestions are duplicated only before filtering, the 0.7
@@ -726,7 +733,7 @@ mod tests {
             title: "Zoo",
             category: "Zoo",
             command_name: "mode",
-            search_text: "mode",
+            search_text: "mode".to_string(),
             route: "/weak",
             key_label: None,
             search_footer: None,

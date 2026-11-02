@@ -379,6 +379,30 @@ mod tests {
         assert_eq!(r.len(), 1);
     }
 
+    // DIALOG-12: the model wire carries `cost` normalized to an array. The
+    // free-flag derivation downstream (`native_setup.rs`, upstream
+    // `model-options.tsx:38-39`) reads `cost[i].input`, so an object payload
+    // must be wrapped, an array passed through, and a missing field become an
+    // empty vec (NOT a wrapped null that would misclassify).
+    #[test]
+    fn cost_is_normalized_to_a_value_array_for_the_free_flag() {
+        let json = r#"{"p":{"name":"P","models":{
+            "array-cost":{"name":"Array","cost":[{"input":0,"output":0},{"input":1,"output":2}]},
+            "object-cost":{"name":"Object","cost":{"input":0,"output":0}},
+            "no-cost":{"name":"None"}
+        }}}"#;
+        let c = Catalog::from_models_dev_api_json(json.as_bytes()).unwrap();
+        let array = c.model("p", "array-cost").unwrap();
+        assert_eq!(array.cost.len(), 2);
+        assert_eq!(array.cost[0]["input"], 0);
+        // Object payload is wrapped into a single-element array.
+        let object = c.model("p", "object-cost").unwrap();
+        assert_eq!(object.cost.len(), 1);
+        assert_eq!(object.cost[0]["input"], 0);
+        // Absent cost stays empty so the downstream derivation yields `false`.
+        assert!(c.model("p", "no-cost").unwrap().cost.is_empty());
+    }
+
     #[test]
     fn fresh_missing_and_corrupt_cache_use_complete_bundled_floor() {
         let fresh = Catalog::from_cache_or_bundled(None).unwrap();
