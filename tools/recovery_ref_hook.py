@@ -92,7 +92,15 @@ def transition_window_allows(rows: list[tuple[str, str, str]]) -> bool:
     expected = bootstrap if kind == "bootstrap-controller" else observer if kind == "observer-correction" else lane_controller if kind == "lane-sync-controller" else None
     allowed = cap.get("allowedPaths")
     proposed = cap.get("proposedBlobs")
-    if expected is None or not isinstance(allowed, list) or set(allowed) != expected or len(allowed) != len(set(allowed)) or not isinstance(proposed, dict) or set(proposed) != expected:
+    if expected is None or not isinstance(allowed, list) or len(allowed) != len(set(allowed)) or not isinstance(proposed, dict):
+        return False
+    if kind == "observer-correction":
+        # A correction may touch any non-empty subset of the closed observer
+        # set: only the paths whose bytes differ from the recorded baseline are
+        # named, and the commit must change exactly those paths.
+        if not allowed or not set(map(str, allowed)) <= observer or set(map(str, allowed)) != set(map(str, proposed)):
+            return False
+    elif set(map(str, allowed)) != expected or set(map(str, proposed)) != expected:
         return False
     if any(not isinstance(v, str) or len(v) != 40 or any(c not in "0123456789abcdef" for c in v) for v in proposed.values()):
         return False
@@ -150,13 +158,11 @@ def transition_window_allows(rows: list[tuple[str, str, str]]) -> bool:
         return False
     allowed = cap.get("allowedPaths")
     proposed = cap.get("proposedBlobs")
-    if cap.get("kind") == "observer-correction" and set(map(str, allowed or [])) != {
-        "tests/e2e/native_provider_setup.py", "tests/e2e/native_stream_tool.py",
-        "tests/e2e/native_utf8_input.py", "tests/e2e/native_escape_input.py",
-        "tests/e2e/native_resize.py", "tests/e2e/native_bracketed_paste.py",
-    }:
+    if cap.get("kind") == "observer-correction" and (
+        not allowed or not set(map(str, allowed)) <= observer
+    ):
         return False
-    if not isinstance(allowed, list) or not isinstance(proposed, dict) or set(map(str, allowed)) != set(proposed):
+    if not isinstance(allowed, list) or not isinstance(proposed, dict) or set(map(str, allowed)) != set(map(str, proposed)):
         return False
     diff = _git_out(["git", "diff", "--name-only", old, new])
     if diff is None:

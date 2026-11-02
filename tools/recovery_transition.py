@@ -187,10 +187,18 @@ def validate_capability_schema(record: dict) -> None:
         raise TransitionError("malformed capability id")
     allowed = record.get("allowedPaths")
     proposed = record.get("proposedBlobs")
-    if not isinstance(allowed, list) or set(allowed) != set(KIND_PATHS[kind]) or len(allowed) != len(set(allowed)):
+    if not isinstance(allowed, list) or len(allowed) != len(set(allowed)):
         raise TransitionError("capability path set does not match its closed kind")
-    if not isinstance(proposed, dict) or set(proposed) != set(KIND_PATHS[kind]) or any(not SHA40.fullmatch(str(v)) for v in proposed.values()):
+    if not isinstance(proposed, dict) or any(not SHA40.fullmatch(str(v)) for v in proposed.values()):
         raise TransitionError("capability blob map does not match its closed kind")
+    if kind == "observer-correction":
+        # A correction may name any non-empty subset of the closed observer set;
+        # the blob map must cover exactly the named paths.
+        if (not allowed or not set(map(str, allowed)) <= set(KIND_PATHS[kind])
+                or set(map(str, allowed)) != set(map(str, proposed))):
+            raise TransitionError("observer correction must name a non-empty subset of the closed observer set")
+    elif set(map(str, allowed)) != set(KIND_PATHS[kind]) or set(map(str, proposed)) != set(KIND_PATHS[kind]):
+        raise TransitionError("capability path set does not match its closed kind")
     if kind == "lane-sync-controller" and record.get("authorizedObserverBlobs") != {}:
         raise TransitionError("lane-sync controller capability may not authorize observer blobs")
     if not SHA40.fullmatch(str(record.get("baseSha"))) or not record.get("canonicalHead") or not record.get("capabilityId"):
@@ -537,10 +545,12 @@ def prepare_lane_sync_controller(root: pathlib.Path, proposal: pathlib.Path, aut
 def prepare_observer_correction(
     root: pathlib.Path, proposal_root: pathlib.Path, baseline_manifest: pathlib.Path, author: str
 ) -> dict:
-    """Prepare a fresh, separately reviewed six-observer correction capability.
+    """Prepare a fresh, separately reviewed observer correction capability.
 
     The bootstrap capability remains limited to ALLOWED_PATHS. This capability
-    has its own exact six-path transaction and must be reviewed separately.
+    authorizes a non-empty subset of the closed six-path observer set: only the
+    paths whose proposed bytes differ from the recorded baseline are named, and
+    the resulting commit must change exactly those paths.
     """
     if not author or author in {"unknown", ""}:
         raise TransitionError("observer correction requires a named author")
@@ -563,16 +573,26 @@ def prepare_observer_correction(
     proposed = {}
     for rel in sorted(OBSERVER_PATHS):
         src = proposal_root / rel
-        if not src.is_file():
-            raise TransitionError(f"observer proposal source missing: {src}")
-        data = src.read_bytes()
-        content[rel] = data.decode("utf-8")
-        proposed[rel] = git_blob_id(root, data)
+        if src.is_file():
+            data = src.read_bytes()
+            blob = git_blob_id(root, data)
+        else:
+            # A correction names only the files it changes; unnamed observer
+            # files keep their recorded baseline bytes.
+            data = subprocess.run(
+                ["git", "show", f"{base}:{rel}"], cwd=root, capture_output=True, check=True
+            ).stdout
+            blob = baseline[rel]
+        if blob != baseline[rel]:
+            content[rel] = data.decode("utf-8")
+            proposed[rel] = blob
+    if not proposed:
+        raise TransitionError("observer proposal does not change any observer file")
     record = {
         "schemaVersion": 2, "capabilityId": "observer-correction-" + secrets.token_hex(8),
         "kind": "observer-correction", "status": "PENDING", "author": author,
         "baseSha": base, "canonicalHead": "main-v2",
-        "allowedPaths": sorted(OBSERVER_PATHS), "proposedBlobs": proposed,
+        "allowedPaths": sorted(proposed), "proposedBlobs": proposed,
         "proposedContent": content,
         # The reference hook authorizes observer corrections through
         # ``proposedBlobs``; ``authorizedObserverBlobs`` is a bootstrap-only
