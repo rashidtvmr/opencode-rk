@@ -2700,8 +2700,10 @@ fn home_composer_border_cell_style(
 struct DiffRgba {
     added_text: Rgba,
     removed_text: Rgba,
+    context_text: Rgba,
     added_background: Rgba,
     removed_background: Rgba,
+    context_background: Rgba,
 }
 
 #[cfg(feature = "native")]
@@ -2713,8 +2715,10 @@ fn diff_rgba(semantic: &crate::native_theme_runtime::SemanticPalette) -> DiffRgb
     DiffRgba {
         added_text: rgba(&semantic.diff.added_text),
         removed_text: rgba(&semantic.diff.removed_text),
+        context_text: rgba(&semantic.diff.context_text),
         added_background: rgba(&semantic.diff.added_background),
         removed_background: rgba(&semantic.diff.removed_background),
+        context_background: rgba(&semantic.diff.context_background),
     }
 }
 
@@ -2727,6 +2731,9 @@ fn chat_row_background(class: Option<&crate::native_view_chat::ChatRowClass>, ro
         Some(ChatRowClass::SystemCard) => Some(element),
         Some(ChatRowClass::DiffAdded) => Some(diff.map_or(Rgba::new(20, 70, 35, 255), |diff| diff.added_background)),
         Some(ChatRowClass::DiffRemoved) => Some(diff.map_or(Rgba::new(80, 25, 30, 255), |diff| diff.removed_background)),
+        // Unchanged diff lines use the `diff.delta` background
+        // (`theme.diff.background.context`, `packages/theme/src/tui/syntax.ts:81`).
+        Some(ChatRowClass::DiffContext) => Some(diff.map_or(root, |diff| diff.context_background)),
         // Assistant completion footer rows (upstream `AssistantFooter`) are
         // plain text on the root surface — upstream draws no box for them.
         Some(ChatRowClass::AssistantFooter) | Some(ChatRowClass::FooterError) => None,
@@ -2753,6 +2760,9 @@ fn chat_row_foreground(class: &crate::native_view_chat::ChatRowClass, text_color
         ChatRowClass::SystemCard => muted,
         ChatRowClass::DiffAdded => diff.map_or(text_color, |diff| diff.added_text),
         ChatRowClass::DiffRemoved => diff.map_or(error, |diff| diff.removed_text),
+        // Unchanged diff lines use the `diff.delta` foreground
+        // (`theme.diff.text.context`, `packages/theme/src/tui/syntax.ts:81`).
+        ChatRowClass::DiffContext => diff.map_or(muted, |diff| diff.context_text),
         ChatRowClass::ToolError => error,
         ChatRowClass::RetryNotice => warning,
         ChatRowClass::ToolPermission => warning,
@@ -2802,6 +2812,7 @@ fn chat_row_is_selectable(class: Option<&crate::native_view_chat::ChatRowClass>)
                 | ChatRowClass::ToolError
                 | ChatRowClass::DiffAdded
                 | ChatRowClass::DiffRemoved
+                | ChatRowClass::DiffContext
                 | ChatRowClass::RetryNotice
         )
     )
@@ -2867,8 +2878,10 @@ mod chat_surface_inset_tests {
         let diff = DiffRgba {
             added_text: Rgba::new(11, 111, 11, 255),
             removed_text: Rgba::new(99, 9, 9, 255),
+            context_text: Rgba::new(55, 55, 88, 255),
             added_background: Rgba::new(22, 222, 22, 255),
             removed_background: Rgba::new(88, 8, 8, 255),
+            context_background: Rgba::new(44, 44, 66, 255),
         };
         assert_eq!(
             chat_row_background(Some(&crate::native_view_chat::ChatRowClass::DiffAdded), root, panel, element, Some(&diff)),
@@ -2889,6 +2902,19 @@ mod chat_surface_inset_tests {
             chat_row_foreground(&crate::native_view_chat::ChatRowClass::DiffRemoved, text_color, muted, error, warning, Some(&diff)),
             diff.removed_text,
             "diff removed prose = diff.text.removed"
+        );
+        // DIFF-002: unchanged lines use the `diff.delta` role
+        // (`theme.diff.text.context` + `theme.diff.background.context`,
+        // `theme/src/tui/syntax.ts:81`).
+        assert_eq!(
+            chat_row_background(Some(&crate::native_view_chat::ChatRowClass::DiffContext), root, panel, element, Some(&diff)),
+            Some(diff.context_background),
+            "diff context surface = diff.background.context"
+        );
+        assert_eq!(
+            chat_row_foreground(&crate::native_view_chat::ChatRowClass::DiffContext, text_color, muted, error, warning, Some(&diff)),
+            diff.context_text,
+            "diff context prose = diff.text.context"
         );
         // Semantic-less theme keeps the historical literal fallback.
         assert_eq!(

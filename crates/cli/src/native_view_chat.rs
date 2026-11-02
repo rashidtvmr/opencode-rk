@@ -757,6 +757,11 @@ pub enum ChatRowClass {
     SystemCard,
     DiffAdded,
     DiffRemoved,
+    /// Unchanged diff context line: upstream paints it with the dedicated
+    /// `diff.delta` role (`theme.diff.text.context` + `background.context`,
+    /// `packages/theme/src/tui/syntax.ts:79-81`,
+    /// `component/patch-diff.tsx:45,80`), NOT the generic metadata surface.
+    DiffContext,
     /// Reasoning/thinking part text.
     Thinking,
     /// Tool call header (`[tool] name (id)`).
@@ -2117,6 +2122,8 @@ fn push_diff_fence(rows: &mut Vec<(String, ChatRowClass)>, width: usize, prefix:
         let class = match line.role {
             crate::native_diff_view::DiffLineRole::Added => ChatRowClass::DiffAdded,
             crate::native_diff_view::DiffLineRole::Removed => ChatRowClass::DiffRemoved,
+            crate::native_diff_view::DiffLineRole::Context
+            | crate::native_diff_view::DiffLineRole::Blank => ChatRowClass::DiffContext,
             _ => ChatRowClass::Metadata,
         };
         rows.push((truncate_row(&format!("{prefix}{}", line.text), width), class));
@@ -2553,6 +2560,8 @@ fn typed_message_rows_with_prefix_spans_mode(
                     let class = match line.role {
                         crate::native_diff_view::DiffLineRole::Added => ChatRowClass::DiffAdded,
                         crate::native_diff_view::DiffLineRole::Removed => ChatRowClass::DiffRemoved,
+                        crate::native_diff_view::DiffLineRole::Context
+                        | crate::native_diff_view::DiffLineRole::Blank => ChatRowClass::DiffContext,
                         _ => ChatRowClass::Metadata,
                     };
                     rows.push((truncate_row(&format!("    {}", line.text), width), class));
@@ -6706,6 +6715,12 @@ mod footer_v3_consumer_tests {
         );
         assert!(
             rows.iter().any(|(row, class)| *class == ChatRowClass::DiffAdded && row.contains("+new")),
+            "{rows:?}"
+        );
+        // DIFF-002: an unchanged line carries the `diff.delta` role, not the
+        // generic metadata class (`packages/theme/src/tui/syntax.ts:81`).
+        assert!(
+            rows.iter().any(|(row, class)| *class == ChatRowClass::DiffContext && row.contains("ctx")),
             "{rows:?}"
         );
         assert!(
