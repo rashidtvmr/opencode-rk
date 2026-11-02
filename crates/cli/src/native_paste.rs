@@ -188,11 +188,14 @@ impl Default for PasteMode {
 }
 
 impl PasteMode {
-    /// Parse the configuration value; anything other than `full` folds.
+    /// Parse the configuration value. Upstream compares the raw value against
+    /// the exact literal `"full"` (`config.prompt?.paste !== "full"`,
+    /// `prompt/index.tsx:1463`), so only `Some("full")` selects [`PasteMode::Full`];
+    /// any other value folds.
     #[must_use]
     pub fn from_config(value: Option<&str>) -> Self {
         match value {
-            Some(value) if value.trim().eq_ignore_ascii_case("full") => Self::Full,
+            Some("full") => Self::Full,
             _ => Self::Fold,
         }
     }
@@ -1686,7 +1689,11 @@ mod paste_normalization_tests {
             PastePlan::Insert(body.to_owned())
         );
         assert_eq!(PasteMode::from_config(Some("full")), PasteMode::Full);
-        assert_eq!(PasteMode::from_config(Some("FULL")), PasteMode::Full);
+        // CP-36: upstream compares the raw value against the exact literal
+        // `"full"` (`prompt/index.tsx:1463`); no trim, no case folding.
+        assert_eq!(PasteMode::from_config(Some("FULL")), PasteMode::Fold);
+        assert_eq!(PasteMode::from_config(Some(" full ")), PasteMode::Fold);
+        assert_eq!(PasteMode::from_config(Some("Full")), PasteMode::Fold);
         assert_eq!(PasteMode::from_config(None), PasteMode::Fold);
         assert_eq!(PasteMode::from_config(Some("summary")), PasteMode::Fold);
     }
