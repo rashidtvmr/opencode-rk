@@ -1280,16 +1280,17 @@ fn append_tool_rows(
     width: usize,
     tool_rows: &[(String, ChatRowClass)],
 ) {
-    const BODY_INDENT: &str = "    ";
-    for (index, (text, class)) in tool_rows.iter().enumerate() {
+    // `native_tool_rows` rows are fully formed: its `push_wrapped` bakes the
+    // complete prefix (`header_prefix` = ROW_INDENT + icon + pad, or
+    // `BODY_INDENT`) into each row and wraps/truncates to `width`
+    // (`native_tool_rows.rs:1267-1290`). The adapter must preserve that
+    // geometry byte-for-byte; the old `BODY_INDENT` re-wrap of every non-first
+    // row added a second 4-cell indent and re-split rows at `width-4`.
+    for (text, class) in tool_rows.iter() {
         if rows.len() >= MAX_MESSAGE_ROWS {
             return;
         }
-        if index == 0 {
-            rows.push((truncate_row(text, width), *class));
-        } else {
-            push_wrapped(rows, width, text, BODY_INDENT, *class);
-        }
+        push_wrapped(rows, width, text, "", *class);
     }
 }
 
@@ -5775,6 +5776,56 @@ mod tests {
                 .iter()
                 .any(|(row, class)| *class == ChatRowClass::ToolCall && row.contains("rm -rf")),
             "user text is never promoted to a tool fact"
+        );
+    }
+
+    /// TOOL-003: the tool-row adapter preserves the model's baked geometry.
+    /// `native_tool_rows::rows_for_display` already prefixes/wraps every row,
+    /// so a `ToolState` part must project byte-identical rows; the retired
+    /// `BODY_INDENT` re-wrap added a second 4-cell indent and re-split body
+    /// rows at `width-4` (`native_view_chat.rs:1278-1294`).
+    #[test]
+    fn tool_rows_keep_baked_geometry_without_double_indent() {
+        let mut view = ChatView::new();
+        let args = serde_json::json!({"command": "echo a\n\necho b"}).to_string();
+        let messages = vec![ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![ChatPart::ToolState {
+                name: "bash".to_owned(),
+                id: "call-1".to_owned(),
+                status: "completed".to_owned(),
+                args: args.clone(),
+                output: "a\nb".to_owned(),
+                is_error: false,
+                metadata: String::new(),
+            }],
+            agent: None,
+            model: None,
+            assistant_facts: None,
+            message_id: None,
+        }];
+        let width = 60usize;
+        let rows = view.render_typed_classified(width, 24, "ws", &messages, "", false);
+        let model = crate::tui_entry::native_turn::native_tool_rows::tool_display(
+            width,
+            "bash",
+            "completed",
+            &args,
+            "a\nb",
+            false,
+        );
+        for (text, class) in
+            crate::tui_entry::native_turn::native_tool_rows::rows_for_display(width, &model)
+        {
+            assert!(
+                rows.iter().any(|(row, c)| row == &text && *c == class),
+                "adapter must emit the model row verbatim: {text:?} ({class:?}) not in {rows:?}"
+            );
+        }
+        // No body row may carry an extra 4-cell indent beyond the model's own.
+        assert!(
+            !rows.iter().any(|(row, _)| row.starts_with("        ")),
+            "body rows must not be double-indented: {rows:?}"
         );
     }
 
