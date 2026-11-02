@@ -441,27 +441,43 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 
 /// `Locale.number`: `1.0K`/`1.0M` at 1,000/999,950.
 ///
-/// One decimal digit with JS `toFixed(1)` rounding semantics: on an exact
-/// `.x5` tie `toFixed` picks the larger value (ECMA-262: "if there are two
-/// such n, pick the larger n"), whereas Rust's `{:.1}` is ties-to-even and
-/// would render `1250` as `1.2K` instead of upstream `1.3K`
-/// (`packages/tui/src/util/locale.ts:19-26`). `scale` is the value of one
-/// tenth of the unit (`100` for K, `100000` for M).
+/// One decimal digit with JS `toFixed(1)` rounding semantics
+/// (`packages/tui/src/util/locale.ts:19-26`). `toFixed` rounds the actual
+/// IEEE-754 double `value / divisor` — not the exact rational — half-up at the
+/// first decimal, so `1150 -> "1.1K"` (the double is just below 1.15) while
+/// `1250 -> "1.3K"` (1.25 is exactly representable, an exact tie rounded to the
+/// larger n). Rust's `{:.1}` is ties-to-even (`1250 -> "1.2K"`) and integer
+/// tenths arithmetic rounds the rational (`1150 -> "1.2K"`); both diverge.
+/// Reproduce the double exactly by formatting it to 20 decimals (correctly
+/// rounded, far finer than the ~1e-17 gap separating any value from a midpoint)
+/// and dropping the second decimal half-up.
 #[must_use]
 pub fn locale_number(value: u64) -> String {
     if value >= 999_950 {
-        format_compact(value, 100_000, "M")
+        format_compact(value, 1_000_000, "M")
     } else if value >= 1_000 {
-        format_compact(value, 100, "K")
+        format_compact(value, 1_000, "K")
     } else {
         value.to_string()
     }
 }
 
-/// Format `value`'s tenths-of-unit with round-half-away-from-zero.
-fn format_compact(value: u64, scale: u64, suffix: &str) -> String {
-    let tenths = value.saturating_add(scale / 2) / scale;
-    format!("{}.{}{suffix}", tenths / 10, tenths % 10)
+/// Round the double `value / divisor` to one decimal, half-up, and suffix it.
+fn format_compact(value: u64, divisor: u64, suffix: &str) -> String {
+    let rendered = format!("{:.20}", value as f64 / divisor as f64);
+    let (int_part, frac) = rendered.split_once('.').unwrap_or((rendered.as_str(), ""));
+    let mut whole: u64 = int_part.parse().unwrap_or(0);
+    let bytes = frac.as_bytes();
+    let mut tenths = u64::from(bytes.first().map_or(0, |b| b - b'0'));
+    let hundredths = u64::from(bytes.get(1).map_or(0, |b| b - b'0'));
+    if hundredths >= 5 {
+        tenths += 1;
+        if tenths == 10 {
+            tenths = 0;
+            whole += 1;
+        }
+    }
+    format!("{whole}.{tenths}{suffix}")
 }
 
 /// Usage counters carried by one assistant step.
@@ -1091,8 +1107,19 @@ mod tests {
         assert_eq!(locale_number(999_949), "999.9K");
         assert_eq!(locale_number(999_950), "1.0M");
         assert_eq!(locale_number(1_234_567), "1.2M");
-        // Exact `.x5` ties follow JS `toFixed(1)` (round half AWAY from zero),
-        // not Rust's ties-to-even (`locale.ts:19-26`).
+        // `toFixed(1)` rounds the double `value/1000`, not the exact rational:
+        // these are all just BELOW the `.x5` midpoint, so they round down even
+        // though naive half-up on the rational would round them up. An integer
+        // tenths formula regresses every one of these (`locale.ts:19-26`).
+        assert_eq!(locale_number(1_150), "1.1K");
+        assert_eq!(locale_number(1_450), "1.4K");
+        assert_eq!(locale_number(1_650), "1.6K");
+        assert_eq!(locale_number(1_950), "1.9K");
+        assert_eq!(locale_number(2_050), "2.0K");
+        assert_eq!(locale_number(1_150_000), "1.1M");
+        assert_eq!(locale_number(1_450_000), "1.4M");
+        // Exact `.x5` ties: the double is exactly representable, so `toFixed`
+        // picks the larger n (Rust `{:.1}` would render 1.2K for 1250).
         assert_eq!(locale_number(1_250), "1.3K");
         assert_eq!(locale_number(2_250), "2.3K");
         assert_eq!(locale_number(1_750), "1.8K");

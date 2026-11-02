@@ -10130,8 +10130,42 @@ fn native_loop(
                     );
                     continue;
                 }
-                if !page_open
-                    || help_open
+                // A non-Chat page owns Up/Down for its own navigation; the
+                // chat composer is the only other owner. CP-30: on the chat
+                // composer, walk prompt history at the text edges
+                // (`prompt/index.tsx:1020-1095`, `prompt/history.tsx:103-117`);
+                // a successful walk consumes the event. The completion panel
+                // already handled arrows above, and the disabled child
+                // composer stays inert.
+                if !page_open {
+                    if !help_open
+                        && !view.dialogs.intercepts_input()
+                        && matches!(dialog, native_setup::Dialog::None)
+                        && !live
+                            .as_ref()
+                            .is_some_and(|snapshot| snapshot.parent_session_id.is_some())
+                    {
+                        if let Some((text, cursor)) = history_walk_entry(
+                            &mut prompt_history,
+                            if direction == native_input_decoder::InputEvent::ArrowUp {
+                                -1
+                            } else {
+                                1
+                            },
+                            &draft,
+                            draft_cursor,
+                        ) {
+                            draft = text;
+                            draft_cursor = cursor;
+                            crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
+                            completion.sync(&draft);
+                            utf8.reset();
+                            needs_paint = true;
+                        }
+                    }
+                    continue;
+                }
+                if help_open
                     || view.dialogs.intercepts_input()
                     || !matches!(dialog, native_setup::Dialog::None)
                 {
@@ -10146,36 +10180,6 @@ fn native_loop(
                     view.context_mut().select_step(direction == native_input_decoder::InputEvent::ArrowDown);
                     needs_paint = true;
                     continue;
-                }
-                // CP-30: prompt-history walk (`prompt/index.tsx:1020-1095`,
-                // `prompt/history.tsx:103-117`) before the Ctrl-B/Ctrl-N
-                // normalization. The completion panel owned arrows earlier
-                // (`:8733-8734`, upstream `!auto()?.visible`), and the
-                // disabled child composer stays inert. A successful walk
-                // consumes the event; otherwise arrows keep their existing
-                // normalization below.
-                if !live
-                    .as_ref()
-                    .is_some_and(|snapshot| snapshot.parent_session_id.is_some())
-                {
-                    if let Some((text, cursor)) = history_walk_entry(
-                        &mut prompt_history,
-                        if direction == native_input_decoder::InputEvent::ArrowUp {
-                            -1
-                        } else {
-                            1
-                        },
-                        &draft,
-                        draft_cursor,
-                    ) {
-                        draft = text;
-                        draft_cursor = cursor;
-                        crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
-                        completion.sync(&draft);
-                        utf8.reset();
-                        needs_paint = true;
-                        continue;
-                    }
                 }
                 if direction == native_input_decoder::InputEvent::ArrowUp {
                     2
@@ -10395,17 +10399,23 @@ fn native_loop(
             // the highlight and returns WITHOUT `preventDefault`, so the key
             // keeps propagating (to app exit here). It only copies and retains
             // the highlight when copy-on-select is off; a failed copy on a real
-            // selection clears and consumes the key.
+            // multi-cell selection clears and propagates, exactly like the
+            // copy-on-select branch.
             let copy_on_select = !crate::native_text_selection::copy_on_select_disabled(
                 env::var("OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT")
                     .ok()
                     .as_deref(),
                 cfg!(windows),
             );
+            // Upstream `copy()` returns false for an `isStart && behavior ===
+            // "cell"` selection (`selection.ts:47`), so a plain click takes the
+            // clear-and-return (propagate) path on Ctrl+C too, whether or not
+            // copy-on-select is on (test `selection-keys.test.ts:96-114`).
+            let has_text = selection.selected_text().is_some() && !selection.is_single_cell();
             match crate::native_text_selection::ctrl_c_selection_key(
                 copy_on_select,
                 selection.has_selection(),
-                selection.selected_text().is_some(),
+                has_text,
             ) {
                 // No selection: fall through so Ctrl+C keeps exit priority.
                 crate::native_text_selection::CtrlCKeyAction::FallThrough => {}
