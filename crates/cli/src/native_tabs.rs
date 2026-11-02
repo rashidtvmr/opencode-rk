@@ -366,7 +366,10 @@ impl TabRowPaint {
     #[must_use]
     pub fn horizontal_selected(palette: &crate::native_theme_runtime::Palette) -> Self {
         use crate::native_theme_runtime::Slot;
-        // selected bg = tint(action.hovered:bg->raised.high, decrease(raised.base), 1) = raised.high
+        // `session-tabs.tsx:1568-1575,467`: a selected tab is never `lifted`, so
+        // bg = tint(background.base, decrease(raised.base), 1). `tint` at alpha 1
+        // is the exact overlay, so the result is `decrease(raised.base)` =
+        // `raised.high` (neutral.600) in both light and dark.
         let bg = palette.get(Slot::BackgroundElement);
         let title_fg = palette.get(Slot::Text);
         let close_fg = crate::native_tab_rail::tint(
@@ -4551,9 +4554,13 @@ mod tests {
 
     /// TAB-07 live-path color: when a built-in V2 semantic palette is present,
     /// the unread activity marker resolves to `semantic.tab_attention` (the
-    /// `hue.accent[200]` `unreadColor`, `session-tabs.tsx:125-129,565`), and the
-    /// live painter passes that palette through. Guards against silently
-    /// dropping `SemanticPalette` on the final paint path.
+    /// `hue.accent[200]` `unreadColor`, `session-tabs.tsx:125-129,565`).
+    ///
+    /// Coverage note: this exercises the `from_navigation` -> strip builder
+    /// (`with_row_colors_semantic`) color resolution only. The live painter
+    /// (`tui_entry.rs` tab arm) calls the same builder with
+    /// `ctx.semantic.as_ref()`, but the bridge `Renderer` exposes no styled-cell
+    /// readback, so a revert of that call site itself cannot be observed here.
     #[test]
     fn tab_07_live_unread_uses_semantic_tab_attention() {
         use crate::native_navigation::NavigationState;
