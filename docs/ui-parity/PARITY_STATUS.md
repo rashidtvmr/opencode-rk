@@ -136,6 +136,28 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | MD-009 | `REAL_GAP` | math lifecycle (`native_math.rs:676`, `last_good` `:657`, test `:943`); live `without_engine` (`native_view_chat.rs:2298`) forces `Fallback` (`:2302`); needs live `MathLayoutEngine` injection. **Supersedes** the earlier `ALREADY_CORRECT` entry |
 | MSG-010 | `REAL_GAP` | `turn_duration`/`turn_tokens_per_second`/`legacy_turns` (`native_message_rows.rs`) no non-test caller; footer `native_footer.rs:263` leaves throughput an explicit gap; projection `native_chat_projection.rs:713` uses `native_assistant_facts::turn_duration_ms` instead |
 
+**Additional wave-44 verdicts (fourth batch):**
+
+| Item | Wave-44 verdict | Evidence / seam |
+| --- | --- | --- |
+| LAY-01..09 | `ALREADY_CORRECT` | Live path `native_view_layout::{Layout,compose_frame}` + `NativeView::presentation/sidebar_visible`, driven by `tui_entry.rs:8334 view.render_typed`; per-ID consumers traced (LAY-01 `tui_entry.rs:8334`; LAY-02 `native_view.rs:4089/2128`; LAY-03/05 `tui_entry.rs:8148/7389`; LAY-04 `rail_resize.preferred()`; LAY-06/07 `native_view.rs:1855-1856`; LAY-08 `tui_entry.rs:8973/8988`; LAY-09 `tui_entry.rs:7624`) |
+| LAY-10 | `REAL_GAP` | 107/108 fullscreen threshold + tabs-hide rule model-complete (`native_pane_resize.rs:551/558/586`, `native_host.rs:684/691`) but `NativeHost::new` is `#[cfg(test)]`-only (`native_host.rs:755,772`); `NativeView` carries no plugin-panel/terminal pane state; seam `tui_entry.rs:8334` |
+| LAY-11 | `REAL_GAP` | Precedence single-valued island-only; seam `native_view_layout.rs:808 right_pane` |
+| LAY-12 | `REAL_GAP` | Enter/permission guard in unstepped `native_host.rs:324-433`; only cosmetic `set_rail_interactive` live |
+| LAY-13 | `REAL_GAP` | handle/drag/double-click in `native_pane_resize.rs:276,308`, test-only |
+| LAY-14 | `ALREADY_CORRECT` | Independent scroll live-wired; consumed `tui_entry.rs:10010,7160,10196` |
+| LAY-15 | `REAL_GAP` | Reserved action row const self-asserted only (`native_view_layout.rs:1898`), not painted live |
+| SIDE-01 | `ALREADY_CORRECT` | `native_sidebar.rs:48-88,1346-1385`; live `native_view.rs:3356-3574` |
+| SIDE-02 | `ALREADY_CORRECT` | `native_sidebar.rs:1153-1306`; live `native_view_status.rs:829-887` |
+| SIDE-06 | `ALREADY_CORRECT` | `native_sidebar.rs:419-492`; live `native_view.rs:3512` |
+| SIDE-07 | `ALREADY_CORRECT` | `native_sidebar.rs:364-590`; live `native_view.rs:3471-3494` |
+| SIDE-09 | `ALREADY_CORRECT` | `native_view_status.rs:739-765`; `native_ui_preferences.rs:70-75`; live `tui_entry.rs:6772,10021-10036` |
+| SIDE-10 | `BLOCKED` | Rendering correct (`native_sidebar.rs:640-732,1408-1441`); derivation seam missing: `todo_http.rs:31-38` returns stored `session_todos` verbatim; `stage_session_revert` (`server/src/lib.rs:1193-1209`) stores boundary but never recomputes; `tui_entry.rs:7508` refetches stored list |
+| THEME-11 | `ALREADY_CORRECT` | Live loader `tui_entry.rs:6083` handles missing/invalid/unknown with fallback; consumer boot `:6744` + picker `:11425`; tests `:3020-3067` |
+| THEME-12 | `REAL_GAP` | `ThemeController` (`native_theme_runtime.rs:1860`, tests `:3803/:3830/:3860`) but picker confirm `tui_entry.rs:11422-11430` calls `load_native_theme`+`persist_theme_selection` directly; no live preview-on-move/cancel-revert |
+| THEME-13 | `REAL_GAP` | `SystemThemeState` (`native_theme_runtime.rs:2135`, tests `:3897/:3918/:3941`) but boot `tui_entry.rs:6738-6753` picks mode from prefs only; no palette probe/reply |
+| THEME-14 | `REAL_GAP` | `SyntaxStyleArena` (`native_theme_runtime.rs:2374`, test `:3986`) zero non-test callers; `native_paint` `tui_entry.rs:4469` installs no syntax style |
+
 ## Genuine gaps — live wiring (`REAL_GAP`)
 
 These have a faithful model + test but no live consumer.
