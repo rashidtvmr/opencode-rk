@@ -8524,6 +8524,7 @@ fn native_loop(
             native_input_decoder::InputEvent::TabPrevious => ("tab-previous", 0, None),
             native_input_decoder::InputEvent::TabSlot(_) => ("tab-slot", 0, None),
             native_input_decoder::InputEvent::TabReopen => ("tab-reopen", 0, None),
+            native_input_decoder::InputEvent::AgentCycle => ("agent-cycle", 0, None),
             native_input_decoder::InputEvent::ArrowLeft => ("left", 0, None),
             native_input_decoder::InputEvent::ArrowRight => ("right", 0, None),
             native_input_decoder::InputEvent::Escape => ("escape", 0, None),
@@ -10308,7 +10309,12 @@ fn native_loop(
             | native_input_decoder::InputEvent::TabNext
             | native_input_decoder::InputEvent::TabPrevious
             | native_input_decoder::InputEvent::TabSlot(_)
-            | native_input_decoder::InputEvent::TabReopen => continue,
+            | native_input_decoder::InputEvent::TabReopen
+            // CP-28: shift+tab decodes to `AgentCycle` (upstream
+            // `agent.cycle`, `config/keybind.ts:176`). It stays inert
+            // here because the live loop has no selected-agent state;
+            // see handoff cp28_status.
+            | native_input_decoder::InputEvent::AgentCycle => continue,
             // Defensive unreachable arm: focus reports are consumed above the
             // dialog/page dispatch, but this match stays exhaustive over
             // `InputEvent`.

@@ -53,6 +53,12 @@ pub(crate) enum InputEvent {
     /// already decoded as `AltArrowUp`. `alt+backspace` is NOT a tab binding -
     /// upstream uses it for `input.delete.word.backward` (`:244`).
     TabPrevious,
+    /// Kitty Shift+Tab (CSI 9;2u) and legacy back-tab (CSI Z).
+    /// Upstream `agent.cycle` is `shift+tab` (`config/keybind.ts:176`),
+    /// routed to `local.agent.move(1)` (`app.tsx:974-981`). Decoded
+    /// distinctly so a shift+tab never becomes typed text or an
+    /// ordinary Tab (which stays `session.tab.next`-free composer text).
+    AgentCycle,
     /// Kitty Ctrl+digit (CSI 49;5u .. 57;5u, 48;5u)
     /// (`session.tab.select.{1..10}`, `config/keybind.ts:152-161`).
     TabSlot(usize),
@@ -338,6 +344,10 @@ impl TerminalInputDecoder {
                 } else {
                     InputEvent::ArrowLeft
                 });
+            } else if self.state == State::Csi && self.len == 0 && byte == b'Z' {
+                // Legacy back-tab ESC [ Z; upstream `agent.cycle`
+                // (`config/keybind.ts:176`).
+                self.emit(InputEvent::AgentCycle);
             } else if self.state == State::Csi && byte == b'u' {
                 self.decode_kitty();
             } else if self.state == State::Csi
@@ -544,6 +554,12 @@ impl TerminalInputDecoder {
                     self.emit(InputEvent::TabPrevious);
                     return;
                 }
+                // shift+tab is `agent.cycle` (`config/keybind.ts:176`),
+                // not a session-tab chord.
+                (9, SHIFT) => {
+                    self.emit(InputEvent::AgentCycle);
+                    return;
+                }
                 (49..=57, CTRL) => {
                     self.emit(InputEvent::TabSlot((codepoint - 49) as usize));
                     return;
@@ -647,6 +663,12 @@ mod horizontal_cursor_regressions {
         assert_eq!(decoder.pop(), Some(InputEvent::TabNext), "ctrl+tab");
         for byte in b"\x1b[9;6u" { decoder.push(*byte, now); }
         assert_eq!(decoder.pop(), Some(InputEvent::TabPrevious), "ctrl+shift+tab");
+        // shift+tab is `agent.cycle` (`config/keybind.ts:176`), not a
+        // session-tab chord: Kitty CSI 9;2u and legacy CSI Z both decode.
+        for byte in b"\x1b[9;2u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::AgentCycle), "kitty shift+tab");
+        for byte in b"\x1b[Z" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::AgentCycle), "legacy CSI Z backtab");
         // `alt+down`/`alt+up` are already `AltArrowDown`/`AltArrowUp`, and
         // upstream binds neither `alt+tab` nor `alt+backspace` to a tab
         // command: `alt+backspace` is `input.delete.word.backward`
