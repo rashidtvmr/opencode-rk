@@ -37,6 +37,11 @@ use serde_json::{Map, Value};
 /// Upstream `maxLines = 10` collapsed budget for command + output
 /// (`routes/session/index.tsx:3094-3097`).
 pub const SHELL_BUDGET_LINES: usize = 10;
+/// Reduced-motion spinner sentinel (TOOL-002): the live loop passes this when
+/// `animations` is off so a busy row paints the upstream `⋯` fallback
+/// (`component/spinner.tsx:20`) instead of an animated Braille frame. Any
+/// other `Some(tick)` selects `spinner-frames` tick `tick % len`.
+pub const SPINNER_REDUCED_MOTION: u64 = u64::MAX;
 /// Upstream `commandLines = Math.min(2, maxLines)` (`collapse-tool-output.ts:36`).
 pub const SHELL_COMMAND_LINES: usize = 2;
 /// Upstream execute runtime-error preview: 4 lines
@@ -380,13 +385,37 @@ pub fn tool_state_rows(
     output: &str,
     is_error: bool,
 ) -> Vec<ToolRow> {
-    rows(width, &tool_display(width, name, status, args_json, output, is_error))
+    tool_state_rows_spin(width, name, status, args_json, output, is_error, None)
+}
+
+/// [`tool_state_rows`] with the live spinner frame for busy rows (TOOL-002).
+/// `spin` is the `FrameClock` animation tick (`now_ms / 80`, the upstream
+/// spinner `interval={80}`, `component/spinner.tsx:34`); the reduced-motion
+/// sentinel [`SPINNER_REDUCED_MOTION`] paints `⋯`; `None` keeps the static
+/// icon (the non-live default). Terminal rows ignore it.
+#[must_use]
+pub fn tool_state_rows_spin(
+    width: usize,
+    name: &str,
+    status: &str,
+    args_json: &str,
+    output: &str,
+    is_error: bool,
+    spin: Option<u64>,
+) -> Vec<ToolRow> {
+    rows(width, &tool_display(width, name, status, args_json, output, is_error), spin)
 }
 
 /// Render a call event that carries no result yet (`ChatPart::ToolCall`).
 #[must_use]
 pub fn tool_call_rows(width: usize, name: &str) -> Vec<ToolRow> {
-    tool_state_rows(width, name, "running", "", "", false)
+    tool_call_rows_spin(width, name, None)
+}
+
+/// [`tool_call_rows`] with the live spinner frame (TOOL-002).
+#[must_use]
+pub fn tool_call_rows_spin(width: usize, name: &str, spin: Option<u64>) -> Vec<ToolRow> {
+    tool_state_rows_spin(width, name, "running", "", "", false, spin)
 }
 
 /// Render a result event that arrived without a paired call
@@ -412,7 +441,7 @@ pub fn tool_result_rows(width: usize, name: &str, output: &str, is_error: bool) 
             }
         }
     }
-    rows(width, &display)
+    rows(width, &display, None)
 }
 
 /// Build the per-tool display model from caller facts only.
@@ -1212,10 +1241,16 @@ fn duration_text(ms: u64) -> String {
 /// caller metadata has been folded in via [`apply_tool_metadata`]).
 #[must_use]
 pub fn rows_for_display(width: usize, display: &ToolDisplay) -> Vec<ToolRow> {
-    rows(width, display)
+    rows_for_display_spin(width, display, None)
 }
 
-fn rows(width: usize, display: &ToolDisplay) -> Vec<ToolRow> {
+/// [`rows_for_display`] with the live spinner frame for busy rows (TOOL-002).
+#[must_use]
+pub fn rows_for_display_spin(width: usize, display: &ToolDisplay, spin: Option<u64>) -> Vec<ToolRow> {
+    rows(width, display, spin)
+}
+
+fn rows(width: usize, display: &ToolDisplay, spin: Option<u64>) -> Vec<ToolRow> {
     // Upstream `fg` memo (`routes/session/index.tsx:2837-2847`) checks the
     // pending-permission state BEFORE the runtime-failure state, so a
     // permission-pending call paints its whole row `text.feedback.warning`
@@ -1225,7 +1260,26 @@ fn rows(width: usize, display: &ToolDisplay) -> Vec<ToolRow> {
     } else {
         display.status.row_class()
     };
-    let header_prefix = header_prefix(display.icon);
+    // TOOL-002 (`message-parts.tsx:223-234`): while the row streams or runs
+    // upstream swaps the icon column for the animated `spinner-frames.ts`
+    // glyph (`Match when={props.spinner}` renders `<Spinner>` instead of the
+    // static icon). `spin` is the live `FrameClock` tick (`now_ms / 80`, the
+    // upstream spinner `interval={80}`, `component/spinner.tsx:34`). Non-live
+    // callers pass `None` and keep the static icon byte-identical; the
+    // reduced-motion tick [`SPINNER_REDUCED_MOTION`] paints the `⋯` fallback
+    // (`component/spinner.tsx:20`). Terminal rows always keep the icon.
+    let glyph: String = if display.status.is_running() {
+        match spin {
+            Some(SPINNER_REDUCED_MOTION) => "\u{22ef}".to_owned(),
+            Some(tick) => crate::native_box_style::BRAILLE_FRAMES
+                [(tick % crate::native_box_style::BRAILLE_FRAMES.len() as u64) as usize]
+                .to_string(),
+            None => display.icon.to_owned(),
+        }
+    } else {
+        display.icon.to_owned()
+    };
+    let header_prefix = header_prefix(&glyph);
     let mut out = Vec::new();
     push_wrapped(&mut out, width, &display.label, &header_prefix, class);
     // `StatusBadge` (`routes/session/index.tsx:2875-2883`) is a separate,
@@ -1475,7 +1529,7 @@ mod tests {
     fn shell_budget_is_ten_lines_with_truncation_indicator() {
         let output: String = (1..=30).map(|n| format!("line {n}\n")).collect();
         let display = tool_display(80, "bash", "completed", r#"{"command":"echo hi"}"#, &output, false);
-        let rows = rows(80, &display);
+        let rows = rows(80, &display, None);
         assert!(rows.len() <= SHELL_BUDGET_LINES, "rows: {}", rows.len());
         assert!(rows[0].0.contains("echo hi"));
         let body = &rows[1..];
@@ -1876,6 +1930,32 @@ mod tests {
         }
         // Continuations still start after the fixed icon column.
         assert!(rows[1].0.starts_with(ROW_INDENT));
+    }
+
+    #[test]
+    fn busy_rows_paint_the_live_spinner_frame() {
+        // TOOL-002 (`message-parts.tsx:223-234`): a streaming/running row
+        // replaces the icon column with the animated `spinner-frames.ts`
+        // glyph at upstream `interval={80}` (`component/spinner.tsx:34`);
+        // the frame index is the live `FrameClock` tick (`now_ms / 80`).
+        let args = json!({"command": "make"});
+        let frame0 = tool_state_rows_spin(40, "shell", "streaming", &args.to_string(), "", false, Some(0));
+        assert!(frame0[0].0.contains('\u{280b}'), "tick 0 paints frame 0: {frame0:?}");
+        assert!(!frame0[0].0.contains('\u{2839}'), "{frame0:?}");
+        let frame2 = tool_state_rows_spin(40, "shell", "streaming", &args.to_string(), "", false, Some(2));
+        assert!(frame2[0].0.contains('\u{2839}'), "tick 2 paints frame 2: {frame2:?}");
+        // Reduced motion (the live loop's sentinel) paints the upstream `⋯`
+        // fallback (`spinner.tsx:20`).
+        let reduced =
+            tool_state_rows_spin(40, "shell", "streaming", &args.to_string(), "", false, Some(SPINNER_REDUCED_MOTION));
+        assert!(reduced[0].0.contains('\u{22ef}'), "{reduced:?}");
+        // The non-live default (`None`) keeps the static icon byte-identical,
+        // and terminal rows keep the status icon regardless of the live frame.
+        let static_row = tool_state_rows(40, "shell", "streaming", &args.to_string(), "", false);
+        assert!(static_row[0].0.contains('$'), "{static_row:?}");
+        assert!(!static_row[0].0.contains('\u{280b}'), "{static_row:?}");
+        let done = tool_state_rows_spin(40, "shell", "completed", &args.to_string(), "", false, Some(7));
+        assert!(done[0].0.contains('$'), "{done:?}");
     }
 
     #[test]

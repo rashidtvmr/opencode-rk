@@ -916,6 +916,12 @@ impl NativeView {
         self.chat.set_markdown_mode(mode);
     }
 
+    /// Publish the live spinner frame index for busy tool rows (TOOL-002);
+    /// `None` paints the reduced-motion fallback. Forwarded to [`ChatView`].
+    pub fn set_spin_frame(&mut self, frame: Option<u64>) {
+        self.chat.set_spin_frame(frame);
+    }
+
     pub fn tab_reservation(&self) -> TabReservation {
         self.tab_reservation
     }

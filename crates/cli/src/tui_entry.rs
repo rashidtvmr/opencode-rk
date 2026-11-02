@@ -7904,6 +7904,15 @@ fn native_loop(
             animation_tick = next_tick;
             needs_paint = true;
         }
+        // TOOL-002: publish the live spinner frame for busy tool rows. The
+        // upstream `<spinner frames interval={80}>` cadence is one frame per
+        // animation tick (`now_ms / 80`); reduced motion paints the `⋯`
+        // fallback via the sentinel (`component/spinner.tsx:20`).
+        view.set_spin_frame(if animations {
+            Some(animation_start.now_ms() / 80)
+        } else {
+            Some(crate::tui_entry::native_turn::native_tool_rows::SPINNER_REDUCED_MOTION)
+        });
         // The pointer close-hold auto-releases after 5 s (`session-tabs.tsx:
         // 868-900`); a released hold repaints the ordinary adaptive strip.
         if close_hold
