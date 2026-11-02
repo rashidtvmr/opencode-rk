@@ -661,8 +661,18 @@ pub fn workspace_files(root: &std::path::Path) -> Vec<Item> {
             if name.starts_with('.') || matches!(name, "target" | "node_modules" | "vendor" | "dist" | "build") { continue; }
             let Ok(metadata) = path.symlink_metadata() else { continue; };
             if metadata.file_type().is_symlink() { continue; }
-            if metadata.is_dir() && depth < 8 { pending.push_back((path, depth + 1)); }
-            else if metadata.is_file() {
+            if metadata.is_dir() && depth < 8 {
+                // CP-40: upstream `@` completion includes directories so a
+                // mention can expand into the folder (`autocomplete.tsx:379`
+                // `isDirectory: item.type === "directory"`, expanded at
+                // `:719`). The directory is both offered and traversed.
+                let Ok(relative) = path.strip_prefix(&root) else { continue; };
+                let Some(relative) = relative.to_str() else { continue; };
+                if relative.len() <= 512 && !relative.chars().any(|ch| ch.is_control() || ch.is_whitespace()) {
+                    items.push(Item { value: format!("@{relative}"), description: "directory".into(), disabled: false });
+                }
+                pending.push_back((path, depth + 1));
+            } else if metadata.is_file() {
                 let Ok(relative) = path.strip_prefix(&root) else { continue; };
                 let Some(relative) = relative.to_str() else { continue; };
                 if relative.len() > 512 || relative.chars().any(|ch| ch.is_control() || ch.is_whitespace()) { continue; }
@@ -935,6 +945,26 @@ mod tests {
         let items = workspace_files(&root);
         assert!(items.iter().any(|item| item.value == "@src/café.rs"));
         assert!(!items.iter().any(|item| item.value.contains(".env") || item.value.contains("target/") || item.value.contains("linked/")));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cp40_workspace_mentions_include_directories_for_expansion() {
+        let root = std::env::temp_dir().join(format!("oc2-completion-dir-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("src/nested")).unwrap();
+        std::fs::write(root.join("src/main.rs"), "fixture").unwrap();
+        let items = workspace_files(&root);
+        let dir = items.iter().find(|item| item.value == "@src").expect("directory mention offered");
+        assert_eq!(dir.description, "directory");
+        let file = items.iter().find(|item| item.value == "@src/main.rs").expect("file mention offered");
+        assert_eq!(file.description, "file");
+        // The directory flag (not the plain value) drives expansion.
+        let mut completion = Completion::default();
+        for item in &items {
+            if item.description == "directory" { completion.set_directory(&item.value, true); }
+        }
+        assert!(completion.directory("@src"));
+        assert!(!completion.directory("@src/main.rs"));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

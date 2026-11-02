@@ -6953,6 +6953,14 @@ fn native_loop(
             mentions.sort_by(|a, b| {
                 b.description.starts_with("agent").cmp(&a.description.starts_with("agent")).then_with(|| a.value.cmp(&b.value))
             });
+            // CP-40: record which mentions name a directory so Tab/Enter expands
+            // the folder instead of inserting it as a plain file mention
+            // (`autocomplete.tsx:719`).
+            for item in &mentions {
+                if item.description == "directory" {
+                    completion.set_directory(&item.value, true);
+                }
+            }
             completion.replace_mentions(mentions);
             needs_paint = true;
         } else if completion_load.as_ref().is_some_and(|load| load.is_finished()) {
