@@ -391,6 +391,80 @@ mod tab23_leader_followup_tests {
     }
 }
 
+/// CP-30: the prompt-history walk (`prompt/history.tsx:103-117` `move`,
+/// `prompt/index.tsx:1020-1095` `prompt.history.prev/next`). Upstream walks
+/// history only when the cursor sits at the text start (`prev`) or the text
+/// end (`next`); otherwise the visual cursor moves and no walk happens. The
+/// restored draft follows `restore_history_entry` semantics
+/// (`native_composer.rs:986-998`): cursor at the start when walking back,
+/// at the end when walking forward.
+#[cfg(feature = "native")]
+fn history_walk_entry(
+    history: &mut crate::native_paste::PromptHistory,
+    direction: i8,
+    current_text: &str,
+    current_cursor: usize,
+) -> Option<(String, usize)> {
+    let at_edge = if direction < 0 {
+        current_cursor == 0
+    } else {
+        current_cursor == current_text.len()
+    };
+    if !at_edge {
+        return None;
+    }
+    let entry = history.move_through(direction, current_text)?;
+    let text = entry.prompt.text;
+    let cursor = if direction < 0 { 0 } else { text.len() };
+    Some((text, cursor))
+}
+
+#[cfg(all(test, feature = "native"))]
+mod cp30_history_walk_tests {
+    use super::history_walk_entry;
+    use crate::native_paste::{DraftEntry, HistoryEntry, PromptHistory};
+
+    fn seeded() -> PromptHistory {
+        let mut history = PromptHistory::new();
+        for text in ["one", "two"] {
+            history.append(HistoryEntry {
+                prompt: DraftEntry {
+                    text: text.to_owned(),
+                    ..Default::default()
+                },
+            });
+        }
+        history
+    }
+
+    /// RED before: `PromptHistory::move_through` and the
+    /// `restore_history_entry` cursor rule were modelled but never dispatched
+    /// from the live composer keys. GREEN after: the walk reproduces
+    /// `history.tsx:103-117` and `index.tsx:1048-1095` (cursor 0 when walking
+    /// back, cursor at the end when walking forward).
+    #[test]
+    fn cp30_history_walk_restores_back_and_forward_with_upstream_cursor() {
+        let mut history = seeded();
+        let (text, cursor) = history_walk_entry(&mut history, -1, "", 0).unwrap();
+        assert_eq!((text.as_str(), cursor), ("two", 0));
+        let (text, cursor) = history_walk_entry(&mut history, -1, "two", 0).unwrap();
+        assert_eq!((text.as_str(), cursor), ("one", 0));
+        let (text, cursor) = history_walk_entry(&mut history, 1, "one", 3).unwrap();
+        assert_eq!((text.as_str(), cursor), ("two", 3));
+    }
+
+    #[test]
+    fn cp30_history_walk_requires_edge_cursor_and_unedited_text() {
+        let mut history = seeded();
+        // Upstream `prev` bails to visual-cursor motion off the text start
+        // (`index.tsx:1048-1053`); no walk happens.
+        assert_eq!(history_walk_entry(&mut history, -1, "draft", 2), None);
+        // An edited draft invalidates the walk (`history.tsx:107-108`).
+        assert!(history.move_through(-1, "").is_some());
+        assert_eq!(history_walk_entry(&mut history, -1, "edited", 0), None);
+    }
+}
+
 /// The composer Enter submit decision, fed from the live loop's facts.
 /// Upstream Enter invokes textarea `onSubmit` -> `submit()`
 /// (`component/prompt/index.tsx:1790-1795`); delivery is `queue` exactly
@@ -6453,6 +6527,9 @@ fn native_loop(
     }
     let mut children_panel = crate::native_children::Panel::default();
     let mut children_refresh = Instant::now();
+    // CP-30: prompt history for the live Up/Down walk
+    // (`prompt/history.tsx:103-141`).
+    let mut prompt_history = crate::native_paste::PromptHistory::new();
     // Running children for the prompt-footer live label
     // (`prompt/footer.tsx:22-28`). Kept as observed facts: an unavailable or
     // malformed listing clears them instead of leaving a stale count.
@@ -10070,6 +10147,36 @@ fn native_loop(
                     needs_paint = true;
                     continue;
                 }
+                // CP-30: prompt-history walk (`prompt/index.tsx:1020-1095`,
+                // `prompt/history.tsx:103-117`) before the Ctrl-B/Ctrl-N
+                // normalization. The completion panel owned arrows earlier
+                // (`:8733-8734`, upstream `!auto()?.visible`), and the
+                // disabled child composer stays inert. A successful walk
+                // consumes the event; otherwise arrows keep their existing
+                // normalization below.
+                if !live
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.parent_session_id.is_some())
+                {
+                    if let Some((text, cursor)) = history_walk_entry(
+                        &mut prompt_history,
+                        if direction == native_input_decoder::InputEvent::ArrowUp {
+                            -1
+                        } else {
+                            1
+                        },
+                        &draft,
+                        draft_cursor,
+                    ) {
+                        draft = text;
+                        draft_cursor = cursor;
+                        crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
+                        completion.sync(&draft);
+                        utf8.reset();
+                        needs_paint = true;
+                        continue;
+                    }
+                }
                 if direction == native_input_decoder::InputEvent::ArrowUp {
                     2
                 } else {
@@ -10847,6 +10954,18 @@ fn native_loop(
                     serde_json::json!({"dialog":format!("{dialog:?}"),"page":format!("{:?}",view.page()),"composer_bytes":draft.len(),"model":selected.as_ref().map(|model|model.qualified()),"daemon_attached":live.is_some(),"busy":worker.is_some()}),
                 );
                 utf8.reset();
+                // CP-30: capture a submitted draft in prompt history
+                // (`index.tsx:1192-1205` -> `prompt/history.tsx:118-141`
+                // `append`), so the Up/Down walk can restore it. Page-enter
+                // and palette routes never reach the prompt.
+                if !page_open && palette_route.is_none() && !draft.is_empty() {
+                    prompt_history.append(crate::native_paste::HistoryEntry {
+                        prompt: crate::native_paste::DraftEntry {
+                            text: draft.clone(),
+                            ..Default::default()
+                        },
+                    });
+                }
                 // Set only by command-input Enter (Commands page); the
                 // composer path leaves it `None` and parses the draft
                 // exactly as before.
