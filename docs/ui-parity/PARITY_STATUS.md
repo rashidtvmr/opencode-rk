@@ -234,7 +234,7 @@ the wave-44 verdict supersedes it.
 | Verdict | Count |
 | --- | --- |
 | `ALREADY_CORRECT` | 136 |
-| `REAL_GAP` | 68 |
+| `REAL_GAP` | 67 |
 | `BLOCKED` | 18 |
 | **Total** | **223** |
 
@@ -243,12 +243,13 @@ the wave-44 verdict supersedes it.
 | Item | Commit | What changed |
 | --- | --- | --- |
 | LAY-15 | `774ccbcd` | Live reserved action row is now derived from `SESSION_RESERVED_ACTION_ROWS` (`native_layout.rs:380`) instead of a hardcoded `u16::from(composer_room > 0)`; the live composed frame asserts `regions.jump.h` against the const. Behavior-preserving. Focused tests + full CLI suite (2164/0) green. |
+| CP-01 | `a98c9afb` | Live session composer slot now resolves through `native_prompt_pane::prompt_slot` (`NativeView::session_prompt_slot`) instead of ad-hoc `permission_rows.is_some()`; an open auxiliary composer/dock or child-without-forms wins the slot, permission outranks form (upstream Switch `routes/session/index.tsx:1591-1660`). Focused tests + full CLI suite (2166/0) green. |
 
 ### `REAL_GAP` — faithful model + focused test exist, no live consumer (68)
 
 `PAR-04, PAR-09, PAR-10, PAR-11, PAR-19, LAY-10, LAY-11, LAY-12, LAY-13,
 LAY-17, TAB-04, TAB-06, TAB-10, SIDE-04, SIDE-08, THEME-05, THEME-08,
-THEME-09, THEME-12, THEME-13, THEME-14, CP-01, CP-02, CP-05, CP-06, CP-07,
+THEME-09, THEME-12, THEME-13, THEME-14, CP-02, CP-05, CP-06, CP-07,
 CP-08, CP-09, CP-11, CP-42, MSG-001, MSG-002, MSG-003, MSG-004, MSG-007,
 MSG-008, MSG-009, MSG-010, MD-007, MD-008, MD-009, TOOL-006, MEDIA-001,
 DIALOG-02, DIALOG-04, DIALOG-06, DIALOG-07, DIALOG-08, DIALOG-09, DIALOG-10,
