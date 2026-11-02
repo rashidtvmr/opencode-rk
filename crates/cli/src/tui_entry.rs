@@ -2712,6 +2712,9 @@ struct DiffRgba {
     added_text: Rgba,
     removed_text: Rgba,
     context_text: Rgba,
+    /// `theme.diff.text.hunkHeader` (`packages/theme/src/tui/schema.ts:169`,
+    /// `routes/session/index.tsx:3473`).
+    hunk_header_text: Rgba,
     added_background: Rgba,
     removed_background: Rgba,
     context_background: Rgba,
@@ -2727,6 +2730,7 @@ fn diff_rgba(semantic: &crate::native_theme_runtime::SemanticPalette) -> DiffRgb
         added_text: rgba(&semantic.diff.added_text),
         removed_text: rgba(&semantic.diff.removed_text),
         context_text: rgba(&semantic.diff.context_text),
+        hunk_header_text: rgba(&semantic.diff.hunk_header_text),
         added_background: rgba(&semantic.diff.added_background),
         removed_background: rgba(&semantic.diff.removed_background),
         context_background: rgba(&semantic.diff.context_background),
@@ -2745,6 +2749,10 @@ fn chat_row_background(class: Option<&crate::native_view_chat::ChatRowClass>, ro
         // Unchanged diff lines use the `diff.delta` background
         // (`theme.diff.background.context`, `packages/theme/src/tui/syntax.ts:81`).
         Some(ChatRowClass::DiffContext) => Some(diff.map_or(root, |diff| diff.context_background)),
+        // The hunk-header row sits on the line-number/gutter surface
+        // (`lineNumberBg={theme.diff.background.context}`,
+        // `packages/tui/src/component/patch-diff.tsx:80`).
+        Some(ChatRowClass::DiffHunkHeader) => Some(diff.map_or(root, |diff| diff.context_background)),
         // Assistant completion footer rows (upstream `AssistantFooter`) are
         // plain text on the root surface — upstream draws no box for them.
         Some(ChatRowClass::AssistantFooter) | Some(ChatRowClass::FooterError) => None,
@@ -2774,6 +2782,8 @@ fn chat_row_foreground(class: &crate::native_view_chat::ChatRowClass, text_color
         // Unchanged diff lines use the `diff.delta` foreground
         // (`theme.diff.text.context`, `packages/theme/src/tui/syntax.ts:81`).
         ChatRowClass::DiffContext => diff.map_or(muted, |diff| diff.context_text),
+        // `hunkFg={theme.diff.text.hunkHeader}` (`routes/session/index.tsx:3473`).
+        ChatRowClass::DiffHunkHeader => diff.map_or(muted, |diff| diff.hunk_header_text),
         ChatRowClass::ToolError => error,
         ChatRowClass::RetryNotice => warning,
         ChatRowClass::ToolPermission => warning,
@@ -2890,6 +2900,7 @@ mod chat_surface_inset_tests {
             added_text: Rgba::new(11, 111, 11, 255),
             removed_text: Rgba::new(99, 9, 9, 255),
             context_text: Rgba::new(55, 55, 88, 255),
+            hunk_header_text: Rgba::new(66, 66, 99, 255),
             added_background: Rgba::new(22, 222, 22, 255),
             removed_background: Rgba::new(88, 8, 8, 255),
             context_background: Rgba::new(44, 44, 66, 255),
@@ -2926,6 +2937,19 @@ mod chat_surface_inset_tests {
             chat_row_foreground(&crate::native_view_chat::ChatRowClass::DiffContext, text_color, muted, error, warning, Some(&diff)),
             diff.context_text,
             "diff context prose = diff.text.context"
+        );
+        // W24C-DIFF-HUNK-THEME: the hunk-header row uses `diff.text.hunkHeader`
+        // over the line-number surface `diff.background.context` (upstream
+        // `patch-diff.tsx:79-81`: hunk box bg = lineNumberBg, text fg = hunkFg).
+        assert_eq!(
+            chat_row_background(Some(&crate::native_view_chat::ChatRowClass::DiffHunkHeader), root, panel, element, Some(&diff)),
+            Some(diff.context_background),
+            "hunk header surface = diff.background.context (lineNumberBg)"
+        );
+        assert_eq!(
+            chat_row_foreground(&crate::native_view_chat::ChatRowClass::DiffHunkHeader, text_color, muted, error, warning, Some(&diff)),
+            diff.hunk_header_text,
+            "hunk header label = diff.text.hunkHeader"
         );
         // Semantic-less theme keeps the historical literal fallback.
         assert_eq!(

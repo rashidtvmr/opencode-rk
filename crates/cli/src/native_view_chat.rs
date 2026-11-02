@@ -783,6 +783,13 @@ pub enum ChatRowClass {
     /// `packages/theme/src/tui/syntax.ts:79-81`,
     /// `component/patch-diff.tsx:45,80`), NOT the generic metadata surface.
     DiffContext,
+    /// Unified-diff hunk header row (`@@ -a,b +c,d @@`): upstream paints the
+    /// hunk label with `theme.diff.text.hunkHeader` over the line-number
+    /// surface `theme.diff.background.context`
+    /// (`packages/tui/src/component/patch-diff.tsx:79-81`,
+    /// `routes/session/index.tsx:3471-3489`: `hunkFg={theme.diff.text.hunkHeader}`,
+    /// `lineNumberBg={theme.diff.background.context}`).
+    DiffHunkHeader,
     /// Reasoning/thinking part text.
     Thinking,
     /// Tool call header (`[tool] name (id)`).
@@ -2171,6 +2178,7 @@ fn push_diff_fence(rows: &mut Vec<(String, ChatRowClass)>, width: usize, prefix:
             crate::native_diff_view::DiffLineRole::Removed => ChatRowClass::DiffRemoved,
             crate::native_diff_view::DiffLineRole::Context
             | crate::native_diff_view::DiffLineRole::Blank => ChatRowClass::DiffContext,
+            crate::native_diff_view::DiffLineRole::HunkHeader => ChatRowClass::DiffHunkHeader,
             _ => ChatRowClass::Metadata,
         };
         rows.push((truncate_row(&format!("{prefix}{}", line.text), width), class));
@@ -2622,6 +2630,7 @@ fn typed_message_rows_with_prefix_spans_mode(
                         crate::native_diff_view::DiffLineRole::Removed => ChatRowClass::DiffRemoved,
                         crate::native_diff_view::DiffLineRole::Context
                         | crate::native_diff_view::DiffLineRole::Blank => ChatRowClass::DiffContext,
+                        crate::native_diff_view::DiffLineRole::HunkHeader => ChatRowClass::DiffHunkHeader,
                         _ => ChatRowClass::Metadata,
                     };
                     rows.push((truncate_row(&format!("    {}", line.text), width), class));
@@ -6986,7 +6995,7 @@ mod footer_v3_consumer_tests {
             "{rows:?}"
         );
         assert!(
-            rows.iter().any(|(row, class)| *class == ChatRowClass::Metadata && row.contains("@@")),
+            rows.iter().any(|(row, class)| *class == ChatRowClass::DiffHunkHeader && row.contains("@@")),
             "{rows:?}"
         );
         // The diff surface replaces the fence rows; it never paints them.
