@@ -10693,3 +10693,46 @@ Verifiers (independent, do not inherit author justification): the six landings
 (`W26-VERIFY-LANDINGS`), plus THEME-16, MSG-002, TOOL-008, SIDE-04, THEME-06,
 THEME-10.
 Route errors: `@apimaster-gpt-6-luna` remains `$0` balance — no dispatches.
+
+## Wave-26 convergence — landed + verified (2026-11-02, cont.)
+
+### New canonical landings (all with full CLI suite GREEN, single-threaded)
+- `6cc1c0bd` **DIALOG-12**: model-picker `free` flag now derived from the
+  catalogue `cost` array (`isFreeModel` = non-empty all-zero input,
+  `model-options.tsx:38-39`); flows into `ModelCandidate.free` ->
+  `is_free_group`/`order_models`. Also carries `cost` on the catalog wire.
+- `edf49e76` **DIFF-002**: `ChatRowClass::DiffHunkHeader` paints the unified
+  diff `@@ … @@` label with `diff.text.hunkHeader` over
+  `diff.background.context` (`patch-diff.tsx:79-81`), not generic `Metadata`.
+- `9f9fe594` **revert MSG-002**: independent review returned NEEDS_FIX
+  (collapsed stand-in exposes member content; GroupToggle shadows the message
+  menu; hardcoded Medium verbosity). Whole slice reverted pending a real
+  group-summary header producer.
+- `6eafc1af` **CP-30**: live prompt-history walk (`history_walk_entry`,
+  edge-cursor + unedited gate, `history.tsx:103-117`), append on submit.
+- `8029d40a` **SIDE-04 follow-up**: `native_progress::locale_number` now
+  rounds half-away-from-zero to match JS `toFixed(1)` ties (`1250 -> 1.3K`),
+  deduplicated `usage_status_label` through it.
+- `b72923b8` **THEME-16 follow-up**: failed-copy Ctrl+C clears AND propagates
+  (`selection.ts:79-81`); `TextSelection::is_single_cell` so a click never
+  consumes Escape (`:89-90`).
+
+### Wave-26 verifier outcome table (independent, `verified:false`)
+- `a`/CONFIRMED: THEME-10 matrix (W26-VERIFY-THEME10), THEME-06 all claims.
+- NEEDS_FIX -> fixed: SIDE-04 tie-rounding + duplication (landed `8029d40a`);
+  THEME-16 claim-4 propagate + claim-5 single-cell (landed `b72923b8`);
+  MSG-002 (reverted `9f9fe594`).
+- Honest `(c)` blockers (exact seam named in each handoff.json): CP-12 footer
+  (no `now_ms`; host row + height rebalance), DIALOG-19 overlay (5 missing
+  producers/compositor), DIALOG-20 toast (no live ChromeModel owner), LAY-13
+  pane (5-item docked-pane seam), LAY-20 plugin (no plugin-status producer),
+  MSG-008 TPS (per-step streamed stamp absent; server emits one message per
+  turn, not per step), SIDE-05 limit (no `/api/experimental/usage/limits`),
+  THEME-07 alpha (constant-bg `paint_color`), TOOL-002 spinner (producer +
+  per-row colour channel + paint arm + clock), TOOL-007 (no runtime producer),
+  TOOL-010/011 (stale vs new `child_out` signature; needs re-author).
+- Empty (0 files, re-dispatch): W26-VERIFY-LANDINGS, W26-VERIFY-TOOL008;
+  W26-VERIFY-THEME06 dir present but no handoff; W26-CP28-SHIFTTAB and
+  W26-DIALOG11-SEARCH produced no artifacts.
+
+Canonical HEAD after this batch: `b72923b8`. Full suite `2124 passed; 0 failed`.
