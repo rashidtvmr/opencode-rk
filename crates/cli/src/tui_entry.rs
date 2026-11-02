@@ -10034,6 +10034,19 @@ fn native_loop(
                         needs_paint = true;
                         continue;
                     }
+                    if view.onboarding_dismiss_action(x, y) {
+                        // SIDE-12: persist the exact upstream `getting-started`
+                        // dismissal (`footer.tsx:11-16,44-49`) so the box stays
+                        // dismissed across restart. Failure is reported, never
+                        // faked.
+                        if let Err(error) =
+                            crate::native_ui_preferences::UiPreferences::dismiss_onboarding(&state_path, true)
+                        {
+                            append_transcript(&mut transcript, format!("error: onboarding dismiss persist failed: {error}"));
+                        }
+                        needs_paint = true;
+                        continue;
+                    }
                     if let Some((name, included)) = view.mcp_sidebar_action(x, y) {
                         if let Some(snapshot) = live.as_ref() {
                             let encoded: String = name.bytes().flat_map(|byte| {

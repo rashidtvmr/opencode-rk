@@ -228,6 +228,11 @@ pub struct NativeView {
     frame_busy: bool,
     mcp_hit: Vec<(String, bool, u16, u16, u16)>,
     mcp_toggle_hit: Option<(u16, u16, u16)>,
+    /// SIDE-12: absolute hit rect (left, top, width) of the painted
+    /// getting-started dismiss row, published only while the onboarding box
+    /// shows. Invalidated on any scroll/resize/route change exactly like
+    /// `mcp_toggle_hit`, so a stale rect can never dismiss a hidden box.
+    onboarding_dismiss_hit: Option<(u16, u16, u16)>,
     sidebar_content_height: usize,
     /// Frame reservation owned by the live session-tab shell.
     tab_reservation: TabReservation,
@@ -252,6 +257,52 @@ mod page_spacing_tests {
         let mut view = NativeView::new(148, 30); view.set_session_route(true);
         view.apply_mcp(&serde_json::json!({"a":{"status":"connected"},"b":{"status":"disabled"},"c":{"status":"needs_auth"}})).unwrap(); let _ = view.render("", &[], false, &[]);
         assert!(view.mcp_toggle_hit.is_some()); view.scroll_sidebar_at(view.presentation().sidebar_offset.unwrap() + 1, 2, 1); assert!(view.mcp_toggle_hit.is_none()); let _ = view.render("", &[], false, &[]); assert!(view.mcp_toggle_hit.is_some()); view.resize(160, 30); assert!(view.mcp_toggle_hit.is_none());
+    }
+
+    /// SIDE-12: the getting-started `✕` publishes a hit rect only while the box
+    /// shows; a real press dismisses it (and clears the hit), a miss does not,
+    /// and a dismissed box republishes nothing.
+    #[test]
+    fn onboarding_dismiss_hit_is_published_only_while_the_box_shows() {
+        let mut view = NativeView::new(148, 30);
+        view.set_session_route(true);
+        view.set_onboarding(Some(crate::native_view_status::native_sidebar::Onboarding {
+            dismissed: false,
+            integrations_known: true,
+            connected_provider: false,
+        }));
+        let _ = view.render("", &[], false, &[]);
+        let (left, top, _) = view.onboarding_dismiss_hit.expect("painted dismiss hit");
+        assert!(
+            !view.onboarding_dismiss_action(left + 1, top.saturating_sub(1)),
+            "a miss above the row does nothing"
+        );
+        assert!(
+            view.onboarding_dismiss_action(left + 1, top),
+            "a real press dismisses the showing box"
+        );
+        let _ = view.render("", &[], false, &[]);
+        assert!(
+            view.onboarding_dismiss_hit.is_none(),
+            "a dismissed box publishes no dismiss hit"
+        );
+    }
+
+    /// SIDE-12: a scroll invalidates the published dismiss geometry until the
+    /// next paint, so a stale rect can never dismiss a hidden box.
+    #[test]
+    fn scroll_clears_old_onboarding_dismiss_geometry_until_repaint() {
+        let mut view = NativeView::new(148, 30);
+        view.set_session_route(true);
+        view.set_onboarding(Some(crate::native_view_status::native_sidebar::Onboarding {
+            dismissed: false,
+            integrations_known: true,
+            connected_provider: false,
+        }));
+        let _ = view.render("", &[], false, &[]);
+        assert!(view.onboarding_dismiss_hit.is_some());
+        view.scroll_sidebar_at(view.presentation().sidebar_offset.unwrap() + 1, 2, 1);
+        assert!(view.onboarding_dismiss_hit.is_none());
     }
 
     #[test]
@@ -907,6 +958,7 @@ impl NativeView {
             frame_busy: false,
             mcp_hit: Vec::new(),
             mcp_toggle_hit: None,
+            onboarding_dismiss_hit: None,
             sidebar_content_height: 0,
             tab_reservation: TabReservation::default(),
             markdown_mode: crate::markdown_runs::MarkdownMode::Rendered,
@@ -920,6 +972,7 @@ impl NativeView {
         if self.tab_reservation != reservation {
             self.mcp_hit.clear();
             self.mcp_toggle_hit = None;
+            self.onboarding_dismiss_hit = None;
             self.context_usage_hit = None;
             self.live_footer_hit = None;
         }
@@ -945,6 +998,7 @@ impl NativeView {
     pub fn resize(&mut self, cols: u16, rows: u16) {
         self.mcp_hit.clear();
         self.mcp_toggle_hit = None;
+        self.onboarding_dismiss_hit = None;
         self.context_usage_hit = None;
         self.live_footer_hit = None;
         self.sidebar_content_height = 0;
@@ -1668,6 +1722,7 @@ impl NativeView {
         if self.box_appearance != appearance {
             self.mcp_hit.clear();
             self.mcp_toggle_hit = None;
+            self.onboarding_dismiss_hit = None;
         }
         self.box_appearance = appearance;
     }
@@ -1676,6 +1731,7 @@ impl NativeView {
         if self.session_route != session_route {
             self.mcp_hit.clear();
             self.mcp_toggle_hit = None;
+            self.onboarding_dismiss_hit = None;
             self.context_usage_hit = None;
             self.live_footer_hit = None;
             self.dock_hit.clear();
@@ -1692,6 +1748,7 @@ impl NativeView {
     pub fn toggle_sidebar(&mut self) {
         self.mcp_hit.clear();
         self.mcp_toggle_hit = None;
+        self.onboarding_dismiss_hit = None;
         self.live_footer_hit = None;
         let visible = self.sidebar_visible();
         self.sidebar_hidden = visible;
@@ -1702,6 +1759,7 @@ impl NativeView {
     pub fn set_sidebar_hidden(&mut self, hidden: bool) {
         self.mcp_hit.clear();
         self.mcp_toggle_hit = None;
+        self.onboarding_dismiss_hit = None;
         self.live_footer_hit = None;
         self.sidebar_hidden = hidden;
         self.sidebar_open = false;
@@ -1744,6 +1802,7 @@ impl NativeView {
         if self.parent_session != parent_session {
             self.mcp_hit.clear();
             self.mcp_toggle_hit = None;
+            self.onboarding_dismiss_hit = None;
             self.live_footer_hit = None;
             self.dock_hit.clear();
         }
@@ -2195,6 +2254,7 @@ impl NativeView {
         self.status.apply_mcp(value)?;
         self.mcp_hit.clear();
         self.mcp_toggle_hit = None;
+        self.onboarding_dismiss_hit = None;
         Ok(())
     }
 
@@ -2219,6 +2279,7 @@ impl NativeView {
         let result = self.status.apply_todos(value);
         self.mcp_hit.clear();
         self.mcp_toggle_hit = None;
+        self.onboarding_dismiss_hit = None;
         result
     }
 
@@ -2226,6 +2287,7 @@ impl NativeView {
         self.status.set_todos_error(reason);
         self.mcp_hit.clear();
         self.mcp_toggle_hit = None;
+        self.onboarding_dismiss_hit = None;
     }
 
     pub fn mcp_sidebar_toggle_action(&mut self, x: u16, y: u16) -> bool {
@@ -2233,7 +2295,24 @@ impl NativeView {
         let Some((left, top, width)) = self.mcp_toggle_hit else { return false; };
         if x < left || x >= left.saturating_add(width) || y != top { return false; }
         if !self.status.toggle_mcp_sidebar() { return false; }
-        self.mcp_hit.clear(); self.mcp_toggle_hit = None; true
+        self.mcp_hit.clear(); self.mcp_toggle_hit = None; self.onboarding_dismiss_hit = None; true
+    }
+
+    /// SIDE-12: the getting-started `✕` (`footer.tsx:44-49`, the `onMouseUp`
+    /// dismiss). Hit-tests the published dismiss row and, on a real press,
+    /// marks the onboarding fact dismissed. Returns `true` only when a showing
+    /// box was actually dismissed, so the caller persists the upstream
+    /// `getting-started` key exactly once per real press and never for a stale
+    /// or hidden box.
+    pub fn onboarding_dismiss_action(&mut self, x: u16, y: u16) -> bool {
+        if self.presentation().sidebar_offset.is_none() || self.dialogs.intercepts_input() || self.command_palette_open() { return false; }
+        let Some((left, top, width)) = self.onboarding_dismiss_hit else { return false; };
+        if x < left || x >= left.saturating_add(width) || y != top { return false; }
+        let dismissed = self.status.dismiss_onboarding();
+        self.mcp_hit.clear();
+        self.mcp_toggle_hit = None;
+        self.onboarding_dismiss_hit = None;
+        dismissed
     }
 
     pub fn mcp_sidebar_action(&self, x: u16, y: u16) -> Option<(String, bool)> {
@@ -2273,6 +2352,7 @@ impl NativeView {
             .scroll_sidebar(lines, self.sidebar_content_height);
         self.mcp_hit.clear();
         self.mcp_toggle_hit = None;
+        self.onboarding_dismiss_hit = None;
         true
     }
 
@@ -3272,6 +3352,7 @@ impl NativeView {
         };
         self.mcp_hit.clear();
         self.mcp_toggle_hit = None;
+        self.onboarding_dismiss_hit = None;
         let mut sidebar: Vec<String> = sidebar_styled
             .iter()
             .map(|line| padded(&line.text, presentation.sidebar_width))
@@ -3419,6 +3500,13 @@ impl NativeView {
                 });
                 if matches!(self.status.mcp_sidebar_row_hit(38, self.sidebar_content_height, index), Some(crate::native_view_status::McpSidebarHit::Toggle)) {
                     self.mcp_toggle_hit = Some((left.saturating_add(sidebar_inset), if sidebar_frame_painted { sidebar_top.saturating_add(1).saturating_add(index as u16) } else { index as u16 }, sidebar_text_width));
+                }
+                // SIDE-12: publish the getting-started `✕` hit rect only while
+                // the box is actually showing, so a press can dismiss it
+                // (`footer.tsx:44-49`). Row indexes address the same rows the
+                // styled renderer returned.
+                if self.status.onboarding_dismiss_row(38, self.sidebar_content_height) == Some(index) {
+                    self.onboarding_dismiss_hit = Some((left.saturating_add(sidebar_inset), if sidebar_frame_painted { sidebar_top.saturating_add(1).saturating_add(index as u16) } else { index as u16 }, sidebar_text_width));
                 }
                 if let Some((name, included)) =
                     self.status
