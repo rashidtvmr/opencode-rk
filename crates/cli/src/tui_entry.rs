@@ -3488,6 +3488,184 @@ fn menu_submits(event: &native_input_decoder::InputEvent) -> bool {
     matches!(event, native_input_decoder::InputEvent::Byte(13 | 10))
 }
 
+/// Move the open message menu's highlight (`DialogSelect` Up/Down,
+/// `ui/dialog-select.tsx:1590-1602`).
+#[cfg(feature = "native")]
+fn message_menu_move(menu: &mut crate::native_view_chat::SessionMessageMenu, forward: bool) {
+    match menu {
+        crate::native_view_chat::SessionMessageMenu::Actions(actions) => actions.move_selection(forward),
+        crate::native_view_chat::SessionMessageMenu::PendingSteer(pending) => pending.move_selection(forward),
+    }
+}
+
+/// The captured `(session_id, message_id)` identity of an open menu, read
+/// before dispatch so the later mutable borrow of the menu slot is free.
+#[cfg(feature = "native")]
+fn message_menu_identity(
+    menu: &crate::native_view_chat::SessionMessageMenu,
+) -> (Option<String>, Option<String>) {
+    match menu {
+        crate::native_view_chat::SessionMessageMenu::Actions(actions) => (
+            actions.session_id().map(str::to_owned),
+            actions.message_id().map(str::to_owned),
+        ),
+        crate::native_view_chat::SessionMessageMenu::PendingSteer(pending) => (
+            None,
+            pending.message_id().map(str::to_owned),
+        ),
+    }
+}
+
+/// Resolve the highlighted option into the request the caller must execute
+/// (`dialog-message.tsx:29-90`, `index.tsx:2403-2416`).
+#[cfg(feature = "native")]
+enum MessageMenuDispatch {
+    Actions(crate::native_view_chat::MessageActionOutcome),
+    Pending(Option<crate::native_view_chat::PendingSteerEffect>),
+}
+
+#[cfg(feature = "native")]
+fn message_menu_dispatch(
+    menu: &crate::native_view_chat::SessionMessageMenu,
+) -> MessageMenuDispatch {
+    match menu {
+        crate::native_view_chat::SessionMessageMenu::Actions(actions) => {
+            MessageMenuDispatch::Actions(actions.select_selected())
+        }
+        crate::native_view_chat::SessionMessageMenu::PendingSteer(pending) => {
+            MessageMenuDispatch::Pending(pending.select_selected())
+        }
+    }
+}
+
+/// Path of the revert-stage route (`packages/protocol/src/groups/session.ts:465`).
+#[cfg(feature = "native")]
+fn revert_stage_request_path(session_id: &str) -> String {
+    format!("/api/sessions/{session_id}/revert/stage")
+}
+
+/// Body of the revert-stage route; the server contract is `{"messageID":...}`
+/// (`StageRevertBody`, `crates/server/src/lib.rs:1179-1181`).
+#[cfg(feature = "native")]
+fn revert_stage_request_body(message_id: &str) -> String {
+    serde_json::json!({ "messageID": message_id }).to_string()
+}
+
+/// Execute every effect the resolved message action produced
+/// (`dialog-message.tsx:34-88`). The view performs no IO itself; each effect
+/// is a real request here or a named gap.
+#[cfg(feature = "native")]
+#[allow(clippy::too_many_arguments)]
+fn dispatch_message_actions(
+    outcome: crate::native_view_chat::MessageActionOutcome,
+    session_id: Option<&str>,
+    origin: Option<&str>,
+    auth: Option<&str>,
+    draft: &mut String,
+    draft_cursor: &mut usize,
+    draft_parts: &mut Vec<crate::native_paste::PastedText>,
+    transcript: &mut NativeChatHistory,
+) {
+    use crate::native_view_chat::MessageActionEffect;
+    use std::io::Write as _;
+    for effect in outcome.effects {
+        match effect {
+            // The dialog clears on every jump/revert (`dialog-message.tsx:34`).
+            MessageActionEffect::CloseMenu => {}
+            MessageActionEffect::JumpToMessage { .. } => {
+                // Upstream's handler itself only clears the dialog
+                // (`dialog-message.tsx:31-34`); the scroll-to-message alignment
+                // is owned by the transcript scroll controller, which oc2 has
+                // no live row-anchor reveal for yet. Named seam.
+            }
+            MessageActionEffect::RestorePrompt { text, .. } => {
+                let cursor = text.len();
+                crate::native_composer::replace_draft_with_cursor(
+                    draft,
+                    draft_cursor,
+                    text,
+                    cursor,
+                );
+                draft_parts.clear();
+            }
+            MessageActionEffect::StageRevert { message_id } => {
+                let Some(session_id) = session_id else {
+                    append_transcript(
+                        transcript,
+                        "error: revert stage: no session for this message".to_owned(),
+                    );
+                    continue;
+                };
+                let path = revert_stage_request_path(session_id);
+                let body = revert_stage_request_body(&message_id);
+                let result = origin
+                    .ok_or_else(|| "daemon unavailable".to_owned())
+                    .and_then(|origin| {
+                        http_request_with_status(origin, "POST", &path, Some(&body), auth)
+                            .and_then(|(reply, status)| {
+                                if (200..300).contains(&status) {
+                                    Ok(reply)
+                                } else {
+                                    Err(format!("HTTP {status}"))
+                                }
+                            })
+                    });
+                if let Err(error) = result {
+                    append_transcript(
+                        transcript,
+                        format!("error: revert stage failed: {error}"),
+                    );
+                }
+            }
+            MessageActionEffect::CopyToClipboard { text, truncated } => {
+                let frame = selection_clipboard_frame(&text);
+                match std::io::stdout().lock().write_all(frame.as_bytes()) {
+                    Ok(()) => {
+                        if truncated {
+                            append_transcript(transcript, "copied message (truncated)".to_owned());
+                        }
+                    }
+                    Err(error) => append_transcript(
+                        transcript,
+                        format!("error: clipboard write failed: {error}"),
+                    ),
+                }
+            }
+            MessageActionEffect::ForkSession { .. } => {
+                // `dialog-fork.tsx:16-30` replaces the dialog with the fork
+                // picker; oc2 has no live fork dialog host yet. Named seam.
+                append_transcript(
+                    transcript,
+                    "fork: session fork dialog is not available yet".to_owned(),
+                );
+            }
+        }
+    }
+}
+
+/// Execute the "Pending steer" select's request
+/// (`index.tsx:2403-2416`). The upstream `session.inbox.update` /
+/// `session.inbox.cancel` routes have no oc2 server endpoint yet, so this
+/// records the request as an explicit, non-silent gap.
+#[cfg(feature = "native")]
+fn dispatch_pending_steer(
+    effect: Option<crate::native_view_chat::PendingSteerEffect>,
+    transcript: &mut NativeChatHistory,
+) {
+    use crate::native_view_chat::PendingSteerEffect;
+    match effect {
+        Some(PendingSteerEffect::MoveToQueue { message_id }) => append_transcript(
+            transcript,
+            format!("pending steer: move {message_id} to queue is not available yet"),
+        ),
+        Some(PendingSteerEffect::Cancel { message_id }) => append_transcript(
+            transcript,
+            format!("pending steer: cancel {message_id} is not available yet"),
+        ),
+        None => {}
+    }
+}
+
 /// Build the popup frame for an open message menu, centered in the
 /// viewport like upstream's `DialogSelect` (`dialog-message.tsx:29-90`,
 /// `ui/dialog-select.tsx`). Rows come from the model
@@ -3501,12 +3679,12 @@ fn message_menu_frame(
 ) -> crate::native_tab_context_menu::MenuFrame {
     const MENU_WIDTH: u16 = 44;
     let width = MENU_WIDTH.min(viewport.width);
-    let rows: Vec<(String, crate::native_view_chat::ChatRowClass)> = match menu {
+    let (rows, selected) = match menu {
         crate::native_view_chat::SessionMessageMenu::Actions(actions) => {
-            actions.render_rows(usize::from(width))
+            (actions.render_rows(usize::from(width)), actions.selected_index())
         }
         crate::native_view_chat::SessionMessageMenu::PendingSteer(pending) => {
-            pending.render_rows(usize::from(width))
+            (pending.render_rows(usize::from(width)), pending.selected_index())
         }
     };
     let height = u16::try_from(rows.len()).unwrap_or(u16::MAX).min(viewport.height);
@@ -3526,8 +3704,15 @@ fn message_menu_frame(
             },
             label,
             enabled: true,
-            hovered: false,
-            background: crate::native_theme_runtime::Slot::BackgroundPanel,
+            // `DialogSelect` paints the highlighted option with the element
+            // background and the others with the panel background
+            // (`ui/dialog-select.tsx`, `native_tab_context_menu.rs:275-291`).
+            hovered: index == selected,
+            background: if index == selected {
+                crate::native_theme_runtime::Slot::BackgroundElement
+            } else {
+                crate::native_theme_runtime::Slot::BackgroundPanel
+            },
             foreground: crate::native_theme_runtime::Slot::Text,
         })
         .collect();
@@ -8670,12 +8855,44 @@ fn native_loop(
         }
         // MSG-006 message menu owns input while open (upstream renders the
         // select in `DialogSelect`, `dialog-message.tsx:13-23`): Escape /
-        // Ctrl-C / Ctrl-D dismiss and Enter closes; option effect dispatch
-        // and pointer option selection are named follow-up gaps. Every
-        // other event is swallowed while the menu is open (modal).
-        if message_menu.is_some() {
-            if menu_dismisses(&event) || menu_submits(&event) {
-                message_menu = None;
+        // Ctrl-C / Ctrl-D dismiss, Up/Down move the highlight
+        // (`ui/dialog-select.tsx:1590-1602`) and Enter resolves the
+        // highlighted option into its effect (`dialog-message.tsx:29-90`).
+        // Every other event is swallowed while the menu is open (modal).
+        if let Some(mut menu) = message_menu.take() {
+            let mut keep = true;
+            if menu_dismisses(&event) {
+                keep = false;
+            } else if matches!(event, native_input_decoder::InputEvent::ArrowUp) {
+                message_menu_move(&mut menu, false);
+            } else if matches!(event, native_input_decoder::InputEvent::ArrowDown) {
+                message_menu_move(&mut menu, true);
+            } else if menu_submits(&event) {
+                let (session_id, _message_id) = message_menu_identity(&menu);
+                match message_menu_dispatch(&menu) {
+                    MessageMenuDispatch::Actions(outcome) => {
+                        dispatch_message_actions(
+                            outcome,
+                            session_id.as_deref(),
+                            live.as_ref().map(|snapshot| snapshot.origin.as_str()),
+                            auth,
+                            &mut draft,
+                            &mut draft_cursor,
+                            &mut draft_parts,
+                            &mut transcript,
+                        );
+                    }
+                    MessageMenuDispatch::Pending(effect) => {
+                        dispatch_pending_steer(effect, &mut transcript);
+                    }
+                }
+                // The menu dismisses on every dispatched action. Copy upstream
+                // clears only after the write resolves (`dialog-message.tsx:72`);
+                // the OSC52 write here is synchronous, so it closes too.
+                keep = false;
+            }
+            if keep {
+                message_menu = Some(menu);
             }
             needs_paint = true;
             continue;

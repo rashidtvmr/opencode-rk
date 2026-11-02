@@ -3316,6 +3316,10 @@ pub struct MessageActionMenu {
     session_id: Option<String>,
     message_id: Option<String>,
     snapshot: Option<ChatMessage>,
+    /// Highlighted option index. `DialogSelect` keeps a selection store seeded
+    /// at `0` and moved with Up/Down (`ui/dialog-select.tsx:151,1590-1602`),
+    /// which the frame paints as the hovered row.
+    selected: usize,
 }
 
 impl MessageActionMenu {
@@ -3395,6 +3399,41 @@ impl MessageActionMenu {
         MessageAction::ALL
     }
 
+    /// Highlighted option index (`DialogSelect` selection store,
+    /// `ui/dialog-select.tsx:151`). Always a valid `MessageAction::ALL` index.
+    #[must_use]
+    pub fn selected_index(&self) -> usize {
+        self.selected.min(MessageAction::ALL.len().saturating_sub(1))
+    }
+
+    /// Move the highlight, wrapping (`DialogSelect` Up/Down move with wrap,
+    /// `ui/dialog-select.tsx:1590-1602`).
+    pub fn move_selection(&mut self, forward: bool) {
+        let len = MessageAction::ALL.len();
+        if len == 0 {
+            return;
+        }
+        let current = self.selected_index();
+        self.selected = if forward {
+            (current + 1) % len
+        } else {
+            (current + len - 1) % len
+        };
+    }
+
+    /// The highlighted option.
+    #[must_use]
+    pub fn selected_action(&self) -> MessageAction {
+        MessageAction::ALL[self.selected_index()]
+    }
+
+    /// Resolve the highlighted option against the current snapshot
+    /// (`ui/dialog-select.tsx:1690`, the Enter/onSelect path).
+    #[must_use]
+    pub fn select_selected(&self) -> MessageActionOutcome {
+        self.select(self.selected_action())
+    }
+
     /// Menu rows: one row per option, `"  {title}  {description}"`, so the
     /// renderer can show the select without a dialog chrome (`DialogSelect`
     /// renders each option's title and description, `ui/dialog-select.tsx`).
@@ -3403,10 +3442,13 @@ impl MessageActionMenu {
         if !self.is_open() {
             return Vec::new();
         }
+        let selected = self.selected_index();
         MessageAction::ALL
             .iter()
-            .map(|action| {
-                let row = format!("  {}  {}", action.title(), action.description());
+            .enumerate()
+            .map(|(index, action)| {
+                let marker = if index == selected { ">" } else { " " };
+                let row = format!("{marker} {}  {}", action.title(), action.description());
                 (truncate_row(&row, width), ChatRowClass::MenuOption)
             })
             .collect()
@@ -3417,8 +3459,7 @@ impl MessageActionMenu {
     /// * Jump to — upstream only clears the dialog (`dialog-message.tsx:34`);
     ///   the jump itself is reported so the caller can align the message.
     /// * Revert — restore the prompt only for a user snapshot, then always
-    ///   stage the revert with the captured id (`dialog-message.tsx:40-52`).
-    /// * Copy — do nothing when the snapshot is gone (`dialog-message.tsx:60`),
+    ///   stage the revert with the captured id (`dialog-message.tsx:40-52`).    /// * Copy — do nothing when the snapshot is gone (`dialog-message.tsx:60`),
     ///   otherwise copy the raw text; the menu closes only on a successful
     ///   write (`dialog-message.tsx:72-77`).
     /// * Fork — do nothing unless the snapshot is a user message
@@ -3554,6 +3595,9 @@ pub enum PendingSteerEffect {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PendingSteerMenu {
     message_id: Option<String>,
+    /// Highlighted option index (`DialogSelect` selection store,
+    /// `ui/dialog-select.tsx:151`); always a valid `PendingAction::ALL` index.
+    selected: usize,
 }
 
 impl PendingSteerMenu {
@@ -3588,16 +3632,54 @@ impl PendingSteerMenu {
         PendingAction::ALL
     }
 
-    /// One row per option (`ui/dialog-select.tsx` renders title-only options).
+    /// One row per option (`ui/dialog-select.tsx` renders title-only options),
+    /// with the highlighted row marked (`DialogSelect` hover row).
     #[must_use]
     pub fn render_rows(&self, width: usize) -> Vec<(String, ChatRowClass)> {
         if !self.is_open() {
             return Vec::new();
         }
+        let selected = self.selected_index();
         PendingAction::ALL
             .iter()
-            .map(|action| (truncate_row(&format!("  {}", action.title()), width), ChatRowClass::MenuOption))
+            .enumerate()
+            .map(|(index, action)| {
+                let marker = if index == selected { ">" } else { " " };
+                (truncate_row(&format!("{marker} {}", action.title()), width), ChatRowClass::MenuOption)
+            })
             .collect()
+    }
+
+    /// Highlighted option index (`ui/dialog-select.tsx:151`).
+    #[must_use]
+    pub fn selected_index(&self) -> usize {
+        self.selected.min(PendingAction::ALL.len().saturating_sub(1))
+    }
+
+    /// Move the highlight with wrap (`ui/dialog-select.tsx:1590-1602`).
+    pub fn move_selection(&mut self, forward: bool) {
+        let len = PendingAction::ALL.len();
+        if len == 0 {
+            return;
+        }
+        let current = self.selected_index();
+        self.selected = if forward {
+            (current + 1) % len
+        } else {
+            (current + len - 1) % len
+        };
+    }
+
+    /// The highlighted option.
+    #[must_use]
+    pub fn selected_action(&self) -> PendingAction {
+        PendingAction::ALL[self.selected_index()]
+    }
+
+    /// Resolve the highlighted option (`ui/dialog-select.tsx:1690`).
+    #[must_use]
+    pub fn select_selected(&self) -> Option<PendingSteerEffect> {
+        self.select(self.selected_action())
     }
 
     /// Resolve one option. The menu must be cleared only after the caller's
@@ -7001,7 +7083,9 @@ mod footer_v3_consumer_tests {
         );
         let rows = pending.render_rows(24);
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].0, "  Move to queue");
+        // The first row is highlighted (`DialogSelect` selection store seeded
+        // at 0, `ui/dialog-select.tsx:151`).
+        assert_eq!(rows[0].0, "> Move to queue");
         assert_eq!(rows[1].0, "  Delete");
         assert_eq!(PendingAction::ALL.map(PendingAction::title), ["Move to queue", "Delete"]);
         // The menu stays open until the caller's mutation succeeds.
@@ -7021,6 +7105,51 @@ mod footer_v3_consumer_tests {
             actions.close();
             assert!(actions.render_rows(80).is_empty());
         }
+    }
+
+    #[test]
+    fn message_menu_cursor_moves_with_wrap_and_resolves_the_highlight() {
+        let user = ChatMessage::text(ChatRole::User, "hello");
+        let mut menu = MessageActionMenu::new();
+        menu.open("ses_1", "msg_1", Some(&user));
+        // DialogSelect seeds selection at 0 (`ui/dialog-select.tsx:151`).
+        assert_eq!(menu.selected_index(), 0);
+        assert_eq!(menu.selected_action(), MessageAction::JumpTo);
+        // Down moves to the second option; Up wraps back to the top.
+        menu.move_selection(true);
+        assert_eq!(menu.selected_index(), 1);
+        assert_eq!(menu.selected_action(), MessageAction::Revert);
+        assert_eq!(
+            menu.select_selected().effects,
+            vec![
+                MessageActionEffect::RestorePrompt {
+                    message_id: "msg_1".to_owned(),
+                    text: "hello".to_owned(),
+                },
+                MessageActionEffect::StageRevert { message_id: "msg_1".to_owned() },
+                MessageActionEffect::CloseMenu,
+            ]
+        );
+        menu.move_selection(false);
+        assert_eq!(menu.selected_index(), 0);
+        menu.move_selection(false);
+        assert_eq!(menu.selected_index(), 3, "Up from the top wraps to the last option");
+        assert_eq!(menu.selected_action(), MessageAction::Fork);
+        // The highlighted row is marked in the render (`DialogSelect` hover row).
+        let rows = menu.render_rows(80);
+        assert_eq!(rows[0].0, "  Jump to  view message in session");
+        assert!(rows[3].0.starts_with("> Fork"));
+
+        let mut pending = PendingSteerMenu::new();
+        pending.open("msg_2");
+        assert_eq!(pending.selected_action(), PendingAction::MoveToQueue);
+        pending.move_selection(true);
+        assert_eq!(
+            pending.select_selected(),
+            Some(PendingSteerEffect::Cancel { message_id: "msg_2".to_owned() })
+        );
+        pending.move_selection(true);
+        assert_eq!(pending.selected_index(), 0, "Down from the last option wraps");
     }
 
     #[test]
