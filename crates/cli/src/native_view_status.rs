@@ -2701,6 +2701,40 @@ mod mcp_sidebar_behavior_regression {
         assert!(view.render_sidebar(80, 20).iter().any(|row| row == "MCP (1 active, 1 error)"));
     }
 
+    /// SIDE-11: a Todo collapse persisted while the list was long survives the
+    /// list shrinking to <=2 rows. Upstream keeps the flag (`todo.tsx:26`
+    /// refuses to toggle at <=2), still prints the plain heading
+    /// (`todo.tsx:37-39`) and always shows the rows without an arrow
+    /// (`todo.tsx:26/42`).
+    #[test]
+    fn todo_collapse_persisted_from_a_longer_list_survives_shrinking_to_two() {
+        let mut view = StatusView::default();
+        view.apply_todos(&json!({"todos":[
+            {"id":"t1","content":"First task","status":"pending","priority":"high"},
+            {"id":"t2","content":"Second task","status":"in_progress","priority":"high"},
+            {"id":"t3","content":"Third task","status":"pending","priority":"low"}
+        ]}))
+        .unwrap();
+        assert!(view.toggle_todo_sidebar());
+        assert!(!view.todo_sidebar_open());
+        view.apply_todos(&json!({"todos":[
+            {"id":"t1","content":"First task","status":"pending","priority":"high"},
+            {"id":"t2","content":"Second task","status":"in_progress","priority":"high"}
+        ]}))
+        .unwrap();
+        assert_eq!(view.todo_open, Some(false), "the persisted flag is not reset");
+        assert!(view.todo_sidebar_open(), "<=2 rows stay visible despite the persisted collapse");
+        let rows = view.render_sidebar(80, 20);
+        assert!(rows.iter().any(|row| row == "Todo"), "{rows:?}");
+        assert!(!rows.iter().any(|row| row.starts_with('▶')), "no arrow at <=2");
+        assert!(rows.iter().any(|row| row.contains("[ ] First task")), "{rows:?}");
+        assert!(rows.iter().any(|row| row.contains("[•] Second task")), "{rows:?}");
+        // Toggling is still refused while <=2 rows exist.
+        assert!(!view.toggle_todo_sidebar());
+        assert!(view.todo_sidebar_open());
+        assert!(view.render_sidebar(80, 20).iter().any(|row| row == "Todo"));
+    }
+
     #[test]
     fn typed_header_only_survives_title_todo_collision_and_scroll() {
         let mut view = StatusView::default();
