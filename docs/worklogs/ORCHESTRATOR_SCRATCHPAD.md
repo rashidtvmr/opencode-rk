@@ -11428,3 +11428,31 @@ command, not a lane-specific one.
   (`tui_entry.rs:12489-12497`) vs upstream dispatching only listed commands
   (`prompt/index.tsx:1154-1158`); `tests/e2e/native_custom_command.py:108-115` encodes
   the divergent behavior. Needs a contract decision — not on the 7-gate path.
+
+## 2026-11-02 — Phase-1 acceptance reached and pushed (HEAD `5e91ffae`)
+
+- Landed this session: `15b21afc` (custom-command e2e dismisses the first-run
+  config-import offer), `787a8784` (LAY-15 always reserve the one-row action
+  strip), `5e91ffae` (judge: add the two installed parity checks).
+- Re-pinned the frozen judge blob via `python3 tools/recovery_guard.py repin
+  --review <record> --allow-tooling`; `tools/phase1_judge.py` pin moved
+  `302e6f7e…` -> `f9c7ebf3…`. `recovery_guard.py` GREEN.
+- Built the release receipt at `5e91ffae` (`target/release/oc2` unchanged since
+  the judge edit is Python-only) and ran the artifact-mode judge with
+  `--observe-state --sync-state`.
+- **Judge result: `status: PASS`, `acceptanceEligible: true`, 17/17 checks
+  exit 0, 7/7 gates PASS, `runtimeUnresolvedFailures: []`.** The two legacy rows
+  resolved: `OBS-NATIVE-UPSTREAM-LAYOUT-PARITY` INTEGRATED -> ACCEPTED,
+  `OBS-NATIVE-CUSTOM-COMMAND-PARITY` OPEN -> SUPERSEDED. Runtime rows now
+  17 SUPERSEDED + 4 ACCEPTED, 0 unresolved.
+- **Pushed `main-v2` to `git@github.com:rashidtvmr/opencode-rk.git`:
+  `a595ed24..5e91ffae`.** Verified with `git ls-remote` (remote head now
+  `5e91ffae`).
+- Wave-40 dispatch: ~24 artifact-first workers on the remaining parity-kit
+  obligations (CP-36, CP-23, CP-26, LAY-17, LAY-20, SIDE-03/05/10/12, MSG-005/006/008,
+  TAB-21, THEME-10, TOOL-002/008/011/012, DIALOG-05/20, FORM-002, STATE-003,
+  MEDIA01-FIX, THEME14-FIX) plus reviews (TAB-07, TAB-23, FORMHOST, judge x2).
+- Verdicts so far: REVIEWJUDGE APPROVE; **REVIEW-TAB23 NEEDS_FIX** (test-only
+  resolver, unreachable `TabCommand::Close` arm, no keybind ingestion — negative
+  verdict stands, candidate not landed); CP-26/SIDE-05/DIFF-002/SIDE-10
+  ALREADY_CORRECT (no patch); DIALOG-05 patch emitted (PREVERIFIED).
