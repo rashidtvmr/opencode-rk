@@ -97,6 +97,24 @@ mod tests {
         assert!(!fits_vertical(68, 5));
         assert!(fits_vertical(106, 42));
     }
+    /// LAY-04. The live rail-resize clamp respects the exact 5/72 bounds and the
+    /// 44-column content minimum (`ui/layout.ts:2-5,15-20`):
+    /// `max(5, min(width, 72, total - 44))`. The compact transition at 11/12 is
+    /// owned by the rail renderer (`native_tab_rail::COMPACT_BREAKPOINT`).
+    #[test] fn lay_04_clamp_respects_five_seventy_two_and_content_min_forty_four() {
+        // Lower bound 5, upper bound 72.
+        assert_eq!(clamp_width(0, 200), MIN_WIDTH);
+        assert_eq!(clamp_width(1, 200), MIN_WIDTH);
+        assert_eq!(clamp_width(MIN_WIDTH, 200), 5);
+        assert_eq!(clamp_width(MAX_WIDTH, 200), 72);
+        assert_eq!(clamp_width(200, 200), 72);
+        // min-content 44: `min(width, 72, total - 44)`, floored at 5.
+        assert_eq!(clamp_width(72, CONTENT_MIN_WIDTH + MAX_WIDTH), 72, "total - 44 = 72");
+        assert_eq!(clamp_width(72, CONTENT_MIN_WIDTH + MAX_WIDTH - 1), 71, "total - 44 = 71");
+        // `total - 44` at or below the compact floor saturates at MIN_WIDTH.
+        assert_eq!(clamp_width(72, CONTENT_MIN_WIDTH + MIN_WIDTH - 1), MIN_WIDTH, "total - 44 = 4");
+        assert_eq!(clamp_width(72, 30), MIN_WIDTH, "total < 44 saturates");
+    }
     #[test] fn drag_release_cancel_and_double_click_are_owned() {
         let mut state = ResizeState::new(42, 42, 120);
         assert!(state.press(1000, 41, 120));
