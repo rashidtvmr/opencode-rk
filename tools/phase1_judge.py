@@ -165,6 +165,29 @@ def main():
                 security_env,
             )
         )
+        checks.append(
+            run(
+                "native_upstream_layout_parity",
+                [
+                    "cargo",
+                    "test",
+                    "--locked",
+                    "-p",
+                    "opencode-rk-cli",
+                    "--test",
+                    "upstream_layout_parity",
+                    "--",
+                    "--test-threads=1",
+                ],
+                env,
+            )
+        )
+        checks.append(
+            run(
+                "native_custom_command_parity",
+                [py, "tests/e2e/native_custom_command.py", *common, "--artifact-dir", str(evidence / "custom-command")],
+            )
+        )
 
     check_map = {c["name"]: c for c in checks}
     gate_defs = json.loads((ROOT / "recovery" / "phase1-gates.json").read_text(encoding="utf-8"))
