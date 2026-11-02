@@ -33,6 +33,7 @@
 use crate::native_view_chat::ChatRowClass;
 use crate::native_view_layout::visit_unpadded_cells;
 use serde_json::{Map, Value};
+use unicode_segmentation::UnicodeSegmentation;
 
 /// Upstream `maxLines = 10` collapsed budget for command + output
 /// (`routes/session/index.tsx:3094-3097`).
@@ -985,10 +986,15 @@ fn shell_display(
 
 /// Port of `collapseToolOutput` (`collapse-tool-output.ts:4-24`). Returns the
 /// head preview and whether anything was dropped.
+///
+/// The budget unit is the **code point** (`Array.from(output).length`,
+/// `Array.from(preview).slice(0, maxChars - 1)` at
+/// `collapse-tool-output.ts:6,13,16-18`) — never display cells or grapheme
+/// clusters — so the preview is exactly `max_chars - 1` code points plus `…`.
 #[must_use]
 pub fn collapse_tool_output(output: &str, max_lines: usize, max_chars: usize) -> (String, bool) {
     let lines: Vec<&str> = output.split('\n').collect();
-    if lines.len() <= max_lines && cells(output) <= max_chars {
+    if lines.len() <= max_lines && output.chars().count() <= max_chars {
         return (output.to_owned(), false);
     }
     let mut visible: Vec<String> = lines.iter().take(max_lines).map(|line| (*line).to_owned()).collect();
@@ -998,8 +1004,9 @@ pub fn collapse_tool_output(output: &str, max_lines: usize, max_chars: usize) ->
         }
     }
     let preview = visible.join("\n");
-    if cells(&preview) > max_chars {
-        return (truncate_cells(&preview, max_chars.saturating_sub(1)) + "…", true);
+    if preview.chars().count() > max_chars {
+        let head: String = preview.chars().take(max_chars.saturating_sub(1)).collect();
+        return (format!("{head}…"), true);
     }
     (preview, true)
 }
@@ -1028,26 +1035,32 @@ pub fn collapse_tail(output: &str, max_lines: usize, max_chars: usize) -> String
     format!("{label}\n{}", take_last_cells(&preview, available))
 }
 
-/// Port of `collapseShellCommand` (`collapse-tool-output.ts:53-87`): at most
+/// Port of `collapseShellCommand` (`collapse-tool-output.ts:51-87`): at most
 /// `max_lines` visual rows within `line_width` cells, `…` when clipped.
+///
+/// The unit of iteration is the **grapheme cluster** (`Locale.graphemes(input)`
+/// with `stringWidth(segment)` at `collapse-tool-output.ts:55,64`) — never the
+/// code point — so combining sequences, flag pairs and joined emoji stay whole
+/// across row wraps, and the overflow pop removes exactly one cluster
+/// (`visible.pop()` at `collapse-tool-output.ts:76-79`).
 #[must_use]
 pub fn collapse_shell_command(input: &str, max_lines: usize, line_width: usize) -> (String, bool, usize) {
-    let mut visible = String::new();
+    let mut visible: Vec<&str> = Vec::new();
     let mut lines = 1usize;
     let mut width = 0usize;
     let mut overflow = false;
-    for ch in input.chars() {
-        if ch == '\n' {
+    for segment in input.graphemes(true) {
+        if segment == "\n" {
             if lines >= max_lines {
                 overflow = true;
                 break;
             }
-            visible.push(ch);
+            visible.push(segment);
             lines += 1;
             width = 0;
             continue;
         }
-        let next = char_cells(ch);
+        let next = cells(segment);
         if width + next > line_width {
             if lines >= max_lines {
                 overflow = true;
@@ -1056,17 +1069,19 @@ pub fn collapse_shell_command(input: &str, max_lines: usize, line_width: usize) 
             lines += 1;
             width = 0;
         }
-        visible.push(ch);
+        visible.push(segment);
         width += next;
     }
     if !overflow {
         return (input.to_owned(), false, lines);
     }
     if width >= line_width {
-        // Drop the glyph that overflowed so the ellipsis replaces it.
+        // Drop the cluster that filled the row so the ellipsis replaces it.
+        // Upstream then does `width -= stringWidth(removed)`; `width` is not
+        // returned, so that subtraction is inoperative and omitted here.
         visible.pop();
     }
-    (format!("{visible}…"), true, lines)
+    (format!("{}…", visible.concat()), true, lines)
 }
 
 /// Port of `collapseShellOutput` (`collapse-tool-output.ts:26-51`): command and
@@ -1095,7 +1110,10 @@ pub fn collapse_shell_output(
         return (command, String::new(), command_overflow);
     }
     let lines = max_lines.saturating_sub(used_lines).saturating_sub(1).max(1);
-    let chars = max_chars.saturating_sub(cells(&command) + 2).max(1);
+    // Upstream subtracts `Array.from(command.output).length` code points
+    // (`collapse-tool-output.ts:42`) — the shared budget is counted in code
+    // points, not display cells.
+    let chars = max_chars.saturating_sub(command.chars().count() + 2).max(1);
     let (_, overflow) = collapse_tool_output(output, lines, chars);
     let body = if overflow {
         collapse_tail(output, lines, chars)
@@ -1420,11 +1438,6 @@ fn cells(text: &str) -> usize {
     visit_unpadded_cells(text, MAX_CELLS, |_, _| {})
 }
 
-fn char_cells(ch: char) -> usize {
-    let mut buf = [0u8; 4];
-    cells(ch.encode_utf8(&mut buf))
-}
-
 fn strip(text: &str) -> String {
     crate::native_transcript::strip_ansi(&clip(text, MAX_ARGS_BYTES))
 }
@@ -1558,11 +1571,47 @@ mod tests {
     }
 
     #[test]
-    fn wide_glyph_lines_stay_within_cell_budget() {
+    fn wide_glyph_budget_counts_code_points_like_upstream() {
+        // Contract supersession of the prior `wide_glyph_lines_stay_within_cell_budget`
+        // (git history preserves it): upstream `collapse-tool-output.ts:13-20`
+        // slices `Array.from(preview)` — code points — so 20 budgeted units of
+        // wide glyphs become 19 code points + `…` (39 display cells). The old
+        // `<= 21 cells` assertion pinned a display-cell budget that upstream
+        // does not implement.
         let text = "日本語のテキスト".repeat(10);
         let (preview, overflow) = collapse_tool_output(&text, 2, 20);
         assert!(overflow);
-        assert!(cells(preview.split('\n').next().unwrap()) <= 21);
+        assert!(preview.ends_with('…'));
+        assert_eq!(preview.chars().count(), 20);
+        assert_eq!(preview.chars().take(3).collect::<String>(), "日本語");
+    }
+
+    // TOOL-005: `collapseToolOutput` budgets on code points (`Array.from`,
+    // `collapse-tool-output.ts:6,13,16-18`). The pre-fix port measured display
+    // `cells()`: `中中中` counted 6 > 5 and collapsed to `中中…`, and
+    // `中中中中` truncated to `中…`; upstream sees 3 <= 5 code points (no
+    // overflow) and slices exactly `maxChars - 1` = 2 code points + `…`.
+    // These assertions FAIL on the cell-budget source and PASS on the fix.
+    #[test]
+    fn tool_output_budget_counts_code_points_not_display_cells() {
+        assert_eq!(collapse_tool_output("中中中", 1, 5), ("中中中".to_owned(), false));
+        assert_eq!(collapse_tool_output("中中中中", 1, 3), ("中中…".to_owned(), true));
+    }
+
+    // TOOL-005: `collapseShellCommand` iterates grapheme clusters
+    // (`Locale.graphemes`, `collapse-tool-output.ts:55-73`) and pops exactly
+    // one whole cluster when the row is full (`collapse-tool-output.ts:76-79`).
+    // With `lineWidth = 2` the third `e + U+0301` cluster overflows; upstream
+    // pops that cluster and renders `é…`. The pre-fix code-point loop popped
+    // the trailing combining mark instead and kept its base, rendering
+    // `e + U+0301 + e + …` (two base letters, cluster split). This assertion
+    // FAILS on the code-point source and PASSES on the fix.
+    #[test]
+    fn shell_command_pops_grapheme_clusters_not_code_points() {
+        let (command, overflow, lines) = collapse_shell_command("e\u{301}e\u{301}e\u{301}", 1, 2);
+        assert!(overflow);
+        assert_eq!(lines, 1);
+        assert_eq!(command, "e\u{301}…");
     }
 
     #[test]
