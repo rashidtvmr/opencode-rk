@@ -1211,6 +1211,11 @@ pub struct V2Theme {
     /// Mode the user asked for; preserved when a one-mode document renders.
     pub requested_mode: ThemeMode,
     pub palette: Palette,
+    /// Palette resolved for the contextual upstream `surface("dialog")` view
+    /// (`theme/src/tui/resolve.ts:79`, `ui/dialog.tsx:44,82`). A document-level
+    /// `@dialog` token override is contextualized and resolved against its own
+    /// reference scope; without an override this equals [`Self::palette`].
+    pub dialog: Palette,
     pub semantic: SemanticPalette,
 }
 
@@ -1231,11 +1236,34 @@ pub fn v2_theme_from_asset(asset: &Value, mode: ThemeMode) -> Result<V2Theme, Pa
     let selected_obj = root.get(selected).and_then(Value::as_object).ok_or_else(|| invalid("selected mode is not an object".into()))?;
     let mut merged = v2_merge(Value::Object(base.clone()), Value::Object(selected_obj.clone()));
     v2_apply_contextual_actions(&mut merged, &Value::Object(base), &Value::Object(selected_obj.clone()));
-    let mut resolver = V2Resolver::new(merged);
+    let mut resolver = V2Resolver::new(merged.clone());
     resolver.compile_hues()?;
     let palette = resolver.palette()?;
     let semantic = resolver.semantic()?;
-    Ok(V2Theme { selected_mode, requested_mode: mode, palette, semantic })
+
+    // Upstream `resolveExpandedTheme` publishes a reactive `surface("dialog")`
+    // (`resolve.ts:79`). `expandTheme` expands the document-level `@dialog`
+    // token block over the already-selected base (`expand.ts:10-15`); the
+    // override may originate in the document's shared `base` because
+    // `selectThemeMode` merges `base`+selected (`select.ts:16`), which our
+    // `merged` already reflects. `contextualize` (`resolve.ts:95-107`) then
+    // merges the override and rebuilds action-state precedence. Layout-only
+    // keys stay absent, so the expansion only injects `$…` reference strings
+    // and never changes the value the base resolver would produce.
+    let dialog = if let Some(override_tokens) = merged.get("@dialog").cloned() {
+        let mut context_base = merged;
+        if let Some(root) = context_base.as_object_mut() { root.remove("@dialog"); }
+        let mut contextual = v2_merge(context_base.clone(), override_tokens);
+        v2_expand_theme_tokens(&mut contextual);
+        v2_apply_contextual_actions(&mut contextual, &context_base, &Value::Null);
+        let mut dialog_resolver = V2Resolver::new(contextual);
+        dialog_resolver.compile_hues()?;
+        dialog_resolver.palette()?
+    } else {
+        palette
+    };
+
+    Ok(V2Theme { selected_mode, requested_mode: mode, palette, dialog, semantic })
 }
 
 /// Action variants rebuilt with upstream `contextualActions` precedence.
@@ -1299,6 +1327,42 @@ fn v2_merge(base: Value, over: Value) -> Value {
             Value::Object(left)
         }
         (_, value) => value,
+    }
+}
+
+/// Upstream `expandTheme`/`expandTokens` (`packages/theme/src/tui/expand.ts:10-24`):
+/// fill the derived action-state and soft-text references (`$…`) the resolver
+/// reads. Layout-only keys (`padding`, colors, `gap`) pass through untouched.
+/// The dialog sensor only rebuilds action precedence, so the injection never
+/// changes a value the base resolver would already compute; it exists to keep
+/// the contextual view faithful to the upstream shape.
+fn v2_expand_theme_tokens(definition: &mut Value) {
+    let Some(root) = definition.as_object_mut() else { return };
+    if let Some(text) = root.get_mut("text").and_then(Value::as_object_mut) {
+        if !text.contains_key("muted") && text.contains_key("base") { text.insert("muted".into(), Value::String("$text.base".into())); }
+        if !text.contains_key("faint") && (text.contains_key("muted") || text.contains_key("base")) { text.insert("faint".into(), Value::String("$text.muted".into())); }
+        v2_expand_actions(text.get_mut("action"), "text.action");
+    }
+    if let Some(background) = root.get_mut("background").and_then(Value::as_object_mut) {
+        v2_expand_actions(background.get_mut("action"), "background.action");
+    }
+}
+
+/// Upstream `expandActions` (`expand.ts:88-108`): each variant with a `base`
+/// gains `$state -> $<path>.<variant>.base` references when the state key is
+/// absent. Non-object additions are skipped, matching upstream's `value?.base`
+/// guard.
+fn v2_expand_actions(actions: Option<&mut Value>, path: &str) {
+    let Some(actions) = actions.and_then(Value::as_object_mut) else { return };
+    for (variant, value) in actions.iter_mut() {
+        let Some(map) = value.as_object_mut() else { continue };
+        if !map.contains_key("base") { continue; }
+        for state in V2_STATES {
+            let key = format!("${state}");
+            if !map.contains_key(&key) {
+                map.insert(key, Value::String(format!("${path}.{variant}.base")));
+            }
+        }
     }
 }
 
@@ -1639,6 +1703,10 @@ pub struct RuntimeTheme {
     pub requested_mode: ThemeMode,
     /// Palette resolved from the theme definitions for [`Self::mode`].
     pub palette: Palette,
+    /// Palette resolved for the contextual upstream `surface("dialog")` view.
+    /// Equal to [`Self::palette`] for a theme without a document-level
+    /// `@dialog` override; see [`V2Theme::dialog`].
+    pub dialog: Palette,
     /// Semantic token view: the V2 document's own roles, or a legacy
     /// document's identical roles migrated the way upstream `migrateV1` does.
     pub semantic: Option<SemanticPalette>,
@@ -1656,11 +1724,13 @@ impl RuntimeTheme {
             || match mode { ThemeMode::Dark => Palette::opencode_dark(), ThemeMode::Light => Palette::opencode_light() },
             |theme| theme.palette,
         );
+        let dialog = v2.as_ref().map_or(palette, |theme| theme.dialog);
         Self {
             name: "opencode".to_owned(),
             mode: v2.as_ref().map_or(mode, |theme| theme.selected_mode),
             requested_mode: mode,
             palette,
+            dialog,
             semantic: v2.map(|theme| theme.semantic),
         }
     }
@@ -1703,6 +1773,7 @@ impl RuntimeTheme {
             mode: resolved.selected_mode,
             requested_mode: resolved.requested_mode,
             palette: resolved.palette,
+            dialog: resolved.dialog,
             semantic: Some(resolved.semantic),
         })
     }
@@ -1721,6 +1792,7 @@ impl RuntimeTheme {
                 mode: resolved.selected_mode,
                 requested_mode: resolved.requested_mode,
                 palette: resolved.palette,
+                dialog: resolved.dialog,
                 semantic: Some(resolved.semantic),
             });
         }
@@ -1734,11 +1806,13 @@ impl RuntimeTheme {
         let semantic = object
             .get("theme")
             .and_then(|theme| semantic_from_json(&defs, theme, mode).ok());
+        let palette = palette_from_asset(asset, mode)?;
         Ok(Self {
             name: name.to_owned(),
             mode,
             requested_mode: mode,
-            palette: palette_from_asset(asset, mode)?,
+            palette,
+            dialog: palette,
             semantic,
         })
     }
@@ -3059,6 +3133,44 @@ fn f1_shipped_v2_asset_resolves_via_from_asset() {
     assert!(light.semantic.is_some());
     assert_eq!(light.palette.get(Slot::Warning), hex("#d68c27"));
     assert_eq!(light.palette.get(Slot::Primary), hex("#3b7dd8"));
+}
+
+// ── THEME-06: contextual `@dialog` surface ────────────────────────────────
+
+/// Upstream `resolveExpandedTheme` publishes `views.dialog` from
+/// `contextualize(base, definition["@dialog"])` (`resolve.ts:79,95-107`) and
+/// `selectThemeMode` merges the document `base`+selected (`select.ts:16`), so
+/// the shipped `@dialog` lives in the shared `base`. Its `background.base`
+/// override must resolve against the merged view (not be emptied) and stay
+/// distinct from the root background; a document without `@dialog` falls back
+/// to the base palette.
+#[test]
+fn theme06_dialog_surface_resolves_contextual_base_and_falls_back() {
+    let asset: Value = serde_json::from_str(include_str!("../assets/opencode-v2.json"))
+        .expect("shipped asset parses");
+    let dark = RuntimeTheme::from_asset("opencode-v2", &asset, ThemeMode::Dark)
+        .expect("dark resolves");
+    assert_eq!(dark.palette.get(Slot::Background), hex("#0a0a0a"));
+    assert_eq!(
+        dark.dialog.get(Slot::Background),
+        hex("#141414"),
+        "dialog background.base resolves to $background.raised.base, not the root background"
+    );
+    assert_ne!(dark.dialog.get(Slot::Background), dark.palette.get(Slot::Background));
+
+    let light = RuntimeTheme::from_asset("opencode-v2", &asset, ThemeMode::Light)
+        .expect("light resolves");
+    assert_eq!(light.palette.get(Slot::Background), hex("#ffffff"));
+    assert_eq!(light.dialog.get(Slot::Background), hex("#fafafa"));
+
+    // No `@dialog` override → the dialog view falls back to the base view.
+    let mut without = asset.clone();
+    if let Some(base) = without.get_mut("base").and_then(Value::as_object_mut) {
+        base.remove("@dialog");
+    }
+    let no_dialog = RuntimeTheme::from_asset("opencode-v2", &without, ThemeMode::Dark)
+        .expect("document without @dialog resolves");
+    assert_eq!(no_dialog.dialog.get(Slot::Background), no_dialog.palette.get(Slot::Background));
 }
 
 // ── F2: alias identity (V4/V12/V13/V14/V15) ────────────────────────────────

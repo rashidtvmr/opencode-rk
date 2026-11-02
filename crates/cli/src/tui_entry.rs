@@ -1686,6 +1686,12 @@ fn native_size() -> (u32, u32) {
 #[cfg(feature = "native")]
 struct PaintCtx {
     palette: crate::native_theme_runtime::Palette,
+    /// THEME-06: palette resolved for the contextual upstream `@dialog`
+    /// surface (`ui/dialog.tsx:44,82`, `theme/src/tui/resolve.ts:79`). The modal
+    /// panel and its content cells paint `background.base` from here, not from
+    /// the base view. Equal to `palette` for a theme without an `@dialog`
+    /// override.
+    dialog: crate::native_theme_runtime::Palette,
     markdown: Option<crate::native_theme_runtime::MarkdownPalette>,
     /// Resolved `theme.semantic.diff` tokens for the `+`/`-` transcript rows
     /// (THEME-09). `None` falls back to the historical literal RGB.
@@ -2194,6 +2200,7 @@ mod surface_paint_regressions {
         let mut renderer = NativeRenderer::create_memory(80, 24).expect("memory renderer");
         native_paint(&mut renderer, &lines, PaintCtx {
             palette: crate::native_theme_runtime::Palette::opencode_dark(),
+            dialog: crate::native_theme_runtime::RuntimeTheme::builtin_default(crate::native_theme_runtime::ThemeMode::Dark).dialog,
             markdown: None,
             diff: None,
             presentation: view.presentation(),
@@ -2253,6 +2260,7 @@ mod surface_paint_regressions {
         let mut renderer = NativeRenderer::create_memory(80, 24).expect("memory renderer");
         native_paint(&mut renderer, &lines, PaintCtx {
             palette: crate::native_theme_runtime::Palette::opencode_dark(),
+            dialog: crate::native_theme_runtime::RuntimeTheme::builtin_default(crate::native_theme_runtime::ThemeMode::Dark).dialog,
             markdown: None,
             diff: None,
             presentation: view.presentation(),
@@ -2341,6 +2349,7 @@ mod surface_paint_regressions {
         let mut renderer = NativeRenderer::create_memory(148, 30).expect("memory renderer");
         native_paint(&mut renderer, &lines, PaintCtx {
             palette: crate::native_theme_runtime::Palette::opencode_dark(),
+            dialog: crate::native_theme_runtime::RuntimeTheme::builtin_default(crate::native_theme_runtime::ThemeMode::Dark).dialog,
             markdown: None,
             diff: None,
             presentation: view.presentation(),
@@ -2408,6 +2417,7 @@ mod surface_paint_regressions {
         let mut renderer = NativeRenderer::create_memory(60, 20).expect("memory renderer");
         native_paint(&mut renderer, &lines, PaintCtx {
             palette: crate::native_theme_runtime::Palette::opencode_dark(),
+            dialog: crate::native_theme_runtime::RuntimeTheme::builtin_default(crate::native_theme_runtime::ThemeMode::Dark).dialog,
             markdown: None,
             diff: None,
             presentation: view.presentation(),
@@ -4325,6 +4335,11 @@ fn native_paint(
         .collect();
     let background = paint_color(ctx.palette, Slot::Background);
     let panel = paint_color(ctx.palette, Slot::BackgroundPanel);
+    // THEME-06: the modal surface paints the contextual `@dialog` view's
+    // `background.base` (`ui/dialog.tsx:44,82`), which the dialog palette
+    // exposes through the `backgroundPanel` (raised.base) role. Without an
+    // `@dialog` override `ctx.dialog == ctx.palette`, so this is unchanged.
+    let dialog_panel = paint_color(ctx.dialog, Slot::BackgroundPanel);
     let element = paint_color(ctx.palette, Slot::BackgroundElement);
     let text_color = paint_color(ctx.palette, Slot::Text);
     let muted = paint_color(ctx.palette, Slot::TextMuted);
@@ -4464,7 +4479,8 @@ fn native_paint(
                     x >= u32::from(left) && x < u32::from(left + width)
                         && y >= u32::from(top) && y < u32::from(top + height)
                 });
-                let mut bg = surface_underlay_background(sidebar || in_modal || in_page, role_bg, composer, false, background, panel, element);
+                let panel_bg = if in_modal { dialog_panel } else { panel };
+                let mut bg = surface_underlay_background(sidebar || in_modal || in_page, role_bg, composer, false, background, panel_bg, element);
                 let mut fg = if in_modal {
                     modal_row_fg(
                         modal_text.trim_start(),
@@ -4982,21 +4998,21 @@ fn native_paint(
                 if selected_cells.contains(&(y, x)) { color = accent; }
                 color
             };
-            let tl = modal_surface_background(style, modal_rect, left, top, &corners.top_left.to_string(), underlay_at(left, top), panel, ctx.modal.backdrop_alpha);
-            let tr = modal_surface_background(style, modal_rect, left + width - 1, top, &corners.top_right.to_string(), underlay_at(left + width - 1, top), panel, ctx.modal.backdrop_alpha);
-            let bl = modal_surface_background(style, modal_rect, left, bottom, &corners.bottom_left.to_string(), underlay_at(left, bottom), panel, ctx.modal.backdrop_alpha);
-            let br = modal_surface_background(style, modal_rect, left + width - 1, bottom, &corners.bottom_right.to_string(), underlay_at(left + width - 1, bottom), panel, ctx.modal.backdrop_alpha);
+            let tl = modal_surface_background(style, modal_rect, left, top, &corners.top_left.to_string(), underlay_at(left, top), dialog_panel, ctx.modal.backdrop_alpha);
+            let tr = modal_surface_background(style, modal_rect, left + width - 1, top, &corners.top_right.to_string(), underlay_at(left + width - 1, top), dialog_panel, ctx.modal.backdrop_alpha);
+            let bl = modal_surface_background(style, modal_rect, left, bottom, &corners.bottom_left.to_string(), underlay_at(left, bottom), dialog_panel, ctx.modal.backdrop_alpha);
+            let br = modal_surface_background(style, modal_rect, left + width - 1, bottom, &corners.bottom_right.to_string(), underlay_at(left + width - 1, bottom), dialog_panel, ctx.modal.backdrop_alpha);
             renderer.draw_text_styled(left, top, &corners.top_left.to_string(), accent, Some(tl), 0)?;
             renderer.draw_text_styled(left + width - 1, top, &corners.top_right.to_string(), accent, Some(tr), 0)?;
             renderer.draw_text_styled(left, bottom, &corners.bottom_left.to_string(), accent, Some(bl), 0)?;
             renderer.draw_text_styled(left + width - 1, bottom, &corners.bottom_right.to_string(), accent, Some(br), 0)?;
             if width > 2 {
-                draw_horizontal_rule(renderer, left + 1, top, width - 2, horizontal, accent, panel)?;
-                draw_horizontal_rule(renderer, left + 1, bottom, width - 2, horizontal, accent, panel)?;
+                draw_horizontal_rule(renderer, left + 1, top, width - 2, horizontal, accent, dialog_panel)?;
+                draw_horizontal_rule(renderer, left + 1, bottom, width - 2, horizontal, accent, dialog_panel)?;
             }
             for y in top + 1..bottom {
-                renderer.draw_text_styled(left, y, &vertical.to_string(), accent, Some(panel), 0)?;
-                renderer.draw_text_styled(left + width - 1, y, &vertical.to_string(), accent, Some(panel), 0)?;
+                renderer.draw_text_styled(left, y, &vertical.to_string(), accent, Some(dialog_panel), 0)?;
+                renderer.draw_text_styled(left + width - 1, y, &vertical.to_string(), accent, Some(dialog_panel), 0)?;
             }
         }
     }
@@ -8226,6 +8242,7 @@ fn native_loop(
                 &lines,
                 PaintCtx {
                     palette: theme.palette,
+                    dialog: theme.dialog,
                     markdown: theme.semantic.clone().map(|semantic| semantic.markdown),
                     diff: theme.semantic.as_ref().map(diff_rgba),
                     presentation,
