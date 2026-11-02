@@ -4142,4 +4142,28 @@ mod theme10_new_designs_gate {
         assert_ne!(dark.palette, Palette::opencode_dark());
         assert_ne!(light.palette, Palette::opencode_light());
     }
+
+    #[test]
+    fn default_and_new_designs_gate_names_independently() {
+        // THEME-10 four-way matrix: the "new-designs" experiment toggles ONLY
+        // the `opencode2` source. `opencode` is always available, and an
+        // ungated `opencode2` renders `opencode` (upstream
+        // `context/theme.tsx:291-307`).
+        // default-designs x opencode
+        let d_open = RuntimeTheme::named_gated("opencode", ThemeMode::Dark, false)
+            .expect("opencode is always available");
+        assert_eq!(d_open.name, "opencode");
+        // new-designs x opencode
+        let n_open = RuntimeTheme::named_gated("opencode", ThemeMode::Dark, true)
+            .expect("opencode is always available");
+        assert_eq!(n_open.name, "opencode");
+        assert_eq!(d_open.palette, n_open.palette);
+        // default-designs x opencode2 -> ungated, falls back to opencode
+        assert!(RuntimeTheme::named_gated("opencode2", ThemeMode::Dark, false).is_none());
+        // new-designs x opencode2 -> resolves as opencode2
+        let n_2 = RuntimeTheme::named_gated("opencode2", ThemeMode::Dark, true)
+            .expect("opencode2 resolves while gated");
+        assert_eq!(n_2.name, "opencode2");
+        assert_ne!(n_2.palette, d_open.palette);
+    }
 }
