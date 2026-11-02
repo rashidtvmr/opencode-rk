@@ -10917,3 +10917,95 @@ leave it in `extra`, so summarization accepts both"), and `extra` is the
 `#[serde(flatten)]` catch-all, so the fallback is live whenever a real payload
 carries `cost` in the flatten bucket. Not dead code; the normalization test
 (`cost` array/object/absent) verifies the fallback. No change needed.
+
+## Wave-30 landings + wave-31 dispatch (2026-11-02, cont.)
+
+### Canonical HEAD now `4a0fcdfd`; tree clean. 4 landings this pass.
+`c2af9254` worklog → `dc95a0b5` CP-36 fix → `0dfff37e` CP-40 directory →
+`4a0fcdfd` TAB-07 semantic palette. Each landed with a focused test + full CLI
+suite GREEN (single-threaded); final suite 2133 passed / 0 failed.
+
+### Independent verifier outcomes collected
+- `W30-VER-CP36-40` = **REJECT** on CP-36: `PasteMode::from_config` used
+  `value.trim().eq_ignore_ascii_case("full")`; upstream compares the raw value to
+  the exact literal (`config.prompt?.paste !== "full"`, `prompt/index.tsx:1463`;
+  value is `Literals(["compact","full"])`, `config/index.tsx:144`). Fixed in
+  `dc95a0b5` (match `Some("full")` only); test now asserts `"FULL"`/`" full "`/
+  `"Full"` fold. `W30R-VER-CP36-FIX` = **CONFIRMED** (source-level; the focused run
+  was blocked only by the not-yet-written completion.rs edit mid-flight).
+- `W30-VER-CP36-40` CP-40 = PASS_WITH_SCOPE; `tests_non_tautological` = REJECT
+  (CP-40 kind test's fixture manually calls `set_kind`). The new CP-40 directory
+  test exercises the live `workspace_files` → `set_directory` lane, non-tautological.
+- `REVIEW-TAB07-REAUTH` = **NEEDS_FIX**: the live paint path called
+  `.with_row_colors(&ctx.palette)` (semantic `None`), dropping `SemanticPalette`,
+  so the unread accent fell back to `Slot::Warning`. Fixed in `4a0fcdfd`: added
+  `PaintCtx.semantic`, populated from `theme.semantic`, switched the live paint to
+  `with_row_colors_semantic`. New test
+  `tab_07_live_unread_uses_semantic_tab_attention`. Residual: vertical rail has no
+  unread fact (tracked; `W30R-TAB07-VERTICAL`).
+- `W30-VER-THEME10` = **PASS** (all 4) on `da70b7d1`; `W30-VER-TOOL008` = **PASS**
+  (all 5) with a stale-line-range correction (real child dispatch `tui_entry.rs:10004-10024`).
+- `W30-SIDE07-MCP-ALIGN` = (a) already correct (landed `db6ffb16`).
+
+### CTX-BUDGET mechanism added (2026-11-02)
+Harness full-fidelity worker output burns ~400-600+ tokens per just-completed
+subagent. Mitigated by running collection/triage shell commands inside the harness
+`execute` tool (raw output lives in managed storage) and by requiring workers to
+return a terse `DONE <PKG> <verdict> <sha256>` as their final text with all
+evidence in their private `handoff.json`/`scratchpad.md`.
+
+### KIT status (223 total obligations)
+`docs/ui-parity/opencode-ui-parity-kit/checklist.json` `status` distribution:
+`unverified_rust`: 160; `proposed_fixture`: 62; `verified_rust`: 1. The 62
+`proposed_fixture` are the PAR-01..24 self-capture goldens plus TUI fixtures —
+`unverified_rust` (not accepted) and dependent on PAR capture fixtures. No
+upstream adapter exists for oc2-vs-oc2 capture.
+
+### wave-31 verdicts collected (all `verified:false`) — routes: vyce, xkiro-luna/mimo, th/river/luna/combined
+- (c) blockers with exact seams — SIDE-14 footer (no sidebar PointerMove router:
+  `tui_entry.rs:9327-9332` tab/rail only; needs `set_footer_hovered` + copy/toast/openPath),
+  CP-28 effect (decoder landed `83b626bc`; no retained selected-agent store/handler;
+  `persist_submit` sends `{"text":text}` only, no switch-agent route), STATE-001 spinner
+  (`native_progress.rs` Spinner + `native_shell.rs` ShellFooter are dead code;
+  live `native_view.rs:3644 footer_line` has no `now_ms`/running), MD-006 collapsed
+  reasoning (no live collapsed presentation; `native_message_rows` has no live
+  consumer), MSG-009 location-switched splice (no producer or live consumer),
+  TOOL-010/011 execute dialog (no execute-row payload channel: `child_owners` is
+  the only owner map; `DialogKind::Execute` has no payload field), LAY-13 pane
+  (`ViewPresentation` lacks a docked right-pane width field; `FrameSpec.right`
+  always `None` in production), THEME-07 alpha (see below), DIFF-003/004 (deletes/
+  applied-resource metadata not read by `native_chat_projection::tool_output_content`;
+  scroll-aware virtual diff has no live host), DIALOG-19/20 (ChromeModel/toast/crash
+  models exist but zero production call sites), FORM-001..008 (form overlay model
+  unwired; no server form route/event), TOOL-007 notice (no parent-session synthetic
+  message `metadata{source,childID,agent,state}` producer).
+- MSG-008/010: footer geometry + `legacy_turns`/`turn_tokens_per_second` already
+  implemented; TPS span blocked on missing `SessionMessageAssistant.time.streamed`
+  (`message-updater.ts:260-263`, `rows.ts:450-453`); the wire carries no such field.
+  Worker partial patch (map `usage.output_tokens`→`RowMessage.tokens`) NOT landed:
+  `RowMessage` has no live render consumer (`tui_entry.rs` uses only `click_acts`),
+  so it would be producer-only dead code.
+
+### THEME-07 — unresolved; needs a captured render before any change (NOT landed)
+Worker claimed the selected horizontal tab background should resolve to the
+transparent action state (`background.action.primary.$selected` = `transparent`,
+`theme/assets/v2/opencode.json` base). That claim is **partly inconsistent** with
+the pinned source: `VerticalSessionTabs` uses `tabBackground` (`actionSelected()`
+when selected && !compact, `session-tabs.tsx:774-779`) painted at `:885`; the
+`HorizontalSessionTabs` inner tab uses `background.base` tinted via `theme.decrease`
+(`:1568-1575`) painted at `:467`, and `theme.decrease` shifts LIGHTNESS (not the
+alpha of `raised.base`), so the native `horizontal_selected` `raised.high` value may
+be wrong but the fix is NOT the worker's proposed transparency. The exact rendered
+selected-tab bg must be compared under a real terminal (dark+light) before changing
+`native_tabs.rs:365-387`. Obligation THEME-07 = unverified_rust; do not claim parity.
+
+### wave-31 dispatch (20+ across allowed routes)
+Fresh implementers for the tractable seams and precise-(c) re-checks:
+TAB-07 vertical rail (vyce), LAY-12 focus (combined), THEME-07 captured-render
+compare (vyce), TOOL-005 budget re-author (vyce), DIALOG-19/20 (luna), LAY-19/20
+(luna), TOOL-002 spin (mimo), TOOL-012 metadata (mimo), DIFF-003/004 (river),
+MSG-009 splice (th-free), SIDE-14 footer (luna), CP-40 destructive/skill kinds
+(mimo), SIDE-08/09/12 (vyce), FORM live producer (mimo), TOOL-007 notice (mimo),
+MSG-008/010 (mimo), LAY-13 pane (mimo). Verifiers: CP-36 fix (luna), CP-40 dir
+review (luna). Route limits preserved: vyce ≤8; each of
+th/river/luna/combined/apimaster ≤1 (apimaster still `$0`, no dispatch).
