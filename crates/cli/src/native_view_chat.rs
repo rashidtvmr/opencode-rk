@@ -2171,14 +2171,12 @@ fn push_diff_fence(rows: &mut Vec<(String, ChatRowClass)>, width: usize, prefix:
             crate::native_diff_view::DiffLineRole::Context
             | crate::native_diff_view::DiffLineRole::Blank => ChatRowClass::DiffContext,
             // DIFF-002: upstream paints the hunk-header band only for hunks
-            // after the first (`patch-diff.tsx:79` `<Show when={index() > 0}>`);
-            // the leading `@@` splits into the `@@`/`@@` context elements and
-            // the first hunk contributes no header row. Suppress it here and
-            // keep the join anchored by emitting an empty row.
-            crate::native_diff_view::DiffLineRole::HunkHeader if line.hunk_index == 0 => {
-                rows.push((String::new(), ChatRowClass::DiffContext));
-                continue;
-            }
+            // after the first (`patch-diff.tsx:79` `<Show when={index() > 0}>`)
+            // and, for a single-hunk diff, `splitPatchHunks` supplies no
+            // `header` at all (`util/diff.ts:54-59`). The first hunk therefore
+            // contributes NO row — not even an empty one, which would add a
+            // stray row of height.
+            crate::native_diff_view::DiffLineRole::HunkHeader if line.hunk_index == 0 => continue,
             crate::native_diff_view::DiffLineRole::HunkHeader => ChatRowClass::DiffHunkHeader,
             _ => ChatRowClass::Metadata,
         };
@@ -2608,8 +2606,20 @@ fn typed_message_rows_with_prefix_spans_mode(
                     diff,
                     crate::native_diff_view::MAX_DIFF_LINES,
                 );
-                let total_rows = rendered.rows.len();
                 let malformed = rendered.malformed;
+                // DIFF-002: upstream renders no element for the first hunk's
+                // `@@` line (`patch-diff.tsx:79` `<Show when={index() > 0}>`),
+                // so drop it before the row-budget math — otherwise it would
+                // occupy a slot and add a stray row of height.
+                let painted: Vec<_> = rendered
+                    .rows
+                    .into_iter()
+                    .filter(|line| {
+                        !(line.role == crate::native_diff_view::DiffLineRole::HunkHeader
+                            && line.hunk_index == 0)
+                    })
+                    .collect();
+                let total_rows = painted.len();
                 // Reserve real status row(s) BEFORE the parser row budget:
                 // each true fact gets its own distinct row inside the hard
                 // MAX_MESSAGE_ROWS cap (the frozen regressions require both
@@ -2625,18 +2635,14 @@ fn typed_message_rows_with_prefix_spans_mode(
                 let truncated = rendered.truncated || kept_without_trunc_status < total_rows;
                 let reserve = malformed_slots + usize::from(truncated) + diag_slots;
                 let kept = total_rows.min(budget.saturating_sub(reserve));
-                for line in rendered.rows.into_iter().take(kept) {
+                for line in painted.into_iter().take(kept) {
                     let class = match line.role {
                         crate::native_diff_view::DiffLineRole::Added => ChatRowClass::DiffAdded,
                         crate::native_diff_view::DiffLineRole::Removed => ChatRowClass::DiffRemoved,
                         crate::native_diff_view::DiffLineRole::Context
                         | crate::native_diff_view::DiffLineRole::Blank => ChatRowClass::DiffContext,
-                        // DIFF-002: no header band for the first hunk
-                        // (`patch-diff.tsx:79`); keep the row anchored.
-                        crate::native_diff_view::DiffLineRole::HunkHeader if line.hunk_index == 0 => {
-                            rows.push((String::new(), ChatRowClass::DiffContext));
-                            continue;
-                        }
+                        // DIFF-002: defensive — first-hunk header already filtered.
+                        crate::native_diff_view::DiffLineRole::HunkHeader if line.hunk_index == 0 => continue,
                         crate::native_diff_view::DiffLineRole::HunkHeader => ChatRowClass::DiffHunkHeader,
                         _ => ChatRowClass::Metadata,
                     };
@@ -6916,10 +6922,21 @@ mod footer_v3_consumer_tests {
         );
         // DIFF-002: upstream paints the hunk-header band only for hunks after
         // the first (`patch-diff.tsx:79` `<Show when={index() > 0}>`), so a
-        // single-hunk diff paints no `@@` row at all.
+        // single-hunk diff paints no `@@` row at all. It must not leave an
+        // empty placeholder row behind either: upstream renders NO element for
+        // the first hunk, so the first-hunk `@@` line contributes zero height.
         assert!(
             !rows.iter().any(|(_, class)| *class == ChatRowClass::DiffHunkHeader),
             "{rows:?}"
+        );
+        assert_eq!(
+            rows.len(),
+            3,
+            "a single-hunk diff is exactly the +/-/context rows; no phantom header row: {rows:?}"
+        );
+        assert!(
+            !rows.iter().any(|(row, _)| row.is_empty()),
+            "no empty placeholder row may survive: {rows:?}"
         );
         // The diff surface replaces the fence rows; it never paints them.
         assert!(!rows.iter().any(|(row, _)| row.contains("```")), "{rows:?}");
