@@ -178,6 +178,30 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | DIALOG-14 | `REAL_GAP` | `DrillDown`/`LateLoadGuard` test-only; seam `tui_entry.rs:10917` |
 | DIALOG-15 | `REAL_GAP` | palette `McpStatus`/`IntegrationPhase` test-only; seam `tui_entry.rs:10917` |
 
+**Additional wave-44 verdicts (sixth batch):**
+
+| Item | Wave-44 verdict | Evidence / seam |
+| --- | --- | --- |
+| CP-01 | `REAL_GAP` | `PromptSlot`/`prompt_slot` (`native_prompt_pane.rs:202,221`, test `:1665`) uncalled; live `native_view.rs:3056` ad-hoc slot |
+| CP-02 | `REAL_GAP` | live `lip_row(width,[0x14,0x14,0x14,0xff])` hardcodes opaque bg; transparent variant (`native_prompt_pane.rs:1276`) unreachable |
+| CP-03 | `ALREADY_CORRECT` | `prompt_surface` `native_prompt_pane.rs:119`; live `tui_entry.rs:8567` |
+| CP-04 | `ALREADY_CORRECT` | rules `native_prompt_layout.rs:148-190`; live `native_view_chat.rs:928`→`native_view.rs:3137` |
+| CP-05 | `REAL_GAP` | `metadata_runs`/`metadata_style` (`native_prompt_pane.rs:340,477`) no live producer; seam `native_view.rs:1612,3149` |
+| CP-06 | `REAL_GAP` | `metadata_layout` (`native_prompt_pane.rs:378`) ports `metadata.tsx:117-156` but live `composer_metadata` re-implements it; seam `native_view.rs:1612` |
+| TOOL-001 | `ALREADY_CORRECT` | `canonical_tool_name` (`native_tool_rows.rs:78`) + 14-kind enum (`:91-130`); live `native_view_chat.rs:2599` |
+| TOOL-002 | `ALREADY_CORRECT` | spinner swap (`native_tool_rows.rs:1296-1306`), permission/error order (`:1283`); live `tui_entry.rs:7947`→`native_view.rs:1001`→`native_view_chat.rs:3086` |
+| TOOL-003 | `ALREADY_CORRECT` | 2-cell icon column `header_prefix` (`:1345`), Background badge (`:1316`, test `:1748`); live `native_view_chat.rs:2633` |
+| TOOL-004 | `ALREADY_CORRECT` | `primitive_input_summary:238`, `strip:1448`; tests `:1624/:1934`; live `native_view_chat.rs:2620/2633` |
+| TOOL-005 | `ALREADY_CORRECT` | `SHELL_BUDGET_LINES:40`, `collapse_tail:1024`; tests `:1549-1602`; live `native_view_chat.rs:2607` |
+| TOOL-006 | `REAL_GAP` | `BackgroundShell`/`ShellLoad`/`ShellChunk` (`native_shell.rs`) only in-file; client shells use one-shot `/shell/stream` (`server/src/lib.rs:294`); seam `native_shell.rs:1812` |
+| MEDIA-001 | `REAL_GAP` | model+tests (`native_image_preview.rs:458,1047`, test `:1231`); page render live (`native_view_pages.rs:1056`→`native_view.rs:3031`) but no live caller of `PageState::open_image_preview` (`native_view_pages.rs:788`); preview always `None` |
+| DIALOG-06 | `REAL_GAP` | `SelectDialog::filtered()` (`native_palette.rs:1409`, test `:3408`); no live consumer; seam `native_view_dialogs.rs:1423-1428` placeholder render |
+| DIALOG-07 | `REAL_GAP` | `row_footer()` (`native_palette.rs:1136`, test `:3832`); same seam |
+| DIALOG-08 | `REAL_GAP` | `page_down/page_up` (`native_palette.rs:1598`, test `:3442`); same seam |
+| DIALOG-09 | `REAL_GAP` | `SelectExperiment` (`native_palette.rs:1151`, test `:3727`); same seam |
+| DIALOG-10 | `REAL_GAP` | `PromptState` (`native_palette.rs:1922`, test `:3922`); same seam |
+| MSG-001 | `REAL_GAP` | assistant-row model present but no live consumer for the full ID sub-behavior set |
+
 ## Genuine gaps — live wiring (`REAL_GAP`)
 
 These have a faithful model + test but no live consumer.
