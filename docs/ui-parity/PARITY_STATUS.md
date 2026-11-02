@@ -200,7 +200,27 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | DIALOG-08 | `REAL_GAP` | `page_down/page_up` (`native_palette.rs:1598`, test `:3442`); same seam |
 | DIALOG-09 | `REAL_GAP` | `SelectExperiment` (`native_palette.rs:1151`, test `:3727`); same seam |
 | DIALOG-10 | `REAL_GAP` | `PromptState` (`native_palette.rs:1922`, test `:3922`); same seam |
-| MSG-001 | `REAL_GAP` | assistant-row model present but no live consumer for the full ID sub-behavior set |
+| MSG-001 | `REAL_GAP` | Row model `reduce_session_rows` (`native_message_rows.rs:242,265,150,2088,960`, tests `:2148-2232`) never called by the live painter (`native_view_chat.rs:2505/3340` flatten `ChatMessage.parts`; grouping only by `starts_new_group` `:1294`) |
+
+**Additional wave-44 verdicts (seventh batch):**
+
+| Item | Wave-44 verdict | Evidence / seam |
+| --- | --- | --- |
+| CP-40 | `ALREADY_CORRECT` | `native_completion.rs` Kind/destructive/directory/hover + `panel_state`; 6 tests `:965-1169`; live `tui_entry.rs:6996-9101` |
+| CP-41 | `ALREADY_CORRECT` | `native_text_selection.rs` cell-based spans; tests `:611`, `native_completion.rs:1232/1246`; live `tui_entry.rs:8489-10647` |
+| CP-42 | `REAL_GAP` | Retry-notice transcript half live (`tui_entry.rs:2913`); `PromptSurface` streaming/retry chrome (`native_composer.rs:1481-1568`, test `:2078`) no live consumer; seam `tui_entry.rs:6498-6510` |
+| MSG-002 | `REAL_GAP` | `native_message_rows.rs:165,177,191,203,150` (tests `:2244-2266`); `DisclosureState` zero non-def callers; live render always-expanded (`native_view_chat.rs:2569`) |
+| MSG-003 | `REAL_GAP` | `partition_pending`/`group_refs` (`native_message_rows.rs:710,665,678`, tests `:2283/:2315`) uncalled; live pending = flat call-id set (`native_view_chat.rs:205`, wired `tui_entry.rs:7815,7861`) |
+| MSG-004 | `REAL_GAP` | Semantic anchor model (`native_message_rows.rs:1400-1559`, `native_view_layout.rs:1042,1219,1291`; tests `:2346-2422`, `native_view_layout.rs:1989-2196`) zero runtime callers; live tab switch saves bare `view.chat_scroll_offset()` (`tui_entry.rs:12907`) via `native_navigation.rs:14,44,58` |
+
+**Additional wave-44 verdicts (eighth batch):**
+
+| Item | Wave-44 verdict | Evidence / seam |
+| --- | --- | --- |
+| DIALOG-01 | `ALREADY_CORRECT` | widths/cap/placement live in `native_modal_layer.rs:109,704,721`; consumer `native_view.rs:3696` (`native_palette.rs:647/656` is a test-only dup) |
+| DIALOG-02 | `REAL_GAP` | shell gap/row-pad/footer-band helpers (`native_palette.rs:667-733`, test `:3808`) zero production callers; live `native_view_dialogs.rs:1408-1510` never calls them |
+| DIALOG-03 | `ALREADY_CORRECT` | live stack `native_modal_layer.rs:437/382/387/532`; remount/refocus tests `:1150/:1292`, `native_view.rs:7728`; consumed `tui_entry.rs:7865/10676` |
+| DIALOG-04 | `REAL_GAP` | ordered routes `escape_route:808`/`ctrl_c_route:821` (test `:7316`) no production caller; live `tui_entry.rs:10671-10700` does own selection/clear then `dialogs.cancel()` |
 
 ## Genuine gaps — live wiring (`REAL_GAP`)
 
