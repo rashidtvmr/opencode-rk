@@ -59,9 +59,31 @@ def structural_errors() -> list[str]:
 
     serve_start = main.find("async fn serve")
     serve = main[serve_start:] if serve_start >= 0 else ""
-    if "router_with_auth" not in serve:
+    # The serve path must construct a router with the MINTED daemon credential.
+    # The constructor name varies by delegation (router_with_auth /
+    # router_with_provider_integration / router_with_events_and_integration), so
+    # match any of them, then require a `Some(` argument inside THAT call so a
+    # `None` auth (the unauthenticated router) still fails closed.
+    ctor_re = re.compile(
+        r"\brouter_with_(?:auth|provider_integration|events_and_integration)\s*\("
+    )
+    auth_ok = False
+    for match in ctor_re.finditer(serve):
+        depth = 1
+        i = match.end()
+        while i < len(serve) and depth:
+            if serve[i] in "([{":
+                depth += 1
+            elif serve[i] in ")]}":
+                depth -= 1
+            i += 1
+        if "Some(" in serve[match.end():i]:
+            auth_ok = True
+            break
+    if not auth_ok:
         errors.append(
-            "AUTH: serve path still does not call router_with_auth; minted token is not enforcement"
+            "AUTH: serve path does not construct an auth router with the minted "
+            "credential (expected a router_with_* call passing Some(...))"
         )
 
     cli_rs = "\n".join(
