@@ -10257,16 +10257,36 @@ fn native_loop(
             continue;
         }
         if byte == 3 {
-            match crate::native_text_selection::ctrl_c_copy_outcome(
+            // Upstream `Selection.handleSelectionKey`
+            // (`packages/tui/src/util/selection.ts:78-85`) branches on the
+            // copy-on-select policy BEFORE attempting a copy: with it enabled
+            // and no focused editor owning its own selection, Ctrl+C CLEARS
+            // the highlight and returns WITHOUT `preventDefault`, so the key
+            // keeps propagating (to app exit here). It only copies and retains
+            // the highlight when copy-on-select is off; a failed copy on a real
+            // selection clears and consumes the key.
+            let copy_on_select = !crate::native_text_selection::copy_on_select_disabled(
+                env::var("OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT")
+                    .ok()
+                    .as_deref(),
+                cfg!(windows),
+            );
+            match crate::native_text_selection::ctrl_c_selection_key(
+                copy_on_select,
                 selection.has_selection(),
                 selection.selected_text().is_some(),
             ) {
                 // No selection: fall through so Ctrl+C keeps exit priority.
-                crate::native_text_selection::CtrlCCopy::FallThrough => {}
+                crate::native_text_selection::CtrlCKeyAction::FallThrough => {}
+                // Copy-on-select on: clear, then keep propagating to exit.
+                crate::native_text_selection::CtrlCKeyAction::ClearAndFallThrough => {
+                    selection.clear();
+                    needs_paint = true;
+                }
                 // Upstream retains the selection after a successful copy
-                // (`packages/tui/src/util/selection.ts:78-87`); keep the
+                // (`packages/tui/src/util/selection.ts:84-86`); keep the
                 // highlight and click history, only repaint.
-                crate::native_text_selection::CtrlCCopy::Retain => {
+                crate::native_text_selection::CtrlCKeyAction::Retain => {
                     if let Some(text) = selection.selected_text() {
                         let frame = selection_clipboard_frame(&text);
                         let mut stdout = std::io::stdout().lock();
@@ -10280,15 +10300,25 @@ fn native_loop(
                     needs_paint = true;
                     continue;
                 }
-                // A failed copy clears the selection (upstream `:79-81`).
-                crate::native_text_selection::CtrlCCopy::Clear => {
+                // A failed copy clears and consumes the selection
+                // (upstream `:79-81`).
+                crate::native_text_selection::CtrlCKeyAction::ClearAndConsume => {
                     selection.clear();
                     needs_paint = true;
                     continue;
                 }
             }
         } else if byte == 27 {
+            // Upstream Escape branch (`packages/tui/src/util/selection.ts:88-95`):
+            // clear the highlight; if the selection held real text the key is
+            // CONSUMED (`preventDefault`/`stopPropagation`), otherwise it falls
+            // through to the remaining Escape handlers (exit / dialog dismiss).
+            let had_text = selection.selected_text().is_some();
             selection.clear();
+            if had_text {
+                needs_paint = true;
+                continue;
+            }
         }
         // Modal precedence: a pending permission decision owns input over
         // the Help frame and open pages — printables, page bindings and the

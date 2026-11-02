@@ -340,33 +340,48 @@ fn floor_char_boundary(s: &str, max: usize) -> usize {
     end
 }
 
-/// Result of a Ctrl+C copy attempt. Mirrors upstream `handleSelectionKey`
-/// (`packages/tui/src/util/selection.ts:78-95`): with no selection the key
-/// falls through (upstream returns at `:73`); a successful copy RETAINS the
-/// selection; only a failed copy clears it (`:79-81`).
+/// Ctrl+C selection-key action. Mirrors upstream `handleSelectionKey`
+/// (`packages/tui/src/util/selection.ts:78-85`): with no selection the key
+/// falls through (`:73`); with copy-on-select on it clears and returns WITHOUT
+/// consuming the event, so the key keeps propagating; a successful copy
+/// retains the highlight; and only a failed copy clears and consumes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CtrlCCopy {
-    /// No selection to act on; let the event reach app exit.
+pub enum CtrlCKeyAction {
+    /// Let the key reach the remaining handlers (app exit).
     FallThrough,
+    /// Clear the highlight, then let the key reach the remaining handlers.
+    ClearAndFallThrough,
     /// Copy succeeded; keep the highlight and click history.
     Retain,
-    /// Copy failed (selection without text); clear it.
-    Clear,
+    /// Copy failed on a real selection; clear it and consume the key.
+    ClearAndConsume,
 }
 
-/// Decide the Ctrl+C selection outcome from the copy result.
-pub fn ctrl_c_copy_outcome(has_selection: bool, has_text: bool) -> CtrlCCopy {
-    match (has_selection, has_text) {
-        (false, _) => CtrlCCopy::FallThrough,
-        (true, true) => CtrlCCopy::Retain,
-        (true, false) => CtrlCCopy::Clear,
+/// Decide the Ctrl+C selection-key action. `copy_on_select` is the effective
+/// policy (copy-on-select enabled = not disabled) and `has_text` is whether
+/// the copy would actually produce text.
+pub fn ctrl_c_selection_key(
+    copy_on_select: bool,
+    has_selection: bool,
+    has_text: bool,
+) -> CtrlCKeyAction {
+    if !has_selection {
+        return CtrlCKeyAction::FallThrough;
+    }
+    if copy_on_select {
+        return CtrlCKeyAction::ClearAndFallThrough;
+    }
+    if has_text {
+        CtrlCKeyAction::Retain
+    } else {
+        CtrlCKeyAction::ClearAndConsume
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{copy_on_select_disabled, CtrlCCopy, MouseCopyEvent, TextSelection};
-    use super::ctrl_c_copy_outcome;
+    use super::{copy_on_select_disabled, CtrlCKeyAction, MouseCopyEvent, TextSelection};
+    use super::ctrl_c_selection_key;
 
     fn rows(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| (*s).to_owned()).collect()
@@ -375,12 +390,25 @@ mod tests {
     #[test]
     fn ctrl_c_retains_on_success_and_clears_only_on_failure() {
         // No selection: the key falls through to app exit (selection.ts:73).
-        assert_eq!(ctrl_c_copy_outcome(false, false), CtrlCCopy::FallThrough);
-        assert_eq!(ctrl_c_copy_outcome(false, true), CtrlCCopy::FallThrough);
-        // Successful copy retains the highlight (selection.ts:78-87).
-        assert_eq!(ctrl_c_copy_outcome(true, true), CtrlCCopy::Retain);
-        // Failed copy (selection, no text) clears it (selection.ts:79-81).
-        assert_eq!(ctrl_c_copy_outcome(true, false), CtrlCCopy::Clear);
+        assert_eq!(ctrl_c_selection_key(true, false, false), CtrlCKeyAction::FallThrough);
+        assert_eq!(ctrl_c_selection_key(false, false, false), CtrlCKeyAction::FallThrough);
+        // Copy-on-select ON: clear the highlight but let the key propagate
+        // (upstream selection.ts:79-81 `if ((copyOnSelect && !editing) || ...)`).
+        assert_eq!(
+            ctrl_c_selection_key(true, true, true),
+            CtrlCKeyAction::ClearAndFallThrough
+        );
+        assert_eq!(
+            ctrl_c_selection_key(true, true, false),
+            CtrlCKeyAction::ClearAndFallThrough
+        );
+        // Copy-on-select OFF: copy and retain on success (selection.ts:84-86).
+        assert_eq!(ctrl_c_selection_key(false, true, true), CtrlCKeyAction::Retain);
+        // Failed copy (selection, no text) clears AND consumes (:79-81).
+        assert_eq!(
+            ctrl_c_selection_key(false, true, false),
+            CtrlCKeyAction::ClearAndConsume
+        );
     }
 
     #[test]
