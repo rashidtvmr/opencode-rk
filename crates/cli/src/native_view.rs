@@ -3797,15 +3797,12 @@ impl NativeView {
 
     /// Home's footer is a nonshrinking sibling, not an overpainted last row.
     /// Pinned feature-plugins/home/footer.tsx reserves 0, 1, or 3 rows.
+    /// LAY-20: `home/footer.tsx:82-86` gates on the FULL terminal dimensions
+    /// (`useTerminalDimensions()`), never the tab-reduced route area, so the
+    /// 44/14/16 thresholds fire at the same terminal size with or without a
+    /// tab rail or strip.
     fn home_footer_rows(&self) -> usize {
-        let height = self.render_height();
-        if self.presentation().main_width < 44 || height < 14 {
-            0
-        } else if height < 16 {
-            1
-        } else {
-            3
-        }
+        usize::from(crate::native_home::footer_rows(self.layout.cols, self.layout.rows))
     }
 
     /// Pinned Home composition: centered four-row logo and a 75-cell maximum
@@ -3986,7 +3983,11 @@ impl NativeView {
             );
         }
         if footer_rows == 0 { return rows; }
-        let right = if width >= 64 { env!("CARGO_PKG_VERSION") } else { "" };
+        // LAY-20: `/mcps`, `/plugins` and the version gate on the full
+        // terminal width (`home/footer.tsx:7-13` uses `useTerminalDimensions()`);
+        // the band itself still lays out inside the home column width.
+        let visibility = crate::native_home::footer_visibility(self.layout.cols);
+        let right = if visibility.version { env!("CARGO_PKG_VERSION") } else { "" };
         let (mcp_total, mcp_failed, mcp_connected) =
             if self.status.mcp_acknowledged() && !self.status.entries().is_empty() {
                 let entries = self.status.entries();
@@ -4011,7 +4012,7 @@ impl NativeView {
         // no entries, hides the plugin block when nothing failed, gates
         // /mcps at 64 and /plugins at 80.
         let visible = crate::native_home::footer_status(
-            width,
+            self.layout.cols,
             mcp_total,
             mcp_failed,
             mcp_connected,
@@ -5841,6 +5842,38 @@ mod tests {
         assert!(frame[tiny_row].contains("\u{2299} 1 plugin failed"));
         assert!(!frame[tiny_row].contains("/plugins"));
         assert!(!frame[tiny_row].contains(env!("CARGO_PKG_VERSION")));
+    }
+    #[test]
+    fn lay20c_home_footer_gates_on_full_terminal_size_with_tab_strip() {
+        use super::*;
+        // Terminal 64x14 with the default horizontal tab strip (1 row):
+        // `home/footer.tsx:82-85` gates on `useTerminalDimensions()`, so the
+        // footer band still renders (1 row at height 14) and the version
+        // still shows at width 64 even though the route area is 13 rows.
+        let mut view = NativeView::new(64, 14);
+        view.set_session_route(false);
+        view.set_tab_reservation(crate::native_tabs::TabReservation::for_view(
+            crate::native_tabs::TabOrientation::Horizontal,
+            64,
+            14,
+        ));
+        assert_eq!(view.home_footer_rows(), 1, "height 14 gates on terminal rows");
+        let frame = view.render("", &[], false, &[]);
+        assert!(
+            frame.iter().any(|row| row.contains(env!("CARGO_PKG_VERSION"))),
+            "version renders in the 1-row footer band at terminal width 64"
+        );
+        // Height 13 stays gated off with the same reservation.
+        let mut short = NativeView::new(64, 13);
+        short.set_session_route(false);
+        short.set_tab_reservation(crate::native_tabs::TabReservation::for_view(
+            crate::native_tabs::TabOrientation::Horizontal,
+            64,
+            13,
+        ));
+        assert_eq!(short.home_footer_rows(), 0, "height 13 hides the footer");
+        let frame = short.render("", &[], false, &[]);
+        assert!(!frame.iter().any(|row| row.contains(env!("CARGO_PKG_VERSION"))));
     }
     #[test]
     fn tab_reservations_shift_chat_paint_and_selection_with_text() {
