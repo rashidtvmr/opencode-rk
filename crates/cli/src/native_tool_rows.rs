@@ -562,10 +562,17 @@ pub fn tool_display(
         ToolKind::Generic => generic_display(canonical, &args, state),
     };
 
-    let icon = match state {
-        ToolStatus::Error => "✗",
-        ToolStatus::Denied => "⊘",
-        _ => icon,
+    // InlineTool specializations and Shell/BlockTool retain their declared
+    // icon on failure. Only GenericTool and Execute explicitly select `✗`
+    // from the error status (`routes/session/index.tsx:2746-2751,3420-3425`);
+    // denied styling strikes through, but does not replace, that icon
+    // (`message-parts.tsx:242-252,281-293`).
+    let icon = if matches!(kind, ToolKind::Generic | ToolKind::Execute)
+        && matches!(state, ToolStatus::Error | ToolStatus::Denied)
+    {
+        "✗"
+    } else {
+        icon
     };
 
     ToolDisplay {
@@ -1638,10 +1645,14 @@ mod tests {
     fn error_rows_are_error_classed() {
         let rows = tool_state_rows(80, "bash", "completed", r#"{"command":"false"}"#, "boom", true);
         assert_eq!(rows[0].1, ChatRowClass::ToolError);
-        assert!(rows[0].0.contains('✗'));
+        // The shell header keeps its declared `$` prefix on failure, exactly
+        // like upstream `ShellDisplay` (`index.tsx:3097`, `$ <command>` for
+        // every terminal state including error); only GenericTool and Execute
+        // swap the glyph for `✗` (`index.tsx:2746-2751,3412-3425`).
+        assert!(rows[0].0.contains('$'), "{rows:?}");
         assert!(rows.iter().any(|(row, class)| *class == ChatRowClass::ToolError
             && row.contains("✖ shell failed: boom")));
-        assert_eq!(rows[0].0.trim_start().chars().next(), Some('✗'));
+        assert_eq!(rows[0].0.trim_start().chars().next(), Some('$'));
     }
 
     #[test]
@@ -1656,8 +1667,42 @@ mod tests {
         );
         assert!(rows.iter().all(|(_, class)| *class != ChatRowClass::ToolError));
         assert_eq!(rows[0].1, ChatRowClass::ToolDenied);
-        assert!(rows[0].0.contains('⊘'));
+        assert!(rows[0].0.contains('←'), "InlineTool retains its declared icon: {rows:?}");
         assert!(!rows.iter().any(|(row, _)| row.contains("failed")));
+    }
+
+    #[test]
+    fn tool_error_icons_follow_each_upstream_component() {
+        // InlineTool specializations retain their declared glyph even in error
+        // or denied state. GenericTool and Execute explicitly choose ✗.
+        let glob = label("glob", "error", json!({"pattern": "*.rs"}));
+        assert_eq!(glob.icon, "✱");
+        let denied_read = tool_display(
+            80,
+            "read",
+            "error",
+            r#"{"path":"src/main.rs"}"#,
+            "QuestionRejectedError: user dismissed the request",
+            true,
+        );
+        assert_eq!(denied_read.status, ToolStatus::Denied);
+        assert_eq!(denied_read.icon, "→");
+        let shell = label("shell", "error", json!({"command": "false"}));
+        assert_eq!(shell.icon, "$");
+        let generic = label("mcp__fixture", "error", json!({}));
+        assert_eq!(generic.icon, "✗");
+        let denied_generic = tool_display(
+            80,
+            "mcp__fixture",
+            "error",
+            "{}",
+            "QuestionRejectedError: user dismissed the request",
+            true,
+        );
+        assert_eq!(denied_generic.status, ToolStatus::Denied);
+        assert_eq!(denied_generic.icon, "✗");
+        let execute = label("execute", "error", json!({"code":"1"}));
+        assert_eq!(execute.icon, "✗");
     }
 
     #[test]
