@@ -277,15 +277,29 @@ pub enum TabCellColor {
     Idle,
     /// Selected tab: bg=raised.high, fg=text.base, bold.
     Selected,
-    /// Hovered (not selected): bg=raised.high, fg=text.base.
+    /// Hovered (not selected, not dragged): bg=raised.base fg=text.base
+    /// (`session-tabs.tsx:1568-1573` lifts `background.action.primary.hovered`,
+    /// which both bundled themes pin to `$hue.neutral.700` == `raised.base`).
     Hovered,
+    /// Dragged (not selected, pointer no longer over the source): bg=raised.high
+    /// fg=text.base bold. Upstream lifts `action.primary.hovered` toward
+    /// `decrease(raised.base)` by 1, which is exactly `raised.high`, and forces
+    /// BOLD (`session-tabs.tsx:1568-1573,1642`). Its number color is NOT
+    /// `text.base`: upstream `numberColor` (`:1632-1641`) only takes
+    /// `foreground()` when `hovered() && !selected()`, so a dragged-but-not-
+    /// hovered tab keeps the idle number formula.
+    Dragged,
+    /// Dragged (not selected) AND still hovered: same bg/bold as [`Self::Dragged`]
+    /// but the number takes `foreground()` = `text.base` because
+    /// `hovered() && !selected()` holds (`session-tabs.tsx:1611-1614,1632-1641`).
+    DraggedHovered,
     /// New-session idle affordance: plus fg=idleNumber, "New session" fg=TextMuted.
     AddIdle,
-    /// New-session hovered affordance: bg=raised.high, plus+text fg=text.base.
+    /// New-session hovered affordance: bg=raised.base, plus+text fg=text.base.
     AddHovered,
     /// Promoted Home slot (active new tab): bg=raised.high fg=text.base, bold.
     HomeActive,
-    /// Promoted Home slot hovered (not active): bg=raised.high fg=text.base.
+    /// Promoted Home slot hovered (not active): bg=raised.base fg=text.base.
     HomeHovered,
 }
 
@@ -295,7 +309,8 @@ pub enum TabCellColor {
 /// unused roles are ignored by the caller.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TabRowPaint {
-    /// Background: idle->background.base, hovered/selected->raised.high.
+    /// Background: idle->background.base, hovered->raised.base,
+    /// dragged/selected->raised.high.
     pub background: [u8; 4],
     /// Title/number fg: idle=text.muted, hovered/selected=text.base.
     pub title_fg: [u8; 4],
@@ -307,7 +322,7 @@ pub struct TabRowPaint {
     pub new_text_fg: [u8; 4],
     /// Bold attribute: selected (or dragged) -> 1, else 0.
     pub title_attr: u32,
-    /// Color role tag for this row (Idle/Selected/Hovered/Add/Hover/Home).
+    /// Color role tag for this row (Idle/Selected/Dragged/Hovered/Add/Home).
     pub color: TabCellColor,
     /// Number/indicator column fg per upstream session-tabs.tsx:1648-1658.
     /// Zero channels mean "caller falls back to title_fg" (Home/add conven-
@@ -339,11 +354,16 @@ impl TabRowPaint {
         }
     }
 
-    /// Hovered horizontal session tab: bg=raised.high fg=text.base.
+    /// Hovered horizontal session tab: bg=raised.base fg=text.base. Upstream
+    /// `session-tabs.tsx:1568-1573` lifts `theme.background.action.primary.hovered`
+    /// with `dragged ? 1 : selection()` = 0 for a plain hover; both bundled
+    /// themes define `action.primary.$hovered = $hue.neutral.700`
+    /// (`opencode.json:63`, `opencode2.json:65`), which is `raised.base`
+    /// (`opencode.json:56`, `opencode2.json:58`), i.e. `Slot::BackgroundPanel`.
     #[must_use]
     pub fn horizontal_hovered(palette: &crate::native_theme_runtime::Palette) -> Self {
         use crate::native_theme_runtime::Slot;
-        let bg = palette.get(Slot::BackgroundElement);
+        let bg = palette.get(Slot::BackgroundPanel);
         let title_fg = palette.get(Slot::Text);
         let close_fg = crate::native_tab_rail::tint(
             palette.get(Slot::TextMuted),
@@ -359,6 +379,34 @@ impl TabRowPaint {
             title_attr: 0,
             number_fg: [0, 0, 0, 0],
             color: TabCellColor::Hovered,
+        }
+    }
+
+    /// Dragged horizontal session tab: bg=raised.high fg=text.base bold.
+    /// `session-tabs.tsx:1568-1573`: the dragged tab lifts `action.primary.hovered`
+    /// toward `theme.decrease(theme.background.raised.base)` by 1, which is the
+    /// exact overlay `decrease(raised.base)` = `raised.high`
+    /// (`native_theme_runtime.rs:3245-3257`), i.e. `Slot::BackgroundElement`;
+    /// `:1642` forces BOLD while held.
+    #[must_use]
+    pub fn horizontal_dragged(palette: &crate::native_theme_runtime::Palette) -> Self {
+        use crate::native_theme_runtime::Slot;
+        let bg = palette.get(Slot::BackgroundElement);
+        let title_fg = palette.get(Slot::Text);
+        let close_fg = crate::native_tab_rail::tint(
+            palette.get(Slot::TextMuted),
+            palette.get(Slot::Text),
+            0.6,
+        );
+        TabRowPaint {
+            background: bg,
+            title_fg,
+            close_fg,
+            plus_fg: [0, 0, 0, 0],
+            new_text_fg: [0, 0, 0, 0],
+            title_attr: 1,
+            number_fg: [0, 0, 0, 0],
+            color: TabCellColor::Dragged,
         }
     }
 
@@ -408,11 +456,11 @@ impl TabRowPaint {
         }
     }
 
-    /// Hovered add-session affordance: bg=raised.high, plus+text=Text.
+    /// Hovered add-session affordance: bg=raised.base, plus+text=Text.
     #[must_use]
     pub fn horizontal_add_hovered(palette: &crate::native_theme_runtime::Palette) -> Self {
         use crate::native_theme_runtime::Slot;
-        let bg = palette.get(Slot::BackgroundElement);
+        let bg = palette.get(Slot::BackgroundPanel);
         let text = palette.get(Slot::Text);
         TabRowPaint {
             background: bg,
@@ -444,11 +492,14 @@ impl TabRowPaint {
         }
     }
 
-    /// Promoted Home slot hovered (not active): bg=raised.high fg=text.base.
+    /// Promoted Home slot hovered (not active): bg=raised.base fg=text.base.
+    /// Home is a normal adaptive member of the strip, so its hovered paint is
+    /// the same `action.primary.hovered` = `raised.base` as a session tab
+    /// (`session-tabs.tsx:1568-1573`).
     #[must_use]
     pub fn horizontal_home_hovered(palette: &crate::native_theme_runtime::Palette) -> Self {
         use crate::native_theme_runtime::Slot;
-        let bg = palette.get(Slot::BackgroundElement);
+        let bg = palette.get(Slot::BackgroundPanel);
         let text = palette.get(Slot::Text);
         TabRowPaint {
             background: bg,
@@ -466,7 +517,9 @@ impl TabRowPaint {
 /// Classify a horizontal session tab's color role from upstream formulas
 /// (session-tabs.tsx :1569-1583 :1609-1612 :1642):
 /// - selected -> Selected (bg=raised.high, fg=Text, bold)
-/// - hovered && !selected -> Hovered (bg=raised.high, fg=Text)
+/// - dragged (non-selected) -> Dragged (bg=raised.high, fg=Text, bold), stamped
+///   later by [`TabStrip::with_dragged`] from the caller's drag fact
+/// - hovered && !selected -> Hovered (bg=raised.base, fg=Text)
 /// - otherwise -> Idle (bg=background.base, fg=TextMuted)
 #[must_use]
 pub fn cell_color(_flags: &TabFlags, is_hovered: bool, is_active: bool) -> TabCellColor {
@@ -518,6 +571,12 @@ pub fn horizontal_session_paint_with_semantics(
         semantic.map_or_else(|| palette.get(Slot::Warning), |theme| theme.tab_attention.rgba)
     } else if flags.busy {
         semantic.map_or_else(|| palette.get(Slot::Primary), |theme| theme.tab_interactive.rgba)
+    } else if color == TabCellColor::DraggedHovered {
+        // `session-tabs.tsx:1632-1641`: the number takes `foreground()` =
+        // text.base only when `hovered() && !selected()`. A dragged tab that is
+        // still hovered satisfies that; a dragged tab the pointer has left does
+        // not, and falls through to the idle formula below.
+        palette.get(Slot::Text)
     } else if color == TabCellColor::Hovered {
         palette.get(Slot::Text)
     } else if color == TabCellColor::Selected {
@@ -535,15 +594,23 @@ pub fn row_paint_for(
     color: TabCellColor,
     palette: &crate::native_theme_runtime::Palette,
 ) -> TabRowPaint {
-    match color {
+    let mut paint = match color {
         TabCellColor::Idle => TabRowPaint::horizontal_idle(palette),
         TabCellColor::Selected => TabRowPaint::horizontal_selected(palette),
+        TabCellColor::Dragged => TabRowPaint::horizontal_dragged(palette),
+        TabCellColor::DraggedHovered => TabRowPaint::horizontal_dragged(palette),
         TabCellColor::Hovered => TabRowPaint::horizontal_hovered(palette),
         TabCellColor::AddIdle => TabRowPaint::horizontal_add_idle(palette),
         TabCellColor::AddHovered => TabRowPaint::horizontal_add_hovered(palette),
         TabCellColor::HomeActive => TabRowPaint::horizontal_home_active(palette),
         TabCellColor::HomeHovered => TabRowPaint::horizontal_home_hovered(palette),
-    }
+    };
+    // The role tag must reflect the actual classification, not the shared
+    // constructor's default: `Dragged` and `DraggedHovered` reuse the same
+    // dragged paint (same bg/bold) but differ in the number color, so the tag
+    // distinguishes them for consumers and tests.
+    paint.color = color;
+    paint
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1206,21 +1273,31 @@ impl TabStrip {
     /// (`data.session.title.pending`, `context/data.tsx:22-47`) and the
     /// resolved `config.animations ?? true`, then stamp the matching title
     /// attribute onto the resolved paints. A renaming title is DIM only while
-    /// animations are disabled; otherwise the selected tab keeps BOLD
-    /// (`session-tabs.tsx:1061-1074,1713-1720`). The promoted Home/add rows are
-    /// left untouched: upstream keeps them BOLD unconditionally
-    /// (`session-tabs.tsx:1201,1210`).
+    /// animations are disabled; otherwise the selected OR dragged tab keeps
+    /// BOLD (`session-tabs.tsx:1061-1074,1642,1713-1720`). The promoted
+    /// Home/add rows are left untouched: upstream keeps them BOLD
+    /// unconditionally (`session-tabs.tsx:1201,1210`).
     #[must_use]
     pub fn with_title_renaming(
         mut self,
         renaming: &dyn Fn(&SessionRef) -> bool,
         animations: bool,
     ) -> Self {
-        let selected: Vec<bool> = self.row_flags.iter().map(|flags| flags.active).collect();
+        // The dragged source is painted BOLD while held (`session-tabs.tsx:1642`),
+        // so the lifted flag is active OR Dragged, not just `flags.active`.
+        let lifted: Vec<bool> = self
+            .row_flags
+            .iter()
+            .zip(self.row_colors.iter())
+            .map(|(flags, color)| {
+                flags.active
+                    || matches!(*color, TabCellColor::Dragged | TabCellColor::DraggedHovered)
+            })
+            .collect();
         for (index, paint) in self.row_paints.iter_mut().enumerate() {
             let Some((session, _)) = self.rects.get(index) else { continue };
-            let is_selected = selected.get(index).copied().unwrap_or(false);
-            paint.title_attr = title_attributes(is_selected, renaming(session), animations);
+            let is_lifted = lifted.get(index).copied().unwrap_or(false);
+            paint.title_attr = title_attributes(is_lifted, renaming(session), animations);
         }
         self
     }
@@ -1292,6 +1369,42 @@ impl TabStrip {
     #[must_use]
     pub fn add_hovered(&self) -> bool {
         self.add_hovered
+    }
+
+    /// TAB-07: paint the pointer-held drag source at full selected elevation
+    /// (`session-tabs.tsx:1568-1573,1642`): a dragged (non-selected) tab lifts
+    /// `action.primary.hovered` toward `decrease(raised.base)` by 1, which is
+    /// exactly `raised.high`, and turns BOLD. Recomputes the palette-free
+    /// `row_colors` from the drag fact plus the frame `hovered`/`active` facts,
+    /// so it is idempotent and frame-local; call it before
+    /// `with_row_colors_semantic`/`with_title_renaming`. The selected tab wins
+    /// when both apply. The vertical rail owns its own paint (no `row_colors`),
+    /// so this is a no-op there — upstream's vertical drag reuses the hovered
+    /// style (`session-tabs.tsx:776-777`).
+    #[must_use]
+    pub fn with_dragged(mut self, dragged: Option<&SessionRef>) -> Self {
+        for (index, color) in self.row_colors.iter_mut().enumerate() {
+            let Some((session, _)) = self.rects.get(index) else { continue };
+            if self.row_flags.get(index).is_some_and(|flags| flags.active) {
+                continue;
+            }
+            let is_hovered = self.hovered.as_ref() == Some(session);
+            *color = if dragged == Some(session) {
+                // The number color follows `hovered() && !selected()`
+                // (`session-tabs.tsx:1632-1641`), independent of the drag fact,
+                // so a dragged tab the pointer has left keeps the idle number.
+                if is_hovered {
+                    TabCellColor::DraggedHovered
+                } else {
+                    TabCellColor::Dragged
+                }
+            } else if is_hovered {
+                TabCellColor::Hovered
+            } else {
+                TabCellColor::Idle
+            };
+        }
+        self
     }
 
     /// Whether the promoted Home slot is the active new tab in this frame.
@@ -3279,8 +3392,9 @@ mod tests {
         assert_eq!(strip.row_paints[1].color, TabCellColor::Hovered);
         assert_eq!(strip.row_paints[2].color, TabCellColor::Selected);
         // Upstream session-tabs.tsx:1569-1583 with the recorded theme mapping:
-        // idle bg=background.base fg=text.muted; hovered/selected bg=raised.high
-        // fg=text.base (selected bold).
+        // idle bg=background.base fg=text.muted; hovered bg=raised.base
+        // (action.primary.hovered), dragged/selected bg=raised.high fg=text.base
+        // (selected bold).
         assert_eq!(strip.row_paints[0].background, palette.get(Slot::Background));
         assert_eq!(strip.row_paints[0].title_fg, palette.get(Slot::TextMuted));
         assert_eq!(strip.row_paints[2].background, palette.get(Slot::BackgroundElement));
@@ -3429,12 +3543,13 @@ mod tests {
         assert_eq!(add_paint.new_text_fg, palette.get(Slot::TextMuted));
         assert!(!add_strip.add_hovered());
 
-        // Hovered add control: bg=raised.high and both fg=Text.
+        // Hovered add control: bg=raised.base (upstream session-tabs.tsx:1769-1770
+        // lifts `theme.background.action.primary.hovered`) and both fg=Text.
         let add_hover = add_strip.with_add_hovered(true, &palette);
         assert!(add_hover.add_hovered());
         let paint = add_hover.add_paint.expect("add paint after builder");
         assert_eq!(paint.color, TabCellColor::AddHovered);
-        assert_eq!(paint.background, palette.get(Slot::BackgroundElement));
+        assert_eq!(paint.background, palette.get(Slot::BackgroundPanel));
         assert_eq!(paint.plus_fg, palette.get(Slot::Text));
         assert_eq!(paint.new_text_fg, palette.get(Slot::Text));
 
@@ -3773,6 +3888,127 @@ mod tests {
         assert_eq!(title_attributes(false, true, false), crate::native_ui_style::ATTR_DIM);
         assert_eq!(title_attributes(true, true, true), crate::native_ui_style::ATTR_BOLD);
         assert_eq!(title_attributes(false, false, true), 0);
+    }
+
+    /// TAB-07: the hovered (non-dragged) horizontal tab paints at
+    /// `action.primary.hovered` == `raised.base` — both bundled themes pin
+    /// `action.primary.$hovered` to `$hue.neutral.700` (`opencode.json:63`,
+    /// `opencode2.json:65`), the same value as `raised.base`
+    /// (`opencode.json:56`, `opencode2.json:58`) — NOT at the selected
+    /// elevation. A dragged tab lifts to `raised.high` and turns BOLD
+    /// (`session-tabs.tsx:1568-1573,1642`), the selected tab wins over the
+    /// drag, and releasing the drag restores the hovered/idle roles.
+    #[test]
+    fn tab_07_hovered_paints_raised_base_and_dragged_lifts_to_selected_elevation() {
+        use crate::native_theme_runtime::{Palette, Slot};
+        let palette = Palette::opencode_dark();
+        let mut hovered_tab = input("hov", "hovered");
+        hovered_tab.flags = TabFlags { active: false, busy: false, needs_attention: false };
+        let mut selected_tab = input("sel", "selected");
+        selected_tab.flags = TabFlags { active: true, busy: false, needs_attention: false };
+        let render = |dragged: Option<&SessionRef>| {
+            TabStrip::render_with_hover(
+                &[
+                    input("idle", "idle"),
+                    hovered_tab.clone(),
+                    selected_tab.clone(),
+                ],
+                TabOrientation::Horizontal,
+                120,
+                1,
+                0,
+                Some(&SessionRef("hov".into())),
+            )
+            .with_dragged(dragged)
+            .with_row_colors(&palette)
+        };
+        let hovered = render(None);
+        assert_eq!(
+            hovered.row_paints[1].background,
+            palette.get(Slot::BackgroundPanel),
+            "hovered bg = action.primary.hovered = raised.base (session-tabs.tsx:1568-1573)"
+        );
+        assert_eq!(hovered.row_paints[1].title_fg, palette.get(Slot::Text));
+        assert_eq!(hovered.row_paints[1].title_attr, 0, "hovered alone is not bold");
+        assert_eq!(
+            hovered.row_paints[1].number_fg,
+            palette.get(Slot::Text),
+            "hovered number base = foreground() = text.base (:1635-1636)"
+        );
+        assert_eq!(
+            hovered.row_paints[2].background,
+            palette.get(Slot::BackgroundElement),
+            "selected keeps raised.high = decrease(raised.base)"
+        );
+        let dragged = render(Some(&SessionRef("hov".into())));
+        assert_eq!(
+            dragged.row_paints[1].color,
+            TabCellColor::DraggedHovered,
+            "dragging the hovered tab keeps the hover fact for the number color"
+        );
+        assert_eq!(
+            dragged.row_paints[1].background,
+            palette.get(Slot::BackgroundElement),
+            "dragged lifts toward decrease(raised.base) by 1 == raised.high"
+        );
+        assert_eq!(dragged.row_paints[1].title_fg, palette.get(Slot::Text));
+        assert_eq!(dragged.row_paints[1].title_attr, 1, "dragged is BOLD (:1642)");
+        assert_eq!(
+            dragged.row_paints[1].number_fg,
+            palette.get(Slot::Text),
+            "dragged+hovered number base = foreground() = text.base (:1632-1641)"
+        );
+        assert_eq!(
+            dragged.row_paints[2].color,
+            TabCellColor::Selected,
+            "selected wins over the drag fact"
+        );
+        assert_eq!(dragged.row_paints[2].title_attr, 1);
+        // Dragging a tab the pointer is NOT over keeps the idle number formula:
+        // upstream `numberColor` only takes `foreground()` when
+        // `hovered() && !selected()` (`session-tabs.tsx:1632-1641`), independent
+        // of the drag fact. The dragged background/bold still apply.
+        let dragged_away = render(Some(&SessionRef("idle".into())));
+        assert_eq!(
+            dragged_away.row_paints[0].color,
+            TabCellColor::Dragged,
+            "dragged but not hovered is Dragged, not DraggedHovered"
+        );
+        assert_eq!(
+            dragged_away.row_paints[0].background,
+            palette.get(Slot::BackgroundElement),
+            "dragged-away still lifts to raised.high"
+        );
+        assert_eq!(
+            dragged_away.row_paints[0].title_attr, 1,
+            "dragged-away is still BOLD (:1642)"
+        );
+        assert_ne!(
+            dragged_away.row_paints[0].number_fg,
+            palette.get(Slot::Text),
+            "dragged-but-not-hovered number is the idle formula, NOT text.base"
+        );
+        // A frame with the drag released repaints the source as plain hovered.
+        let released = render(None);
+        assert_eq!(released.row_paints[1].color, TabCellColor::Hovered);
+        assert_eq!(released.row_paints[1].title_attr, 0);
+        // A dragged title also stays BOLD when the TAB-24 renaming stamp runs.
+        let renamed = TabStrip::render_with_hover(
+            &[
+                input("idle", "idle"),
+                hovered_tab.clone(),
+                selected_tab.clone(),
+            ],
+            TabOrientation::Horizontal,
+            120,
+            1,
+            0,
+            Some(&SessionRef("hov".into())),
+        )
+        .with_dragged(Some(&SessionRef("hov".into())))
+        .with_row_colors(&palette)
+        .with_title_renaming(&|_| false, true);
+        assert_eq!(renamed.row_paints[1].title_attr, 1, "renaming stamp keeps drag BOLD");
     }
 
     /// TAB-08 fixture (`marquee-*` long title): the exact fixture title with

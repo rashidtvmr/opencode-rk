@@ -8254,6 +8254,10 @@ fn native_loop(
                 home_active && tab_home_hovered,
                 held_layout.as_ref(),
             )
+            // TAB-07: the held drag source paints at full selected elevation
+            // (raised.high) and BOLD (`session-tabs.tsx:1568-1573,1642`); must
+            // run before with_row_colors_semantic consumes row_colors.
+            .with_dragged(tab_drag.dragging())
             .with_row_colors_semantic(&theme.palette, theme.semantic.as_ref())
             .with_add_hovered(tab_add_hovered, &theme.palette)
         };
