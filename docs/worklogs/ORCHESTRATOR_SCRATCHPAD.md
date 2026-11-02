@@ -11456,3 +11456,40 @@ command, not a lane-specific one.
   resolver, unreachable `TabCommand::Close` arm, no keybind ingestion — negative
   verdict stands, candidate not landed); CP-26/SIDE-05/DIFF-002/SIDE-10
   ALREADY_CORRECT (no patch); DIALOG-05 patch emitted (PREVERIFIED).
+
+## 2026-11-02 (cont.) — wave-40 landings, HEAD `27c6c208`, pushed
+
+Landed and pushed (`5e91ffae..27c6c208` to `git@github.com:rashidtvmr/opencode-rk.git`):
+- `669a7f50` **FORM-002** — `crates/cli/src/native_permissions.rs`: empty permission
+  diff/patch strings treated as absent (upstream Solid `<Show>` falsy-string
+  semantics). Reviewed `REVIEWFORM002` APPROVED (independent, test-role).
+- `f6298d7c` **SIDE-05** — `crates/cli/src/native_sidebar.rs`: test-only painted-cell
+  assertion for the five limit states. Reviewed `REVIEWSIDE05` APPROVE.
+- `27c6c208` **CP-23** — `crates/cli/src/native_view.rs` + `crates/cli/src/tui_entry.rs`:
+  `context_usage_styles` extended to a 5-tuple with attributes; dock pushes
+  `ATTR_BOLD` when `span.bold`, `ATTR_NONE` on the context-page path; painter ORs
+  the attribute. Independent review `REVIEWCP23` dispatched against the exact SHA.
+- Full CLI suite (single-threaded) on the combined tree: **2151 passed / 0 failed**.
+
+Verdicts this wave:
+- **REVIEW-TAB23 NEEDS_FIX** (test-only resolver, unreachable `TabCommand::Close`
+  arm, no keybind ingestion) — not landed. (A second reviewer said APPROVE; a
+  negative verdict cannot be outvoted on the same SHA.)
+- **REVIEW-TAB07 NEEDS_FIX** (F1: patch changes hovered bg to `BackgroundPanel`
+  but leaves the stale assertion at `native_tabs.rs:3437` pinning
+  `BackgroundElement`) — repair `TAB07FIX` dispatched.
+- **REVIEW-DIALOG05 NEEDS_FIX** (F1: bare `DIALOG_LIST_INSET` unresolved in
+  `pub mod select`, E0425 compile blocker; F2: dead symbol) — repair `DIALOG05FIX`
+  dispatched.
+- ALREADY_CORRECT (no patch): CP-26, SIDE-05 (renderer), SIDE-10, TOOL-008,
+  MD-009, DIFF-002, STATE-003 (helper logic).
+- BLOCKED (recorded, no fabricated producer): SIDE-03 (no revert-aware usage /
+  `set_cost` producer), TOOL-012 (`metadata.loaded` — pinned upstream `read.ts`
+  emits only `truncated`; no server NDJSON metadata field), TAB-21 (no idle
+  transition producer), MSG-008 (`time.streamed` wire slot), MSG-005 (chips need
+  a new server/storage `files`/`skills` field), W35-MEDIA01 transport
+  (`available_for_web_turn: false`).
+
+In flight (wave-40 cont.): REVIEWCP23, REVIEWMEDIA01, REVIEWFORMHOST, REVIEWLAY17,
+DIALOG05FIX, TAB07FIX, CP36, LAY20, MSG006, SIDE12, THEME10, THEME14FIX, TOOL011,
+TOOL002-fix.
