@@ -377,14 +377,15 @@ impl SessionRegions {
             h: pad_rows,
         };
         let composer_room = session.h.saturating_sub(pad_rows);
-        let composer_h = spec.composer_height.min(composer_room);
+        let action_h = u16::from(composer_room > 0);
+        let composer_capacity = composer_room.saturating_sub(action_h);
+        let composer_h = spec.composer_height.min(composer_capacity);
         let composer = Rect {
             x: session.x,
             y: session.y + composer_room - composer_h,
             w: session.w,
             h: composer_h,
         };
-        let action_h = u16::from(composer.y > session.y).min(composer.y - session.y);
         let jump = Rect {
             x: session.x,
             y: composer.y - action_h,
@@ -685,6 +686,25 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// LAY-15. The reserved action row remains one row even when the requested
+    /// composer would otherwise consume all rows above the bottom pad.
+    #[test]
+    fn lay_15_action_row_survives_full_height_composer() {
+        for rows in [3u16, 8] {
+            let mut spec = FrameSpec::new(80, rows);
+            spec.composer_height = rows;
+            let regions = SessionRegions::compute(&spec);
+            assert_eq!(regions.jump.h, 1, "{rows} rows: action row is always reserved");
+            assert_eq!(regions.jump.y + regions.jump.h, regions.composer.y);
+            assert_eq!(regions.composer.h, rows.saturating_sub(2));
+            assert_eq!(regions.bottom_pad.h, 1);
+            assert_eq!(
+                regions.transcript.h + regions.jump.h + regions.composer.h + regions.bottom_pad.h,
+                rows
+            );
         }
     }
 
