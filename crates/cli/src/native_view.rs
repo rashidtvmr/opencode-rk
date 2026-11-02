@@ -190,6 +190,14 @@ pub struct NativeView {
     /// Whether the composer owns input (`useInteractivity`, `footer.tsx:60`):
     /// the shortcuts render disabled + DIM while a side panel is focused.
     rail_interactive: bool,
+    /// CP-11: `config.animations ?? true` (`index.tsx:1912`). When off the
+    /// running status slot paints the static `[⋯]` marker instead of the
+    /// scanner. Fed from the live resolved config alongside the title state.
+    rail_animations: bool,
+    /// CP-11: elapsed scanner time in ms for the running status slot
+    /// (`index.tsx:1913-1917`). Fed from the live turn clock so the spinner
+    /// advances; 0 paints the first frame.
+    rail_elapsed_ms: u64,
     /// First running subagent, the navigation target of the footer live
     /// label (`session.child.first`, `routes/session/index.tsx:1391-1398`).
     live_first_child: Option<String>,
@@ -947,6 +955,8 @@ impl NativeView {
             rail_command_shortcut: None,
             rail_agent_shortcut: None,
             rail_interactive: true,
+            rail_animations: true,
+            rail_elapsed_ms: 0,
             queued_prompts: crate::native_view_chat::QueueDock::default(),
             dock: {
                 // CP-23 (`composer/index.tsx:127-128`): both always-mounted
@@ -1223,6 +1233,16 @@ impl NativeView {
     pub fn set_rail_shortcuts(&mut self, commands: Option<String>, agents: Option<String>) {
         self.rail_command_shortcut = commands.filter(|key| !key.is_empty());
         self.rail_agent_shortcut = agents.filter(|key| !key.is_empty());
+    }
+
+    /// CP-11: the live running-status clock (`index.tsx:1912-1917`).
+    /// `animations` is the resolved `config.animations ?? true`; `elapsed_ms`
+    /// is the monotonic time since the current provider turn started, used
+    /// only to advance the scanner frame. The running status slot replaces
+    /// the idle directory label while the turn is busy.
+    pub fn set_rail_status_clock(&mut self, animations: bool, elapsed_ms: u64) {
+        self.rail_animations = animations;
+        self.rail_elapsed_ms = elapsed_ms;
     }
 
     /// Whether the composer owns input (`useInteractivity`): footer hints read
@@ -1787,6 +1807,15 @@ impl NativeView {
 
     #[must_use]
     pub fn scrollbar_enabled(&self) -> bool { self.scrollbar_enabled }
+
+    /// CP-02: thread the resolved `promptBg` surface
+    /// (`prompt/index.tsx:1676`) into the chat composer so the lip row honours
+    /// a transparent background (`index.tsx:1879,1890-1895`). `None` keeps the
+    /// opaque default. Callers pass the theme's
+    /// `native_prompt_pane::prompt_surface(...).rgba`.
+    pub fn set_prompt_background(&mut self, background: Option<[u8; 4]>) {
+        self.chat.set_prompt_background(background);
+    }
 
     /// Scrollbar painted by the last render, if the bar is shown and the
     /// transcript content overflows its viewport.
@@ -3911,12 +3940,27 @@ impl NativeView {
             command_shortcut: self.rail_command_shortcut.as_deref(),
             agent_shortcut: self.rail_agent_shortcut.as_deref(),
             interactive: self.rail_interactive,
+            // CP-11: `data.session.status(sessionID) == "running"`
+            // (`index.tsx:1911`). The provider-turn fact is the authoritative
+            // running state and drives the `prompt.footer.status` Switch.
+            running: loading,
+            animations: self.rail_animations,
+            elapsed_ms: self.rail_elapsed_ms,
             ..crate::native_status_rail::RailFacts::new(usize::from(width))
         };
         let rail_spans = crate::native_status_rail::rail_spans(&facts);
         let footer_text = crate::native_status_rail::slot_text(
             &rail_spans,
             crate::native_status_rail::RailSlot::Footer,
+        );
+        // CP-11: the status slot (`prompt.footer.status`, `index.tsx:1901-1967`)
+        // owns the left term. While running it paints the scanner + interrupt
+        // label and replaces the idle directory; with no live move/pending
+        // facts the idle branch leaves this empty so the directory below is
+        // retained unchanged.
+        let status_text = crate::native_status_rail::slot_text(
+            &rail_spans,
+            crate::native_status_rail::RailSlot::Status,
         );
         // The `/context` click target is the usage/cost status list only
         // (`footer.tsx:38-46`), never the adjacent `commands` hint.
@@ -3955,7 +3999,11 @@ impl NativeView {
             usage_width,
         ));
         let directory = fit(
-            &footer_directory(&self.workspace, left_width as u16),
+            &if status_text.is_empty() {
+                footer_directory(&self.workspace, left_width as u16)
+            } else {
+                status_text
+            },
             left_width as u16,
         );
         let footer = padded(
@@ -5047,10 +5095,18 @@ mod footer_layout_tests {
         view.set_loading(true); // deprecated no-op: frame argument is authority
         let rows = view.render_typed("draft", &[], true, &[]);
         assert_eq!(rows.len(), 20);
-        assert!(rows[19].contains("/tmp/") || rows[19].contains("project"));
+        // CP-11: `prompt.footer.status` paints exactly one branch, so a
+        // running session replaces the idle directory with the scanner +
+        // interrupt label (`index.tsx:1911-1967`).
+        assert!(rows[19].contains("interrupt"), "running status: {:?}", rows[19]);
         assert!(rows[..19].iter().any(|row| row.contains("Thinking")));
         assert!(!rows[19].contains("Thinking"));
         let idle = view.render_typed("draft", &[], false, &[]);
+        assert!(
+            idle[19].contains("/tmp/") || idle[19].contains("project"),
+            "idle footer shows the directory: {:?}",
+            idle[19]
+        );
         assert!(!idle[19].contains("Thinking"));
     }
 
@@ -5249,6 +5305,37 @@ mod footer_layout_tests {
         let busy = view.render_typed("", &[], true, &[]).pop().unwrap();
         assert_eq!(busy.chars().count(), 64);
         assert!(busy.ends_with(&format!("{}  ", env!("CARGO_PKG_VERSION"))));
+    }
+
+    // CP-11 (`index.tsx:1901-1967`): the `prompt.footer.status` Switch paints
+    // exactly one branch, so a running session replaces the idle directory
+    // with the scanner + interrupt label while keeping the frame geometry.
+    #[test]
+    fn cp11_running_status_replaces_idle_directory() {
+        let mut view = NativeView::new(80, 24);
+        view.set_workspace("/x".to_owned());
+        let idle = view.render_typed("", &[], false, &[]).pop().unwrap();
+        assert!(idle.contains("/x"), "idle footer shows the directory: {idle:?}");
+        assert!(!idle.contains("interrupt"), "idle footer has no status: {idle:?}");
+        let running = view.render_typed("", &[], true, &[]).pop().unwrap();
+        assert!(
+            running.contains("interrupt"),
+            "running footer shows the interrupt label: {running:?}"
+        );
+        assert!(
+            !running.contains("/x"),
+            "running status replaces the directory: {running:?}"
+        );
+        // Mutually exclusive labels, identical geometry.
+        assert_eq!(idle.chars().count(), 80);
+        assert_eq!(running.chars().count(), 80);
+        // The static marker is used when animations are disabled.
+        view.set_rail_status_clock(false, 0);
+        let static_running = view.render_typed("", &[], true, &[]).pop().unwrap();
+        assert!(
+            static_running.contains("[⋯]"),
+            "animations off paints the static marker: {static_running:?}"
+        );
     }
 
     #[test]

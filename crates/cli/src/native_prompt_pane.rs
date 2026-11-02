@@ -918,6 +918,11 @@ pub(crate) struct PromptPaneInput<'a> {
     pub metadata: PromptMetadataInput<'a>,
     pub frame: EffectiveBox,
     pub allow_rail: bool,
+    /// `promptBg = decrease(background.raised.base)` (`index.tsx:1676`). The
+    /// live frame threads the resolved surface here; alpha `0` makes the lip
+    /// substitute spaces (`index.tsx:1879,1890-1895`). The `composer`
+    /// constructor keeps the opaque raised default for direct unit APIs.
+    pub background: [u8; 4],
 }
 
 impl<'a> PromptPaneInput<'a> {
@@ -947,6 +952,7 @@ impl<'a> PromptPaneInput<'a> {
             metadata,
             frame: appearance.effective(crate::native_box_style::BoxId::ChatComposer),
             allow_rail: !appearance.home_composer_outline(),
+            background: [0x14, 0x14, 0x14, 0xff],
         }
     }
 }
@@ -1025,7 +1031,7 @@ impl<'a> PromptPane<'a> {
                     // `promptBg().a === 0` (`index.tsx:1879,1890-1895`).
                     text: lip_row(
                         u16::try_from(input.width).unwrap_or(u16::MAX),
-                        [0x14, 0x14, 0x14, 0xff],
+                        input.background,
                     ),
                     kind: PromptPaneRowKind::Lip,
                 });
@@ -1740,6 +1746,7 @@ mod tests {
             metadata: PromptMetadataInput::default(),
             frame,
             allow_rail: true,
+            background: [0x14, 0x14, 0x14, 0xff],
         }
     }
 

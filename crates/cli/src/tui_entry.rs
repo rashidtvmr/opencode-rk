@@ -6530,6 +6530,9 @@ fn native_loop(
     let mut history_browsing = false;
     let mut history_tail_refresh_pending = false;
     let mut last_history_refresh = Instant::now();
+    // CP-11: monotonic start of the current provider turn, used only to
+    // advance the running scanner frame in the shared footer status slot.
+    let mut busy_since: Option<Instant> = None;
     // Segregated API-key dialog buffer: never stored as (or merged into)
     // the chat composer draft, never saved by any draft transaction.
     let mut key_input = String::new();
@@ -8322,9 +8325,31 @@ fn native_loop(
             active_queue_session,
         ));
 
+        // CP-11: the provider-turn fact (`data.session.status`) plus a live
+        // monotonic clock feed the running status slot (`index.tsx:1911-1917`).
+        // The elapsed value is only meaningful while busy; it resets on the
+        // idle edge so a new turn starts from the first scanner frame.
+        let busy_now = binding_active && !worker_finished;
+        let rail_elapsed_ms = if busy_now {
+            let start = *busy_since.get_or_insert_with(Instant::now);
+            start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+        } else {
+            busy_since = None;
+            0
+        };
+        view.set_rail_status_clock(animations, rail_elapsed_ms);
+
         let mut lines = if help_open && !dialog_open {
             Vec::new()
         } else {
+            // CP-02: thread the resolved prompt surface so the composer lip row
+            // honours a transparent `promptBg` (`index.tsx:1879,1890-1895`).
+            view.set_prompt_background(
+                theme
+                    .semantic
+                    .as_ref()
+                    .map(|semantic| crate::native_prompt_pane::prompt_surface(semantic).rgba),
+            );
             // Busy reflects only the worker that owns the CURRENT binding;
             // a stale (superseded) worker never shows busy here.
             // Event draining above may settle and remove the worker during
@@ -8334,7 +8359,7 @@ fn native_loop(
             view.render_typed(
                 draft_echo,
                 &transcript.messages,
-                binding_active && !worker_finished,
+                busy_now,
                 &overlay,
             )
         };

@@ -157,6 +157,12 @@ pub struct ChatView {
     /// selects `spinner-frames` tick `tick % 10`; `None` is reduced motion.
     /// Set via [`ChatView::set_spin_frame`] before rendering; renders read it.
     spin_frame: std::cell::Cell<Option<u64>>,
+    /// CP-02: resolved `promptBg = decrease(background.raised.base)`
+    /// (`prompt/index.tsx:1676`). The live frame threads the real surface via
+    /// [`ChatView::set_prompt_background`]; alpha `0` makes the lip substitute
+    /// spaces (`index.tsx:1879,1890-1895`). `None` keeps the opaque default so
+    /// direct unit APIs are unchanged.
+    prompt_background: Option<[u8; 4]>,
 }
 
 impl ChatView {
@@ -176,6 +182,14 @@ impl ChatView {
     /// rendering; direct unit APIs fall back to the pane height.
     pub(crate) fn set_terminal_height(&mut self, terminal_height: u16) {
         self.terminal_height = Some(terminal_height);
+    }
+
+    /// CP-02: record the resolved `promptBg` surface
+    /// (`prompt/index.tsx:1676`) for the lip row. `None` restores the opaque
+    /// default; `Some` with alpha `0` is the transparent variant upstream
+    /// paints as spaces (`index.tsx:1879,1890-1895`).
+    pub(crate) fn set_prompt_background(&mut self, background: Option<[u8; 4]>) {
+        self.prompt_background = background;
     }
 
     /// TOOL-002 live join input (`routes/session/index.tsx:2793-2799`):
@@ -256,7 +270,7 @@ impl ChatView {
         busy: bool,
         appearance: &crate::native_box_style::BoxAppearance,
     ) -> PromptPane<'a> {
-        self.prompt_pane(PromptPaneInput::composer(
+        let mut input = PromptPaneInput::composer(
             appearance,
             width,
             height,
@@ -265,7 +279,13 @@ impl ChatView {
             PromptMode::Normal,
             busy,
             PromptMetadataInput::default(),
-        ))
+        );
+        // CP-02: the live frame threads the resolved prompt surface so the lip
+        // row honours a transparent `promptBg` (`index.tsx:1879,1890-1895`).
+        if let Some(background) = self.prompt_background {
+            input.background = background;
+        }
+        self.prompt_pane(input)
     }
 
     /// The same block forced into the explicit-outline presentation.
@@ -291,6 +311,9 @@ impl ChatView {
             metadata: PromptMetadataInput::default(),
             frame,
             allow_rail: false,
+            background: self
+                .prompt_background
+                .unwrap_or([0x14, 0x14, 0x14, 0xff]),
         })
     }
 
@@ -6828,6 +6851,28 @@ mod tests {
     }
 
     #[test]
+    fn live_prompt_background_reaches_the_lip_row_transparently() {
+        // CP-02: a transparent live `promptBg` (alpha 0) must reach the
+        // composer lip row through the real render path, substituting spaces
+        // (`index.tsx:1879,1890-1895`) rather than the opaque half-blocks.
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let opaque = ChatView::new().render_styled(40, 12, "ws", &[], "draft", false, &appearance);
+        assert!(
+            opaque.iter().any(|(text, _, _)| text.contains('\u{2580}')),
+            "default surface paints the half-block lip"
+        );
+        let mut view = ChatView::new();
+        view.set_prompt_background(Some([0, 0, 0, 0]));
+        let transparent = view.render_styled(40, 12, "ws", &[], "draft", false, &appearance);
+        assert!(
+            !transparent.iter().any(|(text, _, _)| text.contains('\u{2580}') || text.contains('\u{2579}')),
+            "transparent surface substitutes spaces for the lip"
+        );
+        // The main rail still renders; only the lip row changes.
+        assert!(transparent.iter().any(|(text, _, _)| text.contains('\u{2503}')));
+    }
+
+    #[test]
     fn rail_render_rows_are_the_prompt_pane_rows() {
         let mut view = ChatView::new();
         let appearance = crate::native_box_style::BoxAppearance::default();
@@ -6934,6 +6979,7 @@ mod tests {
             metadata: PromptMetadataInput::default(),
             frame,
             allow_rail: false,
+            background: [0x14, 0x14, 0x14, 0xff],
         });
         let rows = view.render_styled(40, 12, "ws", &[], "draft", false, &appearance);
         assert_eq!(rows.len(), 12);
