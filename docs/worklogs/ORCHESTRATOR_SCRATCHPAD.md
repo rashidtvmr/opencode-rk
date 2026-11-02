@@ -10532,3 +10532,164 @@ SIDE-RESIDUAL on `@9router-th-free`; OBLIGATION-DELTA5 on `@9router-luna-free`.
 Each implementer brief pins one exact seam `file:line` so a step-capped worker
 still leaves an honest artifact. Structural (`(c)`) families remain: THEME-14
 effect.
+
+## Wave 22–23 convergence (base `c443bb6b` → `edf229b9`)
+
+Canonical HEAD advanced on `main-v2` with four landings; every verified bounded
+slice committed immediately (nothing left on a side branch):
+
+- `c443bb6b` THEME-09 — diff-row resolved-token paint (live chain
+  `tui_entry.rs:8018 → native_view_chat`, W22 review approved, not dead).
+- `6474eeba` DIALOG-05..10 — `DialogKind::Select`/`Prompt` on the existing
+  `DialogView` host + `Select` first-enabled-row seed (`ui/dialog-select.tsx:151`).
+- `bb30c536` TOOL-010 — `DialogKind::Execute` content viewer (choice-less open,
+  `NotAnswerable` answer/cancel, `ContentBudget` viewport).
+- `edf229b9` MSG-006/007 — message menu cursor (`selected`, `move_selection`
+  with wrap, `selected_index`/`selected_action`/`select_selected`; hovered-row
+  paint) + Enter dispatch of the real effects: Revert restores the prompt via
+  `replace_draft_with_cursor` and POSTs `/api/sessions/{id}/revert/stage`,
+  Copy writes the OSC52 frame. Named gaps: JumpTo alignment, Fork dialog,
+  PendingSteer `inbox.update`/`cancel` (no server endpoint). cli 2117/0.
+
+### Wave-23 verdicts (base `bb30c536`, evidence on disk)
+
+W23-VERIFY-FFI-RESIDUAL: FFI-03/09/10 `already_correct`; 01/02/04/05/06/07/08/11
+`needs_fix` (module exists, no live startup/render consumer).
+W23-VERIFY-THEME01-04: all four `already_correct` (live consumers cited).
+W23-VERIFY-DIALOG19: DIALOG-11/12/19/20 `needs_fix` (state exists, no live
+renderer).
+W23-VERIFY-LAY-RESIDUAL2: LAY-13/17 `needs_fix` (model faithful, no live
+mount/geometry consumer).
+W23-VERIFY-STATE-FORM: all 12 `needs_fix` (corrected: producers substantially
+complete; missing live consumers are the shell footer blit, CompactionState row
+mirror, form modal render/key routing, home form band).
+W23-REVIEW-WAVE22: Select seed matches upstream; Select/Prompt/Execute still a
+**dead slice** (no live `open_request` producer). Additive/harmless, not reject.
+W23-OBLIGATION-DELTA7: 223 rows — **56 a / 131 needs_fix / 36 (c)**
+(`evidence/W23-OBLIGATION-DELTA7/obligations.md`).
+W23 implementers: MSG005-RAILPAINT `(c)` (no per-row rail-colour lane);
+MSG009-NOTICE `(c)` (no `TranscriptSurfaces` splice); THEME08-SYNTAX-FENCE `(c)`
+(no scope-bearing span channel/tokenizer); CP11-FOOTER-RAIL `(c)` (no live
+footer facts); SIDE08-MCP-DIALOG producer drafted (`native_view_status.rs`) but
+dead without a live consumer; THEME06-DIALOG-VIEW `(c)` (`@dialog` surface not
+resolved).
+
+Structural backlog is the **composition-root hosts** (main-authored): STATE
+footer blit, FORM overlay host, native DialogSelect/Execute producers,
+TOOL-006 background shell, MSG-009 notice splice, MSG-005 rail-colour lane,
+FFI startup Scene/FrameController. These dominate the 131 `needs_fix`.
+
+### Publication
+Sole canonical writer = this orchestrator's branch (`main-v2`). Guard GREEN
+after each commit; `canonical_sha` tracks HEAD. Publication uses the
+`recovery-state/canonical-write.token` capability.
+
+## Wave 24 / 24b convergence (base `bb30c536` -> `eb053fbe`)
+
+Canonical `main-v2` advanced with three more bounded landings:
+- `f2c66008` DIFF-002 — `ChatRowClass::DiffContext` + `DiffRgba.context_text/
+  context_background`; context/blank diff rows now paint the `diff.delta` role
+  (`theme/src/tui/syntax.ts:81`) instead of `Metadata`. cli 2117/0.
+- `eb053fbe` TOOL-008 — subtask child navigation: producer reads
+  `metadata.sessionID` into `ChatPart::Subtask.session_id`; styled render
+  computes a `child_owners` frame-row lane; transcript mouse-up opens the child
+  via `open_child_transition`+`commit_child_route` before the message menu.
+  Full vertical slice, focused test. cli 2117/0.
+
+### Wave-24 verifier tables (on disk)
+W24-VERIFY-TOOL-FAMILY: TOOL-001/003/004/005/009/012 `a`; 002/006/007/008/010/011
+`needs_fix`. W24-VERIFY-SIDE-FAMILY2: SIDE-04/05/14 `needs_fix`, 15 `(c)`, rest
+`a`. W24-VERIFY-TAB-FAMILY2: TAB-01..10/22 all `a`. W24-VERIFY-CP-FAMILY2 +
+W24B-VERIFY-CP-RESIDUAL3: CP-01..04/07/09/11/13/15/20/23/26/27 `a`;
+CP-17/18 `needs_fix` (runtime capture gap). W24-VERIFY-DIFF-FAMILY: DIFF-001 `a`;
+DIFF-002 `needs_fix` at its base (now landed). W24-VERIFY-THEME-RESIDUAL3:
+THEME-10..14/17/18 `needs_fix`, 15 `a`, 16 `(c)`. W24-VERIFY-MSG-RESIDUAL3:
+MSG-008 `a`, 001/002/003/005/009/010 `needs_fix`. W24-VERIFY-PAR3: mostly
+`(c)` (goldens are oc2-vs-oc2 self-captures; no upstream adapter) / `needs_fix`.
+W24B-VERIFY-DIALOG-RESIDUAL: DIALOG-01/03/04/11 `a`; 02/12/19/20 `needs_fix`.
+W24B-VERIFY-TOOL-RESIDUAL2: TOOL-002/006/007/008/011 `needs_fix` (narrowed).
+
+### Wave-24b residuals (main-authored blockers, `(c)`)
+STATE-001/003/004 + CP-12 footer: real gap = no host row between the
+`prompt.footer` metadata row and the shell row; needs `now_ms` clock + body-row
+insertion + height rebalance + retry/error/token producer. MSG-005 rail: lane
+scaffold ready, blocked on a live `PendingDelivery`/agent-colour producer (no
+inbox server endpoint). TOOL-010/011 execute: key router delivered as a module
+(evidence/W24B-TOOL010-EXECUTE-CONSUMER/candidate.patch); open-half blocked on a
+tool-part identity lane (`native_view_chat.rs:2457-2482`).
+
+### Route errors observed
+`@apimaster-gpt-6-luna` returned "Insufficient balance. Remaining balance:
+$0.000000" (2026-11-02). Stop further APIMaster dispatches; recorded as an
+actual provider error, not quota inference.
+
+### Publication
+Sole canonical writer = main-v2 (this orchestrator). Guard GREEN after each
+commit; publication via `recovery-state/canonical-write.token`.
+
+## Wave-25/26 convergence — UI parity (2026-11-02)
+
+### Landed this session (canonical `main-v2`, sole writer = this orchestrator)
+- `24435708` **THEME-06** contextual `@dialog` surface: `V2Theme.dialog` +
+  `RuntimeTheme.dialog`; `v2_expand_theme_tokens`/`v2_expand_actions` (`expand.ts:
+  10-24,88-108`); live modal paint uses `dialog_panel` (`PaintCtx.dialog` ->
+  modal border/fill/hrule/underlay). Focused test asserts dark `#141414` vs root
+  `#0a0a0a`, light `#fafafa` vs `#ffffff`, and the no-override fallback.
+- `759b153e` **TOOL-008 fix** (reviewer must-fix): child ownership was
+  per-MESSAGE; threaded a per-row `child_out: Vec<(usize,String)>` channel
+  through the typed/boxed row generators (`rebase_part_children`), so only the
+  subtask part's own rows open the child. Mixed `[text, subtask, subtask]` test.
+- `00059e10` **SIDE-04**: footer usage count now uses compact `Locale.number`
+  units (`locale.ts:19-27`) instead of grouped `format_thousands`; the sidebar
+  context row keeps grouped `.toLocaleString()` (`sidebar/context.tsx:29`).
+  Corrected two footer tests that had frozen the divergence with a wrong cite.
+- `9fb77133` **THEME-10**: `default_and_new_designs_gate_names_independently`
+  four-way matrix test (`named_gated` already correct).
+- `828cfb60` **THEME-16**: `CtrlCKeyAction`/`ctrl_c_selection_key` four-arm
+  helper mirroring `selection.ts:76-95` (copy-on-select clears+propagates;
+  copy retains; failed copy clears+consumes; Escape consumes only with text).
+- `4efb8a51` **MSG-002**: per-session group disclosure wired into the transcript
+  (`DisclosureState::visible_leaves`, `ChatView` render gate + GroupToggle
+  consumer in `tui_entry`), gate inactive until `set_session`.
+
+Full CLI suite after every landing (single-threaded, `--test-threads=1`):
+`2118 -> 2119 -> 2120 -> 2121 -> 2122 passed; 0 failed`.
+
+### Wave-25 verifier/implementer outcomes (evidence dir, verified:false)
+- `a` (already correct): THEME-15 (cursor wire fully live); MSG-004 etc.
+- `b` (patch, landed/reconciled): THEME-10 matrix, SIDE-04 compact units,
+  THEME-16 selection keys, MSG-002 group gate.
+- `(c)` honest blockers (exact missing seam recorded in handoff.json):
+  - THEME-07 alpha: `paint_color` composites over the CONSTANT dark bg; needs an
+    explicit real-surface underlay arg at ~20 call sites + a live caller of
+    `background_action_primary.state()`.
+  - MSG-008/010 TPS: no per-assistant-step streamed stamp on the wire /
+    `Event` / `MessageRecord` / `MessageExecution`. Fabricating from `created_at`
+    forbidden.
+  - TOOL-002 spinner: three absent pieces (producer glyph, per-row colour
+    channel, chat paint arm) + no frame clock in the transcript renderer.
+  - TOOL-007 notice: consumer built but zero runtime producer; port
+    `subagent-completion.ts:20-46`.
+  - LAY-13 pane: whole docked right-pane subsystem absent.
+  - LAY-20 plugin: no live plugin-status producer; do not reuse MCP failures.
+  - DIALOG-19 overlay / DIALOG-20 toast: models complete, no live frame caller.
+  - CP-12 footer: no `now_ms` clock fact; host-row insertion + height rebalance.
+  - SIDE-05 limit: no `/api/experimental/usage/limits` serve point; SIDE-04
+    five-class sum needs `usage.cache.write`.
+  - PAR clock: capture-differential; no upstream TypeScript/OpenTUI adapter and
+    no state/clock fixture adapters; oc2 self-captures not admissible as oracle.
+  - FORM host: no live `form.list` producer.
+  - MSG-009 splice: projection omits `location-switched`; live render never
+    calls `TranscriptSurfaces::render_rows`.
+- `W25-VERIFY-LAY3` empty dir; `W26-DIALOG11-SEARCH` empty dir; several workers
+  died at the step cap with no text but WITH artifacts (preserved).
+
+### Wave-26 (active, 22 workers on allowed routes)
+Implementers: TOOL-002 spinner, CP-28 shift+tab, THEME-07 alpha, CP-12 footer,
+TOOL-010/011 execute (re-author vs the new `child_out` signature), DIALOG-11
+search, SIDE-05 limit, MSG-008 TPS, LAY-13 pane, DIALOG-20 toast, DIALOG-19
+overlay, LAY-20 plugin, TOOL-007 notice, CP-30 history, MSG-009 splice.
+Verifiers (independent, do not inherit author justification): the six landings
+(`W26-VERIFY-LANDINGS`), plus THEME-16, MSG-002, TOOL-008, SIDE-04, THEME-06,
+THEME-10.
+Route errors: `@apimaster-gpt-6-luna` remains `$0` balance — no dispatches.
