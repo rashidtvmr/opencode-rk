@@ -131,6 +131,12 @@ pub enum DialogKind {
     Question,
     Confirm,
     Error,
+    /// DialogSelect list (`ui/dialog-select.tsx`); the model lives in
+    /// `native_palette::select::SelectDialog`. Content is the choice list.
+    Select,
+    /// DialogPrompt text row (`ui/dialog-prompt.tsx`); the model lives in
+    /// `native_palette::dialog::PromptState`.
+    Prompt,
 }
 
 /// Static, safe error-card categories. Defined in this file so raw backend
@@ -581,10 +587,12 @@ impl DialogView {
     #[must_use]
     pub fn production_viewport_policy(&self) -> DialogViewportPolicy {
         match self.dialog.as_ref().map(|dialog| dialog.kind) {
+            Some(DialogKind::Select) => DialogViewportPolicy::SelectTerminal,
             Some(DialogKind::Permission)
             | Some(DialogKind::Question)
             | Some(DialogKind::Confirm)
             | Some(DialogKind::Error)
+            | Some(DialogKind::Prompt)
             | None => DialogViewportPolicy::ContentBudget,
         }
     }
@@ -1010,7 +1018,15 @@ impl DialogView {
                 .unwrap_or_default(),
             error: request.error.unwrap_or(StaticError::BackendUnavailable),
         });
-        self.selection = None;
+        // `DialogSelect` seeds `selected: 0` (`ui/dialog-select.tsx:152`), so
+        // the first enabled row is selected on open and the first Down moves
+        // to the second row. Permission/Question/Confirm/Error start
+        // unselected (the user must make an explicit choice).
+        self.selection = self
+            .dialog
+            .as_ref()
+            .filter(|dialog| dialog.kind == DialogKind::Select)
+            .and_then(|dialog| dialog.disabled.iter().position(|disabled| !disabled));
         self.rejected = false;
         self.phase = Phase::Open;
         // `dialog.replace()` (`ui/dialog.tsx:396-419`) runs last, once every
@@ -1162,13 +1178,14 @@ impl DialogView {
                 // is an error, never an approve fallback.
                 None => unreachable!("validated above"),
             },
-            DialogKind::Question | DialogKind::Confirm => DecisionIntent::Answer {
+            DialogKind::Question | DialogKind::Confirm | DialogKind::Select => DecisionIntent::Answer {
                 request_id,
                 session_id,
                 choice_index: index,
                 choice,
                 attempt,
             },
+            DialogKind::Prompt => return Err(DialogError::NotAnswerable),
             DialogKind::Error => unreachable!("answered above"),
         };
         self.pending_attempt = attempt;
@@ -1200,11 +1217,12 @@ impl DialogView {
                 session_id,
                 attempt,
             },
-            DialogKind::Confirm => DecisionIntent::Cancel {
+            DialogKind::Confirm | DialogKind::Select => DecisionIntent::Cancel {
                 request_id,
                 session_id,
                 attempt,
             },
+            DialogKind::Prompt => return Err(DialogError::NotAnswerable),
             DialogKind::Question | DialogKind::Error => unreachable!("handled above"),
         };
         self.pending_attempt = attempt;
@@ -1393,6 +1411,8 @@ impl DialogView {
                 }
                 DialogKind::Question => lines.push(line("question — select an answer".to_string(), Role::Description)),
                 DialogKind::Confirm => lines.push(line("confirmation required".to_string(), Role::Description)),
+                DialogKind::Select => lines.push(line("select: use up/down then Enter".to_string(), Role::Description)),
+                DialogKind::Prompt => lines.push(line("prompt: type then Enter".to_string(), Role::Description)),
                 DialogKind::Error => {
                     lines.push(line(dialog.error.headline().to_string(), Role::Error));
                     lines.push(line(dialog.error.detail().to_string(), Role::Description));
@@ -5798,6 +5818,33 @@ mod tests {
         view.open_request(permission_request())
             .expect("valid request");
         view
+    }
+
+    #[test]
+    fn select_kind_opens_with_terminal_viewport_and_answers_like_question() {
+        let mut view = DialogView::new();
+        view.open_request(DialogRequest {
+            id: "sel-1".to_string(),
+            session_id: "ses-1".to_string(),
+            kind: DialogKind::Select,
+            title: "Pick a model".to_string(),
+            choices: vec!["gpt".to_string(), "claude".to_string()],
+            message: None,
+            disabled: Vec::new(),
+            error: None,
+        })
+        .expect("select request valid");
+        assert!(view.is_open());
+        assert_eq!(
+            view.production_viewport_policy(),
+            DialogViewportPolicy::SelectTerminal
+        );
+        view.next();
+        let intent = view.answer().expect("select answer");
+        assert!(
+            matches!(intent, DecisionIntent::Answer { choice_index: 1, .. }),
+            "select answer carries the choice index, got {intent:?}"
+        );
     }
 
     #[test]
