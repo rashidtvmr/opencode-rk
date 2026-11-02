@@ -11651,3 +11651,44 @@ only for sub-behaviors 3 (always-body swap, static body
 stage+textarea in `DialogView` plus nested key handling — not bounded.
 
 Decision: no unilateral change; recorded as a product-choice divergence.
+
+## 2026-11-02 — Wave-44 verification complete; wave-45 implementation dispatched
+
+### Wave-44 result (all 223 checklist IDs verdicted)
+
+Authoritative consolidated map committed to `docs/ui-parity/PARITY_STATUS.md`
+through `2784d5e4` (remote verified). Final counts:
+
+| Verdict | Count |
+| --- | --- |
+| `ALREADY_CORRECT` | 137 |
+| `REAL_GAP` | 68 |
+| `BLOCKED` | 18 |
+| **Total** | **223** |
+
+- 165 IDs were (re)verified in wave-44 across 28 read-only workers on the four
+  authorized routes; workers that hit step caps were re-dispatched in ≤6-ID
+  slices. 58 IDs were already verdicted in earlier waves.
+- Per-ID JSON verdicts: `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave44/`.
+- `REAL_GAP` = model + focused test exist, live TUI does not consume them.
+  `BLOCKED` = a producer/transport/contract field does not exist.
+- FORM-001 sub-behavior 1 (6-choice scoped permission) is a deliberate
+  opencode-rk extension (`run_owner.rs:232` accepts `once|session|always`),
+  NOT a parity bug. Do not remove it.
+
+### Wave-45 implementation dispatch (2026-11-02)
+
+Output dir `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave45/`.
+Workers are read-only on canonical and return a `git apply`-able patch +
+`<ID>.impl.json` (or a `blocked` reason). Orchestrator applies + compiles +
+focused test + full CLI suite + commits. Dispatched:
+
+- SIDE-08 (MCP dialog) — ses_e62f80f45ffeGhIh6CzHM5VQL5
+- DIALOG-02 (dialog layout helpers) — ses_e62f80f44ffeiDP4bpb2LCbndO
+- MEDIA-001 (image preview) — ses_e62f7f95effeM11kqHZNj2QKEz
+- TAB-04 (tab indicators) — ses_e62f7f95effdUgUlAsdTIgCFkQ
+- DIALOG-01..04 JSON finalize — ses_e62fb6be6ffe0cIpGRjqJib8Zc
+
+Commit recipe unchanged: export `OC2_RECOVERY_CANONICAL_TOKEN` from
+`$(git rev-parse --git-common-dir)/recovery-state/canonical-write.token`; the
+`prepared phase` hook line is spurious — confirm via `git log`.
