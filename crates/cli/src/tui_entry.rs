@@ -6766,6 +6766,10 @@ fn native_loop(
         None => None,
     };
     view.set_sidebar_hidden(preferences.sidebar_hidden);
+    // SIDE-09: seed the persisted MCP disclosure BEFORE the first
+    // `refresh_session_mcp` below, so the first ACK cannot clobber it
+    // (`sidebar/mcp.tsx:6/25-31`, `plugin/api.tsx:201`).
+    view.set_mcp_sidebar_open(preferences.mcp_sidebar_open);
     let (scrollbar_enabled, scrollbar_diagnostics) =
         crate::native_ui_preferences::UiPreferences::session_scrollbar(
             cli_path.as_deref(),
@@ -10010,7 +10014,22 @@ fn native_loop(
                     && matches!(dialog, native_setup::Dialog::None)
                     && import_dialog.as_ref().is_none_or(|import| !import.is_open())
                 {
-                    if view.mcp_sidebar_toggle_action(x, y) { needs_paint = true; continue; }
+                    if view.mcp_sidebar_toggle_action(x, y) {
+                        // SIDE-09: persist the exact upstream `{ open: bool }`
+                        // value after a real toggle (`sidebar/mcp.tsx:29-31`
+                        // `draft.open = !draft.open`), so the disclosure
+                        // survives restart. Failure is reported, never faked.
+                        if let Err(error) =
+                            crate::native_ui_preferences::UiPreferences::persist_mcp_sidebar_open(
+                                &state_path,
+                                view.mcp_sidebar_open(),
+                            )
+                        {
+                            append_transcript(&mut transcript, format!("error: mcp sidebar persist failed: {error}"));
+                        }
+                        needs_paint = true;
+                        continue;
+                    }
                     if let Some((name, included)) = view.mcp_sidebar_action(x, y) {
                         if let Some(snapshot) = live.as_ref() {
                             let encoded: String = name.bytes().flat_map(|byte| {

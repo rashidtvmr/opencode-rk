@@ -752,6 +752,18 @@ impl StatusView {
         self.mcp_open.unwrap_or(true)
     }
 
+    /// SIDE-09: seed the MCP sidebar disclosure from the persisted plugin store
+    /// (`sidebar/mcp.tsx:6/25-31` `storage.store("view", { initial: { open:
+    /// true } })`). Call this BEFORE the first [`Self::apply_mcp`] so a
+    /// persisted collapse survives the first acknowledgement; `None` leaves
+    /// the disclosure unresolved and the view keeps the upstream default
+    /// `open: true`. The `Some` value is the persisted `open` fact, not a
+    /// recomputed default, so a persisted collapsed heading renders exactly as
+    /// upstream does.
+    pub fn set_mcp_sidebar_open(&mut self, open: Option<bool>) {
+        self.mcp_open = open;
+    }
+
     /// Toggle the Todo disclosure. At most two todos always stay expanded, so
     /// a collapse persisted from a longer list cannot hide them (`SIDE-11`).
     pub fn toggle_todo_sidebar(&mut self) -> bool {
@@ -1241,7 +1253,14 @@ impl StatusView {
     pub fn apply_mcp(&mut self, value: &Value) -> Result<(), String> {
         match parse_mcp(value) {
             Ok(entries) => {
-                if !self.mcp_ack { self.mcp_open = Some(true); }
+                // SIDE-09: the first-ack default is only a fallback for an
+                // unresolved disclosure. A value seeded from the persisted
+                // `plugin.opencode.sidebar.mcp.view` store (or set by a prior
+                // toggle) must not be clobbered back to `true`, or a persisted
+                // collapse would be lost on the first snapshot.
+                if !self.mcp_ack && self.mcp_open.is_none() {
+                    self.mcp_open = Some(true);
+                }
                 self.mcp = entries;
                 self.mcp_ack = true;
                 self.mcp_stale = None;
@@ -2581,6 +2600,77 @@ mod mcp_sidebar_behavior_regression {
         view.apply_mcp(&snapshot).unwrap();
         assert!(!view.mcp_sidebar_open());
         assert!(view.render_sidebar(80, 20).iter().any(|row| row.contains("▶ MCP")));
+    }
+
+    /// SIDE-09: a disclosure seeded from the persisted
+    /// `plugin.opencode.sidebar.mcp.view` store (`sidebar/mcp.tsx:6/25-31`,
+    /// namespaced by `plugin/api.tsx:201`) must survive the first `apply_mcp`
+    /// ACK. Before the fix the first ACK force-set `mcp_open = Some(true)`,
+    /// clobbering the persisted collapse so a restart always reopened the
+    /// section. An unresolved disclosure still takes the upstream default
+    /// `initial: { open: true }`.
+    #[test]
+    fn persisted_collapse_survives_the_first_ack() {
+        let mut view = StatusView::default();
+        view.set_mcp_sidebar_open(Some(false));
+        view.apply_mcp(&three_servers()).unwrap();
+        assert!(
+            !view.mcp_sidebar_open(),
+            "the seeded collapse is not clobbered by the first ACK"
+        );
+        let rows = view.render_sidebar(80, 20);
+        assert!(
+            rows.iter().any(|row| row == "▶ MCP (1 active, 2 errors)"),
+            "persisted collapse renders the upstream collapsed heading: {rows:?}"
+        );
+        assert!(
+            !rows.iter().any(|row| row.contains("• a ")),
+            "the collapsed rows stay hidden: {rows:?}"
+        );
+        // Never seeded: the first ACK applies the upstream `open: true` default.
+        let mut fresh = StatusView::default();
+        fresh.apply_mcp(&three_servers()).unwrap();
+        assert!(fresh.mcp_sidebar_open(), "unresolved disclosure defaults open");
+    }
+
+    /// SIDE-09 pin (no invented hover): the pinned footer hover
+    /// (`footer.tsx:98-109`) is a paint-only fact for the footer path row
+    /// (`Footer::role`). It must never alter any MCP row — text, role or span
+    /// plan. The MCP plugin binds no `onMouseOver` (`sidebar/mcp.tsx`), so a
+    /// hover treatment on an MCP row would be invented.
+    #[test]
+    fn footer_hover_never_changes_mcp_rows_or_spans() {
+        use crate::native_ui_style::{LineSpan, Role};
+        let mut view = StatusView::default();
+        view.set_working_directory(Some("/projects/oc2".into()), Some("main".into()));
+        view.apply_mcp(&three_servers()).unwrap();
+        let mcp_rows = |view: &StatusView| -> Vec<(String, Role)> {
+            view.render_sidebar_styled(38, 30)
+                .into_iter()
+                .filter(|line| line.text.contains("MCP") || line.text.contains("• "))
+                .map(|line| (line.text, line.role))
+                .collect()
+        };
+        let span_plan = |view: &StatusView| -> Vec<(usize, LineSpan)> {
+            view.sidebar_span_styles_at(38, super::MAX_ROWS)
+        };
+        let before_rows = mcp_rows(&view);
+        let before_spans = span_plan(&view);
+        assert!(!before_rows.is_empty(), "MCP rows are present");
+        view.set_footer_hovered(true);
+        assert_eq!(
+            mcp_rows(&view),
+            before_rows,
+            "hover never rewrites MCP row text or role"
+        );
+        assert_eq!(
+            span_plan(&view),
+            before_spans,
+            "hover never adds or moves a painted span"
+        );
+        view.set_footer_hovered(false);
+        assert_eq!(mcp_rows(&view), before_rows);
+        assert_eq!(span_plan(&view), before_spans);
     }
 
     /// SIDE-11: a collapse persisted while the list was long survives the

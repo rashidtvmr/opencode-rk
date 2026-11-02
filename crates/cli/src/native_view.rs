@@ -2198,6 +2198,23 @@ impl NativeView {
         Ok(())
     }
 
+    /// SIDE-09: seed the MCP sidebar disclosure from the persisted plugin store
+    /// before the first [`Self::apply_mcp`], so a persisted collapse is not
+    /// clobbered by the first-ack default (`native_view_status.rs`
+    /// `set_mcp_sidebar_open`). `None` keeps the upstream `open: true` default.
+    pub fn set_mcp_sidebar_open(&mut self, open: Option<bool>) {
+        self.status.set_mcp_sidebar_open(open);
+    }
+
+    /// SIDE-09: current MCP sidebar disclosure. The mouse toggle handler reads
+    /// this to persist the exact upstream `{ open: bool }` value after a real
+    /// toggle, mirroring `mcp.tsx:29-31` `updateView((draft) => { draft.open =
+    /// !draft.open })`.
+    #[must_use]
+    pub fn mcp_sidebar_open(&self) -> bool {
+        self.status.mcp_sidebar_open()
+    }
+
     pub fn apply_todos(&mut self, value: &Value) -> Result<(), String> {
         let result = self.status.apply_todos(value);
         self.mcp_hit.clear();

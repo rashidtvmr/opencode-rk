@@ -22,6 +22,13 @@ const MAX_STATE_BYTES: usize = 64 * 1024;
 const MAX_TAB_SCOPES: usize = 8;
 const MAX_SESSION_ID_BYTES: usize = 128;
 const MAX_TAB_TITLE_BYTES: usize = 200;
+/// Persisted MCP sidebar disclosure key (SIDE-09). Upstream namespaces every
+/// plugin store as `plugin.${input.id}.${key}` (`plugin/api.tsx:201`) with
+/// `id = "opencode.sidebar.mcp"` (`sidebar/mcp.tsx:96`) and `key = "view"`
+/// (`sidebar/mcp.tsx:6`), and the value shape is `{ open: bool }`. A bare
+/// `"view"` key would collide with `feature-plugins/sidebar/todo.tsx:7`,
+/// which stores `view` on its own `opencode.sidebar.todo` namespace.
+const MCP_SIDEBAR_VIEW_KEY: &str = "plugin.opencode.sidebar.mcp.view";
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
 /// Resolved `tabs.scope` (`config/index.tsx:193-195,334`, default `cwd`) and
@@ -60,6 +67,12 @@ pub struct UiPreferences {
     /// `tui.json` theme takes precedence over the persisted `kv.json` choice.
     pub theme: Option<String>,
     pub sidebar_hidden: bool,
+    /// SIDE-09: persisted MCP sidebar disclosure (`sidebar/mcp.tsx:6/25-31`
+    /// `storage.store("view", { initial: { open: true } })`, namespaced
+    /// `plugin.opencode.sidebar.mcp.view` per `plugin/api.tsx:201`). `None`
+    /// means never persisted, so the caller keeps the upstream default
+    /// `open: true`; `Some(bool)` seeds the view before the first `apply_mcp`.
+    pub mcp_sidebar_open: Option<bool>,
     pub theme_mode: Option<String>,
     pub theme_mode_lock: Option<String>,
     pub vertical_tabs_width: Option<u16>,
@@ -431,11 +444,21 @@ impl UiPreferences {
             .and_then(|value| value.get("dismissed"))
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        // SIDE-09: persisted MCP disclosure. `None` when never stored, so the
+        // view keeps the upstream `initial: { open: true }` default rather than
+        // a fabricated collapse. Read from the plugin-namespaced object the
+        // writer below produces: `{"plugin.opencode.sidebar.mcp.view": {"open": bool}}`.
+        let mcp_sidebar_open = state
+            .get(MCP_SIDEBAR_VIEW_KEY)
+            .and_then(Value::as_object)
+            .and_then(|value| value.get("open"))
+            .and_then(Value::as_bool);
         Ok(Self {
             prompt_width,
             prompt_paste,
             theme: configured_theme.or(stored_theme),
             sidebar_hidden,
+            mcp_sidebar_open,
             theme_mode: state
                 .get("theme_mode")
                 .and_then(Value::as_str)
@@ -461,6 +484,23 @@ impl UiPreferences {
             state_path,
             "sidebar",
             Some(Value::String(if hidden { "hide" } else { "auto" }.into())),
+        )
+    }
+
+    /// SIDE-09: persist the MCP sidebar disclosure under the exact upstream
+    /// plugin-namespaced key and value shape
+    /// (`sidebar/mcp.tsx:6/25-31` `updateView((draft) => { draft.open = !draft.open })`
+    /// over `storage.store("view", { initial: { open: true } })`, namespaced by
+    /// `plugin.${input.id}.${key}` at `plugin/api.tsx:201` with
+    /// `id = "opencode.sidebar.mcp"` at `sidebar/mcp.tsx:96`): the entry
+    /// `"plugin.opencode.sidebar.mcp.view": {"open": bool}`. Writes only that
+    /// key, preserving every unrelated KV entry, so a `todo.tsx:7` collapse
+    /// (its own namespace) is never clobbered and vice versa.
+    pub fn persist_mcp_sidebar_open(state_path: &Path, open: bool) -> Result<(), String> {
+        update_state(
+            state_path,
+            MCP_SIDEBAR_VIEW_KEY,
+            Some(serde_json::json!({ "open": open })),
         )
     }
 
@@ -1600,6 +1640,44 @@ mod tests {
         assert_eq!(saved["getting-started"]["dismissed"], true);
         assert_eq!(saved["keep"], 7);
         assert_eq!(saved["sidebar"], "auto");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// SIDE-09: the MCP disclosure round-trips under the exact upstream
+    /// plugin-namespaced key (`plugin/api.tsx:201` + `sidebar/mcp.tsx:6,96`) and
+    /// `{open: bool}` shape, defaults to `None` when absent, and never clobbers
+    /// the unrelated bare `"view"` key that `todo.tsx:7` stores on its own
+    /// namespace.
+    #[test]
+    fn mcp_sidebar_open_round_trips_under_the_plugin_namespaced_key() {
+        let dir = std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "opencode-ui-mcp-open-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = dir.join("opencode/kv.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // A bare `view` key from todo.tsx's namespace must survive untouched.
+        fs::write(&path, br#"{"sidebar":"auto","keep":7,"view":{"open":false}}"#).unwrap();
+        // Absent key: `None`, so the view keeps the upstream `open: true` default.
+        assert_eq!(UiPreferences::load(&[], &path).unwrap().mcp_sidebar_open, None);
+        UiPreferences::persist_mcp_sidebar_open(&path, false).unwrap();
+        assert_eq!(
+            UiPreferences::load(&[], &path).unwrap().mcp_sidebar_open,
+            Some(false)
+        );
+        let saved = read_state(&path).unwrap();
+        assert_eq!(saved["plugin.opencode.sidebar.mcp.view"]["open"], false);
+        // The unrelated bare `view` key and other entries are preserved.
+        assert_eq!(saved["view"]["open"], false);
+        assert_eq!(saved["keep"], 7);
+        assert_eq!(saved["sidebar"], "auto");
+        // Round-trip back to expanded.
+        UiPreferences::persist_mcp_sidebar_open(&path, true).unwrap();
+        assert_eq!(
+            UiPreferences::load(&[], &path).unwrap().mcp_sidebar_open,
+            Some(true)
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 }
