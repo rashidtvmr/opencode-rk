@@ -72,6 +72,55 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | FORM-001 | `BLOCKED` | Live dialog `native_view_dialogs.rs:1090` emits 6 labels vs upstream 3 (`permission.tsx:232-240`); save gate drops only "Always allow"; always-body swap missing (static `:1420`); nested rejection stage missing. Sub-behavior 1 (3-option realign + save gate) is independently bounded via `permission_alias:488`; sub-behaviors 3+4 need a stage+textarea in `DialogView` |
 | DIALOG-20 | `REAL_GAP` | Toast model+producer exist (`native_toast.rs:225-595`, `native_overlay_stack.rs:684 take_error_toast`) but nothing live constructs `ChromeModel`/paints `ToastFrame` (`native_view_dialogs.rs:7535` is `#[cfg(test)]`; `set_toast` `native_shell.rs:1755` test-only; `NativeView` has no toast field). Crash half: no `panic::set_hook`, no `DialogKind::ErrorDetails/Crash` |
 
+**Additional wave-44 verdicts (second batch):**
+
+| Item | Wave-44 verdict | Evidence / seam |
+| --- | --- | --- |
+| PAR-01 | `ALREADY_CORRECT` | Pins stamped into every golden (`ui_parity.py:464`), compared every `--check` (`:247-276`), negative-controlled (`selftest.py:237`) |
+| PAR-02 | `BLOCKED` | Capability table empty (`audit-implementation.md:79-96`); no producer |
+| PAR-03 | `BLOCKED` | Rust adapter exists (`oc2_pty.py`); upstream TS/OpenTUI adapter absent (`README.md:148`) |
+| PAR-04 | `REAL_GAP` | text/pos/style/clipping/cursor covered+tested; hit targets never modeled (no `hit_targets` compare key) |
+| PAR-05 | `ALREADY_CORRECT` | Wide-cell continuation + combining fold (`ui_parity.py:65-73,139-182`), tested (`selftest.py:244`) |
+| PAR-06 | `BLOCKED` | Cell/text-only harness; no font/pixel capture path (`oc2_pty.py:362-369`) |
+| PAR-07 | `BLOCKED` | Frame side complete (`native_capture.rs`); event-trace sink (`native_debug.rs:81`) misses queue/steer, permissions, forms, input-submission; seam `native_composer.rs` submit path |
+| PAR-08 | `ALREADY_CORRECT` | `native_clock.rs` FrameClock; live `tui_entry.rs:6666` |
+| PAR-09 | `REAL_GAP` | async syntax await + stale/blank rejection in `highlight.rs`; `pub mod highlight` has zero cli call sites |
+| PAR-10 | `REAL_GAP` | `native_transcript.rs` accums; live path consumes only `strip_ansi` |
+| PAR-11 | `REAL_GAP` | `native_message_rows.rs` anchors/identity/group-expansion; no `tui_entry` consumer |
+| PAR-12 | `ALREADY_CORRECT` | modal keymap scope/priority/suppression live (`native_view_dialogs.rs:652-828`); dock/side-panel scope unasserted |
+| TAB-01 | `ALREADY_CORRECT` | `native_tabs.rs:1440`; test `:3576`; live `tui_entry.rs:8245` |
+| TAB-02 | `ALREADY_CORRECT` | `native_tabs.rs:34`; test `:3607`; live `tui_entry.rs:5032` |
+| TAB-03 | `ALREADY_CORRECT` | `native_tabs.rs:1592`; test `:3640`; live `tui_entry.rs:4998` |
+| TAB-04 | `REAL_GAP` | numbers-mode `TabIndicators` (`native_tabs.rs:1773`) has no live config source; `config.tabs.indicators` not loaded; render `tui_entry.rs:8245` hardcodes status |
+| TAB-05 | `ALREADY_CORRECT` | `native_tabs.rs:754`; test `:3783`; live `tui_entry.rs:8215` |
+| TAB-06 | `REAL_GAP` | `enqueue_user_prompt`/`pending_marks_busy` (`native_tabs.rs:1877/1893`) zero callers; `queued_drafts` push (`tui_entry.rs:11512`) carries no per-tab flash/busy feed |
+| TAB-07 | `ALREADY_CORRECT` | `native_tabs.rs:1940`; test `:3852`; live `tui_entry.rs:4964` |
+| TAB-08 | `ALREADY_CORRECT` | `native_tabs.rs:2027`; test `:4032`; live `tui_entry.rs:5009` |
+| TAB-09 | `ALREADY_CORRECT` | `native_tabs.rs:2146`; test `:4052`; live `tui_entry.rs:7930` |
+| TAB-10 | `REAL_GAP` | geometry live (`render:471` → `tui_entry.rs:8281`); `session_tab_detail` (`native_tab_rail.rs:103`) no live consumer; `rail_inputs_for_navigation` (`tui_entry.rs:5277`) feeds only `project_label` |
+| TAB-11 | `ALREADY_CORRECT` | `native_tab_rail.rs:778`; test `:2363`; live `tui_entry.rs:8281` |
+| TAB-12 | `ALREADY_CORRECT` | `native_tab_rail.rs:1138`; test `:2228`; live `tui_entry.rs:5072` |
+| MD-001..006 | `ALREADY_CORRECT` | Live path `native_view_chat.rs:2320 push_block_markdown` → `native_markdown_flow.rs:770` → paint `tui_entry.rs:4753`; per-ID tests in `native_markdown_flow.rs` |
+| MD-007 | `REAL_GAP` | `set_fence_handlers`/`MarkdownPluginRegistry` zero non-test callers; seam `native_view_chat.rs:2334` (flow built, no handlers fed) |
+| MD-008 | `BLOCKED` | mermaid renderer built `without_painter` (`native_view_chat.rs:2276`); needs live `DiagramPainter` |
+| MD-009 | `BLOCKED` | math renderer built `without_engine` (`native_view_chat.rs:2298`); needs live `MathLayoutEngine` |
+| CP-07 | `REAL_GAP` | `selectable_agents`/`agent_color` (`native_prompt_pane.rs:591,619`) no live caller; no `AgentFact` producer to `native_view.rs:1612` |
+| CP-08 | `REAL_GAP` | `next_prompt_display` (`native_prompt_pane.rs:675`) not routed via `composer_metadata` (`native_view.rs:1612`) |
+| CP-09 | `REAL_GAP` | `prompt_highlight`/`border_highlight`/`MetadataReveal` (`native_prompt_pane.rs:137,155,702`) not consumed by Paint path |
+| CP-10 | `ALREADY_CORRECT` | `rail_spans`/`slot_text` (`native_status_rail.rs:874,1048`); live `native_view.rs:3867-3904` → paint `:3820-3822` |
+| CP-11 | `REAL_GAP` | `RailFacts::status_slot` (`native_status_rail.rs:739`); live `footer_line` (`native_view.rs:3879`) never sets `running`/`move_progress`/`pending_new`/`location` |
+| LAY-16 | `ALREADY_CORRECT` | `native_layout.rs:405-420`; live `native_shell_frame.rs:279` |
+| LAY-17 | `REAL_GAP` | Anchor model `native_view_layout.rs:1014-1320` (tests `:1916-2196`) zero non-test callers; live transcript scroll/tab-restore never calls it |
+| LAY-18 | `ALREADY_CORRECT` | `native_home.rs:200`; live `native_view.rs:1451` |
+| LAY-19 | `ALREADY_CORRECT` | `native_home.rs:277`; live `native_view.rs:2042` |
+| LAY-20 | `ALREADY_CORRECT` | `native_home.rs:88-146`; live `native_view.rs:4175/4200` |
+| MSG-006 | `ALREADY_CORRECT` | `click_acts` (`native_message_rows.rs:2109-2117`, test `:2519`); live `tui_entry.rs:10102-10106` gates message-menu + child-nav |
+| MSG-007 | `REAL_GAP` | `MessageActionMenu` (`native_view_chat.rs:3568-3760`) live dispatch `tui_entry.rs:3745-3829`; ForkSession → notice only (`:3820-3822`); `menu.resync` (`native_view_chat.rs:3642`) zero live callers |
+| SIDE-11 | `ALREADY_CORRECT` | `native_sidebar.rs:426`; test `:1739`; live `native_view_status.rs:871` → `native_view.rs:3360` |
+| SIDE-12 | `ALREADY_CORRECT` | `native_sidebar.rs:1063`; test `:1936`; live `native_view_status.rs:354` → `native_view.rs:271/:308` |
+| SIDE-13 | `ALREADY_CORRECT` | `native_sidebar.rs:64,777,949`; test `:2081`; live `native_view.rs:3904` |
+| SIDE-15 | `ALREADY_CORRECT` | `native_sidebar.rs:406-409`; test `:2170`; live `native_view.rs:3360` |
+
 ## Genuine gaps — live wiring (`REAL_GAP`)
 
 These have a faithful model + test but no live consumer.
