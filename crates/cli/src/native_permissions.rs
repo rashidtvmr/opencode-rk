@@ -795,10 +795,10 @@ impl PermissionPrompt {
 /// "No diff provided" line inset by one cell.
 #[must_use]
 pub fn edit_body_lines(presentation: &PermissionPresentation) -> Vec<PromptLine> {
-    if let Some(diff) = &presentation.diff {
+    if let Some(diff) = presentation.diff.as_deref().filter(|diff| !diff.is_empty()) {
         return diff.lines().map(|line| PromptLine::base(line.to_string())).collect();
     }
-    if let Some(patch) = &presentation.patch {
+    if let Some(patch) = presentation.patch.as_deref().filter(|patch| !patch.is_empty()) {
         return patch.lines().map(|line| PromptLine::muted(line.to_string())).collect();
     }
     vec![PromptLine::muted(" No diff provided".to_string())]
@@ -982,6 +982,22 @@ mod tests {
             edit_body_lines(&diff_presentation),
             vec![PromptLine::base("-a".into()), PromptLine::base("+b".into())]
         );
+        // Upstream's Show treats empty diff/patch strings as absent.
+        let empty_diff_with_patch = PermissionPresentation {
+            diff: Some(String::new()),
+            patch: Some("*** Begin Patch".into()),
+            ..diff_presentation.clone()
+        };
+        assert_eq!(
+            edit_body_lines(&empty_diff_with_patch),
+            vec![PromptLine::muted("*** Begin Patch".into())]
+        );
+        let empty_patch = PermissionPresentation {
+            diff: None,
+            patch: Some(String::new()),
+            ..diff_presentation.clone()
+        };
+        assert_eq!(edit_body_lines(&empty_patch), vec![PromptLine::muted(" No diff provided".into())]);
         let mut keep_selection = PermissionPrompt::new("edit", vec!["*".into()], false);
         keep_selection.choose(PermissionOption::Always);
         keep_selection.toggle_fullscreen();
