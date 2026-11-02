@@ -1630,74 +1630,36 @@ impl NativeView {
     }
 
     fn composer_metadata(&self) -> String {
-        if self.shell_mode {
-            return self.composer_agent.as_deref().unwrap_or("Shell").to_owned();
-        }
-
-        let terminal_width = usize::from(self.layout.cols);
-        let available = terminal_width.saturating_sub(if terminal_width < 44 { 9 } else { 13 });
-        let agent = (terminal_width >= 44)
-            .then_some(self.composer_agent.as_deref())
-            .flatten();
+        // CP-05/CP-06: the live in-box metadata row is resolved by the ported
+        // `promptMetadataLayout` model (`metadata.tsx:117-167`) instead of a
+        // parallel re-derivation, so the candidate order, the <44-column
+        // agent/provider drop, the provider-shortening fallback and the
+        // nine-cell model floor all come from the single authoritative model.
         let (model, provider) = self
             .composer_model
             .as_ref()
             .map_or((self.status.model_label(), ""), |(model, provider)| {
                 (model.as_str(), provider.as_str())
             });
-        let provider = if terminal_width < 44 { "" } else { provider };
-        let provider_short = provider.rsplit(" / ").next().unwrap_or(provider);
-        let variant = self.composer_variant.as_deref();
-        let effort = self.composer_effort.as_deref();
-        let format = |provider: &str, model: &str| {
-            let mut parts = Vec::new();
-            if let Some(agent) = agent {
-                parts.push(agent.to_owned());
-            }
-            if !model.is_empty() {
-                if agent.is_some() {
-                    parts.push("·".to_owned());
-                }
-                parts.push(model.to_owned());
-                if !provider.is_empty() {
-                    parts.push(provider.to_owned());
-                }
-            }
-            if let Some(variant) = variant {
-                parts.push("·".to_owned());
-                parts.push(variant.to_owned());
-            }
-            if let Some(effort) = effort {
-                parts.push("·".to_owned());
-                parts.push(effort.to_owned());
-            }
-            parts.join(" ")
+        let input = crate::native_prompt_pane::PromptMetadataInput {
+            mode: if self.shell_mode {
+                crate::native_prompt_pane::PromptMode::Shell
+            } else {
+                crate::native_prompt_pane::PromptMode::Normal
+            },
+            agent: self.composer_agent.as_deref(),
+            // Upstream `auto` comes from `local.permission.mode`; no confirmed
+            // mode fact reaches this view, so it must not fabricate that label.
+            auto: false,
+            model,
+            provider,
+            variant: self.composer_variant.as_deref(),
+            // Workspace usage-limit text is not produced by the live path yet.
+            limit: None,
+            effort: self.composer_effort.as_deref(),
         };
-
-        // Upstream `auto` comes from `local.permission.mode`; no confirmed
-        // mode fact reaches this view, so it must not fabricate that label.
-        for candidate in [
-            format(provider, model),
-            format(provider_short, model),
-            format("", model),
-        ] {
-            if prompt_metadata_cells(&candidate) <= available {
-                return candidate;
-            }
-        }
-
-        let prefix = agent.map_or_else(String::new, |agent| format!("{agent} · "));
-        let suffix = [variant, effort]
-            .into_iter()
-            .flatten()
-            .map(|value| format!(" · {value}"))
-            .collect::<String>();
-        let model_width = available
-            .saturating_sub(prompt_metadata_cells(&prefix))
-            .saturating_sub(prompt_metadata_cells(&suffix))
-            .max(9);
-        let model = truncate_prompt_metadata(model, model_width);
-        format("", &model)
+        let layout = crate::native_prompt_pane::metadata_layout(&input, self.layout.cols);
+        crate::native_prompt_pane::metadata_text(&layout)
     }
 
     /// Prompt-footer slot text for this frame plus the `(start_cell, cells)`
