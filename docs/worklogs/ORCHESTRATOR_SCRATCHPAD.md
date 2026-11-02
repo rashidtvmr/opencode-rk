@@ -10736,3 +10736,62 @@ Route errors: `@apimaster-gpt-6-luna` remains `$0` balance — no dispatches.
   W26-DIALOG11-SEARCH produced no artifacts.
 
 Canonical HEAD after this batch: `b72923b8`. Full suite `2124 passed; 0 failed`.
+
+## Wave-27 convergence + review-fix landings (2026-11-02)
+
+### Canonical HEAD: `464a9511` (working branch IS canonical), tree clean.
+
+### Verifier outcomes on the wave-26 landings (independent, `verified:false`)
+- `W27-VER-DIFF002` VERIFIED all 4 claims of `edf49e76`.
+- `W27-VER-DIFF002B` **NEEDS_FIX**: over-paint — upstream paints the hunk-header
+  band only for `index() > 0` (`patch-diff.tsx:79`, `util/diff.ts:54-59`); oc2
+  painted a phantom `@@` row for `hunk_index == 0`.
+- `W27-VER-LANDING2` **NEEDS_FIX**: `8029d40a` integer tenths-of-unit rounding
+  diverges on non-dyadic `.x5` (JS `toFixed` rounds the IEEE-754 double, not the
+  rational): 4000 K-range + 796 M-range divergences (`1150 -> JS 1.1K, rust 1.2K`).
+- `W27-VER-LANDING2B` **NEEDS_FIX**: `b72923b8` honours the single-cell exemption
+  for Escape but not Ctrl+C (upstream funnels it through `copy()`; test
+  `selection-keys.test.ts:96-114`).
+- `W27-VER-CP30B` **NEEDS_FIX**: the CP-30 walk sat after the `if !page_open {
+  continue }` gate — dead in Chat mode, and on an open page it mutated the hidden
+  draft and swallowed page arrows.
+- `W27-VER-THEME06` **NEEDS_FIX**: (1) `v2_apply_contextual_actions(...,
+  Value::Null)` discards the dialog override's own actions; (2) dialog panel
+  paints `Slot::BackgroundPanel` (`background.raised.base`) not the contextual
+  surface's `background.base`; root palette unexpanded at `:1239-1242`.
+- `W27-VER-DIALOG12` / `W27-VER-DIALOG12B` C2/C3/C4 VERIFIED; C1 cosmetic
+  dead-code fallback noted (non-blocking).
+- `W27-VER-MSG002-REVERT` all 4 claims PASS (pure deletion, mirrored counts,
+  zero dangling refs).
+- `W27-VER-TOOL008` PREVERIFIED_SOURCE_ONLY (all claims PASS by inspection).
+- `W27-TOOL002-SPIN` honest `(c)` (producer + per-row colour channel + paint arm
+  + clock all absent). `W27-SIDE08-DIALOGMCP` honest `(c)` (needs MCP dialog kind,
+  typed sidebar intent, host routing). `W27-TOOL010-EXEC` first-draft only;
+  `W27-VER-TOOL010-STATE` supplied the exact re-author seams (F1-F6).
+- Empty dirs (re-dispatched): `W27-MSG009-SPLICE`, `W27-THEME07-ALPHA`.
+
+### Review-fix landings (each: focused test + full CLI suite GREEN, single-threaded)
+- `4fa43139` **three verifier-found defects**: SIDE-04 exact-double rounding
+  (`format!("{:.20}")` then half-up drop of the 2nd decimal — matches JS on all
+  dyadic AND non-dyadic ties; exhaustive node sweep = 0 diffs); CP-30 walk moved
+  into the `!page_open` Chat branch (reachable, never intercepts page arrows);
+  THEME-16 `is_single_cell` folded into the Ctrl+C `has_text` decision.
+- `3bf0dab4` **DIFF-002 first-hunk suppression**: `hunk_index` threaded onto
+  `DiffPaintRow`; both chat consumers skip the `hunk_index == 0` header (empty
+  anchor row) while a later hunk still paints exactly one themed band. Test
+  updated to assert 0 headers for a single hunk, exactly 1 for a two-hunk diff.
+- `464a9511` **DIALOG-11**: palette appends live `SettingsDialog::rows()` only
+  while filtering (`command-palette.tsx:36-46`), searchable by real keyword join;
+  new `PaletteAction::Settings` -> `SettingsDialog::select_id` focus (no apply);
+  truthful hint absence. Two pinned palette tests updated for the newly
+  searchable setting rows.
+
+Full CLI suite after these landings: **`2125 passed; 0 failed`**.
+
+### Wave-27/28 fleet
+Wave-27 implementers mostly returned (c)/empty; wave-28 dispatched (20 workers):
+re-author TOOL-010/011, THEME-06 fix, CP-28 keymap, LAY-13 pane, plus read-only
+surveys of MD/STATE/FFI/CP/LAY/MSG/DIALOG/TAB/SIDE/THEME/DIFF-TOOL, and verifiers
+for DIALOG-11, the two review-fix commits, and a deeper TOOL-008 runtime check.
+`@apimaster-gpt-6-luna` still `$0` (no dispatches). Canonical-relative
+`evidence/` recreated by workers is relocated to the external root each pass.
