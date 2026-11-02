@@ -164,6 +164,38 @@ impl UiPreferences {
         (selected, diagnostics)
     }
 
+    /// THEME-10: resolve the live "new-designs" experiment flag
+    /// (`config/index.tsx:383-386` `useNewDesigns()`, i.e. the root
+    /// `experimental["new-designs"]` boolean of the CLI config). Disk config
+    /// applies first, an inline override second, and the last valid value wins.
+    /// This is the exact document the TUI context's `useConfig().data` resolves
+    /// (`packages/cli/src/config/config.ts:29-31,68-83`), so it gates the
+    /// temporary `opencode2` theme source precisely as upstream does.
+    pub fn new_designs_enabled(cli_path: Option<&Path>, inline: Option<&str>) -> bool {
+        fn read<F: FnOnce(&Value) -> bool>(text: &str, get: F) -> Option<bool> {
+            let value: Value = serde_json::from_str(&strip_jsonc(text).ok()?).ok()?;
+            Some(get(&value))
+        }
+        let mut selected: Option<bool> = None;
+        if let Some(path) = cli_path {
+            let mut budget = crate::native_ui_budget::ReadBudget::default();
+            if let Ok(Some(text)) = budget.read(path, MAX_CONFIG_BYTES, "CLI config") {
+                if let Some(value) =
+                    read(&text, crate::native_theme_runtime::config_new_designs)
+                {
+                    selected = Some(value);
+                }
+            }
+        }
+        if let Some(text) = inline.filter(|text| !text.is_empty() && text.len() <= MAX_CONFIG_BYTES)
+        {
+            if let Some(value) = read(text, crate::native_theme_runtime::config_new_designs) {
+                selected = Some(value);
+            }
+        }
+        selected.unwrap_or(false)
+    }
+
     pub fn tab_orientation(
         cli_path: Option<&Path>,
         inline: Option<&str>,

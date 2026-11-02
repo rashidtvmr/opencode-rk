@@ -2642,7 +2642,7 @@ mod surface_paint_regressions {
         use crate::native_theme_runtime::ThemeMode;
         // The builtin `opencode` theme is the V2 document upstream
         // (`packages/tui/src/theme/index.ts` `listThemes`).
-        let default = super::load_native_theme("opencode", ThemeMode::Dark, &[])
+        let default = super::load_native_theme("opencode", ThemeMode::Dark, &[], false)
             .expect("default theme loads");
         let semantic = default.semantic.as_ref().expect("default semantic roles");
         assert_eq!(semantic.markdown.code.rgba, [0x7f, 0xd8, 0x8f, 0xff]);
@@ -2650,7 +2650,7 @@ mod surface_paint_regressions {
 
         // Legacy assets carry the same-named roles and migrate 1:1
         // (`packages/theme/src/tui/v1-migrate.ts`).
-        let legacy = super::load_native_theme("dracula", ThemeMode::Dark, &[])
+        let legacy = super::load_native_theme("dracula", ThemeMode::Dark, &[], false)
             .expect("bundled legacy theme loads");
         let semantic = legacy.semantic.as_ref().expect("legacy semantic roles");
         assert_eq!(semantic.text_base.rgba, [0xf8, 0xf8, 0xf2, 0xff]);
@@ -2658,6 +2658,49 @@ mod surface_paint_regressions {
         assert_eq!(semantic.markdown.heading.rgba, [0xbd, 0x93, 0xf9, 0xff]);
         assert_eq!(semantic.syntax.keyword.rgba, [0xff, 0x79, 0xc6, 0xff]);
         assert_eq!(semantic.background_raised_base.rgba, [0x21, 0x22, 0x2c, 0xff]);
+    }
+
+    /// THEME-10: the temporary `opencode2` theme is resolvable through the live
+    /// loader only while the "new-designs" experiment is enabled. A disabled
+    /// gate leaves the name unknown exactly as before (no accidental builtin),
+    /// and a custom `themes/opencode2.json` shadows the builtin in both states.
+    #[test]
+    fn opencode2_theme_is_gated_by_the_new_designs_experiment() {
+        use crate::native_theme_runtime::ThemeMode;
+        // Disabled: the name is not resolvable (unknown theme), matching
+        // upstream where `opencode2` is absent from `allThemes()`.
+        assert!(super::load_native_theme("opencode2", ThemeMode::Dark, &[], false).is_err());
+        // Enabled: the shipped v2 document resolves with its distinct palette.
+        let themed = super::load_native_theme("opencode2", ThemeMode::Dark, &[], true)
+            .expect("gated opencode2 resolves while new-designs is on");
+        assert_eq!(themed.name, "opencode2");
+        // The new-designs document is a distinct palette, not an alias of the
+        // default `opencode` V2 document (e.g. `base.background.base`
+        // neutral.800 -> neutral.900, `assets/opencode2.json`).
+        let default = super::load_native_theme("opencode", ThemeMode::Dark, &[], false)
+            .expect("default opencode loads");
+        assert_ne!(
+            themed.palette.table(),
+            default.palette.table(),
+            "opencode2 must not resolve to the default opencode palette"
+        );
+    }
+
+    #[test]
+    fn new_designs_accessor_reads_the_experimental_flag() {
+        use crate::native_ui_preferences::UiPreferences;
+        assert!(!UiPreferences::new_designs_enabled(None, Some(r#"{"experimental":{"new-designs":false}}"#)));
+        assert!(UiPreferences::new_designs_enabled(None, Some(r#"{"experimental":{"new-designs":true}}"#)));
+        assert!(!UiPreferences::new_designs_enabled(None, Some("{}")));
+        assert!(!UiPreferences::new_designs_enabled(None, Some("{ not json")));
+        // Inline wins over disk.
+        let dir = std::env::temp_dir().join(format!("oc2-nd-{}-{}", std::process::id(), line!()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let disk = dir.join("cli.json");
+        std::fs::write(&disk, r#"{"experimental":{"new-designs":true}}"#).unwrap();
+        assert!(!UiPreferences::new_designs_enabled(Some(&disk), Some(r#"{"experimental":{"new-designs":false}}"#)));
+        assert!(UiPreferences::new_designs_enabled(Some(&disk), None));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -5890,6 +5933,7 @@ fn native_theme_choices(
     config_paths: &[std::path::PathBuf],
     current: Option<&str>,
     mode: crate::native_theme_runtime::ThemeMode,
+    new_designs: bool,
 ) -> Result<Vec<NativeThemeChoice>, String> {
     use std::collections::BTreeMap;
     use std::fs;
@@ -5899,6 +5943,16 @@ fn native_theme_choices(
     const MAX_DISCOVERED_NAMES: usize = 128;
     crate::native_ui_budget::check_paths(config_paths)?;
     let mut choices = BTreeMap::<String, NativeThemeChoice>::new();
+    // THEME-10: the temporary `opencode2` theme is offered only while the
+    // "new-designs" experiment is enabled (`theme/index.ts:27-32`,
+    // `context/theme.tsx:291-294`). `custom_sources` stays empty for it so the
+    // validation loop below resolves it from the builtin gate, not a file.
+    if new_designs {
+        choices.insert("opencode2".to_owned(), NativeThemeChoice {
+            name: "opencode2".to_owned(),
+            available: crate::native_theme_runtime::RuntimeTheme::opencode2(mode).is_some(),
+        });
+    }
     // Keep the exact winning custom file. Config paths are traversed in
     // precedence order, so later entries replace earlier ones just like the
     // resolver's reverse search.
@@ -5960,6 +6014,13 @@ fn native_theme_choices(
             choice.available = false;
             continue;
         }
+        // `opencode2` is a gated builtin, not a file-backed/custom theme; when
+        // no custom file shadows it, its availability is exactly the
+        // experiment gate above. A real custom `themes/opencode2.json` still
+        // validates through the file path like any other discovered name.
+        if choice.name == "opencode2" && !custom_sources.contains_key("opencode2") {
+            continue;
+        }
         let resolver_name = match choice.name.as_str() {
             "dark" | "light" | "system" => "opencode",
             name => name,
@@ -6011,10 +6072,11 @@ fn load_native_theme(
     name: &str,
     mode: crate::native_theme_runtime::ThemeMode,
     config_paths: &[std::path::PathBuf],
+    new_designs: bool,
 ) -> Result<crate::native_theme_runtime::RuntimeTheme, String> {
     crate::native_ui_budget::check_paths(config_paths)?;
     let mut budget = crate::native_ui_budget::ReadBudget::default();
-    load_native_theme_with_budget(name, mode, config_paths, &mut budget)
+    load_native_theme_with_budget(name, mode, config_paths, new_designs, &mut budget)
 }
 
 #[cfg(feature = "native")]
@@ -6022,6 +6084,7 @@ fn load_native_theme_with_budget(
     name: &str,
     mode: crate::native_theme_runtime::ThemeMode,
     config_paths: &[std::path::PathBuf],
+    new_designs: bool,
     budget: &mut crate::native_ui_budget::ReadBudget,
 ) -> Result<crate::native_theme_runtime::RuntimeTheme, String> {
     use crate::native_theme_runtime::{RuntimeTheme, ThemeMode};
@@ -6044,6 +6107,18 @@ fn load_native_theme_with_budget(
             let value = serde_json::from_str(&text).map_err(|_| "invalid theme JSON")?;
             return RuntimeTheme::from_asset(name, &value, mode)
                 .map_err(|error| format!("invalid theme: {error}"));
+        }
+    }
+    // THEME-10: the gated temporary builtin `opencode2`. A custom
+    // `themes/opencode2.json` was already preferred by the loop above (files
+    // shadow builtins, matching upstream `listThemes()`); only when no file
+    // matched does the "new-designs" experiment gate decide. A disabled gate
+    // falls through to the existing unknown-theme error, unchanged.
+    if name == "opencode2" && new_designs {
+        if let Some(theme) =
+            crate::native_theme_runtime::RuntimeTheme::named_gated(name, mode, true)
+        {
+            return Ok(theme);
         }
     }
     // Upstream `listThemes()` (`packages/tui/src/theme/index.ts`) overrides the
@@ -6619,10 +6694,15 @@ fn native_loop(
         Some("light") => crate::native_theme_runtime::ThemeMode::Light,
         _ => crate::native_theme_runtime::ThemeMode::Dark,
     };
+    let new_designs = crate::native_ui_preferences::UiPreferences::new_designs_enabled(
+        cli_path.as_deref(),
+        inline_cli.as_deref(),
+    );
     let mut theme = match load_native_theme(
         selected_theme,
         theme_mode,
         &config_paths,
+        new_designs,
     ) {
         Ok(theme) => theme,
         Err(error) => {
@@ -11234,7 +11314,7 @@ fn native_loop(
                         if view.page() == crate::native_view_pages::Page::Theme {
                             if let Some(row) = view.page_selected().filter(|row| row.enabled) {
                                 let name = row.id.clone();
-                                match load_native_theme(&name, theme.mode, &config_paths) {
+                                match load_native_theme(&name, theme.mode, &config_paths, new_designs) {
                                     Ok(next) => {
                                         match crate::native_ui_preferences::UiPreferences::persist_theme_selection(&state_path, &name, next.mode.key()) {
                                             Ok(()) => { theme = next; view.close_page(); }
@@ -11782,7 +11862,7 @@ fn native_loop(
                                 ),
                             }
                         } else if page == crate::native_view_pages::Page::Theme {
-                            let choices = native_theme_choices(&config_paths, Some(theme.name.as_str()), theme_mode)
+                            let choices = native_theme_choices(&config_paths, Some(theme.name.as_str()), theme_mode, new_designs)
                                 .unwrap_or_else(|error| {
                                     append_transcript(&mut transcript, format!("error: theme registry: {error}"));
                                     Vec::new()
@@ -14534,9 +14614,50 @@ mod native_theme_registry_tests {
     fn malformed_custom_shadow_is_not_advertised_as_available() {
         let (_fixture, config) = fixture();
         std::fs::write(config.parent().unwrap().join("themes/opencode.json"), "{").unwrap();
-        let choices = native_theme_choices(&[config], None, crate::native_theme_runtime::ThemeMode::Dark).unwrap();
+        let choices = native_theme_choices(&[config], None, crate::native_theme_runtime::ThemeMode::Dark, false).unwrap();
         let opencode = choices.iter().find(|choice| choice.name == "opencode").unwrap();
         assert!(!opencode.available);
+    }
+
+    /// THEME-10: the gated temporary builtin `opencode2` enters the offered set
+    /// only under the "new-designs" experiment, and a real custom
+    /// `themes/opencode2.json` shadows it like any other file-backed theme.
+    #[test]
+    fn opencode2_is_offered_in_the_registry_only_under_new_designs() {
+        let (_fixture, config) = fixture();
+        let off = native_theme_choices(
+            std::slice::from_ref(&config),
+            None,
+            crate::native_theme_runtime::ThemeMode::Dark,
+            false,
+        )
+        .unwrap();
+        assert!(!off.iter().any(|choice| choice.name == "opencode2"));
+        let on = native_theme_choices(
+            std::slice::from_ref(&config),
+            None,
+            crate::native_theme_runtime::ThemeMode::Dark,
+            true,
+        )
+        .unwrap();
+        let gated = on
+            .iter()
+            .find(|choice| choice.name == "opencode2")
+            .expect("opencode2 offered while new-designs is on");
+        assert!(gated.available);
+
+        // A malformed custom shadow must still be advertised as unavailable
+        // (files shadow builtins, matching `listThemes()`), even when gated on.
+        std::fs::write(config.parent().unwrap().join("themes/opencode2.json"), "{").unwrap();
+        let shadowed = native_theme_choices(
+            &[config],
+            None,
+            crate::native_theme_runtime::ThemeMode::Dark,
+            true,
+        )
+        .unwrap();
+        let shadow = shadowed.iter().find(|choice| choice.name == "opencode2").unwrap();
+        assert!(!shadow.available, "malformed custom shadow is unavailable");
     }
 
     #[test]
@@ -14546,7 +14667,7 @@ mod native_theme_registry_tests {
         for index in 0..257 {
             std::fs::write(themes.join(format!("theme-{index}.json")), "{}").unwrap();
         }
-        assert!(native_theme_choices(&[config], None, crate::native_theme_runtime::ThemeMode::Dark).is_err());
+        assert!(native_theme_choices(&[config], None, crate::native_theme_runtime::ThemeMode::Dark, false).is_err());
     }
 
     #[test]
@@ -14561,6 +14682,7 @@ mod native_theme_registry_tests {
             &[config],
             None,
             crate::native_theme_runtime::ThemeMode::Dark,
+            false,
         );
         assert!(matches!(result, Err(error) if error.contains("registry incomplete")));
     }
@@ -14568,7 +14690,7 @@ mod native_theme_registry_tests {
     #[test]
     fn disappeared_current_custom_identity_remains_unavailable() {
         let (_fixture, config) = fixture();
-        let choices = native_theme_choices(&[config], Some("removed-custom"), crate::native_theme_runtime::ThemeMode::Dark).unwrap();
+        let choices = native_theme_choices(&[config], Some("removed-custom"), crate::native_theme_runtime::ThemeMode::Dark, false).unwrap();
         let removed = choices.iter().find(|choice| choice.name == "removed-custom").unwrap();
         assert!(!removed.available);
     }
