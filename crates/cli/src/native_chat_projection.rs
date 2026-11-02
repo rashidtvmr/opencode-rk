@@ -329,8 +329,8 @@ fn hydrated_parts(message: &Value, budget: &mut usize) -> Vec<ChatPart> {
                     &part.get("arguments").map(Value::to_string).unwrap_or_default(),
                     budget,
                 );
-                let (body, patch) = result.map_or_else(
-                    || (String::new(), None),
+                let (body, patches) = result.map_or_else(
+                    || (String::new(), Vec::new()),
                     |result| tool_output_content(
                         result.get("output").or_else(|| result.get("payload"))
                             .and_then(Value::as_str).unwrap_or(""),
@@ -345,7 +345,7 @@ fn hydrated_parts(message: &Value, budget: &mut usize) -> Vec<ChatPart> {
                     .map(|value| take(&value.to_string(), budget))
                     .unwrap_or_default();
                 output.push(ChatPart::ToolState { name, id, status, args, output: body, is_error, metadata });
-                if let Some(patch) = patch { output.push(patch); }
+                output.extend(patches);
             }
             "tool_output" => {
                 if paired_outputs[index] {
@@ -420,11 +420,10 @@ fn tool_output_parts_bounded(
     let status = take(if ambiguous { "ambiguous" } else if is_error { "error" } else { "completed" }, budget);
     let name = take(name, budget);
     let id = take(id, budget);
-    let (body, patch) = tool_output_content(output, is_error, metadata, budget);
-    let mut parts = vec![ChatPart::ToolState {
+    let (body, mut parts) = tool_output_content(output, is_error, metadata, budget);
+    parts.insert(0, ChatPart::ToolState {
         name, id, status, args: String::new(), output: body, is_error, metadata: String::new(),
-    }];
-    if let Some(patch) = patch { parts.push(patch); }
+    });
     parts
 }
 
@@ -495,7 +494,7 @@ fn integral_position(value: Option<&Value>) -> Option<i64> {
     Some(number as i64)
 }
 
-fn tool_output_content(output: &str, is_error: bool, metadata: Option<&Value>, budget: &mut usize) -> (String, Option<ChatPart>) {
+fn tool_output_content(output: &str, is_error: bool, metadata: Option<&Value>, budget: &mut usize) -> (String, Vec<ChatPart>) {
     let mut end = output.len().min(MAX_MESSAGE_BYTES);
     while !output.is_char_boundary(end) { end -= 1; }
     let output = &output[..end];
@@ -503,12 +502,133 @@ fn tool_output_content(output: &str, is_error: bool, metadata: Option<&Value>, b
         .filter(|value| value["format"] == "opencode.file-edit.v1" && !is_error);
     let body = typed.as_ref().and_then(|value| value["output"].as_str()).unwrap_or(output);
     let body = take(body, budget);
-    let patch = typed.and_then(|edit| edit["diff"].as_str().map(|diff| {
-        let path = take(edit["path"].as_str().unwrap_or(""), budget);
-        let diagnostics = parse_diagnostics(metadata, &path, budget);
-        ChatPart::Patch { path, diff: take(diff, budget), diagnostics }
-    }));
-    (body, patch)
+    let mut patches = Vec::new();
+    if let Some(edit) = typed {
+        if let Some(diff) = edit["diff"].as_str() {
+            let path = take(edit["path"].as_str().unwrap_or(""), budget);
+            let diagnostics = parse_diagnostics(metadata, &path, budget);
+            patches.push(ChatPart::Patch { path, diff: take(diff, budget), diagnostics });
+        }
+    } else {
+        // DIFF-004: only a non-envelope tool output can carry the patch tool's
+        // `metadata.files`/`metadata.applied` facts.
+        patches.extend(patch_tool_parts(metadata, budget));
+    }
+    (body, patches)
+}
+
+/// DIFF-004: upstream `ApplyPatch` reads the tool part's `metadata.files` and
+/// `metadata.applied` (`packages/tui/src/routes/session/index.tsx:3517,
+/// 3536-3544`) and renders one block per entry that survives
+/// `parseApplyPatchFiles` (`:3769-3795`); when none survive, one label+path
+/// row per applied entry with both a truthy type and resource (`:3588-3606`).
+/// The tested `WirePatchFile`/`parse_patch_files` and
+/// `WireApplied`/`parse_applied` models in `native_diff_view.rs` perform the
+/// same field mapping and malformed-entry dropping; upstream falsy type/path
+/// checks (`:3784-3789`, `:3542-3544`) are applied here so empty strings drop
+/// exactly like upstream. Files win over applied exactly like the upstream
+/// `<Switch>` order, and non-delete files still paint through the existing
+/// single-file [`ChatPart::Patch`] pipeline in wire order.
+fn patch_tool_parts(metadata: Option<&Value>, budget: &mut usize) -> Vec<ChatPart> {
+    let mut parts: Vec<ChatPart> = Vec::new();
+    let mut deleted_rows: Vec<crate::native_view_chat::PatchToolRow> = Vec::new();
+    // Upstream `<Switch>` short-circuits the applied fallback on
+    // `files().length > 0` (`index.tsx:3528`), and `files()` is
+    // `parseApplyPatchFiles`, which includes `delete` entries. So ANY surviving
+    // parsed file — delete or not — suppresses the applied rows.
+    let mut saw_any_file = false;
+    for file in crate::native_diff_view::parse_patch_files(&wire_patch_files(metadata)) {
+        // Upstream `parseApplyPatchFiles` truthiness (`:3784-3789`).
+        if file.file_type.is_empty() || file.relative_path.is_empty() || file.file_path.is_empty() {
+            continue;
+        }
+        saw_any_file = true;
+        if file.is_delete() {
+            deleted_rows.push(crate::native_view_chat::PatchToolRow {
+                label: take(file.path_label(), budget),
+                path: take(&file.relative_path, budget),
+                deleted_summary: Some(take(&file.deleted_summary(), budget)),
+            });
+            continue;
+        }
+        flush_patch_tool_rows(&mut parts, &mut deleted_rows);
+        parts.push(ChatPart::Patch {
+            path: take(&file.relative_path, budget),
+            diff: take(&file.patch, budget),
+            diagnostics: Vec::new(),
+        });
+    }
+    if !saw_any_file {
+        // Upstream applied fallback: `type && resource` truthiness
+        // (`:3540-3544`), reached only when no parsed file survives.
+        for resource in crate::native_diff_view::parse_applied(&wire_applied(metadata)) {
+            if resource.kind.is_empty() || resource.resource.is_empty() {
+                continue;
+            }
+            deleted_rows.push(crate::native_view_chat::PatchToolRow {
+                label: take(crate::native_diff_view::applied_label(&resource.kind), budget),
+                path: take(&resource.resource, budget),
+                deleted_summary: None,
+            });
+        }
+    }
+    flush_patch_tool_rows(&mut parts, &mut deleted_rows);
+    parts
+}
+
+fn flush_patch_tool_rows(
+    parts: &mut Vec<ChatPart>,
+    rows: &mut Vec<crate::native_view_chat::PatchToolRow>,
+) {
+    if rows.is_empty() {
+        return;
+    }
+    parts.push(ChatPart::PatchToolRows {
+        rows: std::mem::take(rows),
+    });
+}
+
+fn str_field(item: &Value, key: &str) -> Option<String> {
+    item.get(key).and_then(Value::as_str).map(str::to_owned)
+}
+
+fn wire_patch_files(metadata: Option<&Value>) -> Vec<crate::native_diff_view::WirePatchFile> {
+    metadata
+        .and_then(|metadata| metadata.get("files"))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| crate::native_diff_view::WirePatchFile {
+                    file_type: str_field(item, "type"),
+                    status: str_field(item, "status"),
+                    file: str_field(item, "file"),
+                    relative_path: str_field(item, "relativePath"),
+                    file_path: str_field(item, "filePath"),
+                    patch: str_field(item, "patch"),
+                    additions: item.get("additions").and_then(Value::as_f64),
+                    deletions: item.get("deletions").and_then(Value::as_f64),
+                    move_path: str_field(item, "movePath"),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn wire_applied(metadata: Option<&Value>) -> Vec<crate::native_diff_view::WireApplied> {
+    metadata
+        .and_then(|metadata| metadata.get("applied"))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| crate::native_diff_view::WireApplied {
+                    kind: str_field(item, "type"),
+                    resource: str_field(item, "resource"),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Project one daemon message record into a typed chat message.
@@ -1228,6 +1348,110 @@ mod tests {
         assert!(retained <= MAX_MESSAGE_BYTES);
     }
 
+
+    #[test]
+    fn patch_tool_metadata_files_paint_delete_rows_like_upstream_apply_patch() {
+        // Upstream ApplyPatch (`routes/session/index.tsx:3517,3528-3562`,
+        // `parseApplyPatchFiles` `:3769-3795`): every parsed `metadata.files`
+        // entry renders in wire order and a `delete` entry paints only
+        // `-{deletions} line{s}`; entries missing a truthy type/path or a
+        // finite count drop (`:3784-3789`).
+        let mut call = json!({
+            "type":"tool_call","call_id":"patch-1","name":"applypatch","status":"completed",
+            "arguments":{"patchText":"*** Delete File: old.rs"}
+        });
+        call["metadata"] = json!({
+            "files": [
+                {"type":"delete","file":"old.rs","filePath":"old.rs","patch":"*** Delete File: old.rs","additions":0,"deletions":3},
+                {"type":"delete","file":"one.rs","patch":"*** Delete File: one.rs","additions":0,"deletions":1},
+                {"file":"no-type.rs","patch":"+x","additions":1,"deletions":0},
+                {"type":"update","file":"edge.rs","patch":"","additions":"3","deletions":1}
+            ],
+            "applied": [
+                {"type":"add","resource":"should-not-render.rs"}
+            ]
+        });
+        let record = actual_tool_record(json!([
+            call,
+            {"type":"tool_output","call_id":"patch-1","name":"applypatch","output":"Done","success":true,"is_error":false,"error":null}
+        ]), "[applypatch] Done");
+        let projected = project_message(&record).expect("projected");
+        assert_eq!(projected.parts.len(), 2, "ToolState then one ordered row group");
+        let mut groups = projected.parts.iter().filter_map(|part| match part {
+            ChatPart::PatchToolRows { rows } => Some(rows),
+            _ => None,
+        });
+        let rows = groups.next().expect("delete rows paint before any applied fallback");
+        assert!(groups.next().is_none(), "upstream <Switch>: parsed files short-circuit applied rows");
+        assert_eq!(rows.len(), 2, "no-type and non-finite-count entries drop");
+        assert_eq!((rows[0].label.as_str(), rows[0].path.as_str()), ("# Deleted", "old.rs"));
+        assert_eq!(rows[0].deleted_summary.as_deref(), Some("-3 lines"));
+        assert_eq!(rows[1].deleted_summary.as_deref(), Some("-1 line"), "exact upstream singular/plural");
+    }
+
+    #[test]
+    fn patch_tool_files_paint_in_wire_order_with_delete_fallback() {
+        let mut call = json!({
+            "type":"tool_call","call_id":"patch-3","name":"applypatch","status":"completed",
+            "arguments":{"patchText":"n/a"}
+        });
+        call["metadata"] = json!({
+            "files": [
+                {"type":"update","file":"a.rs","patch":"--- a/a.rs\n+++ b/a.rs\n-old\n+new\n","additions":1,"deletions":1},
+                {"type":"delete","file":"b.rs","patch":"*** Delete File: b.rs","additions":0,"deletions":2},
+                {"type":"update","file":"c.rs","patch":"--- a/c.rs\n+++ b/c.rs\n+x\n","additions":1,"deletions":0}
+            ]
+        });
+        let record = actual_tool_record(json!([
+            call,
+            {"type":"tool_output","call_id":"patch-3","name":"applypatch","output":"Done"}
+        ]), "[applypatch] Done");
+        let projected = project_message(&record).expect("projected");
+        let order: Vec<String> = projected.parts.iter().map(|part| match part {
+            ChatPart::Patch { path, .. } => format!("patch:{path}"),
+            ChatPart::PatchToolRows { rows } => format!("deleted:{}", rows[0].path),
+            ChatPart::ToolState { .. } => "tool".to_string(),
+            _ => "other".to_string(),
+        }).collect();
+        assert_eq!(
+            order,
+            vec!["tool", "patch:a.rs", "deleted:b.rs", "patch:c.rs"],
+            "upstream For-each over files paints blocks in wire order"
+        );
+    }
+
+    #[test]
+    fn patch_tool_applied_fallback_only_when_no_file_survives() {
+        let mut call = json!({
+            "type":"tool_call","call_id":"patch-2","name":"applypatch","status":"completed",
+            "arguments":{"patchText":"*** Add File: new.rs"}
+        });
+        call["metadata"] = json!({
+            "applied": [
+                {"type":"add","resource":"new.rs"},
+                {"type":"delete","resource":"gone.rs"},
+                {"resource":"no-kind.rs"},
+                {"type":"","resource":"empty.rs"},
+                {"type":"add","resource":""}
+            ]
+        });
+        let record = actual_tool_record(json!([
+            call,
+            {"type":"tool_output","call_id":"patch-2","name":"applypatch","output":"Done"}
+        ]), "[applypatch] Done");
+        let projected = project_message(&record).expect("projected");
+        let mut groups = projected.parts.iter().filter_map(|part| match part {
+            ChatPart::PatchToolRows { rows } => Some(rows),
+            _ => None,
+        });
+        let rows = groups.next().expect("applied rows parse like upstream");
+        assert_eq!(rows.len(), 2, "falsy type/resource entries drop (upstream :3540-3544 truthiness)");
+        assert_eq!((rows[0].label.as_str(), rows[0].path.as_str()), ("# Created", "new.rs"));
+        assert_eq!(rows[0].deleted_summary, None, "applied resources paint no summary");
+        assert_eq!((rows[1].label.as_str(), rows[1].path.as_str()), ("# Deleted", "gone.rs"));
+        assert_eq!(rows[1].deleted_summary.as_deref(), None);
+    }
+
     #[test]
     fn edit_metadata_diagnostics_parse_like_upstream_parse_diagnostics() {
         // Upstream `parseDiagnostics`
@@ -1744,6 +1968,10 @@ mod tests {
                 ChatPart::Compaction { reason } => reason.len(),
                 ChatPart::Patch { path, diff, diagnostics } => path.len() + diff.len() + diagnostics.iter().map(|d| d.message.len()).sum::<usize>(),
                 ChatPart::ToolResult { name, output, .. } => name.len() + output.len(),
+                ChatPart::PatchToolRows { rows: entries } => entries.iter()
+                    .map(|entry| entry.label.len() + entry.path.len()
+                        + entry.deleted_summary.as_ref().map_or(0, |summary| summary.len()))
+                    .sum::<usize>(),
             })
             .sum();
         assert!(

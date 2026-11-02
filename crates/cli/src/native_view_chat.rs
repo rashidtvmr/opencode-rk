@@ -677,6 +677,28 @@ pub enum ChatPart {
         /// keeps severity-1 rows for the file path, at most three).
         diagnostics: Vec<PatchDiagnostic>,
     },
+    /// DIFF-004: upstream ApplyPatch delete/applied label rows for the live
+    /// projection (`packages/tui/src/routes/session/index.tsx:3528-3608`).
+    /// Non-delete file patches keep flowing through the existing single-file
+    /// [`ChatPart::Patch`] pipeline; this variant carries the remaining row
+    /// kinds in file order (see [`PatchToolRow`]).
+    PatchToolRows {
+        rows: Vec<PatchToolRow>,
+    },
+}
+
+/// DIFF-004: one label+path row group. Upstream `ApplyPatch` paints parsed
+/// `metadata.files` blocks in wire order and, only when no file survives
+/// `parseApplyPatchFiles` (`index.tsx:3769-3795`), one label+path group per
+/// `metadata.applied` entry (`:3536-3544,3588-3606`). A `delete` block is its
+/// `Show` fallback: `-{deletions} line{s}` only, painted in the removed
+/// color; `deleted_summary` is `None` for an applied resource, whose value
+/// row stays muted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PatchToolRow {
+    pub label: String,
+    pub path: String,
+    pub deleted_summary: Option<String>,
 }
 
 /// One typed chat message: caller-supplied role plus ordered parts, with the
@@ -2693,6 +2715,36 @@ fn typed_message_rows_with_prefix_spans_mode(
                         rows.truncate(rows.len().saturating_sub(statuses.len() - slack));
                     }
                     rows.extend(statuses);
+                }
+            }
+            ChatPart::PatchToolRows { rows: entries } => {
+                // DIFF-004 upstream ApplyPatch: parsed files win over applied
+                // (`index.tsx:3528-3608`, `<Switch>` order); a `delete` block
+                // paints only its removed-colored summary (`:3555-3557`) and
+                // applied resources paint label + muted value rows
+                // (`:3588-3606`).
+                for entry in entries {
+                    if rows.len() >= MAX_MESSAGE_ROWS {
+                        break;
+                    }
+                    rows.push((
+                        truncate_row(
+                            &format!("[diff] {} {}", entry.label, entry.path),
+                            width,
+                        ),
+                        ChatRowClass::Metadata,
+                    ));
+                    if let Some(summary) = entry.deleted_summary.as_deref() {
+                        rows.push((
+                            truncate_row(&format!("    {summary}"), width),
+                            ChatRowClass::DiffRemoved,
+                        ));
+                    } else {
+                        rows.push((
+                            truncate_row(&format!("    {}", entry.path), width),
+                            ChatRowClass::Metadata,
+                        ));
+                    }
                 }
             }
         }

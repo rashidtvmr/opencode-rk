@@ -197,6 +197,7 @@ fn message_bytes(message: &ChatMessage) -> usize {
             ChatPart::Step { kind, detail } => kind.len() + detail.len(),
             ChatPart::Compaction { reason } => reason.len(),
             ChatPart::Patch { path, diff, diagnostics } => path.len() + diff.len() + diagnostics.iter().map(|d| d.message.len()).sum::<usize>(),
+            ChatPart::PatchToolRows { rows } => rows.iter().map(|row| row.label.len() + row.path.len() + row.deleted_summary.as_deref().map_or(0, str::len)).sum::<usize>(),
             ChatPart::ToolCall { name, id } => name.len() + id.len(),
             ChatPart::ToolResult { name, output, .. } => name.len() + output.len(),
         })
@@ -307,6 +308,13 @@ impl NativeChatHistory {
                     *diff = bounded(diff);
                     for diagnostic in diagnostics.iter_mut() {
                         diagnostic.message = bounded(&diagnostic.message);
+                    }
+                }
+                ChatPart::PatchToolRows { rows } => {
+                    for row in rows {
+                        row.label = bounded(&row.label);
+                        row.path = bounded(&row.path);
+                        row.deleted_summary = row.deleted_summary.as_deref().map(bounded);
                     }
                 }
             }
