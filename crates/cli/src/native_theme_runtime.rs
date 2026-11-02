@@ -3461,6 +3461,76 @@ fn native_json_asset_resolves_every_slot_to_upstream_values() {
     }
 }
 
+// ── THEME-01 (V2): every native-JSON hue token, both modes, RGBA + provenance ─
+// The shipped default theme `assets/opencode-v2.json` (`V2_DEFAULT_ASSET`) is
+// the native default; the legacy `native_theme_assets/opencode.json` check
+// above covers only the 10 core slots. This resolves EVERY published hue token
+// of both mode blocks (direct hex hues and alias hues) and pins the resolved
+// RGBA together with its {hue,step} provenance, so equal-valued adjacent
+// swatches and alias identity stay distinguishable (the upstream resolver
+// indexes swatch identity, not RGB; `packages/theme/src/tui/resolve.ts`).
+
+#[test]
+fn theme01_v2_native_json_resolves_every_hue_token_rgba_and_provenance() {
+    let asset: Value = serde_json::from_str(include_str!("../assets/opencode-v2.json"))
+        .expect("shipped V2 asset parses");
+    for mode in [ThemeMode::Dark, ThemeMode::Light] {
+        let theme = RuntimeTheme::from_asset("opencode-v2", &asset, mode)
+            .expect("shipped V2 asset resolves for both modes");
+        let semantic = theme.semantic.expect("genuine V2 document attaches semantic");
+        let hues = asset[mode.key()]["hue"].as_object().expect("mode hue map");
+        assert!(!hues.is_empty(), "{mode}: hue map is empty");
+        let mut checked = 0usize;
+        for (name, value) in hues {
+            let scale = semantic
+                .scale(name)
+                .unwrap_or_else(|| panic!("{mode}: hue {name} not published"));
+            assert_eq!(scale.len(), 9, "{mode}: hue {name} must publish nine steps");
+            if let Some(alias) = value.as_str() {
+                // Alias hue (`$hue.<target>`): RGBA from the target scale, but
+                // provenance keeps the ALIAS name (upstream resolves each alias
+                // into its own scale of clones).
+                let target = alias
+                    .strip_prefix("$hue.")
+                    .unwrap_or_else(|| panic!("{mode}: bad hue alias {alias}"));
+                let target_scale = semantic.scale(target).expect("alias target published");
+                for (index, step) in V2_STEPS.iter().enumerate() {
+                    let color = &scale[index];
+                    assert_eq!(
+                        color.rgba, target_scale[index].rgba,
+                        "{mode}: {name}.{step} alias rgba"
+                    );
+                    let expected = Some(HueSource { hue: name.clone(), step: *step });
+                    assert_eq!(color.provenance, expected, "{mode}: {name}.{step} alias provenance");
+                    checked += 1;
+                }
+            } else {
+                let object = value
+                    .as_object()
+                    .unwrap_or_else(|| panic!("{mode}: hue {name} is not object/alias"));
+                assert_eq!(object.len(), 9, "{mode}: hue {name} must contain nine steps");
+                for step in V2_STEPS {
+                    let token = object
+                        .get(&step.to_string())
+                        .and_then(Value::as_str)
+                        .unwrap_or_else(|| panic!("{mode}: {name}.{step} missing"));
+                    let expected = parse_color(token).expect("hue hex token");
+                    let index = (step / 100 - 1) as usize;
+                    let color = &scale[index];
+                    assert_eq!(color.rgba, expected, "{mode}: {name}.{step} rgba");
+                    assert_eq!(
+                        color.provenance,
+                        Some(HueSource { hue: name.clone(), step }),
+                        "{mode}: {name}.{step} provenance"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 0, "{mode}: no tokens checked");
+    }
+}
+
 // ── THEME-04: step clamping / negative / fractional / nonfinite amounts ────
 
 #[test]
