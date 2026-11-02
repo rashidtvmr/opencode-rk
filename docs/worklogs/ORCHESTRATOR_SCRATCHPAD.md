@@ -10795,3 +10795,67 @@ surveys of MD/STATE/FFI/CP/LAY/MSG/DIALOG/TAB/SIDE/THEME/DIFF-TOOL, and verifier
 for DIALOG-11, the two review-fix commits, and a deeper TOOL-008 runtime check.
 `@apimaster-gpt-6-luna` still `$0` (no dispatches). Canonical-relative
 `evidence/` recreated by workers is relocated to the external root each pass.
+
+## Wave-28 landings + wave-29 dispatch (2026-11-02)
+
+### Canonical HEAD now `83b626bc` (working branch IS canonical), tree clean.
+
+### Landed this pass (each: focused test + full CLI suite GREEN, single-threaded)
+- `de29bd21` **DIALOG-11 refinement + DIALOG-12 test**: setting `searchText` now
+  derived from the live `SettingsRow.keywords.join(" ")` (removes the
+  hand-maintained id->string map that silently dropped keyword search for any
+  future row); setting rows now carry upstream's exact `searchFooter`
+  `"Settings · <category>"` (`command-palette.tsx:40`) rendered by the existing
+  flattened right-align path; `PaletteEntry.search_text`/`search_footer` became
+  owned `String`s to hold runtime-derived values (command rows unchanged). Added
+  the catalog-crate `cost` normalization test (array passthrough / object wrap /
+  absent-empty) the DIALOG-12 reviewer flagged.
+- `06c4039d` **DIFF-002 residual over-paint**: `W28-VER-DIFF002FINAL` found
+  `3bf0dab4` still emitted an empty `ChatRowClass::DiffContext` placeholder row
+  for the first hunk, preserving a stray row of height. Upstream renders NO
+  element for the first hunk (`patch-diff.tsx:79-85`; a single-hunk patch has no
+  `header` at all, `util/diff.ts:54-59`). Both consumers now `continue` without a
+  push; the styled consumer filters first-hunk headers out of `painted` BEFORE the
+  row-budget math. Test strengthened to pin a 3-row single-hunk result and no
+  empty row.
+- `83b626bc` **CP-28 shift+tab decode**: pre-patch a `(9, SHIFT)` Kitty report
+  fell through the tab-chord match to the text-safe branch and emitted a literal
+  `0x09` TAB byte into the composer; legacy `CSI Z` back-tab was dropped. Added
+  `InputEvent::AgentCycle`, decoded both forms, and kept it inert at the live
+  composer consumer. The `agent.cycle` effect remains an honest (c): no live
+  selected-agent state to cycle, so only the decoder half is landed.
+
+Full CLI suite after these: **`2125 passed; 0 failed`**.
+
+### Wave-28 verifier outcomes (independent, `verified:false`)
+- `W28-VER-DIALOG11` PASS_WITH_NOTES → drove `de29bd21` (fragile hand map +
+  missing `Settings · <category>` footer).
+- `W28-VER-FIX1` all three PASS on `4fa43139`: exhaustive node sweep vs JS
+  `toFixed(1)` = 0 mismatches in the reachable u64 domain (42 raw diffs all at
+  v>=1e23, above `u64::MAX`); CP-30 walk reachable in Chat and page arrows
+  preserved; THEME-16 `is_single_cell` folded into the Ctrl+C `has_text` gate.
+- `W28-VER-DIFF002FINAL` NEEDS_FIX → drove `06c4039d`.
+- `W28-TAB/-LAY13/-DIALOG/-MSG/-CP/-SIDE/-THEME/-MD/-FFI/-DIFF-INVESTIGATE`: read-only
+  surveys ranking the most-landable unmet obligations with exact seams.
+
+### Wave-29 dispatch (20 + 4 re-dispatch)
+Implementers: SIDE-07 MCP align, CP-36 paste fold, CP-40 autocomplete maps,
+MD-006 thinking title (collapsed-only caveat), MSG-007 actions, STATE-001 spinner,
+THEME-10 opencode2 live wire, TAB-07 feedback, TOOL-005 budget re-author,
+MSG-009 splice, SIDE-10 todos, DIALOG-13 sessions, LAY-17 anchors, LAY-12 focus,
+DIFF-004 builders, TOOL-003 route, SIDE-14 footer. Verifiers: CP-28, DIFF-002F,
+DIALOG-11R. Re-dispatch: TOOL-010/011 execute, THEME-06 fix, TOOL-008 runtime,
+FIX2 historical.
+Routes: vyce ≤8, xkiro-luna, xkiro-mimo, th-free/luna-free/river/combined 1 each.
+
+### Investigations (read-only, main)
+- FORM-001..008: the `form_overlay` model is implemented and unit-tested but has
+  NO live form-request producer in the server/bridge and no live overlay consumer
+  — same (c) class as LAY-19. Recorded, not dispatched.
+- THEME-10: confirmed `RuntimeTheme::named_gated` + `config_new_designs` exist and
+  the shipped `assets/opencode2.json` resolves, but `load_runtime_theme` (the only
+  gate-applying loader) has no non-test caller; live choices/load use
+  `native_theme_choices`/`load_native_theme`. Dispatched W29-THEME10-WIRE.
+
+Route errors: `@apimaster-gpt-6-luna` still `$0` — no dispatches. Canonical-relative
+`evidence/` recreated by workers is relocated to the external root each pass.
