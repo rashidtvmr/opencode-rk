@@ -64,6 +64,10 @@ pub struct ModelsDevModel {
     pub modalities: Option<Modalities>,
     #[serde(default)]
     pub status: Option<String>,
+    /// Pricing metadata is normalized on the model wire as an array. Older
+    /// models.dev payloads may leave it in `extra`, so summarization accepts both.
+    #[serde(default)]
+    pub cost: Option<Value>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -95,6 +99,7 @@ pub struct ModelSummary {
     pub structured_output: bool,
     pub context_window: Option<u64>,
     pub status: Option<String>,
+    pub cost: Vec<Value>,
 }
 /// Provider discovery metadata from models.dev. Environment variables and
 /// API URLs are descriptive catalog fields; they do not grant or infer auth.
@@ -333,6 +338,9 @@ fn summarize(
         structured_output: r.structured_output,
         context_window: r.limit.as_ref().and_then(|l| l.context),
         status: r.status.clone(),
+        cost: r.cost.clone().or_else(|| r.extra.get("cost").cloned())
+            .map(|cost| match cost { Value::Array(values) => values, other => vec![other] })
+            .unwrap_or_default(),
     })
 }
 #[derive(Debug, Error)]

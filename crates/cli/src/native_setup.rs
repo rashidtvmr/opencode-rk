@@ -20,6 +20,7 @@ pub(super) struct Model {
     pub name: String,
     pub provider_id: String,
     pub context_window: Option<u64>,
+    pub free: bool,
 }
 
 impl Model {
@@ -155,7 +156,7 @@ pub(super) fn picker_rows(
             provider: model.provider_id.clone(),
             id: model.id.clone(),
             title: model.name.clone(),
-            free: false,
+            free: model.free,
             deprecated: false,
         })
         .collect();
@@ -197,6 +198,9 @@ pub(super) fn catalogue(body: &str) -> Result<Vec<Model>, String> {
             continue;
         };
         let name = entry["name"].as_str().unwrap_or(id);
+        let free = entry["cost"].as_array()
+            .map(|cost| !cost.is_empty() && cost.iter().all(|row| row["input"].as_f64() == Some(0.0)))
+            .unwrap_or(false);
         if id.is_empty()
             || id.len() > 256
             || name.len() > 256
@@ -211,6 +215,7 @@ pub(super) fn catalogue(body: &str) -> Result<Vec<Model>, String> {
                 name: name.to_owned(),
                 provider_id: provider.to_owned(),
                 context_window:entry.get("context_window").and_then(Value::as_u64).filter(|value|*value>0),
+                free,
             });
         }
     }
@@ -509,17 +514,17 @@ mod picker_tests {
 
     fn fixture_models() -> Vec<Model> {
         vec![
-            Model { id: "x".into(), name: "Acme X".into(), provider_id: "acme".into(), context_window: None },
-            Model { id: "gpt-5.6".into(), name: "Fallback".into(), provider_id: "openai".into(), context_window: None },
+            Model { id: "x".into(), name: "Acme X".into(), provider_id: "acme".into(), context_window: None, free: false },
+            Model { id: "gpt-5.6".into(), name: "Fallback".into(), provider_id: "openai".into(), context_window: None, free: false },
         ]
     }
 
     #[test]
     fn picker_rows_orders_recents_first_for_empty_query() {
         let models = vec![
-            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None },
-            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None },
-            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None },
+            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None, free: false },
+            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None, free: false },
+            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None, free: false },
         ];
         let picker = pickers::ModelPickerState::open(&[]);
         let recents = vec![("p".to_owned(), "c".to_owned()), ("p".to_owned(), "a".to_owned())];
@@ -532,9 +537,9 @@ mod picker_tests {
     #[test]
     fn dialog_rows_resolve_recents_first_index_to_committed_model() {
         let models = vec![
-            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None },
-            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None },
-            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None },
+            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None, free: false },
+            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None, free: false },
+            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None, free: false },
         ];
         let recents = vec![("p".to_owned(), "c".to_owned())];
         // Empty query -> recents-first picker order, not raw catalogue order.
@@ -652,6 +657,20 @@ mod picker_tests {
     }
 
     #[test]
+    fn catalogue_derives_free_only_from_non_empty_zero_input_costs() {
+        let models = catalogue(r#"{"models":[
+            {"provider_id":"free","id":"zero","name":"Zero","cost":[{"input":0,"output":0}]},
+            {"provider_id":"paid","id":"priced","name":"Priced","cost":[{"input":0.01,"output":0}]},
+            {"provider_id":"unknown","id":"missing","name":"Missing"},
+            {"provider_id":"empty","id":"empty","name":"Empty","cost":[]}
+        ]}"#).unwrap();
+        assert!(models.iter().find(|m| m.id == "zero").unwrap().free);
+        assert!(!models.iter().find(|m| m.id == "priced").unwrap().free);
+        assert!(!models.iter().find(|m| m.id == "missing").unwrap().free);
+        assert!(!models.iter().find(|m| m.id == "empty").unwrap().free);
+    }
+
+    #[test]
     fn custom_catalogue_preserves_router_identity_and_complete_list() {
         let rows: Vec<_> = (0..1159).map(|i| json!({"id":format!("route/model-{i}"),"provider_id":"9router","name":format!("Model {i}")})).collect();
         let models = catalogue(&json!({"models": rows}).to_string()).unwrap();
@@ -660,7 +679,7 @@ mod picker_tests {
         assert_eq!(models[index].qualified(), "9router/route/model-1158");
         assert_eq!(visible_rows(&models, "9router/route/model-1158"), vec![index]);
     }
-    fn models() -> Vec<Model> { vec![Model { id: "j-model".into(), name: "Jöhn 🚀".into(), provider_id: "openai".into(),context_window:None }, Model { id: "k-model".into(), name: "Kappa".into(), provider_id: "openai".into(),context_window:None }] }
+    fn models() -> Vec<Model> { vec![Model { id: "j-model".into(), name: "Jöhn 🚀".into(), provider_id: "openai".into(),context_window:None, free:false }, Model { id: "k-model".into(), name: "Kappa".into(), provider_id: "openai".into(),context_window:None, free:false }] }
     #[test] fn query_is_utf8_and_jk_are_search_text() {
         let m = models();
         assert_eq!(visible_rows(&m, "öhn"), vec![0]);
