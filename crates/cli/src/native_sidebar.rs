@@ -2241,6 +2241,41 @@ mod tests {
         }
     }
 
+    /// SIDE-07: the two remaining upstream states keep the muted dot and their
+    /// exact labels. `pending` falls through `dot()` to `theme.text.muted`
+    /// (`sidebar/mcp.tsx:20-21`) with the "Connecting" label (`:80`), and
+    /// `disabled` paints its own muted dot (`:19`), its literal "Disabled"
+    /// label (`:82`) and the muted status word (`:74`).
+    #[test]
+    fn pending_and_disabled_paint_muted_dots_with_exact_labels() {
+        assert_eq!(McpDisplayStatus::Pending.dot(), Slot::TextMuted);
+        assert_eq!(McpDisplayStatus::Disabled.dot(), Slot::TextMuted);
+        let items = mcp(&[McpDisplayStatus::Pending, McpDisplayStatus::Disabled]);
+        let section = McpSection {
+            items: &items,
+            open: true,
+        };
+        let width = body_width(content_width(42));
+        for (item, label) in items.iter().zip(["Connecting", "Disabled"]) {
+            let text = section.row(item, width);
+            assert!(text.ends_with(label), "{text}");
+            let spans = section.row_spans(item, width);
+            assert_eq!(spans[0], LineSpan::new(0, 1, Slot::TextMuted, ATTR_NONE));
+            assert_eq!(spans[1].slot, Slot::Text, "bold base-text name: {text}");
+            assert_eq!(spans[1].attributes, ATTR_BOLD);
+            assert_eq!(
+                spans[2],
+                LineSpan::new(
+                    width - cell_width(label),
+                    cell_width(label),
+                    Slot::TextMuted,
+                    ATTR_NONE,
+                )
+            );
+            assert!(spans.iter().all(|span| span.end_cell() <= cell_width(&text)));
+        }
+    }
+
     /// SIDE-08/SIDE-15: the truncated name and the native `(excluded)` suffix
     /// keep their own spans, and no span reaches past the painted row.
     #[test]
