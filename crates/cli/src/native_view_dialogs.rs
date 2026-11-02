@@ -137,6 +137,12 @@ pub enum DialogKind {
     /// DialogPrompt text row (`ui/dialog-prompt.tsx`); the model lives in
     /// `native_palette::dialog::PromptState`.
     Prompt,
+    /// DialogExecute content viewer (`routes/session/dialog-execute.tsx:28`),
+    /// opened from an execute tool row (`index.tsx:3400-3427`). It is a
+    /// content-only surface: code block + output block, no choices and no
+    /// backend decision. The row text model lives in
+    /// `native_tool_rows::ExecuteDialog`.
+    Execute,
 }
 
 /// Static, safe error-card categories. Defined in this file so raw backend
@@ -593,6 +599,7 @@ impl DialogView {
             | Some(DialogKind::Confirm)
             | Some(DialogKind::Error)
             | Some(DialogKind::Prompt)
+            | Some(DialogKind::Execute)
             | None => DialogViewportPolicy::ContentBudget,
         }
     }
@@ -955,7 +962,10 @@ impl DialogView {
                 return Err(DialogError::ChoiceTooLong);
             }
         }
-        if request.kind != DialogKind::Error && request.choices.is_empty() {
+        // `routes/session/dialog-execute.tsx:28` (and the static error card)
+        // is a content-only viewer: no choice list, so empty `choices` is
+        // valid for `Execute` exactly as for `Error`.
+        if request.kind != DialogKind::Error && request.kind != DialogKind::Execute && request.choices.is_empty() {
             return Err(DialogError::NoChoices);
         }
         if request.kind == DialogKind::Error && request.error.is_none() {
@@ -1138,6 +1148,7 @@ impl DialogView {
         };
         match dialog.kind {
             DialogKind::Error => return Err(DialogError::NotAnswerable),
+            DialogKind::Execute => return Err(DialogError::NotAnswerable),
             DialogKind::Question if !self.question_capable => {
                 return Err(DialogError::QuestionUnavailable)
             }
@@ -1186,6 +1197,7 @@ impl DialogView {
                 attempt,
             },
             DialogKind::Prompt => return Err(DialogError::NotAnswerable),
+            DialogKind::Execute => unreachable!("answered above"),
             DialogKind::Error => unreachable!("answered above"),
         };
         self.pending_attempt = attempt;
@@ -1206,6 +1218,7 @@ impl DialogView {
         match kind {
             DialogKind::Question => return Err(DialogError::QuestionCancelUnsupported),
             DialogKind::Error => return Err(DialogError::NotAnswerable),
+            DialogKind::Execute => return Err(DialogError::NotAnswerable),
             _ => {}
         }
         let request_id = dialog.id.clone();
@@ -1223,7 +1236,7 @@ impl DialogView {
                 attempt,
             },
             DialogKind::Prompt => return Err(DialogError::NotAnswerable),
-            DialogKind::Question | DialogKind::Error => unreachable!("handled above"),
+            DialogKind::Question | DialogKind::Error | DialogKind::Execute => unreachable!("handled above"),
         };
         self.pending_attempt = attempt;
         self.phase = Phase::Pending;
@@ -1413,12 +1426,14 @@ impl DialogView {
                 DialogKind::Confirm => lines.push(line("confirmation required".to_string(), Role::Description)),
                 DialogKind::Select => lines.push(line("select: use up/down then Enter".to_string(), Role::Description)),
                 DialogKind::Prompt => lines.push(line("prompt: type then Enter".to_string(), Role::Description)),
+                DialogKind::Execute => lines.push(line("execute — code and output".to_string(), Role::Description)),
                 DialogKind::Error => {
                     lines.push(line(dialog.error.headline().to_string(), Role::Error));
                     lines.push(line(dialog.error.detail().to_string(), Role::Description));
                 }
             }
             let has_footer = !matches!(dialog.kind, DialogKind::Error)
+                && !matches!(dialog.kind, DialogKind::Execute)
                 && !(dialog.kind == DialogKind::Question && !self.question_capable);
             let footer_rows = usize::from(has_footer && height > 1);
             let choice_rows = dialog.choices.len().min(height.saturating_sub(3)).max(1);
@@ -1474,6 +1489,7 @@ impl DialogView {
             match dialog.kind {
                 DialogKind::Question if !self.question_capable => {}
                 DialogKind::Error => {}
+                DialogKind::Execute => {}
                 _ if height > 1 => {
                     lines.truncate(height - 1);
                     hits[height - 1] = None;
@@ -5818,6 +5834,32 @@ mod tests {
         view.open_request(permission_request())
             .expect("valid request");
         view
+    }
+
+    #[test]
+    fn execute_kind_is_content_only_and_not_answerable() {
+        // `dialog-execute.tsx:28` is a content viewer: empty choices open, and
+        // neither answer nor cancel produces a decision intent.
+        let mut view = DialogView::new();
+        view.open_request(DialogRequest {
+            id: "exe-1".to_string(),
+            session_id: "ses-1".to_string(),
+            kind: DialogKind::Execute,
+            title: "execute".to_string(),
+            choices: Vec::new(),
+            message: Some("print(1)\n\n1".to_string()),
+            disabled: Vec::new(),
+            error: None,
+        })
+        .expect("execute viewer opens without choices");
+        assert!(view.is_open());
+        assert_eq!(
+            view.production_viewport_policy(),
+            DialogViewportPolicy::ContentBudget
+        );
+        assert_eq!(view.answer().unwrap_err(), DialogError::NotAnswerable);
+        assert_eq!(view.cancel().unwrap_err(), DialogError::NotAnswerable);
+        assert!(view.is_open());
     }
 
     #[test]
