@@ -10431,22 +10431,20 @@ fn native_loop(
                     needs_paint = true;
                     continue;
                 }
-                // A failed copy clears and consumes the selection
-                // (upstream `:79-81`).
-                crate::native_text_selection::CtrlCKeyAction::ClearAndConsume => {
-                    selection.clear();
-                    needs_paint = true;
-                    continue;
-                }
             }
         } else if byte == 27 {
             // Upstream Escape branch (`packages/tui/src/util/selection.ts:88-95`):
-            // clear the highlight; if the selection held real text the key is
-            // CONSUMED (`preventDefault`/`stopPropagation`), otherwise it falls
-            // through to the remaining Escape handlers (exit / dialog dismiss).
+            // clear the highlight; if the selection held real text that did not
+            // come from a single-cell (click) start the key is CONSUMED
+            // (`preventDefault`/`stopPropagation`), otherwise it falls through
+            // to the remaining Escape handlers (exit / dialog dismiss).
+            // A `isStart && behavior === "cell"` selection is treated as empty
+            // (`:90`), so a plain click never swallows Escape
+            // (test `selection-keys.test.ts:93-110`).
+            let single_cell = selection.is_single_cell();
             let had_text = selection.selected_text().is_some();
             selection.clear();
-            if had_text {
+            if had_text && !single_cell {
                 needs_paint = true;
                 continue;
             }

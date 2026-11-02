@@ -241,6 +241,16 @@ impl TextSelection {
         self.anchor.is_some() && self.focus.is_some()
     }
 
+    /// True when the selection spans more than one cell. Upstream
+    /// `Selection.isStart && behavior === "cell"` is a single-cell/click
+    /// selection, which must NOT consume Escape or Ctrl+C
+    /// (`packages/tui/src/util/selection.ts:89`, test
+    /// `selection-keys.test.ts:93-110`). A plain click leaves anchor == focus.
+    #[must_use]
+    pub fn is_single_cell(&self) -> bool {
+        self.anchor.is_some() && self.anchor == self.focus
+    }
+
     /// Clear anchor, focus, and the active drag state.
     pub fn clear(&mut self) {
         self.anchor = None;
@@ -344,7 +354,8 @@ fn floor_char_boundary(s: &str, max: usize) -> usize {
 /// (`packages/tui/src/util/selection.ts:78-85`): with no selection the key
 /// falls through (`:73`); with copy-on-select on it clears and returns WITHOUT
 /// consuming the event, so the key keeps propagating; a successful copy
-/// retains the highlight; and only a failed copy clears and consumes.
+/// retains the highlight; a failed copy clears and falls through like
+/// the copy-on-select branch (`:79-81`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CtrlCKeyAction {
     /// Let the key reach the remaining handlers (app exit).
@@ -353,8 +364,6 @@ pub enum CtrlCKeyAction {
     ClearAndFallThrough,
     /// Copy succeeded; keep the highlight and click history.
     Retain,
-    /// Copy failed on a real selection; clear it and consume the key.
-    ClearAndConsume,
 }
 
 /// Decide the Ctrl+C selection-key action. `copy_on_select` is the effective
@@ -374,7 +383,9 @@ pub fn ctrl_c_selection_key(
     if has_text {
         CtrlCKeyAction::Retain
     } else {
-        CtrlCKeyAction::ClearAndConsume
+        // Failed copy takes upstream's clear-and-return path (:79-81):
+        // plain return, the key is NOT consumed.
+        CtrlCKeyAction::ClearAndFallThrough
     }
 }
 
@@ -404,10 +415,12 @@ mod tests {
         );
         // Copy-on-select OFF: copy and retain on success (selection.ts:84-86).
         assert_eq!(ctrl_c_selection_key(false, true, true), CtrlCKeyAction::Retain);
-        // Failed copy (selection, no text) clears AND consumes (:79-81).
+        // Failed copy (selection, no text) clears and falls through:
+        // upstream :79-81 returns WITHOUT preventDefault (test
+        // selection-keys.test.ts:90-110 forwards \x03).
         assert_eq!(
             ctrl_c_selection_key(false, true, false),
-            CtrlCKeyAction::ClearAndConsume
+            CtrlCKeyAction::ClearAndFallThrough
         );
     }
 
@@ -520,10 +533,18 @@ mod tests {
         let mut selection = TextSelection::default();
         selection.set_rows(&rows(&["alpha"]), 0, 0, 8);
         assert!(selection.press(1, 0));
+        // A plain click is an upstream `isStart && behavior === "cell"`
+        // selection, which must never consume Escape/Ctrl+C
+        // (`selection.ts:90`, `selection-keys.test.ts:93-110`).
+        assert!(selection.is_single_cell());
         assert_eq!(selection.copy_for_input_kind(2, false), None);
         assert_eq!(selection.selected_text().as_deref(), Some("l"));
         assert!(!selection.dragging);
         assert_eq!(selection.copy_for_input_kind(5, true), None);
+        // A drag makes it a real multi-cell selection.
+        assert!(selection.press(1, 0));
+        selection.drag(3, 0);
+        assert!(!selection.is_single_cell());
     }
 
     #[test]
