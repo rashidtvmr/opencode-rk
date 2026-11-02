@@ -382,17 +382,26 @@ impl TabRowPaint {
         }
     }
 
-    /// Dragged horizontal session tab: bg=raised.high fg=text.base bold.
-    /// `session-tabs.tsx:1568-1573`: the dragged tab lifts `action.primary.hovered`
-    /// toward `theme.decrease(theme.background.raised.base)` by 1, which is the
-    /// exact overlay `decrease(raised.base)` = `raised.high`
+    /// Dragged horizontal session tab: bg=raised.high, BOLD. `session-tabs.tsx:1568-1573`:
+    /// the dragged tab lifts `action.primary.hovered` toward
+    /// `theme.decrease(theme.background.raised.base)` by 1, which is the exact
+    /// overlay `decrease(raised.base)` = `raised.high`
     /// (`native_theme_runtime.rs:3245-3257`), i.e. `Slot::BackgroundElement`;
     /// `:1642` forces BOLD while held.
+    ///
+    /// The title fg follows `foreground()` (`session-tabs.tsx:1609-1612`):
+    /// `text.base` only while the pointer is still over the dragged tab, else
+    /// `tint(text.muted, text.base, selection())` with `selection() == 0` for a
+    /// non-selected tab, i.e. `text.muted`.
     #[must_use]
-    pub fn horizontal_dragged(palette: &crate::native_theme_runtime::Palette) -> Self {
+    pub fn horizontal_dragged(palette: &crate::native_theme_runtime::Palette, hovered: bool) -> Self {
         use crate::native_theme_runtime::Slot;
         let bg = palette.get(Slot::BackgroundElement);
-        let title_fg = palette.get(Slot::Text);
+        let title_fg = if hovered {
+            palette.get(Slot::Text)
+        } else {
+            palette.get(Slot::TextMuted)
+        };
         let close_fg = crate::native_tab_rail::tint(
             palette.get(Slot::TextMuted),
             palette.get(Slot::Text),
@@ -597,8 +606,8 @@ pub fn row_paint_for(
     let mut paint = match color {
         TabCellColor::Idle => TabRowPaint::horizontal_idle(palette),
         TabCellColor::Selected => TabRowPaint::horizontal_selected(palette),
-        TabCellColor::Dragged => TabRowPaint::horizontal_dragged(palette),
-        TabCellColor::DraggedHovered => TabRowPaint::horizontal_dragged(palette),
+        TabCellColor::Dragged => TabRowPaint::horizontal_dragged(palette, false),
+        TabCellColor::DraggedHovered => TabRowPaint::horizontal_dragged(palette, true),
         TabCellColor::Hovered => TabRowPaint::horizontal_hovered(palette),
         TabCellColor::AddIdle => TabRowPaint::horizontal_add_idle(palette),
         TabCellColor::AddHovered => TabRowPaint::horizontal_add_hovered(palette),
@@ -3982,6 +3991,11 @@ mod tests {
         assert_eq!(
             dragged_away.row_paints[0].title_attr, 1,
             "dragged-away is still BOLD (:1642)"
+        );
+        assert_eq!(
+            dragged_away.row_paints[0].title_fg,
+            palette.get(Slot::TextMuted),
+            "dragged-away title fg = foreground() = tint(text.muted, text.base, 0) = text.muted (:1609-1612)"
         );
         assert_ne!(
             dragged_away.row_paints[0].number_fg,

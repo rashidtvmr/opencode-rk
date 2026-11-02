@@ -259,9 +259,11 @@ mod page_spacing_tests {
         assert!(view.mcp_toggle_hit.is_some()); view.scroll_sidebar_at(view.presentation().sidebar_offset.unwrap() + 1, 2, 1); assert!(view.mcp_toggle_hit.is_none()); let _ = view.render("", &[], false, &[]); assert!(view.mcp_toggle_hit.is_some()); view.resize(160, 30); assert!(view.mcp_toggle_hit.is_none());
     }
 
-    /// SIDE-12: the getting-started `✕` publishes a hit rect only while the box
-    /// shows; a real press dismisses it (and clears the hit), a miss does not,
-    /// and a dismissed box republishes nothing.
+    /// SIDE-12: the getting-started `✕` publishes a one-cell hit rect only while
+    /// the box shows; a press on that cell dismisses it (and clears the hit), a
+    /// press elsewhere on the row does not, and a dismissed box republishes
+    /// nothing. Upstream binds the dismiss `onMouseUp` to the `✕` text alone
+    /// (`footer.tsx:45-55`), not the whole row.
     #[test]
     fn onboarding_dismiss_hit_is_published_only_while_the_box_shows() {
         let mut view = NativeView::new(148, 30);
@@ -272,14 +274,23 @@ mod page_spacing_tests {
             connected_provider: false,
         }));
         let _ = view.render("", &[], false, &[]);
-        let (left, top, _) = view.onboarding_dismiss_hit.expect("painted dismiss hit");
+        let (x, top, width) = view.onboarding_dismiss_hit.expect("painted dismiss hit");
+        assert_eq!(width, 1, "the dismiss hit is exactly the trailing ✕ cell");
         assert!(
-            !view.onboarding_dismiss_action(left + 1, top.saturating_sub(1)),
+            !view.onboarding_dismiss_action(x.saturating_sub(1), top),
+            "a press on the row but left of the ✕ does nothing (footer.tsx:45-55)"
+        );
+        assert!(
+            !view.onboarding_dismiss_action(x + 1, top),
+            "a press past the ✕ does nothing"
+        );
+        assert!(
+            !view.onboarding_dismiss_action(x, top.saturating_sub(1)),
             "a miss above the row does nothing"
         );
         assert!(
-            view.onboarding_dismiss_action(left + 1, top),
-            "a real press dismisses the showing box"
+            view.onboarding_dismiss_action(x, top),
+            "a press on the ✕ dismisses the showing box"
         );
         let _ = view.render("", &[], false, &[]);
         assert!(
@@ -3503,10 +3514,17 @@ impl NativeView {
                 }
                 // SIDE-12: publish the getting-started `✕` hit rect only while
                 // the box is actually showing, so a press can dismiss it
-                // (`footer.tsx:44-49`). Row indexes address the same rows the
-                // styled renderer returned.
+                // (`footer.tsx:44-49`). Upstream binds the `onMouseUp` to the
+                // dismiss `<text>` alone (`footer.tsx:45-55`), not the whole
+                // row, so the hit is exactly the trailing `✕` cell.
                 if self.status.onboarding_dismiss_row(38, self.sidebar_content_height) == Some(index) {
-                    self.onboarding_dismiss_hit = Some((left.saturating_add(sidebar_inset), if sidebar_frame_painted { sidebar_top.saturating_add(1).saturating_add(index as u16) } else { index as u16 }, sidebar_text_width));
+                    let dismiss_column = crate::native_sidebar::cell_width(&sidebar_styled[index].text)
+                        .saturating_sub(1);
+                    self.onboarding_dismiss_hit = Some((
+                        left.saturating_add(sidebar_inset).saturating_add(dismiss_column as u16),
+                        if sidebar_frame_painted { sidebar_top.saturating_add(1).saturating_add(index as u16) } else { index as u16 },
+                        1,
+                    ));
                 }
                 if let Some((name, included)) =
                     self.status
