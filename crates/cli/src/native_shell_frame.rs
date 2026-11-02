@@ -556,9 +556,9 @@ fn sidebar_row(descriptor: &FrameDescriptor, input: &ShellFrameInput<'_>, y: u16
 mod tests {
     use super::*;
     use crate::native_view_layout::{
-        SESSION_SIDEBAR_MAX_WIDTH, SESSION_SIDEBAR_WIDTH, SESSION_TABS_COMPACT_WIDTH,
-        clamp_session_tabs_width, session_tabs_compact, session_tabs_fit_vertically,
-        sidebar_scrollbar_reservation,
+        SESSION_RESERVED_ACTION_ROWS, SESSION_SIDEBAR_MAX_WIDTH, SESSION_SIDEBAR_WIDTH,
+        SESSION_TABS_COMPACT_WIDTH, clamp_session_tabs_width, session_tabs_compact,
+        session_tabs_fit_vertically, sidebar_scrollbar_reservation,
     };
 
     fn s(text: &str) -> String {
@@ -894,7 +894,10 @@ mod tests {
             input.jump = action;
             let frame = compose_shell(&input);
             let regions = frame.regions;
-            assert_eq!(regions.jump.h, 1, "{action:?}: one row is always reserved");
+            assert_eq!(
+                regions.jump.h, SESSION_RESERVED_ACTION_ROWS,
+                "{action:?}: the live painter reserves the const-derived action row"
+            );
             assert_eq!(regions.jump.y + 1, regions.composer.y, "{action:?}: above the composer");
             let row = &frame.rows[usize::from(regions.jump.y)];
             let cell = slice_cells(row, regions.transcript_text.x, regions.transcript_text.w);

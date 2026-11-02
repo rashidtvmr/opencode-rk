@@ -20,8 +20,8 @@
 //! whose title and footer are pinned outside its scroll region.
 
 use crate::native_view_layout::{
-    SESSION_SIDEBAR_PAD_HORIZONTAL, SESSION_SIDEBAR_PAD_VERTICAL, SESSION_SIDEBAR_SCROLL_RESERVE,
-    SESSION_SIDEBAR_WIDTH, SESSION_TRANSCRIPT_SCROLLBAR_CELLS,
+    SESSION_RESERVED_ACTION_ROWS, SESSION_SIDEBAR_PAD_HORIZONTAL, SESSION_SIDEBAR_PAD_VERTICAL,
+    SESSION_SIDEBAR_SCROLL_RESERVE, SESSION_SIDEBAR_WIDTH, SESSION_TRANSCRIPT_SCROLLBAR_CELLS,
     session_horizontal_inset,
 };
 
@@ -377,7 +377,7 @@ impl SessionRegions {
             h: pad_rows,
         };
         let composer_room = session.h.saturating_sub(pad_rows);
-        let action_h = u16::from(composer_room > 0);
+        let action_h = SESSION_RESERVED_ACTION_ROWS.min(composer_room);
         let composer_capacity = composer_room.saturating_sub(action_h);
         let composer_h = spec.composer_height.min(composer_capacity);
         let composer = Rect {
@@ -615,7 +615,9 @@ mod tests {
     // LAY-01, LAY-11, LAY-14..LAY-16: pinned session-frame regions (P03).
     // -----------------------------------------------------------------------
 
-    use crate::native_view_layout::{RightPane, SidebarMode, right_pane, sidebar_visible};
+    use crate::native_view_layout::{
+        RightPane, SESSION_RESERVED_ACTION_ROWS, SidebarMode, right_pane, sidebar_visible,
+    };
 
     fn docked(width: u16, height: u16, show_sidebar: bool, composer: u16) -> FrameSpec {
         let wide = crate::native_view_layout::session_wide(width, 0);
@@ -697,7 +699,10 @@ mod tests {
             let mut spec = FrameSpec::new(80, rows);
             spec.composer_height = rows;
             let regions = SessionRegions::compute(&spec);
-            assert_eq!(regions.jump.h, 1, "{rows} rows: action row is always reserved");
+            assert_eq!(
+                regions.jump.h, SESSION_RESERVED_ACTION_ROWS,
+                "{rows} rows: reserved action row height comes from the live const"
+            );
             assert_eq!(regions.jump.y + regions.jump.h, regions.composer.y);
             assert_eq!(regions.composer.h, rows.saturating_sub(2));
             assert_eq!(regions.bottom_pad.h, 1);
