@@ -159,6 +159,14 @@ pub struct NativeView {
     /// (`packages/tui/src/feature-plugins/home/footer.tsx:52-75`). No live
     /// source exists yet (LAY-20 blocker); default 0 keeps the block hidden.
     home_plugins_failed: usize,
+    /// Pending global forms on Home: `forms()` in `routes/home.tsx:36-38`,
+    /// the `"global"`-owner elicitation forms keyed in the client store
+    /// (`packages/client/src/solid/data.ts:129-130`). Nonzero disables the
+    /// Home prompt (`routes/home.tsx:102` `Prompt
+    /// disabled={forms().length > 0}`) and raises the absolute form band one
+    /// row above the terminal bottom (`routes/home.tsx:109-116`, reduced by
+    /// [`crate::native_home::form_overlay`]).
+    global_forms: usize,
     composer_variant: Option<String>,
     composer_model: Option<(String, String)>,
     composer_effort: Option<String>,
@@ -860,6 +868,7 @@ impl NativeView {
             send_pointer: None,
             context_usage_hit: None,
             home_plugins_failed: 0,
+            global_forms: 0,
             composer_variant: None,
             composer_model: None,
             composer_effort: None,
@@ -1929,6 +1938,33 @@ impl NativeView {
         self.home_plugins_failed = failed;
     }
 
+    /// Feed the Home global-forms count: `forms()` in `routes/home.tsx:36-38`,
+    /// the `"global"`-owner elicitation forms
+    /// (`packages/client/src/solid/data.ts:129-130`). No elicitation feed
+    /// reaches the cli yet — `crates/server/src/mcp_runtime.rs:178` exposes
+    /// captured MCP `elicitation/create` requests but nothing consumes them,
+    /// and no `.../form` route is registered (`crates/server/src/lib.rs:299`
+    /// has only the permission routes) — so production leaves this 0 and the
+    /// prompt stays enabled.
+    pub fn set_global_forms(&mut self, forms: usize) {
+        self.global_forms = forms;
+    }
+
+    /// Current global-forms count (`forms().length`, `routes/home.tsx:102`).
+    #[must_use]
+    pub fn global_forms(&self) -> usize {
+        self.global_forms
+    }
+
+    /// `Prompt disabled={forms().length > 0}` (`routes/home.tsx:102`) reduced
+    /// through [`crate::native_home::form_overlay`]. Consumed by
+    /// [`NativeView::home_cursor_at`] so the disabled prompt projects no
+    /// insertion point.
+    #[must_use]
+    pub fn home_prompt_disabled(&self) -> bool {
+        crate::native_home::form_overlay(self.global_forms).prompt_disabled
+    }
+
     /// Admit a click only within the exact last-rendered usage label.
     pub fn context_usage_hit(&self, x: u16, y: u16) -> bool {
         self.pages.page() == Page::Chat
@@ -1962,6 +1998,13 @@ impl NativeView {
     /// Project the actual insertion offset onto the clipped Home draft rows.
     pub fn home_cursor_at(&self, draft: &str, byte_cursor: usize) -> Option<(u16, u16)> {
         if self.session_route {
+            return None;
+        }
+        // `Prompt disabled={forms().length > 0}` (`routes/home.tsx:102`):
+        // upstream paints the disabled cursor in the background colour
+        // (`component/prompt/index.tsx:355`), so no insertion point is
+        // projected while a global form owns the Home prompt.
+        if self.home_prompt_disabled() {
             return None;
         }
         let (left, top, width, height) = self.composer_region(draft)?;
@@ -5849,6 +5892,61 @@ mod tests {
         assert!(!frame[tiny_row].contains("/plugins"));
         assert!(!frame[tiny_row].contains(env!("CARGO_PKG_VERSION")));
     }
+    /// LAY-19 seam: `NativeView` owns the upstream Home global-forms field
+    /// (`data.session.form.list("global", currentLocation())`,
+    /// `routes/home.tsx:36-38`) and the Home prompt gate consumes it
+    /// (`routes/home.tsx:102` `Prompt disabled={forms().length > 0}`).
+    #[test]
+    fn lay19b_home_global_form_field_disables_prompt_and_drives_overlay() {
+        use super::*;
+        let mut view = NativeView::new(43, 24);
+        view.set_session_route(false);
+        view.set_tab_reservation(crate::native_tabs::TabReservation::for_view(
+            crate::native_tabs::TabOrientation::Horizontal, 43, 24));
+        let draft = "alpha beta gamma delta epsilon ".to_owned()
+            + &"hello  world source boundary prompt wrapping ".repeat(5);
+        let _ = view.render_typed(&draft, &[], false, &[]);
+        // Baseline: no forms, the prompt projects its insertion point (the
+        // exact projection the input loop places the cursor from).
+        assert_eq!(view.global_forms(), 0);
+        assert!(!view.home_prompt_disabled());
+        assert_eq!(view.home_cursor_at(&draft, 0), Some((3, 13)));
+
+        // One global form disables the prompt; upstream hides the disabled
+        // cursor (`component/prompt/index.tsx:355` paints it in the background
+        // colour), so the projection yields no insertion point.
+        view.set_global_forms(1);
+        assert_eq!(view.global_forms(), 1);
+        assert!(
+            view.home_prompt_disabled(),
+            "forms().length > 0 disables the prompt"
+        );
+        assert_eq!(view.home_cursor_at(&draft, 0), None);
+        assert_eq!(view.home_cursor(&draft), None);
+
+        // The same field drives the overlay band at the expected bottom
+        // inset/z-order (`routes/home.tsx:109-116`).
+        let overlay = crate::native_home::form_overlay(view.global_forms());
+        assert!(overlay.visible);
+        assert!(overlay.prompt_disabled);
+        assert_eq!(overlay.bottom_inset, crate::native_home::FORM_BOTTOM_INSET);
+        assert_eq!(overlay.pad_x, crate::native_home::FORM_PAD_X);
+        assert!(
+            overlay.z_index > overlay.prompt_z_index,
+            "form band (zIndex 2000) paints above the prompt wrapper (zIndex 1000)"
+        );
+        assert_eq!(
+            crate::native_home::form_band(view.layout.rows, 5),
+            Some((18, 22)),
+            "band floats one row above the terminal bottom"
+        );
+
+        // Clearing the field re-enables the prompt unchanged.
+        view.set_global_forms(0);
+        assert!(!view.home_prompt_disabled());
+        assert_eq!(view.home_cursor_at(&draft, 0), Some((3, 13)));
+    }
+
     #[test]
     fn lay20c_home_footer_gates_on_full_terminal_size_with_tab_strip() {
         use super::*;
