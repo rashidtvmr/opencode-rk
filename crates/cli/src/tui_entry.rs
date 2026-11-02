@@ -9193,6 +9193,11 @@ fn native_loop(
         // Every other event is swallowed while the menu is open (modal).
         if let Some(mut menu) = message_menu.take() {
             let mut keep = true;
+            // MSG-007: tolerate a resync while the menu is open by refreshing
+            // the captured snapshot from the live projection before dispatch.
+            if let Some(snapshot) = live.as_ref() {
+                menu.resync(&crate::native_chat_projection::project_history_entries(&snapshot.raw_history));
+            }
             if menu_dismisses(&event) {
                 keep = false;
             } else if matches!(event, native_input_decoder::InputEvent::ArrowUp) {
@@ -10168,11 +10173,19 @@ fn native_loop(
                                                 == crate::native_view_chat::ChatRowClass::UserCard
                                     });
                                 if user_card {
+                                    // MSG-007: pass the live projection's
+                                    // message so Revert/Copy/Fork resolve
+                                    // against real text (`dialog-message.tsx:23`).
+                                    let snapshot_message =
+                                        crate::native_chat_projection::project_history_entries(&snapshot.raw_history)
+                                            .into_iter()
+                                            .find(|(id, _)| id == &message_id)
+                                            .map(|(_, message)| message);
                                     message_menu = Some(crate::native_view_chat::menu_for_message(
                                         None,
                                         &snapshot.session_id,
                                         &message_id,
-                                        None,
+                                        snapshot_message.as_ref(),
                                     ));
                                 }
                             }

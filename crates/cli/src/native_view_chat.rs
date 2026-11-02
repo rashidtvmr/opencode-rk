@@ -3983,6 +3983,17 @@ pub enum SessionMessageMenu {
     PendingSteer(PendingSteerMenu),
 }
 
+impl SessionMessageMenu {
+    /// Refresh the captured message snapshot of an open action menu after the
+    /// caller's projection resynced (`dialog-message.tsx:23`). Pending-steer
+    /// menus carry no message snapshot, so they are a no-op.
+    pub fn resync(&mut self, messages: &[(String, ChatMessage)]) {
+        if let SessionMessageMenu::Actions(actions) = self {
+            actions.resync(messages);
+        }
+    }
+}
+
 /// Build the menu upstream would open for this message click.
 #[must_use]
 pub fn menu_for_message(
@@ -4593,6 +4604,34 @@ fn truncate_width(text: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_message_menu_resync_refreshes_action_snapshot_without_retargeting() {
+        // MSG-007: the wrapper refreshes the captured snapshot after a
+        // projection resync while keeping the captured identity
+        // (`dialog-message.tsx:23`).
+        let original = ChatMessage {
+            role: ChatRole::User,
+            parts: Vec::new(),
+            agent: None,
+            model: None,
+            assistant_facts: None,
+            message_id: Some("m1".into()),
+        };
+        let mut menu = SessionMessageMenu::Actions(MessageActionMenu::new());
+        if let SessionMessageMenu::Actions(actions) = &mut menu {
+            actions.open("s", "m1", Some(&original));
+        }
+        let replacement = ChatMessage { message_id: Some("m1".into()), ..original.clone() };
+        menu.resync(&[("m1".to_owned(), replacement.clone())]);
+        match &menu {
+            SessionMessageMenu::Actions(actions) => {
+                assert_eq!(actions.message_id(), Some("m1"));
+                assert_eq!(actions.snapshot(), Some(&replacement));
+            }
+            SessionMessageMenu::PendingSteer(_) => panic!("expected actions menu"),
+        }
+    }
 
     #[test]
     fn markdown_facts_map_onto_rendered_rows_without_painted_inference() {
