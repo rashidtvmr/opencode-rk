@@ -136,6 +136,13 @@ pub struct ChatView {
     /// messages whose producer knew no backend id; never fabricated
     /// positionally.
     message_owners: RefCell<Vec<Option<String>>>,
+    /// TOOL-008: backend child-session id owning each painted body row of the
+    /// last styled render (`frame row -> child sessionID`). A transcript click
+    /// on a subtask row navigates into that child
+    /// (`packages/tui/src/routes/session/index.tsx:3291-3324`, the `Subagent`
+    /// `onMouseUp` -> `navigate({type:"session",sessionID:id})`). `None` for
+    /// rows whose owning message carries no subtask child id.
+    child_owners: RefCell<Vec<Option<String>>>,
     /// TOOL-002: tool-call ids whose permission decision is pending right
     /// now. Upstream joins the first pending request whose
     /// `source.type === "tool"` and `source.id` (oc2 wire `source.callID`,
@@ -643,6 +650,12 @@ pub enum ChatPart {
         agent: String,
         description: String,
         background: bool,
+        /// Backend child session id carried by the subtask part `metadata`
+        /// (`sessionID`, falling back to `sessionId`) - the navigation target
+        /// of a transcript click on this row
+        /// (`packages/tui/src/routes/session/index.tsx:3294,3311-3314`).
+        /// Empty when the producer knew none; never fabricated.
+        session_id: String,
     },
     Retry {
         attempt: usize,
@@ -2487,6 +2500,7 @@ fn typed_message_rows_with_prefix_spans_mode(
                 agent,
                 description,
                 background,
+                session_id: _,
             } => {
                 push_wrapped(
                     &mut rows,
@@ -3004,7 +3018,7 @@ impl ChatView {
             .unwrap_or(rows.len());
         let transcript_h = body_h.saturating_sub(1);
         let target = self.scroll.get().saturating_add(transcript_h);
-        let mut reversed: Vec<(StyledChatRow, Vec<ChatRunSpan>, Option<String>)> = Vec::new();
+        let mut reversed: Vec<(StyledChatRow, Vec<ChatRunSpan>, Option<String>, Option<String>)> = Vec::new();
         if transcript_h > 0 {
             'messages: for (index, message) in messages.iter().enumerate().rev() {
                 let mut message_spans: Vec<(usize, Vec<ChatRunSpan>)> = Vec::new();
@@ -3022,8 +3036,14 @@ impl ChatView {
                     if row < dense.len() { dense[row] = spans; }
                 }
                 let owner = message.message_id.clone();
+                let child = message.parts.iter().find_map(|part| match part {
+                    ChatPart::Subtask { session_id, .. } if !session_id.is_empty() => {
+                        Some(session_id.clone())
+                    }
+                    _ => None,
+                });
                 for (row, spans) in message_rows.into_iter().zip(dense).rev() {
-                    reversed.push((row, spans, owner.clone()));
+                    reversed.push((row, spans, owner.clone(), child.clone()));
                     if reversed.len() >= target {
                         break 'messages;
                     }
@@ -3050,13 +3070,16 @@ impl ChatView {
         let mut bounds = vec![None; rows.len()];
         let mut row_spans: Vec<Vec<ChatRunSpan>> = vec![Vec::new(); rows.len()];
         let mut owners: Vec<Option<String>> = vec![None; rows.len()];
-        for (index, ((text, class, range), spans, owner)) in visible.into_iter().enumerate() {
+        let mut child_owners: Vec<Option<String>> = vec![None; rows.len()];
+        for (index, ((text, class, range), spans, owner, child)) in visible.into_iter().enumerate() {
             rows[first + index] = (text, class);
             bounds[first + index] = range;
             row_spans[first + index] = spans;
             owners[first + index] = owner;
+            child_owners[first + index] = child;
         }
         self.message_owners.replace(owners);
+        self.child_owners.replace(child_owners);
         let styled: Vec<StyledChatRow> = rows.into_iter()
             .zip(bounds)
             .map(|((text, class), bounds)| (text, class, bounds))
@@ -3157,6 +3180,23 @@ impl ChatView {
     #[must_use]
     pub fn message_owner_at(&self, row: usize) -> Option<String> {
         self.message_owners.borrow().get(row).cloned().flatten()
+    }
+
+    /// TOOL-008: child-session id owning each painted body row of the last
+    /// styled render, indexed by frame row. The transcript click resolves the
+    /// row to this id and navigates into the child
+    /// (`packages/tui/src/routes/session/index.tsx:3291-3324`).
+    #[must_use]
+    pub fn child_owners(&self) -> Vec<Option<String>> {
+        self.child_owners.borrow().clone()
+    }
+
+    /// Child-session id owning `row`, or `None` when the row owns no subtask
+    /// child (`None` for non-subtask rows and for subtasks whose producer knew
+    /// no session id).
+    #[must_use]
+    pub fn child_owner_at(&self, row: usize) -> Option<String> {
+        self.child_owners.borrow().get(row).cloned().flatten()
     }
 
     /// Anchor the last currently visible transcript row to a message and an
@@ -5147,7 +5187,18 @@ mod tests {
         answer.message_id = Some("msg_b".to_owned());
         let mut anonymous = ChatMessage::text(ChatRole::User, "no backend id");
         anonymous.message_id = None;
-        let messages = vec![question, answer, anonymous];
+        let mut messages = vec![question, answer, anonymous];
+        // A subtask message carries a child session id (TOOL-008); its painted
+        // rows resolve to that child for the transcript click navigation.
+        let mut subtask = ChatMessage::text(ChatRole::Assistant, "exploring");
+        subtask.message_id = Some("msg_c".to_owned());
+        subtask.parts = vec![ChatPart::Subtask {
+            agent: "explore".to_owned(),
+            description: "scan the tree".to_owned(),
+            background: false,
+            session_id: "ses_child".to_owned(),
+        }];
+        messages.push(subtask);
 
         let view = ChatView::new();
         let (rows, _) = view.render_styled_with_spans(
@@ -5172,9 +5223,19 @@ mod tests {
             (first..rows.len()).any(|row| view.message_owner_at(row).as_deref() == Some("msg_b")),
             "the assistant reply keeps its own backend id",
         );
+        // The subtask's painted rows resolve to the child session id and the
+        // non-subtask rows resolve to none (TOOL-008).
+        assert!(
+            (first..rows.len()).any(|row| view.child_owner_at(row).as_deref() == Some("ses_child")),
+            "the subtask row carries its child session id",
+        );
+        assert!(
+            a_rows.iter().all(|row| view.child_owner_at(*row).is_none()),
+            "non-subtask rows own no child",
+        );
         // An id-less message never fabricates an owner (no `history:{index}`).
         assert!(
-            view.message_owners().iter().flatten().all(|id| id == "msg_a" || id == "msg_b"),
+            view.message_owners().iter().flatten().all(|id| id == "msg_a" || id == "msg_b" || id == "msg_c"),
             "no owner is invented for a message with no backend id",
         );
     }

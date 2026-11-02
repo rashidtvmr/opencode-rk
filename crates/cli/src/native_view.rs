@@ -1055,6 +1055,20 @@ impl NativeView {
         self.chat.message_owner_at(row)
     }
 
+    /// TOOL-008: child-session id owning each painted body row of the last
+    /// styled transcript render (`frame row -> subtask child sessionID`).
+    #[must_use]
+    pub fn chat_child_owners(&self) -> Vec<Option<String>> {
+        self.chat.child_owners()
+    }
+
+    /// Child-session id owning `row`, or `None` when the row belongs to no
+    /// subtask child. Empty before the first render of a frame.
+    #[must_use]
+    pub fn chat_child_owner_at(&self, row: usize) -> Option<String> {
+        self.chat.child_owner_at(row)
+    }
+
     pub fn set_prompt_mode(&mut self, shell: bool) {
         self.shell_mode = shell;
     }

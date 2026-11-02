@@ -1468,6 +1468,7 @@ mod footer_gate_tests {
             role: ChatRole::Assistant,
             parts: vec![ChatPart::Subtask {
                 agent: "explore".into(), description: "probe".into(), background: true,
+                session_id: "child-1".into(),
             }],
             agent: None, model: None, assistant_facts: None, message_id: None,
         };
@@ -9795,6 +9796,32 @@ fn native_loop(
                             has_text_selection,
                             crate::native_message_rows::RowAction::MessageActions,
                         ) {
+                            // TOOL-008: a subtask row click navigates into its
+                            // child session (`index.tsx:3311-3314`, the
+                            // `Subagent` `onMouseUp` -> `navigate({type:
+                            // "session",sessionID:id})`), before the message
+                            // menu resolves.
+                            let child_open = view
+                                .chat_child_owner_at(usize::from(y))
+                                .zip(live.as_ref().map(|snapshot| {
+                                    (snapshot.origin.clone(), snapshot.session_id.clone())
+                                }));
+                            if let Some((child, (origin, parent_session))) = child_open {
+                                let result = open_child_transition(
+                                    &mut view, &mut transcript, &mut navigation, &draft, draft_cursor,
+                                    &origin, auth.as_deref(), binding_generation,
+                                    &parent_session, &child,
+                                    selected.as_ref().map(|model| model.qualified()),
+                                );
+                                match result {
+                                    Ok((snapshot, restored, generation, target_cursor, target_scroll, target_model)) => {
+                                        commit_child_route(snapshot, restored, generation, target_cursor, target_scroll, target_model, &models, &mut selected, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut session_route, &mut completion);
+                                    }
+                                    Err(error) => append_transcript(&mut transcript, format!("error: child open: {error}")),
+                                }
+                                needs_paint = true;
+                                continue;
+                            }
                             if let (Some(snapshot), Some(message_id)) =
                                 (live.as_ref(), view.chat_message_owner_at(usize::from(y)))
                             {

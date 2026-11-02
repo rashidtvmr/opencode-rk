@@ -373,6 +373,12 @@ fn hydrated_parts(message: &Value, budget: &mut usize) -> Vec<ChatPart> {
             "subtask" | "task" => output.push(ChatPart::Subtask {
                 agent: take(text("agent"), budget), description: take(text("description"), budget),
                 background: part.get("background").and_then(Value::as_bool).unwrap_or(false),
+                session_id: take(
+                    part.get("metadata")
+                        .and_then(|m| m.get("sessionID").or_else(|| m.get("sessionId")))
+                        .and_then(Value::as_str).unwrap_or(""),
+                    budget,
+                ),
             }),
             "retry" => output.push(ChatPart::Retry {
                 attempt: part.get("attempt").and_then(Value::as_u64).unwrap_or(0)
