@@ -2,6 +2,39 @@
 
 This repository is in **product-convergence mode**. The goal is a working OpenCode-compatible Rust application, not a larger task graph.
 
+## Current implementation-first contract — 2026-11-02
+
+The user's latest direction is larger end-to-end expert implementation ownership,
+direct porting from pinned OpenCode, less redundant research/review, and a
+devil's-advocate/evaluator-optimizer check of these rules. The operative policy is
+`docs/IMPLEMENTATION_FIRST_DELIVERY.md`; predefined responsibilities and dispatch
+templates are in `docs/AGENT_ROLES.md`. Read those and
+`docs/AGENT_WORKER_PRACTICES.md` before assignments. They supersede conflicting
+older scheduling/staffing/handoff prose below; dated historical directions are
+evidence, not additional active schedulers. Product/security/acceptance rules remain.
+
+- Default to expert implementation owners (roughly 70% initially when independent
+  implementation is eligible), not a research/audit fleet. No fixed role quotas.
+- Own a subsystem through small, continuously delivered, production-wired
+  checkpoints and repairs. Source inspection is embedded; standalone research
+  requires one concrete blocking question. Reuse validated source mappings.
+- Four parallel integration PREPARATION lanes are authorized. A shared canonical
+  Git ref/index still requires one atomic, guarded publication transaction and
+  stale-base verification; disjoint paths do not make simultaneous ref updates safe.
+- Configured parallelism is not execution telemetry. The delivery engine still
+  has one `integration_turn`, and `jobs.py:heavy_lock` is an exclusive single lock
+  at this audit. Do not bypass either or claim changing config implements concurrency.
+- Resource limits are maxima, with admission based on actual build/link/test
+  memory, CPU and I/O. Low disk triggers repair; it does not authorize data loss.
+- Cleanup requires inactive ownership, clean unique/ignored content, merged and
+  freshly proven pushed ancestry, frozen-ref exclusion and immediate rechecks.
+  The current reclaim script is report-only until the policy's missing guards
+  are implemented and verified. Preserve the merged-and-pushed rule.
+- Keep exact-candidate independent reviews and required checks. Reuse understanding,
+  not approval for changed bytes. Future review reuse/stacks/pooled slots are not
+  silently enabled by this policy. No new controller framework or product fleet is
+  launched merely to update these instructions.
+
 ## Current user operating instructions — 2026-11-02
 
 ### Maximum-parallelism rule — no artificial bottleneck or blocker

@@ -11122,3 +11122,87 @@ HEAD progressed `cf36f364` -> `53d819a8` -> `f8da15f4` -> `dda3b7dc` -> `8a97589
 - Receipt helper: `<evidence>/phase1/make-build-receipt.py`.
 - Next: artifact-mode judge, then `observe-judge` each check; drive `phase1-gates.json`
   to 7/7 on the exact integrated SHA.
+
+---
+
+## 2026-11-02 — max-parallelism rules landed; a real compile blocker found
+
+### Canonical
+- `main-v2` pushed to GitHub through `49899353` (was 256 commits behind before this push).
+- `4a0fcdfd`/`8a97589b` (TAB-07) and `9f995514` (completion-Enter) are ancestors of HEAD.
+
+### Three commits landed and pushed
+1. `ae20a31c` convergence: raise all coordination caps to measured host envelope.
+2. `e15374a6` docs(agents): real blast radius of the protected 4-cap.
+3. `49899353` fix(cli): make the `native` feature default so the canonical build compiles.
+
+### BLOCKER FOUND AND FIXED — `main-v2` did not compile
+- `crates/cli/Cargo.toml` declared `native` as a **non-default** feature.
+  `crates/cli/src/main.rs:56-90` gates ~20 `mod native_*;` declarations behind
+  `#[cfg(feature = "native")]`, while `crates/cli/src/tui_entry.rs` (always compiled)
+  references them unconditionally.
+- Observable: `cargo build --release -p opencode-rk-cli` -> **949 errors**
+  (`cannot find native_setup/native_input_decoder/native_view_pages/TabOrientation/...`,
+  each with rustc note `found an item that was configured out`).
+- This also made `cargo check --workspace --locked` — a required Phase-1 check
+  (`cargo_check_workspace_locked`, required by gate `P1-RELEASE`) — **fail at HEAD**,
+  so P1-RELEASE could never have been satisfied.
+- Fix: `default = ["native"]` in `crates/cli/Cargo.toml`. Verified after:
+  `cargo check --workspace --locked` -> `Finished`, 0 errors; release build 57.7s.
+- The non-native line-loop fallback stays reachable with `--no-default-features`
+  (TUI-014 contract), so this does not delete a code path.
+
+### Why it went unnoticed
+Lanes and prior validation all invoked `--features native` explicitly (see
+`worklog/V2-DEFAULT-TUI-CONTRACT.md`, `integration/validation-queue.md:244,321`).
+Every gate that used the bare canonical command would have been red for a reason
+unrelated to the feature under test. The lesson: validate with the **canonical**
+command, not a lane-specific one.
+
+### Ceilings now non-binding (measured host: 10 cores / 24 GiB)
+- convergence-v2: logicalAgentCeiling 96, maxConcurrentImplementationPackages 48,
+  candidateHighWater 48, parallelPreverificationCeiling 32, **integrationWriters 4**,
+  maxHeavyLocalValidations 3, cargoBuildJobs 3, rustTestThreads 4.
+- completion-controller: targetWorkers 30, maxWorkers 48, maxUnverifiedCandidates 48,
+  maxHeavyValidations 3, maxAttemptsPerTask 5, maxBreadthWorkersBeforeLocalE2eGreen 24,
+  refillPolicy continuous-unbounded-refill.
+- controller.settings: maxConcurrentLanes 16, v2CandidateHighWater 48, stopWhenNoReadyWork false.
+- delivery-workflow: workers 30, max_wip 60, heavy_checks 3, attempts 5.
+- Validators relaxed to the same envelope so config and code agree.
+
+### Protected 4-cap — resolved as a documented residual, NOT a fleet cap
+- `tools/recovery_transition.py` structurally permits **only** its own historical
+  `transitionPolicy` delta (`validate_config_delta`: "config changed outside
+  transitionPolicy"), so `config/recovery-mode.json` cannot be amended by a worker
+  commit at all.
+- `maxVerifiedUnintegratedCandidates: 4` is read by `recovery_state.py:730` (`ready`)
+  and `recovery_guard.py:464` (report). It gates only INTEGRATION_READY/INTEGRATING
+  rows in the **historical** queue, which is not run as a second scheduler.
+- Closed honestly in AGENTS.md rather than bypassed. Do not re-open it as a blocker.
+
+### Worktree reclaim
+- `tools/worktree_reclaim.py` created (dry-run default). Verifies tip is an ancestor of
+  `main-v2` **and** present on the push remote (`git ls-remote`, not `origin/*`, which is
+  stale because `origin` fetches a local path while pushing to GitHub).
+- Removed `recovery/core`, `recovery/ui`, `recovery/runtime`, `recovery/platform`.
+  Disk 8.3 GiB -> **37 GiB** free (98% -> 92%). Branch refs intentionally preserved by
+  the ref hook. `recovery_guard.py` exit 0 (missing-worktree lines are warnings only).
+
+### Test evidence
+- `tests/delivery`: 99 tests OK.
+- `tests/completion`: 6 tests OK.
+- `tests/bootstrap/test_convergence_v2*.py`: 19 tests OK after the supersession.
+- Contract supersession: `test_convergence_v2_backpressure.py` asserted the retired
+  4-cap. Intent preserved (over-ceiling still rejected at 129/512; no new execute while
+  the configured number is pending); only the superseded boundary moved.
+
+### Verification in flight
+- Release artifact `target/release/oc2` rebuilt at `49899353` (14:54 local).
+- Build receipt: `.../opencode/p1-build-receipts/build-49899353.json`.
+- Artifact-mode judge launched: `.../p1-judge/run-49899353`.
+- Next: read judge result per check, then `observe-judge` each, and drive 7/7.
+
+### Dispatch note
+- `reviewer` and `coder` subagent types return
+  `No active credentials for provider: opencode-go`. Use `general` (or `explore`) until
+  that route is restored. Do not silently treat an errored dispatch as work in progress.
