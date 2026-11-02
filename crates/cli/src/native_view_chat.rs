@@ -2170,6 +2170,15 @@ fn push_diff_fence(rows: &mut Vec<(String, ChatRowClass)>, width: usize, prefix:
             crate::native_diff_view::DiffLineRole::Removed => ChatRowClass::DiffRemoved,
             crate::native_diff_view::DiffLineRole::Context
             | crate::native_diff_view::DiffLineRole::Blank => ChatRowClass::DiffContext,
+            // DIFF-002: upstream paints the hunk-header band only for hunks
+            // after the first (`patch-diff.tsx:79` `<Show when={index() > 0}>`);
+            // the leading `@@` splits into the `@@`/`@@` context elements and
+            // the first hunk contributes no header row. Suppress it here and
+            // keep the join anchored by emitting an empty row.
+            crate::native_diff_view::DiffLineRole::HunkHeader if line.hunk_index == 0 => {
+                rows.push((String::new(), ChatRowClass::DiffContext));
+                continue;
+            }
             crate::native_diff_view::DiffLineRole::HunkHeader => ChatRowClass::DiffHunkHeader,
             _ => ChatRowClass::Metadata,
         };
@@ -2622,6 +2631,12 @@ fn typed_message_rows_with_prefix_spans_mode(
                         crate::native_diff_view::DiffLineRole::Removed => ChatRowClass::DiffRemoved,
                         crate::native_diff_view::DiffLineRole::Context
                         | crate::native_diff_view::DiffLineRole::Blank => ChatRowClass::DiffContext,
+                        // DIFF-002: no header band for the first hunk
+                        // (`patch-diff.tsx:79`); keep the row anchored.
+                        crate::native_diff_view::DiffLineRole::HunkHeader if line.hunk_index == 0 => {
+                            rows.push((String::new(), ChatRowClass::DiffContext));
+                            continue;
+                        }
                         crate::native_diff_view::DiffLineRole::HunkHeader => ChatRowClass::DiffHunkHeader,
                         _ => ChatRowClass::Metadata,
                     };
@@ -6899,8 +6914,11 @@ mod footer_v3_consumer_tests {
             rows.iter().any(|(row, class)| *class == ChatRowClass::DiffContext && row.contains("ctx")),
             "{rows:?}"
         );
+        // DIFF-002: upstream paints the hunk-header band only for hunks after
+        // the first (`patch-diff.tsx:79` `<Show when={index() > 0}>`), so a
+        // single-hunk diff paints no `@@` row at all.
         assert!(
-            rows.iter().any(|(row, class)| *class == ChatRowClass::DiffHunkHeader && row.contains("@@")),
+            !rows.iter().any(|(_, class)| *class == ChatRowClass::DiffHunkHeader),
             "{rows:?}"
         );
         // The diff surface replaces the fence rows; it never paints them.
@@ -6908,6 +6926,20 @@ mod footer_v3_consumer_tests {
         // Gutter line numbers are composed into the row text.
         let removed = rows.iter().find(|(_, class)| *class == ChatRowClass::DiffRemoved).unwrap();
         assert!(removed.0.trim_start().starts_with('1'), "{}", removed.0);
+
+        // A second hunk DOES paint exactly one header band, labelled with that
+        // hunk's own `@@ … @@` ranges.
+        let multi = "```diff\n@@ -1,2 +1,2 @@\n-old\n+new\n@@ -10,2 +10,2 @@\n-x\n+y\n```";
+        let mut mrows = Vec::new();
+        push_block_markdown(
+            &mut mrows, 80, multi, "", ChatRowClass::AssistantCard, MarkdownMode::Rendered,
+        );
+        let headers: Vec<_> = mrows
+            .iter()
+            .filter(|(_, class)| *class == ChatRowClass::DiffHunkHeader)
+            .collect();
+        assert_eq!(headers.len(), 1, "{mrows:?}");
+        assert!(headers[0].0.contains("@@ -10,2 +10,2 @@"), "{mrows:?}");
 
         // A `diff` fence without a hunk header fails closed to the code block.
         let plain = "```diff\nnot a patch\n```";
