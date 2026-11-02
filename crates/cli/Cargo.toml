@@ -40,6 +40,11 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [features]
+# The shipped product IS the native OpenTUI client, so `native` is on by
+# default: `cargo build`, `cargo test` and `cargo check --workspace --locked`
+# must cover the same code that ships. The non-native line-loop fallback
+# remains reachable with `--no-default-features`.
+default = ["native"]
 native = ["opencode-rk-opentui-bridge/native"]
 
 [dev-dependencies]
