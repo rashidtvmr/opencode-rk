@@ -52,6 +52,11 @@ pub enum PromptWidth {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UiPreferences {
     pub prompt_width: Option<PromptWidth>,
+    /// `prompt.paste` (`config/index.tsx:144`,
+    /// `Schema.Literals(["compact", "full"])`). The live source for the CP-36
+    /// fold decision (`prompt/index.tsx:1463`): only the exact value `"full"`
+    /// disables folding; every other value (including unset) folds.
+    pub prompt_paste: Option<String>,
     /// `tui.json` theme takes precedence over the persisted `kv.json` choice.
     pub theme: Option<String>,
     pub sidebar_hidden: bool,
@@ -254,12 +259,13 @@ impl UiPreferences {
         crate::native_ui_budget::check_paths(config_paths)?;
         let mut budget = crate::native_ui_budget::ReadBudget::default();
         let mut prompt_width = None;
+        let mut prompt_paste = None;
         let mut configured_theme = None;
         let mut cursor: Option<Value> = None;
         let mut animations: Option<bool> = None;
         let mut diagnostics = Vec::new();
         for path in config_paths {
-            let loaded = (|| -> Result<Option<(Option<PromptWidth>, Option<String>, Option<Value>, Option<bool>)>, String> {
+            let loaded = (|| -> Result<Option<(Option<PromptWidth>, Option<String>, Option<String>, Option<Value>, Option<bool>)>, String> {
                 let Some(text) = budget.read(path, MAX_CONFIG_BYTES, "TUI config")? else {
                     return Ok(None);
                 };
@@ -312,6 +318,28 @@ impl UiPreferences {
                     })
                     .transpose()?
                     .flatten();
+                // `prompt.paste` (`config/index.tsx:144`). The same merged
+                // `prompt` object that already carries `max_width`; only the
+                // two literal values are accepted, everything else is a
+                // malformed-config diagnostic exactly like `max_width`.
+                let paste = object
+                    .get("prompt")
+                    .map(|prompt| {
+                        let prompt = prompt.as_object().ok_or_else(|| {
+                            format!("invalid TUI config prompt: {}", path.display())
+                        })?;
+                        prompt
+                            .get("paste")
+                            .map(|value| match value {
+                                Value::String(s) if s == "compact" || s == "full" => {
+                                    Ok(s.clone())
+                                }
+                                _ => Err(format!("invalid prompt.paste: {}", path.display())),
+                            })
+                            .transpose()
+                    })
+                    .transpose()?
+                    .flatten();
                 // `tui.cursor` (`config/index.tsx:60-67`). Stored raw so the
                 // caller parses it with the theme runtime's `CursorConfig`
                 // (validated there, THEME-14).
@@ -326,13 +354,16 @@ impl UiPreferences {
                         })
                     })
                     .transpose()?;
-                Ok(Some((width, theme, cursor, animations)))
+                Ok(Some((width, paste, theme, cursor, animations)))
             })();
 
             match loaded {
-                Ok(Some((width, theme, cursor_value, animations_value))) => {
+                Ok(Some((width, paste, theme, cursor_value, animations_value))) => {
                     if let Some(width) = width {
                         prompt_width = Some(width);
+                    }
+                    if paste.is_some() {
+                        prompt_paste = paste;
                     }
                     if let Some(theme) = theme {
                         configured_theme = Some(theme);
@@ -370,6 +401,7 @@ impl UiPreferences {
             .unwrap_or(false);
         Ok(Self {
             prompt_width,
+            prompt_paste,
             theme: configured_theme.or(stored_theme),
             sidebar_hidden,
             theme_mode: state
@@ -1463,6 +1495,37 @@ mod tests {
         );
         let empty = UiPreferences::load(&[], &dir.join("missing-kv.json")).unwrap();
         assert_eq!(empty.cursor, None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// CP-36: `prompt.paste` is surfaced for the live fold decision
+    /// (`config/index.tsx:144`, `prompt/index.tsx:1463`). Only the two literals
+    /// are accepted; anything else is a bounded diagnostic exactly like
+    /// `prompt.max_width`, and an absent value stays `None` (treated as fold).
+    #[test]
+    fn prompt_paste_is_surfaced_and_rejects_non_literal_values() {
+        let dir = std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "opencode-ui-paste-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let global = dir.join("global.json");
+        let project = dir.join("project.json");
+        fs::write(&global, r#"{"prompt":{"paste":"compact"}}"#).unwrap();
+        fs::write(&project, r#"{"prompt":{"paste":"full"}}"#).unwrap();
+        let prefs = UiPreferences::load(&[global, project], &dir.join("missing-kv.json")).unwrap();
+        assert_eq!(prefs.prompt_paste.as_deref(), Some("full"), "later config wins");
+        assert!(prefs.diagnostics.is_empty());
+
+        let invalid = dir.join("invalid.json");
+        fs::write(&invalid, r#"{"prompt":{"paste":"yes"}}"#).unwrap();
+        let bad = UiPreferences::load(std::slice::from_ref(&invalid), &dir.join("missing-kv.json")).unwrap();
+        assert_eq!(bad.prompt_paste, None, "non-literal value is not surfaced");
+        assert_eq!(bad.diagnostics.len(), 1, "malformed value is a diagnostic");
+
+        let absent = UiPreferences::load(&[], &dir.join("missing-kv.json")).unwrap();
+        assert_eq!(absent.prompt_paste, None, "absent => caller folds");
         fs::remove_dir_all(dir).unwrap();
     }
 

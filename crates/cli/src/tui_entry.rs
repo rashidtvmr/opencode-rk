@@ -6866,6 +6866,7 @@ fn native_loop(
                             value: format!("@{name}"), description: format!("agent · {}", crate::native_completion::description(agent.get("description").and_then(serde_json::Value::as_str).unwrap_or(""))),
                             disabled: false,
                         });
+                        completion.set_kind(&format!("@{name}"), crate::native_completion::Kind::Agent);
                     }
                 }
             }
@@ -10252,7 +10253,13 @@ fn native_loop(
                         // it applies to the bytes actually inserted. A planner
                         // refusal (non-boundary / the inserted bytes exceed the
                         // budget) falls back to a bounded append.
-                        let mode = crate::native_paste::PasteMode::default();
+                        // CP-36: the fold decision reads the live
+                        // `prompt.paste` config value (`prompt/index.tsx:1463`
+                        // `config.prompt?.paste !== "full"`); only the exact
+                        // value `full` inserts the literal text.
+                        let mode = crate::native_paste::PasteMode::from_config(
+                            preferences.prompt_paste.as_deref(),
+                        );
                         if crate::native_composer::insert_paste_at_cursor(
                             &mut draft,
                             &mut draft_cursor,
