@@ -145,6 +145,28 @@ impl RowPaint {
         }
         paint
     }
+    /// TAB-07 vertical (compact rail): [`Self::compact_session_row`] plus the
+    /// activity-unread accent override, mirroring the horizontal
+    /// `TabStrip::with_row_colors_semantic` guard (`native_tabs.rs:1249-1257`).
+    /// Upstream: the rail's `unreadColor` is `theme.hue.accent[200]`
+    /// (`session-tabs.tsx:565,1328`) == `hue.accent.200` ==
+    /// `SemanticPalette::tab_attention` (`native_theme_runtime.rs:1527`); an
+    /// active/selected row keeps `theme.text.base` (`session-tabs.tsx:794-796`).
+    pub fn compact_session_row_semantic(
+        palette: &crate::native_theme_runtime::Palette,
+        flags: &TabFlags,
+        is_hovered: bool,
+        unread: bool,
+        semantic: Option<&crate::native_theme_runtime::SemanticPalette>,
+    ) -> Self {
+        let mut paint = Self::compact_session_row(palette, flags, is_hovered);
+        if unread && !flags.needs_attention && !flags.busy && !flags.active {
+            use crate::native_theme_runtime::Slot;
+            paint.title_fg = semantic
+                .map_or_else(|| palette.get(Slot::Warning), |theme| theme.tab_attention.rgba);
+        }
+        paint
+    }
 
     pub fn cap_row(palette: &crate::native_theme_runtime::Palette, bottom: bool) -> Self {
         use crate::native_theme_runtime::Slot;
@@ -368,6 +390,10 @@ pub struct RailInput {
     pub flags: TabFlags,
     /// Marquee window start for the hovered title (0 paints the plain title).
     pub marquee_offset: usize,
+    /// Activity-unread fact from the live `NavigationState`
+    /// (`TabInput.unread` / `NavigationState::is_unread`): unread rows paint
+    /// in the accent `unreadColor` (`session-tabs.tsx:565,1328`).
+    pub unread: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -418,6 +444,9 @@ pub struct RailRow {
     pub color_spans: Vec<(u16, CellColor)>,
     /// Original TabFlags that produced this row's style, needed for paint.
     pub flags: TabFlags,
+    /// Original activity-unread fact for this row, needed for paint
+    /// (mirrors `flags`).
+    pub unread: bool,
     /// Whether this row's session was hovered when rendered.
     pub is_hovered: bool,
     /// Four-cell fade window for the title/detail text of this row.
@@ -576,6 +605,7 @@ impl RailFrame {
                     style: RailStyle::Empty,
                     color_spans: Vec::new(),
                     flags: TabFlags::default(),
+                    unread: false,
                     is_hovered: false,
                     fade: None,
                 });
@@ -686,6 +716,7 @@ impl RailFrame {
                         style,
                         color_spans,
                         flags: input.flags,
+                        unread: input.unread,
                         is_hovered: hovered == Some(&input.session),
                         fade,
                     });
@@ -697,6 +728,7 @@ impl RailFrame {
                         style: RailStyle::Empty,
                         color_spans: Vec::new(),
                         flags: TabFlags::default(),
+                        unread: false,
                         is_hovered: false,
                     fade: None,
                     });
@@ -717,6 +749,7 @@ impl RailFrame {
                     style: RailStyle::NewControl,
                     color_spans,
                     flags: TabFlags::default(),
+                    unread: false,
                     is_hovered: false,
                     fade: None,
                 });
@@ -728,6 +761,7 @@ impl RailFrame {
                     style: RailStyle::Empty,
                     color_spans: Vec::new(),
                     flags: TabFlags::default(),
+                    unread: false,
                     is_hovered: false,
                     fade: None,
                 });
@@ -815,6 +849,7 @@ impl RailFrame {
             style: RailStyle::Empty,
             color_spans: vec![(0, role)],
             flags: TabFlags::default(),
+            unread: false,
             is_hovered: false,
                     fade: None,
         };
@@ -946,6 +981,7 @@ impl RailFrame {
                     style,
                     color_spans,
                     flags: input.flags,
+                    unread: input.unread,
                     is_hovered,
                     fade: None,
                 });
@@ -960,6 +996,7 @@ impl RailFrame {
                     style: RailStyle::NewControl,
                     color_spans: vec![(0, CellColor::CompactPadding), (start, CellColor::NewIndicator), (start + 1, CellColor::CompactPadding)],
                     flags: TabFlags::default(),
+                    unread: false,
                     is_hovered: false,
                     fade: None,
                 });
@@ -1359,6 +1396,7 @@ mod tests {
                     needs_attention: false,
                 },
                 marquee_offset: 0,
+                unread: false,
             })
             .collect()
     }
@@ -1879,6 +1917,7 @@ mod tests {
                     needs_attention: false,
                 },
                 marquee_offset: 0,
+                unread: false,
             })
             .collect();
         let frame = RailFrame::render_with_active_new(&inputs, 42, 10, 0, None, true);
@@ -2006,6 +2045,7 @@ mod tests {
                 detail: "project-alpha".into(),
                 flags: TabFlags { active: true, busy: false, needs_attention: false },
                 marquee_offset: 0,
+                unread: false,
             },
             RailInput {
                 session: crate::native_navigation::SessionRef("second".into()),
@@ -2013,6 +2053,7 @@ mod tests {
                 detail: "project-alpha".into(),
                 flags: TabFlags::default(),
                 marquee_offset: 0,
+                unread: false,
             },
             RailInput {
                 session: crate::native_navigation::SessionRef("third".into()),
@@ -2020,6 +2061,7 @@ mod tests {
                 detail: "project-alpha".into(),
                 flags: TabFlags::default(),
                 marquee_offset: 0,
+                unread: false,
             },
         ];
         let frame = RailFrame::render_cells(&inputs, 5, 24, 0, None, false);
@@ -2050,6 +2092,7 @@ mod tests {
                 detail: "project-alpha".into(),
                 flags: TabFlags { active: true, busy: false, needs_attention: false },
                 marquee_offset: 0,
+                unread: false,
             },
             RailInput {
                 session: crate::native_navigation::SessionRef("second".into()),
@@ -2057,6 +2100,7 @@ mod tests {
                 detail: "project-alpha".into(),
                 flags: TabFlags::default(),
                 marquee_offset: 0,
+                unread: false,
             },
         ];
         // Nothing highlighted: the overlay cell is blank (not a cap glyph).
@@ -2067,6 +2111,7 @@ mod tests {
                 detail: "project-alpha".into(),
                 flags: TabFlags::default(),
                 marquee_offset: 0,
+                unread: false,
             },
             RailInput {
                 session: crate::native_navigation::SessionRef("second".into()),
@@ -2074,6 +2119,7 @@ mod tests {
                 detail: "project-alpha".into(),
                 flags: TabFlags::default(),
                 marquee_offset: 0,
+                unread: false,
             },
         ];
         let idle = RailFrame::render_cells(&idle_inputs, 5, 24, 0, None, false);
@@ -2113,6 +2159,7 @@ mod tests {
             detail: "project".into(),
             flags: TabFlags { active: false, busy: true, needs_attention: true },
             marquee_offset: 0,
+            unread: false,
         };
         let compact = RailFrame::render_cells(std::slice::from_ref(&input), 11, 10, 0, None, false);
         assert_eq!(compact.rows[3].text.trim(), "!");
@@ -2134,6 +2181,7 @@ mod tests {
             detail: "p".into(),
             flags: TabFlags::default(),
             marquee_offset: 0,
+            unread: false,
         }];
         let plain = RailFrame::render_cells_with_search_hover(&inputs, 5, 8, 0, None, false, false);
         let overlay = RailFrame::render_cells_with_search_hover(&inputs, 5, 8, 0, None, false, true);
@@ -2322,6 +2370,7 @@ mod tests {
                 detail: "project-alpha".into(),
                 flags: TabFlags { active: true, busy: false, needs_attention: false },
                 marquee_offset: 0,
+                unread: false,
             },
             RailInput {
                 session: crate::native_navigation::SessionRef("second".into()),
@@ -2329,6 +2378,7 @@ mod tests {
                 detail: "project-alpha".into(),
                 flags: TabFlags::default(),
                 marquee_offset: 0,
+                unread: false,
             },
             RailInput {
                 session: crate::native_navigation::SessionRef("third".into()),
@@ -2336,6 +2386,7 @@ mod tests {
                 detail: "project-alpha".into(),
                 flags: TabFlags::default(),
                 marquee_offset: 0,
+                unread: false,
             },
         ];
         let frame = RailFrame::render_cells(&inputs, 5, 24, 0, None, false);
@@ -2358,5 +2409,87 @@ mod tests {
         // The rail owns exactly five columns; the transcript starts at x=5.
         assert_eq!(frame.hit(4, 3), Some(RailHit::Session(inputs[0].session.clone())));
         assert_eq!(frame.hit(5, 3), None);
+    }
+    /// TAB-07 vertical: the live activity-unread fact rides `RailInput.unread`
+    /// into the compact rail (`RailRow.unread`) and its paint. Upstream compact
+    /// rail unread color is the accent `unreadColor` = `theme.hue.accent[200]`
+    /// (`session-tabs.tsx:565,1328`); a selected/active row keeps
+    /// `theme.text.base` (`session-tabs.tsx:794-796`).
+    #[test]
+    fn compact_unread_row_uses_accent_unread_color() {
+        let palette = crate::native_theme_runtime::Palette::opencode_dark();
+        let inputs = vec![
+            RailInput {
+                session: crate::native_navigation::SessionRef("s-unread".into()),
+                title: "Unread".into(),
+                detail: String::new(),
+                flags: TabFlags::default(),
+                marquee_offset: 0,
+                unread: true,
+            },
+            RailInput {
+                session: crate::native_navigation::SessionRef("s-read".into()),
+                title: "Read".into(),
+                detail: String::new(),
+                flags: TabFlags::default(),
+                marquee_offset: 0,
+                unread: false,
+            },
+        ];
+        // width 8 < COMPACT_BREAKPOINT exercises the compact renderer.
+        let frame = RailFrame::render_cells(&inputs, 8, 10, 0, None, false);
+        let unread_row = frame
+            .rows
+            .iter()
+            .find(|row| {
+                matches!(&row.kind, RailRowKind::Session(session)
+                    if *session == crate::native_navigation::SessionRef("s-unread".into()))
+            })
+            .expect("compact frame keeps the unread session row");
+        assert!(unread_row.unread, "RailRow carries the input unread fact to paint");
+        let read_row = frame
+            .rows
+            .iter()
+            .find(|row| {
+                matches!(&row.kind, RailRowKind::Session(session)
+                    if *session == crate::native_navigation::SessionRef("s-read".into()))
+            })
+            .expect("compact frame keeps the read session row");
+        assert!(!read_row.unread);
+        use crate::native_theme_runtime::Slot;
+        let muted = palette.get(Slot::TextMuted);
+        let accent = palette.get(Slot::Warning);
+        let unread_paint =
+            RowPaint::compact_session_row_semantic(&palette, &TabFlags::default(), false, true, None);
+        assert_eq!(unread_paint.title_fg, accent, "unread row paints the accent unreadColor");
+        assert_ne!(unread_paint.title_fg, muted, "unread row does not keep idle TextMuted");
+        let read_paint =
+            RowPaint::compact_session_row_semantic(&palette, &TabFlags::default(), false, false, None);
+        assert_eq!(read_paint.title_fg, muted, "read idle row keeps TextMuted");
+        let mut active = TabFlags::default();
+        active.active = true;
+        let active_paint = RowPaint::compact_session_row_semantic(&palette, &active, false, true, None);
+        assert_eq!(
+            active_paint.title_fg,
+            RowPaint::compact_session_row(&palette, &active, false).title_fg,
+            "an active unread row keeps its normal fg (theme.text.base)"
+        );
+        let mut busy = TabFlags::default();
+        busy.busy = true;
+        let busy_paint = RowPaint::compact_session_row_semantic(&palette, &busy, false, true, None);
+        assert_eq!(
+            busy_paint.title_fg,
+            RowPaint::compact_session_row(&palette, &busy, false).title_fg,
+            "busy rows keep the running hue instead of the unread accent"
+        );
+        let mut attention = TabFlags::default();
+        attention.needs_attention = true;
+        let attention_paint =
+            RowPaint::compact_session_row_semantic(&palette, &attention, false, true, None);
+        assert_eq!(
+            attention_paint.title_fg,
+            RowPaint::compact_session_row(&palette, &attention, false).title_fg,
+            "attention outranks the unread accent"
+        );
     }
 }

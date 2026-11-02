@@ -2226,7 +2226,7 @@ mod surface_paint_regressions {
             kind: RailRowKind::Empty, style: RailStyle::Idle,
             rect: RailRect { x: 0, y: 0, width: 12, height: 2 },
             text: "abcdefghijkl\nmnopqrstuvwx".into(),
-            color_spans: Vec::new(), flags: Default::default(), is_hovered: false, fade: None,
+            color_spans: Vec::new(), flags: Default::default(), unread: false, is_hovered: false, fade: None,
         };
         paint_rail_row(&mut renderer, &row, Some((3, 0, 5, 1)), foreground, background).unwrap();
         renderer.frame(|_| {}).unwrap();
@@ -4950,7 +4950,7 @@ fn native_paint(
                 crate::native_tab_rail::RowPaint::compact_search_row(&ctx.palette)
             } else if rail.width < crate::native_tab_rail::COMPACT_BREAKPOINT
                 && matches!(row.kind, crate::native_tab_rail::RailRowKind::Session(_)) {
-                crate::native_tab_rail::RowPaint::compact_session_row(&ctx.palette, &row.flags, row.is_hovered)
+                crate::native_tab_rail::RowPaint::compact_session_row_semantic(&ctx.palette, &row.flags, row.is_hovered, row.unread, ctx.semantic.as_ref())
             } else {
                 crate::native_tab_rail::RowPaint::session_row(&ctx.palette, &row.flags, row.is_hovered)
             };
@@ -5275,6 +5275,7 @@ fn rail_inputs_for_navigation(
         session: tab.session.clone(), title: tab.title.clone(),
         detail: navigation.project_label(&tab.session).unwrap_or_default().to_owned(), flags: tab.flags,
         marquee_offset: tab.marquee_offset,
+        unread: tab.unread,
     }).collect()
 }
 
@@ -14724,8 +14725,8 @@ mod middle_close_hit_tests {
 
     fn nav_inputs() -> Vec<RailInput> {
         vec![
-            RailInput { session: crate::native_navigation::SessionRef("s-a".into()), title: "Alpha".into(), detail: "alpha detail".into(), flags: Default::default(), marquee_offset: 0 },
-            RailInput { session: crate::native_navigation::SessionRef("s-b".into()), title: "Beta".into(), detail: "".into(), flags: Default::default(), marquee_offset: 0 },
+            RailInput { session: crate::native_navigation::SessionRef("s-a".into()), title: "Alpha".into(), detail: "alpha detail".into(), flags: Default::default(), marquee_offset: 0 , unread: false},
+            RailInput { session: crate::native_navigation::SessionRef("s-b".into()), title: "Beta".into(), detail: "".into(), flags: Default::default(), marquee_offset: 0 , unread: false},
         ]
     }
 
