@@ -158,6 +158,26 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | THEME-13 | `REAL_GAP` | `SystemThemeState` (`native_theme_runtime.rs:2135`, tests `:3897/:3918/:3941`) but boot `tui_entry.rs:6738-6753` picks mode from prefs only; no palette probe/reply |
 | THEME-14 | `REAL_GAP` | `SyntaxStyleArena` (`native_theme_runtime.rs:2374`, test `:3986`) zero non-test callers; `native_paint` `tui_entry.rs:4469` installs no syntax style |
 
+**Additional wave-44 verdicts (fifth batch):**
+
+| Item | Wave-44 verdict | Evidence / seam |
+| --- | --- | --- |
+| FFI-01 | `REAL_GAP` | cli never calls `probe_installed` (identity probe runs only in its own test `native_identity.rs:493`) |
+| FFI-02 | `REAL_GAP` | `Scene`/`GenHandle` unused by cli; scene consumes handle/text internally |
+| FFI-03 | `REAL_GAP` | `BridgeHandle` unused by cli |
+| FFI-04 | `REAL_GAP` | cli renders via `safe_renderer::Renderer`, not `frame::FrameController` |
+| FFI-05 | `REAL_GAP` | `text::wrap_cells` unused by cli; `text.rs:95-96` self-declares native equivalence NOT demonstrated |
+| FFI-06 | `REAL_GAP` | cli markdown uses `native_markdown_flow`, not `markdown::MarkdownDoc` |
+| THEME-15 | `ALREADY_CORRECT` | `native_theme_runtime.rs:2627 cursor_wire`; live `tui_entry.rs:8447 set_cursor_style`; tests `:4012/:4052/:4085` |
+| THEME-16 | `ALREADY_CORRECT` | `native_text_selection.rs:372 ctrl_c_selection_key`; live `tui_entry.rs:10595/:10646`; paint `:4784/:5150`; tests `:402/:427` |
+| THEME-17 | `ALREADY_CORRECT` | `native_view_layout.rs:515 char_width` + ZWJ/VS16/Tamil; `native_composer.rs:5-12`; live cursor `tui_entry.rs:8434`; tests `native_composer.rs:2373/2440/2450/2473` |
+| THEME-18 | `ALREADY_CORRECT` | one segmentation (`visit_cells`/`visit_unpadded_cells`) shared by paint/clip/cursor/hit-test (`native_dock.rs:304`); tests `native_view.rs:7825`, `native_dock.rs:1885` |
+| DIALOG-11 | `ALREADY_CORRECT` | palette module + live `view.command_palette_activate` dispatch (`tui_entry.rs:10727-10746`) |
+| DIALOG-12 | `REAL_GAP` | `ModelPickerState` base wired (`native_setup.rs:144`→`tui_entry.rs:7355/9992`); `ModelVariantPicker`/`next_dialog_after_model_select`/favorites snapshot no live caller |
+| DIALOG-13 | `REAL_GAP` | `SessionPicker` referenced only in `native_palette.rs` tests; seam `tui_entry.rs:10917` |
+| DIALOG-14 | `REAL_GAP` | `DrillDown`/`LateLoadGuard` test-only; seam `tui_entry.rs:10917` |
+| DIALOG-15 | `REAL_GAP` | palette `McpStatus`/`IntegrationPhase` test-only; seam `tui_entry.rs:10917` |
+
 ## Genuine gaps — live wiring (`REAL_GAP`)
 
 These have a faithful model + test but no live consumer.
@@ -212,12 +232,15 @@ STATE-003/004, THEME-02/03, CP-26, SIDE-05 (renderer), SIDE-10, MD-009.
 
 ## Coverage gaps in this pass
 
-The following item groups were dispatched but their workers hit step caps
-before finalizing verdicts, so they are **UNVERIFIED** here (placeholder-only
-JSON, not verdicts): group1 (PAR/LAY), group2, group4 (THEME-02..18,
-CP-01..11), group5 (final JSON), group6, group7 (final JSON). The prose
-evidence from the group5/group7 workers is reflected above; the JSON files
-themselves are stubs and must not be read as verdicts.
+Wave-44 covered every item that was still `UNVERIFIED` after wave-43 (165 IDs).
+The remaining 58 IDs (`TAB-13..20,22,24`, `THEME-01`, `CP-12..39`,
+`TOOL-007..010,012`, `DIFF-002,004,005`, `FORM-002..008`, `STATE-001,003,004`,
+`DIALOG-05`) were already verdicted in earlier waves and are recorded above.
+
+Wave-44 workers that hit step caps on their first scope were re-dispatched in
+≤6-ID slices; per-ID JSON verdicts are authoritative and live in
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave44/`.
+A placeholder `UNVERIFIED`/`"note":"stub"` JSON is **not** a verdict.
 
 ## Honest completion statement
 
