@@ -221,7 +221,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | DIALOG-02 | `REAL_GAP` | shell gap/row-pad/footer-band helpers (`native_palette.rs:667-733`, test `:3808`) zero production callers; live `native_view_dialogs.rs:1408-1510` never calls them |
 | DIALOG-03 | `ALREADY_CORRECT` | live stack `native_modal_layer.rs:437/382/387/532`; remount/refocus tests `:1150/:1292`, `native_view.rs:7728`; consumed `tui_entry.rs:7865/10676` |
 | DIALOG-04 | `REAL_GAP` | ordered routes `escape_route:808`/`ctrl_c_route:821` (test `:7316`) no production caller; live `tui_entry.rs:10671-10700` does own selection/clear then `dialogs.cancel()` |
-| DIALOG-16 | `ALREADY_CORRECT` | `native_settings.rs:53/561/517/352`; tests `:930` (numeric clamp+save-lock), `:959` (experiments empty+save-lock); live `tui_entry.rs:6340,7963,8845`. **Refutes** wave-43. Caveat: `ThemePreview` (`native_palette.rs:2946`) no live consumer; live theme path `native_view.rs:2395` |
+| DIALOG-16 | `REAL_GAP` | Base `SettingsDialog` shell is live (`tui_entry.rs:6340/7963/10735`), but the requirement's sub-behaviors are test-only: `NumericLimit`/`SCROLL_SPEED`/`LEADER_TIMEOUT`/`ALERT_VOLUME` (`native_settings.rs:509-559`) and `ExperimentsDialog` (`:561`) have zero non-test callers; `ThemePreview` (`native_palette.rs:2946`) no live consumer. Seam `tui_entry.rs:8832-8875`. (Resolved disagreement: the retry verdict is upheld over the earlier `ALREADY_CORRECT`.) |
 | DIALOG-17 | `REAL_GAP` | `native_palette.rs:2999,3037,3141,3287` (tests `:4393,4423,4464`); no live consumer |
 | DIALOG-18 | `REAL_GAP` | `native_view_dialogs.rs:3432,3609,3661,3767` (tests `:5351,5365,5430,5464,5493`); `diff_dialog` module test-only |
 | DIALOG-19 | `REAL_GAP` | `native_overlay_stack.rs:38,360,243` + `native_modal_layer.rs:775` (tests `:1001..1181`); `ChromeModel`/Startup-Loading test-only |
@@ -233,8 +233,8 @@ the wave-44 verdict supersedes it.
 
 | Verdict | Count |
 | --- | --- |
-| `ALREADY_CORRECT` | 137 |
-| `REAL_GAP` | 68 |
+| `ALREADY_CORRECT` | 136 |
+| `REAL_GAP` | 69 |
 | `BLOCKED` | 18 |
 | **Total** | **223** |
 
@@ -246,7 +246,7 @@ THEME-09, THEME-12, THEME-13, THEME-14, CP-01, CP-02, CP-05, CP-06, CP-07,
 CP-08, CP-09, CP-11, CP-42, MSG-001, MSG-002, MSG-003, MSG-004, MSG-007,
 MSG-008, MSG-009, MSG-010, MD-007, MD-008, MD-009, TOOL-006, MEDIA-001,
 DIALOG-02, DIALOG-04, DIALOG-06, DIALOG-07, DIALOG-08, DIALOG-09, DIALOG-10,
-DIALOG-12, DIALOG-13, DIALOG-14, DIALOG-15, DIALOG-17, DIALOG-18, DIALOG-19,
+DIALOG-12, DIALOG-13, DIALOG-14, DIALOG-15, DIALOG-16, DIALOG-17, DIALOG-18, DIALOG-19,
 DIALOG-20, FFI-01, FFI-02, FFI-03, FFI-04, FFI-05, FFI-06, FFI-07, FFI-08,
 FFI-11`.
 
@@ -288,7 +288,7 @@ STATE-002`.
 
 Everything not listed in the two sections above. This includes the full
 `CP-12..CP-39` range, `TAB-01..03/05/07..09/11..20/22/24`, `SIDE-01/02/06/07/09/11/12/13/15`,
-`THEME-01..04/06/07/10/11/15..18`, `DIALOG-01/03/05/11/16`, `FFI-09/10`,
+`THEME-01..04/06/07/10/11/15..18`, `DIALOG-01/03/05/11`, `FFI-09/10`,
 `MD-001..006`, `MSG-006`, `TOOL-001..005/007..010/012`, `DIFF-002/004/005`,
 `FORM-002/005..008`, `STATE-001/003/004`, `LAY-01..09/14/16/18/19/20`,
 `CP-03/04/10/40/41`, `PAR-01/05/08/12/13/14/15/17/18/20/21/23/24`.
@@ -304,8 +304,8 @@ A placeholder `UNVERIFIED`/`"note":"stub"` JSON is **not** a verdict.
 
 ## Honest completion statement
 
-Of the 223 checklist obligations, **137 are `ALREADY_CORRECT`** (a faithful
-implementation, a focused test, and a traced live consumer), **68 are
+Of the 223 checklist obligations, **136 are `ALREADY_CORRECT`** (a faithful
+implementation, a focused test, and a traced live consumer), **69 are
 `REAL_GAP`** (model + test exist but the live TUI does not consume them), and
 **18 are `BLOCKED`** (a producer/transport/contract field does not exist).
 
