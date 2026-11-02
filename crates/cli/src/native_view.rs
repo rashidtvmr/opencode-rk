@@ -1055,33 +1055,6 @@ impl NativeView {
         self.chat.message_owner_at(row)
     }
 
-    /// MSG-002: bind the painted session to the chat disclosure store
-    /// (`group-view.tsx` gate); `None` keeps every row visible.
-    pub fn chat_set_session(
-        &mut self,
-        session_id: Option<String>,
-        verbosity: Option<crate::native_message_rows::Verbosity>,
-    ) {
-        self.chat.set_session(session_id, verbosity);
-    }
-
-    /// MSG-002: upstream `groupExpanded(groupID, kind)` for one painted row.
-    #[must_use]
-    pub fn chat_group_expanded(
-        &self,
-        session_id: &str,
-        verbosity: crate::native_message_rows::Verbosity,
-        group_id: &str,
-        kind: crate::native_message_rows::GroupKind,
-    ) -> bool {
-        self.chat.group_expanded(session_id, verbosity, group_id, kind)
-    }
-
-    /// MSG-002: persist one expansion choice (`setGroupExpanded`).
-    pub fn chat_set_group_expanded(&mut self, session_id: &str, group_id: &str, expanded: bool) {
-        self.chat.set_group_expanded(session_id, group_id, expanded);
-    }
-
     /// TOOL-008: child-session id owning each painted body row of the last
     /// styled transcript render (`frame row -> subtask child sessionID`).
     #[must_use]
