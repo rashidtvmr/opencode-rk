@@ -11074,3 +11074,51 @@ render consumer, so landing it would be producer-only dead code; do NOT land.
 - `RECOVERY-STRUCTURE-001` is `SUPERSEDED` in runtime (only `RECOVERY-JUDGE-001` and
   `RECOVERY-DURABILITY-001` remain OPEN) — `recovery_state.py status` listing it is stale
   vs the tracking file; re-check after the second-client diagnostic.
+
+## Wave-32 landings + Phase-1 artifact run (2026-11-02)
+
+HEAD progressed `cf36f364` -> `53d819a8` -> `f8da15f4` -> `dda3b7dc` -> `8a97589b`.
+
+### Landed (each: focused test + full CLI suite single-threaded + immediate commit)
+- `53d819a8` **LAY-20** — `NativeView::home_footer_rows` now delegates to
+  `native_home::footer_rows(layout.cols, layout.rows)`; footer version/status
+  visibility uses full terminal cols. Upstream `home/footer.tsx:82-86,7-13` gate on
+  `useTerminalDimensions()`. Test `lay20c_...` (64x14+tabstrip => 1 row + version).
+  LAY-19 remains (c: no global-forms field on NativeView).
+- `dda3b7dc` **AUTH gate amendment** — `convergence_gate.py` now accepts any of
+  `router_with_auth` / `router_with_provider_integration` /
+  `router_with_events_and_integration` AND requires a `Some(` argument in that call
+  (fail-closed on `None`). Evaluator-sensitive path; **two approvals**
+  (`W32-VER-GATE-AUTH-TEST` test evaluator tightened the form, `W32-VER-GATE-AUTH-SEC`
+  security evaluator required the `Some(` assertion). `--structure-only` => GREEN.
+- `8a97589b` **TAB-07 vertical** — `RailInput/RailRow.unread` + `compact_session_row_semantic`;
+  test `compact_unread_row_uses_accent_unread_color`. Residual (c): expanded-rail
+  indicator numbers/status + `TabUnread::Error`.
+
+### Confirmed STALE (runtime markers, not current defects)
+- `RECOVERY-DURABILITY-001` — `tests/e2e/native_second_client.py` is real (reuses daemon,
+  resumes live session, proves one provider request) and wired at `phase1_judge.py:116-143`.
+  Needs a re-run at current SHA, not an implementation.
+- `RECOVERY-STRUCTURE-001` — SUPERSEDED in runtime.
+- `OBS-NATIVE-STREAM-TOOL-INSTALLED` — stored failures are at `d2045079`/`b96014e8`, NOT HEAD.
+- AUTH structural block was a **false positive** (serve passes `Some(credential)` ->
+  `require_bearer`); now fixed in the gate.
+
+### Rejected / held (parity)
+- `W31R-TOOL005-BUDGET4` — **REJECT** (`W32-VER-TOOL005-BUDGET`): upstream
+  `collapse-tool-output.ts:4-24` budgets on `Array.from` (code points); the candidate
+  also swapped `collapseShellCommand` to graphemes (correct) but its test was
+  tautological (passed pre-patch). Re-dispatched as `W32R-TOOL005-CODEUNIT`.
+- `W32-VER-TOOL002-SPIN` produced no handoff — re-dispatched as `W32R-VER-TOOL002-SPIN2`.
+- `W32R-TOOL005-CODEUNIT` returned no text (empty dir) — re-dispatch needed.
+- `W31-TOOL012-META` = (c): transport patch OK but `crates/tools`/`server` never emit
+  `metadata`, so no producer — held (consumer exists, producer missing).
+
+### Phase-1 critical path execution
+- Release build for `8a97589b` running (`target/release/oc2`, `--features native`,
+  `RUSTFLAGS=-C link-arg=-Wl,-rpath,@executable_path/../lib`); dylib
+  `crates/opentui-bridge/native/lib/aarch64-apple-darwin/libopentui.dylib` hash matches
+  the prior PASS receipt.
+- Receipt helper: `<evidence>/phase1/make-build-receipt.py`.
+- Next: artifact-mode judge, then `observe-judge` each check; drive `phase1-gates.json`
+  to 7/7 on the exact integrated SHA.
