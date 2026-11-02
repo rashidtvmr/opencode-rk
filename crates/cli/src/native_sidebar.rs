@@ -2108,14 +2108,18 @@ mod tests {
         let unc = truncate_file_path("\\\\server\\share\\a\\b\\c\\deep-folder", 24);
         assert!(cell_width(&unc) <= 24, "{unc}");
         assert!(unc.starts_with("\\\\server\\share\\"), "{unc}");
+        assert!(unc.ends_with('…'), "{unc}");
         // Wide (CJK) glyphs count two cells.
         let cjk = truncate_file_path("/a/项目/很长的目录名称在这里继续延伸", 16);
         assert!(cell_width(&cjk) <= 16, "{cjk}");
         assert!(cjk.contains('…'));
+        assert!(cjk.ends_with('…'), "{cjk}");
         // Emoji keep grapheme clusters intact.
         let emoji = truncate_file_path("/a/🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀", 12);
         assert!(cell_width(&emoji) <= 12, "{emoji}");
         assert!(!emoji.contains('\u{fffd}'));
+        assert!(emoji.ends_with('…'), "{emoji}");
+        assert_eq!(emoji.matches('🚀').count(), 4, "{emoji}");
     }
 
     /// SIDE-01: the header and footer are pinned while the body scrolls.
