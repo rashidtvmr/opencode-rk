@@ -957,7 +957,7 @@ fn boxed_message_rows(
     separator: bool,
     appearance: &crate::native_box_style::BoxAppearance,
 ) -> Vec<StyledChatRow> {
-    boxed_message_rows_spans(width, message, separator, appearance, &mut Vec::new())
+    boxed_message_rows_spans(width, message, separator, appearance, &mut Vec::new(), &mut Vec::new())
 }
 
 /// Preserve the boxed rows while carrying source-derived Markdown intervals.
@@ -967,14 +967,16 @@ fn boxed_message_rows_spans(
     separator: bool,
     appearance: &crate::native_box_style::BoxAppearance,
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
+    child_out: &mut Vec<(usize, String)>,
 ) -> Vec<StyledChatRow> {
-    boxed_message_rows_spans_mode(width, message, separator, appearance, spans_out, crate::markdown_runs::MarkdownMode::Rendered, &std::collections::BTreeSet::new())
+    boxed_message_rows_spans_mode(width, message, separator, appearance, spans_out, child_out, crate::markdown_runs::MarkdownMode::Rendered, &std::collections::BTreeSet::new())
 }
 
 fn boxed_message_rows_spans_mode(
     width: usize, message: &ChatMessage, separator: bool,
     appearance: &crate::native_box_style::BoxAppearance,
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
+    child_out: &mut Vec<(usize, String)>,
     markdown_mode: crate::markdown_runs::MarkdownMode,
     pending: &std::collections::BTreeSet<String>,
 ) -> Vec<StyledChatRow> {
@@ -1005,14 +1007,16 @@ fn boxed_message_rows_spans_mode(
         && matches!(id,BoxId::User|BoxId::Assistant) {1} else {usize::from(style.padding)};
     // Unstyled fallback: caller facts at the caller's wrap width, carrying
     // their full-row text interval (selected template, never decoration).
-    let plain = |wrap: usize, spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>| -> Vec<StyledChatRow> {
+    let plain = |wrap: usize, spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>, child_out: &mut Vec<(usize, String)>| -> Vec<StyledChatRow> {
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(wrap.min(width), message, separator, None, &mut typed_spans, markdown_mode, width, pending);
+        let mut typed_children = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans_mode(wrap.min(width), message, separator, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending);
         let rows: Vec<StyledChatRow> = typed
             .into_iter()
             .map(|(text, class)| (text, class, Some((0, width.min(u16::MAX as usize) as u16))))
             .collect();
         rebase_part_spans(typed_spans, rows.len(), 0, 0, usize::MAX, width, spans_out);
+        rebase_part_children(typed_children, rows.len(), 0, child_out);
         rows
     };
     // The pinned TUI has two different primitives, not a shared padded card:
@@ -1038,7 +1042,8 @@ fn boxed_message_rows_spans_mode(
         let limit = MAX_MESSAGE_ROWS.saturating_sub(output.len() + usize::from(user));
         let base = output.len();
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, Some(""), &mut typed_spans, markdown_mode, width, pending);
+        let mut typed_children = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, Some(""), &mut typed_spans, &mut typed_children, markdown_mode, width, pending);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
         {
@@ -1050,6 +1055,7 @@ fn boxed_message_rows_spans_mode(
             ));
         }
         rebase_part_spans(typed_spans, taken, base, 3, inner, width, spans_out);
+        rebase_part_children(typed_children, taken, base, child_out);
         if user {
             output.push((padding, ChatRowClass::UserCard, None));
         }
@@ -1059,14 +1065,14 @@ fn boxed_message_rows_spans_mode(
     // path (which would reserve outline rows) and do not synthesize blank
     // border glyphs; retain the ordinary typed message classes and bounds.
     if !style.has_border() {
-        return plain(width, spans_out);
+        return plain(width, spans_out, child_out);
     }
     // A full drawn frame exists ONLY through an explicit Double/Heavy line
     // weight (kept explicit). A radius preset or a Custom radius must never
     // create or widen a frame — changing radius affects existing corners,
     // never activates framing.
     if appearance.full_outline(id) {
-        let Some(frame) = crate::native_box_style::TextFrame::new(style, width, pad) else { return plain(width, spans_out); };
+        let Some(frame) = crate::native_box_style::TextFrame::new(style, width, pad) else { return plain(width, spans_out, child_out); };
         let inner = usize::from(frame.content_width());
         let mut output = Vec::new();
         if separator { output.push((String::new(), ChatRowClass::Separator, None)); }
@@ -1074,13 +1080,15 @@ fn boxed_message_rows_spans_mode(
         for _ in 0..pad { output.push((frame.blank(), ChatRowClass::Blank, None)); }
         let base = output.len();
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, markdown_mode, width, pending);
+        let mut typed_children = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 + 2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit) {
             output.push((frame.row(&text), class, Some(((1 + pad) as u16, inner as u16))));
         }
         rebase_part_spans(typed_spans, taken, base, 1 + pad, inner, width, spans_out);
+        rebase_part_children(typed_children, taken, base, child_out);
         for _ in 0..pad { output.push((frame.blank(), ChatRowClass::Blank, None)); }
         output.push((frame.edge(true), ChatRowClass::Separator, None));
         return output;
@@ -1095,7 +1103,7 @@ fn boxed_message_rows_spans_mode(
         let rail = 1;
         let overhead = rail + pad;
         if width <= overhead + 1 {
-            return plain(width, spans_out);
+            return plain(width, spans_out, child_out);
         }
         let inner = width - overhead;
         let mut output = Vec::new();
@@ -1108,7 +1116,8 @@ fn boxed_message_rows_spans_mode(
         }
         let base = output.len();
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, markdown_mode, width, pending);
+        let mut typed_children = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
@@ -1128,6 +1137,7 @@ fn boxed_message_rows_spans_mode(
             ));
         }
         rebase_part_spans(typed_spans, taken, base, 1 + pad, inner, width, spans_out);
+        rebase_part_children(typed_children, taken, base, child_out);
         for _ in 0..pad {
             output.push((rail_pad.clone(), ChatRowClass::Blank, None));
         }
@@ -1135,7 +1145,7 @@ fn boxed_message_rows_spans_mode(
     }
     if pad > 0 {
         if width <= pad.max(1) {
-            return plain(width, spans_out);
+            return plain(width, spans_out, child_out);
         }
         let inner = width - pad;
         let mut output = Vec::new();
@@ -1147,7 +1157,8 @@ fn boxed_message_rows_spans_mode(
         }
         let base = output.len();
         let mut typed_spans = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, markdown_mode, width, pending);
+        let mut typed_children = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
@@ -1167,12 +1178,13 @@ fn boxed_message_rows_spans_mode(
             ));
         }
         rebase_part_spans(typed_spans, taken, base, pad, inner, width, spans_out);
+        rebase_part_children(typed_children, taken, base, child_out);
         for _ in 0..pad {
             output.push((String::new(), ChatRowClass::Blank, None));
         }
         output
     } else {
-        plain(width, spans_out)
+        plain(width, spans_out, child_out)
     }
 }
 
@@ -1899,6 +1911,20 @@ fn rebase_part_spans(
     }
 }
 
+/// Rebase per-row child-session ownership from a source-row interval onto the
+/// boxed output, mirroring [`rebase_part_spans`]. `child_out` lists
+/// `(output_row, child_session_id)` for the subtask part's own rendered rows
+/// (TOOL-008); a `taken`/`base` offset shift is the only transformation.
+fn rebase_part_children(
+    children: Vec<(usize, String)>, taken: usize, base: usize,
+    sink: &mut Vec<(usize, String)>,
+) {
+    for (index, child) in children {
+        if index >= taken { continue; }
+        sink.push((base + index, child));
+    }
+}
+
 // ── native_markdown_flow block layout ────────────────────────────────
 //
 // Upstream renders assistant prose through a single Markdown renderable with
@@ -2362,15 +2388,16 @@ fn typed_message_rows_with_prefix(
     separator: bool,
     prefix: Option<&str>,
 ) -> Vec<(String, ChatRowClass)> {
-    typed_message_rows_with_prefix_spans(width, message, separator, prefix, &mut Vec::new())
+    typed_message_rows_with_prefix_spans(width, message, separator, prefix, &mut Vec::new(), &mut Vec::new())
 }
 
 fn typed_message_rows_with_prefix_spans(
     width: usize, message: &ChatMessage, separator: bool, prefix: Option<&str>,
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
+    child_out: &mut Vec<(usize, String)>,
 ) -> Vec<(String, ChatRowClass)> {
     typed_message_rows_with_prefix_spans_mode(
-        width, message, separator, prefix, spans_out,
+        width, message, separator, prefix, spans_out, child_out,
         crate::markdown_runs::MarkdownMode::Rendered,
         width,
         &std::collections::BTreeSet::new(),
@@ -2380,6 +2407,7 @@ fn typed_message_rows_with_prefix_spans(
 fn typed_message_rows_with_prefix_spans_mode(
     width: usize, message: &ChatMessage, separator: bool, prefix: Option<&str>,
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
+    child_out: &mut Vec<(usize, String)>,
     markdown_mode: crate::markdown_runs::MarkdownMode,
     terminal_width: usize,
     pending: &std::collections::BTreeSet<String>,
@@ -2500,8 +2528,13 @@ fn typed_message_rows_with_prefix_spans_mode(
                 agent,
                 description,
                 background,
-                session_id: _,
+                session_id,
             } => {
+                // TOOL-008: only the subtask part's own rendered rows open its
+                // child session (`routes/session/index.tsx:3310-3314` navigates
+                // from the Subagent part's `onMouseUp`), never sibling parts
+                // that share the message.
+                let child_start = rows.len();
                 push_wrapped(
                     &mut rows,
                     width,
@@ -2512,6 +2545,11 @@ fn typed_message_rows_with_prefix_spans_mode(
                     "  ",
                     ChatRowClass::ToolCall,
                 );
+                if !session_id.is_empty() {
+                    for row in child_start..rows.len() {
+                        child_out.push((row, session_id.clone()));
+                    }
+                }
             }
             ChatPart::Retry { attempt, message } => {
                 push_wrapped(
@@ -2879,6 +2917,7 @@ impl ChatView {
                 starts_new_group(index, messages),
                 None,
                 &mut Vec::new(),
+                &mut Vec::new(),
                 self.markdown_mode,
                 width,
                 &self.pending_permission_calls,
@@ -3022,12 +3061,14 @@ impl ChatView {
         if transcript_h > 0 {
             'messages: for (index, message) in messages.iter().enumerate().rev() {
                 let mut message_spans: Vec<(usize, Vec<ChatRunSpan>)> = Vec::new();
+                let mut message_children: Vec<(usize, String)> = Vec::new();
                 let message_rows = boxed_message_rows_spans_mode(
                     width,
                     message,
                     starts_styled_group(index, messages),
                     appearance,
                     &mut message_spans,
+                    &mut message_children,
                     markdown_mode,
                     &self.pending_permission_calls,
                 );
@@ -3035,15 +3076,13 @@ impl ChatView {
                 for (row, spans) in message_spans {
                     if row < dense.len() { dense[row] = spans; }
                 }
+                let mut dense_children: Vec<Option<String>> = vec![None; message_rows.len()];
+                for (row, child) in message_children {
+                    if row < dense_children.len() { dense_children[row] = Some(child); }
+                }
                 let owner = message.message_id.clone();
-                let child = message.parts.iter().find_map(|part| match part {
-                    ChatPart::Subtask { session_id, .. } if !session_id.is_empty() => {
-                        Some(session_id.clone())
-                    }
-                    _ => None,
-                });
-                for (row, spans) in message_rows.into_iter().zip(dense).rev() {
-                    reversed.push((row, spans, owner.clone(), child.clone()));
+                for ((row, spans), child) in message_rows.into_iter().zip(dense).zip(dense_children).rev() {
+                    reversed.push((row, spans, owner.clone(), child));
                     if reversed.len() >= target {
                         break 'messages;
                     }
@@ -3142,14 +3181,17 @@ impl ChatView {
         markdown_mode: crate::markdown_runs::MarkdownMode,
     ) -> usize {
         let mut spans = Vec::new();
+        let mut children = Vec::new();
         messages.iter().enumerate().map(|(index, message)| {
             spans.clear();
+            children.clear();
             boxed_message_rows_spans_mode(
                 width,
                 message,
                 starts_styled_group(index, messages),
                 appearance,
                 &mut spans,
+                &mut children,
                 markdown_mode,
                 // Content-height count only: a row-class swap never changes
                 // the row count, so the pending set is irrelevant here.
@@ -5237,6 +5279,70 @@ mod tests {
         assert!(
             view.message_owners().iter().flatten().all(|id| id == "msg_a" || id == "msg_b" || id == "msg_c"),
             "no owner is invented for a message with no backend id",
+        );
+    }
+
+    /// TOOL-008 review fix: child ownership must be per *part*, not per
+    /// message. A message can hold `[text, subtask, subtask]`; upstream
+    /// navigates only from the Subagent part's own rows
+    /// (`routes/session/index.tsx:3310-3314`), so the text rows must own no
+    /// child and sibling subtasks must not share an id.
+    #[test]
+    fn subtask_child_ownership_is_per_part_not_per_message() {
+        let width = 60;
+        let height = 30;
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let mut user = ChatMessage::text(ChatRole::User, "go");
+        user.message_id = Some("msg_u".to_owned());
+        let mut mixed = ChatMessage::text(ChatRole::Assistant, "preamble prose");
+        mixed.message_id = Some("msg_mixed".to_owned());
+        mixed.parts = vec![
+            ChatPart::Text("preamble prose".to_owned()),
+            ChatPart::Subtask {
+                agent: "explore".to_owned(),
+                description: "first".to_owned(),
+                background: false,
+                session_id: "ses_first".to_owned(),
+            },
+            ChatPart::Subtask {
+                agent: "explore".to_owned(),
+                description: "second".to_owned(),
+                background: true,
+                session_id: "ses_second".to_owned(),
+            },
+        ];
+        let messages = vec![user, mixed];
+
+        let view = ChatView::new();
+        let (rows, _) = view.render_styled_with_spans(
+            width, height, "", &messages, "", false, &appearance,
+        );
+        let first = view.transcript_first_row();
+        // The mixed message's own text rows own the message but no child.
+        let text_rows: Vec<usize> = (first..rows.len())
+            .filter(|row| {
+                view.message_owner_at(*row).as_deref() == Some("msg_mixed")
+                    && rows[*row].1 == ChatRowClass::AssistantCard
+            })
+            .collect();
+        assert!(!text_rows.is_empty(), "the mixed message paints its text card");
+        assert!(
+            text_rows.iter().all(|row| view.child_owner_at(*row).is_none()),
+            "text rows of a [text, subtask] message must not open the child",
+        );
+        // Each subtask's tool rows resolve to its own child only.
+        let first_child: Vec<usize> = (first..rows.len())
+            .filter(|row| view.child_owner_at(*row).as_deref() == Some("ses_first"))
+            .collect();
+        let second_child: Vec<usize> = (first..rows.len())
+            .filter(|row| view.child_owner_at(*row).as_deref() == Some("ses_second"))
+            .collect();
+        assert!(!first_child.is_empty(), "the first subtask owns rows");
+        assert!(!second_child.is_empty(), "the second subtask owns rows");
+        assert!(
+            first_child.iter().chain(second_child.iter())
+                .all(|row| rows[*row].1 == ChatRowClass::ToolCall),
+            "child ownership is limited to the subtask tool rows",
         );
     }
 
