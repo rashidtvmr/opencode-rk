@@ -637,6 +637,19 @@ impl Panel {
     }
 }
 
+/// CP-40: mark which `@` mentions name a directory so Tab/Enter expands the
+/// folder rather than accepting it as a plain file mention. This is the exact
+/// live-intake translation (`autocomplete.tsx:379` marks directories,
+/// `:714-725` expands them); factored out so the live wiring is directly
+/// testable end-to-end.
+pub fn record_directory_mentions(completion: &mut Completion, items: &[Item]) {
+    for item in items {
+        if item.description == "directory" {
+            completion.set_directory(&item.value, true);
+        }
+    }
+}
+
 /// Only relative file names are indexed; this never reads file contents.
 pub fn workspace_files(root: &std::path::Path) -> Vec<Item> {
     let Ok(root) = root.canonicalize() else { return Vec::new() };
@@ -958,13 +971,23 @@ mod tests {
         assert_eq!(dir.description, "directory");
         let file = items.iter().find(|item| item.value == "@src/main.rs").expect("file mention offered");
         assert_eq!(file.description, "file");
-        // The directory flag (not the plain value) drives expansion.
+        // End-to-end live wiring: the exact intake sequence the live loop runs
+        // (`record_directory_mentions` then `replace_mentions`), followed by a
+        // real Tab expand. Actually exercises expansion, so a broken intake or a
+        // broken `complete_key_at` fails this test.
         let mut completion = Completion::default();
-        for item in &items {
-            if item.description == "directory" { completion.set_directory(&item.value, true); }
-        }
+        record_directory_mentions(&mut completion, &items);
+        completion.replace_mentions(items.clone());
         assert!(completion.directory("@src"));
         assert!(!completion.directory("@src/main.rs"));
+        let mut draft = "@src".to_owned();
+        let cursor = draft.len();
+        completion.sync(&draft);
+        let next = completion
+            .complete_key_at(b'\t', &mut draft, cursor, 4096)
+            .expect("Tab expands the directory mention");
+        assert_eq!(draft, format!("@src{}", std::path::MAIN_SEPARATOR));
+        assert_eq!(next, draft.len());
         std::fs::remove_dir_all(root).unwrap();
     }
 }
