@@ -36,6 +36,7 @@ These have a faithful model + test but no live consumer.
 | TOOL-011 | `DialogKind::Execute`/`execute_dialog` (`native_tool_rows.rs:1159`) is never opened live; only `Question` (`tui_entry.rs:8197`) and `Confirm` (`native_view.rs:7737`) are consumed. The Execute dialog body renderer is also a placeholder (`native_view_dialogs.rs:1429`), so wiring alone would not reach parity. |
 | DIFF-001 | Split-mode boundary arithmetic is correct (`native_diff_view.rs:600`, constants `:540-544`) but has no live consumer: `resolve_view_mode` is called only from unconsumed `build_*` fns (`native_diff_inline.rs:125,169,198`); the live render hardcodes unified (`native_view_chat.rs:2707`). `DiffSurface::Viewer` + `viewer_patch_pane_width` (`:659`) have zero callers. Needs config/width threading + a `SplitRow→ChatRowClass` mapping + a diff-viewer component. |
 | DIFF-003 | Added-file virtualization model + tests are correct (`native_diff_view.rs:1014-1076`, tests `:1962-2209`) but have zero callers outside the module; `AddedPatchChunk` (`:926-930`) carries no highlight field, so source highlighting cannot survive chunk crossing. Needs a scroll-aware producer feeding `relative_scroll_top→visible_chunk_range` + a highlight-carrying chunk model. |
+| FORM-001 | The upstream-correct `PermissionPrompt` (`native_permissions.rs:557`, once/always/reject, `save` gate, always-body swap, nested rejection scope) is **dead code** (only its own tests reference it). The live path is `DialogView` Permission (`tui_entry.rs:7865` → `native_view_dialogs.rs:1090`), a flat choice list that omits the body swap and nested-rejection stage. Closing needs rewiring the live permission flow to the upstream-correct model. |
 
 ## Genuine gaps — missing producer/transport (`BLOCKED`)
 
@@ -53,6 +54,8 @@ These have a faithful model + test but no live consumer.
 | TOOL-012 | `metadata.loaded` — pinned upstream `read.ts` emits only `truncated`; no server NDJSON metadata field. |
 | THEME-14 | No native `SyntaxStyle` producer; `SyntaxStyleArena` (`native_theme_runtime.rs:2374-2453`) is test-only and the paint path (`tui_entry.rs:4469`) installs no syntax style, so the guarantee is vacuous. |
 | TAB-21 | Focus-confirmed view acknowledgement: `ViewAcknowledgement` (`native_navigation.rs:1133`, 250→5s) has zero live callers (only its own `#[cfg(test)]` at `:2069`); `tui_entry.rs:8689-8694` defers the driver until a "watermark seam" lands. No client POST `/api/sessions/{id}/view` in `crates/cli` (server route only: `server/src/lib.rs:236/1229`); no idle/viewed timestamp reaches the CLI. The unread **paint** transition itself is live. |
+| FORM-003 | `form_overlay::FormPrompt` (`native_view_dialogs.rs:2258`) is a complete pure port (all field kinds, validation, review, draft restore) but has **no consumer and no producer**: no `/form` route (`server/src/lib.rs:290-310` only permission) and MCP `elicitation/create` is captured (`mcp_runtime.rs:178`) but unconsumed (`native_view.rs:2021-2024`). Needs a server form/question route + elicitation feed + CLI poll/render/reply. |
+| FORM-004 | Same producer/transport seam as FORM-003; the narrow-field/checkbox/inset/editor arithmetic itself is correct. |
 | W35-MEDIA01 | Transport (`crates/server/src/lib.rs:730-733`) reports `available_for_web_turn: false`. |
 
 ## Verified `ALREADY_CORRECT` (source-inspected this pass)
@@ -64,7 +67,7 @@ These have a faithful model + test but no live consumer.
 - **FFI:** FFI-03 .. FFI-11.
 - **Tools:** TOOL-007, TOOL-008, TOOL-009, TOOL-010, TOOL-012.
 - **Diffs:** DIFF-002, DIFF-004, DIFF-005.
-- **Forms:** FORM-001 .. FORM-008.
+- **Forms:** FORM-002, FORM-005, FORM-006, FORM-007, FORM-008.
 - **State:** STATE-001, STATE-003, STATE-004.
 - **Composer/CP:** CP-12 .. CP-39 (rail, dock, sidebar, composer, paste, completion) — each has an impl + focused test + live consumer.
 
