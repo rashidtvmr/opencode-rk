@@ -11537,3 +11537,65 @@ Verdicts / holds this wave:
 In flight (wave-41): REVIEWTAB07FIX2, REVIEWCP23, REVIEWTOOL002, REVIEWFORMHOST,
 REVIEWSIDE13, DIALOG05FIX2, LAY17FIX2, SIDE12FIX, SIDE09, TAB24, CP12, MD006,
 MSG009, LAY16.
+
+## Update — 2026-11-02 (post-wave-42 landing run)
+
+Canonical `main-v2` = `ccd33cde` (remote verified via `git ls-remote`). Working tree clean.
+
+Landed + pushed this run:
+- `0f805b70` TAB-07 — hovered→BackgroundPanel, dragged→BackgroundElement+BOLD,
+  `TabCellColor::DraggedHovered` number-color distinction, `row_paint_for` role-tag stamp.
+- `9a578f8e` SIDE-12 — publish `onboarding_dismiss_hit`, `NativeView::onboarding_dismiss_action`,
+  wire the tui_entry mouse handler to persist `getting-started`.
+- `521ffa8e` TAB-07/SIDE-12 review repairs — (a) REVIEWTAB07LANDED NEEDS_FIX: a dragged
+  tab the pointer has left must paint title `text.muted` (upstream `foreground()`
+  `session-tabs.tsx:1609-1612`; `horizontal_dragged(palette, hovered)` now takes the
+  hover fact; TAB-07 test asserts the dragged-away title fg). (b) REVIEWSIDE12LANDED
+  NEEDS_FIX: upstream binds the dismiss `onMouseUp` to the `✕` text alone
+  (`footer.tsx:45-55`), so the published hit is now exactly the trailing `✕` cell
+  (width 1); the view test asserts left-of-✕/past-✕ presses do nothing.
+- `ccd33cde` SIDE-11 — Todo `<=2` shrink regression test mirroring the MCP one
+  (production logic already correct).
+
+Full CLI suite: 2164 passed / 0 failed at `ccd33cde`.
+
+Wave-42 subagent outcome: all workers hit step caps producing only BLOCKED stubs
+(no patch.diff). Pivot reaffirmed: orchestrator implements directly; subagents used
+only for independent review with artifact-first prompts. Two reviews DID land files:
+REVIEWTAB07LANDED (NEEDS_FIX, repaired) and REVIEWSIDE12LANDED (NEEDS_FIX, repaired).
+
+Remaining genuine gaps (recorded, not fabricated):
+- SIDE-08 row-click → DialogMcp (needs a `DialogKind::Mcp` host + select model +
+  toggle actions + error details; truncation half already done).
+- MSG-009 `TranscriptSurfaces::render_rows` has no live consumer; revert-card /
+  notice producers absent (queue-dock + pending-steer halves live-wired).
+- DIALOG-05 `empty_state()` edge: prior DIALOG05FIX test asserted `EmptyState::Empty`
+  but impl returns `None` for a `render_filter(false)` non-empty list; viewport
+  heights half already tested and green.
+- LAY-17 browsing anchor: `capture_tab_scroll_anchor` returns None in the candidate test.
+- BLOCKED producers: SIDE-03, TOOL-012, TAB-21, MSG-008, MSG-005 chips, W35-MEDIA01,
+  THEME-14 (no native SyntaxStyle consumer), DIALOG-20 crash/error-details half.
+
+## 2026-11-02 — wave-43 consolidation, PARITY_STATUS.md
+
+Canonical `main-v2` = `ccd33cde` (remote verified). Wave-43 dispatched 8
+verification + 16 gap-ownership workers on the 4 authorized routes. Most hit
+step caps and left stubs; the reliable verdicts are consolidated into
+`docs/ui-parity/PARITY_STATUS.md`.
+
+Reliable wave-43 verdicts:
+- group3 (real): 23 ALREADY_CORRECT; REAL_GAP = TAB-21, TAB-23, SIDE-03,
+  SIDE-04, SIDE-05, SIDE-14.
+- group8 (real): DIALOG-05..09,11..15 ALREADY_CORRECT; REAL_GAP = DIALOG-10,
+  DIALOG-16..20, FFI-01, FFI-02; FFI-03..11 ALREADY_CORRECT.
+- group5 (text): CP-12..CP-39 ALREADY_CORRECT with live consumers.
+- group7 (text): TOOL-007/008/009/010/012, DIFF-001..005, FORM-001..008,
+  STATE-001/003/004 ALREADY_CORRECT; REAL_GAP = TOOL-011, STATE-002.
+- BLOCKED with exact seams: MSG-005, MSG-008 (`time.streamed`), MSG-009,
+  SIDE-08 (`DialogKind::Mcp`), DIALOG-05 (unreachable `Empty`), DIALOG-20
+  (crash half), TOOL-012 (`metadata.loaded`), THEME-14 (no `SyntaxStyle`
+  producer), W35-MEDIA01 transport.
+
+Conclusion recorded: remaining items are live-wiring (`REAL_GAP`) or missing
+backend producers (`BLOCKED`); neither is unblocked by more agents. group1/2/4/
+6/7 JSON files are stubs and must not be read as verdicts.
