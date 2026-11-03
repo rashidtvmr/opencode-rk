@@ -1,0 +1,69 @@
+{
+  "id": "CP-09",
+  "verdict": "BLOCKED",
+  "base_head": "7cf78666",
+  "requirement": "Render initial reveal and muted/shell border states. Acceptance: fixed-clock frames at start/intermediate/end; no replay after tab remount. C03/C17.",
+  "upstream_oracle": "/Users/mymac/Projects/tmp/opencode @ 450e7b92412c780a7b5a75226bb8d49aaca24e22",
+  "upstream_citations": [
+    "packages/tui/src/component/prompt/index.tsx:1588-1592 highlight(): muted -> theme.border.base; shell -> theme.text.action.primary.selected; else promptDisplay().agentColor ?? theme.border.base",
+    "packages/tui/src/component/prompt/index.tsx:1594-1608 agentMetaAlpha createFadeIn + revealedPromptMetadata WeakSet (no remount replay); borderHighlight = tint(theme.border.base, highlight(), agentMetaAlpha())",
+    "packages/tui/src/context/local.tsx:128-135 color(id): explicit agent.color wins, else palette[index % len], unknown -> palette[0]",
+    "packages/core/src/v1/config/agent.ts:7-10,31-33 Color = hex #RRGGBB | primary|secondary|accent|success|warning|error|info; agent.color optional",
+    "packages/schema/src/agent.ts:19-35 Agent.Info carries color?:string",
+    "packages/util/... signal.ts:20-49 createFadeIn tween (0.16 s)"
+  ],
+  "why_not_bounded": "CP-09 is NOT a bounded patch. The task framing (add a `color` field + a view setter) would create new helpers with NO live caller, which the landability rule rejects. The real blocker is a missing multi-seam producer chain, all four legs absent: (1) no live selected-agent state - the live loop DISCARDS the only agent-cycle input (InputEvent::AgentCycle -> `continue` at tui_entry.rs:10932, comment 'the live loop has no selected-agent state'); (2) the session's selected agent is never fetched - LiveSnapshot (tui_entry.rs:573-604) and snapshot_from_listing (:1140-1242) parse no `agent` field from /api/sessions, unlike upstream data.session.get(id).agent (local.tsx:95); (3) the agent catalogue that IS fetched (/api/commands) is metadata-only and drops color server-side (configured_commands.rs:80-104 mention_agents emits {name,description,read_only} only; primary/hidden/subagent entries dropped at 97-104), and the CLI parser agent_catalogue_rows (tui_entry.rs:5549-5635) reads only name/description/read_only/aliases into a PageRow with no live selected-agent consumer; (4) set_composer_agent (native_view.rs:1308) has ONLY #[test] callers (:5703,5740,5773) so composer_agent is always None live, and the live border rail home_composer_border_cell_style (tui_entry.rs:2820-2839) paints static (paint_color(palette, Slot::Border), root) with no agent color, no reveal tween, and no muted/shell distinction. Additionally the 9-step categorical scale required by agent_palette (native_prompt_pane.rs:604, scales [[[u8;4];9]]) is not exposed: native_theme_runtime exposes only single-step categorical_colors (:906-910).",
+  "live_path_trace": {
+    "live_border_rail_painter": "crates/cli/src/tui_entry.rs:2820-2839 home_composer_border_cell_style; called at :4830 inside the composer cell loop (:4818-4856); active branch :2835-2836 paints `(paint_color(palette, Slot::Border), root)` for glyphs `┃`/`╹` (static, no agent color, no alpha)",
+    "catalogue_fetch_live": "crates/cli/src/tui_entry.rs:7530 (@mention), :7618 (Commands page), :12443 (Agents page) GET /api/commands",
+    "catalogue_server_producer": "crates/server/src/configured_commands.rs:80-104 mention_agents() emits {name,description,read_only}; route crates/server/src/lib.rs:205 /api/commands -> :1813 list_configured_commands",
+    "catalogue_cli_parser": "crates/cli/src/tui_entry.rs:5549-5635 agent_catalogue_rows -> native_view_pages::PageRow (metadata-only; activation Unsupported)",
+    "selected_agent_state": "NONE. native_input_decoder.rs:350,560 emit InputEvent::AgentCycle; tui_entry.rs:10932 discards it via `continue`",
+    "session_agent_fetch": "NONE. LiveSnapshot tui_entry.rs:573-604 has no `agent` field; snapshot_from_listing :1140-1242 never reads session.agent",
+    "composer_setter": "crates/cli/src/native_view.rs:1308 set_composer_agent(agent,variant); production callers: NONE (only tests :5703,5740,5773)",
+    "color_model": "crates/cli/src/native_prompt_pane.rs:604 agent_palette, :619 agent_color, :137 prompt_highlight, :155 border_highlight, :702 MetadataReveal - ALL #[test]-only callers (cp07 :1551, cp09 :1631)"
+  },
+  "missing_seams": [
+    {
+      "file": "crates/server/src/configured_commands.rs",
+      "line": "80-104 (mention_agents)",
+      "why_no_live_consumer": "The only agent-catalogue payload DROPS `color` and filters out primary/hidden entries; the CLI never receives an agent color.",
+      "required_producer": "Emit agent `color` (hex/theme-token) - and, if selection is needed, `mode`/`hidden` - in the /api/commands payload, or a dedicated /api/agents route, matching schema/agent.ts:19-35."
+    },
+    {
+      "file": "crates/cli/src/tui_entry.rs",
+      "line": "1140-1242 snapshot_from_listing / 573-604 LiveSnapshot",
+      "why_no_live_consumer": "The live client never fetches or stores the session's selected agent, so there is no id to resolve a color for.",
+      "required_producer": "Parse and store the session's live `agent` id from /api/sessions (or /api/sessions/{id}), mirroring local.tsx:95 data.session.get(id).agent."
+    },
+    {
+      "file": "crates/cli/src/tui_entry.rs",
+      "line": "10932 (InputEvent::AgentCycle => continue)",
+      "why_no_live_consumer": "The live loop has NO selected-agent state; the only agent-cycle input is discarded, so there is no live current-agent to color the border.",
+      "required_producer": "Live selected-agent state in NativeView plus a production dispatch of AgentCycle (and/or Agents-page selection) that updates it."
+    },
+    {
+      "file": "crates/cli/src/native_view.rs",
+      "line": "1308 set_composer_agent",
+      "why_no_live_consumer": "Only #[test] callers; composer_agent is always None in the running TUI.",
+      "required_producer": "A production caller that sets the observed selected agent (and its color) from the live session agent + parsed catalogue."
+    },
+    {
+      "file": "crates/cli/src/tui_entry.rs",
+      "line": "2820-2839 home_composer_border_cell_style (caller :4830)",
+      "why_no_live_consumer": "The live rail paints a static Slot::Border; it never calls prompt_highlight/border_highlight and holds no reveal clock, so muted/agent/reveal states cannot be rendered.",
+      "required_producer": "A live paint consumer that calls prompt_highlight(agent_color)/border_highlight with a per-prompt MetadataReveal alpha driven by the live FrameClock (native_clock.rs:43 now_ms), plus a live `muted` (leader) source."
+    },
+    {
+      "file": "crates/cli/src/native_theme_runtime.rs",
+      "line": "906-910 categorical_colors",
+      "why_no_live_consumer": "Exposes only the single `.200` categorical step; agent_palette(native_prompt_pane.rs:604) needs nine-step scales to pick 400 (new-designs) vs 200.",
+      "required_producer": "Expose the full categorical hue scales (all 9 steps) so agent_palette can select the correct step."
+    }
+  ],
+  "files": [],
+  "what_changed": "none (blocked; no patch produced)",
+  "live_consumer": "crates/cli/src/tui_entry.rs:2820-2839 IS the live border painter but paints static Slot::Border; no live path supplies an agent color or a reveal alpha. set_composer_agent, agent_color, prompt_highlight, border_highlight and MetadataReveal have only test callers.",
+  "focused_test_plan": "No patch. Existing cp07_agent_selection_and_palette_color_are_data_driven (native_prompt_pane.rs:1551) and cp09_metadata_reveal_tweens_once_and_never_replays (:1631) prove the models in isolation; they do not establish a live consumer or producer, so they cannot satisfy the landability rule.",
+  "note": "A `color` field on the catalogue alone (as the task framing suggests) would be a new helper with no live caller -> REJECTED under the landability rule. See docs/ui-parity/PARITY_STATUS.md:315-316."
+}

@@ -1,0 +1,40 @@
+{
+  "id": "MD-009",
+  "verdict": "BLOCKED",
+  "base_head": "7cf78666",
+  "requirement": "LaTeX/math fences retain last good partial layout only when source extends it; unsupported syntax falls back; long formulas scroll horizontally and do not steal vertical transcript scroll.",
+  "upstream_oracle": "/Users/mymac/Projects/tmp/opencode @ 450e7b92412c780a7b5a75226bb8d49aaca24e22",
+  "upstream_citations": [
+    "packages/tui/src/plugin/builtins.ts:14,30 (Latex builtin registered unconditionally)",
+    "packages/latex/src/plugin.ts:4-13 (registerCodeBlockRenderer('latex'|'math', createLatexCodeBlockRenderer(context.renderer, ...)))",
+    "packages/latex/src/plugin.ts:7-10 (renderer + text.base / text.muted theme colors)"
+  ],
+  "why_not_bounded": "MD-009 cannot be a live-wired patch because NO real math layout engine exists anywhere in the workspace, and the live consumer discards the rendered frame. The only trait impls of MathLayoutEngine are the fail-closed sentinel NoMathEngine (crates/cli/src/native_math.rs:420, returns MathFailure::Unavailable) and the #[test]-only StubEngine (:914, inside mod tests). The live painter `paint_fence_block` builds MathRenderer::without_engine (:2321) which always yields MathOutcome::Fallback and paints the plain code block. The layout boundary MathLayout (:371-375) carries geometry only { width, height, baseline } and the live consumer's Rendered arm only debug_asserts (:2328-2330); it never paints formula cells. No latex/katex/tex crate is present in any Cargo.toml.",
+  "live_path_trace": {
+    "live_consumer": "crates/cli/src/native_view_chat.rs:2318-2332 (paint_fence_block math branch)",
+    "renderer_construction": "crates/cli/src/native_view_chat.rs:2321 MathRenderer::without_engine(MathTheme::new(\"text.base\", \"text.muted\"))",
+    "sentinel": "crates/cli/src/native_math.rs:420 impl MathLayoutEngine for NoMathEngine -> Err(MathFailure::Unavailable)",
+    "real_impls_in_workspace": "NONE (only NoMathEngine :420 and test StubEngine :914)",
+    "boundary_type": "crates/cli/src/native_math.rs:371-375 MathLayout { width, height, baseline } (no glyph cells); :412 trait MathLayoutEngine { fn layout(...) -> Result<MathLayout, MathFailure> }",
+    "renderer": "crates/cli/src/native_math.rs:613 MathRenderer<E: MathLayoutEngine>; :621 impl MathRenderer<NoMathEngine>; :629 impl<E> MathRenderer<E>; last_good/forget_block :657-669"
+  },
+  "missing_seams": [
+    {
+      "file": "crates/cli/src/native_math.rs",
+      "line": "412-424 trait MathLayoutEngine + NoMathEngine; 371-375 MathLayout",
+      "why_no_live_consumer": "The trait has no production implementor; the only non-sentinel impl is test-only. The layout result models geometry only, so it cannot carry the laid-out math glyphs the requirement renders.",
+      "required_producer": "A real LaTeX/math layout engine: TeX-style parser plus glyph layout (fractions, operators, symbols) returning painted cells. Upstream delegates to packages/latex (types.ts, markdown.ts)."
+    },
+    {
+      "file": "crates/cli/src/native_view_chat.rs",
+      "line": "2318-2332",
+      "why_no_live_consumer": "The live consumer is hard-coded to without_engine; its Rendered arm only debug_asserts. It cannot paint a laid-out formula and cannot drive horizontal-scroll-without-stealing-vertical-scroll, because it never emits formula rows.",
+      "required_producer": "A glyph-cell carrier (or cell-returning engine API) plus a live render path copying formula cells into transcript rows with a horizontal scroll box that does not consume vertical wheel/scroll."
+    }
+  ],
+  "files": [],
+  "what_changed": "none (blocked; no patch produced)",
+  "live_consumer": "crates/cli/src/native_view_chat.rs:2318-2332 exists and IS live, but it is wired to the fail-closed sentinel; there is no engine producer to inject.",
+  "focused_test_plan": "No patch. Existing md_009_* tests (native_math.rs:1150-1190+, renderer_without_engine_falls_back :1185) drive StubEngine inside #[cfg(test)] and prove the lifecycle, not a live engine; they cannot satisfy the landability rule.",
+  "note": "Shares the required producer family with MD-008 (diagram/math engine) and MD-007 (live plugin registration). See MD-008.blocked.json, MD-007.blocked.json."
+}

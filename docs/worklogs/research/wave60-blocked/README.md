@@ -14,5 +14,5 @@ Not every dispatched group produced a file: W60-A2 (DIALOG-06..09) failed twice
 with no artifact; W60-B (SIDE-03/04/05), W60-D (MSG-001/002/003) and W60-J
 (THEME-08/09/13/14) reported inline after hitting the step cap; W60-G
 (DIALOG-12..19) completed with no artifact; W60-M (MSG-005/008/009/010) errored
-"Invalid request"; W60-N (MD-007/008/009 + CP-09) was still running at record
-time.
+"Invalid request"; W60-N (MD-007/008/009 + CP-09) reported all four BLOCKED (MD-007/008/009,
+CP-09 artifacts included here).
