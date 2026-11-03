@@ -1811,7 +1811,6 @@ struct PaintCtx {
     vertical_rail: Option<crate::native_tab_rail::RailFrame>,
     compact_tooltip: Option<crate::native_tab_rail::CompactTooltip>,
     context_menu: Option<crate::native_tab_context_menu::MenuFrame>,
-    rename_dialog: Option<(String, Option<String>)>,
     /// Transcript scrollbar geometry for this frame, when shown.
     transcript_scrollbar: Option<crate::native_view::TranscriptScrollbar>,
     /// Sidebar body scrollbar geometry for this frame, when shown.
@@ -2320,7 +2319,6 @@ mod surface_paint_regressions {
             vertical_rail: None,
             compact_tooltip: None,
             context_menu: None,
-            rename_dialog: None,
             transcript_scrollbar: None,
             sidebar_scrollbar: None,
             scrollbar_track: Rgba::rgb(10, 10, 10),
@@ -2381,7 +2379,6 @@ mod surface_paint_regressions {
             vertical_rail: None,
             compact_tooltip: None,
             context_menu: None,
-            rename_dialog: None,
             transcript_scrollbar: Some(scrollbar),
             sidebar_scrollbar: None,
             scrollbar_track: Rgba::rgb(12, 12, 12),
@@ -2471,7 +2468,6 @@ mod surface_paint_regressions {
             vertical_rail: None,
             compact_tooltip: None,
             context_menu: None,
-            rename_dialog: None,
             transcript_scrollbar: None,
             sidebar_scrollbar: Some(scrollbar),
             scrollbar_track: Rgba::rgb(12, 12, 12),
@@ -2540,7 +2536,6 @@ mod surface_paint_regressions {
             vertical_rail: None,
             compact_tooltip: Some(tooltip.clone()),
             context_menu: None,
-            rename_dialog: None,
             transcript_scrollbar: None,
             sidebar_scrollbar: None,
             scrollbar_track: Rgba::rgb(12, 12, 12),
@@ -5241,14 +5236,6 @@ fn native_paint(
             }
         }
     }
-    if let Some((title,error))=ctx.rename_dialog.as_ref() {
-        let w=cols.min(60); let h=5u32.min(rows); let x=(cols-w)/2; let y=(rows-h)/2;
-        let bg=paint_color(ctx.palette,crate::native_theme_runtime::Slot::BackgroundPanel); let fg=paint_color(ctx.palette,crate::native_theme_runtime::Slot::Text);
-        if w>0&&h>0 { renderer.fill_rect(x,y,w,h,bg)?; renderer.draw_text_styled(x+1,y,"Rename session",fg,Some(bg),0)?; }
-        if h>1 { renderer.draw_text_styled(x+1,y+1,&crate::native_view_layout::fit(title,w.saturating_sub(2) as u16),fg,Some(bg),0)?; }
-        if h>2 { renderer.draw_text_styled(x+1,y+2,"Enter: save  Esc: cancel",fg,Some(bg),0)?; }
-        if let Some(error)=error { if h>3 { renderer.draw_text_styled(x+1,y+3,&crate::native_view_layout::fit(error,w.saturating_sub(2) as u16),paint_color(ctx.palette,crate::native_theme_runtime::Slot::TextMuted),Some(bg),0)?; } }
-    }
     renderer.frame(|_| {})?;
     Ok(())
 }
@@ -6730,7 +6717,7 @@ fn native_loop(
     let mut tab_marquee = crate::native_tabs::TabMarquee::new();
     let mut context_menu: Option<crate::native_tab_context_menu::TabContextMenu> = None;
     let mut message_menu: Option<crate::native_view_chat::SessionMessageMenu> = None;
-    let mut rename_input: Option<(crate::native_navigation::SessionRef, String)> = None;
+    let mut rename_input: Option<crate::native_navigation::SessionRef> = None;
     let mut rename_error: Option<String> = None;
     // Rename settlements ride the same bounded background-worker/channel
     // polling pattern as completion/history: spawn_blocking posts one owned
@@ -7177,7 +7164,7 @@ fn native_loop(
         if let Ok(result) = rename_rx.try_recv() {
             if let Some(inflight) = rename_inflight.take() {
                 let owned_by_dialog =
-                    rename_dialog_owns(rename_input.as_ref().map(|(open, _)| open), &inflight);
+                    rename_dialog_owns(rename_input.as_ref(), &inflight);
                 let settlement = rename_settlement(&inflight, result);
                 if let Some((session, title)) = settlement.accepted {
                     // Server truth for exactly the requested id: record it in
@@ -7192,12 +7179,15 @@ fn native_loop(
                     // a cancelled or retargeted dialog is never cleared by
                     // someone else's ack.
                     if owned_by_dialog {
+                        view.dialogs.close();
                         rename_input = None;
                         rename_error = None;
                     }
                 } else if let Some(message) = settlement.message {
                     if owned_by_dialog {
-                        rename_error = Some(message);
+                        rename_error = Some(message.clone());
+                        view.dialogs.prompt_set_busy(false);
+                        view.dialogs.prompt_set_message(Some(message));
                     } else {
                         append_transcript(&mut transcript, format!("error: session rename: {message}"));
                     }
@@ -7210,10 +7200,12 @@ fn native_loop(
             // leaving the request pending forever, and only tell a dialog
             // that is still open for the same in-flight id.
             let owned_by_dialog = rename_inflight.as_ref().is_some_and(|inflight| {
-                rename_dialog_owns(rename_input.as_ref().map(|(open, _)| open), inflight)
+                rename_dialog_owns(rename_input.as_ref(), inflight)
             });
             if owned_by_dialog {
                 rename_error = Some("Rename failed: request exited without a response".into());
+                view.dialogs.prompt_set_busy(false);
+                view.dialogs.prompt_set_message(rename_error.clone());
             }
             rename_worker = None;
             rename_inflight = None;
@@ -8738,7 +8730,6 @@ fn native_loop(
                 .as_ref()
                 .map(|menu| message_menu_frame(menu, crate::native_tab_context_menu::Viewport { width: viewport.0, height: viewport.1 }))
                 .or_else(|| context_menu.as_ref().map(|menu| menu.frame(crate::native_tab_context_menu::Viewport { width: viewport.0, height: viewport.1 }))),
-            rename_dialog: rename_input.as_ref().map(|(_,title)| (title.clone(), rename_error.clone())),
             transcript_scrollbar: view.transcript_scrollbar(),
             sidebar_scrollbar: view.sidebar_scrollbar(),
             scrollbar_track: theme
@@ -9398,17 +9389,30 @@ fn native_loop(
         // Ctrl-C/Ctrl-D cancel only (never exit), Enter submits through the
         // real PATCH route, backspace edits, text is bounded UTF-8.
         if rename_input.is_some() {
+            // The edited text lives in the live `DialogView` prompt
+            // (`ui/dialog-prompt.tsx`), so the painted dialog and the edited
+            // value are the same object; `rename_input` only records which
+            // session the dialog targets.
             if rename_dismisses(&event) {
-                rename_input = None;
-                rename_error = None;
-                utf8.reset();
-                needs_paint = true;
+                // Escape cancel is suppressed while a submit is in flight
+                // (`dialog-prompt.tsx:93-100`).
+                if view.dialogs.prompt_escape() {
+                    view.dialogs.close();
+                    rename_input = None;
+                    rename_error = None;
+                    utf8.reset();
+                    needs_paint = true;
+                }
                 continue;
             }
             if rename_submits(&event) {
-                let (session, value) = rename_input.as_ref().expect("rename owns input");
-                let Some(title) = rename_accepted_title(value) else {
+                // Enter is disabled while busy (`dialog-prompt.tsx:43-46`).
+                let Some(title) = view.dialogs.prompt_submit() else {
+                    continue;
+                };
+                let Some(title) = rename_accepted_title(&title) else {
                     rename_error = Some("Title cannot be empty".into());
+                    view.dialogs.prompt_set_message(rename_error.clone());
                     needs_paint = true;
                     continue;
                 };
@@ -9416,12 +9420,15 @@ fn native_loop(
                 // truthful refusal, never a queued duplicate or a racing ack.
                 if rename_inflight.is_some() {
                     rename_error = Some("A rename request is already in flight".into());
+                    view.dialogs.prompt_set_message(rename_error.clone());
                     needs_paint = true;
                     continue;
                 }
+                let session = rename_input.as_ref().expect("rename owns input").clone();
                 let Some(snapshot) = live.as_ref().filter(|s| s.session_id == session.0) else {
                     rename_error =
                         Some("Rename refused: target session is no longer active".into());
+                    view.dialogs.prompt_set_message(rename_error.clone());
                     needs_paint = true;
                     continue;
                 };
@@ -9443,14 +9450,17 @@ fn native_loop(
                     .map(|(body, status)| (body, status, title, id));
                     let _ = tx.blocking_send(result);
                 }));
+                // Busy: editing is suspended and the spinner line is painted
+                // while the request is in flight (`dialog-prompt.tsx:168-170`).
                 rename_error = None;
+                view.dialogs.prompt_set_busy(true);
+                view.dialogs.prompt_set_message(None);
+                utf8.reset();
                 needs_paint = true;
                 continue;
             }
             if rename_backspace(&event) {
-                if let Some((_, value)) = rename_input.as_mut() {
-                    value.pop();
-                }
+                view.dialogs.prompt_backspace();
                 utf8.reset();
                 needs_paint = true;
                 continue;
@@ -9458,10 +9468,8 @@ fn native_loop(
             if let native_input_decoder::InputEvent::Byte(byte) = &event {
                 if *byte >= 32 {
                     if let Some(ch) = utf8.push(*byte) {
-                        if let Some((_, value)) = rename_input.as_mut() {
-                            if value.len() + ch.len_utf8() <= 256 && !ch.is_control() {
-                                value.push(ch);
-                            }
+                        if ch.len_utf8() <= 256 {
+                            view.dialogs.prompt_push(ch);
                         }
                     }
                     needs_paint = true;
@@ -9537,7 +9545,18 @@ fn native_loop(
                         crate::native_tab_context_menu::MenuAction::NewSession => { let model=selected.as_ref().map(|m|m.qualified()); let saved=if navigation.active().is_some(){navigation.save_active_state(draft.clone(),draft_cursor,view.chat_scroll_offset(),model)}else{Ok(())}; if let Err(e)=saved{append_transcript(&mut transcript,format!("error: new tab: state save refused: {e:?}"));}else{live=None;history_window=None;history_pending=false;history_active=None;history_navigation_request=None;blocked_history_scroll=None;history_tail_refresh_pending=false;history_browsing=false;draft.clear(); draft_parts.clear();draft_cursor=0;navigation.enter_home();session_route=false;view.reset_to_home_after_tab_close();view.set_chat_scroll_offset(0);} },
                         crate::native_tab_context_menu::MenuAction::CopySessionId{session}=>{let frame=selection_clipboard_frame(&session.0);let mut out=std::io::stdout().lock();out.write_all(frame.as_bytes())?;out.flush()?;},
                         crate::native_tab_context_menu::MenuAction::Close{session}=>{close_hold=None;let scroll=view.chat_scroll_offset();match close_tab_transition(&mut view,&mut transcript,&mut navigation,&draft,draft_cursor,daemon_origin,auth,binding_generation,&session,selected.as_ref().map(|m|m.qualified()),scroll){Ok(result)=>apply_close_tab_result(result,&mut view,&mut live,&mut history_window,&mut binding_generation,&mut draft,&mut draft_cursor,&mut selected,&models,&mut session_route,&mut compact_worker),Err(e)=>append_transcript(&mut transcript,format!("error: close tab: {e}"))}},
-                        crate::native_tab_context_menu::MenuAction::Rename{session,current_title}=>{rename_input=Some((session,current_title));rename_error=None;},
+                        crate::native_tab_context_menu::MenuAction::Rename{session,current_title}=>{
+                            rename_error=None;
+                            // DIALOG-10: open the live `DialogPrompt` for the
+                            // rename (`component/dialog-session-rename.tsx`,
+                            // title "Rename session"), seeding it with the
+                            // current title. The prompt owns the text; the
+                            // settlement block closes it on ack.
+                            match view.dialogs.open_prompt("rename", session.0.clone(), "Rename session", &current_title, None) {
+                                Ok(()) => rename_input=Some(session),
+                                Err(error)=>append_transcript(&mut transcript,format!("error: rename dialog: {error:?}")),
+                            }
+                        },
                         crate::native_tab_context_menu::MenuAction::Reopen{session}=>{
                             let scroll=view.chat_scroll_offset();
                             match reopen_tab_transition(&mut view,&mut transcript,&mut navigation,&draft,draft_cursor,daemon_origin,auth,binding_generation,selected.as_ref().map(|m|m.qualified()),scroll,Some(&session)){

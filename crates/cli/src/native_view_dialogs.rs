@@ -411,6 +411,11 @@ struct OpenDialog {
     mcp_status: Vec<String>,
     message_lines: Vec<String>,
     error: StaticError,
+    /// DIALOG-10: live `DialogPrompt` text state (`ui/dialog-prompt.tsx`),
+    /// present only for [`DialogKind::Prompt`]. The model is the tested
+    /// `native_palette::dialog::PromptState`; the live session-rename flow
+    /// drives it.
+    prompt: Option<crate::native_palette::select::PromptState>,
 }
 
 /// Focus-owning dialog overlay state. `Default` is a closed view.
@@ -1042,6 +1047,7 @@ impl DialogView {
                 .map(sanitize_block)
                 .unwrap_or_default(),
             error: request.error.unwrap_or(StaticError::BackendUnavailable),
+            prompt: None,
         });
         // `DialogSelect` seeds `selected: 0` (`ui/dialog-select.tsx:152`), so
         // the first enabled row is selected on open and the first Down moves
@@ -1118,6 +1124,7 @@ impl DialogView {
             mcp_status,
             message_lines,
             error: StaticError::BackendUnavailable,
+            prompt: None,
         });
         // `DialogSelect` seeds `selected` to the focused row
         // (`dialog-select.tsx:152`, `dialog-mcp.tsx:61` `preserveSelection`).
@@ -1137,6 +1144,132 @@ impl DialogView {
     #[must_use]
     pub fn open_kind(&self) -> Option<DialogKind> {
         self.dialog.as_ref().map(|dialog| dialog.kind)
+    }
+
+    /// DIALOG-10: open a live `DialogPrompt` text row (`ui/dialog-prompt.tsx`)
+    /// with the tested `native_palette::dialog::PromptState` model. Content-only
+    /// like [`DialogView::open_mcp`]: it bypasses the non-empty-choices check
+    /// (a prompt has no choice list) and never pends a permission ack. The
+    /// caller drives the text through the `prompt_*` forwarders and closes the
+    /// dialog on submit/cancel.
+    pub fn open_prompt(
+        &mut self,
+        id: impl Into<String>,
+        session_id: impl Into<String>,
+        title: impl Into<String>,
+        initial_value: &str,
+        message: Option<String>,
+    ) -> Result<(), DialogError> {
+        if self.is_open() {
+            return Err(DialogError::AlreadyOpen);
+        }
+        let id = id.into();
+        let title = title.into();
+        if id.len() > MAX_ID_LEN {
+            return Err(DialogError::IdTooLong);
+        }
+        if title.len() > MAX_TITLE_LEN {
+            return Err(DialogError::TitleTooLong);
+        }
+        if message.as_ref().is_some_and(|m| m.len() > MAX_MESSAGE_LEN) {
+            return Err(DialogError::MessageTooLong);
+        }
+        self.dialog = Some(OpenDialog {
+            id,
+            session_id: session_id.into(),
+            kind: DialogKind::Prompt,
+            title: sanitize_inline(&title),
+            choices: Vec::new(),
+            disabled: Vec::new(),
+            permission: Vec::new(),
+            mcp_status: Vec::new(),
+            message_lines: message
+                .as_deref()
+                .map(sanitize_block)
+                .unwrap_or_default(),
+            error: StaticError::BackendUnavailable,
+            prompt: Some(crate::native_palette::select::PromptState::open(
+                initial_value,
+            )),
+        });
+        self.selection = None;
+        self.rejected = false;
+        self.phase = Phase::Open;
+        self.open_sequence = self.open_sequence.saturating_add(1);
+        let entry_id = self.open_sequence;
+        self.modal
+            .replace(entry_id, DialogSize::Medium, false, None, self.focus);
+        Ok(())
+    }
+
+    /// DIALOG-10: the live prompt's current value, or `None` when no prompt is
+    /// open.
+    #[must_use]
+    pub fn prompt_value(&self) -> Option<&str> {
+        self.dialog
+            .as_ref()
+            .and_then(|dialog| dialog.prompt.as_ref())
+            .map(crate::native_palette::select::PromptState::value)
+    }
+
+    /// DIALOG-10: append one character to the live prompt. Returns whether the
+    /// prompt accepted it (busy/blurred/control input is refused).
+    pub fn prompt_push(&mut self, ch: char) -> bool {
+        self.dialog
+            .as_mut()
+            .and_then(|dialog| dialog.prompt.as_mut())
+            .is_some_and(|prompt| prompt.push(ch))
+    }
+
+    /// DIALOG-10: delete the last character of the live prompt.
+    pub fn prompt_backspace(&mut self) -> bool {
+        self.dialog
+            .as_mut()
+            .and_then(|dialog| dialog.prompt.as_mut())
+            .is_some_and(|prompt| prompt.backspace())
+    }
+
+    /// DIALOG-10: the value Enter would submit, or `None` while busy / closed.
+    #[must_use]
+    pub fn prompt_submit(&self) -> Option<String> {
+        self.dialog
+            .as_ref()
+            .and_then(|dialog| dialog.prompt.as_ref())
+            .and_then(crate::native_palette::select::PromptState::submit)
+            .map(str::to_owned)
+    }
+
+    /// DIALOG-10: whether Escape may cancel the live prompt (suppressed while
+    /// busy, `dialog-prompt.tsx:93-100`).
+    #[must_use]
+    pub fn prompt_escape(&self) -> bool {
+        self.dialog
+            .as_ref()
+            .and_then(|dialog| dialog.prompt.as_ref())
+            .is_some_and(crate::native_palette::select::PromptState::escape)
+    }
+
+    /// DIALOG-10: mark the live prompt busy (suspends editing, shows the busy
+    /// line) while a submit is in flight.
+    pub fn prompt_set_busy(&mut self, busy: bool) {
+        if let Some(prompt) = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.prompt.as_mut())
+        {
+            prompt.set_busy(busy);
+        }
+    }
+
+    /// DIALOG-10: replace the live prompt's supplementary message (the inline
+    /// error line under the input). `None` clears it.
+    pub fn prompt_set_message(&mut self, message: Option<String>) {
+        if let Some(dialog) = self.dialog.as_mut() {
+            dialog.message_lines = message
+                .as_deref()
+                .map(sanitize_block)
+                .unwrap_or_default();
+        }
     }
 
     /// The focused choice's display text, or `None` when closed/unselected.
@@ -1526,7 +1659,21 @@ impl DialogView {
                 DialogKind::Question => lines.push(line("question — select an answer".to_string(), Role::Description)),
                 DialogKind::Confirm => lines.push(line("confirmation required".to_string(), Role::Description)),
                 DialogKind::Select => lines.push(line("select: use up/down then Enter".to_string(), Role::Description)),
-                DialogKind::Prompt => lines.push(line("prompt: type then Enter".to_string(), Role::Description)),
+                DialogKind::Prompt => {
+                    // `dialog-prompt.tsx`: the input row shows the current value;
+                    // while busy it is replaced by the spinner line
+                    // (`dialog-prompt.tsx:100-140,168-170`).
+                    match dialog.prompt.as_ref() {
+                        Some(prompt) => match prompt.busy_line() {
+                            Some(busy) => lines.push(line(busy.to_owned(), Role::Description)),
+                            None if prompt.value().is_empty() => {
+                                lines.push(line("  …".to_string(), Role::Description));
+                            }
+                            None => lines.push(line(format!("  {}", prompt.value()), Role::Item)),
+                        },
+                        None => lines.push(line("prompt".to_string(), Role::Description)),
+                    }
+                }
                 DialogKind::Execute => lines.push(line("execute — code and output".to_string(), Role::Description)),
                 DialogKind::Mcp => lines.push(line("select a server · Enter toggle".to_string(), Role::Description)),
                 DialogKind::Error => {
@@ -1596,6 +1743,8 @@ impl DialogView {
                 "Decision rejected — ↑/↓ choose · Enter retry · Esc deny"
             } else if dialog.kind == DialogKind::Mcp {
                 "↑↓ choose · Enter toggle · Esc close"
+            } else if dialog.kind == DialogKind::Prompt {
+                "Enter: save · Esc: cancel"
             } else {
                 "1–9 / ↑↓ choose · Enter / click here confirm · Esc deny"
             };
@@ -5927,6 +6076,55 @@ mod tests {
         assert_eq!(rows[choice - 1], "");
         let footer = rows.iter().position(|row| row.contains("Enter")).unwrap();
         assert_eq!(rows[footer - 1], "");
+    }
+
+    #[test]
+    fn prompt_dialog_edits_value_and_reports_busy_state() {
+        // DIALOG-10: `ui/dialog-prompt.tsx` — a one-row text input seeded with
+        // an initial value. Enter submits the current value; Escape cancels;
+        // both are suppressed while busy (`:43-46`, `:93-100`, `:168-170`).
+        let mut view = DialogView::new();
+        view.open_prompt("rename", "sess-1", "Rename session", "Old title", None)
+            .unwrap();
+        assert_eq!(view.open_kind(), Some(DialogKind::Prompt));
+        assert!(view.intercepts_input());
+        assert_eq!(view.prompt_value(), Some("Old title"));
+        // Editing: append then delete.
+        assert!(view.prompt_push('!'));
+        assert_eq!(view.prompt_value(), Some("Old title!"));
+        assert!(view.prompt_backspace());
+        assert_eq!(view.prompt_value(), Some("Old title"));
+        // A second open is refused while one is visible.
+        assert_eq!(
+            view.open_prompt("rename", "sess-2", "Rename session", "x", None),
+            Err(DialogError::AlreadyOpen)
+        );
+        // Rendered value + the exact upstream footer.
+        let rows = view.render(56, 12);
+        assert!(rows.iter().any(|row| row.contains("Rename session")), "{rows:?}");
+        assert!(rows.iter().any(|row| row.contains("Old title")), "{rows:?}");
+        assert!(
+            rows.iter().any(|row| row.contains("Enter: save · Esc: cancel")),
+            "{rows:?}"
+        );
+        // Enter submits the current value while focused.
+        assert_eq!(view.prompt_submit().as_deref(), Some("Old title"));
+        assert!(view.prompt_escape());
+        // Busy suspends editing, blocks submit and suppresses Escape.
+        view.prompt_set_busy(true);
+        assert_eq!(view.prompt_submit(), None);
+        assert!(!view.prompt_escape());
+        assert!(!view.prompt_push('x'));
+        assert!(!view.prompt_backspace());
+        let busy_rows = view.render(56, 12);
+        assert!(
+            busy_rows.iter().any(|row| row.contains("Working…")),
+            "{busy_rows:?}"
+        );
+        // Cancel clears the whole dialog.
+        view.close();
+        assert!(!view.is_open());
+        assert_eq!(view.prompt_value(), None);
     }
 
     #[test]
