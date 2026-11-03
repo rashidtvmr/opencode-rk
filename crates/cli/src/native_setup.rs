@@ -15,13 +15,38 @@ const MAX_FAVORITE: usize = 32;
 // Keep aligned with the private own-config limit in providers::imported_config.
 const MAX_OWN_CONFIG_BYTES: usize = 4 * 1024 * 1024;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Per-1M-token USD pricing from the catalogue entry's first `cost` row
+/// (`entry["cost"][0]`, upstream `ModelInfo.cost`). `input`/`output` are USD
+/// per 1,000,000 tokens; only finite non-negative values are admitted.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct ModelCost {
+    pub input: f64,
+    pub output: f64,
+}
+
+impl ModelCost {
+    /// Session cost for one usage observation: `(input*in + output*out)/1e6`
+    /// (upstream `cost` semantics). `None` unless the result is finite and
+    /// positive, so a zero-priced turn never claims a money row.
+    #[must_use]
+    pub fn price(&self, input_tokens: u64, output_tokens: u64) -> Option<f64> {
+        let cost =
+            (input_tokens as f64 * self.input + output_tokens as f64 * self.output) / 1_000_000.0;
+        (cost.is_finite() && cost > 0.0).then_some(cost)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct Model {
     pub id: String,
     pub name: String,
     pub provider_id: String,
     pub context_window: Option<u64>,
     pub free: bool,
+    /// First `cost` row of the catalogue entry, driving the live sidebar USD
+    /// session cost (`context.tsx:14/36-38`). `None` when the entry omits cost
+    /// or the row is not finite/non-negative.
+    pub cost: Option<ModelCost>,
     /// Available named variants for this model, from the catalogue entry's
     /// `variants[].id` (`ModelInfo.variants`, `dialog-variant.tsx:9-42`). Drives
     /// the post-select transition (`dialog-model.tsx:25-38`).
@@ -309,9 +334,21 @@ pub(super) fn catalogue(body: &str) -> Result<Vec<Model>, String> {
             continue;
         };
         let name = entry["name"].as_str().unwrap_or(id);
-        let free = entry["cost"].as_array()
+        let costs = entry["cost"].as_array();
+        let free = costs
             .map(|cost| !cost.is_empty() && cost.iter().all(|row| row["input"].as_f64() == Some(0.0)))
             .unwrap_or(false);
+        let cost = costs
+            .and_then(|cost| cost.first())
+            .and_then(|row| {
+                let input = row["input"].as_f64()?;
+                let output = row["output"].as_f64()?;
+                if input.is_finite() && output.is_finite() && input >= 0.0 && output >= 0.0 {
+                    Some(ModelCost { input, output })
+                } else {
+                    None
+                }
+            });
         let variants: Vec<String> = entry["variants"]
             .as_array()
             .map(|list| {
@@ -339,6 +376,7 @@ pub(super) fn catalogue(body: &str) -> Result<Vec<Model>, String> {
                 provider_id: provider.to_owned(),
                 context_window:entry.get("context_window").and_then(Value::as_u64).filter(|value|*value>0),
                 free,
+                cost,
                 variants,
             });
         }
@@ -645,17 +683,17 @@ mod picker_tests {
 
     fn fixture_models() -> Vec<Model> {
         vec![
-            Model { id: "x".into(), name: "Acme X".into(), provider_id: "acme".into(), context_window: None, free: false, variants: Vec::new() },
-            Model { id: "gpt-5.6".into(), name: "Fallback".into(), provider_id: "openai".into(), context_window: None, free: false, variants: Vec::new() },
+            Model { id: "x".into(), name: "Acme X".into(), provider_id: "acme".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
+            Model { id: "gpt-5.6".into(), name: "Fallback".into(), provider_id: "openai".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
         ]
     }
 
     #[test]
     fn picker_rows_orders_recents_first_for_empty_query() {
         let models = vec![
-            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None, free: false, variants: Vec::new() },
-            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None, free: false, variants: Vec::new() },
-            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None, free: false, variants: Vec::new() },
+            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
+            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
+            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
         ];
         let picker = pickers::ModelPickerState::open(&[]);
         let recents = vec![("p".to_owned(), "c".to_owned()), ("p".to_owned(), "a".to_owned())];
@@ -667,9 +705,9 @@ mod picker_tests {
     #[test]
     fn dialog_rows_resolve_recents_first_index_to_committed_model() {
         let models = vec![
-            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None, free: false, variants: Vec::new() },
-            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None, free: false, variants: Vec::new() },
-            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None, free: false, variants: Vec::new() },
+            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
+            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
+            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
         ];
         let recents = vec![("p".to_owned(), "c".to_owned())];
         // Empty query -> recents-first picker order, not raw catalogue order.
@@ -724,7 +762,7 @@ mod picker_tests {
     fn post_select_dialog_opens_variant_picker_only_when_variants_exist() {
         let with_variants = Model {
             id: "x".into(), name: "X".into(), provider_id: "p".into(),
-            context_window: None, free: false,
+            context_window: None, free: false, cost: None,
             variants: vec!["default".into(), "thinking".into()],
         };
         let no_variants = Model { variants: Vec::new(), ..with_variants.clone() };
@@ -740,7 +778,7 @@ mod picker_tests {
         let state = dir.write("model.json", r#"{"favorite":[{"providerID":"p","modelID":"c"}]}"#);
         let model = |id: &str| Model {
             id: id.into(), name: id.into(), provider_id: "p".into(),
-            context_window: None, free: false, variants: Vec::new(),
+            context_window: None, free: false, cost: None, variants: Vec::new(),
         };
         // A new favorite is prepended (upstream `toggleFavorite`).
         assert_eq!(toggle_favorite_at(&state, &model("a")), Ok(true));
@@ -759,7 +797,7 @@ mod picker_tests {
         let state = dir.write("model.json", "{}");
         let model = Model {
             id: "a".into(), name: "A".into(), provider_id: "p".into(),
-            context_window: None, free: false, variants: Vec::new(),
+            context_window: None, free: false, cost: None, variants: Vec::new(),
         };
         assert_eq!(save_variant_at(&state, &model, Some("thinking")), Ok(()));
         assert_eq!(variant_for_at(Some(&state), "p", "a"), Some("thinking".to_owned()));
@@ -887,6 +925,28 @@ mod picker_tests {
     }
 
     #[test]
+    fn catalogue_parses_first_cost_row_and_prices_usage() {
+        let models = catalogue(r#"{"models":[
+            {"provider_id":"openai","id":"priced","name":"Priced","cost":[{"input":3.0,"output":12.0}]},
+            {"provider_id":"openai","id":"free","name":"Free","cost":[{"input":0,"output":0}]},
+            {"provider_id":"openai","id":"nocost","name":"Missing"},
+            {"provider_id":"openai","id":"empty","name":"Empty","cost":[]}
+        ]}"#).unwrap();
+        let cost = |id: &str| models.iter().find(|m| m.id == id).unwrap().cost;
+        // First cost row is retained; absent/empty becomes None.
+        assert_eq!(cost("priced"), Some(ModelCost { input: 3.0, output: 12.0 }));
+        assert_eq!(cost("free"), Some(ModelCost { input: 0.0, output: 0.0 }));
+        assert_eq!(cost("nocost"), None);
+        assert_eq!(cost("empty"), None);
+        // Upstream `cost` semantics: (input*in + output*out)/1e6.
+        assert_eq!(cost("priced").unwrap().price(1_000_000, 1_000_000), Some(15.0));
+        assert_eq!(cost("priced").unwrap().price(500_000, 0), Some(1.5));
+        // A zero-priced or zero-token turn never claims a money row.
+        assert_eq!(cost("free").unwrap().price(1_000_000, 1_000_000), None);
+        assert_eq!(cost("priced").unwrap().price(0, 0), None);
+    }
+
+    #[test]
     fn custom_catalogue_preserves_router_identity_and_complete_list() {
         let rows: Vec<_> = (0..1159).map(|i| json!({"id":format!("route/model-{i}"),"provider_id":"9router","name":format!("Model {i}")})).collect();
         let models = catalogue(&json!({"models": rows}).to_string()).unwrap();
@@ -895,7 +955,7 @@ mod picker_tests {
         assert_eq!(models[index].qualified(), "9router/route/model-1158");
         assert_eq!(visible_rows(&models, "9router/route/model-1158"), vec![index]);
     }
-    fn models() -> Vec<Model> { vec![Model { id: "j-model".into(), name: "Jöhn 🚀".into(), provider_id: "openai".into(),context_window:None, free:false, variants:Vec::new() }, Model { id: "k-model".into(), name: "Kappa".into(), provider_id: "openai".into(),context_window:None, free:false, variants:Vec::new() }] }
+    fn models() -> Vec<Model> { vec![Model { id: "j-model".into(), name: "Jöhn 🚀".into(), provider_id: "openai".into(),context_window:None, free:false, cost:None, variants:Vec::new() }, Model { id: "k-model".into(), name: "Kappa".into(), provider_id: "openai".into(),context_window:None, free:false, cost:None, variants:Vec::new() }] }
     #[test] fn query_is_utf8_and_jk_are_search_text() {
         let m = models();
         assert_eq!(visible_rows(&m, "öhn"), vec![0]);

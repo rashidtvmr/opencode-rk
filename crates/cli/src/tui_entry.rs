@@ -8060,6 +8060,17 @@ fn native_loop(
                                 ),
                             ));
                             view.set_usage(input,output,cached,reasoning);
+                            // SIDE-03: price this turn's measured usage with the
+                            // selected model's catalogue cost (`cost.ts`/`context.tsx`
+                            // semantics). `input`/`output` are the inclusive measured
+                            // totals; a model without a catalogue cost leaves the row
+                            // hidden rather than inventing a price.
+                            view.set_cost(
+                                selected
+                                    .as_ref()
+                                    .and_then(|model| model.cost)
+                                    .and_then(|cost| cost.price(input, output)),
+                            );
                         }
                         native_turn::Event::ToolCall {
                             call_id,
@@ -14536,7 +14547,7 @@ mod tab_binding_tests {
         let mut selected = None;
         let mut route = true;
         let mut compact_worker = None;
-        let models = [native_setup::Model { id: "target".into(), name: "Target".into(), provider_id: "fixture".into(), context_window: None, free: false, variants: Vec::new() }];
+        let models = [native_setup::Model { id: "target".into(), name: "Target".into(), provider_id: "fixture".into(), context_window: None, free: false, cost: None, variants: Vec::new() }];
         apply_close_tab_result(result, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut selected, &models, &mut route, &mut compact_worker);
         assert_eq!(live.as_ref().unwrap().session_id, B, "Send reads its session identity from live");
         assert_eq!(generation, 5);
@@ -14583,7 +14594,7 @@ mod tab_binding_tests {
         let mut selected = None;
         let mut route = false;
         let mut compact_worker = None;
-        let models = [native_setup::Model { id: "target".into(), name: "Target".into(), provider_id: "fixture".into(), context_window: None, free: false, variants: Vec::new() }];
+        let models = [native_setup::Model { id: "target".into(), name: "Target".into(), provider_id: "fixture".into(), context_window: None, free: false, cost: None, variants: Vec::new() }];
         apply_close_tab_result(result, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut selected, &models, &mut route, &mut compact_worker);
         assert_eq!(live.as_ref().map(|s| s.session_id.as_str()), Some(B));
         assert_eq!(generation, 5);
@@ -14729,7 +14740,7 @@ mod tab_binding_tests {
         let mut cursor = 0;
         let mut route = true;
         let mut completion = crate::native_completion::Completion::default();
-        let models = vec![native_setup::Model { id: "child".into(), name: "Child".into(), provider_id: "fixture".into(), context_window: None, free: false, variants: Vec::new() }];
+        let models = vec![native_setup::Model { id: "child".into(), name: "Child".into(), provider_id: "fixture".into(), context_window: None, free: false, cost: None, variants: Vec::new() }];
         let mut selected = None;
         let snapshot = LiveSnapshot { origin: "http://127.0.0.1:1".into(), session_id: A.into(), title: "A".into(), state: "idle".into(), updated_at: String::new(), message_count: 0, last_text: None, history: vec![], typed_history: vec![], raw_history: vec![], history_next_before: None, history_children: 0, parent_session: true, parent_session_id: Some(B.into()), directory: None, session_titles: vec![], session_project_labels: vec![], session_vcs: vec![], session_revert: None };
         commit_child_route(snapshot, "child draft".into(), 2, 8, 13, Some("fixture/child".into()), &models, &mut selected, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut route, &mut completion);
@@ -15248,6 +15259,7 @@ mod command_consumption_tests {
             provider_id: "fixture".into(),
             context_window: None,
             free: false,
+            cost: None,
             variants: Vec::new(),
         }];
         let mut route = true;
