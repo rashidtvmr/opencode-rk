@@ -6640,6 +6640,104 @@ fn accept_command_completion(
     Some(route.to_owned())
 }
 
+/// Live-boot identity gate for the vendored OpenTUI artifact (FFI-01).
+///
+/// `Ok(Some)` = the on-disk artifact matches the pinned OpenTUI commit
+/// (bytes, fingerprint and every required ABI symbol): safe to drive the
+/// audited ABI. `Ok(None)` = identity could not be checked in this
+/// environment (no `nm`, absent vendored artifact, unsupported host):
+/// nothing was disproven, boot proceeds. `Err` = the readable artifact is
+/// *not* the pinned OpenTUI (drifted bytes, wrong symbol table, corrupt
+/// pin): the TUI must refuse the unaudited binary.
+#[cfg(feature = "native")]
+fn verify_native_identity(
+    probe: Result<
+        opencode_rk_opentui_bridge::native_identity::Identified,
+        opencode_rk_opentui_bridge::native_identity::IdentityError,
+    >,
+) -> Result<Option<opencode_rk_opentui_bridge::native_identity::Identified>, String> {
+    use opencode_rk_opentui_bridge::native_identity::IdentityError;
+    match probe {
+        Ok(identity) => Ok(Some(identity)),
+        // Environmental limits, not evidence of drift: identity is simply
+        // unverifiable here, so boot proceeds without a verified pin.
+        Err(
+            IdentityError::Io { .. }
+            | IdentityError::UnknownTriple { .. }
+            | IdentityError::UnsupportedHost,
+        ) => Ok(None),
+        Err(other) => Err(other.to_string()),
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod native_identity_gate_tests {
+    use super::verify_native_identity;
+    use opencode_rk_opentui_bridge::native_identity::{
+        self, Identified, IdentityError, OPENTUI_COMMIT,
+    };
+
+    fn verified() -> Identified {
+        Identified {
+            opencode_commit: native_identity::OPENCODE_COMMIT,
+            opentui_version: native_identity::OPENTUI_VERSION,
+            opentui_commit: OPENTUI_COMMIT,
+            abi_version: native_identity::ABI_VERSION,
+            triple: native_identity::HOST_TRIPLE,
+            symbol_count: native_identity::REQUIRED_SYMBOLS.len(),
+        }
+    }
+
+    #[test]
+    fn verified_artifact_passes_boot_with_identity() {
+        let identity = verify_native_identity(Ok(verified()))
+            .expect("a verified artifact is never fatal")
+            .expect("a verified artifact yields an identity");
+        assert_eq!(identity.opentui_commit, OPENTUI_COMMIT);
+        assert_eq!(identity.opencode_commit, native_identity::OPENCODE_COMMIT);
+    }
+
+    #[test]
+    fn unverifiable_environment_proceeds_without_identity() {
+        let absent = IdentityError::Io {
+            path: "/absent/native/lib/libopentui.dylib".into(),
+            kind: std::io::ErrorKind::NotFound,
+        };
+        assert!(
+            verify_native_identity(Err(absent))
+                .expect("an unreadable artifact is not fatal")
+                .is_none()
+        );
+        assert!(
+            verify_native_identity(Err(IdentityError::UnsupportedHost))
+                .expect("an unsupported host is not fatal")
+                .is_none()
+        );
+        assert!(
+            verify_native_identity(Err(IdentityError::UnknownTriple {
+                triple: "wasm32-unknown-unknown".into()
+            }))
+            .expect("an unpinned triple is not fatal")
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn drifted_artifact_is_fatal() {
+        assert_eq!(
+            verify_native_identity(Err(IdentityError::FingerprintMismatch {
+                expected: 0x01,
+                actual: 0x02,
+            })),
+            Err("artifact fingerprint 0x2, pinned 0x1".to_string())
+        );
+        assert_eq!(
+            verify_native_identity(Err(IdentityError::MissingSymbol("createRenderer"))),
+            Err("artifact does not export createRenderer".to_string())
+        );
+    }
+}
+
 fn native_loop(
     memory: &[MemoryFile],
     mut live: Option<LiveSnapshot>,
@@ -6651,6 +6749,42 @@ fn native_loop(
     explicit_session_route: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (cols, rows) = native_size();
+    // FFI-01: verify the artifact this build links against is still the
+    // pinned OpenTUI revision before driving its audited ABI. A readable but
+    // drifted artifact refuses boot; an unverifiable environment proceeds.
+    #[cfg(feature = "native")]
+    {
+        use opencode_rk_opentui_bridge::native_identity;
+        match verify_native_identity(native_identity::probe_installed(
+            native_identity::HOST_TRIPLE,
+        )) {
+            Ok(Some(identity)) => crate::native_debug::event(
+                "ui.identity",
+                serde_json::json!({
+                    "opentui_commit": identity.opentui_commit,
+                    "opentui_version": identity.opentui_version,
+                    "opencode_commit": identity.opencode_commit,
+                    "abi_version": identity.abi_version,
+                    "triple": identity.triple,
+                    "required_symbols": identity.symbol_count,
+                }),
+            ),
+            Ok(None) => crate::native_debug::event(
+                "ui.identity_unknown",
+                serde_json::json!({"reason": "artifact identity could not be checked on this host"}),
+            ),
+            Err(reason) => {
+                crate::native_debug::event(
+                    "ui.identity_mismatch",
+                    serde_json::json!({"reason": reason}),
+                );
+                return Err(format!(
+                    "native OpenTUI artifact is not the pinned revision: {reason}"
+                )
+                .into());
+            }
+        }
+    }
     let mut renderer = NativeRenderer::create(cols, rows)?;
     crate::native_debug::event(
         "ui.start",
