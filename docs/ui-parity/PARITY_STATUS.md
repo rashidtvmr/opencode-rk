@@ -165,6 +165,26 @@ tests) and a mergeable commit.
 `CP-07`, `DIFF-003` and `MSG-005` re-verified as still `BLOCKED` with the exact
 missing producer recorded in `artifacts/verdicts/W69-V14-recheck-a.md`.
 
+**Additional wave-68 re-verifications** (independent, source-inspected; full
+evidence in `artifacts/verdicts/`).
+
+| Item | Was | Now | Evidence |
+| --- | --- | --- | --- |
+| `SIDE-10` | `REAL_GAP` | `LANDED` | `0d4f26a7` stage-revert recompute + publish, and `a08a2a06`/`cdc73e6f` route `GET /todo` through `todos_at_boundary` (`server/src/todo_http.rs`), matching `packages/tui/src/util/todo.ts:33-43` |
+| `CP-33` | unrecorded | `ALREADY_CORRECT` | Live `composer_enter_plan` (`tui_entry.rs:12502`), blank-Enter promotion (`native_composer.rs:547`), test `composer_enter_routes_through_plan_submit_queue_and_steer`; upstream `index.tsx:1650-1657` |
+| `CP-35` | unrecorded | `ALREADY_CORRECT` | Live `reconcile_parts` (`tui_entry.rs:11288,12156,12179,12196,12201,13877`) + `TrackedDraft::realign_after_edit` (`native_paste.rs:1206`); 11 `cp35_*`/`reconcile_*` tests; upstream `component/prompt/index.tsx:707-761` |
+| `CP-34` | unrecorded | `REAL_GAP` | `DraftStash`/`PromptStash` (`native_paste.rs:487/571`) unwired; per-tab save/restore persists draft/cursor/scroll but never `draft_parts`; missing upstream `draft-stash.ts` takeDraft/saveDraft |
+| `STATE-001` | `REAL_GAP` | `REAL_GAP` | Spinner clock live as now_ms/80 index only; culling/`destroy`/frame-list/`Background::compose` (`native_progress.rs:207/226/45`) unwired |
+| `STATE-003` | `REAL_GAP` | `REAL_GAP` | `retry_label`/`error_line`/`free_limit_notice`/`token_diagnostics_label` (`native_progress.rs:292-579`) only consumed by `ShellFooter` tests; no retry countdown fed live |
+| `STATE-004` | `REAL_GAP` | `REAL_GAP` | `BackgroundHint`/`background_candidate` (`native_progress.rs:668-708`) only in `native_shell.rs` tests; no 3s-delayed hint source live |
+| `MEDIA-001` | `REAL_GAP` | `REAL_GAP` | `open_image_preview` (`native_view_pages.rs:788`) + models (`native_image_preview.rs:1047-1161`) test-only; no live attachment/preview caller |
+| `PAR-02`/`PAR-03`/`PAR-06` | `BLOCKED` | `BLOCKED` | capability table / upstream capture adapter / font-pixel substrate all still absent (holds) |
+| `TOOL-011` | `BLOCKED` | `BLOCKED` | `execute_dialog` (`native_tool_rows.rs:1159`) test-only; render placeholder (`native_view_dialogs.rs:1426-1429`) |
+| `LAY-01..09` | partial/unrecorded | `ALREADY_CORRECT` | every layout clause has a live consumer plus an exact-width test and a pinned-upstream match; full file:line evidence in `artifacts/verdicts/W68-V1-layout.md` |
+| `TOOL-007`/`008`/`009`/`012` | unrecorded | `ALREADY_CORRECT` | live `native_view_chat.rs:2658-2759` tool/subagent row rendering with `native_tool_rows.rs` tests; upstream `index.tsx:2574-3344` (evidence in `W69-V10-tools.md`) |
+| `TOOL-010` | unrecorded | `REAL_GAP` | `execute_calls`/`execute_call_summary` (`native_tool_rows.rs:278-315`) live but no live clickable child expansion or structured-argument rows; upstream `index.tsx:3348-3397` |
+| `DIALOG-16`/`DIALOG-17`/`DIALOG-18` | `BLOCKED` | `REAL_GAP` | producers now exist but are unwired: settings numeric limits + save lock + experiments (`native_settings.rs:341-561`) test-only; stash/workspaces/file-changes models + `ArmedDelete` (`native_palette.rs:3078/4389`) unreachable; `diff_dialog` chrome (`native_view_dialogs.rs:3723`) zero consumers |
+
 Base SHA `0d74af30`. 28 parallel workers on the four authorized routes, each
 artifact-first and read-only on canonical. Per-ID JSON verdicts live in
 `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave44/`.
