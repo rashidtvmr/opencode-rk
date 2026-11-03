@@ -1,6 +1,6 @@
 # OpenCode V2 UI parity — consolidated status
 
-- **Canonical line:** `main-v2` @ `cf32c247` (remote verified)
+- **Canonical line:** `main-v2` @ `98bf3ac2` (remote verified)
 - **Upstream oracle:** `/Users/mymac/Projects/tmp/opencode` @ `450e7b92412c780a7b5a75226bb8d49aaca24e22`
 - **Checklist:** `docs/ui-parity/opencode-ui-parity-kit/checklist.json` (223 items)
 - **Method:** source inspection of the live Rust path (implementation + a
@@ -31,15 +31,22 @@ artifact-first and read-only on canonical. Per-ID JSON verdicts live in
 `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave44/`.
 This pass **finalizes** the following IDs and supersedes their earlier entries.
 
-> **Wave-47 supersedes this table where they differ.** The wave-47 pass
-> re-verified every remaining `REAL_GAP` item and moved 5 to `ALREADY_CORRECT`,
-> 1 to `LANDED` and 29 to `BLOCKED` (see the verdict sections below). Rows in
-> this wave-44 table that still read `REAL_GAP` for `PAR-04`, `PAR-09`,
-> `PAR-10`, `PAR-19`, `SIDE-04`, `MSG-001..003`, `MSG-008..010`,
-> `DIALOG-12..20`, `FFI-01/03/04/06/07/08/11`, `LAY-10/11/13` or
-> `TAB-04/06/10` are superseded by `BLOCKED`; rows for `PAR-11`, `LAY-12`,
-> `LAY-17`, `MSG-004` and `FFI-05` are superseded by `ALREADY_CORRECT`; and the
-> `MSG-007` row is superseded by `LANDED` (`4a6b487b`).
+> **This wave-44 table is HISTORICAL. Do not read a verdict from it.**
+> Later waves (45–54) superseded many rows. **The authoritative verdicts are the
+> summary counts at the end of this document and the `REAL_GAP` / `BLOCKED` /
+> `LANDED` sections below.** Specifically, wave-44 rows that still read
+> `REAL_GAP` are superseded as follows:
+> - to `BLOCKED`: `PAR-04`, `PAR-09`, `PAR-10`, `PAR-19`, `SIDE-04`,
+>   `MSG-001..003`, `MSG-005`, `MSG-008..010`, `DIALOG-12..20`,
+>   `FFI-01/03/04/06/07/08/11`, `LAY-10/11/13`, `TAB-04/06/10`, `CP-07`,
+>   `CP-09`, `MD-007`, `THEME-08/09/13/14`, `TOOL-006/011`, `DIFF-001/003`,
+>   `STATE-002`, `FORM-001`;
+> - to `ALREADY_CORRECT`: `PAR-11`, `LAY-12`, `LAY-17`, `MSG-004`, `FFI-05`,
+>   `CP-08`;
+> - to `LANDED`: `MSG-007` (`4a6b487b`), `CP-11` (`f8e276cf`), `DIALOG-04`
+>   (`d137313d`), `DIALOG-20` (toast half, `d891f9c3`), `TAB-23` (`ae56897f`),
+>   `SIDE-08` (`76fcb75a`), `THEME-12` (`bc24dd30`), `PAR-16`/`PAR-22`
+>   (`f240367b`/`99e0e6ae`).
 
 **Reclassified / newly finalized:**
 

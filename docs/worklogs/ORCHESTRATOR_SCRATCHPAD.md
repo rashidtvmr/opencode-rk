@@ -11982,3 +11982,21 @@ BLOCKED with exact seams; G-DIALOG-C returned analysis only (DIALOG-12/13/14/15
 BLOCKED; DIALOG-15's MCP half superseded by the live SIDE-08 dialog); G-DIFF
 produced only a test log showing the DIFF-001..005 model tests pass (no patch).
 The rest returned empty at the harness step cap.
+
+### Wave-54 dispatch (base `98bf3ac2`)
+
+Dispatched 14 surgical workers under `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave54/`
+(BRIEF.md). Hard rules added after the wave-53 step-cap failures: max 8 reading
+tool calls, no worktree, write artifacts, run `cargo check`.
+
+- Patch owners (`@vyce-deepseek-v41`): G54-MEDIA (MEDIA-001), G54-DIALOG02
+  (DIALOG-02), G54-SIDE14 (SIDE-14), G54-SIDE10 (SIDE-10).
+- Verify owners (`@9router-vyce-deepseek-v4.1-free-combined`): G54-CP09,
+  G54-TAB, G54-THEME, G54-TOOL, G54-MSG, G54-DIALOG-REST, G54-FFI,
+  G54-STATE-FORM.
+- `@9router-river-glm-5-3-flash`: G54-LAY. `@9router-luna-free`: G54-DIFF.
+
+Also fixed the status doc: replaced the incomplete "Wave-47 supersedes" note with
+a comprehensive superseded-row banner (the wave-44 table is historical; the
+summary counts + sections are authoritative) and corrected the stale canonical
+line (`cf32c247` -> `98bf3ac2`).
