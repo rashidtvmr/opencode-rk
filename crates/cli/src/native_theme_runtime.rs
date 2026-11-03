@@ -1597,6 +1597,40 @@ pub fn config_new_designs(config: &Value) -> bool {
         .and_then(Value::as_bool)
         .unwrap_or(false)
 }
+
+/// `config.tabs.indicators` (`config/index.tsx:199`, default `"status"` at
+/// `:336`; consumed by `session-tabs.tsx:525` as
+/// `numbers={(props.indicators ?? config.tabs.indicators) === "numbers"}`).
+/// Only the exact literal `"numbers"` selects the numeric column; anything
+/// else (absent, `"status"`, a non-string, a non-object root) selects `Status`.
+#[must_use]
+pub fn config_tab_indicators(config: &Value) -> crate::native_tabs::TabIndicators {
+    config
+        .get("tabs")
+        .and_then(Value::as_object)
+        .and_then(|tabs| tabs.get("indicators"))
+        .and_then(Value::as_str)
+        .map_or(crate::native_tabs::TabIndicators::Status, |value| {
+            if value == "numbers" {
+                crate::native_tabs::TabIndicators::Numbers
+            } else {
+                crate::native_tabs::TabIndicators::Status
+            }
+        })
+}
+
+/// Whether `config.tabs.indicators` is explicitly present and valid. Used by
+/// the live preference reader so an inline document that omits the key cannot
+/// clobber a disk value (unlike the boolean `config_new_designs` accessor).
+#[must_use]
+pub fn config_tab_indicators_present(config: &Value) -> bool {
+    config
+        .get("tabs")
+        .and_then(Value::as_object)
+        .and_then(|tabs| tabs.get("indicators"))
+        .is_some()
+}
+
 /// no environment probing, no user-database reads, no secret or log files.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LoadError {
@@ -4254,6 +4288,38 @@ mod theme10_new_designs_gate {
         assert!(!config_new_designs(&json!({ "experimental": { "new-designs": "true" } })));
         assert!(!config_new_designs(&json!({ "experimental": { "client-mcp": true } })));
         assert!(!config_new_designs(&json!([])));
+    }
+
+    #[test]
+    fn config_tab_indicators_matches_upstream_accessor() {
+        // config/index.tsx:199,336 + session-tabs.tsx:525: only the exact
+        // literal "numbers" selects the numeric column; the default is "status".
+        assert_eq!(config_tab_indicators(&json!({})), crate::native_tabs::TabIndicators::Status);
+        assert_eq!(
+            config_tab_indicators(&json!({ "tabs": {} })),
+            crate::native_tabs::TabIndicators::Status
+        );
+        assert_eq!(
+            config_tab_indicators(&json!({ "tabs": { "indicators": "numbers" } })),
+            crate::native_tabs::TabIndicators::Numbers
+        );
+        assert_eq!(
+            config_tab_indicators(&json!({ "tabs": { "indicators": "status" } })),
+            crate::native_tabs::TabIndicators::Status
+        );
+        assert_eq!(
+            config_tab_indicators(&json!({ "tabs": { "indicators": "Numbers" } })),
+            crate::native_tabs::TabIndicators::Status,
+            "only the exact lowercase literal counts"
+        );
+        assert_eq!(
+            config_tab_indicators(&json!({ "tabs": { "indicators": true } })),
+            crate::native_tabs::TabIndicators::Status
+        );
+        assert_eq!(config_tab_indicators(&json!([])), crate::native_tabs::TabIndicators::Status);
+        assert!(!config_tab_indicators_present(&json!({})));
+        assert!(!config_tab_indicators_present(&json!({ "tabs": {} })));
+        assert!(config_tab_indicators_present(&json!({ "tabs": { "indicators": "numbers" } })));
     }
 
     #[test]

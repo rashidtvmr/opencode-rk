@@ -215,6 +215,33 @@ impl UiPreferences {
         selected.unwrap_or(false)
     }
 
+    /// TAB-04: resolve pinned upstream `tabs.indicators` (`config/index.tsx:199`,
+    /// default `"status"` at `:336`; `session-tabs.tsx:525`). Disk config
+    /// applies first, an inline override second, and the last document that
+    /// actually carries the key wins — a document that omits it does not clobber
+    /// a lower-precedence value.
+    pub fn tab_indicators(
+        cli_path: Option<&Path>,
+        inline: Option<&str>,
+    ) -> crate::native_tabs::TabIndicators {
+        let mut selected: Option<crate::native_tabs::TabIndicators> = None;
+        if let Some(path) = cli_path {
+            let mut budget = crate::native_ui_budget::ReadBudget::default();
+            if let Ok(Some(text)) = budget.read(path, MAX_CONFIG_BYTES, "CLI config") {
+                if let Some(value) = parse_cli_tab_indicators(&text) {
+                    selected = Some(value);
+                }
+            }
+        }
+        if let Some(text) = inline.filter(|text| !text.is_empty() && text.len() <= MAX_CONFIG_BYTES)
+        {
+            if let Some(value) = parse_cli_tab_indicators(text) {
+                selected = Some(value);
+            }
+        }
+        selected.unwrap_or(crate::native_tabs::TabIndicators::Status)
+    }
+
     pub fn tab_orientation(
         cli_path: Option<&Path>,
         inline: Option<&str>,
@@ -1201,6 +1228,17 @@ fn parse_cli_tab_scope(text: &str) -> Result<Option<bool>, ()> {
     }
 }
 
+fn parse_cli_tab_indicators(text: &str) -> Option<crate::native_tabs::TabIndicators> {
+    if text.len() > MAX_CONFIG_BYTES {
+        return None;
+    }
+    let value: Value = serde_json::from_str(&strip_jsonc(text).ok()?).ok()?;
+    if !crate::native_theme_runtime::config_tab_indicators_present(&value) {
+        return None;
+    }
+    Some(crate::native_theme_runtime::config_tab_indicators(&value))
+}
+
 fn parse_cli_tab_orientation(text: &str) -> Result<Option<crate::native_navigation::TabOrientation>, ()> {
     if text.len() > MAX_CONFIG_BYTES {
         return Err(());
@@ -1367,6 +1405,31 @@ mod tab_config_tests {
         let (orientation, diagnostics) = UiPreferences::tab_orientation(None, Some(&oversized));
         assert_eq!(orientation, TabOrientation::Horizontal);
         assert_eq!(diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn tab_indicators_defaults_to_status_and_inline_overrides_global() {
+        use crate::native_tabs::TabIndicators;
+        assert_eq!(UiPreferences::tab_indicators(None, None), TabIndicators::Status);
+        assert_eq!(UiPreferences::tab_indicators(None, Some("")), TabIndicators::Status);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        fs::write(&path, r#"{"tabs":{"indicators":"numbers"}}"#).unwrap();
+        assert_eq!(UiPreferences::tab_indicators(Some(&path), None), TabIndicators::Numbers);
+        // An inline document that omits the key must not clobber the disk value.
+        assert_eq!(
+            UiPreferences::tab_indicators(Some(&path), Some(r#"{"tabs":{"mode":"on"}}"#)),
+            TabIndicators::Numbers
+        );
+        assert_eq!(
+            UiPreferences::tab_indicators(Some(&path), Some(r#"{"tabs":{"indicators":"status"}}"#)),
+            TabIndicators::Status
+        );
+        // Invalid/oversized inline falls back to the disk value without leaking.
+        assert_eq!(
+            UiPreferences::tab_indicators(Some(&path), Some("not-json")),
+            TabIndicators::Numbers
+        );
     }
 }
 

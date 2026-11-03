@@ -113,6 +113,16 @@ pub struct TabInput {
     /// Marquee window start for the hovered title (0 paints the plain title).
     /// The strip applies it with the exact title budget its layout reserves.
     pub marquee_offset: usize,
+    /// TAB-04: `config.tabs.indicators` (`config/index.tsx:199`, default
+    /// `"status"`). `Numbers` keeps the numeric label in the indicator column
+    /// instead of the status glyph (`session-tabs.tsx:525`). Defaults to
+    /// `Status`, so a caller that never sets it keeps the status column.
+    pub indicators: TabIndicators,
+    /// The tab's 1-based number (`sessionTabNumberLabel(index)`,
+    /// `context/session-tabs-model.ts:10-12`), painted in `Numbers` mode.
+    /// Empty when the producer did not assign one; `Numbers` then paints the
+    /// empty column rather than fabricating a number.
+    pub number: String,
 }
 
 impl TabInput {
@@ -128,7 +138,16 @@ impl TabInput {
             session: tab.session.clone(),
             unread: false,
             marquee_offset: 0,
+            indicators: TabIndicators::Status,
+            number: String::new(),
         }
+    }
+
+    /// TAB-04: apply the live `config.tabs.indicators` selection to every tab.
+    #[must_use]
+    pub fn with_indicators(mut self, indicators: TabIndicators) -> Self {
+        self.indicators = indicators;
+        self
     }
 }
 
@@ -754,7 +773,8 @@ impl TabStrip {
     pub fn from_navigation(nav: &NavigationState, attention: &[Attention]) -> Vec<TabInput> {
         nav.tabs()
             .iter()
-            .map(|tab| {
+            .enumerate()
+            .map(|(index, tab)| {
                 let mut input = TabInput::from_tab(
                     nav,
                     tab,
@@ -762,6 +782,11 @@ impl TabStrip {
                         .map(|a| a.session == tab.session)
                         .unwrap_or(false),
                 );
+                // TAB-04: the 1-based tab number painted in `Numbers` mode
+                // (`sessionTabNumberLabel(index)` = `String(index + 1)`,
+                // `context/session-tabs-model.ts:10-12`). The strip paints the
+                // absolute index, not the visible-window position.
+                input.number = (index + 1).to_string();
                 // `context/session-tabs.tsx:171-176`: any running family member
                 // marks the root tab busy. Roll open descendant tabs up so a
                 // child's work state reaches its parent tab.
@@ -1607,7 +1632,16 @@ fn format_label(input: &TabInput) -> String {
 /// glyph over the title's second-to-last cell (position absolute right=1
 /// width=1), shrinking the title by two as upstream hoveredTitleWidth does.
 fn horizontal_row(input: &TabInput, slot_width: u16, gauge: usize, hovered: bool) -> (String, Option<TitleFade>) {
-    let glyph = indicator_label(&input.flags, input.attention, false, input.unread);
+    // TAB-04: `config.tabs.indicators`. `Numbers` keeps the numeric label in
+    // the indicator column (`session-tabs.tsx:173` `if (props.numbers) return
+    // props.label`), so a status change never moves the title start cell.
+    // `Status` keeps the existing status-glyph precedence unchanged.
+    let status_glyph = indicator_label(&input.flags, input.attention, false, input.unread);
+    let glyph = if input.indicators == TabIndicators::Numbers {
+        input.number.as_str()
+    } else {
+        status_glyph
+    };
     horizontal_composed_row(
         glyph,
         &input.title,
@@ -2734,6 +2768,8 @@ mod tests {
             attention: None,
             unread: false,
             marquee_offset: 0,
+            indicators: TabIndicators::Status,
+            number: String::new(),
         }
     }
 
@@ -2952,6 +2988,8 @@ mod tests {
             attention: None,
             unread: false,
             marquee_offset: 0,
+            indicators: TabIndicators::Status,
+            number: String::new(),
         };
         let strip = TabStrip::render(&[tab], TabOrientation::Vertical, 6, 1, 0);
         assert_eq!(strip.rects[0].0, SessionRef("busy".into()));
@@ -3776,6 +3814,49 @@ mod tests {
             ),
             "⠋",
             "pending work outranks the unread marker"
+        );
+    }
+
+    // TAB-04: the live horizontal row honours `config.tabs.indicators`. Numbers
+    // mode keeps the numeric label in the indicator column
+    // (`session-tabs.tsx:525,173`), so a status change never moves the title
+    // start cell; status mode keeps the existing glyph precedence.
+    #[test]
+    fn tab_04_numbers_mode_paints_the_number_in_the_live_horizontal_row() {
+        let numbers = TabInput {
+            flags: TabFlags {
+                busy: true,
+                ..TabFlags::default()
+            },
+            number: "3".into(),
+            indicators: TabIndicators::Numbers,
+            ..input("s", "title")
+        };
+        let strip = TabStrip::render(&[numbers], TabOrientation::Horizontal, 20, 1, 0);
+        let row = &strip.rows[0];
+        assert!(
+            row.starts_with(" 3 "),
+            "numbers mode paints the tab number in the indicator column: {row:?}"
+        );
+        assert!(
+            !row.contains('\u{280b}'),
+            "numbers mode suppresses the busy spinner: {row:?}"
+        );
+
+        let status = TabInput {
+            flags: TabFlags {
+                busy: true,
+                ..TabFlags::default()
+            },
+            number: "3".into(),
+            indicators: TabIndicators::Status,
+            ..input("s", "title")
+        };
+        let strip = TabStrip::render(&[status], TabOrientation::Horizontal, 20, 1, 0);
+        assert!(
+            strip.rows[0].contains('\u{280b}'),
+            "status mode paints the busy spinner glyph: {:?}",
+            strip.rows[0]
         );
     }
 

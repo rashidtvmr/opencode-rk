@@ -6926,6 +6926,12 @@ fn native_loop(
         cli_path.as_deref(),
         inline_cli.as_deref(),
     );
+    // TAB-04: resolve `config.tabs.indicators` once (default "status"), like the
+    // theme/new-designs facts above; the per-frame tab build applies it.
+    let tab_indicators = crate::native_ui_preferences::UiPreferences::tab_indicators(
+        cli_path.as_deref(),
+        inline_cli.as_deref(),
+    );
     let mut theme = match load_native_theme(
         selected_theme,
         theme_mode,
@@ -8424,6 +8430,11 @@ fn native_loop(
                 None => Vec::new(),
             };
         let mut tab_inputs = TabStrip::from_navigation(&navigation, &tab_attention);
+        // TAB-04: paint the numeric indicator column when `config.tabs.indicators`
+        // is "numbers" (`session-tabs.tsx:525`).
+        for input in &mut tab_inputs {
+            input.indicators = tab_indicators;
+        }
         if tab_drag.preview().is_some() {
             // Paint (and hit-test) the pending drag order until the move is
             // persisted on release.
@@ -15293,6 +15304,8 @@ mod middle_close_hit_tests {
             attention: None,
             unread: false,
             marquee_offset: 0,
+            indicators: crate::native_tabs::TabIndicators::Status,
+            number: String::new(),
         }).collect();
         let strip = TabStrip::render_with_hover_and_add(&tabs, TabOrientation::Horizontal, 60, 1, 0, None, true);
         // Some session rects exist.
