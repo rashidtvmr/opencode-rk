@@ -11771,3 +11771,36 @@ Dispatched 12 background workers:
 `@9router-luna-free` not used this wave (prior `no eligible account` failure).
 Workers are read-only on canonical; patches land one at a time through the
 orchestrator (compile + focused test + full CLI suite + commit + push).
+
+### Wave-49 outcome (2026-11-03)
+
+`PAR-04` landed (`669036cd`): harness transport + comparator member for
+`Frame.hit_targets`; selftest 22 checks PASS. `SIDE-05`, `MSG-005`,
+`DIFF-001/003` re-confirmed BLOCKED. `SIDE-14` reconnaissance only (not fully
+bounded: upstream's Workspaces action needs the `DialogWorkspaces` live route).
+`TAB-04`, `TAB-23`, `TOOL-011`, `THEME-09`, `CP-09`, `DIALOG-06..10`,
+`DIALOG-12..20` returned no deliverable (provider/step-limit failures). Docs at
+`c1d68d17`: counts 144 `ALREADY_CORRECT` / 6 `REAL_GAP` / 62 `BLOCKED` /
+11 `LANDED` = 223. Remote `main-v2` == `c1d68d17`.
+
+### Wave-50 implementation-owner dispatch (2026-11-03)
+
+26 background workers, base `c1d68d17`, each owning one item with a mandate to
+build the smallest real producer chain and return a patch, or BLOCKED with the
+exact seam. Shared brief: `.../wave50/BRIEF.md`; per-item assignments in
+`.../wave50/TASKS50.md`.
+
+- `@vyce-deepseek-v41` (10): TAB-04, TAB-23, TAB-06, TAB-10, TAB-21, TOOL-011,
+  TOOL-006, THEME-09, DIFF-001/003, THEME-08, PAR-02/03/06/07/16/22.
+- `@9router-vyce-deepseek-v4.1-free-combined` (14): CP-09, SIDE-14,
+  SIDE-03/04/10, FORM-001, STATE-002, DIALOG-02, MD-007/008/009, LAY-10/11/13,
+  PAR-09/10/19, MSG-001/002/003, THEME-13, MSG-008/009/010, FFI-01/02,
+  DIALOG-12..20 (re-dispatched after the luna route failed).
+- `@9router-river-glm-5-3-flash` (1): DIALOG-06..10.
+- `@9router-luna-free`: FAILED again — `rule "luna-free" left no eligible
+  account for gpt-6-luna`; DIALOG-12..20 moved to the combined route.
+
+No worktrees are created: the Recovery Mode ref hook rejects new local branches,
+so workers are read-only on canonical and return patches the orchestrator lands.
+There is therefore nothing to reclaim; every landed patch is pushed to remote
+`main-v2` immediately.
