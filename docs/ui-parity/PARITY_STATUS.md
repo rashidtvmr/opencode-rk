@@ -185,7 +185,7 @@ evidence in `artifacts/verdicts/`).
 | `TOOL-010` | unrecorded | `REAL_GAP` | `execute_calls`/`execute_call_summary` (`native_tool_rows.rs:278-315`) live but no live clickable child expansion or structured-argument rows; upstream `index.tsx:3348-3397` |
 | `DIALOG-16`/`DIALOG-17`/`DIALOG-18` | `BLOCKED` | `REAL_GAP` | producers now exist but are unwired: settings numeric limits + save lock + experiments (`native_settings.rs:341-561`) test-only; stash/workspaces/file-changes models + `ArmedDelete` (`native_palette.rs:3078/4389`) unreachable; `diff_dialog` chrome (`native_view_dialogs.rs:3723`) zero consumers |
 | `CP-17`/`CP-18` | unrecorded | `ALREADY_CORRECT` | live usage arithmetic (`tui_entry.rs:9120-9137`) and number/currency formatting (`native_view.rs:4358-4364`); tests `last_assistant_usage_honours_revert_and_compaction_boundaries`, `number_and_currency_formatting_matches_upstream` |
-| `FORM-003..006` | unrecorded | `REAL_GAP` | the ported `FormPrompt` (`native_view_dialogs.rs:2615-3578`) is test-only; the live loop (`tui_entry.rs:11619-11707`) routes only Mcp/Select/permission, so there is no live daemon-form renderer/dispatch; upstream `component/form.tsx` |
+| `FORM-003..008` | unrecorded | `REAL_GAP` | the ported `FormPrompt` (`native_view_dialogs.rs:2615-3578`) is test-only; the live loop (`tui_entry.rs:11619-11707`) routes only Mcp/Select/permission, so there is no live daemon-form renderer/dispatch; upstream `component/form.tsx` |
 
 Base SHA `0d74af30`. 28 parallel workers on the four authorized routes, each
 artifact-first and read-only on canonical. Per-ID JSON verdicts live in
