@@ -1,0 +1,55 @@
+{
+  "id": "TAB-21",
+  "verdict": "BLOCKED",
+  "base_head": "7cf78666",
+  "canonical": "/Users/mymac/Projects/opencode-rk-recovery-20261005",
+  "item": "Focus-confirmed viewed acknowledge: on focus, POST the observed idle transition as the session's viewed watermark (upstream 250ms->5s retry while the route shows an unread session).",
+  "landable": false,
+  "reason": "The client state machine (ViewAcknowledgement) and the server route both exist, but the CLI never learns the session's idle-transition timestamp, so no live code can observe unread or post the watermark. There is also no CLI POST to the view route.",
+  "dead_client_helper": {
+    "symbol": "ViewAcknowledgement",
+    "file": "crates/cli/src/native_navigation.rs",
+    "line": 1133,
+    "note": "struct + new/observe/unread/poll/failed/succeeded/attempts; only caller is #[cfg(test)] tab_21_focus_confirmed_ack_retries_250ms_to_5s at :2220-2248. Zero non-test callers across crates/."
+  },
+  "no_cli_post": "grep for POST '/api/sessions/{id}/view' in crates/cli returns 0 matches; the route '/api/sessions/{id}/view' is registered server-side only (crates/server/src/lib.rs:236, view_session :1229).",
+  "server_side_ready": [
+    {"file": "crates/server/src/lib.rs", "line": 236, "note": "route(\"/api/sessions/{id}/view\", post(view_session)) registered"},
+    {"file": "crates/server/src/lib.rs", "line": 1229, "note": "view_session: parses {idle: i64 millis}, applies monotone watermark via set_viewed, returns 204"},
+    {"file": "crates/sessions/src/lib.rs", "line": 601, "note": "set_viewed applies time_viewed = max(idle, coalesce(viewed, idle))"},
+    {"file": "crates/contracts/src/lib.rs", "line": 212, "note": "SessionSummary.viewed_at serialized on GET /api/sessions"},
+    {"file": "crates/server/tests/session_view.rs", "line": 1, "note": "server test proves the watermark round-trips"}
+  ],
+  "missing_seam": {
+    "producer_required": "The idle-transition timestamp ('time.idle') for each session must reach the CLI: neither GET /api/sessions (SessionSummary) nor GET /api/sessions/{id} carries an idle field today. grep for idle_at|time_idle|idleSince|idle_since across crates/contracts, crates/server, crates/sessions returns 0 matches. Without idle the CLI cannot compute isUnread (idle > viewed) and cannot know what watermark to post.",
+    "upstream_source_of_idle": {
+      "file": "packages/tui/src/context/session-tabs.tsx",
+      "line": 120,
+      "quote": "const isUnread = (sessionID) => { const info = data.session.get(sessionID); return info?.time.idle !== undefined && (info.time.viewed === undefined || info.time.idle > info.time.viewed) }"
+    },
+    "upstream_ack_effect": {
+      "file": "packages/tui/src/context/session-tabs.tsx",
+      "line": 229,
+      "quote": "const idle = data.session.get(sessionID)?.time.idle; if (idle === undefined || !isUnread(sessionID) || acknowledged.get(sessionID) === idle) return; acknowledged.set(sessionID, idle); void client.api.session.view({ sessionID, idle }).then(...)"
+    },
+    "viewed_precondition": "Even the viewed half is only partly available: SessionSummary.viewed_at exists on GET /api/sessions, but no CLI code reads viewed_at (grep crates/cli/src for viewed_at returns 0 matches).",
+    "focus_half_already_live": {
+      "file": "crates/cli/src/tui_entry.rs",
+      "line": 6808,
+      "note": "client_focused: Option<bool> = Some(true) is already tracked (:9037-9052) from FocusGained/FocusLost - the focus input to ViewAcknowledgement::observe is live; the idle/viewed inputs are not."
+    },
+    "consequences": "Wiring ViewAcknowledgement::poll now is impossible without a value to post. A new producer of the idle-transition timestamp (server SessionSummary field + sessions store read + CLI parse) is required before any client POST can be honest."
+  },
+  "focused_test_plan_when_unblocked": [
+    "server: GET /api/sessions exposes idle (epoch millis / RFC3339) per session; idle advances on a turn settling",
+    "cli: parse idle into LiveSnapshot/nav; ViewAcknowledgement.observe(focused, idle, viewed) computes unread",
+    "cli: focused + unread posts POST /api/sessions/{id}/view {idle}; unfocused never posts; failure retries 250ms then 5000ms cap; success resets attempts",
+    "server: posted idle clamps viewed_at monotonically (existing session_view.rs already covers the clamp)"
+  ],
+  "upstream_citations": [
+    "packages/tui/src/context/session-tabs.tsx:53-55,120-123 (isUnread, VIEW_RETRY_DELAY/MAX)",
+    "packages/tui/src/context/session-tabs.tsx:224-267 (focus-gated acknowledge effect, record-before-post, backoff)",
+    "packages/protocol/src/groups/session.ts:805-817 (session.view endpoint + DateTimeUtcFromMillis idle body)",
+    "packages/core/src/session/projector.ts:619 (time_viewed = max(idle, coalesce(time_viewed, idle)))"
+  ]
+}

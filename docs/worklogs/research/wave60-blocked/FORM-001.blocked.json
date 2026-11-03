@@ -1,0 +1,63 @@
+{
+  "id": "FORM-001",
+  "verdict": "BLOCKED",
+  "base_head": "7cf78666",
+  "base_sha_full": "7cf786664ee4ed9064221b80cc49dd670b20d4db",
+  "requirement": "Upstream-correct PermissionPrompt rendering: stage-based body swap (the 'always allow' branch shows distinct lines), and a nested rejection-message stage. The live prompt must use the upstream PermissionPrompt shape (native_permissions.rs) instead of the flat choice list.",
+  "upstream_oracle": "/Users/mymac/Projects/tmp/opencode @ 450e7b92412c780a7b5a75226bb8d49aaca24e22",
+  "upstream_citations": [
+    "packages/tui/src/routes/session/permission.tsx:144-155 stage Switch (select / confirm-always / reject)",
+    "packages/tui/src/routes/session/permission.tsx:217-260 always-body swap (distinct always lines)",
+    "packages/tui/src/routes/session/permission.tsx:217-260 nested reject stage renders a rejection message body"
+  ],
+  "summary": "The live permission prompt is a flat 6-label choice list built by open_permission_with_persistent (native_view_dialogs.rs:1342), driven live from tui_entry.rs:8155. The upstream-correct PermissionPrompt model (native_permissions.rs:557, PermissionStage::NestedReject at :520) is DEAD CODE: zero non-test callers, and its two required sub-behaviors cannot be rendered because DialogView (native_view_dialogs.rs:429) and OpenDialog (:398) carry NO stage field and NO textarea/input field. Sub-behavior 1 (3-option realign) is NOT a parity bug: the live 6-choice scoped set is a protected extension; the server supports scope in {once,session,always} (run_owner.rs:232) and the save gate only drops 'Always allow'. Sub-behaviors 3 (always-body swap) and 4 (nested rejection stage) DO require a stage enum + textarea field on DialogView/OpenDialog that does not exist at HEAD, so no bounded live-wired patch is possible without inventing new dialog view state and a new live render consumer. Do not stub.",
+  "live_path_trace": {
+    "live_caller": "crates/cli/src/tui_entry.rs:8155 calls view.dialogs.open_permission_with_persistent(pending.id, session_id, ...)",
+    "live_builder": "crates/cli/src/native_view_dialogs.rs:1342 open_permission_with_persistent builds a flat 6-label Vec<String> choices list (Allow once / Deny once / Allow for this session / Always allow if persistent_allowed / Deny for this session / Always deny)",
+    "live_answer": "crates/cli/src/native_view_dialogs.rs:1396 answer() classifies the selected flat label via permission_alias (:510) hardened mapping",
+    "live_cancel": "crates/cli/src/native_view_dialogs.rs:1466 cancel() emits Reject without any rejection-message body",
+    "dead_model": "crates/cli/src/native_permissions.rs:557 PermissionPrompt; :520 PermissionStage::NestedReject; permission_presentation (:273) and permission_always_lines (:169) have zero non-test callers"
+  },
+  "missing_seams": [
+    {
+      "file": "crates/cli/src/native_view_dialogs.rs",
+      "line": "429 DialogView (fields: phase, dialog, selection, ...) and 398 OpenDialog (fields: id, session_id, kind, title, choices, disabled, permission, mcp_status, message_lines, error, prompt)",
+      "why_no_live_consumer": "Neither DialogView nor OpenDialog has a stage field nor a textarea/input field. PermissionStage::NestedReject (native_permissions.rs:520) requires a distinct render stage; the always-body swap (upstream permission.tsx:217-260) requires a second body form on the same dialog. The live builder only ever produces a flat choices list plus a static message_lines body; there is no field to store or transition a stage, and no field to capture rejection-message input.",
+      "required_producer": "A stage enum field (Select / ConfirmAlways / NestedReject) plus a rejection-message text buffer field on OpenDialog/DialogView, and a live render consumer that reads the stage each frame and paints the corresponding body/textarea."
+    },
+    {
+      "file": "crates/cli/src/native_view_dialogs.rs",
+      "line": "1342 open_permission_with_persistent",
+      "why_no_live_consumer": "The live entry point constructs a flat 6-label Vec<String> only. It has no code path that sets a stage or swaps the body for the always branch, and no path that enters a nested reject stage; therefore the upstream PermissionPrompt shape is unreachable from the live path.",
+      "required_producer": "The live builder must populate the new stage field (see above) so the renderer can drive the always-body swap and the nested reject stage."
+    },
+    {
+      "file": "crates/cli/src/native_permissions.rs",
+      "line": "557 PermissionPrompt; 520 PermissionStage::NestedReject; 169 permission_always_lines; 273 permission_presentation",
+      "why_no_live_consumer": "All are dead: zero non-test callers. Nothing in the live open/answer/cancel path constructs PermissionPrompt or reads PermissionStage.",
+      "required_producer": "A live caller must construct PermissionPrompt from the observed request (or the flat live model must be replaced by the stage-driven PermissionPrompt) and the renderer must consume it."
+    },
+    {
+      "file": "crates/cli/src/tui_entry.rs",
+      "line": "8155 (live caller of open_permission_with_persistent)",
+      "why_no_live_consumer": "The only live call site feeds the flat builder. There is no live caller that drives a stage transition or supplies a rejection-message body, so even a new stage field would have no live producer.",
+      "required_producer": "A live dispatch that advances the permission dialog stage (select -> confirm-always / reject) and captures rejection-message input from the running TUI."
+    }
+  ],
+  "files": [],
+  "what_changed": "none (blocked; no patch produced)",
+  "live_consumer": "none in current HEAD; PermissionPrompt, PermissionStage::NestedReject, permission_presentation, permission_always_lines have only test callers; DialogView/OpenDialog expose no stage or textarea field to wire.",
+  "focused_test_plan": "No patch. Any model-only test of PermissionPrompt in isolation does not prove a live consumer and therefore cannot satisfy the landability rule (a new helper/model method with no live caller is REJECTED).",
+  "patch": false,
+  "evidence": [
+    "crates/cli/src/native_view_dialogs.rs:1342 (open_permission_with_persistent, flat 6-label builder)",
+    "crates/cli/src/native_view_dialogs.rs:429 (DialogView fields, no stage/textarea)",
+    "crates/cli/src/native_view_dialogs.rs:398 (OpenDialog fields, no stage/textarea)",
+    "crates/cli/src/native_view_dialogs.rs:1396 (answer -> permission_alias)",
+    "crates/cli/src/native_view_dialogs.rs:1466 (cancel -> Reject, no body)",
+    "crates/cli/src/native_view_dialogs.rs:510 (permission_alias hardened mapping)",
+    "crates/cli/src/native_permissions.rs:557 (PermissionPrompt dead code)",
+    "crates/cli/src/native_permissions.rs:520 (PermissionStage::NestedReject, no live stage)",
+    "crates/cli/src/tui_entry.rs:8155 (live caller open_permission_with_persistent)"
+  ]
+}

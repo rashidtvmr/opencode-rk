@@ -1,0 +1,48 @@
+{
+  "id": "PAR-09",
+  "verdict": "BLOCKED",
+  "base_head": "7cf786664ee4ed9064221b80cc49dd670b20d4db",
+  "title": "Await asynchronous syntax completion; do not bless blank transient code blocks as goldens",
+  "subject_symbols": [
+    "crates/cli/src/native_view_chat.rs:1273 sanitize_code",
+    "crates/cli/src/native_view_chat.rs:1280 expand_code_tabs",
+    "crates/cli/src/native_view_chat.rs:1459 code fence row (plain sanitize_code)",
+    "crates/cli/src/native_view_chat.rs:1673 push_code_wrapped (plain sanitize_code)",
+    "crates/cli/src/native_view_chat.rs:1787 markdown_part_row_spans_mode code branch",
+    "crates/cli/src/native_view_chat.rs:1846 code_row_chunks",
+    "crates/opentui-bridge/src/highlight.rs:782 HighlightService::complete",
+    "crates/opentui-bridge/src/highlight.rs:830 HighlightService::frame_text",
+    "crates/opentui-bridge/src/highlight.rs:846 HighlightService::styled_runs",
+    "crates/cli/src/native_theme_runtime.rs:965 Theme::syntax_rules",
+    "crates/cli/src/tui_entry.rs:4195 markdown_run_color",
+    "crates/opentui-bridge/src/safe_renderer.rs:906 SafeRenderer::draw_text_styled"
+  ],
+  "missing_seam": {
+    "file": "crates/opentui-bridge/src/highlight.rs",
+    "lines": "782-814 (complete), 745-776 (request)",
+    "symbol": "HighlightService::{request, complete} / HighlightedText",
+    "explanation": "The async highlight contract (request -> HighlightRequest, complete(HighlightRequest, HighlightedText)) is a bridge model with NO live call site. `pub mod highlight` is exported (crates/opentui-bridge/src/lib.rs:8) but the CLI never imports it: `grep -rn 'highlight::|HighlightService|HighlightedText|StyledRun|frame_text|styled_runs' crates/cli/src` returns zero matches. The only HighlightedText constructors are HighlightedText::new (highlight.rs:394) and the #[cfg(test)] helper doc() (highlight.rs:964). There is no host loop that issues HighlightRequest and applies Completion. Because no async highlight is ever in flight, the live code fence has no 'blank transient' state to await: it renders synchronously as sanitized plain text."
+  },
+  "why_no_live_consumer": [
+    "LIVE code render is synchronous plain text: every code/tab row path calls sanitize_code (native_view_chat.rs:1273) then expand_code_tabs (:1280) and emits a single full-row CODE|CODE_BLOCK span (native_view_chat.rs:1802-1805). No tokenizer, no per-token style, no async state.",
+    "The only live style sink for chat rows is ChatRunSpan.flags consumed at tui_entry.rs:4860-4875/4900-4907 and resolved by markdown_run_color (tui_entry.rs:4195). markdown_run_color maps flags to MarkdownPalette fields only (markdown.code/heading/strong/...). It has NO branch for per-token syntax roles; the SyntaxPalette (native_theme_runtime.rs:840, populated :706-716 from syntaxComment/syntaxKeyword/syntaxFunction/...) is never consulted on the live paint path.",
+    "Theme::syntax_rules (native_theme_runtime.rs:965) has zero non-test callers; its two test call sites (:3692/:3725 within the module test region starting at the #[cfg(test)] marker :2725, and the standalone #[cfg(test)] block at :4272) confirm it is a test-only table.",
+    "No style-table sink on the checked renderer ABI (THEME-14): SafeRenderer::draw_text_styled (safe_renderer.rs:906) takes explicit fg/bg/attributes with no syntax-style table parameter, and the CLI only uses Renderer/Rgba (tui_entry.rs:89). There is nowhere live to install or paint a syntax token color.",
+    "No highlighter producer exists in-workspace: `grep -rln 'syntect|tree-sitter|tree_sitter'` over crates/*.toml and *.rs returns nothing; Cargo.lock contains 0 matches for syntect/tree-sitter; there are no grammar (*.scm) or highlight-query assets. Upstream drives this through tree-sitter via waitForHighlightedFrame/highlightingDone (SKILL.md:19,21; message-parts.tsx:182)."
+  ],
+  "required_producer": [
+    "A live async syntax engine + on-completion contract wired into the running TUI, equivalent to upstream's shared tree-sitter worker (message-parts.tsx:182 draws no text until the worker replies). This requires BOTH (a) a grammar/tokenizer producer and (b) a live consumer loop that requests highlight, waits for completion, and repaints.",
+    "A per-token style sink: new ChatRunSpan flags for syntax roles plus a markdown_run_color/SyntaxPalette branch, and a renderer ABI that can carry token styles (currently absent, THEME-14)."
+  ],
+  "bounded_highlighter_assessment": "NOT bounded. Checked honestly for a small in-workspace TS/JSON tokenizer or an existing syntect dependency: neither exists (Cargo.lock 0 matches; no *.scm/query assets; no tokenizing producer feeding live rows). A hand-rolled bounded tokenizer would still need three missing pieces: (1) a live async request/complete host loop to satisfy 'await asynchronous syntax completion', (2) new ChatRunSpan syntax-role flags, and (3) a SyntaxPalette lookup on the live paint path (markdown_run_color) or a renderer style-table (absent per THEME-14). That is a subsystem, not a bounded wiring edit, and it would still not match upstream tree-sitter completion semantics.",
+  "blocking_reason": "A new helper/model method with no live caller is REJECTED. HighlightService::complete/request, HighlightedText and Theme::syntax_rules already exist as test-only models with no live consumer; there is no async highlighter to await and no per-token style sink. Wiring one requires a new async syntax subsystem, not a bounded patch.",
+  "focused_test_plan": "n/a (blocked). Existing coverage is test-only inside crates/opentui-bridge/src/highlight.rs (doc()/stale-result tests around :964-1230) and crates/cli/src/native_theme_runtime.rs (#[cfg(test)] region :2725+ :3692/3830). None reaches the live render.",
+  "upstream_citations": [
+    "packages/tui/src/routes/session/message-parts.tsx:182 (<markdown> draws no text until the shared tree-sitter worker replies)",
+    ".opencode/skills/tui-tests/SKILL.md:19 (waitForHighlightedFrame awaits every in-flight CodeRenderable.highlightingDone)",
+    ".opencode/skills/tui-tests/SKILL.md:21 (a frame waiting on a highlight is quiet; wait for text before measuring)",
+    "packages/tui/src/routes/session/index.tsx:3451,3476 (currentSyntax passed as syntaxStyle to code fences)",
+    "packages/theme/src/tui/syntax.ts:46-71 (generateSyntax: syntax token roles -> styles)",
+    "pin: 450e7b92412c780a7b5a75226bb8d49aaca24e22"
+  ]
+}

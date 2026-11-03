@@ -1,0 +1,77 @@
+{
+  "id": "CP-07",
+  "verdict": "BLOCKED",
+  "base_head": "7cf78666",
+  "requirement": "Preserve data-driven agent selection and colors. Custom agent, hidden agent, subagent-only agent, explicit color, palette wrap.",
+  "upstream_oracle": "/Users/mymac/Projects/tmp/opencode @ 450e7b92412c780a7b5a75226bb8d49aaca24e22",
+  "upstream_citations": [
+    "packages/tui/src/context/local.tsx:58-137 createAgent()",
+    "packages/tui/src/context/local.tsx:59-61 agents() filter mode!=='subagent' && !hidden",
+    "packages/tui/src/context/local.tsx:62-64 visibleAgents() filter !hidden",
+    "packages/tui/src/context/local.tsx:77-84 colors() categorical step 400 new-designs else 200, deduped",
+    "packages/tui/src/context/local.tsx:100-127 set()/move() with Agent-not-found toast and modulo wrap",
+    "packages/tui/src/context/local.tsx:128-135 color(id): explicit agent.color wins, else palette[index % len], unknown -> palette[0]",
+    "packages/schema/src/agent.ts:19-35 Agent.Info carries color?:string, mode:subagent|primary|all, hidden:boolean"
+  ],
+  "why_not_bounded": "CP-07 cannot be a live-wired patch: the model functions exist but the LIVE production consumer does not, and the producer of the required facts does not exist either. Wiring it requires a multi-file seam across server payload + CLI parse + live selection state + live paint + theme scales.",
+  "live_path_trace": {
+    "catalogue_fetch": [
+      "crates/cli/src/tui_entry.rs:7530 completion @mention loader GET /api/commands",
+      "crates/cli/src/tui_entry.rs:7618 Commands page GET /api/commands",
+      "crates/cli/src/tui_entry.rs:12443 Agents page GET /api/commands"
+    ],
+    "server_producer": "crates/server/src/configured_commands.rs:80 mention_agents() emits only {name,description,read_only}",
+    "server_route": "crates/server/src/lib.rs:1810-1817 list_configured_commands -> {agents,commands}",
+    "cli_parser": "crates/cli/src/tui_entry.rs:5549 agent_catalogue_rows reads name/description/read_only/aliases -> PageRow (no color/mode/hidden)",
+    "selection": "crates/cli/src/native_input_decoder.rs:350,560 emit InputEvent::AgentCycle; crates/cli/src/tui_entry.rs:10932 discards it with `continue`",
+    "composer_paint": "crates/cli/src/native_view.rs:1308 set_composer_agent(agent,variant); consumed at native_view.rs:1767 -> native_prompt_pane metadata row"
+  },
+  "missing_seams": [
+    {
+      "file": "crates/server/src/configured_commands.rs",
+      "line": "80-105 (mention_agents), filter at 97-102",
+      "why_no_live_consumer": "Server payload for /api/commands strips agent entries to {name,description,read_only} and DROPS hidden/subagent/primary entries entirely (97-102). No `color`, no `mode`, no `hidden` reaches the CLI. Custom/hidden/subagent-only/explicit-color distinctions cannot be reconstructed client-side.",
+      "required_producer": "Emit agent `color` (hex string), `mode`, and `hidden` in mention_agents() (or a dedicated /api/agents payload) so the CLI receives the data-driven facts upstream Agent.Info carries (schema/agent.ts:19-35)."
+    },
+    {
+      "file": "crates/cli/src/tui_entry.rs",
+      "line": "5549-5634 agent_catalogue_rows",
+      "why_no_live_consumer": "Parser reads only name/description/read_only/aliases into a metadata PageRow. No color/mode/hidden fields parsed; agents-page row is metadata-only (activation Unsupported).",
+      "required_producer": "None yet: source server payload lacks the fields (see above)."
+    },
+    {
+      "file": "crates/cli/src/native_input_decoder.rs",
+      "line": "350,560 (AgentCycle emit) -> crates/cli/src/tui_entry.rs:10932",
+      "why_no_live_consumer": "shift+tab decodes to InputEvent::AgentCycle but the live loop `continue`s on it: there is NO live selected-agent state. Upstream local.agent.move(1) has no native counterpart. The picker/cycle consumer is absent.",
+      "required_producer": "Live selected-agent state in NativeView + a production dispatch of AgentCycle to it (and/or Agents-page selection) so selectable_agents()/move() have a caller."
+    },
+    {
+      "file": "crates/cli/src/native_view.rs",
+      "line": "1308 set_composer_agent",
+      "why_no_live_consumer": "Only callers are #[test] at native_view.rs:5703,5740,5773. No production caller supplies an observed selected agent, so composer_agent is always None in the live TUI.",
+      "required_producer": "A live caller that sets the observed selected agent from the parsed catalogue + LIVE session.agent fact."
+    },
+    {
+      "file": "crates/cli/src/native_prompt_pane.rs",
+      "line": "619-631 agent_color (also 591 selectable_agents, 597 visible_agents, 601 agent_palette, 137 prompt_highlight, 155 border_highlight)",
+      "why_no_live_consumer": "All have ONLY #[test] callers (cp07_agent_selection_and_palette_color_are_data_driven native_prompt_pane.rs:1551). No live paint path constructs AgentFact or calls agent_color; prompt border highlight color is never painted in the running TUI.",
+      "required_producer": "A live paint consumer: composer border / user-message rail must call agent_color(...) and be reachable each frame."
+    },
+    {
+      "file": "crates/cli/src/native_theme_runtime.rs",
+      "line": "906-910 categorical_colors",
+      "why_no_live_consumer": "categorical_colors exposes only the single `.200` step. agent_palette(native_prompt_pane.rs:604) requires nine-step scales `[[[u8;4];9]]` to select step 200/400. No 9-step scale is exposed to any consumer.",
+      "required_producer": "Expose the full categorical hue scales (all 9 steps) so agent_palette can choose 400 (new-designs) vs 200."
+    },
+    {
+      "file": "crates/cli/src/native_message_rows.rs",
+      "line": "1972-1986 user_rail_color_for_delivery / role_gutter_for_delivery",
+      "why_no_live_consumer": "Only #[test] callers (2492-2509). The live session render (native_view_chat.rs:1016,1103,1178,1199) paints the user rail with a hardcoded `┃` char and NO agent color.",
+      "required_producer": "Live render must pass the resolved agent color into the user-card rail so settled user cards use the agent color (index.tsx:2384)."
+    }
+  ],
+  "files": [],
+  "what_changed": "none (blocked; no patch produced)",
+  "live_consumer": "none in current HEAD; agent_color/agent_palette/prompt_highlight/border_highlight/user_rail_color_for_delivery and set_composer_agent have only test callers; AgentCycle dispatch is inert.",
+  "focused_test_plan": "No patch. Existing cp07_agent_selection_and_palette_color_are_data_driven (native_prompt_pane.rs:1551) proves the model in isolation only; it does not prove a live consumer, so it cannot satisfy the landability rule."
+}

@@ -1,0 +1,43 @@
+{
+  "id": "PAR-19",
+  "verdict": "BLOCKED",
+  "base_head": "7cf786664ee4ed9064221b80cc49dd670b20d4db",
+  "title": "Use mounted/rendered work counts for large transcript/diff bounds; preserve visible geometry",
+  "subject_symbols": [
+    "crates/cli/src/native_diff_view.rs:1043 relative_scroll_top",
+    "crates/cli/src/native_diff_view.rs:1058 visible_chunk_range",
+    "crates/cli/src/native_diff_view.rs:1014 virtual_added_patch",
+    "crates/cli/src/native_diff_view.rs:1076 placeholder_height",
+    "crates/cli/src/native_diff_view.rs:926 AddedPatchChunk",
+    "crates/cli/src/native_diff_inline.rs:83 paint_inline_patch",
+    "crates/cli/src/native_view_chat.rs:2200 live paint_inline_patch caller",
+    "crates/cli/src/native_view_chat.rs:2730 live paint_rows_with_gutter caller",
+    "crates/cli/src/native_view_chat.rs:902 StyledChatRow type"
+  ],
+  "missing_seam": {
+    "file": "crates/cli/src/native_view_chat.rs",
+    "lines": "2200 / 2730",
+    "symbol": "live diff painters paint_inline_patch / paint_rows_with_gutter (both hardcode Unified, no scroll contract)",
+    "explanation": "virtual_added_patch / relative_scroll_top / visible_chunk_range / placeholder_height all consume a diff-region ScrollBox contract: `scroll.scrollTop`, `root.y`, `scroll.content.y` and `scroll.viewport.height` (upstream patch-diff.tsx:164-181). The live chat diff fence is rendered into flat `(String, ChatRowClass)` rows inside the transcript's single row stream; `grep -rn 'virtual_added_patch|relative_scroll_top|visible_chunk_range|split_added_patch|placeholder_height'` over crates/cli/src and crates/server/src finds no caller outside native_diff_view.rs itself (only self-referential doc-comments in native_diff_inline.rs:19-20). There is no per-diff scroll region, so no scrollTop/root.y/content.y/viewport-height producer exists."
+  },
+  "why_no_live_consumer": [
+    "LIVE diff path: crates/cli/src/native_view_chat.rs:2200 (push_diff_fence) calls native_diff_inline::paint_inline_patch with a fixed measured width and a fixed row budget (MAX_MESSAGE_ROWS), and crates/cli/src/native_view_chat.rs:2730 (ChatPart::Patch) calls native_diff_view::paint_rows_with_gutter(diff, MAX_DIFF_LINES). Both emit flat rows; neither takes a scroll offset.",
+    "The live row model is one class per row: `type StyledChatRow = (String, ChatRowClass, Option<(u16,u16)>)` (native_view_chat.rs:902) plus a single fg/attr span list. There is no chunk-to-row mapping and no second background, so a `SplitRow::Pair { left, right }` cannot be represented (same blocker as THEME-09/DIFF-001).",
+    "The transcript scroll is a single outer viewport (transcript viewport height only, native_view_chat.rs:3395); the diff is not a nested ScrollBox. Upstream's virtual model keys off a nested diff-region scroll lifecycle pass (patch-diff.tsx:164 `root.onLifecyclePass = () => { const top = scroll.scrollTop - (root.y - scroll.content.y) ... }`); no equivalent nested region or lifecycle hook exists live.",
+    "No live scrollTop producer for a diff region: the bridge scroll model (crates/opentui-bridge/src/scroll.rs) is used only by native_view.rs:5999 tests; the live loop has no per-diff scroll state.",
+    "Related models are likewise test-only: crates/cli/src/native_view_dialogs.rs:3965 sticky_header_offset / :4588 pinned_file / the diff-dialog model (:3767 region) have no live caller (DIALOG-12..20 blocked)."
+  ],
+  "required_producer": [
+    "A nested, scroll-aware diff viewer component in the live render: a per-diff region with its own scrollTop, its layout-pass root.y and content.y, and a measured viewport height that feed relative_scroll_top -> visible_chunk_range.",
+    "A chunk-to-row mapping and a row model that can carry the chunk window (mounted/rendered chunk count) so offscreen chunks render as placeholders of exact height without inflating the flat transcript row budget.",
+    "Threading a DiffViewMode (and per-row split backgrounds) through the live row model, which requires extending `StyledChatRow`/(String, ChatRowClass) beyond one class per row."
+  ],
+  "blocking_reason": "A new helper/model method with no live caller is REJECTED. relative_scroll_top/visible_chunk_range/virtual_added_patch already exist and are tested (native_diff_view.rs:1963-2209), but the live diff fence has no nested scroll region, no root.y/content.y/viewport producer, and no chunk->row mapping. Wiring them requires a new live diff-viewer component plus a row-model change; not bounded.",
+  "focused_test_plan": "n/a (blocked). Existing coverage is test-only in crates/cli/src/native_diff_view.rs: virtual_added_patch (:1967-1973), visible_chunk_range (:1988-2204), relative_scroll_top_subtracts_the_virtual_root_offset (:2173-2209). None reaches the live render at native_view_chat.rs:2200/2730.",
+  "upstream_citations": [
+    "packages/tui/src/component/patch-diff.tsx:164-181 (root.onLifecyclePass: top = scroll.scrollTop - (root.y - scroll.content.y); setFirst/setLast from VIRTUAL_CHUNK_LINES and scroll.viewport.height)",
+    "packages/tui/src/component/patch-diff.tsx:115 (placeholders for offscreen chunks; viewport chunks plus one overscan each side)",
+    "packages/tui/src/component/patch-diff.tsx:186-205 (Show when index in [first-1,last+1] fallback={<box height={chunk.rows}/>})",
+    "pin: 450e7b92412c780a7b5a75226bb8d49aaca24e22"
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "id": "LAY-10",
+  "verdict": "BLOCKED",
+  "base_head": "7cf786664ee4ed9064221b80cc49dd670b20d4db",
+  "title": "plugin/terminal panel layout (split vs fullscreen)",
+  "subject_symbols": [
+    "crates/cli/src/native_pane_resize.rs:551 panel_can_split",
+    "crates/cli/src/native_pane_resize.rs:558 panel_presentation",
+    "crates/cli/src/native_pane_resize.rs:569 panel_toggle_fullscreen",
+    "crates/cli/src/native_view_layout.rs:808 right_pane",
+    "crates/cli/src/native_host.rs:672 NativeHost::panel_open",
+    "crates/cli/src/native_host.rs:684 NativeHost::panel_fullscreen",
+    "crates/cli/src/native_host.rs:691 NativeHost::tabs_visible"
+  ],
+  "missing_seam": {
+    "file": "crates/cli/src/native_shell_frame.rs",
+    "lines": "122-124",
+    "symbol": "ShellFrameInput { panel_open, terminal_selected }",
+    "explanation": "panel_open and terminal_selected are declared as ShellFrameInput fields and consumed only by FrameDescriptor::new -> right_pane (native_shell_frame.rs:260). FrameDescriptor::new is reached exclusively through native_shell_frame::compose_shell (native_shell_frame.rs:389), and compose_shell has ZERO non-test callers (grep over crates/ returns only its definition and its own #[cfg(test)] module, plus native_pane_resize.rs tests). The running TUI never calls compose_shell."
+  },
+  "why_no_live_consumer": [
+    "LIVE render path: tui_entry::run -> NativeView::render_typed/render_content -> compose_frame (crates/cli/src/native_view_layout.rs:126), composed at crates/cli/src/native_view.rs:3938: `compose_frame(&effective, &[], &center, &sidebar)`. Only the sidebar occupies the right column; there is no panel/terminal pane in the live composition.",
+    "Live geometry object ViewPresentation (crates/cli/src/native_view.rs:882, built at :1972-1994) has fields cols/rows/main_offset/main_width/main_padding/sidebar_offset/sidebar_width. It carries no RightPane, no panel_open, no terminal_selected. native_view.rs:1996-2005 sidebar_wide/sidebar_visible hardcode sidebar-only logic; right_pane() is never consulted.",
+    "panel_can_split / panel_presentation / panel_toggle_fullscreen (native_pane_resize.rs:551/558/569) have callers only in native_pane_resize.rs #[cfg(test)] (lines 1314-1355). No production call site.",
+    "right_pane (native_view_layout.rs:808) callers: native_shell_frame.rs:260 (inside test-only compose_shell) and native_layout.rs:632 (a test helper docked()). native_layout::SessionRegions::compute (native_layout.rs:320) is called only from native_shell_frame::FrameDescriptor::new (test-only path) and native_layout.rs tests.",
+    "NativeHost (native_host.rs:245) holds the only live-shaped panel state (panel_open/panel_width/panel_dock_requested at :265-271; TogglePanel producer at :461-473). NativeHost::new (:286) has NO non-test caller: tui_entry.rs references only HostEvent::PaneFocusRight/PaneFocusSession (leader_followup_pane_event, tui_entry.rs:345-357, consumed at :9484-9493 solely to call view.set_rail_interactive). HostEvent::TogglePanel is never dispatched in the live loop.",
+    "No keybinding or slash command opens a panel in the running loop: tui_entry.rs command registry (lines 7176, 13276, 14707) lists /sidebar but no /panel and no panel toggle; grep for panel_open/activePanel/PanelTarget/TogglePanel in tui_entry.rs finds nothing."
+  ],
+  "required_producer": [
+    "A live plugin-panel host equivalent to upstream PanelHost/usePanel (packages/tui/src/context/panel.tsx:11-43 + the PanelHost component mounted in session-frame.tsx:26-27): a live signal for the active PanelTarget (plugin+name+sessionID), a live measured panel width from the real terminal (`panels.setWidth`, app.tsx:623), and a live requested-presentation signal fed by a real toggleFullscreen command.",
+    "A live render that routes the panel through the frame: either switch NativeView::render_content to native_shell_frame::compose_shell (a full composition-model change; the live path also composes dock/queue/permission rows, transcript + sidebar scrollbars and hit regions, so this is not a bounded edit), or extend ViewPresentation + compose_frame to carry a RightPane and paint a docked panel column.",
+    "Live input wiring for the panel toggle/fullscreen commands into NativeView (there is none today)."
+  ],
+  "blocking_reason": "A new helper or model method with no production caller is REJECTED. panel_can_split/panel_presentation/panel_toggle_fullscreen and right_pane already exist; the only thing missing is a live consumer, and wiring one requires a live plugin-panel subsystem plus a live-render composition change, neither of which exists. Not bounded.",
+  "focused_test_plan": "n/a (blocked). Existing coverage is test-only: native_pane_resize.rs:1310-1355 (lay10_tabs_hide_only_while_panel_fullscreen) and native_host.rs:898-927 (lay10_panel_107_fullscreen_hides_tabs_and_108_docks) exercise the helper/Host state machine without any live caller.",
+  "upstream_citations": [
+    "packages/tui/src/context/panel.tsx:11-43 (createPanelState: current/requested/width/canSplit/presentation/open/close/release/toggleFullscreen)",
+    "packages/tui/src/component/session-frame.tsx:88-92 (activePanel/fullscreen memos)",
+    "packages/tui/src/component/session-frame.tsx:112-120 (rightPane precedence)",
+    "packages/tui/src/component/session-frame.tsx:26-27 (TerminalPane, PanelHost imports/mount)",
+    "pin: 450e7b92412c780a7b5a75226bb8d49aaca24e22"
+  ]
+}

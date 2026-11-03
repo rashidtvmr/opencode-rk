@@ -1,0 +1,53 @@
+{
+  "id": "MD-007",
+  "verdict": "BLOCKED",
+  "base_head": "7cf78666",
+  "requirement": "Unrelated plugin toggle preserves Markdown block identity; changed/removed fence handler updates existing blocks.",
+  "upstream_oracle": "/Users/mymac/Projects/tmp/opencode @ 450e7b92412c780a7b5a75226bb8d49aaca24e22",
+  "upstream_citations": [
+    "packages/tui/src/plugin/builtins.ts:17-35 (Merman, Latex registered unconditionally as builtin plugins)",
+    "packages/tui/src/plugin/builtins.ts:14,15,29,30 (import Latex/Merman; entries in builtins[])",
+    "packages/merman/src/plugin.ts:5-14 (context.markdown.registerCodeBlockRenderer('mermaid', ...))",
+    "packages/latex/src/plugin.ts:4-13 (registerCodeBlockRenderer('latex'|'math', ...))",
+    "repo doc-comment citations to upstream (not directly re-read this pass): packages/tui/src/plugin/markdown.ts:5-17, packages/tui/src/plugin/context.tsx:141-143, Markdown.ts:503-511 (set renderNode -> rebuild)"
+  ],
+  "why_not_bounded": "MD-007 cannot be a live-wired patch. The live flow `push_block_markdown` (crates/cli/src/native_view_chat.rs:2343) builds a FRESH `MarkdownFlow::new(...)` every call (:2357), calls set_content, renders, and drops it. It is a stateless per-frame repaint with no persistent block state, so it cannot express 'unrelated toggle preserves block identity'. The fence-handler registry `MarkdownPluginRegistry` (:468) and `MarkdownFlow::set_fence_handlers` (:681) have ONLY #[test] callers (native_markdown_flow.rs:2570-2605, 2642-2652). There is also no live plugin source (no /api/plugins route; `rg api/plugin` -> none) and no live plugin-toggle input, so the registry cannot even be populated with real registrations.",
+  "live_path_trace": {
+    "live_fence_painter": "crates/cli/src/native_view_chat.rs:2285 paint_fence_block; called from push_block_markdown :2406",
+    "live_flow_construction": "crates/cli/src/native_view_chat.rs:2357 `let mut flow = MarkdownFlow::new(flow_options(markdown_mode));` (per-frame, new instance, no registry bound)",
+    "registry_type": "crates/cli/src/native_markdown_flow.rs:468 MarkdownPluginRegistry; :681 set_fence_handlers; :1108-1130 block.fence_handler populated from self.fence_handlers",
+    "registry_binding_live": "NONE. set_fence_handlers has zero non-test callers.",
+    "plugin_source_live": "NONE. No live registry producer; no /api/plugins route in crates/server/src/lib.rs route table."
+  },
+  "missing_seams": [
+    {
+      "file": "crates/cli/src/native_view_chat.rs",
+      "line": "2343-2445 push_block_markdown (flow creation 2357)",
+      "why_no_live_consumer": "The live transcript painter reconstructs the whole block list every frame from a fresh MarkdownFlow. Block identity (the very thing MD-007 asserts across an unrelated plugin toggle) is discarded between frames; there is no long-lived flow object keyed by message/part.",
+      "required_producer": "A monotonic, persistent MarkdownFlow per rendered message/part (or an epoch-keyed flow store) whose blocks survive an unrelated registry change, plus a renderer_epoch bump on effective-map change."
+    },
+    {
+      "file": "crates/cli/src/native_markdown_flow.rs",
+      "line": "468 MarkdownPluginRegistry / 681 set_fence_handlers",
+      "why_no_live_consumer": "Both are fully implemented but reached only from #[test] (2570-2605, 2642-2652). No production code constructs a registry or binds it to a flow.",
+      "required_producer": "A live plugin-registry producer that reflects the real installed/active plugin set (upstream builtins + user plugins) and a production caller of set_fence_handlers."
+    },
+    {
+      "file": "crates/server/src/lib.rs",
+      "line": "205 /api/commands (route table 189-302); no /api/plugins or plugin-active entry",
+      "why_no_live_consumer": "No daemon route exposes the active markdown code-block renderer set (upstream merman/latex plugin availability). The CLI cannot learn which handlers are registered.",
+      "required_producer": "A daemon route (or an added field) reporting active markdown plugins / fence handlers so the CLI registry matches upstream builtins.ts."
+    },
+    {
+      "file": "crates/cli/src/tui_entry.rs",
+      "line": "live loop (no plugin-toggle input dispatch)",
+      "why_no_live_consumer": "There is no live toggle of an unrelated plugin that would exercise the block-identity contract; no input event or command reaches a registry.",
+      "required_producer": "A live plugin enable/disable path (command palettes / Plugins page) wired to the registry, mirroring upstream plugin activation."
+    }
+  ],
+  "files": [],
+  "what_changed": "none (blocked; no patch produced)",
+  "live_consumer": "NONE. push_block_markdown is the only live consumer and it uses a fresh unregistered flow; MarkdownPluginRegistry/set_fence_handlers have only test callers.",
+  "focused_test_plan": "No patch. Existing md_007-style tests (native_markdown_flow.rs:2570-2605) prove the registry model in isolation only; they do not prove a persistent live flow or a live plugin source, so they cannot satisfy the landability rule.",
+  "note": "Same missing producer family as MD-008/MD-009: a live plugin-registration/diagram-engine producer. See MD-008.blocked.json / MD-009.blocked.json."
+}

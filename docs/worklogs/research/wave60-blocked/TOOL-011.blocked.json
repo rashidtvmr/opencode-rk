@@ -1,0 +1,49 @@
+{
+  "id": "TOOL-011",
+  "verdict": "BLOCKED",
+  "base_head": "7cf786664ee4ed9064221b80cc49dd670b20d4db",
+  "title": "Execute dialog live status, TypeScript/JSON syntax, matching gutters, wrapped continuation line numbers, output/logs, copy actions, and scroll keys match",
+  "subject_symbols": [
+    "crates/cli/src/native_tool_rows.rs:1159 execute_dialog",
+    "crates/cli/src/native_tool_rows.rs:1140 ExecuteDialog",
+    "crates/cli/src/native_tool_rows.rs:1209 highlighted_output",
+    "crates/cli/src/native_tool_rows.rs:1227 execute_dialog_gutter",
+    "crates/cli/src/native_view_dialogs.rs:1712 DialogKind::Execute render body",
+    "crates/cli/src/native_view_dialogs.rs:1796 DialogKind::Execute footer empty arm",
+    "crates/cli/src/native_view_dialogs.rs:201 DialogRequest (no Execute payload)",
+    "crates/cli/src/native_view_dialogs.rs:1403/1475 DialogKind::Execute NotAnswerable",
+    "crates/opentui-bridge/src/highlight.rs:27-29 (grammar parity disclaimed; no live producer)",
+    "crates/cli/src/tui_entry.rs:13007-13038 (only live tool start path)"
+  ],
+  "missing_seam": {
+    "file": "crates/cli/src/native_view_dialogs.rs",
+    "lines": "396-419 (OpenDialog), 201-210 (DialogRequest), 980-1300 (open_request), 1712/1796 (Execute render)",
+    "symbol": "OpenDialog/DialogRequest Execute payload + a live opener + a live TS/JSON syntax producer",
+    "explanation": "DialogKind::Execute exists (native_view_dialogs.rs:145) and open_request accepts empty choices for it (:1008), but no producer ever opens one: grep for open_execute / DialogKind::Execute callers returns zero non-test sites. OpenDialog (:398-419) and DialogRequest (:201-210) carry no Execute content fields (no code, output, output_json, output_rest, digits, failed, elapsed). The live render for Execute is a bare placeholder — 'execute — code and output' (:1712) plus an empty footer arm (:1796). ExecuteDialog (:1140) and execute_dialog (:1159)/highlighted_output (:1209)/execute_dialog_gutter (:1227) are therefore unread by any live code path."
+  },
+  "why_no_live_consumer": [
+    "grep -rEn 'execute_dialog\\(|ExecuteDialog|execute_dialog_gutter' crates returns only the definitions (native_tool_rows.rs:1140/1159/1227), the doc reference (:144 comment), and the module #[cfg(test)] block (native_tool_rows.rs:1951-1982). No live caller.",
+    "No live opener exists: grep -rEn 'open_execute|DialogKind::Execute' crates/cli/src/tui_entry.rs crates/cli/src/native_view.rs returns nothing in tui_entry.rs and nothing that constructs an Execute request in native_view.rs. native_view.rs only opens Select (working dir), Mcp, Permission, and Prompt dialogs (native_view.rs:2567, 2645, 4855; dialogs open_prompt). The upstream execute-tool-row onClick (index.tsx:3400-3427 -> dialog.replace(<DialogExecute />)) has no oc2 equivalent: the live execute tool row renders only static rows via apply_tool_metadata + rows_for_display_spin (native_view_chat.rs:2632-2657), and the transcript mouse-up handler (tui_entry.rs:10519-10560) resolves subtask-child navigation and the message menu, never an execute dialog.",
+    "No TypeScript/JSON syntax producer exists in-workspace: there is no tokenizer/grammar for TS or JSON. grep -rEn 'fn tokenize|JsonToken|json_token|typescript' crates returns only native_markdown_flow.rs:1224 tokenize (a Markdown inline tokenizer, not code). The only highlight model (opentui-bridge/src/highlight.rs) explicitly disclaims grammar parity (:27-29 'the actual Tree-sitter parse is a separate component') and, per PAR-09, is a test-only bridge model with no live call site; Cargo.lock has no tree-sitter/syntect and no *.scm grammar assets. serde_json (native_tool_rows.rs:1218) is a validating parser, not a syntax-token/color producer.",
+    "No per-token style sink on the live paint path: the live chat style resolver markdown_run_color (tui_entry.rs:4195) maps MarkdownPalette fields only and has no syntax-role branch; SyntaxPalette (native_theme_runtime.rs) is not consulted live (PAR-09). ExecuteDialog's output_json/output_rest are plain strings with no styled-span representation, so even the model's JSON split cannot be colored on the checked renderer ABI (SafeRenderer::draw_text_styled takes explicit fg/bg/attributes, no style table).",
+    "No copy-action or scroll-key consumer for the execute surface: modal key routing is a single dialog_consumes_byte trap (tui_entry.rs:3692), the Execute dialog has no scroll state (no ScrollBox/offset in OpenDialog) and no copy action; upstream's Keymap layer (dialog-execute.tsx:88-100: up/down/pageup/pagedown/home/end/c/o) has no oc2 counterpart."
+  ],
+  "required_producer": [
+    "(1) A DialogRequest/OpenDialog Execute content payload and a live opener: an execute-tool-row click (or keybinding) in tui_entry.rs that builds the request from the live part's state.input.code / state / content and opens DialogKind::Execute. Without an opener, every downstream rule is unobservable.",
+    "(2) A bounded TypeScript + JSON syntax producer that feeds styled spans into the live render, plus a per-token style sink (new ChatRunSpan/ExecuteDialog span flags and a markdown_run_color or renderer style-table branch). This is the same missing subsystem as PAR-09; a hand-rolled tokenizer would also need a style sink that the checked ABI does not carry.",
+    "(3) Live copy (c/o) and scroll (up/down/pageup/pagedown/home/end) handling for the Execute dialog with its own scroll offset, matching dialog-execute.tsx:88-100."
+  ],
+  "bounded_highlighter_assessment": "NOT bounded. No TS/JSON tokenizer or grammar exists in-workspace (only a Markdown inline tokenizer at native_markdown_flow.rs:1224), the bridge highlight model is a test-only, grammar-parity-disclaiming stub with no live call site, and the live paint path has no per-token style sink (PAR-09). A bounded tokenizer would still need a live Execute opener and a live style sink, i.e. three missing pieces.",
+  "blocking_reason": "execute_dialog/ExecuteDialog/highlighted_output/execute_dialog_gutter are a pure model with zero live consumers, DialogKind::Execute has no producer and renders only a placeholder, there is no Execute payload on DialogRequest/OpenDialog, and there is no TypeScript/JSON syntax producer or per-token style sink. Landing TOOL-011 requires a live execute-dialog opener, a syntax subsystem, and dialog-local copy/scroll handling. A new helper/model with no live caller is REJECTED; not bounded.",
+  "focused_test_plan": "n/a (blocked). Existing coverage is test-only inside crates/cli/src/native_tool_rows.rs:1951-1982 (execute_dialog_models_status_gutter_and_json, highlighted_output cases) and crates/cli/src/native_view_dialogs.rs:6299-6314 (Execute open_request accepts empty choices). None reaches a live render.",
+  "upstream_citations": [
+    "packages/tui/src/routes/session/dialog-execute.tsx:28 (DialogExecute content viewer, opened from an execute tool row)",
+    "packages/tui/src/routes/session/dialog-execute.tsx:43-77 (code/output memos, shared digits, status strings, duration)",
+    "packages/tui/src/routes/session/dialog-execute.tsx:88-100 (modal Keymap: up/down/pageup/pagedown/home/end/c/o)",
+    "packages/tui/src/routes/session/dialog-execute.tsx:102-109,153-196 (copy code/copy output actions; Code + Output blocks)",
+    "packages/tui/src/routes/session/dialog-execute.tsx:244-278 (GutteredCode: filetype typescript/json, syntaxStyle, wrapped continuation rows stay unnumbered)",
+    "packages/tui/src/routes/session/index.tsx:3400-3427 (Execute tool row openDetails -> dialog.replace(<DialogExecute part={part} />), onClick/onErrorClick)",
+    "packages/client/src/effect/generated/client.ts:1501-1518 (shell endpoints, for contrast: no execute-dialog route needed)",
+    "pin: 450e7b92412c780a7b5a75226bb8d49aaca24e22"
+  ]
+}

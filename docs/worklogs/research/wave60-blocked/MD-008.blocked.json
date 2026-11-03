@@ -1,0 +1,40 @@
+{
+  "id": "MD-008",
+  "verdict": "BLOCKED",
+  "base_head": "7cf78666",
+  "requirement": "Each supported Mermaid kind, wide horizontal drag, streaming partial syntax, invalid syntax, oversized canvas, and fallback preserve geometry and source.",
+  "upstream_oracle": "/Users/mymac/Projects/tmp/opencode @ 450e7b92412c780a7b5a75226bb8d49aaca24e22",
+  "upstream_citations": [
+    "packages/tui/src/plugin/builtins.ts:15,29 (Merman builtin registered unconditionally)",
+    "packages/merman/src/plugin.ts:5-14 (registerCodeBlockRenderer('mermaid', createMermaidCodeBlockRenderer(context.renderer, ...)))",
+    "packages/merman/src/plugin.ts:8-13 (language key 'mermaid' owns the renderer; palette from theme)"
+  ],
+  "why_not_bounded": "MD-008 cannot be a live-wired patch because NO real diagram painter exists anywhere in the workspace, and the live consumer explicitly discards the rendered frame. The only trait impls of DiagramPainter are the fail-closed sentinel NoDiagramPainter (crates/cli/src/native_mermaid.rs:451, returns MermaidFailure::Unavailable) and the #[test]-only StubPainter (:1084, inside mod tests). The live painter `paint_fence_block` builds MermaidRenderer::without_painter (:2299) which always yields MermaidOutcome::Fallback and paints the plain code block. Additionally the boundary type DiagramFrameSize (:414-420) carries GEOMETRY ONLY ('Glyph cells are the painter's business (and are not modelled here)'), so even injecting a painter would not produce painted cells: the live consumer drops Rendered frames by design (:2308-2313). No mermaid/merman rendering crate is present in any Cargo.toml (rg mermaid|merman|latex in Cargo.toml -> none).",
+  "live_path_trace": {
+    "live_consumer": "crates/cli/src/native_view_chat.rs:2298-2316 (paint_fence_block mermaid branch)",
+    "renderer_construction": "crates/cli/src/native_view_chat.rs:2299 MermaidRenderer::without_painter(MermaidTheme::dark(\"oc2-native\"))",
+    "sentinel": "crates/cli/src/native_mermaid.rs:451 impl DiagramPainter for NoDiagramPainter -> Err(MermaidFailure::Unavailable)",
+    "real_impls_in_workspace": "NONE (only NoDiagramPainter :451 and test StubPainter :1084)",
+    "boundary_type": "crates/cli/src/native_mermaid.rs:414-420 DiagramFrameSize { width, height } (no glyph cells); :443 trait DiagramPainter { fn paint(...) -> Result<DiagramFrameSize, MermaidFailure> }",
+    "renderer": "crates/cli/src/native_mermaid.rs:642 MermaidRenderer<P: DiagramPainter>; :651 impl MermaidRenderer<NoDiagramPainter>; :659 impl<P> MermaidRenderer<P>"
+  },
+  "missing_seams": [
+    {
+      "file": "crates/cli/src/native_mermaid.rs",
+      "line": "443-455 DiagramPainter trait + NoDiagramPainter sentinel; 414-420 DiagramFrameSize",
+      "why_no_live_consumer": "The trait has no production implementor. The only non-sentinel impl is test-only. The boundary result type models geometry only and cannot carry painted glyph cells, so it cannot satisfy 'preserve geometry AND source' rendering.",
+      "required_producer": "A real Mermaid engine: parser for each supported kind (flowchart/gantt/gitgraph/sequence/state/timeline) plus a canvas/box-drawing @ cell renderer, exposed as a DiagramPainter impl. Upstream delegates to packages/merman (a full TS engine, canvas.ts, per-kind parsers)."
+    },
+    {
+      "file": "crates/cli/src/native_view_chat.rs",
+      "line": "2298-2316",
+      "why_no_live_consumer": "The live consumer is hard-coded to without_painter and its Rendered arm only debug_asserts (a frame has geometry but no cells). To paint an actual diagram the consumer must both receive a painter and consume glyph cells.",
+      "required_producer": "A glyph-cell carrier (or cell-returning painter API) and a live render path that copies those cells into transcript rows; plus wiring of the real painter."
+    }
+  ],
+  "files": [],
+  "what_changed": "none (blocked; no patch produced)",
+  "live_consumer": "crates/cli/src/native_view_chat.rs:2298-2316 exists and IS live, but it is wired to the fail-closed sentinel; there is no painter producer to inject.",
+  "focused_test_plan": "No patch. Existing md_008_* tests (native_mermaid.rs:1107-1407) drive StubPainter inside #[cfg(test)] and prove the renderer lifecycle, not a live painter; they cannot satisfy the landability rule.",
+  "note": "Shares the required producer with MD-009 (diagram/math engine). See MD-009.blocked.json."
+}

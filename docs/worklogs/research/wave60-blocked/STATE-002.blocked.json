@@ -1,0 +1,95 @@
+{
+  "id": "STATE-002",
+  "verdict": "BLOCKED",
+  "base_head": "7cf78666",
+  "base_sha_full": "7cf786664ee4ed9064221b80cc49dd670b20d4db",
+  "requirement": "Live compaction renders a placeholder ('[compaction] {reason}'). It must render the upstream CompactionMessage: a bordered header plus a markdown summary body, produced by the real compaction path.",
+  "upstream_oracle": "/Users/mymac/Projects/tmp/opencode @ 450e7b92412c780a7b5a75226bb8d49aaca24e22",
+  "upstream_citations": [
+    "packages/tui/src/routes/session/index.tsx:2171 CompactionMessage (bordered header + markdown body)"
+  ],
+  "summary": "No compaction part travels the transcript contract end-to-end. The live compaction worker (tui_entry.rs:7949-7970) calls the server and, on success, appends only the plain ASCII line 'compaction complete' via append_transcript; it never renders a rich message. The producer compact_session (server/src/lib.rs:1668) resolves the strategy and returns Json({compacted:true,strategy}) only (:1697, :1726), committing only a durable CompactionCheckpoint - it never persists or streams a compaction message/part. MessageRole (contracts/src/lib.rs:222) has only System|User|Assistant|Tool with no Compaction variant, so a compaction marker cannot be serialized at all (encode_role at storage/src/writer_v2.rs:318 covers only 0..3). list_messages (:1256) attaches only tool parts; list_history_page (:1326) attaches zero typed parts ('Raw history records carry no typed parts'); the live startup fetch is GET /history (tui_entry.rs:1193). The rich models are all dead: CompactionState (native_timeline.rs:382) has only self+test consumers; sessions PartKind::Compaction (sessions/src/part_events.rs:19, decode_kind :101) has only crates/sessions/tests/part_events.rs consumers; nothing emits the 'compaction' part type that native_chat_projection.rs:392 projects into ChatPart::Compaction. ServerEvent (server/src/event_bus.rs:12) has no compaction variant. The gap is producer + cross-crate contract + storage + server route + CLI consumer, not a renderer tweak; the wave58 client-only projection helper was correctly REJECTED as dead and unfaithful to the upstream format. Do not stub.",
+  "live_path_trace": {
+    "live_worker": "crates/cli/src/tui_entry.rs:7949-7970 compaction worker: on Ok appends plain text 'compaction complete'; on Err appends 'error: compact: ...'",
+    "producer": "crates/server/src/lib.rs:1668 compact_session -> returns Json({compacted:true,strategy:'fallback'|'native'}) at :1697/:1726; commits only CompactionCheckpoint (:1726 area), never a compaction message/part",
+    "message_list": "crates/server/src/lib.rs:1256 list_messages attaches only tool parts; crates/server/src/lib.rs:1326 list_history_page attaches zero typed parts (comment: 'Raw history records carry no typed parts')",
+    "startup_fetch": "crates/cli/src/tui_entry.rs:1193 GET /api/sessions/{id}/history drives the transcript",
+    "client_projection": "crates/cli/src/native_chat_projection.rs:392 projects a 'compaction' part type the server never emits into ChatPart::Compaction{reason}",
+    "placeholder_render": "crates/cli/src/native_view_chat.rs:2712 renders '[compaction] {reason}' for ChatPart::Compaction"
+  },
+  "missing_seams": [
+    {
+      "file": "crates/contracts/src/lib.rs",
+      "line": "222 MessageRole enum (System|User|Assistant|Tool)",
+      "why_no_live_consumer": "There is no Compaction role, so a compaction message cannot be represented in the transcript contract, serialized, or reconstructed by any client. Every downstream layer (storage, server, CLI) is bound to this closed enum.",
+      "required_producer": "Add a Compaction MessageRole (or an equivalent first-class compaction message/part type) plus MessageRecord support (contracts/src/lib.rs:250) so the compaction artifact can be carried on the wire."
+    },
+    {
+      "file": "crates/storage/src/writer_v2.rs",
+      "line": "318 encode_role",
+      "why_no_live_consumer": "encode_role maps only 0..3 (System/User/Assistant/Tool); with no Compaction role it cannot persist a compaction message. Any compaction row is unrepresentable in storage.",
+      "required_producer": "Extend encode_role (and its decode counterpart) for the new Compaction role so the persisted row round-trips."
+    },
+    {
+      "file": "crates/server/src/lib.rs",
+      "line": "1668 compact_session (returns {compacted,strategy}; :1697, :1726)",
+      "why_no_live_consumer": "compact_session never emits a compaction message/part to any store or stream: it commits only a durable CompactionCheckpoint and returns a bare JSON status. No compaction artifact exists for the client to render.",
+      "required_producer": "Upon successful compaction, persist and/or stream a compaction message carrying the upstream fields (status, summary, tokens) through the transcript contract so list_messages/list_history_page can return it."
+    },
+    {
+      "file": "crates/server/src/lib.rs",
+      "line": "1256 list_messages and 1326 list_history_page",
+      "why_no_live_consumer": "list_messages attaches only tool parts; list_history_page attaches zero typed parts by design ('Raw history records carry no typed parts, so a client that reloads a transcript cannot tell ...'). Even if a compaction row existed, no route surfaces its typed body to the live client.",
+      "required_producer": "Attach the compaction part/message to the rows returned by list_messages/list_history_page so the live GET /history fetch receives it."
+    },
+    {
+      "file": "crates/server/src/event_bus.rs",
+      "line": "12 ServerEvent",
+      "why_no_live_consumer": "ServerEvent has no compaction variant, so a live streaming client cannot learn that a compaction occurred or receive its summary without re-reading history.",
+      "required_producer": "Add a ServerEvent compaction variant (emitted on successful compaction) if live streaming (not only history reload) is to surface the compaction message."
+    },
+    {
+      "file": "crates/cli/src/tui_entry.rs",
+      "line": "7949-7970 (compaction worker) and 1193 (GET /history)",
+      "why_no_live_consumer": "The live worker renders only the flat string 'compaction complete'; the startup/history fetch carries no compaction part (see above). There is no live consumer that builds a bordered-header + markdown-body CompactionMessage.",
+      "required_producer": "Once the server carries the compaction artifact, the live CLI must project it into ChatPart::Compaction{status,summary,tokens} and render the upstream bordered header + markdown body."
+    },
+    {
+      "file": "crates/cli/src/native_timeline.rs",
+      "line": "382 CompactionState (status, cancelled, provider_native, summary, error, tokens)",
+      "why_no_live_consumer": "Zero non-test consumers: all constructions are in native_timeline.rs tests (989+). It is a rich pure model with no live producer or paint path.",
+      "required_producer": "A live consumer must construct CompactionState/CompactionMessage from the server-carried compaction artifact and pass it to the transcript renderer."
+    },
+    {
+      "file": "crates/sessions/src/part_events.rs",
+      "line": "19 PartKind::Compaction, 101 decode_kind",
+      "why_no_live_consumer": "The only consumers are crates/sessions/tests/part_events.rs (the sole external use of `part_events`, declared `pub mod part_events` at sessions/src/lib.rs:17). No server producer emits a `compaction` part, so decode_kind's 'compaction' arm is never reached in production.",
+      "required_producer": "A server producer must emit a `compaction` part through this seam, or the seam must be superseded by the new contract-level compaction message."
+    },
+    {
+      "file": "crates/cli/src/native_chat_projection.rs",
+      "line": "392 (projects 'compaction' -> ChatPart::Compaction{reason})",
+      "why_no_live_consumer": "It projects a 'compaction' part type that no server route ever emits; the reason field is invented client-side. This is the rejected wave58 client-only path: faithful upstream compaction carries status/summary/tokens, not a reason string.",
+      "required_producer": "The server must actually emit the compaction part with upstream-faithful fields; the projection must map status/summary/tokens rather than a synthetic reason."
+    }
+  ],
+  "files": [],
+  "what_changed": "none (blocked; no patch produced)",
+  "live_consumer": "none in current HEAD; CompactionState, sessions PartKind::Compaction, ChatPart::Compaction producer, and the ServerEvent compaction variant are all absent or test-only. The live worker renders a flat 'compaction complete' string only.",
+  "focused_test_plan": "No patch. Existing test-only models (CompactionState, sessions PartKind::Compaction) prove isolated behavior only and do not prove a live end-to-end consumer, so they cannot satisfy the landability rule. The wave58 STATE-002.patch.diff client-only helper was rejected as dead and unfaithful.",
+  "patch": false,
+  "evidence": [
+    "crates/contracts/src/lib.rs:222 (MessageRole: System|User|Assistant|Tool only, no Compaction)",
+    "crates/storage/src/writer_v2.rs:318 (encode_role covers only 0..3)",
+    "crates/server/src/lib.rs:1668 (compact_session returns {compacted,strategy}; commits only CompactionCheckpoint)",
+    "crates/server/src/lib.rs:1256 (list_messages attaches only tool parts)",
+    "crates/server/src/lib.rs:1326 (list_history_page attaches zero typed parts)",
+    "crates/server/src/event_bus.rs:12 (ServerEvent, no compaction variant)",
+    "crates/cli/src/tui_entry.rs:7949-7970 (live worker appends 'compaction complete' text only)",
+    "crates/cli/src/tui_entry.rs:1193 (live startup GET /history)",
+    "crates/cli/src/native_chat_projection.rs:392 (projects a 'compaction' type server never emits)",
+    "crates/cli/src/native_view_chat.rs:2712 (placeholder render '[compaction] {reason}')",
+    "crates/cli/src/native_timeline.rs:382 (CompactionState, zero non-test consumers)",
+    "crates/sessions/src/part_events.rs:19,101 (PartKind::Compaction, only tests/part_events.rs consumes)"
+  ]
+}

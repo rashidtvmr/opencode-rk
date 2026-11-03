@@ -1,0 +1,39 @@
+{
+  "id": "LAY-13",
+  "verdict": "BLOCKED",
+  "base_head": "7cf786664ee4ed9064221b80cc49dd670b20d4db",
+  "title": "panel/frame composition (single FrameDescriptor geometry source)",
+  "subject_symbols": [
+    "crates/cli/src/native_shell_frame.rs:201 FrameDescriptor",
+    "crates/cli/src/native_shell_frame.rs:247 FrameDescriptor::new",
+    "crates/cli/src/native_shell_frame.rs:389 compose_shell",
+    "crates/cli/src/native_layout.rs:254 SessionRegions",
+    "crates/cli/src/native_layout.rs:320 SessionRegions::compute"
+  ],
+  "missing_seam": {
+    "file": "crates/cli/src/native_shell_frame.rs",
+    "lines": "201, 247, 389",
+    "symbol": "FrameDescriptor / compose_shell",
+    "explanation": "The 'related panel composition' (LAY-13) is the single-descriptor geometry model: FrameDescriptor::new (native_shell_frame.rs:247) resolves rail/available/dock/insets/action+bottom rows/sidebar pads/scrollbar cells once, and compose_shell (:389) paints from it. compose_shell has NO non-test caller; FrameDescriptor::new is reached only via compose_shell. The running TUI never composes through this model."
+  },
+  "why_no_live_consumer": [
+    "grep over crates/ for compose_shell returns only its definition (native_shell_frame.rs:389), its own #[cfg(test)] invocations, and native_pane_resize.rs tests (lines 875/1155/1172/1211/1295). No production call site.",
+    "FrameDescriptor::new callers: only compose_shell (:390). FrameDescriptor type is referenced non-test only from native_pane_resize.rs doc comments (:51) and frame_resize_handle (:235), which itself has no production caller.",
+    "SessionRegions::compute (native_layout.rs:320) and FrameSpec (native_layout.rs:197) callers: native_shell_frame.rs:279 (inside FrameDescriptor::new, test-only path) and native_layout.rs tests (:652-815). No live consumer.",
+    "The live render composes through native_view_layout::compose_frame (native_view_layout.rs:126), called live at native_view.rs:3938 with a sidebar-only model (ViewPresentation, native_view.rs:1972-1994); it has no FrameDescriptor/SessionRegions equivalent and no panel/terminal dock.",
+    "LAY-13 coverage in native_shell_frame.rs:999-1091 (lay13_descriptor_is_the_single_geometry_source, lay13_descriptor_resolves_sidebar_pads_and_scrollbar_cells) is #[cfg(test)] only; it asserts the descriptor's arithmetic, not any running-TUI behavior."
+  ],
+  "required_producer": [
+    "A live composition that consumes FrameDescriptor/compose_shell (i.e. the LAY-10/LAY-11 live panel/terminal dock), or a deliberate migration of NativeView::render_content onto the compose_shell model. The live path also owns dock/queue/permission rows, transcript + sidebar scrollbars, chat row classes and hit regions (native_view.rs:3497-4030); replacing its composition is a large, non-bounded change.",
+    "If kept as-is, LAY-13 is pure geometry verification with no product surface; promoting it requires the live consumer above."
+  ],
+  "blocking_reason": "LAY-13 is the geometry model consumed only by the test-only compose_shell. Adding/altering it without a live consumer is REJECTED. Landing it live requires the LAY-10 live panel/terminal dock or a full live-render composition migration. Not bounded.",
+  "focused_test_plan": "n/a (blocked). Existing coverage: native_shell_frame.rs:999-1091; native_layout.rs:639-815 (regions tiling); native_pane_resize.rs LAY-13 frame-placement tests 1086-1300.",
+  "upstream_citations": [
+    "packages/tui/src/component/session-frame.tsx:323-331 (SESSION_SIDEBAR_WIDTH / paneResize.size() dock)",
+    "packages/tui/src/component/session-frame.tsx:381-384 (handle placed from the same frame box)",
+    "packages/tui/src/routes/session/index.tsx:1514-1520 (insets + reserved bottom/action rows)",
+    "packages/tui/src/routes/session/sidebar.tsx:26-29,56-69 (sidebar pads + absolute scrollbar column)",
+    "pin: 450e7b92412c780a7b5a75226bb8d49aaca24e22"
+  ]
+}

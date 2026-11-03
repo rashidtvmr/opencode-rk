@@ -1,0 +1,53 @@
+{
+  "id": "TOOL-006",
+  "verdict": "BLOCKED",
+  "base_head": "7cf786664ee4ed9064221b80cc49dd670b20d4db",
+  "title": "Background shell collapses without needless polling, live expansion updates at the correct cadence, completion drains output, large output is bounded, moved sessions retain original process location",
+  "subject_symbols": [
+    "crates/cli/src/native_shell.rs:1848 BackgroundShell",
+    "crates/cli/src/native_shell.rs:1872 impl BackgroundShell",
+    "crates/cli/src/native_shell.rs:1967 BackgroundShell::sync",
+    "crates/cli/src/native_shell.rs:1986 BackgroundShell::poll",
+    "crates/cli/src/native_shell.rs:2008 BackgroundShell::set_expanded",
+    "crates/cli/src/native_shell.rs:2026 BackgroundShell::apply",
+    "crates/cli/src/native_shell.rs:2093 BackgroundShell::request",
+    "crates/cli/src/native_shell.rs:1812 ShellLoad",
+    "crates/cli/src/native_shell.rs:1828 ShellChunk",
+    "crates/cli/src/native_turn.rs:108 TurnWorker::start_shell",
+    "crates/server/src/lib.rs:294 POST /api/sessions/{id}/shell/stream",
+    "crates/server/src/lib.rs:890 native_shell_stream"
+  ],
+  "missing_seam": {
+    "file": "crates/server/src/lib.rs",
+    "lines": "294 (route table), 890-1015 (native_shell_stream)",
+    "symbol": "GET /api/shell/{id}/output and GET /api/shell (shell.get) + a live shell registry",
+    "explanation": "BackgroundShell emits ShellLoad{shell_id,cursor,limit,location,drain} requests whose only possible responder upstream is client.api.shell.output (GET) plus data.shell.get(id) for location. This build exposes exactly one shell route: POST /api/sessions/{id}/shell/stream (lib.rs:294), a one-shot NDJSON turn that runs the command through ToolExecutor::new().with_broker(...), streams user_message/tool_call/tool_output/assistant_message frames, and terminates (lib.rs:890-1015). There is NO GET /api/shell, NO /api/shell/{id}/output, NO shell registry keyed by an sh_ id, no cursor/size, and no shell.location. BackgroundShell therefore has no live responder for any of its methods."
+  },
+  "why_no_live_consumer": [
+    "grep -rEn 'BackgroundShell|ShellLoad|ShellChunk' crates returns matches only inside crates/cli/src/native_shell.rs: the definitions (:1812/:1828/:1848), their impl (:1872-2119), and the module #[cfg(test)] block (:2447-2560). Zero non-test call sites in the binary.",
+    "The live '!command' submit path (crates/cli/src/tui_entry.rs:13007-13015) calls native_turn::TurnWorker::start_shell, which POSTs /shell/stream (native_turn.rs:108-122). That is the one-shot stream, not the background ShellDisplay poll model. No code constructs a BackgroundShell on the live path.",
+    "The TUI imports native_shell for the composer dock / footer / overlay helpers only (crates/cli/src/native_shell.rs:934-958 re-exports dock_surface items); BackgroundShell/ShellLoad/ShellChunk are re-exported at :956-957 but never referenced outside the module.",
+    "Server side: ServerEvent (crates/server/src/event_bus.rs:12-36) has no Shell variant; there is no sh_ identifier type, no shell registry, no shell.file/cursor/size, and no shell-exited event. native_shell_stream (lib.rs:890) writes an inline message and returns; the spawned task drops the RunOwner (lib.rs:884-888) which cancels the run on drop, so it cannot retain a background process to poll.",
+    "Upstream's model depends on server-side facts this build never produces: Shell.Info{id,status,cwd,file,pid,exit,metadata,time} and Shell.Output{output,cursor,size,truncated} (packages/schema/src/shell.ts) served by shell.get/shell.output/shell.list/shell.create/shell.remove (packages/server/src/handlers/shell.ts:15-66). None of those five routes or the Shell service exist here."
+  ],
+  "required_producer": [
+    "A server-side Shell service + registry: sh_-prefixed id, persistent process spawn (not the brokered one-shot ToolExecutor), a captured combined-output file, cursor/size, per-shell location, and lifecycle events. Plus the routes GET /api/shell (shell.get for location), GET /api/shell/{id}/output?cursor&limit (shell.output), and ideally shell.list/create/remove.",
+    "A live TUI consumer that owns one BackgroundShell per shell part, drives sync/poll/set_expanded from the render clock and click handler, performs the returned ShellLoad HTTP request, and feeds the ShellChunk back into apply(). That is the same consumer that would render the expanded/collapsed shell body; today the live render emits only static tool rows via native_tool_rows (crates/cli/src/native_view_chat.rs:2632-2657).",
+    "Both halves are required: the model's polling/drain/bound/location rules are unobservable without a server that can answer a cursor'd read and a UI loop that issues it. Wiring the model to the existing one-shot /shell/stream is impossible (it returns a single terminated stream with no cursor/size/location and no re-read)."
+  ],
+  "bounded_highlighter_assessment": "n/a (shell, not highlight)",
+  "blocking_reason": "BackgroundShell + ShellLoad/ShellChunk are a new model with no live caller. The single live shell path is the one-shot brokered /shell/stream turn, which cannot serve cursor/size/location re-reads. There is no GET shell route and no shell registry. Landing TOOL-006 requires adding a persistent server-side Shell service and its routes plus a live TUI poll/expand consumer; that is a subsystem, not a bounded wiring edit. A new helper/model with no live caller is REJECTED.",
+  "focused_test_plan": "n/a (blocked). Existing coverage is test-only inside crates/cli/src/native_shell.rs:2447-2560 (background_shell_collapsed_does_not_poll, background_shell_drains_on_completion_and_bounds_output, background_shell_keeps_the_original_location, background_shell_output_text_mirrors_the_memo). None reaches a live render or a live HTTP route.",
+  "upstream_citations": [
+    "packages/tui/src/routes/session/index.tsx:2982 (SHELL_DISPLAY_LIMIT = 1024 * 1024)",
+    "packages/tui/src/routes/session/index.tsx:3014 (location = data.shell.get(shellID)?.location ?? data.session.get(sessionID)?.location)",
+    "packages/tui/src/routes/session/index.tsx:3030-3069 (loadBackgroundOutput: shell.output cursor/limit/drain loop)",
+    "packages/tui/src/routes/session/index.tsx:3071-3083 (createEffect: collapsed background does not poll; expanded/foreground setInterval 1000ms; completion drains)",
+    "packages/tui/src/routes/session/index.tsx:3052-3055,3090 (tail bound + '[earlier output omitted]' head label)",
+    "packages/tui/src/routes/session/index.tsx:3102-3106 (toggle: expanding loads immediately, drains when not backgroundRunning)",
+    "packages/schema/src/shell.ts (Shell.Info, Shell.Output{output,cursor,size,truncated}, Status)",
+    "packages/server/src/handlers/shell.ts:15-66 (shell.list/create/get/output/remove handlers)",
+    "packages/client/src/effect/generated/client.ts:1501-1518 (shell.get / shell.output / shell.remove endpoints)",
+    "pin: 450e7b92412c780a7b5a75226bb8d49aaca24e22"
+  ]
+}

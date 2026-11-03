@@ -1,0 +1,66 @@
+{
+  "id": "DIFF-001",
+  "verdict": "BLOCKED",
+  "base_head": "7cf786664ee4ed9064221b80cc49dd670b20d4db",
+  "canonical": "/Users/mymac/Projects/opencode-rk-recovery-20261005",
+  "upstream_pin": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+  "claim": "split-mode diff arithmetic correct but no live consumer",
+  "missing_seam": [
+    {
+      "file": "crates/cli/src/native_diff_view.rs",
+      "line": 600,
+      "symbol": "resolve_view_mode",
+      "why_no_live_consumer": "Only reachable callers are native_diff_inline.rs build_patch_diff (:125), build_edit_diff (:169), build_permission_diff (:198). Verified rg: every build_* caller is a #[cfg(test)] test in native_diff_inline.rs. No production caller anywhere in crates/ (rg 'build_edit_diff|build_patch_diff|build_permission_diff|resolve_view_mode' excluding test modules returns zero non-test hits).",
+      "required_producer": "a live caller that passes DiffViewPreference + measured width into paint_inline_patch from the running TUI paint path"
+    },
+    {
+      "file": "crates/cli/src/native_view_chat.rs",
+      "line": 2200,
+      "symbol": "push_diff_fence -> paint_inline_patch",
+      "why_no_live_consumer": "This IS a live consumer (reached via paint_fence_block :2335, push_block_markdown :2574, typed_message_rows_* :3428). But it hardcodes DiffViewMode::Unified and DiffWrapMode::Word. The live Patch painter at :2730 uses paint_rows_with_gutter (unified only), never resolve_view_mode. No live path reads config.diffs.view.",
+      "required_producer": "thread DiffViewPreference::from_config(config.diffs.view) + measured content width into both live painters"
+    },
+    {
+      "file": "crates/foundation/src/config.rs",
+      "line": 266,
+      "symbol": "struct Config",
+      "why_no_live_consumer": "Fields are theme/model/permission/shell/compaction/features. No `diffs` field; no parse of a `diffs.view` key anywhere (rg '\"diffs\"' in crates/ returns only native_capture.rs debug strings). native_permissions.rs:188 diff_view(width, Option<&str>) has zero non-test callers.",
+      "required_producer": "a live config layer exposing diffs.view (auto|split|unified), default Auto"
+    },
+    {
+      "file": "crates/cli/src/native_view_chat.rs",
+      "line": 2537,
+      "symbol": "printed row model Vec<(String, ChatRowClass)>",
+      "why_no_live_consumer": "A split terminal row is SplitRow::Pair { left: Option<SplitCell>, right: Option<SplitCell> } (native_diff_view.rs:709-715) carrying two independent DiffLineRole values. The live model holds exactly ONE ChatRowClass per row (native_view_chat.rs:902 + :2537), and the painter maps that class to exactly one fg (chat_row_foreground, tui_entry.rs:2908) and one bg (chat_row_background, tui_entry.rs:2880). One terminal row cannot carry the two independent left/right backgrounds the split design requires.",
+      "required_producer": "extend the row model to carry per-x-range fg/bg (or a per-row split descriptor), plus chat_row_background/chat_row_foreground consumers that honor it"
+    }
+  ],
+  "bounded_path_evaluation": {
+    "path_recorded": "docs/ui-parity/PARITY_STATUS.md:509-515",
+    "steps_claimed": [
+      "add bg/fg fields to ChatRunSpan",
+      "x-ranged role_bg override in paint loop (tui_entry.rs:4623-4666)",
+      "route live Patch/fence painters through paint_inline_patch with config.diffs.view + measured width"
+    ],
+    "verdict": "NOT BOUNDED",
+    "reasoning": [
+      "ChatRunSpan (native_view_chat.rs:1734-1738) is {start,end,flags}. Adding fg/bg touches 9 literal constructions in native_view_chat.rs plus 1 in native_view.rs:3957, and both splice/resize paths in native_view.rs (:3440,:3573,:3607) which reconstruct spans. The paint loop consumes run_spans TWICE (tui_entry.rs:4859 and :4900, plus :4857-4878 markdown bg). Adding fields is mechanical but the ingestion (the hard part) is not.",
+      "ChatRunSpan is derived from markdown_runs::parse_part over PROSE (markdown_part_row_spans_mode :1755). A split diff row is not prose and its spans are positional columns, not markdown flags. There is no existing producer that turns SplitRow::Pair into ChatRunSpans with per-side bg. That adapter must be written (new function + its own column-composition for the String row text).",
+      "config.diffs.view has no producer (foundation Config lacks diffs). Adding it requires a new Config field, default, validation and a live layer. Separately native_permissions.rs:188 diff_view already duplicates the resolve_view_mode logic with a DIFFERENT contract (permission auto-splits at >120 with no viewer branch); wiring both would create two split-resolution authorities.",
+      "Two live painters must both be re-routed: push_diff_fence (:2190) currently returns bool and only accepts Unified rows (:2212-2217 fail-closed guard would reject Split rows), and ChatPart::Patch (:2721-2821) has its own budget/malformed/diagnostics row math keyed to unified line.text. Split rows pair two lines into one row, changing all of total_rows/kept/truncated math.",
+      "Net: not a 3-step bounded patch; it is a config field + row-model extension + span producer + two painter rewrites + the fail-closed guard rework. >5 coordinated seams across 3 files, one of which (row model type) propagates to native_view.rs."
+    ]
+  },
+  "upstream_citations": [
+    "packages/tui/src/component/patch-diff.tsx:45-55 (per-gutter, view prop)",
+    "packages/tui/src/routes/session/index.tsx:3454-3460 (Edit view memo: config.diffs.view else ctx.width > 120 ? split : unified)",
+    "packages/tui/src/routes/session/index.tsx:3533-3537 (ApplyPatch view memo, same rule)",
+    "packages/tui/src/config/index.tsx:126 (diffs.view Schema.Literals(['auto','split','unified']))",
+    "crates/cli/src/native_diff_view.rs:600 resolve_view_mode (already matches :3459/:3536 rule)",
+    "crates/cli/src/native_view_chat.rs:2200-2206 (live fence painter hardcodes Unified)",
+    "crates/cli/src/native_view_chat.rs:2730 (live Patch painter uses paint_rows_with_gutter, unified only)",
+    "crates/cli/src/tui_entry.rs:2880 chat_row_background / :2908 chat_row_foreground (one class -> one fg/one bg)"
+  ],
+  "no_canonical_writes": true,
+  "cargo_run": false
+}

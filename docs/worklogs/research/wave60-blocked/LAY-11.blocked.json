@@ -1,0 +1,39 @@
+{
+  "id": "LAY-11",
+  "verdict": "BLOCKED",
+  "base_head": "7cf786664ee4ed9064221b80cc49dd670b20d4db",
+  "title": "pane resize handle (drag-to-resize the docked terminal/panel column)",
+  "subject_symbols": [
+    "crates/cli/src/native_pane_resize.rs:276 pane_resize_handle",
+    "crates/cli/src/native_pane_resize.rs:308 PaneResize",
+    "crates/cli/src/native_pane_resize.rs:230 frame_resize_handle",
+    "crates/cli/src/native_pane_resize.rs:612 pane_split_geometry",
+    "crates/cli/src/native_view_layout.rs:833 right_pane_width "
+  ],
+  "missing_seam": {
+    "file": "crates/cli/src/native_pane_resize.rs",
+    "lines": "276, 308",
+    "symbol": "pane_resize_handle / PaneResize",
+    "explanation": "pane_resize_handle is called only from frame_resize_handle (:230) and pane_split_geometry (:612); both feed only native_pane_resize.rs #[cfg(test)] (lines 862-1300). PaneResize::new is constructed only in tests. The handle requires a docked RightPane::Terminal|Panel (native_pane_resize.rs:286), which the live composition never produces."
+  },
+  "why_no_live_consumer": [
+    "The handle is derived from ShellFrame/FrameDescriptor (frame_resize_handle, native_pane_resize.rs:230; uses FrameDescriptor.available/descriptor.pane). ShellFrame is produced only by compose_shell, which has no non-test caller (see LAY-10). No live code builds a ShellFrame or a FrameDescriptor.",
+    "The live geometry (ViewPresentation, native_view.rs:1972-1994) has no pane boundary a handle could sit on: the right column is either the docked 42-col sidebar (sidebar_offset) or, below 120 cols, an overlay; there is no terminal/panel dock and no pane-resize width stored in the live view.",
+    "The live input loop has no drag handler that drives PaneResize: grep for on_mouse_drag/PaneResize/pane_resize/resize_handle in tui_entry.rs matches only an unrelated comment (tui_entry.rs:9879). PaneResize::on_mouse_down/on_mouse_drag/on_mouse_up are never invoked live.",
+    "pane_split_geometry (:612) and frame_resize_handle (:230) also have no production caller (grep over crates/ returns only their definitions plus tests)."
+  ],
+  "required_producer": [
+    "A live docked terminal/panel column in the running render (see LAY-10 required producer) so a RightPane::Terminal|Panel boundary exists.",
+    "A live pointer path: tui_entry's mouse dispatch must construct a PaneResize bound to the live frame geometry (paneResize createPaneResize equivalent, session-frame.tsx:45-67), place the handle from the frame descriptor (session-frame.tsx:381-384), and route down/drag/up + double-click into it.",
+    "Live persistence of the committed width into the same storage the live view reads for the dock width (upstream stores layout.paneWidth, session-frame.tsx:42-55)."
+  ],
+  "blocking_reason": "pane_resize_handle/PaneResize exist and are correct-looking but have no production caller and no producible docked pane to attach to. Wiring them requires the LAY-10 live panel/terminal dock plus a live mouse-drag path, neither of which exists. Not bounded.",
+  "focused_test_plan": "n/a (blocked). Existing coverage is test-only: native_pane_resize.rs:878-1300 (handle target/highlight, drag clamp, release persistence, double-click reset, frame placement).",
+  "upstream_citations": [
+    "packages/tui/src/component/session-frame.tsx:45-67 (createPaneResize binding, finishPaneResize, onCommit persists layout.paneWidth)",
+    "packages/tui/src/component/session-frame.tsx:381-384 (PaneResizeHandle placement left = availableWidth - size - 1)",
+    "packages/tui/src/ui/pane-resize.ts:4-76 (createPaneResize state machine)",
+    "packages/tui/src/component/session-frame.tsx:43-44 (fromMouse/contains)",
+    "pin: 450e7b92412c780a7b5a75226bb8d49aaca24e22"
+  ]
+}

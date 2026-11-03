@@ -1,0 +1,55 @@
+{
+  "id": "TAB-10",
+  "verdict": "BLOCKED",
+  "base_head": "7cf78666",
+  "canonical": "/Users/mymac/Projects/opencode-rk-recovery-20261005",
+  "item": "Vertical-rail tab detail string: '<project> \\u2387 <branch>' for a linked worktree whose current branch differs from the default branch (upstream sessionTabDetail).",
+  "landable": false,
+  "reason": "The helper requires three facts the live rail producer does not have: current branch, default branch, and a worktree flag. No CLI producer or server route exposes any of them; the rail detail is fed from the session directory basename alone.",
+  "helper_ready_but_starved": {
+    "symbol": "session_tab_detail",
+    "file": "crates/cli/src/native_tab_rail.rs",
+    "line": 103,
+    "signature": "session_tab_detail(project: &str, current: Option<&str>, default_branch: Option<&str>, worktree: bool) -> String",
+    "note": "only callers are #[cfg(test)] at :2350-2359"
+  },
+  "live_rail_producer": {
+    "file": "crates/cli/src/tui_entry.rs",
+    "line": 5406,
+    "note": "rail_inputs_for_navigation(5406-5416) sets detail = navigation.project_label(&tab.session).unwrap_or_default() - project only; current/default_branch/worktree are never supplied"
+  },
+  "live_project_label_source": [
+    {"file": "crates/cli/src/tui_entry.rs", "line": 1220, "note": "session_project_labels built from session[\"directory\"] alone (1220-1222)"},
+    {"file": "crates/cli/src/tui_entry.rs", "line": 1128, "note": "session_directory_label: only std::path::Path::file_name() of the directory; never inspects VCS"}
+  ],
+  "model_lacks_fields": {
+    "file": "crates/cli/src/native_navigation.rs",
+    "line": 202,
+    "note": "Tab (202-214) has session/parent/project_label/draft/cursor/scroll/selected_model only - no branch, no default branch, no worktree flag; project_label doc-comment explicitly: 'Named projects and VCS metadata are not inferred from this value.'"
+  },
+  "missing_seam": {
+    "producer_required": "A live VCS/location producer: the CLI must learn, per session location, the current branch, the repository default branch, and whether the checkout is a linked worktree. None exists.",
+    "server_route_absent": "crates/server/src/lib.rs route table (189-302) has NO /api/location, NO vcs, NO branch-info route. grep for current_branch|default_branch|WorktreeInfo|vcs_status|git branch across crates/ returns matches in native_tab_rail.rs only (the starved helper doc, not a producer).",
+    "cli_route_absent": "grep for /api/location|syncInfo|vcs.sync|current_branch across crates/cli/src returns 0 matches.",
+    "upstream_producer": {
+      "file": "packages/tui/src/context/session-tabs.tsx",
+      "line": 288,
+      "quote": "await Promise.allSettled(Array.from(locations.values(), (location) => Promise.all([data.location.syncInfo(location), data.location.vcs.sync(location)])))"
+    },
+    "upstream_helper": {
+      "file": "packages/tui/src/context/session-tabs-model.ts",
+      "line": 14,
+      "quote": "export function sessionTabDetail(project, current, defaultBranch, worktree) { const branch = worktree && current !== defaultBranch ? current : undefined; return branch && project ? `${project} \\u2387 ${branch}` : (branch ?? project) }"
+    },
+    "consequences": "session_tab_detail cannot be wired without inventing branch/worktree facts. A new server VCS/location projection (or a CLI git-read of the session directory, which has no authorization/caching seam yet) is required first. Wiring it with fabricated defaults would print a wrong branch."
+  },
+  "focused_test_plan_when_unblocked": [
+    "server/client: sync a location and assert current branch + default branch + worktree flag are exposed for a linked worktree",
+    "cli: linked worktree on a non-default branch renders 'proj \\u2387 feat'; same branch as default renders 'proj'; non-worktree renders 'proj'",
+    "cli rail render: compact tooltip detail equals session_tab_detail output at the painted title budget"
+  ],
+  "upstream_citations": [
+    "packages/tui/src/context/session-tabs-model.ts:14-22 (sessionTabDetail)",
+    "packages/tui/src/context/session-tabs.tsx:283-300 (location + location.vcs prefetch for open tabs)"
+  ]
+}

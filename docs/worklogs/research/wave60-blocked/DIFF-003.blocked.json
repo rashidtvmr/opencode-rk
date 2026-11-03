@@ -1,0 +1,68 @@
+{
+  "id": "DIFF-003",
+  "verdict": "BLOCKED",
+  "base_head": "7cf786664ee4ed9064221b80cc49dd670b20d4db",
+  "canonical": "/Users/mymac/Projects/opencode-rk-recovery-20261005",
+  "upstream_pin": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+  "claim": "added-file virtualization model has zero callers; AddedPatchChunk carries no highlight field",
+  "missing_seam": [
+    {
+      "file": "crates/cli/src/native_diff_view.rs",
+      "line": 1014,
+      "symbol": "virtual_added_patch",
+      "why_no_live_consumer": "rg 'virtual_added_patch' in crates/ returns only this definition (and no native_diff_inline.rs reference). Zero callers, test or live.",
+      "required_producer": "a scroll-aware caller that supplies (a) the split added-file patch and (b) a live scroll offset"
+    },
+    {
+      "file": "crates/cli/src/native_diff_view.rs",
+      "line": 935,
+      "symbol": "split_added_patch",
+      "why_no_live_consumer": "Only referenced by virtual_added_patch (:1018) and tests. No production caller.",
+      "required_producer": "same scroll-aware caller"
+    },
+    {
+      "file": "crates/cli/src/native_diff_view.rs",
+      "line": 1043,
+      "symbol": "relative_scroll_top",
+      "why_no_live_consumer": "Zero callers (rg across crates/ excluding definition).",
+      "required_producer": "a producer of scrollTop + root.y + content.y; the live chat renderer flattens rows to a fixed Vec<String> (native_view.rs:3447-3449) with no per-chunk row mapping and no scroll observer."
+    },
+    {
+      "file": "crates/cli/src/native_diff_view.rs",
+      "line": 1058,
+      "symbol": "visible_chunk_range",
+      "why_no_live_consumer": "Zero callers. PARITY_STATUS.md:322 records the same: needs a diff-region scrollTop + root.y/content.y + viewport height producer; the live paint_inline_patch has no scroll contract and flattens to ChatRow units with no chunk-to-row mapping.",
+      "required_producer": "a root-relative scrollTop and viewport height for a diff region that the message composer does not model"
+    },
+    {
+      "file": "crates/cli/src/native_diff_view.rs",
+      "line": 926,
+      "symbol": "AddedPatchChunk { patch, lines, rows }",
+      "why_no_live_consumer": "Struct carries no highlight field. Upstream VirtualAddedPatch highlights the WHOLE file once then slices per-chunk offsets into SimpleHighlight runs. oc2 has no tree-sitter highlight-once-then-slice producer for added chunks.",
+      "required_producer": "a highlight source (whole-file highlight + per-chunk [start,end] slice) so a chunk can carry its syntax regions"
+    },
+    {
+      "file": "crates/cli/src/native_view_chat.rs",
+      "line": 2730,
+      "symbol": "ChatPart::Patch live painter",
+      "why_no_live_consumer": "The live Patch painter renders one bounded pass (MAX_DIFF_LINES=4096) into flat rows up to MAX_MESSAGE_ROWS=256 and never models virtualization; row budget is fixed by MAX_MESSAGE_ROWS (native_view_chat.rs:623 -> MAX_VIEW_ROWS=256). Virtualization only triggers above VIRTUAL_MIN_LINES=3000 (native_diff_view.rs:548), which already exceeds the live 256-row cap, so the model can never be exercised by the current producer even if a caller were added.",
+      "required_producer": "a diff viewport whose row budget can exceed 3000 (a dedicated diff-viewer surface) plus a scroll-driven chunk window"
+    }
+  ],
+  "interaction_with_message_cap": {
+    "live_row_cap": "MAX_MESSAGE_ROWS = MAX_VIEW_ROWS = 256 (native_view_chat.rs:623, :65)",
+    "virtual_trigger": "VIRTUAL_MIN_LINES = 3000 (native_diff_view.rs:548)",
+    "consequence": "Even a hooked-up caller cannot virtualize inside the transcript, because the transcript caps at 256 rows. Virtualization is only meaningful on the standalone diff-viewer surface (upstream VirtualAddedPatch is driven by scrollbox.tsx / patch-diff.tsx), which is NOT the chat transcript."
+  },
+  "upstream_citations": [
+    "packages/tui/src/component/patch-diff.tsx:24-25 (VIRTUAL_MIN_LINES=3000, VIRTUAL_CHUNK_LINES=128)",
+    "packages/tui/src/component/patch-diff.tsx:40-44 (chunks memo gated on local.scroll)",
+    "packages/tui/src/component/patch-diff.tsx:130-157 (whole-file highlight + per-chunk offsets slice)",
+    "packages/tui/src/component/patch-diff.tsx:164-176 (root.onLifecyclePass: top = scroll.scrollTop - (root.y - scroll.content.y))",
+    "packages/tui/src/component/patch-diff.tsx:180 (Show when index() in [first-1, last+1], else <box height={chunk.rows}>)",
+    "crates/cli/src/native_diff_view.rs:1014-1078 (models present, zero live callers)",
+    "crates/cli/src/native_view_chat.rs:623 MAX_MESSAGE_ROWS cap"
+  ],
+  "no_canonical_writes": true,
+  "cargo_run": false
+}

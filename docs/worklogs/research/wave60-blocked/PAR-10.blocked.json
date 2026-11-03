@@ -1,0 +1,42 @@
+{
+  "id": "PAR-10",
+  "verdict": "BLOCKED",
+  "base_head": "7cf786664ee4ed9064221b80cc49dd670b20d4db",
+  "title": "Exercise streaming->complete, complete->final-content, resync, backfill and stale async-result orders",
+  "subject_symbols": [
+    "crates/cli/src/native_transcript.rs:22 TokenDelta",
+    "crates/cli/src/native_transcript.rs:73 StreamAccumulator",
+    "crates/cli/src/native_transcript.rs:94 StreamAccumulator::push",
+    "crates/cli/src/native_turn.rs:25 Event::Delta(String)",
+    "crates/cli/src/native_turn.rs:329 assistant_delta -> Event::Delta(field(\"delta\"))",
+    "crates/cli/src/tui_entry.rs:7740 Event::Delta -> partial.push_str + replace_partial",
+    "crates/cli/src/tui_entry.rs:7806 Event::Assistant -> partial.clear + remove_partial + append final",
+    "crates/cli/src/tui_entry.rs:13696 replace_partial",
+    "crates/server/src/lib.rs:2772 assistant_delta wire frame"
+  ],
+  "missing_seam": {
+    "file": "crates/server/src/lib.rs",
+    "lines": "2772-2780",
+    "symbol": "OutputTextDelta -> ndjson({\"type\":\"assistant_delta\",\"delta\":delta})",
+    "explanation": "The live `assistant_delta` frame carries only type+delta. It has no per-delta ordering key (`seq`) and no stream identity (`stream_id`/messageID/part id), so the consuming side cannot distinguish stale, duplicate, out-of-order or resynced deltas. StreamAccumulator::push (native_transcript.rs:94) keys on exactly delta.stream_id and delta.seq; with no producer for either field it can never be driven from the real wire."
+  },
+  "why_no_live_consumer": [
+    "CORRECTION to the task's cited lines: crates/cli/src/tui_entry.rs:917,920 are inside NativeCompactWorker::start (the /compact POST worker), NOT the SSE consumer. The actual live streaming consumer is the turn event loop: crates/cli/src/tui_entry.rs:7740-7742 `Event::Delta(delta) => { partial.push_str(&delta); replace_partial(&mut transcript, &partial); }`.",
+    "The live consumer appends raw delta bytes to a draft String (`partial`) and replaces the partial transcript row; it never constructs a TokenDelta or a StreamAccumulator. `grep -rn 'StreamAccumulator|TokenDelta'` over crates/ finds only native_transcript.rs (definitions + #[cfg(test)] uses at :602-623) and native_host.rs:180/351/823/828 (an unrelated HostEvent::TokenDelta { bytes: u32 } byte-count counter, not text deltas).",
+    "The wire producer (server/src/lib.rs:2772-2780) emits {\"type\":\"assistant_delta\",\"delta\":delta} with no seq/stream_id. The CLI decoder (native_turn.rs:329) therefore produces an unkeyed Event::Delta(String). No ordering metadata reaches the client.",
+    "No delta replay/resync/backfill transport exists: the server route table (server/src/lib.rs:287 `/api/sessions/{id}/turns/stream` POST, :294 `/api/sessions/{id}/shell/stream` POST) exposes only new-turn and shell streams. There is no GET event-history or resume-since-seq route, so 'resync' and 'backfill' orders cannot be exercised against a live producer.",
+    "Partially satisfied by a different mechanism (do NOT overclaim): streaming->complete and complete->final-content ARE handled live by the Delta+Assistant mechanism, where Event::Assistant (tui_entry.rs:7806-7816) clears `partial`, removes the partial row and appends the authoritative final message. What is NOT present, and cannot be, is any ordered/stale-async-result producer."
+  ],
+  "required_producer": [
+    "A wire `seq` (monotonic per stream) and a stable `stream_id` (or messageID/part id) on the `assistant_delta` frame, emitted by the provider stream loop in crates/server/src/lib.rs (around :2772), so each delta is individually orderable.",
+    "A live consumer that feeds those keyed deltas into StreamAccumulator (or an equivalent ordered reconciler) on the repaint path (replacing the raw `partial.push_str`), plus a stale-result drop rule on the completion edge.",
+    "Optional for resync/backfill: a delta-history/resume-since-seq transport on the server, which does not exist today."
+  ],
+  "blocking_reason": "A new helper/model method with no live caller is REJECTED. StreamAccumulator/TokenDelta already exist and are fully tested, but have no live producer because the wire frame carries no seq/stream_id. Wiring them requires a server-side wire change plus a client consumer change; not bounded to a single new live call site.",
+  "focused_test_plan": "n/a (blocked). Existing coverage is test-only: crates/cli/src/native_transcript.rs:602-623 (out-of-order/duplicate/wrong-stream convergence) exercises StreamAccumulator without any live producer. Server tests (crates/server/tests/session_turn_stream_api.rs:225/320/324, session_execution_ownership.rs:413/551, session_turn_activity_api.rs:212) assert only type+delta, confirming the wire has no seq.",
+  "upstream_citations": [
+    "packages/tui/src/routes/session/message-parts.tsx:178-190 (streaming={props.message.time.completed === undefined}; content applied before streaming so completion keeps final tokens)",
+    "packages/tui/src/routes/session/index.tsx (assistant part streaming/complete lifecycle)",
+    "pin: 450e7b92412c780a7b5a75226bb8d49aaca24e22"
+  ]
+}

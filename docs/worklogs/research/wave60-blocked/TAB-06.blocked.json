@@ -1,0 +1,59 @@
+{
+  "id": "TAB-06",
+  "verdict": "BLOCKED",
+  "base_head": "7cf78666",
+  "canonical": "/Users/mymac/Projects/opencode-rk-recovery-20261005",
+  "item": "Pending-item busy composition for session tabs (per-tab pending queue; a queued user prompt keeps the tab busy, parked synthetic repeats do not).",
+  "landable": false,
+  "reason": "No live producer carries a per-tab pending queue to the TUI. The helper methods exist but have zero live callers, and the only run queue that exists is (a) owned solely by the active session and (b) already published to the composer dock, not the tab strip.",
+  "dead_helpers_no_live_caller": [
+    {"symbol": "TabStatus::enqueue_user_prompt", "file": "crates/cli/src/native_tabs.rs", "line": 1911, "note": "only callers are #[cfg(test)] at :3917-3921"},
+    {"symbol": "pending_marks_busy", "file": "crates/cli/src/native_tabs.rs", "line": 1927, "note": "only caller is member_busy + tests"},
+    {"symbol": "member_busy", "file": "crates/cli/src/native_tabs.rs", "line": 1934, "note": "only callers are #[cfg(test)] at :3926-3929"},
+    {"symbol": "TabStatus", "file": "crates/cli/src/native_tabs.rs", "line": 1830, "note": "struct + indicator_text(1942) + EMPTY_TAB_STATUS(1839) have zero non-test callers across the workspace (rtk grep over crates/ excluding native_tabs.rs == 0 matches)"}
+  ],
+  "live_busy_path_today": [
+    {"file": "crates/cli/src/native_tabs.rs", "line": 134, "note": "TabInput::from_tab: busy = nav.work_state(&tab.session) == Some(WorkState::Running)"},
+    {"file": "crates/cli/src/native_tabs.rs", "line": 793, "note": "family roll-up: descendant WorkState::Running marks root busy"},
+    {"file": "crates/cli/src/native_tabs.rs", "line": 1604, "note": "indicator_label paints spinner only from flags.busy"}
+  ],
+  "live_queue_exists_but_wrong_consumer": [
+    {"file": "crates/cli/src/tui_entry.rs", "line": 6761, "note": "queued_drafts: VecDeque<(Option<String> owner, String text)> - the ONLY run queue in the CLI"},
+    {"file": "crates/cli/src/tui_entry.rs", "line": 12002, "note": "Queue plan pushes owner = live active session id only; a background tab's queue is never accumulated"},
+    {"file": "crates/cli/src/tui_entry.rs", "line": 527, "note": "publishable_queued_prompts filters to the active session and feeds the composer dock (:8627), NOT the tab strip"}
+  ],
+  "live_snapshot_lacks_field": {
+    "file": "crates/cli/src/tui_entry.rs",
+    "line": 573,
+    "note": "LiveSnapshot (573-604) carries no per-tab pending queue; no pending field reaches navigation or TabStatus"
+  },
+  "missing_seam": {
+    "producer_required": "A live per-session pending queue projected to the tab strip. Two absent pieces: (1) a server event/payload exposing per-session pending items with a kind discriminator (user vs synthetic), and (2) a CLI consumer that maps each session's queue into TabInput/TabStatus.",
+    "upstream_producer": {
+      "file": "packages/tui/src/context/session-tabs.tsx",
+      "line": 170,
+      "quote": "busy: members.some((id) => data.session.status(id) === \"running\" || data.session.pending.list(id).some((item) => item.type !== \"synthetic\"))"
+    },
+    "upstream_event": {
+      "file": "packages/tui/src/context/session-tabs.tsx",
+      "line": 334,
+      "quote": "event.on(\"session.inbox.enqueued\", (evt) => { ... item.type !== \"user\" ... }) (also :315 data.session.pending.sync(sessionID))"
+    },
+    "oc2_gap_confirmed": {
+      "file": "crates/cli/src/tui_entry.rs",
+      "line": 3858,
+      "quote": "The upstream session.inbox.update / session.inbox.cancel routes have no oc2 server endpoint yet"
+    },
+    "consequences": "Wiring enqueue_user_prompt/member_busy to queued_drafts would only ever observe the ACTIVE session, so background tabs could never show queued-busy; that is a fabricated partial behavior, not the upstream family-aggregated fact. A new server-side per-session pending projection + event is required first."
+  },
+  "focused_test_plan_when_unblocked": [
+    "server: GET /api/sessions exposes per-session pending items with type user|synthetic; unit-test both kinds",
+    "cli: background session with one User pending item paints the dots spinner; Synthetic-only paints no spinner",
+    "cli: family roll-up - a descendant's pending user item marks the root busy (upstream :171-176)"
+  ],
+  "upstream_citations": [
+    "packages/tui/src/context/session-tabs.tsx:167-176 (busy composition)",
+    "packages/tui/src/context/session-tabs.tsx:315,334 (pending.sync / session.inbox.enqueued)",
+    "packages/tui/src/context/session-tabs.tsx:355-361 (promptPulse on user enqueue for another open tab)"
+  ]
+}
