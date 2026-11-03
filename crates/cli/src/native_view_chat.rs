@@ -2787,23 +2787,88 @@ fn typed_message_rows_with_prefix_spans_mode(
                 // malformed/truncated facts plus all rows; message-budget
                 // overflow is computed here and OR-ed into the truncation
                 // fact. Never a second parse.
-                let rendered = crate::native_diff_view::paint_rows_with_gutter(
-                    diff,
-                    crate::native_diff_view::MAX_DIFF_LINES,
+                // THEME-09: the patch body honours the width rule
+                // (`resolve_view_mode(DiffSurface::Inline, …)`, DIFF-001): a
+                // wide terminal pairs the -/+ panes onto one split row, a
+                // narrow one keeps the unified gutter. DIFF-002 facts
+                // (malformed / truncated) come from whichever renderer ran.
+                let theme09_split = matches!(
+                    crate::native_diff_view::resolve_view_mode(
+                        crate::native_diff_view::DiffSurface::Inline,
+                        crate::native_diff_view::DiffViewPreference::Auto,
+                        width,
+                    ),
+                    crate::native_diff_view::DiffViewMode::Split
                 );
-                let malformed = rendered.malformed;
-                // DIFF-002: upstream renders no element for the first hunk's
-                // `@@` line (`patch-diff.tsx:79` `<Show when={index() > 0}>`),
-                // so drop it before the row-budget math — otherwise it would
-                // occupy a slot and add a stray row of height.
-                let painted: Vec<_> = rendered
-                    .rows
-                    .into_iter()
-                    .filter(|line| {
-                        !(line.role == crate::native_diff_view::DiffLineRole::HunkHeader
-                            && line.hunk_index == 0)
-                    })
-                    .collect();
+                let mut painted: Vec<(String, ChatRowClass)> = Vec::new();
+                let (malformed, gutter_truncated) = if theme09_split {
+                    let rendered = crate::native_diff_view::paint_rows_split(
+                        diff,
+                        crate::native_diff_view::MAX_DIFF_LINES,
+                        width,
+                    );
+                    for row in rendered.rows.iter() {
+                        match row {
+                            crate::native_diff_view::SplitRow::Full(line) => {
+                                if line.role == crate::native_diff_view::DiffLineRole::HunkHeader
+                                    && line.hunk_index == 0
+                                {
+                                    continue;
+                                }
+                                let class = match line.role {
+                                    crate::native_diff_view::DiffLineRole::Added => ChatRowClass::DiffAdded,
+                                    crate::native_diff_view::DiffLineRole::Removed => ChatRowClass::DiffRemoved,
+                                    crate::native_diff_view::DiffLineRole::HunkHeader => ChatRowClass::DiffHunkHeader,
+                                    _ => ChatRowClass::DiffContext,
+                                };
+                                painted.push((
+                                    truncate_row(&format!("  {}", line.content), width),
+                                    class,
+                                ));
+                            }
+                            crate::native_diff_view::SplitRow::Pair { left, right } => {
+                                let mut text = String::new();
+                                for cell in left.iter().chain(right.iter()) {
+                                    text.push(cell.sign);
+                                    text.push(' ');
+                                    text.push_str(&cell.text);
+                                }
+                                let class = if left.is_some() {
+                                    ChatRowClass::DiffRemoved
+                                } else {
+                                    ChatRowClass::DiffAdded
+                                };
+                                painted.push((truncate_row(&text, width), class));
+                            }
+                        }
+                    }
+                    (rendered.malformed, rendered.truncated)
+                } else {
+                    let rendered = crate::native_diff_view::paint_rows_with_gutter(
+                        diff,
+                        crate::native_diff_view::MAX_DIFF_LINES,
+                    );
+                    for line in rendered.rows.iter() {
+                        if line.role == crate::native_diff_view::DiffLineRole::HunkHeader
+                            && line.hunk_index == 0
+                        {
+                            continue;
+                        }
+                        let class = match line.role {
+                            crate::native_diff_view::DiffLineRole::Added => ChatRowClass::DiffAdded,
+                            crate::native_diff_view::DiffLineRole::Removed => ChatRowClass::DiffRemoved,
+                            crate::native_diff_view::DiffLineRole::Context
+                            | crate::native_diff_view::DiffLineRole::Blank => ChatRowClass::DiffContext,
+                            crate::native_diff_view::DiffLineRole::HunkHeader => ChatRowClass::DiffHunkHeader,
+                            _ => ChatRowClass::Metadata,
+                        };
+                        painted.push((
+                            truncate_row(&format!("    {}", line.text), width),
+                            class,
+                        ));
+                    }
+                    (rendered.malformed, rendered.truncated)
+                };
                 let total_rows = painted.len();
                 // Reserve real status row(s) BEFORE the parser row budget:
                 // each true fact gets its own distinct row inside the hard
@@ -2817,22 +2882,10 @@ fn typed_message_rows_with_prefix_spans_mode(
                 let diag_slots = diagnostics.len();
                 let kept_without_trunc_status =
                     total_rows.min(budget.saturating_sub(malformed_slots + diag_slots));
-                let truncated = rendered.truncated || kept_without_trunc_status < total_rows;
+                let truncated = gutter_truncated || kept_without_trunc_status < total_rows;
                 let reserve = malformed_slots + usize::from(truncated) + diag_slots;
                 let kept = total_rows.min(budget.saturating_sub(reserve));
-                for line in painted.into_iter().take(kept) {
-                    let class = match line.role {
-                        crate::native_diff_view::DiffLineRole::Added => ChatRowClass::DiffAdded,
-                        crate::native_diff_view::DiffLineRole::Removed => ChatRowClass::DiffRemoved,
-                        crate::native_diff_view::DiffLineRole::Context
-                        | crate::native_diff_view::DiffLineRole::Blank => ChatRowClass::DiffContext,
-                        // DIFF-002: defensive — first-hunk header already filtered.
-                        crate::native_diff_view::DiffLineRole::HunkHeader if line.hunk_index == 0 => continue,
-                        crate::native_diff_view::DiffLineRole::HunkHeader => ChatRowClass::DiffHunkHeader,
-                        _ => ChatRowClass::Metadata,
-                    };
-                    rows.push((truncate_row(&format!("    {}", line.text), width), class));
-                }
+                rows.extend(painted.into_iter().take(kept));
                 let mut statuses: Vec<(String, ChatRowClass)> = Vec::new();
                 // DIFF-002 upstream `Diagnostics` rows
                 // (`packages/tui/src/routes/session/index.tsx:3703-3723`):
@@ -2942,6 +2995,35 @@ mod diff_wiring_v2_regressions {
 
     fn patch_message(diff: String) -> ChatMessage {
         ChatMessage { role: ChatRole::Assistant, parts: vec![ChatPart::Patch { path: "many.rs".into(), diff, diagnostics: Vec::new() }], agent: None, model: None, assistant_facts: None, message_id: None }
+    }
+
+    #[test]
+    fn theme09_wide_terminal_pairs_patch_panes_and_narrow_stays_unified() {
+        // THEME-09 live consumer: the chat patch body runs the width rule
+        // (`resolve_view_mode(DiffSurface::Inline, Auto, width)`, DIFF-001) —
+        // a wide terminal pairs the -/+ panes on ONE row, a narrow one keeps
+        // the separate unified-gutter rows.
+        let patch = "@@ -1,2 +1,2 @@\n-old\n+new\n context\n";
+        let narrow = typed_message_rows(100, &patch_message(patch.into()), false);
+        assert!(
+            narrow.iter().any(|(row, class)| *class == ChatRowClass::DiffRemoved && row.contains("-old")),
+            "narrow keeps a separate removed row: {narrow:?}"
+        );
+        assert!(
+            narrow.iter().any(|(row, class)| *class == ChatRowClass::DiffAdded && row.contains("+new")),
+            "narrow keeps a separate added row: {narrow:?}"
+        );
+        let wide = typed_message_rows(121, &patch_message(patch.into()), false);
+        assert!(
+            wide.iter().any(|(row, class)| {
+                *class == ChatRowClass::DiffRemoved && row.contains("- old") && row.contains("+ new")
+            }),
+            "wide pairs the panes onto one removed row: {wide:?}"
+        );
+        assert!(
+            !wide.iter().any(|(row, class)| *class == ChatRowClass::DiffAdded && row.contains("+ new")),
+            "wide never separates the added pane: {wide:?}"
+        );
     }
 
     #[test]

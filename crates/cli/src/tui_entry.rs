@@ -9134,6 +9134,11 @@ fn native_loop(
         // The elapsed value is only meaningful while busy; it resets on the
         // idle edge so a new turn starts from the first scanner frame.
         let busy_now = binding_active && !worker_finished;
+        if worker_finished {
+            // CP-42: the streaming chrome ends exactly when the turn worker
+            // settles, so a finished turn never keeps the scanner.
+            view.set_prompt_turn(false);
+        }
         let rail_elapsed_ms = if busy_now {
             let start = *busy_since.get_or_insert_with(Instant::now);
             start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
@@ -9142,6 +9147,9 @@ fn native_loop(
             0
         };
         view.set_rail_status_clock(animations, rail_elapsed_ms);
+        // CP-08: the catalogue-load edge (`index.tsx:1551`): while the model
+        // reload is in flight the composer retains the memo's previous label.
+        view.set_composer_catalog_loading(model_load.is_some());
 
         let mut lines = if help_open && !dialog_open {
             Vec::new()
@@ -12447,7 +12455,16 @@ fn native_loop(
                         // chat-composer local command clears the draft).
                         if view.page() == crate::native_view_pages::Page::Theme {
                             if let Some(row) = view.page_selected().filter(|row| row.enabled) {
-                                let name = row.id.clone();
+                                // THEME-12: Enter confirms through the LIVE
+                                // picker when one was opened (movement already
+                                // previewed + persisted every step); a fresh
+                                // Enter without movement applies the focused
+                                // row directly, exactly like `dialog-theme-list`
+                                // confirm -> `themes.set`.
+                                let name = theme_pick
+                                    .as_mut()
+                                    .map(crate::native_theme_runtime::ThemePicker::on_confirm)
+                                    .unwrap_or_else(|| row.id.clone());
                                 match load_native_theme(&name, theme.mode, &config_paths, new_designs) {
                                     Ok(next) => {
                                         match crate::native_ui_preferences::UiPreferences::persist_theme_selection(&state_path, &name, next.mode.key()) {
@@ -13665,6 +13682,9 @@ fn native_loop(
                                     state: crate::native_navigation::WorkState::Running,
                                 });
                                 worker = Some(started);
+                                // CP-42: the streaming chrome begins exactly
+                                // when the turn worker actually starts.
+                                view.set_prompt_turn(true);
                                 // PAR-07: input-submission trace sink; a
                                 // worker start is the single live admission
                                 // fact (`turn.submit_rejected` covers the

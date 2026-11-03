@@ -177,6 +177,15 @@ pub struct NativeView {
     composer_variant: Option<String>,
     composer_model: Option<(String, String)>,
     composer_effort: Option<String>,
+    /// CP-08: catalogue reload in flight (`index.tsx:1551` `loading`): while
+    /// set, `composer_metadata` retains the memo's previous model label.
+    composer_loading: bool,
+    /// CP-08: the last resolved prompt labels (`PromptDisplay`,
+    /// `index.tsx:1537-1572`), advanced by `next_prompt_display`.
+    composer_display: crate::native_prompt_pane::PromptDisplay,
+    /// CP-42: streaming/retry chrome of the mounted prompt
+    /// (`index.tsx:1674-1983`); driven by the live worker edges.
+    prompt_surface: crate::native_composer::PromptSurface,
     /// Running family members other than the active session
     /// (`prompt/footer.tsx:22-28` `subagents()`); painted in the prompt footer
     /// row as `N subagent(s)`.
@@ -1066,6 +1075,9 @@ impl NativeView {
             composer_variant: None,
             composer_model: None,
             composer_effort: None,
+            composer_loading: false,
+            composer_display: crate::native_prompt_pane::PromptDisplay::default(),
+            prompt_surface: crate::native_composer::PromptSurface::new(),
             live_subagents: 0,
             live_first_child: None,
             live_footer_hit: None,
@@ -1197,13 +1209,59 @@ impl NativeView {
     /// Catalogue display names are presentation only. The status retains the
     /// qualified identity used by the daemon and persisted configuration.
     pub fn set_composer_model(&mut self, model: &str, provider: &str) {
-        self.composer_model = if [model, provider].iter().all(|name| {
+        let valid = [model, provider].iter().all(|name| {
             !name.trim().is_empty() && name.len() <= 256 && !name.chars().any(char::is_control)
-        }) {
+        });
+        self.composer_model = if valid {
             Some((model.to_owned(), provider.to_owned()))
         } else {
             None
         };
+        // CP-08: the live prompt labels are the ported memo transition
+        // (`next_prompt_display`, `routes/session/index.tsx:1537-1567`):
+        // previous labels are retained while a catalogue reload is in flight
+        // and resolved through this single transition. The validation above
+        // gates the memo so an unobservable identity never overwrites it.
+        if valid {
+            self.composer_display = crate::native_prompt_pane::next_prompt_display(
+                &self.composer_display,
+                &crate::native_prompt_pane::PromptDisplayInput {
+                    location_matches: true,
+                    loading: self.composer_loading,
+                    failed: false,
+                    agent_id: self.composer_agent.as_deref(),
+                    model,
+                    provider,
+                    variant: self.composer_variant.as_deref(),
+                },
+            );
+        }
+    }
+
+    /// CP-08: the model-catalogue load edge driven by the live loop
+    /// (`model_load` in `tui_entry::native_loop`). While set, the prompt keeps
+    /// the memo's previous model label instead of dropping to the status
+    /// summary (`index.tsx:1551-1567`).
+    pub fn set_composer_catalog_loading(&mut self, loading: bool) {
+        self.composer_loading = loading;
+    }
+
+    /// CP-42: the streaming/retry chrome lifecycle, pinned exactly to the
+    /// live worker edges (`index.tsx:1674-1983`): begins when a turn worker
+    /// actually starts, finishes when it settles. The raised surface and
+    /// input enablement never change with the phase.
+    pub fn set_prompt_turn(&mut self, streaming: bool) {
+        if streaming {
+            self.prompt_surface.begin_streaming();
+        } else {
+            self.prompt_surface.finish();
+        }
+    }
+
+    /// CP-42: live phase of the mounted prompt surface.
+    #[must_use]
+    pub fn prompt_turn_phase(&self) -> crate::native_composer::TurnPhase {
+        self.prompt_surface.phase()
     }
 
     /// Model state was never observed (failed catalogue fetch): honest
@@ -1775,12 +1833,22 @@ impl NativeView {
         // parallel re-derivation, so the candidate order, the <44-column
         // agent/provider drop, the provider-shortening fallback and the
         // nine-cell model floor all come from the single authoritative model.
-        let (model, provider) = self
-            .composer_model
-            .as_ref()
-            .map_or((self.status.model_label(), ""), |(model, provider)| {
-                (model.as_str(), provider.as_str())
-            });
+        let (model, provider) = if self.composer_loading && !self.composer_display.model_label.is_empty()
+        {
+            // CP-08: a catalogue reload retains the memo's previous labels
+            // (`index.tsx:1551-1567`) instead of falling back to the status
+            // summary.
+            (
+                self.composer_display.model_label.clone(),
+                self.composer_display.provider_label.clone(),
+            )
+        } else {
+            self.composer_model
+                .as_ref()
+                .map_or((self.status.model_label().to_owned(), String::new()), |(model, provider)| {
+                    (model.to_owned(), provider.to_owned())
+                })
+        };
         let input = crate::native_prompt_pane::PromptMetadataInput {
             mode: if self.shell_mode {
                 crate::native_prompt_pane::PromptMode::Shell
@@ -1791,8 +1859,8 @@ impl NativeView {
             // Upstream `auto` comes from `local.permission.mode`; no confirmed
             // mode fact reaches this view, so it must not fabricate that label.
             auto: false,
-            model,
-            provider,
+            model: model.as_str(),
+            provider: provider.as_str(),
             variant: self.composer_variant.as_deref(),
             // Workspace usage-limit text is not produced by the live path yet.
             limit: None,
@@ -1815,10 +1883,18 @@ impl NativeView {
     /// label; with no live move/pending facts the idle branch is empty so the
     /// caller keeps the directory label.
     fn composer_status_text(&self, running: bool) -> String {
+        // CP-11/CP-42: `rail_spans` owns the `prompt.footer.status` Switch
+        // (`index.tsx:1911-1967`). The RailFacts carry the live location slot
+        // (idle directory) and the running/move/pending precedence; the
+        // streaming/retry chrome (`PromptSurface::is_busy`) joins the caller's
+        // provider-turn fact so the same scanner covers a retry frame.
         let facts = crate::native_status_rail::RailFacts {
-            running,
+            running: running || self.prompt_surface.is_busy(),
             animations: self.rail_animations,
             elapsed_ms: self.rail_elapsed_ms,
+            location: (!self.workspace.is_empty()).then_some(self.workspace.as_str()),
+            // Same budget the caller's `footer_directory` fallback used.
+            location_width: usize::from(self.layout.cols.saturating_sub(4)),
             ..crate::native_status_rail::RailFacts::new(usize::from(self.layout.cols))
         };
         crate::native_status_rail::slot_text(
@@ -1836,9 +1912,9 @@ impl NativeView {
     ) -> (String, Option<(u16, u16)>) {
         // CP-11: the `prompt.footer.status` slot owns the left term. While a
         // provider turn is running it paints the scanner + interrupt label and
-        // replaces the idle directory (`index.tsx:1911-1967`); idle keeps the
-        // directory. `rail` selects the status slot (directory) over the
-        // in-box metadata row.
+        // replaces the idle directory (`index.tsx:1911-1967`); idle paints the
+        // rail's location slot (the working directory). `rail` selects the
+        // status slot over the in-box metadata row.
         let base = if rail {
             let status = self.composer_status_text(running);
             if status.is_empty() {
@@ -5708,6 +5784,63 @@ mod footer_layout_tests {
             static_running.contains("[⋯]"),
             "animations off paints the static marker: {static_running:?}"
         );
+    }
+
+    // CP-08 (`index.tsx:1537-1567`): the live prompt labels go through the
+    // ported memo transition, so a catalogue reload retains the previous model
+    // label instead of dropping to the status summary.
+    #[test]
+    fn cp08_catalog_load_retains_previous_prompt_display() {
+        let mut view = NativeView::new(100, 32);
+        view.set_session_route(true);
+        view.set_composer_model("gpt-4.1", "openai");
+        view.set_composer_catalog_loading(true);
+        let rows = view.render_typed("draft", &[], false, &[]);
+        assert!(
+            rows.join("\n").contains("gpt-4.1"),
+            "load retains the previous model label: {}",
+            rows.join("\n")
+        );
+        view.set_composer_catalog_loading(false);
+        view.set_composer_model("claude-opus-4", "anthropic");
+        assert!(
+            view.render_typed("draft", &[], false, &[])
+                .join("\n")
+                .contains("claude-opus-4"),
+            "resolution replaces the label once the catalogue reloads"
+        );
+    }
+
+    // CP-11: the idle composer footer routes the directory through the rail's
+    // own status projection (`status_slot` -> Location, `index.tsx:1935-1964`),
+    // and the streaming/retry chrome keeps the scanner live.
+    #[test]
+    fn cp11_location_slot_and_prompt_turn_chrome_drive_the_composer_status_text() {
+        let mut view = NativeView::new(80, 24);
+        view.set_workspace("/selected/project".to_owned());
+        let idle = view.composer_status_text(false);
+        assert!(
+            idle.contains("/selected/project"),
+            "idle base is the rail location slot: {idle:?}"
+        );
+        assert!(!idle.contains("interrupt"), "idle has no scanner: {idle:?}");
+        let running = view.composer_status_text(true);
+        assert!(
+            running.contains("interrupt"),
+            "running owns the scanner: {running:?}"
+        );
+        // CP-42: a retained streaming phase keeps the scanner even though the
+        // caller's own busy fact cleared (retry frame hold).
+        view.set_prompt_turn(true);
+        let held = view.composer_status_text(false);
+        assert!(
+            held.contains("interrupt"),
+            "streaming chrome joins the status slot: {held:?}"
+        );
+        assert_eq!(view.prompt_turn_phase(), crate::native_composer::TurnPhase::Streaming);
+        view.set_prompt_turn(false);
+        assert_eq!(view.prompt_turn_phase(), crate::native_composer::TurnPhase::Idle);
+        assert_eq!(view.composer_status_text(false).contains("interrupt"), false);
     }
 
     #[test]
