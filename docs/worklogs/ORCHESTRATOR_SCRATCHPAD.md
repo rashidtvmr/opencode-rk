@@ -12386,8 +12386,16 @@ Counts reconciled: 144 `ALREADY_CORRECT` / 1 `REAL_GAP` (MEDIA-001) / 51
     `session_tps`, storage/sessions round-trip. CLI **2211/0**, server lib
     **309/0**, sessions `message_execution` 3/0, server `message_execution_api` 4/0.
   - MSG-008 moves `BLOCKED` -> `LANDED`.
+  - **MSG-010 reclassified `BLOCKED` -> `ALREADY_CORRECT`** (live equivalent
+    mechanism). The `RowMessage`-based `native_message_rows::turn_tokens_per_second`
+    is a faithful but redundant port with no live consumer; the live transcript
+    uses `ChatMessage`/`AssistantFacts`. The observable requirement is met live:
+    throughput by MSG-008's `AssistantFacts.streamed_ms` + `tokens_per_second()`
+    (tool time excluded per round; missing streamed span -> `None`), and duration
+    by `turn_duration_ms` fed by `project_with_turn_duration`
+    (`native_chat_projection.rs:715-732`, the upstream `inputIndex` boundary).
 
-Counts reconciled: 144 `ALREADY_CORRECT` / 1 `REAL_GAP` (MEDIA-001) / 50
+Counts reconciled: 145 `ALREADY_CORRECT` / 1 `REAL_GAP` (MEDIA-001) / 49
 `BLOCKED` / 28 `LANDED` = 223.
 
-Canonical SHA: `6a49151f` (remote `main-v2` verified via `git ls-remote`).
+Canonical SHA: `ed0547bb` (remote `main-v2` verified via `git ls-remote`).

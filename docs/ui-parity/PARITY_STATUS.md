@@ -62,12 +62,12 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 > `LANDED` sections below.** Specifically, wave-44 rows that still read
 > `REAL_GAP` are superseded as follows:
 > - to `BLOCKED`: `PAR-04`, `PAR-09`, `PAR-10`, `PAR-19`, `SIDE-04`,
->   `MSG-001..003`, `MSG-005`, `MSG-008..010`, `DIALOG-12..20`,
+>   `MSG-001..003`, `MSG-005`, `DIALOG-12..20`,
 >   `FFI-01/03/04/06/07/08/11`, `LAY-10/11/13`, `TAB-06/10`, `CP-07`,
 >   `CP-09`, `MD-007`, `THEME-08/09/13/14`, `TOOL-006/011`, `DIFF-001/003`,
 >   `STATE-002`, `FORM-001`;
 > - to `ALREADY_CORRECT`: `PAR-11`, `LAY-12`, `LAY-17`, `MSG-004`, `FFI-05`,
->   `CP-08`, `THEME-05`;
+>   `CP-08`, `THEME-05`, `MSG-010`;
 > - to `LANDED`: `TAB-04` (wave-56, `config.tabs.indicators` wired live);
 > - to `LANDED`: `MSG-007` (`4a6b487b`), `CP-11` (`f8e276cf`), `DIALOG-04`
 >   (`d137313d`), `DIALOG-20` (toast half, `d891f9c3`), `TAB-23` (`ae56897f`),
@@ -343,11 +343,11 @@ Selected high-value seams:
 | THEME-13 | `SystemThemeState`/`palette_reply` (`native_theme_runtime.rs:2183/2264`) have zero non-test callers; no OSC palette-query emitter and no payload-carrying input event to decode a reply. |
 | THEME-09 | **BLOCKED (verified wave-53).** The live chat `Patch`/diff-fence painter hardcodes `DiffViewMode::Unified` (`native_view_chat.rs:2202/2730`) and `resolve_view_mode`/`config.diffs.view` (`native_diff_view.rs:586`) have no live caller. Threading the preference is not sufficient: a split row is `SplitRow::Pair { left, right }` (`native_diff_view.rs:709-715`) with two independent backgrounds, but the live row model is `(String, ChatRowClass)` with exactly one class per row (`native_view_chat.rs:902`) and the painter maps a class to a single background (`tui_entry.rs:2880-2898 chat_row_background`). The split view is therefore not renderable without extending the row model — the same blocker as DIFF-001. |
 
-### `BLOCKED` — needs a producer/transport/contract field that does not exist (51)
+### `BLOCKED` — needs a producer/transport/contract field that does not exist (49)
 
 `PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-19,
 TAB-06, TAB-21, SIDE-03, SIDE-05,
-MSG-001, MSG-002, MSG-003, MSG-005, MSG-010,
+MSG-001, MSG-002, MSG-003, MSG-005,
 TOOL-006, TOOL-011, DIFF-001, DIFF-003, FFI-02, FFI-03, FFI-04, FFI-06,
 FFI-07, FFI-08, FFI-11, STATE-002, THEME-08, THEME-09, THEME-13,
 THEME-14, CP-07, CP-09,
@@ -383,13 +383,12 @@ DIALOG-19, LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009`.
 | STATE-002 | Live transcript renders compaction as a placeholder (`native_view_chat.rs:2689`); projection (`native_chat_projection.rs:392`) drops status/summary/provider-native/tokens; rich `CompactionState` (`native_timeline.rs:382`) has zero consumers; `compact_session` (`server/src/lib.rs:1668`) never persists/pushes a compaction part. |
 | MSG-005 | Chips need a server/storage `files`/`skills` field that does not exist (`MessageRecord` `contracts/src/lib.rs:250-257`). |
 | MSG-009 | `TranscriptSurfaces`/`RevertCard`/`TranscriptNotice`/`ChildCompletionNotice` (`native_view_chat.rs:4482/4103/4273/4409`) have no live consumer; `SessionRevert` (`contracts/src/lib.rs:191`) has no count; server stage route hardcodes `files:None`; no notice projection; no child-completion metadata. |
-| MSG-010 | `turn_tokens_per_second` (`native_message_rows.rs:1242`) reads `step.timing.streamed_ms` (`:1259`), zero live callers, field has no producer. |
 | TOOL-011 | `execute_dialog` (`native_tool_rows.rs:1159`) zero consumers; live render placeholder (`native_view_dialogs.rs:1429`); no `ExecuteDialog` payload on `OpenDialog`/`DialogView`; no syntax producer (`opentui-bridge/src/highlight.rs:27-29`). |
 | TAB-21 | `ViewAcknowledgement` (`native_navigation.rs:1133`) zero live callers; no client POST `/api/sessions/{id}/view` in `crates/cli`; no idle/viewed timestamp reaches the CLI (`LiveSnapshot` `tui_entry.rs:573`; `SessionSummary` `contracts/src/lib.rs:202-213`). |
 | FORM-001 | The upstream-correct `PermissionPrompt` (`native_permissions.rs:557`) is dead code; the live path (`native_view_dialogs.rs:1090`) is a flat choice list. Sub-behavior 1 (3-option realign) is **not** a parity bug: the canonical server supports `scope ∈ {once,session,always}` (`run_owner.rs:232`) and the 6-choice scoped set is a deliberate extension protected by semantic tests. Sub-behaviors 3 (always-body swap, static `:1420`) and 4 (nested rejection stage) need a stage+textarea in `DialogView`. |
 | PAR-02 / PAR-03 / PAR-06 / PAR-07 | Harness-side: capability table empty (`audit-implementation.md:79-96`); no upstream TS/OpenTUI adapter (`README.md:148`); no font/pixel capture path; event-trace sink misses queue/steer/permissions/forms. |
 
-### `ALREADY_CORRECT` — implementation + focused test + traced live consumer (144)
+### `ALREADY_CORRECT` — implementation + focused test + traced live consumer (145)
 
 Everything not listed in the two sections above. This includes the full
 `CP-12..CP-39` range, `TAB-01..03/05/07..09/11..20/22/24`, `SIDE-01/02/06/07/09/11/12/13/15`,
@@ -441,6 +440,27 @@ model is a redundant (not missing) consumer:
   (`native_view.rs:2892,2906`) and consumed in the live loop
   (`tui_entry.rs:1340,1345`).
 
+Wave-63 reclassification: `MSG-010` moved here. Its observable requirement
+(footer duration + throughput with tool time excluded, missing streamed
+timestamps hidden, and the turn's input boundary derived from the nearest
+preceding user/system record) is satisfied by the **live** path, not by the
+`RowMessage`-based `native_message_rows::turn_tokens_per_second` (which is a
+faithful but redundant port with no live consumer — the live transcript uses
+`ChatMessage`/`AssistantFacts`, not `RowMessage`):
+- throughput: `AssistantFacts.streamed_ms` + `tokens_per_second()`
+  (`native_assistant_facts.rs`), produced by the server `StreamTiming`
+  accumulator and rendered by the footer (MSG-008, `6a49151f`); tool time is
+  excluded because each provider round resets the pair, and a missing streamed
+  span yields `None`;
+- duration: `turn_duration_ms` (`native_assistant_facts.rs:222`) fed by
+  `project_with_turn_duration` (`native_chat_projection.rs:715-732`), which
+  tracks the nearest preceding user/system record exactly like upstream
+  `inputIndex` (`rows.ts:469-482`).
+Both halves have focused tests and a traced live consumer
+(`native_view_chat.rs:2884` → `native_footer.rs`). Caveat: native sessions carry
+no idle markers, so the legacy input-boundary path is the applicable one; the
+upstream "marker-era" branch is not a distinct native state.
+
 ## Coverage and method
 
 Wave-44 covered every item still `UNVERIFIED` after wave-43 (165 IDs) with 28
@@ -459,10 +479,10 @@ field is absent).
 
 ## Honest completion statement
 
-Of the 223 checklist obligations, **144 are `ALREADY_CORRECT`** (a faithful
+Of the 223 checklist obligations, **145 are `ALREADY_CORRECT`** (a faithful
 implementation, a focused test, and a traced live consumer), **1 is
 `REAL_GAP`** (model + test exist but the live TUI does not consume them),
-**50 are `BLOCKED`** (a producer/transport/contract field does not exist), and
+**49 are `BLOCKED`** (a producer/transport/contract field does not exist), and
 **28 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
 `CP-05`, `CP-06` in wave-46; `MSG-007` in wave-47; `SIDE-08`, `THEME-12`,
 `DIALOG-04` in wave-48; `PAR-04` in wave-49; `TAB-23`, `DIALOG-10`,
