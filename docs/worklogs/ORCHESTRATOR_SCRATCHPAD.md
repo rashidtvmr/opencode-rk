@@ -1,5 +1,35 @@
 # Orchestrator scratchpad
 
+## 2026-11-03 (latest) — wave-68 three landings; all 223 verdicts in
+
+Canonical `main-v2` = `a54fc522` (pushed, `ls-remote`-verified). Wave-68 ladder:
+`43050ee0` (F1/DIFF-001 inline) → `7fff2cbd` (F3/SIDE-10, re-based by re-applying
+the reviewed diff) → `4f4a8228` (F2/DIALOG-06/08/09 after the locked-select +
+model-only-focus repair `056aaadb`, full CLI 2239/0, independent APPROVE) plus
+docs commits between.
+
+**All 223 checklist items now carry a verdict row**, so the census is complete.
+Latest overlay: `ALREADY_CORRECT` 103, `REAL_GAP` 95, `BLOCKED` 9, `LANDED` 5
+(plus the newest rows in `PARITY_STATUS.md` filling the previously-missing set).
+
+**Implemented lanes are all occupied again** (base `4f4a8228`):
+`recovery/core` = I3a (CP-13 interrupt arm + CP-14 branch location slot, commit
+after each), `recovery/runtime` = I5 (CP-30/31/32 live composer shell/IME/
+snapshot), `recovery/ui` = I6 (DIALOG-12/13 pickers), `recovery/platform` = I7
+(DIALOG-14/15 pickers). I3 and I4 both died on the transient
+`The last message must have role=user` provider fault with clean trees and were
+re-split smaller; I3's reconnaissance is preserved in `artifacts/I3.RESULT.md`.
+
+**Read-only verifiers in flight:** V16a (DIFF-001/005, MD-005), V18b (DIALOG-19,
+TOOL-006). V18 already delivered DIALOG-19 `REAL_GAP` (`ChromeModel` unwired) and
+TOOL-006 `REAL_GAP` (`BackgroundShell` unwired); V16b delivered CP-37/CP-38
+`REAL_GAP`, FORM-002 `REAL_GAP`.
+
+Note: all four implementation lanes share
+`CARGO_TARGET_DIR=/Users/mymac/Projects/.oc2-features-20261103/target`, so cargo
+builds serialize on the target-dir lock — safe, and required by the ~15 GiB free
+disk budget. Do not provision more worktrees.
+
 ## 2026-11-03 (later) — Wave-68 first landings on persistent worktrees
 
 Canonical `main-v2` advanced, all pushed and `git ls-remote`-verified against
