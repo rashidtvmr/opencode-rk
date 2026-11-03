@@ -11924,3 +11924,27 @@ extending the row model — the same blocker as DIFF-001.
 
 PARITY_STATUS now self-consistent: 144 `ALREADY_CORRECT` / 3 `REAL_GAP`
 (CP-07, MEDIA-001, DIALOG-02) / 62 `BLOCKED` / 14 `LANDED` = 223.
+
+### Wave-53 landing — PAR-16 + PAR-22 harness (`f240367b`)
+
+Recovered the G-PAR-A worker's real artifact from `wave53/copy/`
+(`tools/ui_parity/ui_parity.py`, +153 lines) and completed it: the worker
+defined `build_evidence_bundle` (PAR-22) but never called it, so I wired the
+`--evidence-bundle` write into `main` and added 10 focused selftest checks
+(class default/rejection/mismatch/filtering + evidence-bundle schema/sha/
+class-counts/commands). `tools/ui_parity/selftest.py` 32 checks PASS.
+
+- PAR-16: fixture classes (`baseline`/`optional`/`experimental`/`extension`);
+  `--class` filter; class travels into request+golden; golden/fixture class
+  mismatch is a hard `fixture_class` diff.
+- PAR-22: `--evidence-bundle` binds `rust_sha` + spec/golden/fixture sha256s +
+  class counts + reproduction commands + per-fixture outcomes + installed
+  capture hashes.
+
+PARITY_STATUS reconciled: 144 `ALREADY_CORRECT` / 3 `REAL_GAP` (CP-07,
+MEDIA-001, DIALOG-02) / 60 `BLOCKED` / 16 `LANDED` = 223. Also fixed the stale
+`ALREADY_CORRECT` section header (143 -> 144).
+
+Worker failure mode remains the harness step cap during reconnaissance:
+`wave53/copy/` and `wave53/repo/` are repo copies, and only `copy/` carried an
+uncommitted diff. Extract `git -C copy diff` for any future worker artifact.

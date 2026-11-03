@@ -48,13 +48,13 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | PAR-13 | `ALREADY_CORRECT` | `native_message_rows.rs:2115` `click_acts`; live `tui_entry.rs:10102,10162`; test `native_text_selection.rs:532` |
 | PAR-14 | `ALREADY_CORRECT` | `native_tui_parity.rs:186` COLUMNS=40; `upstream_view_parity.rs:76-78` 60/88/116; `:145` >120 boundary |
 | PAR-15 | `ALREADY_CORRECT` | `native_theme_runtime.rs:392-434` hex/ref/{dark,light}/transparent resolve; live `tui_entry.rs:6736-6753,11425` |
-| PAR-16 | `BLOCKED` | No fixture classification anywhere (grep 0); harness `ui_parity.py:683` has no class dimension |
+| PAR-16 | `LANDED` (`f240367b`) | Fixture classes (`baseline`/`optional`/`experimental`/`extension`): every fixture resolves to exactly one class, unknown classes are rejected, `--class` filters, the class travels into the request/golden, and a golden/fixture class mismatch is a hard `fixture_class` diff (`ui_parity.py`); 5 focused selftest checks |
 | PAR-17 | `ALREADY_CORRECT` | `baseline.lock.json:12-24` v2.2.0 `is_authoritative:false`; pins `native_identity.rs:36-38` |
 | PAR-18 | `ALREADY_CORRECT` | `safe_renderer.rs:1148` Drop, `:609` restore; live `tui_entry.rs:12756-12759`; tests `native_terminal_lifecycle.rs:192-217`, `highlight.rs:1133` |
 | PAR-19 | `REAL_GAP` | Model `native_diff_view.rs:1043,1058` + test `:1963`; no live consumer (`native_view_chat.rs:2707` hardcodes `paint_rows_with_gutter`) |
 | PAR-20 | `ALREADY_CORRECT` | `selftest.py:161-207` mutations one_cell_color/cursor/width/focus/action_extra all assert exit 1 |
 | PAR-21 | `ALREADY_CORRECT` | `support/upstream_view_parity.rs:4` frozen `upstream_layout_parity.rs` untouched; sibling file |
-| PAR-22 | `BLOCKED` | Goldens carry pins (`ui_parity.py:247-265`) but `build-metadata.json:47` rust_checks_passed=null; no SHA-bound evidence bundle |
+| PAR-22 | `LANDED` (`f240367b`) | `--evidence-bundle` writes a SHA-bound bundle (`rust_sha`, spec/golden/fixture hashes, class counts, exact reproduction commands, per-fixture outcomes, installed-capture hashes) so a parity claim binds to the exact Rust revision under test; 5 focused selftest checks |
 | PAR-23 | `ALREADY_CORRECT` | Every checklist item `status:unverified_rust`; kit `rust_checks_passed:null` |
 | PAR-24 | `ALREADY_CORRECT` | Bridge sources present/inspectable (`native_identity.rs:36-38`, scene/highlight/terminal_input) |
 | THEME-02 | `ALREADY_CORRECT` | `prompt_pane.rs:119/:1288`; `theme_runtime.rs:938`; live `tui_entry.rs:8567` |
@@ -245,8 +245,8 @@ the wave-44 verdict supersedes it.
 | --- | --- |
 | `ALREADY_CORRECT` | 144 |
 | `REAL_GAP` | 3 |
-| `BLOCKED` | 62 |
-| `LANDED` (wave-45..51) | 14 |
+| `BLOCKED` | 60 |
+| `LANDED` (wave-45..53) | 16 |
 | **Total** | **223** |
 
 ### Landed fixes (wave-45..51) — moved out of `REAL_GAP`/`BLOCKED`
@@ -267,6 +267,7 @@ the wave-44 verdict supersedes it.
 | TAB-23 | `ae56897f` | The live `session.tab.*` dispatch was a hardcoded `InputEvent → TabCommand` match and the config `keybinds` root key (`config/index.tsx:78` `Schema.optional(TuiKeybind.KeybindOverrides)`) was never read. Adds `UiPreferences.keybinds` (raw JSON, like `cursor`), a `native_navigation::tab_keybinds` resolver (defaults + per-command replace, `false`/`"none"` disable, `KeyStroke` objects, both command-name spellings, unknown keys ignored, `super`/`hyper` dropped), and drives the live tab dispatch through the resolved chord table. No config yields exactly `DEFAULT_TAB_KEYBINDS`. Focused tests + full CLI suite (2176/0) green. |
 | DIALOG-10 | `a52c222a` | The live session rename painted an ad-hoc rectangle with its own `String` buffer and never used the tested `DialogPrompt`. Adds `DialogView::open_prompt` (kind `Prompt`, seeded from `native_palette::select::PromptState`) plus `prompt_value`/`push`/`backspace`/`submit`/`escape`/`set_busy`/`set_message` forwarders, renders the value (or the busy line) and the upstream footer `Enter: save · Esc: cancel`, and routes the live rename through it (`MenuAction::Rename` opens the prompt; the key block edits/submits; the settlement closes it or sets busy/inline-error). Escape/submit are suppressed while busy (`dialog-prompt.tsx:43-46,93-100,168-170`). The ad-hoc `PaintCtx.rename_dialog` paint path is removed. Focused test + full CLI suite (2177/0) green. |
 | DIALOG-20 (toast half) | `d891f9c3` | The tested `Toast`/`ToastFrame` model had no live consumer. Adds `PaintCtx.toast`, paints the frame as the topmost overlay in `native_paint` (surface fill + each styled `CellRun`), owns a live `Toast` in the loop whose logical clock advances on the animation tick so a visible toast auto-dismisses after 5000 ms, and triggers it from the session-id copy path (`Copied to clipboard`, `app.tsx:605`). The crash/error-details half remains `BLOCKED`. Full CLI suite (2177/0) green. |
+| PAR-16 / PAR-22 | `f240367b` | Harness-side (Python). PAR-16: fixtures carry exactly one class (`baseline`/`optional`/`experimental`/`extension`); `fixture_class` defaults to `baseline`, `validate_fixture_class` rejects an unknown value, `--class` filters the selection, the class travels into `build_request`/`golden_from_screen`, and `compare_screens` raises a hard `fixture_class` diff on a golden/fixture class mismatch. PAR-22: `--evidence-bundle` + `build_evidence_bundle` write a SHA-bound bundle (`rust_sha`, spec/golden/fixture sha256s, class counts, exact reproduction commands, per-fixture outcomes, installed-capture hashes). `tools/ui_parity/selftest.py` 32 checks PASS (+10). |
 
 ### `REAL_GAP` — faithful model + focused test exist, no live consumer (3)
 
@@ -285,9 +286,9 @@ Selected high-value seams:
 | THEME-13 | `SystemThemeState`/`palette_reply` (`native_theme_runtime.rs:2183/2264`) have zero non-test callers; no OSC palette-query emitter and no payload-carrying input event to decode a reply. |
 | THEME-09 | **BLOCKED (verified wave-53).** The live chat `Patch`/diff-fence painter hardcodes `DiffViewMode::Unified` (`native_view_chat.rs:2202/2730`) and `resolve_view_mode`/`config.diffs.view` (`native_diff_view.rs:586`) have no live caller. Threading the preference is not sufficient: a split row is `SplitRow::Pair { left, right }` (`native_diff_view.rs:709-715`) with two independent backgrounds, but the live row model is `(String, ChatRowClass)` with exactly one class per row (`native_view_chat.rs:902`) and the painter maps a class to a single background (`tui_entry.rs:2880-2898 chat_row_background`). The split view is therefore not renderable without extending the row model — the same blocker as DIFF-001. |
 
-### `BLOCKED` — needs a producer/transport/contract field that does not exist (62)
+### `BLOCKED` — needs a producer/transport/contract field that does not exist (60)
 
-`PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-10, PAR-16, PAR-19, PAR-22,
+`PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-10, PAR-19,
 TAB-04, TAB-06, TAB-10, TAB-21, SIDE-03, SIDE-04, SIDE-05, SIDE-10, SIDE-14,
 MSG-001, MSG-002, MSG-003, MSG-005, MSG-008, MSG-009, MSG-010,
 TOOL-006, TOOL-011, DIFF-001, DIFF-003, FFI-01, FFI-02, FFI-03, FFI-04, FFI-06,
@@ -332,9 +333,9 @@ DIALOG-19, LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009`.
 | TOOL-011 | `execute_dialog` (`native_tool_rows.rs:1159`) zero consumers; live render placeholder (`native_view_dialogs.rs:1429`); no `ExecuteDialog` payload on `OpenDialog`/`DialogView`; no syntax producer (`opentui-bridge/src/highlight.rs:27-29`). |
 | TAB-21 | `ViewAcknowledgement` (`native_navigation.rs:1133`) zero live callers; no client POST `/api/sessions/{id}/view` in `crates/cli`; no idle/viewed timestamp reaches the CLI (`LiveSnapshot` `tui_entry.rs:573`; `SessionSummary` `contracts/src/lib.rs:202-213`). |
 | FORM-001 | The upstream-correct `PermissionPrompt` (`native_permissions.rs:557`) is dead code; the live path (`native_view_dialogs.rs:1090`) is a flat choice list. Sub-behavior 1 (3-option realign) is **not** a parity bug: the canonical server supports `scope ∈ {once,session,always}` (`run_owner.rs:232`) and the 6-choice scoped set is a deliberate extension protected by semantic tests. Sub-behaviors 3 (always-body swap, static `:1420`) and 4 (nested rejection stage) need a stage+textarea in `DialogView`. |
-| PAR-02 / PAR-03 / PAR-06 / PAR-07 / PAR-16 / PAR-22 | Harness-side: capability table empty (`audit-implementation.md:79-96`); no upstream TS/OpenTUI adapter (`README.md:148`); no font/pixel capture path; event-trace sink misses queue/steer/permissions/forms; no fixture classification; no SHA-bound evidence bundle (`build-metadata.json:47`). |
+| PAR-02 / PAR-03 / PAR-06 / PAR-07 | Harness-side: capability table empty (`audit-implementation.md:79-96`); no upstream TS/OpenTUI adapter (`README.md:148`); no font/pixel capture path; event-trace sink misses queue/steer/permissions/forms. |
 
-### `ALREADY_CORRECT` — implementation + focused test + traced live consumer (143)
+### `ALREADY_CORRECT` — implementation + focused test + traced live consumer (144)
 
 Everything not listed in the two sections above. This includes the full
 `CP-12..CP-39` range, `TAB-01..03/05/07..09/11..20/22/24`, `SIDE-01/02/06/07/09/11/12/13/15`,
@@ -407,11 +408,11 @@ field is absent).
 Of the 223 checklist obligations, **144 are `ALREADY_CORRECT`** (a faithful
 implementation, a focused test, and a traced live consumer), **3 are
 `REAL_GAP`** (model + test exist but the live TUI does not consume them),
-**62 are `BLOCKED`** (a producer/transport/contract field does not exist), and
-**14 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
+**60 are `BLOCKED`** (a producer/transport/contract field does not exist), and
+**16 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
 `CP-05`, `CP-06` in wave-46; `MSG-007` in wave-47; `SIDE-08`, `THEME-12`,
 `DIALOG-04` in wave-48; `PAR-04` in wave-49; `TAB-23`, `DIALOG-10`,
-`DIALOG-20` (toast half) in wave-51).
+`DIALOG-20` (toast half) in wave-51; `PAR-16`, `PAR-22` in wave-53).
 
 The remaining work is therefore **not** more UI drawing:
 
