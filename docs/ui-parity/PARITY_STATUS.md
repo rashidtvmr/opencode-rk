@@ -67,7 +67,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | THEME-09 | `REAL_GAP` | `tui_entry.rs:2849,2866`; test `theme_runtime.rs:3757`; unified live `tui_entry.rs:4626`; split unreachable (`native_view_chat.rs:2179` hardcodes Unified) |
 | THEME-10 | `ALREADY_CORRECT` | `theme_runtime.rs:1592,1665,1754,1768`; tests `:4167-4241`; live `tui_entry.rs:6744,11425` |
 | TAB-21 | `BLOCKED` | `ViewAcknowledgement` (`native_navigation.rs:1133`, test `:2067`) zero live callers; `tui_entry.rs:8689-8694` defers driver; no idle/viewed watermark into CLI (`LiveSnapshot` `tui_entry.rs:573`; `SessionSummary` `contracts/src/lib.rs:202-213`) |
-| TAB-23 | `BLOCKED` | `resolve_tab_shortcut` (`native_navigation.rs:1294`) + `DEFAULT_TAB_KEYBINDS` (`:1260`) test-only; no `keybinds` config producer (`native_ui_preferences.rs:303`); no generic keymap normalization (`native_input_decoder.rs:40-67`); no Help rows |
+| TAB-23 | `LANDED` | `ae56897f` — live `session.tab.*` dispatch now resolves through the config `keybinds` chord table (`native_navigation::tab_keybinds`); `UiPreferences.keybinds` (raw JSON) + focused tests. |
 | SIDE-03 | `BLOCKED` | Renderer+test correct (`native_sidebar.rs:230-287`); live `set_usage` (`native_view_status.rs:1146`) drops cached/reasoning; `set_usage_classes` (`:1168`) + `set_cost` (`:1160`) zero non-test callers; no last-eligible selector; no revert boundary; no cost producer |
 | SIDE-04 | `REAL_GAP` | Five-class arithmetic `native_sidebar.rs:205-287` (test `:1608`) dead on live path; no last-eligible-assistant selector; limit joined only from selected UI model (`tui_entry.rs:8112`); wire `input_tokens` is inclusive of cached (`server/src/auto_compaction.rs:102`) so disjoint classes need a `nonCachedInput` producer |
 | SIDE-08 | `REAL_GAP` | No `DialogKind::Mcp` (`native_view_dialogs.rs:129`); row click toggles via PUT (`tui_entry.rs:10050`), never opens dialog. Upstream `mcp.tsx:56-60` |
@@ -245,8 +245,8 @@ the wave-44 verdict supersedes it.
 | --- | --- |
 | `ALREADY_CORRECT` | 144 |
 | `REAL_GAP` | 6 |
-| `BLOCKED` | 62 |
-| `LANDED` (wave-45..49) | 11 |
+| `BLOCKED` | 61 |
+| `LANDED` (wave-45..51) | 12 |
 | **Total** | **223** |
 
 ### Landed fixes (wave-45..49) — moved out of `REAL_GAP`/`BLOCKED`
@@ -264,6 +264,7 @@ the wave-44 verdict supersedes it.
 | THEME-12 | `bc24dd30` | The live theme picker (`tui_entry.rs`) persisted only on Enter, so arrowing through the list showed no preview and Esc left the last previewed theme in place. Adds `ThemePicker` (a live wrapper over the tested `ThemeController`) plus `theme_picker_move`/`theme_picker_cancel`: page_next/page_prev on the Theme page preview+persist the focused row, Esc restores+persists the pre-open selection, Enter clears the picker (`dialog-theme-list.tsx:32-37` -> `context/theme.tsx:341-349`). Focused test `theme12_live_picker_previews_on_move_and_reverts_on_cancel` + full CLI suite (2173/0) green. |
 | DIALOG-04 | `d137313d` | The ordered modal routes (`native_modal_layer.rs:489-600`) had no live consumer: the live loop quit the app on Ctrl-C even with a dialog open, and a backdrop click did nothing. Ctrl-C (0x03) now routes through the same close/reject path as Escape while the dialog stack owns input (`dialog_consumes_byte`); Ctrl-D (not bound in the modal layer) keeps its byte-exit meaning. A left-button release outside the panel rect closes the top dialog (`ui/dialog.tsx:54-60`); a pending decision is never abandoned. Focused test `dialog04_ctrl_c_closes_dialog_but_ctrl_d_keeps_byte_exit` + full CLI suite (2174/0) green. |
 | PAR-04 | `669036cd` | Harness-side (Python): the Rust capture model already serialized `Frame.hit_targets` (`native_capture.rs:142`, canonical `hit={x},{y},{action}`) but the renderer transport dropped the key and the comparator had no member. Adds the key to every renderer output, a canonical `(y,x,action)`-sorted comparator member gated on the fixture's `compare` list, validation, README, selftest coverage and the matching empty-list goldens. The PTY channel exposes no pointer events, so the live `oc2-pty` adapter emits an empty list; the member is exercised by the deterministic static renderer. `tools/ui_parity/selftest.py` 22 checks PASS. |
+| TAB-23 | `ae56897f` | The live `session.tab.*` dispatch was a hardcoded `InputEvent → TabCommand` match and the config `keybinds` root key (`config/index.tsx:78` `Schema.optional(TuiKeybind.KeybindOverrides)`) was never read. Adds `UiPreferences.keybinds` (raw JSON, like `cursor`), a `native_navigation::tab_keybinds` resolver (defaults + per-command replace, `false`/`"none"` disable, `KeyStroke` objects, both command-name spellings, unknown keys ignored, `super`/`hyper` dropped), and drives the live tab dispatch through the resolved chord table. No config yields exactly `DEFAULT_TAB_KEYBINDS`. Focused tests + full CLI suite (2176/0) green. |
 
 ### `REAL_GAP` — faithful model + focused test exist, no live consumer (6)
 
@@ -285,7 +286,7 @@ Selected high-value seams:
 ### `BLOCKED` — needs a producer/transport/contract field that does not exist (62)
 
 `PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-10, PAR-16, PAR-19, PAR-22,
-TAB-04, TAB-06, TAB-10, TAB-21, TAB-23, SIDE-03, SIDE-04, SIDE-05, SIDE-10, SIDE-14,
+TAB-04, TAB-06, TAB-10, TAB-21, SIDE-03, SIDE-04, SIDE-05, SIDE-10, SIDE-14,
 MSG-001, MSG-002, MSG-003, MSG-005, MSG-008, MSG-009, MSG-010,
 TOOL-006, TOOL-011, DIFF-001, DIFF-003, FFI-01, FFI-02, FFI-03, FFI-04, FFI-06,
 FFI-07, FFI-08, FFI-11, FORM-001, STATE-002, THEME-14, CP-09,
@@ -327,7 +328,6 @@ DIALOG-19, DIALOG-20, LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009`.
 | MSG-010 | `turn_tokens_per_second` (`native_message_rows.rs:1242`) reads `step.timing.streamed_ms` (`:1259`), zero live callers, field has no producer. |
 | TOOL-011 | `execute_dialog` (`native_tool_rows.rs:1159`) zero consumers; live render placeholder (`native_view_dialogs.rs:1429`); no `ExecuteDialog` payload on `OpenDialog`/`DialogView`; no syntax producer (`opentui-bridge/src/highlight.rs:27-29`). |
 | TAB-21 | `ViewAcknowledgement` (`native_navigation.rs:1133`) zero live callers; no client POST `/api/sessions/{id}/view` in `crates/cli`; no idle/viewed timestamp reaches the CLI (`LiveSnapshot` `tui_entry.rs:573`; `SessionSummary` `contracts/src/lib.rs:202-213`). |
-| TAB-23 | `resolve_tab_shortcut` (`native_navigation.rs:1294`) + `DEFAULT_TAB_KEYBINDS` (`:1260`) test-only; no `keybinds` config producer (`native_ui_preferences.rs:303`); no generic keymap normalization. |
 | FORM-001 | The upstream-correct `PermissionPrompt` (`native_permissions.rs:557`) is dead code; the live path (`native_view_dialogs.rs:1090`) is a flat choice list. Sub-behavior 1 (3-option realign) is **not** a parity bug: the canonical server supports `scope ∈ {once,session,always}` (`run_owner.rs:232`) and the 6-choice scoped set is a deliberate extension protected by semantic tests. Sub-behaviors 3 (always-body swap, static `:1420`) and 4 (nested rejection stage) need a stage+textarea in `DialogView`. |
 | PAR-02 / PAR-03 / PAR-06 / PAR-07 / PAR-16 / PAR-22 | Harness-side: capability table empty (`audit-implementation.md:79-96`); no upstream TS/OpenTUI adapter (`README.md:148`); no font/pixel capture path; event-trace sink misses queue/steer/permissions/forms; no fixture classification; no SHA-bound evidence bundle (`build-metadata.json:47`). |
 
@@ -401,12 +401,13 @@ field is absent).
 
 ## Honest completion statement
 
-Of the 223 checklist obligations, **143 are `ALREADY_CORRECT`** (a faithful
-implementation, a focused test, and a traced live consumer), **10 are
+Of the 223 checklist obligations, **144 are `ALREADY_CORRECT`** (a faithful
+implementation, a focused test, and a traced live consumer), **6 are
 `REAL_GAP`** (model + test exist but the live TUI does not consume them),
-**63 are `BLOCKED`** (a producer/transport/contract field does not exist), and
-**7 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
-`CP-05`, `CP-06` in wave-46; `MSG-007` in wave-47).
+**61 are `BLOCKED`** (a producer/transport/contract field does not exist), and
+**12 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
+`CP-05`, `CP-06` in wave-46; `MSG-007` in wave-47; `SIDE-08`, `THEME-12`,
+`DIALOG-04` in wave-48; `PAR-04` in wave-49; `TAB-23` in wave-51).
 
 The remaining work is therefore **not** more UI drawing:
 
@@ -417,7 +418,7 @@ The remaining work is therefore **not** more UI drawing:
   integrator): usage classes + cost + revert boundary (`SIDE-03/04/05/10`),
   compaction transport (`STATE-002`), message chips (`MSG-005`), streamed
   timing (`MSG-008/010`), revert/notice surfaces (`MSG-009`), view
-  acknowledgement (`TAB-21`), keybind config (`TAB-23`), execute-dialog payload
+  acknowledgement (`TAB-21`), execute-dialog payload
   (`TOOL-011`), split-diff config (`DIFF-001/003`), the permission body-swap
   stage (`FORM-001`), the syntax-style bridge ABI (`THEME-14`), the native scene
   entry point (`FFI-02`), the `shell.output` server route (`TOOL-006`), the
@@ -505,6 +506,35 @@ smallest real producer chain, else BLOCKED with the exact seam). Outcomes:
 - `TAB-04`, `TAB-23`, `TOOL-011`, `THEME-09`, `CP-09`, `DIALOG-06..10`,
   `DIALOG-12..20` — workers returned no deliverable (provider/step-limit
   failures); no new evidence, prior BLOCKED seams stand.
+
+### Wave-51 grouped-area results (2026-11-03)
+
+Base `1ea3d25a`. 16 grouped workers (one per area, 3-6 related items each) on the
+four authorized routes. `TAB-23` — **LANDED** (`ae56897f`): see the fixes table.
+Every other item re-confirmed as before:
+
+- `TAB-10` — no server VCS producer / contract branch field / git probe
+  (cross-crate chain). `TAB-21` — the `idle` half of the unread pair is absent
+  from storage, contract and server (no `set_session_idle`, no idle column, no
+  `ServerEvent` idle variant); `ViewAcknowledgement` has zero live callers.
+- `PAR-09/10/19` — no syntax-engine dependency, no wire `seq`/`messageID`, no
+  mounted diff-scroll substrate. `PAR-A` (`PAR-02/03/06/16/22`) — harness-side
+  gaps (no upstream capture profile, no class dimension, no evidence bundle);
+  bounded harness patches identified but not landed.
+- `THEME-13` — no OSC palette-query emitter bound in the FFI and both input
+  decoders discard OSC payloads by design. `THEME-08` — no tokenizer + sink.
+- `CP-09` — no live agent-color producer (catalogue omits `color`,
+  `set_composer_agent` has zero live callers, `agent.cycle` inert).
+- `STATE-002` — no `Compaction` message role in contract/storage, no server
+  persistence. `MSG-001/002/003` — no `SessionRow`→painter adapter.
+  `MSG-005/008/009/010` — no `files`/`skills` field, no per-step streamed
+  timestamp. `TOOL-006` — no `shell.output` server route; executor refuses
+  `background`. `LAY-10/11/13` — no plugin-panel/terminal producer.
+- `DIALOG-12..20` — toast (`DIALOG-20`) is the one bounded target (complete
+  tested producer, only a live construction + paint call missing); the rest need
+  live driving-fact producers. `DIALOG-06..10` — `DIALOG-10` (Prompt / session
+  rename) is bounded; `DIALOG-06..09` (Select) are blocked by the pinned SIDE-08
+  `DialogMcp` consumer.
 
 This document is a status map, not acceptance. No item is marked
 runtime-proven; captured styled-cell/cursor goldens were not produced.

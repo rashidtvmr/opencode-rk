@@ -11804,3 +11804,43 @@ No worktrees are created: the Recovery Mode ref hook rejects new local branches,
 so workers are read-only on canonical and return patches the orchestrator lands.
 There is therefore nothing to reclaim; every landed patch is pushed to remote
 `main-v2` immediately.
+
+### Wave-51 grouped-area dispatch (2026-11-03)
+
+Per the user's grouping direction (one worker owns a whole related area of 5-10
+items instead of one tiny task each), 16 background implementation-owner workers
+dispatched, base `1ea3d25a`. Shared brief: `.../wave51/BRIEF.md`; per-area
+assignments in `.../wave51/TASKS51.md`.
+
+- `@vyce-deepseek-v41` (8): TAB, SIDE, MSG-A, MSG-B, TOOL/DIFF, FFI-A, FFI-B, THEME.
+- `@9router-vyce-deepseek-v4.1-free-combined` (6): CP/FORM/STATE/MEDIA, DIALOG-A,
+  DIALOG-B1, DIALOG-B2, LAY, MD.
+- `@9router-river-glm-5-3-flash` (1): PAR-A.
+- `@9router-luna-free` (1): PAR-B.
+
+Each worker returns one `<ID>.patch.diff` + `<ID>.impl.json` (or
+`<ID>.blocked.json`) per item. Workers are read-only on canonical; patches land
+one at a time through the orchestrator (compile + focused test + full CLI suite +
+commit + push). No worktrees are created (ref hook rejects new local branches),
+so there is nothing to reclaim.
+
+### Wave-51 landing — TAB-23 (2026-11-03)
+
+`TAB-23` **LANDED** (`ae56897f`, pushed to remote `main-v2`). A river worker left
+a private overlay (`.../wave50/TAB-23.overlay/`) with the edits but no
+patch/tests; the orchestrator applied the three files, fixed two compile errors
+in the new `normalize_chord`/`normalize_binding_item` helpers (a `Vec<&str>`
+borrow of a per-iteration temporary, and `object.get(&&str)`), added the two
+focused tests, ran the full CLI suite (2176/0 green) and committed.
+
+What changed: the live `session.tab.*` dispatch was a hardcoded
+`InputEvent → TabCommand` match and the config `keybinds` root key
+(`config/index.tsx:78`) was never read. Adds `UiPreferences.keybinds` (raw JSON,
+like `cursor`), `native_navigation::tab_keybinds` (defaults + per-command
+replace, `false`/`"none"` disable, `KeyStroke` objects, both command-name
+spellings, unknown keys ignored, `super`/`hyper` dropped), and drives the live
+tab dispatch through the resolved chord table. No config yields exactly
+`DEFAULT_TAB_KEYBINDS`.
+
+PARITY_STATUS updated: 144 `ALREADY_CORRECT` / 6 `REAL_GAP` / 61 `BLOCKED` /
+12 `LANDED` = 223. Remote `main-v2` == `ae56897f`.
