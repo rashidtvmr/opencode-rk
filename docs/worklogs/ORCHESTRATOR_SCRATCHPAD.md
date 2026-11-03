@@ -12094,3 +12094,50 @@ items are genuinely deep, not merely unwired:
 Wave-58 dispatched groups A..I (DIALOG, MSG, SIDE, TOOL, THEME, DIFF/FFI,
 STATE/FORM/LAY, MD/PAR, TAB/CP) with a **patch-only, no-compile** rule so the
 integrator owns compilation.
+
+### Wave-58/59 outcome — 0 landable patches
+
+Groups A..I returned per-ID artifacts. All confirmed BLOCKED except two
+candidate patches, both rejected on review:
+
+- **`STATE-002.patch.diff` rejected.** Adds a `compaction_row_text()` projection
+  that composes `status | tokens | summary` into one `ChatPart::Compaction`
+  row. No live producer: `compact_session` (`server/src/lib.rs:1668`) never
+  persists/pushes a compaction part, and the row format is unfaithful to
+  upstream `CompactionMessage` (`routes/session/index.tsx:2171` — a bordered
+  header plus a markdown body, not a single status line). A dead projection
+  helper is not a parity landing.
+- **`PAR-02.patch.diff` rejected.** A hardcoded capability table; the
+  requirement forbids guessed statuses with no producer.
+- **`TAB-06.patch` rejected** (wave-57): `TabStatus::feed_pending` has no live
+  caller.
+
+### Wave-57 landing — SIDE-14 (`d5611712`, base `5ada0653`)
+
+Implemented directly (workers kept hitting the step cap). Faithful upstream
+behavior (`feature-plugins/sidebar/footer.tsx:94-112` +
+`ui/working-directory-actions.tsx:16-58`):
+
+- `native_view_status.rs`: `SidebarFooter::label`, `StatusView::footer_row`
+  (row index of the pinned location row), `footer_directory`, `footer_menu`,
+  `footer_hovered` getter.
+- `native_view.rs`: `footer_hit` rect published during the sidebar render
+  (invalidated on scroll/resize/route/toggle like `onboarding_dismiss_hit`),
+  `set_footer_hover` (kind==7), `footer_click` (press → local `DialogSelect`,
+  selection guard = `openMenu`'s `getSelectedText()` early-return),
+  `open_working_directory_menu`, `working_directory_choice`.
+- `tui_entry.rs`: hover routing in the `kind == 7` block; the footer press in
+  the `kind == 0` sidebar block; a local `Select` Enter/Esc/Ctrl-C branch in the
+  `dialog_consumes_byte` block; the backdrop release closes `Mcp`/`Select`
+  locally; `open_directory_in_file_manager` (`open`/`cmd /C start ""`/`xdg-open`)
+  and `dispatch_working_directory_action` (Copy path → OSC 52 + info toast;
+  Open folder → `openPath`).
+- `Workspaces` stays unoffered: upstream `move.open()` opens `DialogWorkspaces`
+  (`component/prompt/move.tsx`), which has no live route → `can_move=false`.
+- 3 focused tests; full CLI suite 2184/0. SIDE-14: BLOCKED → LANDED. Counts now
+  144 `ALREADY_CORRECT` / 2 `REAL_GAP` / 59 `BLOCKED` / 18 `LANDED` = 223.
+
+Note: `native_view_status.rs` loads `native_sidebar.rs` a second time via
+`#[path]`, so its `FooterAction`/`FooterMenuItem` are **distinct types** from
+`crate::native_sidebar`'s. SIDE-14 uses the `native_view_status::native_sidebar`
+copy throughout (it is the one `StatusView` paints).

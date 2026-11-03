@@ -1,6 +1,6 @@
 # OpenCode V2 UI parity — consolidated status
 
-- **Canonical line:** `main-v2` @ `98bf3ac2` (remote verified)
+- **Canonical line:** `main-v2` @ `d5611712` (remote verified)
 - **Upstream oracle:** `/Users/mymac/Projects/tmp/opencode` @ `450e7b92412c780a7b5a75226bb8d49aaca24e22`
 - **Checklist:** `docs/ui-parity/opencode-ui-parity-kit/checklist.json` (223 items)
 - **Method:** source inspection of the live Rust path (implementation + a
@@ -79,7 +79,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | SIDE-03 | `BLOCKED` | Renderer+test correct (`native_sidebar.rs:230-287`); live `set_usage` (`native_view_status.rs:1146`) drops cached/reasoning; `set_usage_classes` (`:1168`) + `set_cost` (`:1160`) zero non-test callers; no last-eligible selector; no revert boundary; no cost producer |
 | SIDE-04 | `REAL_GAP` | Five-class arithmetic `native_sidebar.rs:205-287` (test `:1608`) dead on live path; no last-eligible-assistant selector; limit joined only from selected UI model (`tui_entry.rs:8112`); wire `input_tokens` is inclusive of cached (`server/src/auto_compaction.rs:102`) so disjoint classes need a `nonCachedInput` producer |
 | SIDE-08 | `REAL_GAP` | No `DialogKind::Mcp` (`native_view_dialogs.rs:129`); row click toggles via PUT (`tui_entry.rs:10050`), never opens dialog. Upstream `mcp.tsx:56-60` |
-| SIDE-14 | `BLOCKED` | `footer_menu` (`native_sidebar.rs:1020`) + duplicate `location_menu` (`native_status_rail.rs:1114`) test-only; no footer hit rect (`native_view.rs`), no hover routing (`tui_entry.rs:9407` kind==7), no click branch (`tui_entry.rs:10016`), no CopyPath/OpenFolder/Workspaces executors |
+| SIDE-14 | `LANDED` (`d5611712`) | Footer hit rect + hover routing + local `DialogSelect` menu + CopyPath/OpenFolder executors wired live; `Workspaces` unoffered (no live move route). See the landed-fixes table. |
 | MSG-005 | `BLOCKED` | Chip helpers `native_message_rows.rs:1904-2046` (tests `:2449-2514`) zero consumers; `MessageRecord` (`contracts/src/lib.rs:250-257`) has no files/skills; producer chain absent `sessions/src/lib.rs:623`, `storage/src/writer_v2.rs:129`, `server/src/lib.rs:1256`, `native_chat_projection.rs:641`, `native_view_chat.rs:1069/:2635` |
 | MSG-008 | `REAL_GAP` | Widths/agent/model/duration/interrupted live (`native_footer.rs:377`, `native_assistant_facts.rs:391`); TPS dead end-to-end: producer `server/src/lib.rs:2894-2901` emits no streamed stamp; `MessageExecution` (`contracts/src/lib.rs:284-293`) has no timing field; `RowTiming.streamed_ms` (`native_message_rows.rs:825`) never set; `tps_enabled` test-only (`native_assistant_facts.rs:325`); `data.session.tps` absent |
 | MSG-009 | `REAL_GAP` | `TranscriptSurfaces`/`RevertCard`/`TranscriptNotice`/`ChildCompletionNotice` (`native_view_chat.rs:4482/4103/4273/4409`) zero live consumers; `SessionRevert` (`contracts/src/lib.rs:191`) has no count; server stage `server/src/lib.rs:1199-1204` hardcodes `files:None`; no notice projection; no child-completion metadata |
@@ -253,8 +253,8 @@ the wave-44 verdict supersedes it.
 | --- | --- |
 | `ALREADY_CORRECT` | 144 |
 | `REAL_GAP` | 2 |
-| `BLOCKED` | 60 |
-| `LANDED` (wave-45..56) | 17 |
+| `BLOCKED` | 59 |
+| `LANDED` (wave-45..57) | 18 |
 | **Total** | **223** |
 
 ### Landed fixes (wave-45..56) — moved out of `REAL_GAP`/`BLOCKED`
@@ -278,6 +278,7 @@ the wave-44 verdict supersedes it.
 | PAR-16 / PAR-22 | `f240367b` | Harness-side (Python). PAR-16: fixtures carry exactly one class (`baseline`/`optional`/`experimental`/`extension`); `fixture_class` defaults to `baseline`, `validate_fixture_class` rejects an unknown value, `--class` filters the selection, the class travels into `build_request`/`golden_from_screen`, and `compare_screens` raises a hard `fixture_class` diff on a golden/fixture class mismatch. PAR-22: `--evidence-bundle` + `build_evidence_bundle` write a SHA-bound bundle (`rust_sha`, spec/golden/fixture sha256s, class counts, exact reproduction commands, per-fixture outcomes, installed-capture hashes). `tools/ui_parity/selftest.py` 32 checks PASS (+10). |
 | TAB-04 | `bf779d09` | The tested numbers-mode `TabIndicators`/`indicator_text` model had no live config source: `config.tabs.indicators` (`config/index.tsx:199`, default `"status"` at `:336`, consumed `session-tabs.tsx:525`) was never read, and the live horizontal row painted the status glyph unconditionally. Adds `config_tab_indicators`/`config_tab_indicators_present`, `parse_cli_tab_indicators` + `UiPreferences::tab_indicators` (disk then inline; an omitting document never clobbers a lower-precedence value), `TabInput.indicators`/`number` (+ `with_indicators`), the 1-based number in `from_navigation`, and the numbers branch in `horizontal_row`; the live loop resolves it once beside `new_designs` and applies it to every per-frame `TabInput`. Status mode unchanged. Focused tests + full CLI suite (2181/0) green. |
 | DIALOG-02 (title half) | `ce9dc211` | The live `DialogView` now carries the new-designs experiment fact (`set_new_designs`, seeded `tui_entry.rs:6958`) and paints the non-permission title `Role::Item` (base color, unbolded) under the experiment (`dialog.tsx:109`); the Permission heading keeps `Role::Warning`. The footer-gap half was deliberately **not** landed: `dialog.tsx:159` yields `0` for the default `footerGap` of 1 in both states and `1` for the `footerGap={2}` callers, so new-designs never removes the gap row. DIALOG-02 stays `REAL_GAP` for the description / footer-gap / per-select-row-pad halves. Focused test + full CLI suite (2178/0) green. |
+| SIDE-14 | `d5611712` | The pinned footer location row (`footer.tsx:94-112`) had no hit rect, hover routing or menu route. Adds `StatusView::footer_row`/`footer_directory`/`footer_menu`/`footer_hovered`, a `NativeView` footer hit rect published during sidebar render (cleared on scroll/resize/route/toggle exactly like the onboarding dismiss rect), pointer-move hover (`kind==7`), a press that opens the local `DialogSelect` (`working-directory-actions.tsx:16-58`; the selection guard mirrors `openMenu`'s `getSelectedText()` early-return), and Enter/Esc/backdrop handling that runs Copy path (OSC 52 + `Path copied to clipboard` info toast) or Open folder (`openPath`, `packages/util/src/open.ts:10-12`). `Workspaces` stays unoffered (no live move route → `can_move=false`). 3 focused tests + full CLI suite (2184/0) green. |
 
 ### `REAL_GAP` — faithful model + focused test exist, no live consumer (2)
 
@@ -295,10 +296,10 @@ Selected high-value seams:
 | THEME-13 | `SystemThemeState`/`palette_reply` (`native_theme_runtime.rs:2183/2264`) have zero non-test callers; no OSC palette-query emitter and no payload-carrying input event to decode a reply. |
 | THEME-09 | **BLOCKED (verified wave-53).** The live chat `Patch`/diff-fence painter hardcodes `DiffViewMode::Unified` (`native_view_chat.rs:2202/2730`) and `resolve_view_mode`/`config.diffs.view` (`native_diff_view.rs:586`) have no live caller. Threading the preference is not sufficient: a split row is `SplitRow::Pair { left, right }` (`native_diff_view.rs:709-715`) with two independent backgrounds, but the live row model is `(String, ChatRowClass)` with exactly one class per row (`native_view_chat.rs:902`) and the painter maps a class to a single background (`tui_entry.rs:2880-2898 chat_row_background`). The split view is therefore not renderable without extending the row model — the same blocker as DIFF-001. |
 
-### `BLOCKED` — needs a producer/transport/contract field that does not exist (60)
+### `BLOCKED` — needs a producer/transport/contract field that does not exist (59)
 
 `PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-10, PAR-19,
-TAB-06, TAB-10, TAB-21, SIDE-03, SIDE-04, SIDE-05, SIDE-10, SIDE-14,
+TAB-06, TAB-10, TAB-21, SIDE-03, SIDE-04, SIDE-05, SIDE-10,
 MSG-001, MSG-002, MSG-003, MSG-005, MSG-008, MSG-009, MSG-010,
 TOOL-006, TOOL-011, DIFF-001, DIFF-003, FFI-01, FFI-02, FFI-03, FFI-04, FFI-06,
 FFI-07, FFI-08, FFI-11, FORM-001, STATE-002, THEME-08, THEME-09, THEME-13,
@@ -332,7 +333,6 @@ DIALOG-19, LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009`.
 | SIDE-03 / SIDE-04 | Live `set_usage` (`native_view_status.rs:1146`) sums `input+output` only; `set_usage_classes` (`:1168`) and `set_cost` (`:1160`) have zero non-test callers. No `lastAssistantWithUsage` selector, no revert boundary reaching the view, no cost producer, and the wire `input_tokens` is inclusive of cached (`server/src/auto_compaction.rs:102`), so disjoint classes need a `nonCachedInput` producer. |
 | SIDE-05 | `set_limit` (`native_view_status.rs:1175`) test-only; no usage-limits pipeline reaches the CLI. |
 | SIDE-10 | `todo_http.rs:31-38` returns the stored `session_todos` table verbatim; `stage_session_revert` (`server/src/lib.rs:1193-1209`) stores the boundary but never recomputes the latest-completed-`todowrite` list sliced at the revert boundary (upstream `util/todo.ts:32-43`). |
-| SIDE-14 | `footer_menu` (`native_sidebar.rs:1020`) test-only; no footer hit rect / hover routing / click branch / CopyPath-OpenFolder-Workspaces executors. Direct re-inspection: `Copy path`/`Open folder` are bounded, but upstream's `Workspaces` action opens `DialogWorkspaces` (`component/prompt/move.tsx` `move.open()`), which has no live route, so the item is not fully bounded. |
 | STATE-002 | Live transcript renders compaction as a placeholder (`native_view_chat.rs:2689`); projection (`native_chat_projection.rs:392`) drops status/summary/provider-native/tokens; rich `CompactionState` (`native_timeline.rs:382`) has zero consumers; `compact_session` (`server/src/lib.rs:1668`) never persists/pushes a compaction part. |
 | MSG-005 | Chips need a server/storage `files`/`skills` field that does not exist (`MessageRecord` `contracts/src/lib.rs:250-257`). |
 | MSG-008 | Footer TPS needs `time.streamed`; `MessageExecution` (`contracts/src/lib.rs:284-293`) has no timing field and the producer frame (`server/src/lib.rs:2895-2901`) emits none; `RowTiming.streamed_ms` (`native_message_rows.rs:825`) never populated live; `config.data.session.tps` absent. |
@@ -416,14 +416,14 @@ field is absent).
 Of the 223 checklist obligations, **144 are `ALREADY_CORRECT`** (a faithful
 implementation, a focused test, and a traced live consumer), **2 are
 `REAL_GAP`** (model + test exist but the live TUI does not consume them),
-**60 are `BLOCKED`** (a producer/transport/contract field does not exist), and
-**17 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
+**59 are `BLOCKED`** (a producer/transport/contract field does not exist), and
+**18 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
 `CP-05`, `CP-06` in wave-46; `MSG-007` in wave-47; `SIDE-08`, `THEME-12`,
 `DIALOG-04` in wave-48; `PAR-04` in wave-49; `TAB-23`, `DIALOG-10`,
 `DIALOG-20` (toast half) in wave-51; `PAR-16`, `PAR-22` in wave-53;
-`TAB-04` in wave-56). `DIALOG-02`'s title-weight half landed in wave-56 but the
-item stays `REAL_GAP` for its remaining description / footer-gap /
-per-select-row-pad halves.
+`TAB-04` in wave-56; `SIDE-14` in wave-57). `DIALOG-02`'s title-weight half
+landed in wave-56 but the item stays `REAL_GAP` for its remaining description /
+footer-gap / per-select-row-pad halves.
 
 The remaining work is therefore **not** more UI drawing:
 
@@ -513,12 +513,11 @@ smallest real producer chain, else BLOCKED with the exact seam). Outcomes:
   add bg/fg fields to `ChatRunSpan` + an x-ranged `role_bg` override in the paint
   loop (`tui_entry.rs:4623-4666`), then route the live `Patch`/fence painters
   through `paint_inline_patch` with `config.diffs.view` + measured width.
-- `SIDE-14` — reconnaissance only (worker hit its step limit): the footer menu
-  model is complete, but the live path needs a footer hit rect, hover routing, a
-  click branch and the three action executors. Re-inspected directly: the
-  `Copy path` and `Open folder` actions are bounded, but upstream's `Workspaces`
-  action opens `DialogWorkspaces` (a move dialog, `component/prompt/move.tsx`
-  `move.open()`), which has no live route — so the item is not fully bounded.
+- `SIDE-14` — **LANDED** (`d5611712`, wave-57): the footer hit rect, hover
+  routing, local `DialogSelect` menu and the `Copy path`/`Open folder`
+  executors are wired live; `Workspaces` stays unoffered because upstream's
+  `move.open()` (`component/prompt/move.tsx`) has no live `DialogWorkspaces`
+  route.
 - `TAB-04`, `TAB-23`, `TOOL-011`, `THEME-09`, `CP-09`, `DIALOG-06..10`,
   `DIALOG-12..20` — workers returned no deliverable (provider/step-limit
   failures); no new evidence, prior BLOCKED seams stand.
