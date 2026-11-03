@@ -6800,6 +6800,7 @@ fn native_loop(
     // `ChatPart::ToolState { id }` at paint (`index.tsx:2793-2799`).
     let mut pending_permission_calls: Vec<String> = Vec::new();
     let mut partial = String::new();
+    let mut last_delta_seq: u64 = 0;
     let mut utf8 = NativeUtf8Decoder::default();
     let mut input = native_input_decoder::TerminalInputDecoder::default();
     let mut observed_size = (cols, rows);
@@ -7737,9 +7738,18 @@ fn native_loop(
                                 view.set_session_route(true);
                             }
                         }
-                        native_turn::Event::Delta(delta) => {
-                            partial.push_str(&delta);
-                            replace_partial(&mut transcript, &partial);
+                        native_turn::Event::Delta { text, seq } => {
+                            // PAR-10: apply deltas in order. A sequence of 0
+                            // (older servers) always applies; otherwise only
+                            // strictly increasing seq values append, dropping
+                            // duplicates and stale out-of-order frames.
+                            if seq == 0 || seq > last_delta_seq {
+                                if seq != 0 {
+                                    last_delta_seq = seq;
+                                }
+                                partial.push_str(&text);
+                                replace_partial(&mut transcript, &partial);
+                            }
                         }
                         native_turn::Event::ReasoningDelta(delta) => transcript.reasoning_event(&delta,false),
                         native_turn::Event::ReasoningFinal(summary) => transcript.reasoning_event(&summary,true),
@@ -7806,6 +7816,7 @@ fn native_loop(
                         native_turn::Event::Assistant { text, facts } => {
                             turn_succeeded = true;
                             partial.clear();
+                            last_delta_seq = 0;
                             remove_partial(&mut transcript);
                             settled = true;
                             transcript.append(
@@ -13061,6 +13072,7 @@ fn native_loop(
                                 });
                                 worker = Some(started);
                                 partial.clear();
+                                last_delta_seq = 0;
                             });
                             if let Err(error) = result {
                                 if route_was_home {

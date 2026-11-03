@@ -22,7 +22,7 @@ const MAX_TOTAL: usize = 256 * 1024;
 pub enum Event {
     Usage {input:u64,output:u64,cached:Option<u64>,reasoning:Option<u64>},
     User { text: Option<String> },
-    Delta(String),
+    Delta { text: String, seq: u64 },
     ReasoningDelta(String),
     ReasoningFinal(String),
     ToolCall {
@@ -326,7 +326,10 @@ fn decode(value: Value, retained: &mut usize) -> Result<Option<Event>, String> {
             text: value.get("message").and_then(|message| message.get("body"))
                 .and_then(|body| body.get("text")).and_then(Value::as_str).map(str::to_owned),
         },
-        "assistant_delta" => Event::Delta(field("delta", retained)?),
+        "assistant_delta" => Event::Delta {
+            text: field("delta", retained)?,
+            seq: value.get("seq").and_then(Value::as_u64).unwrap_or(0),
+        },
         "tool_call" => Event::ToolCall {
             call_id: field_optional(&value, "call_id", retained),
             name: field("name", retained)?,
@@ -462,6 +465,39 @@ mod native_error_tests {
         assert!(
             matches!(output, Event::ToolOutput { error: Some(_), .. }),
             "explicit backend failure flag was dropped"
+        );
+    }
+
+    /// PAR-10: the server tags each `assistant_delta` with a monotonic `seq`;
+    /// the client decoder must surface it so out-of-order/duplicate frames can
+    /// be dropped by the consumer.
+    #[test]
+    fn assistant_delta_carries_sequence_number() {
+        let event = decode(
+            serde_json::json!({"type":"assistant_delta","delta":"hi","seq":3}),
+            &mut 0,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(
+            matches!(event, Event::Delta { ref text, seq } if text == "hi" && seq == 3),
+            "seq was not surfaced: {event:?}"
+        );
+    }
+
+    /// Back-compat: older servers omit `seq`; the decoder defaults to 0 so the
+    /// consumer applies every delta unconditionally.
+    #[test]
+    fn assistant_delta_without_sequence_defaults_to_zero() {
+        let event = decode(
+            serde_json::json!({"type":"assistant_delta","delta":"hi"}),
+            &mut 0,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(
+            matches!(event, Event::Delta { ref text, seq } if text == "hi" && seq == 0),
+            "missing seq did not default to 0: {event:?}"
         );
     }
 

@@ -2253,6 +2253,7 @@ struct TurnStreamState {
     /// User message ID preserved after user_message.take() for round linkage.
     turn_message_id: MessageId,
     assistant_text: String,
+    delta_seq: u64,
     reasoning_summary: String,
     stage: TurnStreamStage,
     _permit: TurnExecutionPermit,
@@ -2707,6 +2708,7 @@ pub(crate) fn create_turn_stream_with_message(
             user_message: Some(user_message),
             turn_message_id: user_message_id,
             assistant_text: String::new(),
+            delta_seq: 0,
             reasoning_summary: String::new(),
             stage: TurnStreamStage::User,
             _permit: permit,
@@ -2771,10 +2773,12 @@ pub(crate) fn create_turn_stream_with_message(
                         match event {
                             Ok(Some(ResponsesStreamEvent::OutputTextDelta(delta))) => {
                                 state.assistant_text.push_str(&delta);
+                                state.delta_seq += 1;
                                 return Some((
                                     Ok::<Bytes, Infallible>(ndjson(json!({
                                         "type": "assistant_delta",
                                         "delta": delta,
+                                        "seq": state.delta_seq,
                                     }))),
                                     state,
                                 ));
