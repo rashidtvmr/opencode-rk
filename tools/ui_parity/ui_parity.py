@@ -25,6 +25,11 @@ SCHEMA_GOLDEN = "oc2.ui-parity.golden/v1"
 SCHEMA_SCREEN = "oc2.ui-parity.screen/v1"
 SCHEMA_REPORT = "oc2.ui-parity.report/v1"
 SCHEMA_REQUEST = "oc2.ui-parity.request/v1"
+SCHEMA_EVIDENCE = "oc2.ui-parity.evidence/v1"
+
+# PAR-16: a fixture belongs to exactly one class so a baseline golden can never
+# silently absorb an optional-config, experimental or approved-extension case.
+FIXTURE_CLASSES = ("baseline", "optional", "experimental", "extension")
 
 ATTR_BITS = (
     "bold",
@@ -273,6 +278,13 @@ def compare_screens(expected, actual, fixture, pins, options) -> tuple:
     ) != act_default.get("bg"):
         diffs.add("default_style", expected=exp_default, actual=act_default)
 
+    # PAR-16: the golden's class must match the fixture's class so a baseline
+    # golden cannot be reused for an optional/experimental/extension fixture.
+    exp_class = expected.get("class") or "baseline"
+    act_class = fixture.get("class") or "baseline"
+    if exp_class != act_class:
+        diffs.add("fixture_class", expected=exp_class, actual=act_class)
+
     # PAR-01: pins travel with every golden.
     capture = expected.get("capture") or {}
     golden_pins = capture.get("pins") or {}
@@ -400,11 +412,36 @@ def compare_screens(expected, actual, fixture, pins, options) -> tuple:
     return diffs, warnings
 
 
+def fixture_class(case) -> str:
+    """PAR-16: resolve a fixture's class, defaulting to `baseline`.
+
+    An explicit `class` key wins; unknown values are rejected by
+    `validate_fixture_class` so a typo cannot masquerade as baseline.
+    """
+    value = case.get("class")
+    if value is None:
+        return "baseline"
+    return str(value)
+
+
+def validate_fixture_class(case) -> None:
+    value = case.get("class")
+    if value is None:
+        return
+    if str(value) not in FIXTURE_CLASSES:
+        raise ValueError(
+            f"fixture {case.get('id')!r} has unknown class {value!r}; "
+            f"expected one of {', '.join(FIXTURE_CLASSES)}"
+        )
+
+
 def resolve_fixtures(args, manifest, kit_fixtures):
     fixtures = {}
     for case in kit_fixtures:
         case = dict(case)
         case.setdefault("source", "kit")
+        case["class"] = fixture_class(case)
+        validate_fixture_class(case)
         fixtures[case["id"]] = case
     for relative in manifest.get("fixtures", []):
         path = (manifest["__dir__"] / relative).resolve()
@@ -412,16 +449,21 @@ def resolve_fixtures(args, manifest, kit_fixtures):
         case = dict(case)
         case["source"] = "local"
         case["__path__"] = str(path)
+        case["class"] = fixture_class(case)
+        validate_fixture_class(case)
         fixtures[case["id"]] = case
     selected = []
     patterns = []
     for raw in args.filter or []:
         patterns.extend(part for part in raw.split(",") if part)
+    class_filter = set(getattr(args, "fixture_class", None) or [])
     for fixture_id in sorted(fixtures):
         if patterns and not any(
             fnmatch.fnmatch(fixture_id, pattern) or pattern in fixture_id
             for pattern in patterns
         ):
+            continue
+        if class_filter and fixtures[fixture_id]["class"] not in class_filter:
             continue
         selected.append(fixtures[fixture_id])
     return selected
@@ -468,6 +510,7 @@ def build_request(fixture, args, pins, profile, command):
     return {
         "schema": SCHEMA_REQUEST,
         "fixture": fixture,
+        "fixture_class": fixture.get("class") or "baseline",
         "viewport": {
             "cols": int(viewport.get("columns") or 80),
             "rows": int(viewport.get("rows") or 24),
@@ -504,6 +547,7 @@ def golden_from_screen(fixture, screen, pins, profile):
     return {
         "schema": SCHEMA_GOLDEN,
         "fixture_id": fixture["id"],
+        "class": fixture.get("class") or "baseline",
         "capture": {
             "adapter": environment.get("adapter") or profile.get("name"),
             "pins": pins,
@@ -527,6 +571,92 @@ def golden_from_screen(fixture, screen, pins, profile):
 
 def golden_path(args, fixture_id):
     return Path(args.golden_dir) / f"{fixture_id}.golden.json"
+
+
+def git_sha(root: Path) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except Exception:  # noqa: BLE001 - evidence must not crash the run
+        return ""
+    return (result.stdout or "").strip() if result.returncode == 0 else ""
+
+
+def relative_or_absolute(path: Path, root: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(root))
+    except ValueError:
+        return str(path)
+
+
+def class_counts(fixtures):
+    counts = {name: 0 for name in FIXTURE_CLASSES}
+    for fixture in fixtures:
+        name = fixture.get("class") or "baseline"
+        counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def build_evidence_bundle(args, manifest_path, pins, results, fixtures, repo):
+    """PAR-22: bind source/fixture hashes, test commands, failures and installed
+    captures to the exact Rust SHA under test.
+
+    The bundle is a plain JSON document: the repository HEAD, the spec/golden
+    hashes, the exact reproduction commands, every checked fixture's outcome and
+    the hashes of any installed-terminal captures.
+    """
+    fixture_hashes = {}
+    for fixture in fixtures:
+        relative = fixture.get("__path__")
+        path = Path(relative).resolve() if relative else None
+        fixture_hashes[fixture["id"]] = sha256_file(path) if path and path.exists() else None
+    golden_hashes = {}
+    for result in results:
+        golden = golden_path(args, result["id"])
+        golden_hashes[result["id"]] = sha256_file(golden) if golden.exists() else None
+
+    def result_row(result):
+        row = {"id": result["id"], "status": result["status"]}
+        if result.get("detail"):
+            row["detail"] = result["detail"]
+        return row
+
+    captures = []
+    for raw in args.installed_capture:
+        path = Path(raw)
+        captures.append(
+            {
+                "path": raw,
+                "exists": path.exists(),
+                "sha256": sha256_file(path) if path.exists() else None,
+            }
+        )
+    kit_dir = Path(args.kit_dir)
+    return {
+        "schema": SCHEMA_EVIDENCE,
+        "rust_sha": git_sha(repo),
+        "pins": pins,
+        "spec": {
+            "checklist": relative_or_absolute(kit_dir / "checklist.json", repo),
+            "checklist_sha256": sha256_file(kit_dir / "checklist.json"),
+            "fixtures": relative_or_absolute(kit_dir / "fixtures.json", repo),
+            "fixtures_sha256": sha256_file(kit_dir / "fixtures.json"),
+            "manifest": relative_or_absolute(manifest_path, repo),
+            "manifest_sha256": sha256_file(manifest_path),
+        },
+        "class_counts": class_counts(fixtures),
+        "fixture_hashes": fixture_hashes,
+        "golden_hashes": golden_hashes,
+        "test_commands": list(args.evidence_command),
+        "results": [result_row(r) for r in results],
+        "failures": [result_row(r) for r in results if r["status"] in ("fail", "error")],
+        "installed_captures": captures,
+    }
 
 
 def print_result(result):
@@ -585,6 +715,29 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--json-report", help="write machine-readable report")
     parser.add_argument("--list", action="store_true", help="list fixtures and golden state")
+    parser.add_argument(
+        "--class",
+        dest="fixture_class",
+        action="append",
+        choices=FIXTURE_CLASSES,
+        help="only fixtures in this class; repeatable (PAR-16)",
+    )
+    parser.add_argument(
+        "--evidence-bundle",
+        help="write a SHA-bound evidence bundle (PAR-22)",
+    )
+    parser.add_argument(
+        "--evidence-command",
+        action="append",
+        default=[],
+        help="exact reproduction command to attach to the evidence bundle; repeatable",
+    )
+    parser.add_argument(
+        "--installed-capture",
+        action="append",
+        default=[],
+        help="installed-terminal capture artifact path to hash into the bundle; repeatable",
+    )
     parser.add_argument("--validate-kit", action="store_true", help="validate kit counts/ids")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
@@ -617,6 +770,12 @@ def main(argv=None) -> int:
         par_ids = [item.get("id") for item in kit_checklist.get("items", []) if str(item.get("id", "")).startswith("PAR-")]
         if par_ids != [f"PAR-{index:02d}" for index in range(1, 25)]:
             errors.append("PAR ids are not PAR-01..PAR-24 in order")
+        # PAR-16: every kit fixture must carry a valid class.
+        for case in kit_fixtures:
+            try:
+                validate_fixture_class(case)
+            except ValueError as error:
+                errors.append(str(error))
         if errors:
             for error in errors:
                 print(f"KIT FAIL: {error}")
@@ -641,6 +800,7 @@ def main(argv=None) -> int:
             path = golden_path(args, fixture["id"])
             print(
                 f"{fixture['id']:<48} {fixture['source']:<5} "
+                f"class={fixture.get('class', 'baseline'):<12} "
                 f"{fixture['viewport'].get('columns')}x{fixture['viewport'].get('rows')} "
                 f"events={len(fixture.get('events') or [])} "
                 f"golden={'yes' if path.exists() else 'no'}"
@@ -810,6 +970,11 @@ def main(argv=None) -> int:
     }
     if args.json_report:
         dump_json(Path(args.json_report), report)
+    if args.evidence_bundle:
+        bundle = build_evidence_bundle(
+            args, manifest_path, pins, results, fixtures, repo_root()
+        )
+        dump_json(Path(args.evidence_bundle), bundle)
     print(
         "summary: "
         + " ".join(f"{key}={value}" for key, value in summary.items())

@@ -256,6 +256,60 @@ def main() -> int:
         )
         ok("wide cell keeps a continuation column", wide[1]["cont"] and not truncated)
 
+        # PAR-16: a fixture belongs to exactly one class, and a golden whose
+        # class disagrees with its fixture is a hard diff.
+        ok("fixture class defaults to baseline", harness.fixture_class({"id": "x"}) == "baseline")
+        try:
+            harness.validate_fixture_class({"id": "x", "class": "bogus"})
+            ok("unknown fixture class is rejected", False, "no ValueError raised")
+        except ValueError:
+            ok("unknown fixture class is rejected", True)
+        expected["class"] = "baseline"
+        class_diffs, _ = harness.compare_screens(
+            expected, screen, {"id": "selftest-static", "class": "optional"}, {}, Options()
+        )
+        ok(
+            "golden/fixture class mismatch is a diff",
+            "fixture_class" in class_diffs.counts,
+            class_diffs.counts,
+        )
+        baseline_only = run(["--check", "--class", "baseline"] + common)
+        ok("--class baseline selects the fixture", baseline_only.returncode == 0, baseline_only.stdout)
+        other_class = run(["--check", "--class", "experimental"] + common)
+        ok(
+            "--class experimental selects nothing",
+            other_class.returncode != 0 and "no fixtures selected" in other_class.stderr,
+            other_class.stderr,
+        )
+
+        # PAR-22: the evidence bundle binds the exact SHA, spec hashes, class
+        # counts, reproduction commands and per-fixture outcomes.
+        bundle_path = root / "evidence.json"
+        bundle_run = run(
+            [
+                "--check",
+                "--evidence-bundle",
+                str(bundle_path),
+                "--evidence-command",
+                "cargo test -p opencode-rk-cli",
+            ]
+            + common
+        )
+        ok("evidence bundle run exits 0", bundle_run.returncode == 0, bundle_run.stdout)
+        bundle = json.loads(bundle_path.read_text())
+        ok("evidence bundle schema", bundle["schema"] == harness.SCHEMA_EVIDENCE)
+        ok("evidence bundle binds a rust sha", bool(bundle["rust_sha"]), bundle["rust_sha"])
+        ok(
+            "evidence bundle records class counts",
+            bundle["class_counts"].get("baseline", 0) >= 1,
+            bundle["class_counts"],
+        )
+        ok(
+            "evidence bundle records reproduction command",
+            "cargo test -p opencode-rk-cli" in bundle["test_commands"],
+            bundle["test_commands"],
+        )
+
         kit = harness.load_json(
             REPO / "docs" / "ui-parity" / "opencode-ui-parity-kit" / "checklist.json"
         )
