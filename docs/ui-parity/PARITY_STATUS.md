@@ -80,7 +80,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | STATE-002 | `BLOCKED` | Producer seam `server/src/lib.rs:1668 compact_session` returns `{compacted,strategy}` and never persists/pushes a compaction part; `MessageRole` (`contracts/src/lib.rs:222`) has no Compaction variant; rich `CompactionState` (`native_timeline.rs:382`) zero consumers; live render placeholder `native_view_chat.rs:2689` |
 | TOOL-011 | `BLOCKED` | `execute_dialog` (`native_tool_rows.rs:1159`, tests `:1951`) zero consumers; live render placeholder `native_view_dialogs.rs:1429`; only producer is test `:5847`; no `ExecuteDialog` payload on `OpenDialog`/`DialogView`; no syntax producer (`opentui-bridge/src/highlight.rs:27-29`) |
 | FORM-001 | `BLOCKED` | Live dialog `native_view_dialogs.rs:1090` emits 6 labels vs upstream 3 (`permission.tsx:232-240`); save gate drops only "Always allow"; always-body swap missing (static `:1420`); nested rejection stage missing. Sub-behavior 1 (3-option realign + save gate) is independently bounded via `permission_alias:488`; sub-behaviors 3+4 need a stage+textarea in `DialogView` |
-| DIALOG-20 | `REAL_GAP` | Toast model+producer exist (`native_toast.rs:225-595`, `native_overlay_stack.rs:684 take_error_toast`) but nothing live constructs `ChromeModel`/paints `ToastFrame` (`native_view_dialogs.rs:7535` is `#[cfg(test)]`; `set_toast` `native_shell.rs:1755` test-only; `NativeView` has no toast field). Crash half: no `panic::set_hook`, no `DialogKind::ErrorDetails/Crash` |
+| DIALOG-20 | `LANDED` (toast half) | `d891f9c3` — the live loop now owns a `Toast` and paints its `ToastFrame` as the topmost overlay (`PaintCtx.toast`), advancing the logical clock on the animation tick and triggering on session-id copy (`app.tsx:605`). Crash/error-details half remains `BLOCKED` (no `panic::set_hook`, no `DialogKind::Crash`). |
 
 **Additional wave-44 verdicts (second batch):**
 
@@ -244,9 +244,9 @@ the wave-44 verdict supersedes it.
 | Verdict | Count |
 | --- | --- |
 | `ALREADY_CORRECT` | 144 |
-| `REAL_GAP` | 5 |
-| `BLOCKED` | 61 |
-| `LANDED` (wave-45..51) | 13 |
+| `REAL_GAP` | 6 |
+| `BLOCKED` | 59 |
+| `LANDED` (wave-45..51) | 14 |
 | **Total** | **223** |
 
 ### Landed fixes (wave-45..51) — moved out of `REAL_GAP`/`BLOCKED`
@@ -266,6 +266,7 @@ the wave-44 verdict supersedes it.
 | PAR-04 | `669036cd` | Harness-side (Python): the Rust capture model already serialized `Frame.hit_targets` (`native_capture.rs:142`, canonical `hit={x},{y},{action}`) but the renderer transport dropped the key and the comparator had no member. Adds the key to every renderer output, a canonical `(y,x,action)`-sorted comparator member gated on the fixture's `compare` list, validation, README, selftest coverage and the matching empty-list goldens. The PTY channel exposes no pointer events, so the live `oc2-pty` adapter emits an empty list; the member is exercised by the deterministic static renderer. `tools/ui_parity/selftest.py` 22 checks PASS. |
 | TAB-23 | `ae56897f` | The live `session.tab.*` dispatch was a hardcoded `InputEvent → TabCommand` match and the config `keybinds` root key (`config/index.tsx:78` `Schema.optional(TuiKeybind.KeybindOverrides)`) was never read. Adds `UiPreferences.keybinds` (raw JSON, like `cursor`), a `native_navigation::tab_keybinds` resolver (defaults + per-command replace, `false`/`"none"` disable, `KeyStroke` objects, both command-name spellings, unknown keys ignored, `super`/`hyper` dropped), and drives the live tab dispatch through the resolved chord table. No config yields exactly `DEFAULT_TAB_KEYBINDS`. Focused tests + full CLI suite (2176/0) green. |
 | DIALOG-10 | `a52c222a` | The live session rename painted an ad-hoc rectangle with its own `String` buffer and never used the tested `DialogPrompt`. Adds `DialogView::open_prompt` (kind `Prompt`, seeded from `native_palette::select::PromptState`) plus `prompt_value`/`push`/`backspace`/`submit`/`escape`/`set_busy`/`set_message` forwarders, renders the value (or the busy line) and the upstream footer `Enter: save · Esc: cancel`, and routes the live rename through it (`MenuAction::Rename` opens the prompt; the key block edits/submits; the settlement closes it or sets busy/inline-error). Escape/submit are suppressed while busy (`dialog-prompt.tsx:43-46,93-100,168-170`). The ad-hoc `PaintCtx.rename_dialog` paint path is removed. Focused test + full CLI suite (2177/0) green. |
+| DIALOG-20 (toast half) | `d891f9c3` | The tested `Toast`/`ToastFrame` model had no live consumer. Adds `PaintCtx.toast`, paints the frame as the topmost overlay in `native_paint` (surface fill + each styled `CellRun`), owns a live `Toast` in the loop whose logical clock advances on the animation tick so a visible toast auto-dismisses after 5000 ms, and triggers it from the session-id copy path (`Copied to clipboard`, `app.tsx:605`). The crash/error-details half remains `BLOCKED`. Full CLI suite (2177/0) green. |
 
 ### `REAL_GAP` — faithful model + focused test exist, no live consumer (6)
 
@@ -284,16 +285,16 @@ Selected high-value seams:
 | THEME-13 | `SystemThemeState`/`palette_reply` (`native_theme_runtime.rs:2183/2264`) have zero non-test callers; no OSC palette-query emitter and no payload-carrying input event to decode a reply. |
 | THEME-09 | The live chat `Patch`/diff-fence painter hardcodes `DiffViewMode::Unified` (`native_view_chat.rs:2200/2730`); `resolve_view_mode`/`config.diffs.view` (`native_diff_view.rs:586`) have no live caller, so the upstream width>120 auto-split is unreachable. |
 
-### `BLOCKED` — needs a producer/transport/contract field that does not exist (62)
+### `BLOCKED` — needs a producer/transport/contract field that does not exist (59)
 
 `PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-10, PAR-16, PAR-19, PAR-22,
 TAB-04, TAB-06, TAB-10, TAB-21, SIDE-03, SIDE-04, SIDE-05, SIDE-10, SIDE-14,
 MSG-001, MSG-002, MSG-003, MSG-005, MSG-008, MSG-009, MSG-010,
 TOOL-006, TOOL-011, DIFF-001, DIFF-003, FFI-01, FFI-02, FFI-03, FFI-04, FFI-06,
 FFI-07, FFI-08, FFI-11, FORM-001, STATE-002, THEME-14, CP-09,
-DIALOG-06, DIALOG-07, DIALOG-08, DIALOG-09, DIALOG-10,
+DIALOG-06, DIALOG-07, DIALOG-08, DIALOG-09,
 DIALOG-12, DIALOG-13, DIALOG-14, DIALOG-15, DIALOG-16, DIALOG-17, DIALOG-18,
-DIALOG-19, DIALOG-20, LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009`.
+DIALOG-19, LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009`.
 
 | Item | Exact missing seam |
 | --- | --- |
@@ -403,12 +404,13 @@ field is absent).
 ## Honest completion statement
 
 Of the 223 checklist obligations, **144 are `ALREADY_CORRECT`** (a faithful
-implementation, a focused test, and a traced live consumer), **5 are
+implementation, a focused test, and a traced live consumer), **6 are
 `REAL_GAP`** (model + test exist but the live TUI does not consume them),
-**61 are `BLOCKED`** (a producer/transport/contract field does not exist), and
-**13 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
+**59 are `BLOCKED`** (a producer/transport/contract field does not exist), and
+**14 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
 `CP-05`, `CP-06` in wave-46; `MSG-007` in wave-47; `SIDE-08`, `THEME-12`,
-`DIALOG-04` in wave-48; `PAR-04` in wave-49; `TAB-23`, `DIALOG-10` in wave-51).
+`DIALOG-04` in wave-48; `PAR-04` in wave-49; `TAB-23`, `DIALOG-10`,
+`DIALOG-20` (toast half) in wave-51).
 
 The remaining work is therefore **not** more UI drawing:
 
@@ -531,9 +533,9 @@ Every other item re-confirmed as before:
   `MSG-005/008/009/010` — no `files`/`skills` field, no per-step streamed
   timestamp. `TOOL-006` — no `shell.output` server route; executor refuses
   `background`. `LAY-10/11/13` — no plugin-panel/terminal producer.
-- `DIALOG-12..20` — toast (`DIALOG-20`) is the one bounded target (complete
-  tested producer, only a live construction + paint call missing); the rest need
-  live driving-fact producers. `DIALOG-06..10` — `DIALOG-10` (Prompt / session
+- `DIALOG-12..20` — toast (`DIALOG-20`) **LANDED** (`d891f9c3`, toast half);
+  the crash/error-details half and the rest need live driving-fact producers.
+  `DIALOG-06..10` — `DIALOG-10` (Prompt / session
   rename) **LANDED** (`a52c222a`); `DIALOG-06..09` (Select) are blocked by the
   pinned SIDE-08 `DialogMcp` consumer.
 

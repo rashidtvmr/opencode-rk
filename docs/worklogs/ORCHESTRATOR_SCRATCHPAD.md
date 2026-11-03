@@ -11864,3 +11864,20 @@ ad-hoc `PaintCtx.rename_dialog` paint path is removed. Focused test
 
 PARITY_STATUS updated: 144 `ALREADY_CORRECT` / 5 `REAL_GAP` / 61 `BLOCKED` /
 13 `LANDED` = 223. Remote `main-v2` == `a52c222a`.
+
+### Wave-51 landing — DIALOG-20 toast half (2026-11-03)
+
+`DIALOG-20` (toast half) **LANDED** (`d891f9c3`, pushed to remote `main-v2`).
+Implemented directly in the orchestrator (the DIALOG-B2 worker returned BLOCKED).
+
+What changed: the tested `Toast`/`ToastFrame` model had no live consumer. Adds
+`PaintCtx.toast`, paints the frame as the topmost overlay in `native_paint`
+(surface fill + each styled `CellRun` via `draw_text_styled`), owns a live
+`Toast` in the loop whose logical clock advances on the animation tick so a
+visible toast auto-dismisses after its 5000 ms lifetime, and triggers it from
+the session-id copy path (`Copied to clipboard`, `app.tsx:605`). The
+crash/error-details half remains BLOCKED (no `std::panic::set_hook`, no
+`DialogKind::Crash`). Full CLI suite 2177/0 green.
+
+PARITY_STATUS reconciled to a self-consistent 144 `ALREADY_CORRECT` / 6
+`REAL_GAP` / 59 `BLOCKED` / 14 `LANDED` = 223. Remote `main-v2` == `d891f9c3`.
