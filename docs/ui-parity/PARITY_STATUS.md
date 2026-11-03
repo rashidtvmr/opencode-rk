@@ -298,7 +298,7 @@ Selected high-value seams:
 ### `BLOCKED` — needs a producer/transport/contract field that does not exist (60)
 
 `PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-10, PAR-19,
-TAB-04, TAB-06, TAB-10, TAB-21, SIDE-03, SIDE-04, SIDE-05, SIDE-10, SIDE-14,
+TAB-06, TAB-10, TAB-21, SIDE-03, SIDE-04, SIDE-05, SIDE-10, SIDE-14,
 MSG-001, MSG-002, MSG-003, MSG-005, MSG-008, MSG-009, MSG-010,
 TOOL-006, TOOL-011, DIFF-001, DIFF-003, FFI-01, FFI-02, FFI-03, FFI-04, FFI-06,
 FFI-07, FFI-08, FFI-11, FORM-001, STATE-002, THEME-08, THEME-09, THEME-13,
@@ -309,7 +309,6 @@ DIALOG-19, LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009`.
 
 | Item | Exact missing seam |
 | --- | --- |
-| TAB-04 | `TabIndicators` (`native_tabs.rs:1771`) is consumed only by the non-live `indicator_text`; the live horizontal path uses `indicator_label` (`:1562`) with hardcoded status glyphs. No config loader produces `config.tabs.indicators` anywhere in `crates/` (zero producers); `from_navigation` (`:754`) never reads it. |
 | TAB-06 | `enqueue_user_prompt` (`native_tabs.rs:1877`), `pending_marks_busy` (`:1893`) and `member_busy` (`:1900`) have zero live callers; live busy is only `work_state == Running` in `from_navigation` (`:754`). No producer/transport emits pending `PendingKind` items or cross-tab enqueue events; `LiveSnapshot` (`tui_entry.rs:1224`) carries no per-tab pending queue. |
 | TAB-10 | `rail_inputs_for_navigation` (`tui_entry.rs:5277`) sets `detail` from `project_label` only; `session_tab_detail` (`native_tab_rail.rs:103`) needs current branch, default branch and worktree flag. `session_project_labels` is built from `session["directory"]` alone (`tui_entry.rs:1220-1222`); `Tab` (`native_navigation.rs:202-214`) has no branch/worktree field and no `current_branch`/`default_branch`/`is_worktree` producer exists in `crates/cli`. |
 | MD-007 / MD-008 / MD-009 | The live fence painter `paint_fence_block` (`native_view_chat.rs:2285`) routes mermaid/math through `MermaidRenderer::without_painter` (`:2299`) / `MathRenderer::without_engine` (`:2321`), which fail closed because the only trait impls in the workspace are the no-op sentinels `NoDiagramPainter` (`native_mermaid.rs:451`) and `NoMathEngine` (`native_math.rs:420`). Upstream configures real painters unconditionally via builtin plugins (`builtins.ts:14,15,29,30` → `merman/src/plugin.ts:9`, `latex/src/plugin.ts:7-12`). `MarkdownPluginRegistry`/`set_fence_handlers` have zero live callers, and the live painter `push_block_markdown` (`:2343`) is a stateless per-frame repaint with no block-identity/epoch state. Needs a diagram-painter/math-engine/plugin-registration producer. |
