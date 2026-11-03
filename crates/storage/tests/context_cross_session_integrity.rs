@@ -19,6 +19,7 @@ fn session(storage: &Storage, title: &str) -> SessionId {
         id, title: title.into(), state: SessionState::Active,
         created_at: now, updated_at: now, archived_at: None,
         revert: None,
+        viewed_at: None,
     }).unwrap();
     id
 }
