@@ -12062,3 +12062,35 @@ bounded items directly.
 
 G55-LAY confirmed LAY-10/11/13 stay BLOCKED (the producer is a cross-crate
 contract+server+CLI chain: a live right-pane/plugin-panel/terminal host).
+
+### Wave-57 (base `d687f504`) — single-item "no reconnaissance" brief
+
+Dispatched W1 MEDIA-001, W2 DIALOG-02 remainder, W3 SIDE-10, W4 SIDE-14,
+W5 TAB-06+TAB-10, W6 MSG-005+MSG-008. Only W5 returned artifacts; W1..W4/W6 hit
+the harness step cap (the compile step is what burns the budget).
+
+- **W5 TAB-06 PATCH rejected as a parity landing.** The patch adds
+  `TabStatus::feed_pending(turn_active, pending)` + a test, but `feed_pending`
+  itself has no live caller: the per-tab pending queue (`LiveSnapshot`) still
+  does not exist, so it is another dead model method. TAB-06 stays BLOCKED.
+- **W5 TAB-10 BLOCKED** (correct): `session_tab_detail` already implements the
+  exact upstream semantics; the missing half is `Tab` branch/worktree fields +
+  a producer, which is not bounded.
+
+Direct re-inspection during wave-57 confirmed the remaining `REAL_GAP`/`BLOCKED`
+items are genuinely deep, not merely unwired:
+- **DIALOG-02 remainder**: the live `OpenDialog` (`native_view_dialogs.rs:398`)
+  has no `description` field, so upstream's `dialog.tsx:118-123` description
+  gating has no live prop to gate; the footer-band/per-select-row-pad halves are
+  consumed only by the non-live `SelectDialog`.
+- **MEDIA-001**: upstream's gallery is a live image component
+  (`component/prompt/index.tsx:1700-1765`) with `onMouseUp` → `openImagePreview`;
+  the native cell renderer has no image-rendering capability, and
+  `PageState::open_image_preview` (`native_view_pages.rs:788`) has no live route.
+- **CP-09**: `agent_palette` (`native_prompt_pane.rs:601`) needs 9-step
+  categorical scales, but `native_theme_runtime` exposes only a single-step
+  `categorical_colors`; the agent catalogue parser also carries no `color`.
+
+Wave-58 dispatched groups A..I (DIALOG, MSG, SIDE, TOOL, THEME, DIFF/FFI,
+STATE/FORM/LAY, MD/PAR, TAB/CP) with a **patch-only, no-compile** rule so the
+integrator owns compilation.
