@@ -12000,3 +12000,37 @@ Also fixed the status doc: replaced the incomplete "Wave-47 supersedes" note wit
 a comprehensive superseded-row banner (the wave-44 table is historical; the
 summary counts + sections are authoritative) and corrected the stale canonical
 line (`cf32c247` -> `98bf3ac2`).
+
+### Wave-54 verify outcome + wave-55 producer dispatch (base `4126e310`)
+
+**Wave-54 verify-only workers all confirmed the recorded `BLOCKED` verdicts.**
+Several workers labelled items `REAL_GAP` under a looser reading ("model+test
+exist, no live caller"); the doc's taxonomy is stricter — `BLOCKED` = the
+producer/transport/contract field is absent, so a UI-only patch renders nothing.
+Rejected the looser labels, kept the doc verdicts:
+- TOOL-006 (worker said REAL_GAP; doc line 326 authoritative: no `GET /api/shell`
+  route) -> BLOCKED.
+- LAY-10/11/13, MSG-008/009/010, TAB-06/10 -> BLOCKED (missing producer/contract
+  field, not bounded wiring).
+- TAB-04 is the one genuine open question: upstream `config.tabs.indicators`
+  exists and the app already reads config (`config_new_designs`
+  `native_theme_runtime.rs:1592`; live `new_designs` `tui_entry.rs:6925`), so a
+  bounded config-reader + live-render patch may be possible. Dispatched
+  G54-TAB04 to settle it.
+
+**Wave-54 patch owners:** G54-MEDIA, G54-DIALOG02, G54-SIDE14 (running, made
+scratch copies); G54-SIDE10 returned no artifact (step cap) -> folded into
+wave-55.
+
+**Wave-55 PRODUCER MODE dispatched** (`wave55/BRIEF.md`, base `4126e310`): 5
+workers to *implement* the missing producers, not just verify:
+- G55-MSG (MSG-001/002/003/005/008/009/010) — `@vyce-deepseek-v41`
+- G55-CP-TAB (CP-07/09, TAB-06/10/21) — `@vyce-deepseek-v41`
+- G55-DIALOG (DIALOG-06..09/12..19) — `@vyce-deepseek-v41`
+- G55-TOOL-STATE-FORM (TOOL-006/011, STATE-002, FORM-001) — `@vyce-deepseek-v41`
+- G55-SIDE-DIFF-PAR (SIDE-03/04/05/10/14, DIFF-001/003, PAR-10/19)
+  — `@9router-vyce-deepseek-v4.1-free-combined`
+
+Each returns a `git apply -p1` patch + focused test, or `<ID>.blocked.json` with
+the exact remaining seam. No canonical writes; orchestrator applies + compiles +
+tests + commits.
