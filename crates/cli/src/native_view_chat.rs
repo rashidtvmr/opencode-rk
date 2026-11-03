@@ -107,7 +107,7 @@ fn clip_utf8_prefix_bytes(text: &str, max: usize) -> &str {
 /// Bounded center chat view: rows scrolled up from the tail of the
 /// transcript (`0` = following the tail). Pure state; the caller owns the
 /// history vector and passes it to [`ChatView::render`] every frame.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChatView {
     /// Rows above the tail; clamped to [`MAX_SCROLL_ROWS`].
     scroll: Cell<usize>,
@@ -168,6 +168,29 @@ pub struct ChatView {
     /// keeps upstream's default of `true`; [`ChatView::set_tps_enabled`] records
     /// the resolved preference. Gates only the footer throughput span.
     tps_enabled: Option<bool>,
+    /// DIFF-001: resolved `config.diffs.view` for inline patches.
+    diff_view: crate::native_diff_view::DiffViewPreference,
+}
+
+impl Default for ChatView {
+    fn default() -> Self {
+        Self {
+            scroll: Cell::new(0),
+            prompt_cursor: None,
+            markdown_mode: Default::default(),
+            terminal_width: None,
+            terminal_height: None,
+            transcript_first: Cell::new(0),
+            transcript_viewport: Cell::new(0),
+            message_owners: RefCell::new(Vec::new()),
+            child_owners: RefCell::new(Vec::new()),
+            pending_permission_calls: std::collections::BTreeSet::new(),
+            spin_frame: Cell::new(None),
+            prompt_background: None,
+            tps_enabled: None,
+            diff_view: crate::native_diff_view::DiffViewPreference::Auto,
+        }
+    }
 }
 
 impl ChatView {
@@ -201,6 +224,11 @@ impl ChatView {
     /// (`config.data.session.tps`, `routes/session/index.tsx:2061`).
     pub(crate) fn set_tps_enabled(&mut self, enabled: bool) {
         self.tps_enabled = Some(enabled);
+    }
+
+    /// Record the resolved inline diff layout preference.
+    pub(crate) fn set_diff_view(&mut self, preference: crate::native_diff_view::DiffViewPreference) {
+        self.diff_view = preference;
     }
 
     /// Whether the footer throughput span is enabled. Unset keeps upstream's
@@ -1065,7 +1093,7 @@ fn boxed_message_rows_spans(
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
     child_out: &mut Vec<(usize, String)>,
 ) -> Vec<StyledChatRow> {
-    boxed_message_rows_spans_mode(width, message, separator, appearance, spans_out, child_out, crate::markdown_runs::MarkdownMode::Rendered, &std::collections::BTreeSet::new(), Some(0), true)
+    boxed_message_rows_spans_mode(width, message, separator, appearance, spans_out, child_out, crate::markdown_runs::MarkdownMode::Rendered, &std::collections::BTreeSet::new(), Some(0), true, crate::native_diff_view::DiffViewPreference::Auto)
 }
 
 fn boxed_message_rows_spans_mode(
@@ -1077,6 +1105,7 @@ fn boxed_message_rows_spans_mode(
     pending: &std::collections::BTreeSet<String>,
     spin: Option<u64>,
     tps_enabled: bool,
+    diff_view: crate::native_diff_view::DiffViewPreference,
 ) -> Vec<StyledChatRow> {
     use crate::native_box_style::BoxId;
     let id = if message.role == ChatRole::Tool
@@ -1108,7 +1137,7 @@ fn boxed_message_rows_spans_mode(
     let plain = |wrap: usize, spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>, child_out: &mut Vec<(usize, String)>| -> Vec<StyledChatRow> {
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(wrap.min(width), message, separator, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled);
+        let typed = typed_message_rows_with_prefix_spans_mode(wrap.min(width), message, separator, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled, diff_view);
         let rows: Vec<StyledChatRow> = typed
             .into_iter()
             .map(|(text, class)| (text, class, Some((0, width.min(u16::MAX as usize) as u16))))
@@ -1141,7 +1170,7 @@ fn boxed_message_rows_spans_mode(
         let base = output.len();
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, Some(""), &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, Some(""), &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled, diff_view);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
         {
@@ -1179,7 +1208,7 @@ fn boxed_message_rows_spans_mode(
         let base = output.len();
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled, diff_view);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 + 2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit) {
@@ -1215,7 +1244,7 @@ fn boxed_message_rows_spans_mode(
         let base = output.len();
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled, diff_view);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
@@ -1256,7 +1285,7 @@ fn boxed_message_rows_spans_mode(
         let base = output.len();
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled, diff_view);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
@@ -2556,6 +2585,7 @@ fn typed_message_rows_with_prefix_spans(
         &std::collections::BTreeSet::new(),
         Some(0),
         true,
+        crate::native_diff_view::DiffViewPreference::Auto,
     )
 }
 
@@ -2568,6 +2598,7 @@ fn typed_message_rows_with_prefix_spans_mode(
     pending: &std::collections::BTreeSet<String>,
     spin: Option<u64>,
     tps_enabled: bool,
+    diff_view: crate::native_diff_view::DiffViewPreference,
 ) -> Vec<(String, ChatRowClass)> {
     let mut rows: Vec<(String, ChatRowClass)> = Vec::new();
     if separator {
@@ -2795,7 +2826,7 @@ fn typed_message_rows_with_prefix_spans_mode(
                 let theme09_split = matches!(
                     crate::native_diff_view::resolve_view_mode(
                         crate::native_diff_view::DiffSurface::Inline,
-                        crate::native_diff_view::DiffViewPreference::Auto,
+                        diff_view,
                         width,
                     ),
                     crate::native_diff_view::DiffViewMode::Split
@@ -2995,6 +3026,43 @@ mod diff_wiring_v2_regressions {
 
     fn patch_message(diff: String) -> ChatMessage {
         ChatMessage { role: ChatRole::Assistant, parts: vec![ChatPart::Patch { path: "many.rs".into(), diff, diagnostics: Vec::new() }], agent: None, model: None, assistant_facts: None, message_id: None }
+    }
+
+    #[test]
+    fn diff001_inline_auto_and_explicit_preferences_follow_width() {
+        use crate::native_diff_view::{resolve_view_mode, DiffSurface, DiffViewMode, DiffViewPreference};
+        assert_eq!(resolve_view_mode(DiffSurface::Inline, DiffViewPreference::Auto, 120), DiffViewMode::Unified);
+        assert_eq!(resolve_view_mode(DiffSurface::Inline, DiffViewPreference::Auto, 121), DiffViewMode::Split);
+        for width in [120, 121] {
+            assert_eq!(resolve_view_mode(DiffSurface::Inline, DiffViewPreference::Split, width), DiffViewMode::Split);
+            assert_eq!(resolve_view_mode(DiffSurface::Inline, DiffViewPreference::Unified, width), DiffViewMode::Unified);
+        }
+        let message = patch_message("@@ -1,1 +1,1 @@\n-old\n+new\n".into());
+        let auto = ChatView::new().render_typed_classified(120, 8, "ws", &[message.clone()], "", false);
+        let mut unified_view = ChatView::new();
+        unified_view.set_diff_view(DiffViewPreference::Unified);
+        assert_eq!(auto, unified_view.render_typed_classified(120, 8, "ws", &[message], "", false));
+    }
+
+    #[test]
+    fn diff001_chat_view_set_split_paints_paired_patch_rows() {
+        use crate::native_diff_view::DiffViewPreference;
+        let mut view = ChatView::new();
+        view.set_diff_view(DiffViewPreference::Split);
+        let rows = view.render_typed_classified(
+            100,
+            8,
+            "ws",
+            &[patch_message("@@ -1,1 +1,1 @@\n-old\n+new\n".into())],
+            "",
+            false,
+        );
+        assert!(rows.iter().any(|(row, class)| {
+            *class == ChatRowClass::DiffRemoved && row.contains("- old") && row.contains("+ new")
+        }), "split patch row missing: {rows:?}");
+        assert!(!rows.iter().any(|(row, class)| {
+            *class == ChatRowClass::DiffAdded && row.contains("+ new")
+        }), "added pane rendered as a separate row: {rows:?}");
     }
 
     #[test]
@@ -3293,6 +3361,7 @@ impl ChatView {
                 &self.pending_permission_calls,
                 self.spin_frame.get(),
                 self.tps_enabled(),
+                self.diff_view,
             );
             for row in rows.into_iter().rev() {
                 rev.push(row);
@@ -3445,6 +3514,7 @@ impl ChatView {
                     &self.pending_permission_calls,
                     self.spin_frame.get(),
                     self.tps_enabled(),
+                    self.diff_view,
                 );
                 let mut dense = vec![Vec::new(); message_rows.len()];
                 for (row, spans) in message_spans {
@@ -3572,6 +3642,7 @@ impl ChatView {
                 &std::collections::BTreeSet::new(),
                 Some(0),
                 self.tps_enabled(),
+                self.diff_view,
             ).len()
         }).sum()
     }

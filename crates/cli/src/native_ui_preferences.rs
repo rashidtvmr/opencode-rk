@@ -171,6 +171,63 @@ impl UiPreferences {
         if let Some(text) = inline { apply(text, &mut selected, &mut diagnostics, "inline CLI"); }
         (selected, diagnostics)
     }
+
+    /// `config.diffs.view` (`config/index.tsx:126`). Upstream defaults to
+    /// `auto`; disk config applies first and inline config overrides it.
+    pub fn diffs_view(
+        cli_path: Option<&Path>,
+        inline: Option<&str>,
+    ) -> (crate::native_diff_view::DiffViewPreference, Vec<String>) {
+        fn apply(
+            text: &str,
+            selected: &mut crate::native_diff_view::DiffViewPreference,
+            diagnostics: &mut Vec<String>,
+            label: &str,
+        ) {
+            if text.len() > MAX_CONFIG_BYTES {
+                diagnostics.push(format!("{label} configuration exceeds size limit"));
+                return;
+            }
+            let clean = match strip_jsonc(text) {
+                Ok(clean) => clean,
+                Err(_) => {
+                    diagnostics.push(format!("invalid {label} configuration"));
+                    return;
+                }
+            };
+            let value = match serde_json::from_str::<Value>(&clean) {
+                Ok(value) => value,
+                Err(_) => {
+                    diagnostics.push(format!("invalid {label} configuration"));
+                    return;
+                }
+            };
+            match value.get("diffs").and_then(|diffs| diffs.get("view")) {
+                Some(Value::String(view)) => match view.as_str() {
+                    "auto" => *selected = crate::native_diff_view::DiffViewPreference::Auto,
+                    "split" => *selected = crate::native_diff_view::DiffViewPreference::Split,
+                    "unified" => *selected = crate::native_diff_view::DiffViewPreference::Unified,
+                    _ => diagnostics.push("invalid diffs.view value".to_owned()),
+                },
+                Some(_) => diagnostics.push("invalid diffs.view value".to_owned()),
+                None => {}
+            }
+        }
+        let mut selected = crate::native_diff_view::DiffViewPreference::Auto;
+        let mut diagnostics = Vec::new();
+        if let Some(path) = cli_path {
+            let mut budget = crate::native_ui_budget::ReadBudget::default();
+            match budget.read(path, MAX_CONFIG_BYTES, "CLI config") {
+                Ok(Some(text)) => apply(&text, &mut selected, &mut diagnostics, "disk CLI"),
+                Ok(None) => {}
+                Err(_) => diagnostics.push("unable to read bounded global CLI configuration".into()),
+            }
+        }
+        if let Some(text) = inline {
+            apply(text, &mut selected, &mut diagnostics, "inline CLI");
+        }
+        (selected, diagnostics)
+    }
     /// Load the V2 global/inline CLI theme. The inline document overlays the
     /// global document, matching upstream CLI config merge semantics. Legacy
     /// `tui.json`/kv theme remains the caller's lower-precedence fallback.
@@ -1975,5 +2032,43 @@ mod session_tps_tests {
         assert!(selected, "invalid value keeps the upstream default");
         assert_eq!(diagnostics, vec!["invalid session.tps value"]);
         assert!(diagnostics.iter().all(|line| !line.contains(secret)));
+    }
+}
+
+#[cfg(test)]
+mod diff001_preferences_tests {
+    use super::*;
+
+    #[test]
+    fn diff001_config_parse_absent_auto_split_unified() {
+        assert_eq!(UiPreferences::diffs_view(None, None).0, crate::native_diff_view::DiffViewPreference::Auto);
+        for (value, expected) in [
+            ("auto", crate::native_diff_view::DiffViewPreference::Auto),
+            ("split", crate::native_diff_view::DiffViewPreference::Split),
+            ("unified", crate::native_diff_view::DiffViewPreference::Unified),
+        ] {
+            assert_eq!(UiPreferences::diffs_view(None, Some(&format!(r#"{{"diffs":{{"view":"{value}"}}}}"#))).0, expected);
+        }
+    }
+
+    #[test]
+    fn diff001_unknown_and_case_mismatch_are_invalid() {
+        for value in ["unknown", "AUTO", "Split", "UNIFIED"] {
+            let (selected, diagnostics) = UiPreferences::diffs_view(
+                None,
+                Some(&format!(r#"{{"diffs":{{"view":"{value}"}}}}"#)),
+            );
+            assert_eq!(selected, crate::native_diff_view::DiffViewPreference::Auto);
+            assert_eq!(diagnostics, vec!["invalid diffs.view value"]);
+        }
+    }
+
+    #[test]
+    fn diff001_inline_overrides_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        fs::write(&path, r#"{"diffs":{"view":"split"}}"#).unwrap();
+        assert_eq!(UiPreferences::diffs_view(Some(&path), None).0, crate::native_diff_view::DiffViewPreference::Split);
+        assert_eq!(UiPreferences::diffs_view(Some(&path), Some(r#"{"diffs":{"view":"unified"}}"#)).0, crate::native_diff_view::DiffViewPreference::Unified);
     }
 }

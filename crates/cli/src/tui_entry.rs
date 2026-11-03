@@ -7436,6 +7436,15 @@ fn native_loop(
         append_transcript(&mut transcript, format!("error: {diagnostic}"));
     }
     view.set_tps_enabled(tps_enabled);
+    let (diff_view, diff_view_diagnostics) =
+        crate::native_ui_preferences::UiPreferences::diffs_view(
+            cli_path.as_deref(),
+            inline_cli.as_deref(),
+        );
+    for diagnostic in diff_view_diagnostics {
+        append_transcript(&mut transcript, format!("error: {diagnostic}"));
+    }
+    view.set_diff_view(diff_view);
     view.set_prompt_width(match preferences.prompt_width {
         Some(crate::native_ui_preferences::PromptWidth::Auto) => {
             crate::native_view::PromptWidth::Auto

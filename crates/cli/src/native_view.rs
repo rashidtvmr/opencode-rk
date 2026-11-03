@@ -2034,6 +2034,10 @@ impl NativeView {
         self.chat.set_tps_enabled(enabled);
     }
 
+    pub fn set_diff_view(&mut self, preference: crate::native_diff_view::DiffViewPreference) {
+        self.chat.set_diff_view(preference);
+    }
+
     /// Scrollbar painted by the last render, if the bar is shown and the
     /// transcript content overflows its viewport.
     #[must_use]
