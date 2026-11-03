@@ -42,7 +42,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 >   `CP-09`, `MD-007`, `THEME-08/09/13/14`, `TOOL-006/011`, `DIFF-001/003`,
 >   `STATE-002`, `FORM-001`;
 > - to `ALREADY_CORRECT`: `PAR-11`, `LAY-12`, `LAY-17`, `MSG-004`, `FFI-05`,
->   `CP-08`;
+>   `CP-08`, `THEME-05`;
 > - to `LANDED`: `MSG-007` (`4a6b487b`), `CP-11` (`f8e276cf`), `DIALOG-04`
 >   (`d137313d`), `DIALOG-20` (toast half, `d891f9c3`), `TAB-23` (`ae56897f`),
 >   `SIDE-08` (`76fcb75a`), `THEME-12` (`bc24dd30`), `PAR-16`/`PAR-22`
@@ -286,7 +286,7 @@ Selected high-value seams:
 
 | Item | Seam |
 | --- | --- |
-| MEDIA-001 | `image_attachments`/`inline_tool_images`/`gallery_model` (`native_image_preview.rs:1047-1160`) have zero non-test callers; `PageState::open_image_preview` (`native_view_pages.rs:788`) never invoked live, so the preview always renders "no image attached". Wave-48 re-confirmed: no clipboard-image read path, no live `PromptPaneInput` attachment field, and `LocalFiles` (`native_image_preview.rs:67`) has only a test implementation. |
+| MEDIA-001 | `image_attachments`/`inline_tool_images`/`gallery_model` (`native_image_preview.rs:1047-1160`) have zero non-test callers; `PageState::open_image_preview` (`native_view_pages.rs:788`) never invoked live, so the preview always renders "no image attached". Wave-48 re-confirmed: no clipboard-image read path, no live `PromptPaneInput` attachment field, and `LocalFiles` (`native_image_preview.rs:67`) has only a test implementation. Wave-54 added: the live transcript part `ChatPart::File { filename, mime }` (`native_view_chat.rs:680-683`) carries no `uri`/`data`, and the wire projection (`native_chat_projection.rs:368-372`) reads only `filename`/`path` + `mime`, dropping the upstream `data:${mime};base64,${data}` cell source (`routes/session/index.tsx:2363`) — so the gallery also needs a projection field, and the gallery-strip painter/hit-rect/mouse routing is a 3-file change. |
 | DIALOG-02 | `native_palette.rs:667-733` dialog shell/list-row metrics are not read by the live `DialogView::layout` (`native_view_dialogs.rs:1627`), which ignores `new_designs`; the `SelectDialog` port (`native_palette.rs:1251`) that consumes them has zero live callers. |
 | THEME-08 | `syntax_rules()` (`native_theme_runtime.rs:965`) has zero non-test callers; no tokenizer/highlighter producer and no renderer syntax-style sink (`safe_renderer.rs:906` takes explicit fg/bg/attrs only). |
 | THEME-13 | `SystemThemeState`/`palette_reply` (`native_theme_runtime.rs:2183/2264`) have zero non-test callers; no OSC palette-query emitter and no payload-carrying input event to decode a reply. |
