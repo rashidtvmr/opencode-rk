@@ -11948,3 +11948,37 @@ MEDIA-001, DIALOG-02) / 60 `BLOCKED` / 16 `LANDED` = 223. Also fixed the stale
 Worker failure mode remains the harness step cap during reconnaissance:
 `wave53/copy/` and `wave53/repo/` are repo copies, and only `copy/` carried an
 uncommitted diff. Extract `git -C copy diff` for any future worker artifact.
+
+### Wave-54 reclassification — CP-07 REAL_GAP->BLOCKED; DIALOG-02 seam sharpened
+
+Verified against current source (`99e0e6ae`):
+
+- **CP-07 -> BLOCKED.** The `AgentFact` model (`native_prompt_pane.rs:580-631`)
+  is test-only: `selectable_agents`/`agent_color` have no live caller,
+  `set_composer_agent` (`native_view.rs:1232`) has zero non-test callers so
+  `composer_agent` is always `None` live, `agent.cycle` is inert
+  (`tui_entry.rs:10807-10811`), `DialogKind` has no Agent variant, and the
+  `mention_agents` contract (`configured_commands.rs:80-99`) emits only
+  name/description/read_only — no `hidden`/`subagent`/`color`. Needs a
+  cross-crate contract field + live selection state, so it is a producer gap,
+  not bounded wiring.
+- **DIALOG-02 stays REAL_GAP, seam sharpened.** The shared-shell half is
+  live-equivalent (`native_modal_layer.rs:704/721/735` duplicates
+  `dialog_width`/`dialog_top`/`footer_is_narrow` with identical formulas). But
+  the requirement's "list row padding / footer bands / both experiment states"
+  is the `dialog.tsx`+`dialog-select.tsx` `newDesigns` behavior
+  (`dialog.tsx:109-160`, `dialog-select.tsx:875-941`), and the live
+  `DialogView::layout` (`native_view_dialogs.rs:1627`) never reads `new_designs`
+  and uses its own fixed `" > "`/`"   "` row marker. The `SelectDialog` port
+  that does implement it (`native_palette.rs:1251`) has zero live callers, so
+  the model+test exist without a live consumer -> REAL_GAP.
+
+Counts reconciled: 144 `ALREADY_CORRECT` / 2 `REAL_GAP` (MEDIA-001, DIALOG-02) /
+61 `BLOCKED` / 16 `LANDED` = 223.
+
+Wave-53 worker outcome (final): only G-PAR-A/G-PAR-C produced landable harness
+artifacts (landed as `f240367b`/`99e0e6ae`). G-MSG-C confirmed MSG-009/MSG-010
+BLOCKED with exact seams; G-DIALOG-C returned analysis only (DIALOG-12/13/14/15
+BLOCKED; DIALOG-15's MCP half superseded by the live SIDE-08 dialog); G-DIFF
+produced only a test log showing the DIFF-001..005 model tests pass (no patch).
+The rest returned empty at the harness step cap.

@@ -114,7 +114,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | MD-007 | `REAL_GAP` | `set_fence_handlers`/`MarkdownPluginRegistry` zero non-test callers; seam `native_view_chat.rs:2334` (flow built, no handlers fed) |
 | MD-008 | `BLOCKED` | mermaid renderer built `without_painter` (`native_view_chat.rs:2276`); needs live `DiagramPainter` |
 | MD-009 | `BLOCKED` | math renderer built `without_engine` (`native_view_chat.rs:2298`); needs live `MathLayoutEngine` |
-| CP-07 | `REAL_GAP` | `selectable_agents`/`agent_color` (`native_prompt_pane.rs:591,619`) no live caller; no `AgentFact` producer to `native_view.rs:1612` |
+| CP-07 | `BLOCKED` | The `AgentFact` model (`native_prompt_pane.rs:580-631`) is test-only: no live caller of `selectable_agents`/`agent_color`, `set_composer_agent` (`native_view.rs:1232`) has zero non-test callers so `composer_agent` is always `None` live, `agent.cycle` is inert (`tui_entry.rs:10807-10811`), `DialogKind` has no Agent variant, and the `mention_agents` contract (`configured_commands.rs:80-99`) emits only name/description/read_only — no `hidden`/`subagent`/`color`. Needs a cross-crate contract field + live selection state |
 | CP-08 | `REAL_GAP` | `next_prompt_display` (`native_prompt_pane.rs:675`) not routed via `composer_metadata` (`native_view.rs:1612`) |
 | CP-09 | `REAL_GAP` | `prompt_highlight`/`border_highlight`/`MetadataReveal` (`native_prompt_pane.rs:137,155,702`) not consumed by Paint path |
 | CP-10 | `ALREADY_CORRECT` | `rail_spans`/`slot_text` (`native_status_rail.rs:874,1048`); live `native_view.rs:3867-3904` → paint `:3820-3822` |
@@ -228,7 +228,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | Item | Wave-44 verdict | Evidence / seam |
 | --- | --- | --- |
 | DIALOG-01 | `ALREADY_CORRECT` | widths/cap/placement live in `native_modal_layer.rs:109,704,721`; consumer `native_view.rs:3696` (`native_palette.rs:647/656` is a test-only dup) |
-| DIALOG-02 | `REAL_GAP` | shell gap/row-pad/footer-band helpers (`native_palette.rs:667-733`, test `:3808`) zero production callers; live `native_view_dialogs.rs:1408-1510` never calls them |
+| DIALOG-02 | `REAL_GAP` | shell gap/row-pad/footer-band helpers (`native_palette.rs:667-733`, test `:3808`) zero production callers. The shared-shell half is live-equivalent (`native_modal_layer.rs:704/721/735` duplicates `dialog_width`/`dialog_top`/`footer_is_narrow` with the same formulas), but the requirement's "list row padding / footer bands / both experiment states" is the `dialog-select.tsx`+`dialog.tsx` `newDesigns` behavior: upstream gates the title weight/color, description, footer gap and every select-row pad on `newDesigns` (`dialog.tsx:109-160`, `dialog-select.tsx:875-941`), while the live `DialogView::layout` (`native_view_dialogs.rs:1627`) never reads `new_designs` and uses its own fixed `" > "`/`"   "` row marker. The `SelectDialog` port that does implement it (`native_palette.rs:1251`) has zero live callers |
 | DIALOG-03 | `ALREADY_CORRECT` | live stack `native_modal_layer.rs:437/382/387/532`; remount/refocus tests `:1150/:1292`, `native_view.rs:7728`; consumed `tui_entry.rs:7865/10676` |
 | DIALOG-04 | `REAL_GAP` | ordered routes `escape_route:808`/`ctrl_c_route:821` (test `:7316`) no production caller; live `tui_entry.rs:10671-10700` does own selection/clear then `dialogs.cancel()` |
 | DIALOG-16 | `REAL_GAP` | Base `SettingsDialog` shell is live (`tui_entry.rs:6340/7963/10735`), but the requirement's sub-behaviors are test-only: `NumericLimit`/`SCROLL_SPEED`/`LEADER_TIMEOUT`/`ALERT_VOLUME` (`native_settings.rs:509-559`) and `ExperimentsDialog` (`:561`) have zero non-test callers; `ThemePreview` (`native_palette.rs:2946`) no live consumer. Seam `tui_entry.rs:8832-8875`. (Resolved disagreement: the retry verdict is upheld over the earlier `ALREADY_CORRECT`.) |
@@ -244,8 +244,8 @@ the wave-44 verdict supersedes it.
 | Verdict | Count |
 | --- | --- |
 | `ALREADY_CORRECT` | 144 |
-| `REAL_GAP` | 3 |
-| `BLOCKED` | 60 |
+| `REAL_GAP` | 2 |
+| `BLOCKED` | 61 |
 | `LANDED` (wave-45..53) | 16 |
 | **Total** | **223** |
 
@@ -269,9 +269,9 @@ the wave-44 verdict supersedes it.
 | DIALOG-20 (toast half) | `d891f9c3` | The tested `Toast`/`ToastFrame` model had no live consumer. Adds `PaintCtx.toast`, paints the frame as the topmost overlay in `native_paint` (surface fill + each styled `CellRun`), owns a live `Toast` in the loop whose logical clock advances on the animation tick so a visible toast auto-dismisses after 5000 ms, and triggers it from the session-id copy path (`Copied to clipboard`, `app.tsx:605`). The crash/error-details half remains `BLOCKED`. Full CLI suite (2177/0) green. |
 | PAR-16 / PAR-22 | `f240367b` | Harness-side (Python). PAR-16: fixtures carry exactly one class (`baseline`/`optional`/`experimental`/`extension`); `fixture_class` defaults to `baseline`, `validate_fixture_class` rejects an unknown value, `--class` filters the selection, the class travels into `build_request`/`golden_from_screen`, and `compare_screens` raises a hard `fixture_class` diff on a golden/fixture class mismatch. PAR-22: `--evidence-bundle` + `build_evidence_bundle` write a SHA-bound bundle (`rust_sha`, spec/golden/fixture sha256s, class counts, exact reproduction commands, per-fixture outcomes, installed-capture hashes). `tools/ui_parity/selftest.py` 32 checks PASS (+10). |
 
-### `REAL_GAP` — faithful model + focused test exist, no live consumer (3)
+### `REAL_GAP` — faithful model + focused test exist, no live consumer (2)
 
-`CP-07, MEDIA-001, DIALOG-02`.
+`MEDIA-001, DIALOG-02`.
 
 Per-ID seams are recorded in the wave-44 batch tables above and in
 `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave44/<ID>.json`.
@@ -280,20 +280,19 @@ Selected high-value seams:
 | Item | Seam |
 | --- | --- |
 | MEDIA-001 | `image_attachments`/`inline_tool_images`/`gallery_model` (`native_image_preview.rs:1047-1160`) have zero non-test callers; `PageState::open_image_preview` (`native_view_pages.rs:788`) never invoked live, so the preview always renders "no image attached". Wave-48 re-confirmed: no clipboard-image read path, no live `PromptPaneInput` attachment field, and `LocalFiles` (`native_image_preview.rs:67`) has only a test implementation. |
-| DIALOG-02 | `native_palette.rs:667-721` dialog shell metrics (gap/row-pad/footer-band) are not read by the live `DialogView::layout` (`native_view_dialogs.rs:1494`). |
-| CP-07 | `selectable_agents`/`agent_color` (`native_prompt_pane.rs:591-631`) have no live `AgentFact` color producer; `set_composer_agent` (`native_view.rs:1232`) has zero non-test callers and the agent catalogue contract carries no `color` field. |
+| DIALOG-02 | `native_palette.rs:667-733` dialog shell/list-row metrics are not read by the live `DialogView::layout` (`native_view_dialogs.rs:1627`), which ignores `new_designs`; the `SelectDialog` port (`native_palette.rs:1251`) that consumes them has zero live callers. |
 | THEME-08 | `syntax_rules()` (`native_theme_runtime.rs:965`) has zero non-test callers; no tokenizer/highlighter producer and no renderer syntax-style sink (`safe_renderer.rs:906` takes explicit fg/bg/attrs only). |
 | THEME-13 | `SystemThemeState`/`palette_reply` (`native_theme_runtime.rs:2183/2264`) have zero non-test callers; no OSC palette-query emitter and no payload-carrying input event to decode a reply. |
 | THEME-09 | **BLOCKED (verified wave-53).** The live chat `Patch`/diff-fence painter hardcodes `DiffViewMode::Unified` (`native_view_chat.rs:2202/2730`) and `resolve_view_mode`/`config.diffs.view` (`native_diff_view.rs:586`) have no live caller. Threading the preference is not sufficient: a split row is `SplitRow::Pair { left, right }` (`native_diff_view.rs:709-715`) with two independent backgrounds, but the live row model is `(String, ChatRowClass)` with exactly one class per row (`native_view_chat.rs:902`) and the painter maps a class to a single background (`tui_entry.rs:2880-2898 chat_row_background`). The split view is therefore not renderable without extending the row model — the same blocker as DIFF-001. |
 
-### `BLOCKED` — needs a producer/transport/contract field that does not exist (60)
+### `BLOCKED` — needs a producer/transport/contract field that does not exist (61)
 
 `PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-10, PAR-19,
 TAB-04, TAB-06, TAB-10, TAB-21, SIDE-03, SIDE-04, SIDE-05, SIDE-10, SIDE-14,
 MSG-001, MSG-002, MSG-003, MSG-005, MSG-008, MSG-009, MSG-010,
 TOOL-006, TOOL-011, DIFF-001, DIFF-003, FFI-01, FFI-02, FFI-03, FFI-04, FFI-06,
 FFI-07, FFI-08, FFI-11, FORM-001, STATE-002, THEME-08, THEME-09, THEME-13,
-THEME-14, CP-09,
+THEME-14, CP-07, CP-09,
 DIALOG-06, DIALOG-07, DIALOG-08, DIALOG-09,
 DIALOG-12, DIALOG-13, DIALOG-14, DIALOG-15, DIALOG-16, DIALOG-17, DIALOG-18,
 DIALOG-19, LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009`.
@@ -406,9 +405,9 @@ field is absent).
 ## Honest completion statement
 
 Of the 223 checklist obligations, **144 are `ALREADY_CORRECT`** (a faithful
-implementation, a focused test, and a traced live consumer), **3 are
+implementation, a focused test, and a traced live consumer), **2 are
 `REAL_GAP`** (model + test exist but the live TUI does not consume them),
-**60 are `BLOCKED`** (a producer/transport/contract field does not exist), and
+**61 are `BLOCKED`** (a producer/transport/contract field does not exist), and
 **16 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
 `CP-05`, `CP-06` in wave-46; `MSG-007` in wave-47; `SIDE-08`, `THEME-12`,
 `DIALOG-04` in wave-48; `PAR-04` in wave-49; `TAB-23`, `DIALOG-10`,
