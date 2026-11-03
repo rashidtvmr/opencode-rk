@@ -12578,3 +12578,45 @@ Canonical SHA: `6a72aa61` (remote `main-v2` verified via `git ls-remote`).
     `ses_e5f6cc840ffcTFVRgkQwioYFPT`.
 
 Canonical SHA: `51538ca1` (remote `main-v2` verified via `git ls-remote`).
+
+### 2026-11-03 — wave-66 dispatch restart, route triage, verdicts, rejected patches
+
+Route triage (raw provider probes against `http://127.0.0.1:20128/v1`, 1499-model
+catalogue read from `~/.config/opencode/opencode.json`):
+
+- `vyce/deepseek-v4.1` and `vyce-deepseek-v4.1-free-combined` → HTTP 400
+  `invalid_request` on a 1-token probe. Both `@vyce-deepseek-v41` and
+  `@9router-vyce-deepseek-v4.1-free-combined` are unusable this wave.
+- `river-glm-5.3-flash` is absent from the catalogue entirely (agent config is
+  `{}`); `9router-th-free` and `xkiro-mimo-v2-6-flash` likewise have no
+  resolvable model/provider. User excluded all three explicitly.
+- Verified working: `luna-free` (200), `th/deepseek-v4-flash:free` (200),
+  `th/gpt-5.6-luna` (200), `xk/openai/gpt-5.6-luna` (200). All 25 groups were
+  re-dispatched there (9 / 8 / 8) after two failed provider rounds.
+
+Infrastructure repairs this session:
+
+- Reclaimed 9.3 GB of dead worker clones from waves 60–65 after archiving every
+  dirty clone's diff to `/tmp/archive-w6/` (21 files + status; 320 KB). Disk went
+  12 GiB → 19 GiB free.
+- All worker clones were pre-created at `51538ca1` with `web/` removed for disk.
+  Consequence: every worker `git diff` also contains 60+ `web/` deletion hunks.
+  Landing must use `git apply --exclude=web/* --exclude=.agents/* --exclude=.cursor/* --exclude=.github/*`.
+
+Landed: `9c15a911` — wave-66 verdict section in `PARITY_STATUS.md`, TAB-21 and
+TAB-10 corrected from stale `BLOCKED`/`REAL_GAP` to `LANDED`, SIDE-05 relabeled
+`REAL_GAP`, rejected patches recorded with reasons. Remote verified `9c15a911`.
+
+Rejected worker patches (independently reviewed, not landed): TOOL (mutates stored
+tool `args`, degrades painter classification, no test), MSG005 (invented flat
+`files`/`skills` defaults nothing persists, plus fields on a struct that lacks
+them), MARKDOWN (blank canvas footprint hides the source block), MISC
+(production-inert empty-branch guard), HARNESS (empty diff).
+
+Verifier verdicts recorded: VTAB 20 CONFIRMED, VSIDE 13 CONFIRMED + SIDE-05
+mislabel, VCP 5 CONFIRMED.
+
+Conclusion recorded in the status doc: MEDIA-001 is substrate-blocked — the
+bridge rasterizes RGBA to cells, but `Cargo.lock` has no image decoder and the
+renderer has no OSC-1337/kitty passthrough, so no CLI-only patch can display an
+image.
