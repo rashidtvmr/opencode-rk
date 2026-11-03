@@ -11,6 +11,7 @@ use std::{
 const MAX_MODELS: usize = 5000;
 const MAX_STATE_BYTES: usize = 64 * 1024;
 const MAX_RECENT: usize = 32;
+const MAX_FAVORITE: usize = 32;
 // Keep aligned with the private own-config limit in providers::imported_config.
 const MAX_OWN_CONFIG_BYTES: usize = 4 * 1024 * 1024;
 
@@ -21,6 +22,10 @@ pub(super) struct Model {
     pub provider_id: String,
     pub context_window: Option<u64>,
     pub free: bool,
+    /// Available named variants for this model, from the catalogue entry's
+    /// `variants[].id` (`ModelInfo.variants`, `dialog-variant.tsx:9-42`). Drives
+    /// the post-select transition (`dialog-model.tsx:25-38`).
+    pub variants: Vec<String>,
 }
 
 impl Model {
@@ -101,20 +106,61 @@ fn recent_keys_at(path: Option<&Path>) -> Vec<pickers::ModelKey> {
         .collect()
 }
 
-/// Live model-dialog rows in `picker_rows` order (recents-first for an empty
-/// query), reading recents from persisted state. Non-empty queries fall through
-/// to the fuzzy `visible_rows` filter unchanged.
-pub(super) fn dialog_rows(models: &[Model], query: &str) -> Vec<usize> {
-    dialog_rows_with(models, query, &recent_keys())
+/// Persisted favorites (newest first) as picker keys. Mirrors `recent_keys`:
+/// `save_model`/`toggle_favorite` write the `favorite` array, upstream
+/// `local.model.favorite()` reads it (`model-preference.ts:94-100`).
+pub(super) fn favorite_keys() -> Vec<pickers::ModelKey> {
+    favorite_keys_at(state_path().as_deref())
 }
 
-/// Pure core mirroring `dialog_rows` with explicit recents (testable).
+fn favorite_keys_at(path: Option<&Path>) -> Vec<pickers::ModelKey> {
+    let Some(path) = path else { return Vec::new() };
+    let Ok(value) = read_state(path) else { return Vec::new() };
+    let Some(favorite) = value["favorite"].as_array() else { return Vec::new() };
+    favorite
+        .iter()
+        .take(MAX_FAVORITE)
+        .filter_map(|entry| {
+            let provider = entry["providerID"].as_str()?;
+            let id = entry["modelID"].as_str()?;
+            Some((provider.to_owned(), id.to_owned()))
+        })
+        .collect()
+}
+
+/// Persisted variant for one model (`variant[provider/model]`, upstream
+/// `model-preference.ts:69-74`). An explicit `"default"` normalizes to `None`.
+pub(super) fn variant_for(model: &Model) -> Option<String> {
+    variant_for_at(state_path().as_deref(), &model.provider_id, &model.id)
+}
+
+fn variant_for_at(path: Option<&Path>, provider: &str, id: &str) -> Option<String> {
+    let path = path?;
+    let value = read_state(path).ok()?;
+    let key = format!("{provider}/{id}");
+    variant_at(&value, &key)
+}
+
+fn variant_at(value: &Value, key: &str) -> Option<String> {
+    let variant = value["variant"].get(key)?.as_str()?;
+    (!variant.is_empty() && variant != "default").then(|| variant.to_owned())
+}
+
+/// Live model-dialog rows in `picker_rows` order (favorites, then recents, for
+/// an empty query), reading favorites and recents from persisted state.
+/// Non-empty queries fall through to the fuzzy `visible_rows` filter unchanged.
+pub(super) fn dialog_rows(models: &[Model], query: &str) -> Vec<usize> {
+    dialog_rows_with(models, query, &favorite_keys(), &recent_keys())
+}
+
+/// Pure core mirroring `dialog_rows` with explicit favorites and recents.
 pub(super) fn dialog_rows_with(
     models: &[Model],
     query: &str,
+    favorites: &[pickers::ModelKey],
     recents: &[pickers::ModelKey],
 ) -> Vec<usize> {
-    let picker = pickers::ModelPickerState::open(&[]);
+    let picker = pickers::ModelPickerState::open(favorites);
     picker_rows(models, query, &picker, recents)
 }
 
@@ -122,17 +168,82 @@ pub(super) fn dialog_rows_with(
 /// names. The index is resolved against `dialog_rows` order, never against the
 /// raw catalogue, so reordering cannot desync the committed model.
 pub(super) fn dialog_selected_row(models: &[Model], query: &str, row: usize) -> Option<Model> {
-    dialog_selected_row_with(models, query, row, &recent_keys())
+    dialog_selected_row_with(models, query, row, &favorite_keys(), &recent_keys())
 }
 
 pub(super) fn dialog_selected_row_with(
     models: &[Model],
     query: &str,
     row: usize,
+    favorites: &[pickers::ModelKey],
     recents: &[pickers::ModelKey],
 ) -> Option<Model> {
-    let rows = dialog_rows_with(models, query, recents);
+    let rows = dialog_rows_with(models, query, favorites, recents);
     rows.get(clamp_row(row, rows.len())).and_then(|index| models.get(*index)).cloned()
+}
+
+/// The dialog to open after committing a model (`dialog-model.tsx:25-38`):
+/// a model with variants and no still-valid current variant opens the flat
+/// variant picker, otherwise the model dialog simply closes.
+pub(super) fn post_select_dialog(model: &Model) -> pickers::ModelSelectionDialog {
+    let current = variant_for(model);
+    pickers::next_dialog_after_model_select(&model.variants, current.as_deref())
+}
+
+/// Flat variant-select options (`dialog-variant.tsx:9-42`) for a committed
+/// model. `new_designs` mirrors upstream `useNewDesigns()`.
+pub(super) fn variant_options(model: &Model, new_designs: bool) -> Vec<String> {
+    let current = variant_for(model);
+    pickers::ModelVariantPicker::new(&model.variants, current.as_deref(), new_designs)
+        .options()
+        .to_vec()
+}
+
+/// Persist the chosen variant for a model. `None` (the `default` row) writes
+/// an explicit `"default"` so it can override a configured agent variant
+/// (`model-preference.ts:60-66,150-155`).
+pub(super) fn save_variant(model: &Model, value: Option<&str>) -> Result<(), String> {
+    let path = state_path().ok_or("unable to resolve model state directory")?;
+    save_variant_at(&path, model, value)
+}
+
+fn save_variant_at(path: &Path, model: &Model, value: Option<&str>) -> Result<(), String> {
+    let mut value_json = read_state(path)?;
+    if value_json.get("variant").is_none() || !value_json["variant"].is_object() {
+        value_json["variant"] = json!({});
+    }
+    let key = format!("{}/{}", model.provider_id, model.id);
+    value_json["variant"][key] = json!(value.unwrap_or("default"));
+    persist_state(path, &value_json)
+}
+
+/// Toggle favorite status for a model, returning the new state. Upstream
+/// `toggleFavorite` prepends a newly favorited model and drops an existing one
+/// (`local.tsx:465-472`, `model-preference.ts:94-100`), which is exactly what
+/// `model.dialog.favorite` (ctrl+f, `config/keybind.ts:165`) invokes.
+pub(super) fn toggle_favorite(model: &Model) -> Result<bool, String> {
+    let path = state_path().ok_or("unable to resolve model state directory")?;
+    toggle_favorite_at(&path, model)
+}
+
+fn toggle_favorite_at(path: &Path, model: &Model) -> Result<bool, String> {
+    let mut value = read_state(path)?;
+    let favorite = value["favorite"].as_array().cloned().unwrap_or_default();
+    let matches = |entry: &Value| {
+        entry["providerID"].as_str() == Some(&model.provider_id)
+            && entry["modelID"].as_str() == Some(&model.id)
+    };
+    let was_favorite = favorite.iter().any(matches);
+    let next: Vec<Value> = if was_favorite {
+        favorite.into_iter().filter(|entry| !matches(entry)).collect()
+    } else {
+        let mut list = vec![json!({"providerID":model.provider_id, "modelID":model.id})];
+        list.extend(favorite.into_iter().take(MAX_FAVORITE - 1));
+        list
+    };
+    value["favorite"] = Value::Array(next);
+    persist_state(path, &value)?;
+    Ok(!was_favorite)
 }
 
 /// Catalogue indices in `ModelPickerState` order. An empty query is the full
@@ -201,6 +312,18 @@ pub(super) fn catalogue(body: &str) -> Result<Vec<Model>, String> {
         let free = entry["cost"].as_array()
             .map(|cost| !cost.is_empty() && cost.iter().all(|row| row["input"].as_f64() == Some(0.0)))
             .unwrap_or(false);
+        let variants: Vec<String> = entry["variants"]
+            .as_array()
+            .map(|list| {
+                list.iter()
+                    .filter_map(|variant| {
+                        variant["id"].as_str().or_else(|| variant.as_str())
+                    })
+                    .filter(|variant| !variant.is_empty() && variant.len() <= 128)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
         if id.is_empty()
             || id.len() > 256
             || name.len() > 256
@@ -216,6 +339,7 @@ pub(super) fn catalogue(body: &str) -> Result<Vec<Model>, String> {
                 provider_id: provider.to_owned(),
                 context_window:entry.get("context_window").and_then(Value::as_u64).filter(|value|*value>0),
                 free,
+                variants,
             });
         }
     }
@@ -414,7 +538,14 @@ pub(super) fn save_model(model: &Model) -> Result<(), String> {
     if value.get("variant").is_none() {
         value["variant"] = json!({});
     }
-    let bytes = serde_json::to_vec(&value).map_err(|_| "unable to encode model state")?;
+    persist_state(&path, &value)
+}
+
+/// Shared bounded atomic write for the persisted model state. `save_model`
+/// and the DIALOG-12 favorite/variant writers all funnel through here so the
+/// 64 KiB cap, `0600` mode and temp-file cleanup stay single-sourced.
+fn persist_state(path: &Path, value: &Value) -> Result<(), String> {
+    let bytes = serde_json::to_vec(value).map_err(|_| "unable to encode model state")?;
     if bytes.len() > MAX_STATE_BYTES {
         return Err("model state exceeds size limit".to_owned());
     }
@@ -434,7 +565,7 @@ pub(super) fn save_model(model: &Model) -> Result<(), String> {
     let result = (|| -> std::io::Result<()> {
         file.write_all(&bytes)?;
         file.sync_all()?;
-        fs::rename(&temporary, &path)
+        fs::rename(&temporary, path)
     })();
     if result.is_err() {
         if let Err(error) = fs::remove_file(&temporary) {
@@ -514,17 +645,17 @@ mod picker_tests {
 
     fn fixture_models() -> Vec<Model> {
         vec![
-            Model { id: "x".into(), name: "Acme X".into(), provider_id: "acme".into(), context_window: None, free: false },
-            Model { id: "gpt-5.6".into(), name: "Fallback".into(), provider_id: "openai".into(), context_window: None, free: false },
+            Model { id: "x".into(), name: "Acme X".into(), provider_id: "acme".into(), context_window: None, free: false, variants: Vec::new() },
+            Model { id: "gpt-5.6".into(), name: "Fallback".into(), provider_id: "openai".into(), context_window: None, free: false, variants: Vec::new() },
         ]
     }
 
     #[test]
     fn picker_rows_orders_recents_first_for_empty_query() {
         let models = vec![
-            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None, free: false },
-            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None, free: false },
-            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None, free: false },
+            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None, free: false, variants: Vec::new() },
+            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None, free: false, variants: Vec::new() },
+            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None, free: false, variants: Vec::new() },
         ];
         let picker = pickers::ModelPickerState::open(&[]);
         let recents = vec![("p".to_owned(), "c".to_owned()), ("p".to_owned(), "a".to_owned())];
@@ -533,23 +664,108 @@ mod picker_tests {
         assert_eq!(picker_rows(&models, "b", &picker, &recents), vec![1]);
         assert_eq!(picker_rows(&models, "B", &picker, &[]), vec![1]);
     }
-
     #[test]
     fn dialog_rows_resolve_recents_first_index_to_committed_model() {
         let models = vec![
-            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None, free: false },
-            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None, free: false },
-            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None, free: false },
+            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None, free: false, variants: Vec::new() },
+            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None, free: false, variants: Vec::new() },
+            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None, free: false, variants: Vec::new() },
         ];
         let recents = vec![("p".to_owned(), "c".to_owned())];
         // Empty query -> recents-first picker order, not raw catalogue order.
-        assert_eq!(dialog_rows_with(&models, "", &recents), vec![2, 0, 1]);
+        assert_eq!(dialog_rows_with(&models, "", &[], &recents), vec![2, 0, 1]);
         // Index 0 in picker order is the recent C, not catalogue index 0 (A).
-        assert_eq!(dialog_selected_row_with(&models, "", 0, &recents).unwrap().id, "c");
-        assert_eq!(dialog_selected_row_with(&models, "", 1, &recents).unwrap().id, "a");
+        assert_eq!(dialog_selected_row_with(&models, "", 0, &[], &recents).unwrap().id, "c");
+        assert_eq!(dialog_selected_row_with(&models, "", 1, &[], &recents).unwrap().id, "a");
         // Non-empty query keeps the fuzzy `visible_rows` mapping.
-        assert_eq!(dialog_rows_with(&models, "b", &recents), vec![1]);
-        assert_eq!(dialog_selected_row_with(&models, "b", 0, &recents).unwrap().id, "b");
+        assert_eq!(dialog_rows_with(&models, "b", &[], &recents), vec![1]);
+        assert_eq!(dialog_selected_row_with(&models, "b", 0, &[], &recents).unwrap().id, "b");
+        // A favorite hoists above the recent for an empty query.
+        let favorites = vec![("p".to_owned(), "a".to_owned())];
+        assert_eq!(dialog_rows_with(&models, "", &favorites, &recents), vec![0, 2, 1]);
+        assert_eq!(dialog_selected_row_with(&models, "", 0, &favorites, &recents).unwrap().id, "a");
+    }
+
+    #[test]
+    fn favorite_and_variant_state_parse_and_roundtrip() {
+        let dir = TempDir::new("favorite-variant");
+        let state = dir.write(
+            "model.json",
+            r#"{"favorite":[{"providerID":"p","modelID":"c"},{"providerID":"p","modelID":"a"}],
+                "variant":{"p/a":"thinking","p/b":"default","p/c":""},
+                "recent":[{"providerID":"p","modelID":"c"}]}"#,
+        );
+        assert_eq!(
+            favorite_keys_at(Some(&state)),
+            vec![("p".to_owned(), "c".to_owned()), ("p".to_owned(), "a".to_owned())]
+        );
+        // Explicit "default" and empty strings normalize to None.
+        assert_eq!(variant_for_at(Some(&state), "p", "a"), Some("thinking".to_owned()));
+        assert_eq!(variant_for_at(Some(&state), "p", "b"), None);
+        assert_eq!(variant_for_at(Some(&state), "p", "c"), None);
+        assert_eq!(variant_for_at(Some(&state), "p", "missing"), None);
+        assert_eq!(favorite_keys_at(None), Vec::<pickers::ModelKey>::new());
+    }
+
+    #[test]
+    fn catalogue_parses_variants_from_ids_and_strings() {
+        let models = catalogue(r#"{"models":[
+            {"provider_id":"acme","id":"x","name":"X","variants":[{"id":"thinking"},{"id":"fast"}]},
+            {"provider_id":"acme","id":"y","name":"Y","variants":["low","high"]},
+            {"provider_id":"acme","id":"z","name":"Z"}
+        ]}"#).unwrap();
+        let find = |id: &str| models.iter().find(|m| m.id == id).unwrap();
+        assert_eq!(find("x").variants, vec!["thinking".to_owned(), "fast".to_owned()]);
+        assert_eq!(find("y").variants, vec!["low".to_owned(), "high".to_owned()]);
+        assert!(find("z").variants.is_empty());
+    }
+
+    #[test]
+    fn post_select_dialog_opens_variant_picker_only_when_variants_exist() {
+        let with_variants = Model {
+            id: "x".into(), name: "X".into(), provider_id: "p".into(),
+            context_window: None, free: false,
+            variants: vec!["default".into(), "thinking".into()],
+        };
+        let no_variants = Model { variants: Vec::new(), ..with_variants.clone() };
+        assert_eq!(post_select_dialog(&with_variants), pickers::ModelSelectionDialog::VariantPicker);
+        assert_eq!(post_select_dialog(&no_variants), pickers::ModelSelectionDialog::Closed);
+        // Variant options are `default` first, then the named variants.
+        assert_eq!(variant_options(&with_variants, false), vec!["default".to_owned(), "thinking".to_owned()]);
+    }
+
+    #[test]
+    fn toggle_favorite_prepends_new_and_drops_existing() {
+        let dir = TempDir::new("favorite-toggle");
+        let state = dir.write("model.json", r#"{"favorite":[{"providerID":"p","modelID":"c"}]}"#);
+        let model = |id: &str| Model {
+            id: id.into(), name: id.into(), provider_id: "p".into(),
+            context_window: None, free: false, variants: Vec::new(),
+        };
+        // A new favorite is prepended (upstream `toggleFavorite`).
+        assert_eq!(toggle_favorite_at(&state, &model("a")), Ok(true));
+        assert_eq!(
+            favorite_keys_at(Some(&state)),
+            vec![("p".to_owned(), "a".to_owned()), ("p".to_owned(), "c".to_owned())]
+        );
+        // Toggling again drops it and leaves the rest intact.
+        assert_eq!(toggle_favorite_at(&state, &model("a")), Ok(false));
+        assert_eq!(favorite_keys_at(Some(&state)), vec![("p".to_owned(), "c".to_owned())]);
+    }
+
+    #[test]
+    fn save_variant_persists_named_and_normalizes_default() {
+        let dir = TempDir::new("variant-save");
+        let state = dir.write("model.json", "{}");
+        let model = Model {
+            id: "a".into(), name: "A".into(), provider_id: "p".into(),
+            context_window: None, free: false, variants: Vec::new(),
+        };
+        assert_eq!(save_variant_at(&state, &model, Some("thinking")), Ok(()));
+        assert_eq!(variant_for_at(Some(&state), "p", "a"), Some("thinking".to_owned()));
+        // The `default` row persists an explicit "default", which reads back as None.
+        assert_eq!(save_variant_at(&state, &model, None), Ok(()));
+        assert_eq!(variant_for_at(Some(&state), "p", "a"), None);
     }
 
     #[test]
@@ -679,7 +895,7 @@ mod picker_tests {
         assert_eq!(models[index].qualified(), "9router/route/model-1158");
         assert_eq!(visible_rows(&models, "9router/route/model-1158"), vec![index]);
     }
-    fn models() -> Vec<Model> { vec![Model { id: "j-model".into(), name: "Jöhn 🚀".into(), provider_id: "openai".into(),context_window:None, free:false }, Model { id: "k-model".into(), name: "Kappa".into(), provider_id: "openai".into(),context_window:None, free:false }] }
+    fn models() -> Vec<Model> { vec![Model { id: "j-model".into(), name: "Jöhn 🚀".into(), provider_id: "openai".into(),context_window:None, free:false, variants:Vec::new() }, Model { id: "k-model".into(), name: "Kappa".into(), provider_id: "openai".into(),context_window:None, free:false, variants:Vec::new() }] }
     #[test] fn query_is_utf8_and_jk_are_search_text() {
         let m = models();
         assert_eq!(visible_rows(&m, "öhn"), vec![0]);

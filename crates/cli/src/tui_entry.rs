@@ -7060,6 +7060,11 @@ fn native_loop(
     // never mutates it, and cancel returns the exact original draft.
     let mut filter_input = String::new();
     let mut model_row: usize = 0;
+    // DIALOG-12: post-select flat variant picker (`dialog-model.tsx:25-38` →
+    // `dialog-variant.tsx:9-42`). `Some` while the variant list owns the model
+    // dialog's focus: the committed model, its option rows and the focused row.
+    // Escape returns to the model list; Enter persists the choice.
+    let mut variant_pick: Option<(native_setup::Model, Vec<String>, usize)> = None;
     let mut last_permission_poll = Instant::now();
     let mut permission_error: Option<String> = None;
     // TOOL-002: bounded pending-permission tool-call ids joined against
@@ -8627,6 +8632,22 @@ fn native_loop(
                 "Enter save · Esc cancel".into(),
             ],
             native_setup::Dialog::Model => {
+                if let Some((model, options, row)) = variant_pick.as_ref() {
+                    // DIALOG-12: flat variant list (`dialog-variant.tsx:9-42`)
+                    // after committing a model that advertises variants.
+                    let active = native_setup::clamp_row(*row, options.len());
+                    let mut panel = vec![
+                        format!("Select variant for {}", model.name),
+                        String::new(),
+                    ];
+                    let capacity = native_setup::picker_capacity(view.modal_content_height(), 2, 2);
+                    panel.extend(native_setup::picker_render_indices(active, options.len(), capacity).into_iter().filter_map(|index| {
+                        options.get(index).map(|option| format!("{} {}", if index == active { ">" } else { " " }, option))
+                    }));
+                    panel.push(String::new());
+                    panel.push(format!("{} variants · ↑/↓ select · Enter use · Esc back", options.len()));
+                    panel
+                } else {
                 let mut panel = vec![
                     "Select model".to_owned(),
                     String::new(),
@@ -8659,6 +8680,7 @@ fn native_loop(
                     visible.len()
                 ));
                 panel
+                }
             }
         };
         if matches!(
@@ -11006,12 +11028,13 @@ fn native_loop(
                     && !view.dialogs.intercepts_input()
                     && matches!(dialog, native_setup::Dialog::Model)
                 {
-                    let visible = native_setup::dialog_rows(&models, &filter_input);
-                    model_row = native_setup::move_row(
-                        model_row,
-                        visible.len(),
-                        matches!(direction, native_input_decoder::InputEvent::ArrowDown),
-                    );
+                    let down = matches!(direction, native_input_decoder::InputEvent::ArrowDown);
+                    if let Some((_, options, row)) = variant_pick.as_mut() {
+                        *row = native_setup::move_row(*row, options.len(), down);
+                    } else {
+                        let visible = native_setup::dialog_rows(&models, &filter_input);
+                        model_row = native_setup::move_row(model_row, visible.len(), down);
+                    }
                     continue;
                 }
                 if dialog == native_setup::Dialog::Provider {
@@ -11177,6 +11200,10 @@ fn native_loop(
                                 draft_cursor = draft.len();
                             }
                         }
+                    }
+                    native_setup::Dialog::Model if variant_pick.is_some() => {
+                        // DIALOG-12: the flat variant list has no text filter;
+                        // typing must not corrupt the model search buffer.
                     }
                     _ => {
                         if filter_input
@@ -11670,11 +11697,19 @@ fn native_loop(
                 view.close_page();
                 utf8.reset();
             }
+            27 if variant_pick.is_some() => {
+                // DIALOG-12: Escape from the flat variant list returns to the
+                // model list. The committed model selection is already saved.
+                variant_pick = None;
+                model_row = 0;
+                utf8.reset();
+            }
             27 if !matches!(dialog, native_setup::Dialog::None) => {
                 // Canceling a provider/model/API-key dialog returns the
                 // composer draft EXACTLY as it was: the dialog filter and
                 // the segregated key buffer are dialog-local and are
                 // discarded; the chat draft is never the dialog buffer.
+                variant_pick = None;
                 dialog = native_setup::Dialog::None;
                 model_load = None;
                 setup_error = None;
@@ -11719,6 +11754,29 @@ fn native_loop(
             // Chat keyboard scroll (Ctrl-F / Ctrl-B): bounded view state
             // only; no history, dialog or turn side effect. Ctrl-T (0x14)
             // is not mapped here and stays inert by fall-through.
+            6 if matches!(dialog, native_setup::Dialog::Model) && variant_pick.is_none() => {
+                // DIALOG-12: ctrl+f toggles favorite for the focused model
+                // (`config/keybind.ts:165` `model.dialog.favorite`). The
+                // favorite order is re-read on the next `dialog_rows` call.
+                if let Some(model) =
+                    native_setup::dialog_selected_row(&models, &filter_input, model_row)
+                {
+                    match native_setup::toggle_favorite(&model) {
+                        Ok(true) => append_transcript(
+                            &mut transcript,
+                            format!("favorited {}", model.qualified()),
+                        ),
+                        Ok(false) => append_transcript(
+                            &mut transcript,
+                            format!("unfavorited {}", model.qualified()),
+                        ),
+                        Err(error) => {
+                            append_transcript(&mut transcript, format!("error: {error}"))
+                        }
+                    }
+                }
+                utf8.reset();
+            }
             6 if !page_open && matches!(dialog, native_setup::Dialog::None) => {
                 history_navigation_revision = history_navigation_revision.wrapping_add(1);
                 history_navigation_request = None;
@@ -12482,6 +12540,7 @@ fn native_loop(
                                     setup_error = None;
                                     filter_input = format!("{provider_id}/");
                                     dialog = native_setup::Dialog::Model;
+                                    variant_pick = None;
                                     model_row = 0;
                                 }
                                 Err(_) => {
@@ -12521,6 +12580,7 @@ fn native_loop(
                                     // byte-identical.
                                     filter_input.clear();
                                     dialog = native_setup::Dialog::Model;
+                                    variant_pick = None;
                                 }
                                 Err(_) => append_transcript(
                                     &mut transcript,
@@ -12529,6 +12589,30 @@ fn native_loop(
                             }
                         }
                         native_setup::Dialog::Model => {
+                            if let Some((model, options, row)) = variant_pick.clone() {
+                                // DIALOG-12: Enter commits the focused variant
+                                // (`dialog-variant.tsx:9-42`). The `default` row
+                                // persists an explicit "default" so it overrides
+                                // any configured agent variant.
+                                let option = options
+                                    .get(native_setup::clamp_row(row, options.len()))
+                                    .cloned();
+                                if let Some(option) = option {
+                                    let value = (option != "default").then_some(option.as_str());
+                                    match native_setup::save_variant(&model, value) {
+                                        Ok(()) => {
+                                            view.set_composer_model(&model.name, &model.provider_id);
+                                            variant_pick = None;
+                                            dialog = native_setup::Dialog::None;
+                                            model_row = 0;
+                                        }
+                                        Err(error) => append_transcript(
+                                            &mut transcript,
+                                            format!("error: {error}"),
+                                        ),
+                                    }
+                                }
+                            } else {
                             // Enter commits the focused advertised row. Query text is
                             // never itself a model identity.
                             let choice =
@@ -12542,8 +12626,22 @@ fn native_loop(
                                         // honest live model status update.
                                         view.set_model(selected.as_ref().map(|m| m.qualified()));
                                         view.set_composer_model(&model.name, &model.provider_id);
-                                        dialog = native_setup::Dialog::None;
-                                        model_row = 0;
+                                        // DIALOG-12: a model that advertises
+                                        // variants with no still-valid current
+                                        // variant opens the flat variant picker
+                                        // (`dialog-model.tsx:25-38`).
+                                        if native_setup::post_select_dialog(&model)
+                                            == crate::native_palette::pickers::ModelSelectionDialog::VariantPicker
+                                        {
+                                            let options =
+                                                native_setup::variant_options(&model, new_designs);
+                                            filter_input.clear();
+                                            variant_pick = Some((model.clone(), options, 0));
+                                            dialog = native_setup::Dialog::Model;
+                                        } else {
+                                            dialog = native_setup::Dialog::None;
+                                            model_row = 0;
+                                        }
                                     }
                                     Err(error) => append_transcript(
                                         &mut transcript,
@@ -12555,6 +12653,7 @@ fn native_loop(
                                     &mut transcript,
                                     "error: model is not advertised".to_owned(),
                                 );
+                            }
                             }
                         }
                         // Settings owns its events before composer/provider
@@ -13149,6 +13248,7 @@ fn native_loop(
                     // chat-composer typed "/models" is consumed, the
                     // dialog-local filter only is touched.
                     dialog = native_setup::Dialog::Model;
+                    variant_pick = None;
                     model_row = 0;
                     if provider_id != "openai" && model_load.is_none() {
                         if let Some(snapshot) = live.as_ref() {
@@ -14408,7 +14508,7 @@ mod tab_binding_tests {
         let mut selected = None;
         let mut route = true;
         let mut compact_worker = None;
-        let models = [native_setup::Model { id: "target".into(), name: "Target".into(), provider_id: "fixture".into(), context_window: None, free: false }];
+        let models = [native_setup::Model { id: "target".into(), name: "Target".into(), provider_id: "fixture".into(), context_window: None, free: false, variants: Vec::new() }];
         apply_close_tab_result(result, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut selected, &models, &mut route, &mut compact_worker);
         assert_eq!(live.as_ref().unwrap().session_id, B, "Send reads its session identity from live");
         assert_eq!(generation, 5);
@@ -14455,7 +14555,7 @@ mod tab_binding_tests {
         let mut selected = None;
         let mut route = false;
         let mut compact_worker = None;
-        let models = [native_setup::Model { id: "target".into(), name: "Target".into(), provider_id: "fixture".into(), context_window: None, free: false }];
+        let models = [native_setup::Model { id: "target".into(), name: "Target".into(), provider_id: "fixture".into(), context_window: None, free: false, variants: Vec::new() }];
         apply_close_tab_result(result, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut selected, &models, &mut route, &mut compact_worker);
         assert_eq!(live.as_ref().map(|s| s.session_id.as_str()), Some(B));
         assert_eq!(generation, 5);
@@ -14601,7 +14701,7 @@ mod tab_binding_tests {
         let mut cursor = 0;
         let mut route = true;
         let mut completion = crate::native_completion::Completion::default();
-        let models = vec![native_setup::Model { id: "child".into(), name: "Child".into(), provider_id: "fixture".into(), context_window: None, free: false }];
+        let models = vec![native_setup::Model { id: "child".into(), name: "Child".into(), provider_id: "fixture".into(), context_window: None, free: false, variants: Vec::new() }];
         let mut selected = None;
         let snapshot = LiveSnapshot { origin: "http://127.0.0.1:1".into(), session_id: A.into(), title: "A".into(), state: "idle".into(), updated_at: String::new(), message_count: 0, last_text: None, history: vec![], typed_history: vec![], raw_history: vec![], history_next_before: None, history_children: 0, parent_session: true, parent_session_id: Some(B.into()), directory: None, session_titles: vec![], session_project_labels: vec![], session_vcs: vec![] };
         commit_child_route(snapshot, "child draft".into(), 2, 8, 13, Some("fixture/child".into()), &models, &mut selected, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut route, &mut completion);
@@ -15120,6 +15220,7 @@ mod command_consumption_tests {
             provider_id: "fixture".into(),
             context_window: None,
             free: false,
+            variants: Vec::new(),
         }];
         let mut route = true;
         let mut compact_worker = None;
