@@ -870,7 +870,7 @@ impl Storage {
         }
         let mut connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
         let connection = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        connection.execute("INSERT INTO sessions (id,title,state,created_at,updated_at,archived_at,revert,viewed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",params![session.id.to_string(),session.title,encode_state(session.state),session.created_at.to_string(),session.updated_at.to_string(),session.archived_at.map(Timestamp::to_rfc3339),encode_revert(session.revert.as_ref())?,session.viewed_at.map(Timestamp::to_rfc3339)])?;
+        connection.execute("INSERT INTO sessions (id,title,state,created_at,updated_at,archived_at,revert,viewed_at,idle_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",params![session.id.to_string(),session.title,encode_state(session.state),session.created_at.to_string(),session.updated_at.to_string(),session.archived_at.map(Timestamp::to_rfc3339),encode_revert(session.revert.as_ref())?,session.viewed_at.map(Timestamp::to_rfc3339),session.idle_at.map(Timestamp::to_rfc3339)])?;
         if let Some(directory) = directory {
             connection.execute(
                 "INSERT INTO session_directories(session_id,directory) VALUES(?1,?2)",
@@ -972,7 +972,7 @@ impl Storage {
         let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
         connection
             .query_row(
-                "SELECT id,title,state,created_at,updated_at,archived_at,revert,viewed_at FROM sessions WHERE id=?1",
+                "SELECT id,title,state,created_at,updated_at,archived_at,revert,viewed_at,idle_at FROM sessions WHERE id=?1",
                 params![id.to_string()],
                 decode_session,
             )
@@ -985,9 +985,9 @@ impl Storage {
     ) -> Result<Vec<SessionSummary>, StorageError> {
         let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
         let sql = if include_archived {
-            "SELECT id,title,state,created_at,updated_at,archived_at,revert,viewed_at FROM sessions ORDER BY updated_at DESC,id DESC"
+            "SELECT id,title,state,created_at,updated_at,archived_at,revert,viewed_at,idle_at FROM sessions ORDER BY updated_at DESC,id DESC"
         } else {
-            "SELECT id,title,state,created_at,updated_at,archived_at,revert,viewed_at FROM sessions WHERE state='active' ORDER BY updated_at DESC,id DESC"
+            "SELECT id,title,state,created_at,updated_at,archived_at,revert,viewed_at,idle_at FROM sessions WHERE state='active' ORDER BY updated_at DESC,id DESC"
         };
         let mut statement = connection.prepare(sql)?;
         let rows = statement.query_map([], decode_session)?;
@@ -1063,6 +1063,35 @@ impl Storage {
         let changed = connection.execute(
             "UPDATE sessions SET viewed_at=?1,updated_at=?2 WHERE id=?3",
             params![viewed.map(|viewed| viewed.to_rfc3339()), at.to_string(), id.to_string()],
+        )?;
+        if changed == 0 {
+            return Err(StorageError::SessionNotFound(id));
+        }
+        Ok(())
+    }
+    /// TAB-21: record the session's last idle transition (`time_idle`
+    /// upstream, `projector.ts:423-447`). Monotone: a stale/duplicate terminal
+    /// event never regresses the watermark.
+    pub fn set_session_idle(&self, id: SessionId, idle: &Timestamp) -> Result<(), StorageError> {
+        let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let current: Option<String> = connection
+            .query_row(
+                "SELECT idle_at FROM sessions WHERE id=?1",
+                params![id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        if let Some(existing) = current {
+            if let Ok(existing) = parse_timestamp(existing) {
+                if *idle <= existing {
+                    return Ok(());
+                }
+            }
+        }
+        let changed = connection.execute(
+            "UPDATE sessions SET idle_at=?1,updated_at=?2 WHERE id=?3",
+            params![idle.to_rfc3339(), idle.to_string(), id.to_string()],
         )?;
         if changed == 0 {
             return Err(StorageError::SessionNotFound(id));
@@ -1641,7 +1670,7 @@ impl Storage {
             payload TEXT NOT NULL CHECK(length(CAST(payload AS BLOB)) BETWEEN 1 AND 8192),
             PRIMARY KEY(session_id,ordinal)
         );")?;
-        connection.execute_batch("CREATE TABLE IF NOT EXISTS schema_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,title TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('active','archived')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,archived_at TEXT,revert TEXT,viewed_at TEXT); CREATE INDEX IF NOT EXISTS sessions_updated_idx ON sessions(updated_at DESC); CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,role TEXT NOT NULL,inline_text TEXT,blob_hash TEXT,byte_len INTEGER NOT NULL CHECK(byte_len>=0),created_at TEXT NOT NULL,CHECK((inline_text IS NULL)!=(blob_hash IS NULL))); CREATE INDEX IF NOT EXISTS messages_session_idx ON messages(session_id,created_at,id); CREATE TABLE IF NOT EXISTS message_activity(message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,reasoning_summary TEXT NOT NULL CHECK(length(CAST(reasoning_summary AS BLOB))<=8192)); CREATE TABLE IF NOT EXISTS recent_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,kind TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS recent_events_session_idx ON recent_events(session_id,seq); INSERT INTO schema_meta(key,value) VALUES('schema_version','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value;")?;
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS schema_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,title TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('active','archived')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,archived_at TEXT,revert TEXT,viewed_at TEXT,idle_at TEXT); CREATE INDEX IF NOT EXISTS sessions_updated_idx ON sessions(updated_at DESC); CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,role TEXT NOT NULL,inline_text TEXT,blob_hash TEXT,byte_len INTEGER NOT NULL CHECK(byte_len>=0),created_at TEXT NOT NULL,CHECK((inline_text IS NULL)!=(blob_hash IS NULL))); CREATE INDEX IF NOT EXISTS messages_session_idx ON messages(session_id,created_at,id); CREATE TABLE IF NOT EXISTS message_activity(message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,reasoning_summary TEXT NOT NULL CHECK(length(CAST(reasoning_summary AS BLOB))<=8192)); CREATE TABLE IF NOT EXISTS recent_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,kind TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS recent_events_session_idx ON recent_events(session_id,seq); INSERT INTO schema_meta(key,value) VALUES('schema_version','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value;")?;
         // SIDE-10 revert fact seam (upstream `projector.ts:761-781` keeps the
         // staged revert on the session row): databases created before this
         // column existed gain it idempotently; fresh databases get it above.
@@ -1663,6 +1692,17 @@ impl Storage {
         )?;
         if has_viewed_column == 0 {
             connection.execute_batch("ALTER TABLE sessions ADD COLUMN viewed_at TEXT;")?;
+        }
+        // TAB-21 idle-transition seam (upstream `projector.ts:423-447`: a
+        // terminal turn writes `time_idle`): databases created before this
+        // column existed gain it idempotently; fresh databases get it above.
+        let has_idle_column: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='idle_at'",
+            [],
+            |row| row.get(0),
+        )?;
+        if has_idle_column == 0 {
+            connection.execute_batch("ALTER TABLE sessions ADD COLUMN idle_at TEXT;")?;
         }
         connection.execute_batch(
             "CREATE TABLE IF NOT EXISTS draft_attachments(
@@ -2158,6 +2198,7 @@ fn decode_session(row: &rusqlite::Row<'_>) -> Result<SessionSummary, rusqlite::E
     let archived: Option<String> = row.get(5)?;
     let revert_json: Option<String> = row.get(6)?;
     let viewed_at: Option<String> = row.get(7)?;
+    let idle_at: Option<String> = row.get(8)?;
     Ok(SessionSummary {
         id: parse_id(row.get(0)?)?,
         title: row.get(1)?,
@@ -2170,6 +2211,7 @@ fn decode_session(row: &rusqlite::Row<'_>) -> Result<SessionSummary, rusqlite::E
             .transpose()
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
         viewed_at: viewed_at.map(parse_timestamp).transpose()?,
+        idle_at: idle_at.map(parse_timestamp).transpose()?,
     })
 }
 fn decode_message(row: &rusqlite::Row<'_>) -> Result<MessageRecord, rusqlite::Error> {
@@ -2214,7 +2256,7 @@ mod tests {
             updated_at: now,
             archived_at: None,
             revert: None,
-            viewed_at: None,
+            viewed_at: None, idle_at: None,
         }
     }
     #[test]
@@ -2324,6 +2366,36 @@ mod tests {
         storage.set_session_viewed(expected.id, None, at).unwrap();
         expected.viewed_at = None;
         assert_eq!(storage.get_session(expected.id).unwrap(), expected);
+    }
+    #[test]
+    fn set_session_idle_is_monotone_and_surfaces_in_listing() {
+        // TAB-21: a terminal turn records `time_idle`; the watermark never
+        // regresses on a stale/duplicate terminal event.
+        let temp = tempdir().unwrap();
+        let storage = Storage::open_in_memory(temp.path().join("blobs")).unwrap();
+        let mut expected = session("idle");
+        storage.create_session(&expected).unwrap();
+        let first = Timestamp::from_epoch_millis(1_700_000_000_000).unwrap();
+        storage.set_session_idle(expected.id, &first).unwrap();
+        expected.idle_at = Some(first);
+        expected.updated_at = first;
+        assert_eq!(storage.get_session(expected.id).unwrap(), expected);
+        assert_eq!(
+            storage.list_sessions(false).unwrap(),
+            vec![expected.clone()]
+        );
+        // A newer idle advances; an older one is ignored (monotone).
+        let later = Timestamp::from_epoch_millis(1_700_000_005_000).unwrap();
+        storage.set_session_idle(expected.id, &later).unwrap();
+        expected.idle_at = Some(later);
+        expected.updated_at = later;
+        assert_eq!(storage.get_session(expected.id).unwrap(), expected);
+        storage.set_session_idle(expected.id, &first).unwrap();
+        assert_eq!(
+            storage.get_session(expected.id).unwrap().idle_at,
+            Some(later),
+            "a stale idle must not regress the watermark"
+        );
     }
     #[test]
     fn large_message_requires_blob() {

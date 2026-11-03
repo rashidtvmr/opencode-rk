@@ -216,6 +216,12 @@ pub struct SessionSummary {
     pub revert: Option<SessionRevert>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub viewed_at: Option<Timestamp>,
+    /// TAB-21: the session's last idle transition (`time_idle` upstream,
+    /// `projector.ts:423-447`): written when a turn reaches a terminal state.
+    /// The unread predicate is `idle_at.is_some() && (viewed_at.is_none() ||
+    /// idle_at > viewed_at)` (`session-tabs.tsx:120-123`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_at: Option<Timestamp>,
 }
 impl SessionSummary {
     pub fn validate(&self) -> Result<(), ContractError> {

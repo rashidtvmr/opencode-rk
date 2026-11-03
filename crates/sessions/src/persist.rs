@@ -115,7 +115,7 @@ mod tests {
             updated_at: Timestamp::now(),
             archived_at: None,
             revert: None,
-            viewed_at: None,
+            viewed_at: None, idle_at: None,
         }
     }
 

@@ -1952,6 +1952,8 @@ async fn compact_session(
         let client = responses_client(provider_id).await.map_err(provider_failure)?;
         fallback_compaction::compact(&state.sessions, &client, &owner, provider_id, model_id, keep_recent_turns).await?;
         append_compaction_message(&state, &events, id, "completed", None, false, None).await?;
+        // TAB-21: a completed compaction is a terminal execution; record idle.
+        let _ = state.sessions.mark_idle(id, Timestamp::now()).await;
         return Ok(Json(json!({"compacted":true,"strategy":"fallback"})));
     }
     // Capture the actual durable head before loading input. The transactional
@@ -1990,6 +1992,8 @@ async fn compact_session(
         window.usage.clone(),
     )
     .await?;
+    // TAB-21: a completed compaction is a terminal execution; record idle.
+    let _ = state.sessions.mark_idle(id, Timestamp::now()).await;
     Ok(Json(json!({"compacted":true,"strategy":"native"})))
 }
 
@@ -2532,6 +2536,9 @@ async fn create_turn(
         .record_message_execution(assistant_message.id, turn_execution(&body.model, None, usage, None))
         .await;
     auto_compaction::schedule_after_successful_turn(&state.sessions, &provider, &owner, id, provider_id, model_id, usage, &request_context).await;
+    // TAB-21: a terminal turn records the session's idle transition
+    // (`time_idle`, `projector.ts:423-447`), which drives the unread predicate.
+    let _ = state.sessions.mark_idle(id, Timestamp::now()).await;
 
     Ok((
         StatusCode::CREATED,
@@ -3723,7 +3730,15 @@ pub(crate) fn create_turn_stream_with_message(
                             }
                         }
                     }
-                    TurnStreamStage::Done => return None,
+                    TurnStreamStage::Done => {
+                        // TAB-21: the streamed turn's terminal point records
+                        // the idle transition (`projector.ts:423-447`).
+                        let _ = state
+                            .sessions
+                            .mark_idle(state.session_id, Timestamp::now())
+                            .await;
+                        return None;
+                    }
                 }
             }
         },

@@ -252,7 +252,7 @@ fn decode_session(
         updated_at: decode_ts(row.get(3)?)?,
         archived_at: row.get::<_, Option<i64>>(4)?.map(decode_ts).transpose()?,
         revert: None,
-        viewed_at: None,
+        viewed_at: None, idle_at: None,
     })
 }
 fn decode_summary_row(row: &rusqlite::Row<'_>) -> Result<SessionSummary, rusqlite::Error> {
@@ -266,7 +266,7 @@ fn decode_summary_row(row: &rusqlite::Row<'_>) -> Result<SessionSummary, rusqlit
         updated_at: decode_ts(row.get(4)?)?,
         archived_at: row.get::<_, Option<i64>>(5)?.map(decode_ts).transpose()?,
         revert: None,
-        viewed_at: None,
+        viewed_at: None, idle_at: None,
     })
 }
 fn decode_message_row(
@@ -519,7 +519,7 @@ impl SessionService {
             updated_at: now,
             archived_at: None,
             revert: None,
-            viewed_at: None,
+            viewed_at: None, idle_at: None,
         };
         let storage = Arc::clone(&self.storage);
         let candidate = session.clone();
@@ -631,8 +631,15 @@ impl SessionService {
         let storage = Arc::clone(&self.storage);
         run_blocking(move || {
             let current = storage.get_session(id)?;
-            // `session.ts:62-68`: skip when idle is unknown, not newer than the
-            // session's own idle, or already covered by the viewed watermark.
+            // `session.ts:62-68`: skip when the session has no idle, when the
+            // observed idle is *newer* than the session's own idle (stale or
+            // future client), or when the viewed watermark already covers it.
+            let Some(idle_at) = current.idle_at else {
+                return Ok(false);
+            };
+            if idle > idle_at {
+                return Ok(false);
+            }
             let advanced = match current.viewed_at {
                 None => true,
                 Some(viewed) => idle > viewed,
@@ -644,6 +651,12 @@ impl SessionService {
             Ok(true)
         })
         .await
+    }
+    /// TAB-21: record a terminal turn as the session's idle transition
+    /// (`time_idle`, `projector.ts:423-447`). Monotone in storage.
+    pub async fn mark_idle(&self, id: SessionId, idle: Timestamp) -> Result<(), SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.set_session_idle(id, &idle)).await
     }
     pub async fn append_text(
         &self,
@@ -1469,6 +1482,33 @@ mod tests {
         service.archive(session.id).await.unwrap();
         assert!(service.list(false).await.unwrap().is_empty());
         assert_eq!(service.list(true).await.unwrap().len(), 1);
+    }
+    #[tokio::test]
+    async fn mark_idle_and_view_watermark_follow_upstream_guard() {
+        let temp = tempdir().unwrap();
+        let storage = Arc::new(Storage::open_in_memory(temp.path().join("blobs")).unwrap());
+        let service = SessionService::new(storage);
+        let session = service.create("idle").await.unwrap();
+        // A view before any idle transition is a no-op
+        // (`session.time.idle === undefined`, `session.ts:63`).
+        assert!(!service.set_viewed(session.id, Timestamp::now()).await.unwrap());
+        // Millisecond-aligned so the RFC3339 storage round-trip is exact.
+        let idle = Timestamp::from_epoch_millis(1_700_000_000_000).unwrap();
+        service.mark_idle(session.id, idle).await.unwrap();
+        assert_eq!(service.get(session.id).await.unwrap().idle_at, Some(idle));
+        // A stale idle never regresses the watermark.
+        let stale = Timestamp::from_epoch_millis(1_699_999_999_000).unwrap();
+        service.mark_idle(session.id, stale).await.unwrap();
+        assert_eq!(service.get(session.id).await.unwrap().idle_at, Some(idle));
+        // Viewing an idle newer than the session's own idle is skipped
+        // (`input.idle > session.time.idle`, `session.ts:65`).
+        let future = Timestamp::from_epoch_millis(1_700_000_001_000).unwrap();
+        assert!(!service.set_viewed(session.id, future).await.unwrap());
+        // Viewing the observed idle advances the watermark.
+        assert!(service.set_viewed(session.id, idle).await.unwrap());
+        assert_eq!(service.get(session.id).await.unwrap().viewed_at, Some(idle));
+        // A duplicate view is a no-op (`viewed >= input.idle`, `session.ts:66`).
+        assert!(!service.set_viewed(session.id, idle).await.unwrap());
     }
     #[tokio::test]
     async fn large_content_uses_blob() {

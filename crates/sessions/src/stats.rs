@@ -132,7 +132,7 @@ mod tests {
                 None
             },
             revert: None,
-            viewed_at: None,
+            viewed_at: None, idle_at: None,
         }
     }
 

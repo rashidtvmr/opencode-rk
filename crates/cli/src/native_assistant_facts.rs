@@ -579,6 +579,22 @@ mod native_assistant_facts_tests {
     }
 
     #[test]
+    fn session_idle_and_viewed_stamps_feed_the_view_acknowledgement() {
+        // TAB-21: the session listing's `idleAt`/`viewedAt` (the wire form of
+        // `SessionSummary.idle_at`/`viewed_at`) drive the live
+        // `ViewAcknowledgement`; a missing stamp stays absent.
+        let row = json!({
+            "id": "s-1",
+            "idleAt": "2026-10-19T00:00:05.000Z",
+            "viewedAt": "2026-10-19T00:00:01.000Z"
+        });
+        assert_eq!(created_at_ms(&row, "/idleAt"), Some(1_792_368_005_000));
+        assert_eq!(created_at_ms(&row, "/viewedAt"), Some(1_792_368_001_000));
+        assert_eq!(created_at_ms(&json!({"idleAt": null}), "/idleAt"), None);
+        assert_eq!(created_at_ms(&json!({"id": "s-1"}), "/viewedAt"), None);
+    }
+
+    #[test]
     fn typed_cancel_code_is_the_only_interruption_source() {
         // Typed code `cancelled` (lib.rs:2033/2499/2504/2505,
         // task_children.rs:664-668/726) classifies regardless of message text.

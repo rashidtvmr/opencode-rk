@@ -658,6 +658,13 @@ struct LiveSnapshot {
     /// after the boundary is excluded (upstream `usage.ts:9-12`).
     #[cfg(feature = "native")]
     session_revert_boundary: Option<String>,
+    /// TAB-21: the active session's last idle transition (`idleAt`, epoch ms)
+    /// and server-global viewed watermark (`viewedAt`). The live
+    /// `ViewAcknowledgement` driver POSTs `/view` when focused + unread.
+    #[cfg(feature = "native")]
+    session_idle_at: Option<i64>,
+    #[cfg(feature = "native")]
+    session_viewed_at: Option<i64>,
 }
 
 /// TAB-10 producer: derive VCS facts for a session's working directory by
@@ -1382,6 +1389,10 @@ fn snapshot_from_listing(
         session_revert,
         #[cfg(feature = "native")]
         session_revert_boundary,
+        #[cfg(feature = "native")]
+        session_idle_at: crate::native_assistant_facts::created_at_ms(target, "/idleAt"),
+        #[cfg(feature = "native")]
+        session_viewed_at: crate::native_assistant_facts::created_at_ms(target, "/viewedAt"),
     })
 }
 
@@ -7528,6 +7539,11 @@ fn native_loop(
     // Upstream leader chord state (`LeaderDefault = "ctrl+x"`, then `b` →
     // `session.sidebar.toggle`): armed only from the chat composer.
     let mut leader_pending = false;
+    // TAB-21: focus-aware view acknowledgement for the active session. The
+    // driver POSTs `/api/sessions/{id}/view` when the active tab is unread
+    // (idle newer than the server-global viewed watermark), with the upstream
+    // retry schedule (`session-tabs.tsx:242-263`).
+    let mut view_ack = crate::native_navigation::ViewAcknowledgement::new();
     let mut configured_commands_loaded = false;
     let mut completion = crate::native_completion::Completion::default();
     completion.commands = crate::native_view_pages::command_rows().into_iter()
@@ -7546,6 +7562,35 @@ fn native_loop(
     let mut completion_loaded = false;
     let mut byte = [0u8; 1];
     loop {
+        // TAB-21: focus-aware view acknowledgement. When the active session is
+        // unread (idle newer than the server-global viewed watermark), POST the
+        // observed idle transition so the watermark advances; a failure backs
+        // off (250 ms * 2^attempt, capped 5 s; `session-tabs.tsx:242-263`).
+        if let Some(snapshot) = live.as_ref() {
+            view_ack.observe(
+                true,
+                snapshot.session_idle_at.map(|ms| ms.max(0) as u64),
+                snapshot.session_viewed_at.map(|ms| ms.max(0) as u64),
+            );
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_millis() as u64)
+                .unwrap_or(0);
+            if let Some(idle) = view_ack.poll(now_ms) {
+                let body = serde_json::json!({ "idle": idle as i64 }).to_string();
+                let path = format!("/api/sessions/{}/view", snapshot.session_id);
+                match http_request(&snapshot.origin, "POST", &path, Some(&body), auth) {
+                    Ok(_) => view_ack.succeeded(),
+                    Err(error) => {
+                        view_ack.failed(now_ms);
+                        crate::native_debug::event(
+                            "session.view.error",
+                            serde_json::json!({"session_id": snapshot.session_id, "error": error}),
+                        );
+                    }
+                }
+            }
+        }
         // Persist the open-tab order/titles whenever open/close/move/rename
         // changed them. One small bounded write per actual change; titles are
         // refreshed by the same events that already repaint the strip.
@@ -14886,7 +14931,7 @@ mod tab_binding_tests {
         let mut completion = crate::native_completion::Completion::default();
         let models = vec![native_setup::Model { id: "child".into(), name: "Child".into(), provider_id: "fixture".into(), context_window: None, free: false, cost: None, variants: Vec::new() }];
         let mut selected = None;
-        let snapshot = LiveSnapshot { origin: "http://127.0.0.1:1".into(), session_id: A.into(), title: "A".into(), state: "idle".into(), updated_at: String::new(), message_count: 0, last_text: None, history: vec![], typed_history: vec![], raw_history: vec![], history_next_before: None, history_children: 0, parent_session: true, parent_session_id: Some(B.into()), directory: None, session_titles: vec![], session_project_labels: vec![], session_vcs: vec![], session_revert: None, session_revert_boundary: None };
+        let snapshot = LiveSnapshot { origin: "http://127.0.0.1:1".into(), session_id: A.into(), title: "A".into(), state: "idle".into(), updated_at: String::new(), message_count: 0, last_text: None, history: vec![], typed_history: vec![], raw_history: vec![], history_next_before: None, history_children: 0, parent_session: true, parent_session_id: Some(B.into()), directory: None, session_titles: vec![], session_project_labels: vec![], session_vcs: vec![], session_revert: None, session_revert_boundary: None, session_idle_at: None, session_viewed_at: None };
         commit_child_route(snapshot, "child draft".into(), 2, 8, 13, Some("fixture/child".into()), &models, &mut selected, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut route, &mut completion);
         assert_eq!(draft, "child draft");
         assert_eq!(cursor, 8);
@@ -15500,6 +15545,8 @@ mod command_consumption_tests {
             session_vcs: vec![],
             session_revert: None,
             session_revert_boundary: None,
+            session_idle_at: None,
+            session_viewed_at: None,
         });
         let mut history_window = live.as_ref().map(|snapshot| crate::native_chat_projection::NativeHistoryWindow::new(
             &snapshot.raw_history,
@@ -15556,6 +15603,8 @@ mod command_consumption_tests {
             session_vcs: vec![],
             session_revert: None,
             session_revert_boundary: None,
+            session_idle_at: None,
+            session_viewed_at: None,
         });
         let mut history = None;
         let mut generation = 7;
