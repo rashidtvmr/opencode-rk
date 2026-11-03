@@ -11747,3 +11747,27 @@ Landed by the orchestrator directly while the fleet was down:
   `theme_picker_cancel` in `tui_entry.rs`; focused test
   `theme12_live_picker_previews_on_move_and_reverts_on_cancel`. Full CLI suite
   2173/0 green. Pushed to remote `main-v2`.
+- `d137313d` DIALOG-04: live dialog stack closes on Ctrl-C and backdrop release.
+- `cf1d73d3` / `dcac312a` docs: DIALOG-04 landed; THEME-05 reclassified
+  `ALREADY_CORRECT`; wave-48 seam re-confirmations. Counts now
+  144 `ALREADY_CORRECT` / 6 `REAL_GAP` / 63 `BLOCKED` / 10 `LANDED` = 223.
+  Remote `main-v2` == `dcac312a`.
+
+### Wave-49 implementation-owner dispatch (2026-11-03)
+
+Reframed the remaining work from "verdict" to "implementation owner": each worker
+now owns one item and is asked to build the smallest real producer chain and
+return a `git apply`-able patch, or BLOCKED with the exact seam. Shared brief:
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave49/BRIEF.md`;
+per-item assignments in `.../wave49/TASKS49.md`. Base `dcac312a`.
+
+Dispatched 12 background workers:
+
+- `@vyce-deepseek-v41` (6): TAB-04, TAB-23, CP-09, TOOL-011, SIDE-14, SIDE-05.
+- `@9router-vyce-deepseek-v4.1-free-combined` (5): MSG-005, PAR-04, THEME-09,
+  DIALOG-06..10, DIALOG-12..20.
+- `@9router-river-glm-5-3-flash` (1): DIFF-001/003.
+
+`@9router-luna-free` not used this wave (prior `no eligible account` failure).
+Workers are read-only on canonical; patches land one at a time through the
+orchestrator (compile + focused test + full CLI suite + commit + push).
