@@ -12141,3 +12141,83 @@ Note: `native_view_status.rs` loads `native_sidebar.rs` a second time via
 `#[path]`, so its `FooterAction`/`FooterMenuItem` are **distinct types** from
 `crate::native_sidebar`'s. SIDE-14 uses the `native_view_status::native_sidebar`
 copy throughout (it is the one `StatusView` paints).
+
+### Wave-60 dispatch (base `7cf78666`) — 9 read-only patch workers
+
+Dispatched after SIDE-14 landed. Each worker is read-only on canonical and
+returns a `git apply -p1`-able patch + `<ID>.impl.json` or `<ID>.blocked.json`
+under `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave60/`.
+No worktrees (Recovery REF hook rejects new branches); orchestrator applies +
+compiles + tests + commits + pushes any landable patch.
+
+| Worker | Group | Route | Session |
+| --- | --- | --- | --- |
+| W60-A2 | DIALOG-06..09 (Select search/active-gutter/10-page/experiment) | `@9router-river-glm-5-3-flash` | `ses_e607681d0ffeVwzAsArSd4jwnU` |
+| W60-B | SIDE-03/04/05 (usage classes / cost / limits) | `@vyce-deepseek-v41` | `ses_e6077cbf8ffdG4w83N25gIYugV` |
+| W60-C | CP-07 (agent selection + colors) | `@9router-vyce-deepseek-v4.1-free-combined` | `ses_e6077cbf7ffeZO312nfmsW1W5E` |
+| W60-D | MSG-001/002/003 (row/group adapter) | `@vyce-deepseek-v41` | `ses_e60754f43ffeZPixBCAocmcB44` |
+| W60-E | LAY-10/11/13 (panel/terminal layout) | `@vyce-deepseek-v41` | `ses_e60754f43ffd6QkMhUNc44n9c6` |
+| W60-F | PAR-09/10/19 (highlight/stream/diff-scroll) | `@vyce-deepseek-v41` | `ses_e60754f42ffe65S7sILPsm7A4k` |
+| W60-G | DIALOG-12..19 (palette/settings/overlay/toast) | `@vyce-deepseek-v41` | `ses_e60744d57ffdAa53QZcla6PC9U` |
+| W60-H | TAB-06/10/21 (pending/detail/view-ack) | `@vyce-deepseek-v41` | `ses_e60744d56ffeERBUs4r7GmM4dA` |
+| W60-I | DIFF-001/003 (split mode / added-file) | `@9router-vyce-deepseek-v4.1-free-combined` | `ses_e60744d56ffd5KJmOMCgROeZkq` |
+
+Key seam change: SIDE-14 (`d5611712`) created the first live `DialogKind::Select`
+producer (the working-directory menu), so DIALOG-06..09 and DIALOG-02's
+per-select-row-pad half are now potentially bounded by wiring the live Select
+body to the tested `native_palette::select::SelectDialog` model.
+
+### Wave-60 outcome (base `7cf78666`) — 0 landable patches
+
+All 14 dispatched groups reported. **0 landable patches; every item confirmed
+BLOCKED.** This is the third consecutive wave (58, 59, 60) with zero landings,
+and the cause is structural rather than worker quality: the CLI already carries
+faithful, unit-tested models for these behaviors, but the **backend never
+produces the fact** the model consumes, so no bounded CLI-only patch can wire a
+live consumer.
+
+| Worker | Group | Route | Outcome |
+| --- | --- | --- | --- |
+| W60-A2 | DIALOG-06..09 | river-glm-5.3-flash | failed twice, no artifact |
+| W60-B | SIDE-03/04/05 | vyce-deepseek-v41 | BLOCKED (step cap, report inline) |
+| W60-C | CP-07 | vyce-combined | BLOCKED (`CP-07.blocked.json`) |
+| W60-D | MSG-001/002/003 | vyce-deepseek-v41 | BLOCKED (step cap, report inline) |
+| W60-E | LAY-10/11/13 | vyce-deepseek-v41 | BLOCKED (`LAY-1N.blocked.json`) |
+| W60-F | PAR-09/10/19 | vyce-deepseek-v41 | BLOCKED (`PAR-NN.blocked.json`) |
+| W60-G | DIALOG-12..19 | vyce-deepseek-v41 | completed, no artifact |
+| W60-H | TAB-06/10/21 | vyce-deepseek-v41 | BLOCKED (`TAB-NN.blocked.json`) |
+| W60-I | DIFF-001/003 | vyce-combined | BLOCKED (`DIFF-00N.blocked.json`) |
+| W60-J | THEME-08/09/13/14 | vyce-deepseek-v41 | BLOCKED (step cap, report inline) |
+| W60-K | TOOL-006/011 | vyce-deepseek-v41 | BLOCKED (`TOOL-00N.blocked.json`) |
+| W60-L | FORM-001/STATE-002 | vyce-deepseek-v41 | BLOCKED (`FORM-001`/`STATE-002.blocked.json`) |
+| W60-M | MSG-005/008/009/010 | vyce-combined | errored "Invalid request" |
+| W60-N | MD-007/008/009 + CP-09 | vyce-combined | pending at record time |
+
+Orchestrator independently re-verified the two most promising seams and both are
+genuinely backend-blocked:
+
+- **SIDE-03 cost**: `StatusView::set_cost` (`native_view_status.rs:1238`) *is*
+  rendered live (`native_view.rs:4222`, sidebar `Context` section), so only a
+  producer is missing. But the CLI model catalogue (`native_setup.rs:184
+  catalogue()` → `Model`) parses **no `cost` field** (only the derived `free`
+  flag), and the CLI never retains the catalogue at the history-fetch site, so
+  there is no live pricing source. Upstream computes cost server-side
+  (`packages/core/src/session/usage.ts:23-38`, `projector.ts:58`); our
+  `MessageExecution` has no `cost`. Producer required: retain catalogue pricing
+  in the CLI **and** parse cost into `Model`, or add a server `cost` fact.
+- **TAB-21**: server route `POST /api/sessions/{id}/view` + `set_viewed`
+  (`sessions/src/lib.rs:601`) + `SessionSummary.viewed_at`
+  (`contracts/src/lib.rs:212`) all exist. Missing is the **idle-transition
+  timestamp**: upstream sets `time_idle` on every terminal execution
+  (`projector.ts:423-447`, `:704-706`); our `SessionSummary` has no `idle_at`,
+  `SessionState` is only `Active`/`Archived`, and no turn-terminal path writes
+  one. Producer chain = contracts `idle_at` + storage column + sessions
+  `mark_idle` + server terminal hook + CLI unread read/POST (5 crates).
+
+**Structural conclusion.** The remaining 59 BLOCKED items are not CLI-parity
+gaps; they are missing **server-side producers / engines / contract fields**.
+The CLI-only "wire a live consumer" patch approach is exhausted. Further
+progress requires building backend producers (server payload fields, routes,
+engines), which is a different work class than the UI-parity checklist and
+cannot be satisfied by a bounded single-file patch. No count change this wave:
+144 `ALREADY_CORRECT` / 2 `REAL_GAP` / 59 `BLOCKED` / 18 `LANDED` = 223.
