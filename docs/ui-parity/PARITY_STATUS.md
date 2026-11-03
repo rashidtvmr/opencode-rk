@@ -245,11 +245,11 @@ the wave-44 verdict supersedes it.
 | --- | --- |
 | `ALREADY_CORRECT` | 144 |
 | `REAL_GAP` | 6 |
-| `BLOCKED` | 63 |
-| `LANDED` (wave-45..48) | 10 |
+| `BLOCKED` | 62 |
+| `LANDED` (wave-45..49) | 11 |
 | **Total** | **223** |
 
-### Landed fixes (wave-45..48) — moved out of `REAL_GAP`
+### Landed fixes (wave-45..49) — moved out of `REAL_GAP`/`BLOCKED`
 
 | Item | Commit | What changed |
 | --- | --- | --- |
@@ -263,6 +263,7 @@ the wave-44 verdict supersedes it.
 | MSG-007 / CP-11 review fix | `df4f4e29` | MSG-007: `SessionMessageMenu::resync` now takes the captured session id and guards `actions.session_id() == Some(session_id)`, so a live-session switch with a colliding message id cannot retarget Copy/Revert/Fork (`dialog-message.tsx:23`). CP-11: the running scanner + interrupt label moved from the shared shell footer (`footer_line`) into the composer footer slot (`composer_footer_row`, the `prompt.footer` slot) via `NativeView::composer_status_text`; the shell footer keeps the idle directory. Focused tests + full CLI suite (2172/0) green. |
 | THEME-12 | `bc24dd30` | The live theme picker (`tui_entry.rs`) persisted only on Enter, so arrowing through the list showed no preview and Esc left the last previewed theme in place. Adds `ThemePicker` (a live wrapper over the tested `ThemeController`) plus `theme_picker_move`/`theme_picker_cancel`: page_next/page_prev on the Theme page preview+persist the focused row, Esc restores+persists the pre-open selection, Enter clears the picker (`dialog-theme-list.tsx:32-37` -> `context/theme.tsx:341-349`). Focused test `theme12_live_picker_previews_on_move_and_reverts_on_cancel` + full CLI suite (2173/0) green. |
 | DIALOG-04 | `d137313d` | The ordered modal routes (`native_modal_layer.rs:489-600`) had no live consumer: the live loop quit the app on Ctrl-C even with a dialog open, and a backdrop click did nothing. Ctrl-C (0x03) now routes through the same close/reject path as Escape while the dialog stack owns input (`dialog_consumes_byte`); Ctrl-D (not bound in the modal layer) keeps its byte-exit meaning. A left-button release outside the panel rect closes the top dialog (`ui/dialog.tsx:54-60`); a pending decision is never abandoned. Focused test `dialog04_ctrl_c_closes_dialog_but_ctrl_d_keeps_byte_exit` + full CLI suite (2174/0) green. |
+| PAR-04 | `669036cd` | Harness-side (Python): the Rust capture model already serialized `Frame.hit_targets` (`native_capture.rs:142`, canonical `hit={x},{y},{action}`) but the renderer transport dropped the key and the comparator had no member. Adds the key to every renderer output, a canonical `(y,x,action)`-sorted comparator member gated on the fixture's `compare` list, validation, README, selftest coverage and the matching empty-list goldens. The PTY channel exposes no pointer events, so the live `oc2-pty` adapter emits an empty list; the member is exercised by the deterministic static renderer. `tools/ui_parity/selftest.py` 22 checks PASS. |
 
 ### `REAL_GAP` — faithful model + focused test exist, no live consumer (6)
 
@@ -281,9 +282,9 @@ Selected high-value seams:
 | THEME-13 | `SystemThemeState`/`palette_reply` (`native_theme_runtime.rs:2183/2264`) have zero non-test callers; no OSC palette-query emitter and no payload-carrying input event to decode a reply. |
 | THEME-09 | The live chat `Patch`/diff-fence painter hardcodes `DiffViewMode::Unified` (`native_view_chat.rs:2200/2730`); `resolve_view_mode`/`config.diffs.view` (`native_diff_view.rs:586`) have no live caller, so the upstream width>120 auto-split is unreachable. |
 
-### `BLOCKED` — needs a producer/transport/contract field that does not exist (63)
+### `BLOCKED` — needs a producer/transport/contract field that does not exist (62)
 
-`PAR-02, PAR-03, PAR-04, PAR-06, PAR-07, PAR-09, PAR-10, PAR-16, PAR-19, PAR-22,
+`PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-10, PAR-16, PAR-19, PAR-22,
 TAB-04, TAB-06, TAB-10, TAB-21, TAB-23, SIDE-03, SIDE-04, SIDE-05, SIDE-10, SIDE-14,
 MSG-001, MSG-002, MSG-003, MSG-005, MSG-008, MSG-009, MSG-010,
 TOOL-006, TOOL-011, DIFF-001, DIFF-003, FFI-01, FFI-02, FFI-03, FFI-04, FFI-06,
@@ -302,7 +303,6 @@ DIALOG-19, DIALOG-20, LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009`.
 | DIALOG-06..10 | Select/Prompt/Confirm controllers (`native_palette.rs:1251-1295,1922-1933`) are fully ported + tested, but the live dialog body is a generic placeholder (`native_view_dialogs.rs:1393-1511`) and the live event handler opens only `Permission` (`tui_entry.rs:7868-7874`); there is no live `Select`/`Prompt` producer or route into `DialogView::open_request`. Needs a live route/host for those dialog kinds. |
 | DIALOG-12..20 | The live dialog surface is `native_setup::Dialog` (`native_setup.rs:184`), and only the model-picker base rows are wired (`tui_entry.rs:8056`). Every assigned palette/settings/overlay/toast model has zero non-test callers and no producer for its driving facts: favorites/variants (`native_setup.rs:117`, `native_palette.rs:2344`), session-picker debounce/scope/armed-delete (`native_palette.rs:2505`), drill-down (`:1785`), MCP-status palette (`:2797`), numeric limits/experiments (`native_settings.rs:509/561`), stash/workspaces (`native_palette.rs:2999`), diff dialog (`native_view_dialogs.rs:3767`), overlay `ChromeModel::new` (`native_modal_layer.rs:775`), and the toast sink (`native_toast.rs:418`; `native_shell.rs:1755 set_toast` never called). |
 | LAY-10 / LAY-11 / LAY-13 | `panel_can_split`/`panel_presentation`/`panel_toggle_fullscreen` (`native_pane_resize.rs:551-586`), `right_pane` (`native_view_layout.rs:808`) and `pane_resize_handle`/`PaneResize` (`native_pane_resize.rs:276/308`) are test-only; the live render composes only the sidebar (`native_view.rs:3602`). The seam is the missing live plugin-panel/terminal producer `panel_open`/`terminal_selected` (`native_shell_frame.rs:122-124`). |
-| PAR-04 | Harness-side: the renderer JSON (`tools/ui_parity/renderers/oc2_pty.py:349`) emits cursor/focus but no `hit_targets` key, and the comparator set (`tools/ui_parity/ui_parity.py:230`) has no `hit_targets` member. The Rust model (`native_capture.rs:142 Frame.hit_targets`, serializer `:214`) exists but is not on the renderer transport. |
 | PAR-09 | Live code/patch render is plain `sanitize_code` text (`native_view_chat.rs:1273`); no syntax-highlight `HighlightedText` producer (tree-sitter/syntect) exists, and `HighlightService::complete` (`opentui-bridge/src/highlight.rs:782`) has no live call site. |
 | PAR-10 | The live SSE consumer appends raw bytes to a draft `String` (`tui_entry.rs:917,920`) with no per-delta `stream_id`/`seq`, so `StreamAccumulator` (`native_transcript.rs:73`) / `TokenDelta` have no ordered-delta producer. |
 | PAR-19 | `relative_scroll_top`/`visible_chunk_range` (`native_diff_view.rs:1043/1058`) need a diff-region `scrollTop` + `root.y`/`content.y` + viewport height producer; the live `paint_inline_patch` (`native_diff_inline.rs:83`, caller `native_view_chat.rs:2200`) has no scroll contract and flattens to ChatRow units with no chunk-to-row mapping. |
@@ -319,7 +319,7 @@ DIALOG-19, DIALOG-20, LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009`.
 | SIDE-03 / SIDE-04 | Live `set_usage` (`native_view_status.rs:1146`) sums `input+output` only; `set_usage_classes` (`:1168`) and `set_cost` (`:1160`) have zero non-test callers. No `lastAssistantWithUsage` selector, no revert boundary reaching the view, no cost producer, and the wire `input_tokens` is inclusive of cached (`server/src/auto_compaction.rs:102`), so disjoint classes need a `nonCachedInput` producer. |
 | SIDE-05 | `set_limit` (`native_view_status.rs:1175`) test-only; no usage-limits pipeline reaches the CLI. |
 | SIDE-10 | `todo_http.rs:31-38` returns the stored `session_todos` table verbatim; `stage_session_revert` (`server/src/lib.rs:1193-1209`) stores the boundary but never recomputes the latest-completed-`todowrite` list sliced at the revert boundary (upstream `util/todo.ts:32-43`). |
-| SIDE-14 | `footer_menu` (`native_sidebar.rs:1020`) test-only; no footer hit rect / hover routing / click branch / CopyPath-OpenFolder-Workspaces executors. |
+| SIDE-14 | `footer_menu` (`native_sidebar.rs:1020`) test-only; no footer hit rect / hover routing / click branch / CopyPath-OpenFolder-Workspaces executors. Direct re-inspection: `Copy path`/`Open folder` are bounded, but upstream's `Workspaces` action opens `DialogWorkspaces` (`component/prompt/move.tsx` `move.open()`), which has no live route, so the item is not fully bounded. |
 | STATE-002 | Live transcript renders compaction as a placeholder (`native_view_chat.rs:2689`); projection (`native_chat_projection.rs:392`) drops status/summary/provider-native/tokens; rich `CompactionState` (`native_timeline.rs:382`) has zero consumers; `compact_session` (`server/src/lib.rs:1668`) never persists/pushes a compaction part. |
 | MSG-005 | Chips need a server/storage `files`/`skills` field that does not exist (`MessageRecord` `contracts/src/lib.rs:250-257`). |
 | MSG-008 | Footer TPS needs `time.streamed`; `MessageExecution` (`contracts/src/lib.rs:284-293`) has no timing field and the producer frame (`server/src/lib.rs:2895-2901`) emits none; `RowTiming.streamed_ms` (`native_message_rows.rs:825`) never populated live; `config.data.session.tps` absent. |
@@ -472,6 +472,39 @@ is re-scoped: the diff colors are live, but the upstream width>120 auto-split
 (`routes/session/index.tsx:3457-3459`) is unreachable because the live chat
 painter hardcodes `DiffViewMode::Unified` and `config.diffs.view` is never
 parsed.
+
+### Wave-49 implementation-owner results (2026-11-03)
+
+Wave-49 reframed the remaining work as implementation ownership (build the
+smallest real producer chain, else BLOCKED with the exact seam). Outcomes:
+
+- `PAR-04` — **LANDED** (`669036cd`, see the fixes table). The only bounded item
+  the fleet returned.
+- `SIDE-05` — re-confirmed BLOCKED: the whole usage-limits producer chain has no
+  Rust port. No `/api/experimental/usage/limits` route, no core service mirroring
+  `packages/core/src/usage-limits.ts`, no `UsageLimits.Info` contract, no
+  `modelUsage`/`servedByConsole` reduction. The data sources from the external
+  OpenCode Console API with a signed-in workspace credential, so wiring only the
+  CLI `set_limit` half would be a no-op.
+- `MSG-005` — re-confirmed BLOCKED: no `files`/`skills` field anywhere in the
+  producer→transport→contract→storage→serializer→CLI chain (upstream keeps them
+  as top-level user-message fields, `prompt.ts:77-85`).
+- `DIFF-001` / `DIFF-003` — re-confirmed BLOCKED: split paints one terminal row
+  as two 50% panes with up to four style regions, which the flat
+  `(String, ChatRowClass)` row model cannot represent (one fg + one uniform row
+  bg; `ChatRunSpan` maps flags to fg/attrs only). Bounded upgrade path recorded:
+  add bg/fg fields to `ChatRunSpan` + an x-ranged `role_bg` override in the paint
+  loop (`tui_entry.rs:4623-4666`), then route the live `Patch`/fence painters
+  through `paint_inline_patch` with `config.diffs.view` + measured width.
+- `SIDE-14` — reconnaissance only (worker hit its step limit): the footer menu
+  model is complete, but the live path needs a footer hit rect, hover routing, a
+  click branch and the three action executors. Re-inspected directly: the
+  `Copy path` and `Open folder` actions are bounded, but upstream's `Workspaces`
+  action opens `DialogWorkspaces` (a move dialog, `component/prompt/move.tsx`
+  `move.open()`), which has no live route — so the item is not fully bounded.
+- `TAB-04`, `TAB-23`, `TOOL-011`, `THEME-09`, `CP-09`, `DIALOG-06..10`,
+  `DIALOG-12..20` — workers returned no deliverable (provider/step-limit
+  failures); no new evidence, prior BLOCKED seams stand.
 
 This document is a status map, not acceptance. No item is marked
 runtime-proven; captured styled-cell/cursor goldens were not produced.
