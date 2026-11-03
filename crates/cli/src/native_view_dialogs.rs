@@ -512,7 +512,7 @@ fn permission_alias(label: &str) -> Option<PermissionChoice> {
         "allow" | "approve" | "once" | "allow once" | "approve once" => {
             Some(PermissionChoice::ApproveOnce)
         }
-        "deny" | "reject" => Some(PermissionChoice::Reject),
+        "deny" | "reject" | "Reject" => Some(PermissionChoice::Reject),
         "Allow for this session" => Some(PermissionChoice::Scoped {allow:true,persistent:false}),
         "Always allow" => Some(PermissionChoice::Scoped {allow:true,persistent:true}),
         "Deny for this session" => Some(PermissionChoice::Scoped {allow:false,persistent:false}),
@@ -1329,16 +1329,37 @@ impl DialogView {
         session_id: impl Into<String>,
         title: impl Into<String>,
     ) -> Result<(), DialogError> {
-        // The compatibility helper is retained for callers that do not have
-        // request metadata.  The real permission poll uses the explicit
-        // save-aware helper below; keeping this default enabled preserves the
-        // long-standing typed-dialog contract for local/test callers.
-        self.open_permission_with_persistent(request_id, session_id, title, true)
+        // Compatibility helper for local/test callers that predate the
+        // save-aware helper: it exposes the full six-label mechanics model
+        // (`permission_alias` recognizes all six scoped labels). The live
+        // permission poll uses `open_permission_with_persistent`, which now
+        // emits the exact three-option upstream set (`permission.tsx:232-240`).
+        self.open_request(DialogRequest {
+            id: request_id.into(),
+            session_id: session_id.into(),
+            kind: DialogKind::Permission,
+            title: title.into(),
+            choices: vec![
+                "Allow once".to_owned(),
+                "Deny once".to_owned(),
+                "Allow for this session".to_owned(),
+                "Always allow".to_owned(),
+                "Deny for this session".to_owned(),
+                "Always deny".to_owned(),
+            ],
+            message: None,
+            disabled: Vec::new(),
+            error: None,
+        })
     }
 
     /// Open a permission prompt with the persistent-grant choice controlled
-    /// by the backend request's validated `save` capability.  `false` must
-    /// never remove either scoped deny choice or the session-scoped allow.
+    /// by the backend request's validated `save` capability. Exact upstream
+    /// option set and order (`permission.tsx:232-240`): `once`, `always`
+    /// (only when the request carries `save` rules), `reject`
+    /// (`permissionOptionLabel`, `util/permission.ts:162-168`). The save gate
+    /// (`props.request.save?.length`) drops **only** the `always` option, so a
+    /// save-ineligible request keeps `once` + `reject`.
     pub fn open_permission_with_persistent(
         &mut self,
         request_id: impl Into<String>,
@@ -1346,18 +1367,11 @@ impl DialogView {
         title: impl Into<String>,
         persistent_allowed: bool,
     ) -> Result<(), DialogError> {
-        let mut choices = vec![
-            "Allow once".to_owned(),
-            "Deny once".to_owned(),
-            "Allow for this session".to_owned(),
-        ];
+        let mut choices = vec!["Allow once".to_owned()];
         if persistent_allowed {
             choices.push("Always allow".to_owned());
         }
-        choices.extend([
-            "Deny for this session".to_owned(),
-            "Always deny".to_owned(),
-        ]);
+        choices.push("Reject".to_owned());
         self.open_request(DialogRequest {
             id: request_id.into(),
             session_id: session_id.into(),
@@ -5915,18 +5929,33 @@ mod scoped_input_tests {
     }
 
     #[test]
-    fn save_ineligible_prompt_keeps_only_scoped_and_deny_choices() {
+    fn save_ineligible_prompt_keeps_once_and_reject_only() {
         let mut dialog = DialogView::new();
         dialog.open_permission_with_persistent("request", "session", "permission", false).unwrap();
         let rows = dialog.render(80, 24);
         assert!(rows.iter().any(|row| row.contains("Allow once")));
-        assert!(rows.iter().any(|row| row.contains("Allow for this session")));
-        assert!(rows.iter().any(|row| row.contains("Deny for this session")));
-        assert!(rows.iter().any(|row| row.contains("Always deny")));
+        assert!(rows.iter().any(|row| row.contains("Reject")));
+        // The save gate drops ONLY the persistent `always` option
+        // (`permission.tsx:232-240`); the two non-persistent choices remain.
         assert!(!rows.iter().any(|row| row.contains("Always allow")));
-        assert!(dialog.select(3));
+        assert!(!rows.iter().any(|row| row.contains("for this session")));
+        assert!(!rows.iter().any(|row| row.contains("Always deny")));
+        assert!(dialog.select(1));
+        assert!(matches!(dialog.answer().unwrap(), DecisionIntent::Reject { .. }));
+    }
+    #[test]
+    fn save_eligible_prompt_exposes_once_always_reject_in_order() {
+        let mut dialog = DialogView::new();
+        dialog.open_permission_with_persistent("request", "session", "permission", true).unwrap();
+        let rows = dialog.render(80, 24);
+        let once = rows.iter().position(|row| row.contains("Allow once")).unwrap();
+        let always = rows.iter().position(|row| row.contains("Always allow")).unwrap();
+        let reject = rows.iter().position(|row| row.contains("Reject")).unwrap();
+        assert!(once < always && always < reject, "upstream option order once, always, reject");
+        // Index 1 is `always`: a persistent, scoped allow for the project.
+        assert!(dialog.select(1));
         assert!(matches!(dialog.answer().unwrap(), DecisionIntent::ScopedPermission {
-            allow: false, persistent: false, ..
+            allow: true, persistent: true, ..
         }));
     }
     #[test]
