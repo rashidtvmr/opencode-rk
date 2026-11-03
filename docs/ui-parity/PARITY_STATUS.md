@@ -1,6 +1,6 @@
 # OpenCode V2 UI parity — consolidated status
 
-- **Canonical line:** `main-v2` @ `2c858980` (remote verified)
+- **Canonical line:** `main-v2` @ `09974664` (remote verified)
 - **Upstream oracle:** `/Users/mymac/Projects/tmp/opencode` @ `450e7b92412c780a7b5a75226bb8d49aaca24e22`
 - **Checklist:** `docs/ui-parity/opencode-ui-parity-kit/checklist.json` (223 items)
 - **Method:** source inspection of the live Rust path (implementation + a
@@ -278,8 +278,8 @@ the wave-44 verdict supersedes it.
 | --- | --- |
 | `ALREADY_CORRECT` | 144 |
 | `REAL_GAP` | 2 |
-| `BLOCKED` | 52 |
-| `LANDED` (wave-45..62) | 25 |
+| `BLOCKED` | 51 |
+| `LANDED` (wave-45..62) | 26 |
 | **Total** | **223** |
 
 ### Landed fixes (wave-45..56) — moved out of `REAL_GAP`/`BLOCKED`
@@ -323,6 +323,7 @@ full single-threaded CLI suite, and was pushed + remote-verified.
 | SIDE-10 | `0d4f26a7` | Storage `session_todos_at` + sessions `todos_at_boundary`; `stage_session_revert` recomputes, persists and publishes the boundary-derived todo list (`TodoUpdated`) + server e2e test. Suite 2194/0. |
 | FFI-01 | `019ecafa` | `native_loop` probes the pinned OpenTUI artifact identity before `NativeRenderer::create`; fail-closed on drift, proceeds when unverifiable. 3 tests; suite 2197/0. |
 | DIALOG-12 | `2c858980` | Model picker reads persisted favorites and hoists them above recents; **ctrl+f** toggles favorite for the focused row; committing a model that advertises variants opens the **flat variant picker** (rendered + keyed live: Up/Down/Enter/Escape, text-input suppressed); `Model.variants` parsed from the catalogue. 5 new tests; suite **2202/0**. |
+| MSG-009 | `09974664` | Server `stage_session_revert` computes the real boundary-onward user-message `count` and `files` (typed tool history + unified-diff line counts), adding `SessionRevert.count`; the TUI now projects `SessionSummary.revert` into a `RevertCard` and splices its rows into the transcript foot before the dock/queue, driven from the live `LiveSnapshot`. 2 CLI + 1 server + contracts/storage tests; suite **2204/0**. |
 
 ### `REAL_GAP` — faithful model + focused test exist, no live consumer (2)
 
@@ -340,11 +341,11 @@ Selected high-value seams:
 | THEME-13 | `SystemThemeState`/`palette_reply` (`native_theme_runtime.rs:2183/2264`) have zero non-test callers; no OSC palette-query emitter and no payload-carrying input event to decode a reply. |
 | THEME-09 | **BLOCKED (verified wave-53).** The live chat `Patch`/diff-fence painter hardcodes `DiffViewMode::Unified` (`native_view_chat.rs:2202/2730`) and `resolve_view_mode`/`config.diffs.view` (`native_diff_view.rs:586`) have no live caller. Threading the preference is not sufficient: a split row is `SplitRow::Pair { left, right }` (`native_diff_view.rs:709-715`) with two independent backgrounds, but the live row model is `(String, ChatRowClass)` with exactly one class per row (`native_view_chat.rs:902`) and the painter maps a class to a single background (`tui_entry.rs:2880-2898 chat_row_background`). The split view is therefore not renderable without extending the row model — the same blocker as DIFF-001. |
 
-### `BLOCKED` — needs a producer/transport/contract field that does not exist (52)
+### `BLOCKED` — needs a producer/transport/contract field that does not exist (51)
 
 `PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-19,
 TAB-06, TAB-21, SIDE-03, SIDE-05,
-MSG-001, MSG-002, MSG-003, MSG-005, MSG-008, MSG-009, MSG-010,
+MSG-001, MSG-002, MSG-003, MSG-005, MSG-008, MSG-010,
 TOOL-006, TOOL-011, DIFF-001, DIFF-003, FFI-02, FFI-03, FFI-04, FFI-06,
 FFI-07, FFI-08, FFI-11, STATE-002, THEME-08, THEME-09, THEME-13,
 THEME-14, CP-07, CP-09,

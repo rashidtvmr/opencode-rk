@@ -12306,14 +12306,16 @@ full CLI suite single-threaded, then pushed and remote-verified via `ls-remote`.
 Per the "no dead helper/field" rule, these worker artifacts were reviewed and
 **held** rather than landed:
 
-- **MSG-009** (`/tmp/w62-msg009`, +144): server computes real `revert.count` +
-  `revert.files` (live `/revert/stage` route) and adds `SessionRevert.count`;
-  but the TUI reader is absent — `TranscriptSurfaces`/`RevertCard` still have no
-  live caller in `native_view.rs` (the chat body composes messages + dock +
-  queue only; there is no surfaces slot). Landing the contract field alone would
-  be a produced-but-unread field. Seam: add a `revert` slot to `NativeView`,
-  project `target["revert"]` in `build_live_snapshot` (`tui_entry.rs:1282`) into
-  `RevertCard`, and splice its rows into the transcript body before the composer.
+- **MSG-009** — **LANDED `09974664`** (was held producer-only; the TUI reader was
+  built this session). Server `stage_session_revert` now computes the real
+  boundary-onward user-message `count` (`revert_user_count`) and `files`
+  (`revert_files_from_tool_history` over durable typed tool history +
+  `count_diff_lines`), adding `SessionRevert.count`. TUI: `project_session_revert`
+  (`native_chat_projection.rs`), `NativeView.session_revert`/`set_session_revert`,
+  revert-card rows spliced into the transcript foot before the dock/queue
+  (`native_view.rs`), driven from `LiveSnapshot.session_revert` in
+  `build_live_snapshot` + the live publish site (`tui_entry.rs`). 2 CLI tests +
+  1 server test + contracts/storage tests; CLI suite **2204/0**.
 - **DIFF-001** (`/tmp/w62-diff001`, +54): `config.diffs.view` producer only; the
   live diff painter hardcodes `Unified` and the row model is one class per row —
   a split row needs a `SplitRow→ChatRowClass` adapter (same blocker as THEME-09).
