@@ -45,6 +45,7 @@ async fn fixture(with_facts: bool) -> Fixture {
         output_tokens: Some(9),
         cached_tokens: Some(2),
         reasoning_tokens: Some(1),
+        streamed_ms: None,
     });
     let assistant = sessions
         .append_assistant_with_reasoning_and_execution(session.id, "answer", None, execution)

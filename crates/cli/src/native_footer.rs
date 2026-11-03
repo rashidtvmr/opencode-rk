@@ -15,10 +15,12 @@
 //!   ([`AssistantFacts::duration_ms`], upstream `turnDuration`
 //!   `routes/session/rows.ts:430-438`); a zero/unknown span renders nothing,
 //!   matching upstream's falsy `<Show>`.
-//! - throughput span: ` · {x.toFixed(1)} tok/s` only when upstream
-//!   `config.data.session.tps` is on AND a real throughput exists. No such
-//!   native config key exists (verified absent from `crates/`), and without
-//!   streamed timestamps no throughput is computable: explicit gap.
+//! - throughput span: ` · {x.toFixed(1)} tok/s` only when the session `tps`
+//!   setting is on AND a real throughput exists. The rate is real
+//!   provider-active output over real streamed time
+//!   ([`crate::native_assistant_facts::tokens_per_second`], upstream
+//!   `turnTokensPerSecond` `rows.ts:442-463`); both are wire facts, so an
+//!   absent streamed span renders nothing.
 //! - interrupted span: ` · interrupted` only for a real native cancellation
 //!   fact (`AssistantFacts::interrupted`, sourced from the TYPED transport
 //!   error code `"cancelled"` — never message text) — the native equivalent of
@@ -37,7 +39,7 @@
 //! message prefix/inset as ordinary prose rows (upstream's footer `paddingLeft`
 //! and `TextPart` inset are the same three columns).
 
-use crate::native_assistant_facts::{format_duration, AssistantFacts};
+use crate::native_assistant_facts::{format_duration, tokens_per_second, AssistantFacts};
 use crate::native_view_chat::{ChatMessage, ChatRole, ChatRowClass};
 
 /// Untrusted backend text bound for one footer label (error message, agent,
@@ -82,11 +84,18 @@ pub struct FooterRows {
 
 /// Render the assistant-completion footer for one assistant message.
 ///
-/// `width` is the terminal width used for the upstream width gates. Returns
-/// `None` when the message is not an assistant message, carries no facts, or
-/// has no renderable fact at all — missing facts render nothing.
+/// `width` is the terminal width used for the upstream width gates.
+/// `tps_enabled` is the session `tps` setting (`config.data.session.tps`,
+/// upstream `routes/session/index.tsx:2061`); the throughput span renders only
+/// when it is on AND real streamed timing exists. Returns `None` when the
+/// message is not an assistant message, carries no facts, or has no renderable
+/// fact at all — missing facts render nothing.
 #[must_use]
-pub fn render_assistant_footer(message: &ChatMessage, width: usize) -> Option<FooterRows> {
+pub fn render_assistant_footer(
+    message: &ChatMessage,
+    width: usize,
+    tps_enabled: bool,
+) -> Option<FooterRows> {
     if message.role != ChatRole::Assistant {
         return None;
     }
@@ -126,8 +135,14 @@ pub fn render_assistant_footer(message: &ChatMessage, width: usize) -> Option<Fo
         .filter(|ms| *ms > 0)
         .filter(|_| width < WIDTH_DURATION_GAP_LOW || width >= WIDTH_DURATION_GAP_HIGH)
         .map(|ms| format!(" · {}", format_duration(ms)));
-    // Throughput remains an explicit gap: it needs real per-step streamed
-    // timestamps plus the native tps config — neither exists today.
+    // Upstream `index.tsx:2061`: `config.data.session.tps && tokensPerSecond()`.
+    // The throughput is real provider-active output over real streamed time
+    // (`turnTokensPerSecond`, `rows.ts:442-463`); when either fact is absent the
+    // span renders nothing.
+    let tps_span = tps_enabled
+        .then(|| tokens_per_second(facts.output_tokens, facts.reasoning_tokens, facts.streamed_ms))
+        .flatten()
+        .map(|tps| format!(" · {tps:.1} tok/s"));
     let interrupted_span = interrupted.then(|| INTERRUPTED_SPAN.to_owned());
 
     // Upstream composes the metadata line by concatenating the spans: the
@@ -137,6 +152,7 @@ pub fn render_assistant_footer(message: &ChatMessage, width: usize) -> Option<Fo
     for span in model_span
         .iter()
         .chain(duration_span.iter())
+        .chain(tps_span.iter())
         .chain(interrupted_span.iter())
     {
         metadata.push_str(span);
@@ -259,14 +275,14 @@ mod native_footer_tests {
     fn missing_facts_render_nothing() {
         let mut message = assistant_message(AssistantFacts::default(), None, None);
         message.assistant_facts = None;
-        assert!(render_assistant_footer(&message, 80).is_none());
+        assert!(render_assistant_footer(&message, 80, true).is_none());
     }
 
     #[test]
     fn non_assistant_role_never_renders() {
         let mut message = assistant_message(AssistantFacts::default(), None, None);
         message.role = ChatRole::User;
-        assert!(render_assistant_footer(&message, 80).is_none());
+        assert!(render_assistant_footer(&message, 80, true).is_none());
     }
 
     #[test]
@@ -278,14 +294,14 @@ mod native_footer_tests {
             "stop_reason": "completed"
         }));
         let message = assistant_message(facts, None, None);
-        assert!(render_assistant_footer(&message, 80).is_none());
+        assert!(render_assistant_footer(&message, 80, true).is_none());
     }
 
     #[test]
     fn interruption_renders_exact_suffix_span() {
         let facts = AssistantFacts::from_error(Some("cancelled".to_owned()), "turn cancelled".to_owned());
         let message = assistant_message(facts, None, None);
-        let rows = render_assistant_footer(&message, 80).unwrap();
+        let rows = render_assistant_footer(&message, 80, true).unwrap();
         // Span-exact upstream composition: the interrupted span is verbatim
         // ` · interrupted`; with no agent span the line is exactly that span.
         assert_eq!(row_texts(&rows), [" · interrupted"]);
@@ -296,7 +312,7 @@ mod native_footer_tests {
     fn interruption_with_agent_and_model_composes_span_exact() {
         let facts = AssistantFacts::from_error(Some("cancelled".to_owned()), "turn cancelled".to_owned());
         let message = assistant_message(facts, Some("build"), Some("openai/gpt-x"));
-        let rows = render_assistant_footer(&message, 80).unwrap();
+        let rows = render_assistant_footer(&message, 80, true).unwrap();
         assert_eq!(row_texts(&rows), ["Build · openai/gpt-x · interrupted"]);
     }
 
@@ -305,10 +321,10 @@ mod native_footer_tests {
         let facts = AssistantFacts::from_error(Some("cancelled".to_owned()), "turn cancelled".to_owned());
         let message = assistant_message(facts, Some("build"), Some("openai/gpt-x"));
         // width < 28: model span omitted, agent + interrupted remain.
-        let narrow = render_assistant_footer(&message, WIDTH_MODEL_MIN - 1).unwrap();
+        let narrow = render_assistant_footer(&message, WIDTH_MODEL_MIN - 1, true).unwrap();
         assert_eq!(row_texts(&narrow), ["Build · interrupted"]);
         // width >= 28: model span present.
-        let wide = render_assistant_footer(&message, WIDTH_MODEL_MIN).unwrap();
+        let wide = render_assistant_footer(&message, WIDTH_MODEL_MIN, true).unwrap();
         assert_eq!(row_texts(&wide), ["Build · openai/gpt-x · interrupted"]);
     }
 
@@ -316,7 +332,7 @@ mod native_footer_tests {
     fn generic_error_renders_notice_then_gap_then_metadata() {
         let facts = AssistantFacts::from_error(Some("provider_stream_failed".to_owned()), "provider stream failed".to_owned());
         let message = assistant_message(facts, Some("build"), None);
-        let rows = render_assistant_footer(&message, 80).unwrap();
+        let rows = render_assistant_footer(&message, 80, true).unwrap();
         assert_eq!(
             row_texts(&rows),
             ["Error: provider stream failed", "", "Build"],
@@ -334,7 +350,7 @@ mod native_footer_tests {
         // belongs to that box, so no gap row is emitted either.
         let facts = AssistantFacts::from_error(Some("provider_stream_failed".to_owned()), "provider stream failed".to_owned());
         let message = assistant_message(facts, None, None);
-        let rows = render_assistant_footer(&message, 80).unwrap();
+        let rows = render_assistant_footer(&message, 80, true).unwrap();
         assert_eq!(row_texts(&rows), ["Error: provider stream failed"]);
         assert_eq!(rows.rows[0].1, ChatRowClass::FooterError);
     }
@@ -343,7 +359,7 @@ mod native_footer_tests {
     fn interruption_suppresses_error_notice() {
         let facts = AssistantFacts::from_error(Some("cancelled".to_owned()), "turn cancelled".to_owned());
         let message = assistant_message(facts, None, None);
-        let rows = render_assistant_footer(&message, 80).unwrap();
+        let rows = render_assistant_footer(&message, 80, true).unwrap();
         assert!(
             !rows.rows.iter().any(|(text, _)| text.starts_with("Error:")),
             "no error notice for interruption"
@@ -358,7 +374,7 @@ mod native_footer_tests {
         // and never the ` · interrupted` suffix.
         let facts = AssistantFacts::from_error(None, "turn cancelled".to_owned());
         let message = assistant_message(facts, None, None);
-        let rows = render_assistant_footer(&message, 80).unwrap();
+        let rows = render_assistant_footer(&message, 80, true).unwrap();
         assert_eq!(row_texts(&rows), ["Error: turn cancelled"]);
         assert_eq!(rows.rows[0].1, ChatRowClass::FooterError);
     }
@@ -384,18 +400,18 @@ mod native_footer_tests {
         facts.duration_ms = Some(1_500);
         let message = assistant_message(facts, None, Some("openai/gpt-x"));
         // 27: model hidden, duration shown.
-        assert_eq!(row_texts(&render_assistant_footer(&message, 27).unwrap()), [" · 1.5s"]);
+        assert_eq!(row_texts(&render_assistant_footer(&message, 27, true).unwrap()), [" · 1.5s"]);
         // 28..=35: model shown, duration hidden.
         for width in [28, 35] {
             assert_eq!(
-                row_texts(&render_assistant_footer(&message, width).unwrap()),
+                row_texts(&render_assistant_footer(&message, width, true).unwrap()),
                 [" · openai/gpt-x"],
                 "width {width}"
             );
         }
         // 36: both, in upstream span order (model then duration).
         assert_eq!(
-            row_texts(&render_assistant_footer(&message, 36).unwrap()),
+            row_texts(&render_assistant_footer(&message, 36, true).unwrap()),
             [" · openai/gpt-x · 1.5s"]
         );
     }
@@ -411,9 +427,9 @@ mod native_footer_tests {
         // Upstream's `<Show when={duration()}>` treats 0 as falsy, so a zero
         // duration renders nothing. At width 27 the model span is also hidden,
         // leaving no fact at all.
-        assert!(render_assistant_footer(&message, 27).is_none());
+        assert!(render_assistant_footer(&message, 27, true).is_none());
         for width in [36, 80] {
-            let rows = render_assistant_footer(&message, width).unwrap();
+            let rows = render_assistant_footer(&message, width, true).unwrap();
             assert_eq!(row_texts(&rows), [" · openai/gpt-x"], "width {width}");
         }
     }
@@ -429,7 +445,7 @@ mod native_footer_tests {
         for (agent, model) in [(Some("build"), Some("openai/gpt-x")), (None, None)] {
             let message = assistant_message(facts.clone(), agent, model);
             for width in [27, 28, 35, 36, 80, 200] {
-                if let Some(rows) = render_assistant_footer(&message, width) {
+                if let Some(rows) = render_assistant_footer(&message, width, true) {
                     for (text, _) in &rows.rows {
                         assert!(!text.contains("tok"), "no raw token count: {text}");
                         assert!(!text.contains("ms"), "no duration: {text}");
@@ -448,7 +464,7 @@ mod native_footer_tests {
             Some("agent\u{1b}]8;;evil\u{07}name"),
             Some("model\nname"),
         );
-        let rows = render_assistant_footer(&message, 80).unwrap();
+        let rows = render_assistant_footer(&message, 80, true).unwrap();
         for (text, _) in &rows.rows {
             assert!(!text.contains('\u{1b}'), "no ESC leaks: {text:?}");
             assert!(!text.contains('\u{0000}'), "no NUL leaks: {text:?}");
@@ -468,7 +484,33 @@ mod native_footer_tests {
         assert_eq!(facts.reasoning_tokens, Some(7));
         assert_eq!(facts.stop_reason.as_deref(), Some("incomplete:max_output_tokens"));
         let message = assistant_message(facts, None, None);
-        assert!(render_assistant_footer(&message, 80).is_none());
+        assert!(render_assistant_footer(&message, 80, true).is_none());
+    }
+
+    #[test]
+    fn msg008_throughput_span_renders_only_when_enabled_and_timed() {
+        // Upstream `index.tsx:2061`: `config.data.session.tps && tokensPerSecond()`.
+        let facts = AssistantFacts::from_message_frame(&serde_json::json!({
+            "usage": {"output_tokens": 60, "reasoning_tokens": 40},
+            "streamed_ms": 2000,
+            "stop_reason": "completed"
+        }));
+        let message = assistant_message(facts, Some("build"), None);
+        // Enabled: `(60+40) / (2000/1000) = 50.0 tok/s` follows the agent span.
+        let rows = render_assistant_footer(&message, 80, true).unwrap();
+        assert_eq!(row_texts(&rows), ["Build · 50.0 tok/s"]);
+        // Disabled (`session.tps = false`): the span is suppressed, agent stays.
+        let disabled = render_assistant_footer(&message, 80, false).unwrap();
+        assert_eq!(row_texts(&disabled), ["Build"]);
+
+        // No streamed timing: no throughput even when the setting is on.
+        let untimed = AssistantFacts::from_message_frame(&serde_json::json!({
+            "usage": {"output_tokens": 60, "reasoning_tokens": 40},
+            "stop_reason": "completed"
+        }));
+        let untimed_message = assistant_message(untimed, Some("build"), None);
+        let rows = render_assistant_footer(&untimed_message, 80, true).unwrap();
+        assert_eq!(row_texts(&rows), ["Build"]);
     }
 
     #[test]

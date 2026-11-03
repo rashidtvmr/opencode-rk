@@ -1951,6 +1951,13 @@ impl NativeView {
         self.chat.set_prompt_background(background);
     }
 
+    /// MSG-008: thread the resolved session `tps` setting
+    /// (`config.data.session.tps`, `routes/session/index.tsx:2061`) into the
+    /// chat view so the completion footer's throughput span honours it.
+    pub fn set_tps_enabled(&mut self, enabled: bool) {
+        self.chat.set_tps_enabled(enabled);
+    }
+
     /// Scrollbar painted by the last render, if the bar is shown and the
     /// transcript content overflows its viewport.
     #[must_use]

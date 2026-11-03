@@ -1135,9 +1135,10 @@ impl Storage {
         let output_tokens = count(execution.output_tokens)?;
         let cached_tokens = count(execution.cached_tokens)?;
         let reasoning_tokens = count(execution.reasoning_tokens)?;
+        let streamed_ms = count(execution.streamed_ms)?;
         let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
         connection.execute(
-            "INSERT INTO message_execution(message_id,provider_id,model_id,stop_reason,input_tokens,output_tokens,cached_tokens,reasoning_tokens) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(message_id) DO UPDATE SET provider_id=excluded.provider_id,model_id=excluded.model_id,stop_reason=excluded.stop_reason,input_tokens=excluded.input_tokens,output_tokens=excluded.output_tokens,cached_tokens=excluded.cached_tokens,reasoning_tokens=excluded.reasoning_tokens",
+            "INSERT INTO message_execution(message_id,provider_id,model_id,stop_reason,input_tokens,output_tokens,cached_tokens,reasoning_tokens,streamed_ms) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9) ON CONFLICT(message_id) DO UPDATE SET provider_id=excluded.provider_id,model_id=excluded.model_id,stop_reason=excluded.stop_reason,input_tokens=excluded.input_tokens,output_tokens=excluded.output_tokens,cached_tokens=excluded.cached_tokens,reasoning_tokens=excluded.reasoning_tokens,streamed_ms=excluded.streamed_ms",
             params![
                 execution.message_id.to_string(),
                 execution.provider_id,
@@ -1147,6 +1148,7 @@ impl Storage {
                 output_tokens,
                 cached_tokens,
                 reasoning_tokens,
+                streamed_ms,
             ],
         )?;
         Ok(())
@@ -1172,7 +1174,7 @@ impl Storage {
             .join(",");
         let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
         let mut statement = connection.prepare(&format!(
-            "SELECT message_id,provider_id,model_id,stop_reason,input_tokens,output_tokens,cached_tokens,reasoning_tokens FROM message_execution WHERE message_id IN ({placeholders})"
+            "SELECT message_id,provider_id,model_id,stop_reason,input_tokens,output_tokens,cached_tokens,reasoning_tokens,streamed_ms FROM message_execution WHERE message_id IN ({placeholders})"
         ))?;
         let rows = statement.query_map(rusqlite::params_from_iter(ids.iter()), |row| {
             let count = |index: usize| -> Result<Option<u64>, rusqlite::Error> {
@@ -1191,6 +1193,7 @@ impl Storage {
                 output_tokens: count(5)?,
                 cached_tokens: count(6)?,
                 reasoning_tokens: count(7)?,
+                streamed_ms: count(8)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -1683,9 +1686,23 @@ impl Storage {
                 input_tokens INTEGER CHECK(input_tokens IS NULL OR input_tokens>=0),
                 output_tokens INTEGER CHECK(output_tokens IS NULL OR output_tokens>=0),
                 cached_tokens INTEGER CHECK(cached_tokens IS NULL OR cached_tokens>=0),
-                reasoning_tokens INTEGER CHECK(reasoning_tokens IS NULL OR reasoning_tokens>=0)
+                reasoning_tokens INTEGER CHECK(reasoning_tokens IS NULL OR reasoning_tokens>=0),
+                streamed_ms INTEGER CHECK(streamed_ms IS NULL OR streamed_ms>=0)
             );",
         )?;
+        // MSG-008 throughput seam (upstream `time.streamed`, `rows.ts:451-453`):
+        // databases created before this column existed gain it idempotently;
+        // fresh databases get it in the CREATE above.
+        let has_streamed_column: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('message_execution') WHERE name='streamed_ms'",
+            [],
+            |row| row.get(0),
+        )?;
+        if has_streamed_column == 0 {
+            connection.execute_batch(
+                "ALTER TABLE message_execution ADD COLUMN streamed_ms INTEGER CHECK(streamed_ms IS NULL OR streamed_ms>=0);",
+            )?;
+        }
         connection.execute_batch(
             "CREATE TABLE IF NOT EXISTS artifacts(
                 id TEXT PRIMARY KEY,

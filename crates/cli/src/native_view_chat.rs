@@ -163,6 +163,11 @@ pub struct ChatView {
     /// spaces (`index.tsx:1879,1890-1895`). `None` keeps the opaque default so
     /// direct unit APIs are unchanged.
     prompt_background: Option<[u8; 4]>,
+    /// MSG-008: session `tps` setting (`config.data.session.tps`,
+    /// `routes/session/index.tsx:2061`). `None` means "not configured", which
+    /// keeps upstream's default of `true`; [`ChatView::set_tps_enabled`] records
+    /// the resolved preference. Gates only the footer throughput span.
+    tps_enabled: Option<bool>,
 }
 
 impl ChatView {
@@ -190,6 +195,19 @@ impl ChatView {
     /// paints as spaces (`index.tsx:1879,1890-1895`).
     pub(crate) fn set_prompt_background(&mut self, background: Option<[u8; 4]>) {
         self.prompt_background = background;
+    }
+
+    /// MSG-008: record the resolved session `tps` setting
+    /// (`config.data.session.tps`, `routes/session/index.tsx:2061`).
+    pub(crate) fn set_tps_enabled(&mut self, enabled: bool) {
+        self.tps_enabled = Some(enabled);
+    }
+
+    /// Whether the footer throughput span is enabled. Unset keeps upstream's
+    /// default of `true` (`config/index.tsx:328`).
+    #[must_use]
+    fn tps_enabled(&self) -> bool {
+        self.tps_enabled.unwrap_or(true)
     }
 
     /// TOOL-002 live join input (`routes/session/index.tsx:2793-2799`):
@@ -1033,7 +1051,7 @@ fn boxed_message_rows_spans(
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
     child_out: &mut Vec<(usize, String)>,
 ) -> Vec<StyledChatRow> {
-    boxed_message_rows_spans_mode(width, message, separator, appearance, spans_out, child_out, crate::markdown_runs::MarkdownMode::Rendered, &std::collections::BTreeSet::new(), Some(0))
+    boxed_message_rows_spans_mode(width, message, separator, appearance, spans_out, child_out, crate::markdown_runs::MarkdownMode::Rendered, &std::collections::BTreeSet::new(), Some(0), true)
 }
 
 fn boxed_message_rows_spans_mode(
@@ -1044,6 +1062,7 @@ fn boxed_message_rows_spans_mode(
     markdown_mode: crate::markdown_runs::MarkdownMode,
     pending: &std::collections::BTreeSet<String>,
     spin: Option<u64>,
+    tps_enabled: bool,
 ) -> Vec<StyledChatRow> {
     use crate::native_box_style::BoxId;
     let id = if message.role == ChatRole::Tool
@@ -1075,7 +1094,7 @@ fn boxed_message_rows_spans_mode(
     let plain = |wrap: usize, spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>, child_out: &mut Vec<(usize, String)>| -> Vec<StyledChatRow> {
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(wrap.min(width), message, separator, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin);
+        let typed = typed_message_rows_with_prefix_spans_mode(wrap.min(width), message, separator, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled);
         let rows: Vec<StyledChatRow> = typed
             .into_iter()
             .map(|(text, class)| (text, class, Some((0, width.min(u16::MAX as usize) as u16))))
@@ -1108,7 +1127,7 @@ fn boxed_message_rows_spans_mode(
         let base = output.len();
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, Some(""), &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, Some(""), &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
         {
@@ -1146,7 +1165,7 @@ fn boxed_message_rows_spans_mode(
         let base = output.len();
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 + 2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit) {
@@ -1182,7 +1201,7 @@ fn boxed_message_rows_spans_mode(
         let base = output.len();
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
@@ -1223,7 +1242,7 @@ fn boxed_message_rows_spans_mode(
         let base = output.len();
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
@@ -2522,6 +2541,7 @@ fn typed_message_rows_with_prefix_spans(
         width,
         &std::collections::BTreeSet::new(),
         Some(0),
+        true,
     )
 }
 
@@ -2533,6 +2553,7 @@ fn typed_message_rows_with_prefix_spans_mode(
     terminal_width: usize,
     pending: &std::collections::BTreeSet<String>,
     spin: Option<u64>,
+    tps_enabled: bool,
 ) -> Vec<(String, ChatRowClass)> {
     let mut rows: Vec<(String, ChatRowClass)> = Vec::new();
     if separator {
@@ -2860,7 +2881,7 @@ fn typed_message_rows_with_prefix_spans_mode(
     // 28..=35 duration band do — NOT the inner content width, so that narrow
     // padding does not suppress the model span at width 28 or shift the
     // duration gap band.
-    if let Some(footer) = crate::native_footer::render_assistant_footer(message, terminal_width) {
+    if let Some(footer) = crate::native_footer::render_assistant_footer(message, terminal_width, tps_enabled) {
         let prefix = prefix.unwrap_or_else(|| text_prefix(message.role));
         for (content, class) in footer.rows {
             if rows.len() >= MAX_MESSAGE_ROWS {
@@ -3107,6 +3128,7 @@ impl ChatView {
                 width,
                 &self.pending_permission_calls,
                 self.spin_frame.get(),
+                self.tps_enabled(),
             );
             for row in rows.into_iter().rev() {
                 rev.push(row);
@@ -3258,6 +3280,7 @@ impl ChatView {
                     markdown_mode,
                     &self.pending_permission_calls,
                     self.spin_frame.get(),
+                    self.tps_enabled(),
                 );
                 let mut dense = vec![Vec::new(); message_rows.len()];
                 for (row, spans) in message_spans {
@@ -3384,6 +3407,7 @@ impl ChatView {
                 // the row count, so the pending set is irrelevant here.
                 &std::collections::BTreeSet::new(),
                 Some(0),
+                self.tps_enabled(),
             ).len()
         }).sum()
     }

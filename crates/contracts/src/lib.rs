@@ -296,6 +296,13 @@ pub struct MessageExecution {
     pub output_tokens: Option<u64>,
     pub cached_tokens: Option<u64>,
     pub reasoning_tokens: Option<u64>,
+    /// MSG-008: provider-active streamed time in milliseconds — the first output
+    /// delta's timestamp minus the step's creation timestamp, matching upstream
+    /// `time.streamed - time.created` (`routes/session/rows.ts:451-453`). `None`
+    /// when the producer observed no first-delta stamp, so throughput stays
+    /// absent rather than fabricated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub streamed_ms: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

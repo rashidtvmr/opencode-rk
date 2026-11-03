@@ -19,6 +19,7 @@ fn facts() -> MessageExecutionInput {
         output_tokens: Some(7),
         cached_tokens: Some(0),
         reasoning_tokens: None,
+        streamed_ms: Some(1_500),
     }
 }
 
@@ -51,6 +52,8 @@ async fn execution_facts_round_trip_with_the_message_they_belong_to() {
     assert_eq!(stored.cached_tokens, Some(0));
     // An unreported counter stays absent instead of becoming zero.
     assert_eq!(stored.reasoning_tokens, None);
+    // MSG-008: the provider-active streamed span survives the round trip.
+    assert_eq!(stored.streamed_ms, Some(1_500));
 }
 
 #[tokio::test]

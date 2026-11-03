@@ -378,6 +378,8 @@ pub struct MessageExecutionInput {
     pub output_tokens: Option<u64>,
     pub cached_tokens: Option<u64>,
     pub reasoning_tokens: Option<u64>,
+    /// MSG-008: provider-active streamed time (ms) for the step.
+    pub streamed_ms: Option<u64>,
 }
 
 impl MessageExecutionInput {
@@ -392,6 +394,7 @@ impl MessageExecutionInput {
             output_tokens: self.output_tokens,
             cached_tokens: self.cached_tokens,
             reasoning_tokens: self.reasoning_tokens,
+            streamed_ms: self.streamed_ms,
         }
     }
 }

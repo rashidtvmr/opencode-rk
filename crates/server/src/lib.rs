@@ -126,7 +126,13 @@ use opencode_rk_tools::file_ops::{FileOperation, FileTool};
 use opencode_rk_tools::registry::ToolRegistry;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::{convert::Infallible, path::PathBuf, str::FromStr, sync::Arc};
+use std::{
+    convert::Infallible,
+    path::PathBuf,
+    str::FromStr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use run_owner::{
     ApprovedPermission, PendingPermissionGuard, PermissionReply, PermissionRequest,
@@ -2384,7 +2390,7 @@ async fn create_turn(
     // the provider actually returned is recorded.
     let _ = state
         .sessions
-        .record_message_execution(assistant_message.id, turn_execution(&body.model, None, usage))
+        .record_message_execution(assistant_message.id, turn_execution(&body.model, None, usage, None))
         .await;
     auto_compaction::schedule_after_successful_turn(&state.sessions, &provider, &owner, id, provider_id, model_id, usage, &request_context).await;
 
@@ -2444,6 +2450,80 @@ struct TurnStreamState {
     round_ordinal: u32,
     mcp_registry: mcp_http::McpStatusRegistry,
     read_only: bool,
+    /// MSG-008 throughput accumulator (see [`StreamTiming`]).
+    stream_timing: StreamTiming,
+}
+
+/// MSG-008 provider-active stream timing, accumulated per provider round
+/// (upstream "step"). Each round records when its provider call started and when
+/// its first streamed delta arrived; the turn sums `first_delta - round_start`
+/// across rounds, matching upstream `time.streamed - time.created`
+/// (`routes/session/rows.ts:451-453`). Tool time is never included because a new
+/// round resets the pair.
+#[derive(Default)]
+struct StreamTiming {
+    round_started_at: Option<Instant>,
+    round_first_delta: Option<Instant>,
+    streamed_total: Duration,
+    /// Provider rounds that completed without ever streaming a delta. Upstream
+    /// `turnTokensPerSecond` returns nothing unless EVERY assistant step has a
+    /// `time.streamed` (`rows.ts:453-454`), so a single unstreamed round makes
+    /// the whole throughput absent rather than partial.
+    rounds_unstreamed: u32,
+}
+
+impl StreamTiming {
+    /// Begin a turn: the first provider round starts now.
+    fn started(now: Instant) -> Self {
+        Self {
+            round_started_at: Some(now),
+            ..Self::default()
+        }
+    }
+
+    /// Record the first streamed delta of the current provider round. Upstream
+    /// stamps `time.streamed` on the first `session.step.streamed` event; later
+    /// deltas in the same round never move it.
+    fn note_streamed(&mut self, now: Instant) {
+        if self.round_first_delta.is_none() {
+            self.round_first_delta = Some(now);
+        }
+    }
+
+    /// Close the current provider round, adding its `streamed - created` span to
+    /// the turn aggregate. Upstream `turnTokensPerSecond` sums the per-step
+    /// `time.streamed - time.created` spans (`rows.ts:451-453`), so tool time
+    /// between rounds is excluded.
+    fn close_round(&mut self) {
+        if let (Some(started), Some(first)) = (self.round_started_at, self.round_first_delta) {
+            self.streamed_total = self
+                .streamed_total
+                .saturating_add(first.saturating_duration_since(started));
+        } else if self.round_started_at.is_some() {
+            // A round that ran but never streamed: upstream requires every step
+            // to carry `time.streamed`, so this makes throughput absent.
+            self.rounds_unstreamed = self.rounds_unstreamed.saturating_add(1);
+        }
+        self.round_started_at = None;
+        self.round_first_delta = None;
+    }
+
+    /// Open a fresh provider round so the next `note_streamed` starts a new span.
+    fn open_round(&mut self, now: Instant) {
+        self.round_started_at = Some(now);
+        self.round_first_delta = None;
+    }
+
+    /// Provider-active streamed time observed for this turn, in milliseconds.
+    /// `None` when any round never streamed or no round streamed at all, so
+    /// throughput stays absent rather than fabricated as zero.
+    fn streamed_ms(&self) -> Option<u64> {
+        if self.rounds_unstreamed > 0 {
+            return None;
+        }
+        let millis = self.streamed_total.as_millis();
+        (millis > 0).then(|| u64::try_from(millis).unwrap_or(u64::MAX))
+    }
 }
 
 /// Turn-tool allowlist from OPENCODE_RK_TURN_TOOLS (comma-separated tool ids).
@@ -2896,6 +2976,7 @@ pub(crate) fn create_turn_stream_with_message(
             round_ordinal: 0,
             mcp_registry,
             read_only: body.read_only,
+            stream_timing: StreamTiming::started(Instant::now()),
         },
         |mut state| async move {
             loop {
@@ -2928,6 +3009,7 @@ pub(crate) fn create_turn_stream_with_message(
                         };
                         match event {
                             Ok(Some(ResponsesStreamEvent::OutputTextDelta(delta))) => {
+                                state.stream_timing.note_streamed(Instant::now());
                                 state.assistant_text.push_str(&delta);
                                 state.delta_seq += 1;
                                 return Some((
@@ -2940,6 +3022,7 @@ pub(crate) fn create_turn_stream_with_message(
                                 ));
                             }
                             Ok(Some(ResponsesStreamEvent::ReasoningSummaryDelta(delta))) => {
+                                state.stream_timing.note_streamed(Instant::now());
                                 state.reasoning_summary.push_str(&delta);
                                 return Some((
                                     Ok::<Bytes, Infallible>(ndjson(json!({
@@ -2954,6 +3037,7 @@ pub(crate) fn create_turn_stream_with_message(
                                 name,
                                 arguments,
                             })) => {
+                                state.stream_timing.note_streamed(Instant::now());
                                 if state.pending_calls.len() >= MAX_PENDING_TURN_CALLS {
                                     state.stage = TurnStreamStage::Done;
                                     return Some((
@@ -2980,6 +3064,7 @@ pub(crate) fn create_turn_stream_with_message(
                                 ));
                             }
                             Ok(Some(ResponsesStreamEvent::Completed { stop_reason })) => {
+                                state.stream_timing.close_round();
                                 context_accounting::publish_usage_report(
                                     state.session_id,
                                     &state.usage_input,
@@ -3012,6 +3097,7 @@ pub(crate) fn create_turn_stream_with_message(
                                 let stop_reason = stop.as_str();
                                 let persisted_summary =
                                     (!reasoning_summary.is_empty()).then_some(reasoning_summary);
+                                let streamed_ms = state.stream_timing.streamed_ms();
                                 match state
                                     .sessions
                                     .append_assistant_with_reasoning_and_execution(
@@ -3022,6 +3108,7 @@ pub(crate) fn create_turn_stream_with_message(
                                             &state.qualified_model,
                                             Some(stop_reason.as_str()),
                                             state.provider.usage(),
+                                            streamed_ms,
                                         )),
                                     )
                                     .await
@@ -3058,6 +3145,7 @@ pub(crate) fn create_turn_stream_with_message(
                                                 "reasoning_summary": persisted_summary,
                                                 "usage": state.provider.usage(),
                                                 "stop_reason": stop_reason,
+                                                "streamed_ms": streamed_ms,
                                             }))),
                                             state,
                                         ));
@@ -3334,6 +3422,7 @@ pub(crate) fn create_turn_stream_with_message(
                             let reasoning_summary = std::mem::take(&mut state.reasoning_summary);
                             let persisted_summary =
                                 (!reasoning_summary.is_empty()).then_some(reasoning_summary);
+                            let streamed_ms = state.stream_timing.streamed_ms();
                             match state
                                 .sessions
                                 .append_assistant_with_reasoning_and_execution(
@@ -3347,6 +3436,7 @@ pub(crate) fn create_turn_stream_with_message(
                                         &state.qualified_model,
                                         Some(stop.as_str().as_str()),
                                         None,
+                                        streamed_ms,
                                     )),
                                 )
                                 .await
@@ -3359,6 +3449,7 @@ pub(crate) fn create_turn_stream_with_message(
                                             "message": message,
                                             "reasoning_summary": persisted_summary,
                                             "stop_reason": stop.as_str(),
+                                            "streamed_ms": streamed_ms,
                                         }))),
                                         state,
                                     ));
@@ -3475,6 +3566,7 @@ pub(crate) fn create_turn_stream_with_message(
                                     return None;
                                 }
                                 state.provider = next_stream;
+                                state.stream_timing.open_round(Instant::now());
                                 state.stage = TurnStreamStage::Provider;
                                 continue;
                             }
@@ -3727,6 +3819,7 @@ fn turn_execution(
     qualified_model: &str,
     stop_reason: Option<&str>,
     usage: Option<opencode_rk_providers::responses::ReportedUsage>,
+    streamed_ms: Option<u64>,
 ) -> MessageExecutionInput {
     let (provider_id, model_id) = match qualified_model.split_once('/') {
         Some((provider, model)) if !provider.is_empty() && !model.is_empty() => {
@@ -3743,6 +3836,7 @@ fn turn_execution(
         output_tokens: usage.map(|usage| usage.output_tokens),
         cached_tokens: usage.and_then(|usage| usage.cached_tokens),
         reasoning_tokens: usage.and_then(|usage| usage.reasoning_tokens),
+        streamed_ms,
     }
 }
 
@@ -3758,6 +3852,9 @@ fn execution_json(fact: &opencode_rk_contracts::MessageExecution) -> Option<Valu
     }
     if let Some(value) = &fact.stop_reason {
         object.insert("stop_reason".into(), json!(value));
+    }
+    if let Some(value) = fact.streamed_ms {
+        object.insert("streamed_ms".into(), json!(value));
     }
     let mut usage = serde_json::Map::new();
     for (key, value) in [
@@ -3939,5 +4036,60 @@ mod broker_gate_tests {
             description: "turn tool call".to_owned(),
         });
         assert!(matches!(denied, Decision::Deny { .. }));
+    }
+}
+
+#[cfg(test)]
+mod stream_timing_tests {
+    use super::*;
+
+    fn at(base: Instant, ms: u64) -> Instant {
+        base + Duration::from_millis(ms)
+    }
+
+    #[test]
+    fn msg008_sums_provider_active_spans_across_rounds() {
+        let base = Instant::now();
+        let mut timing = StreamTiming::started(at(base, 0));
+        // Round 1: provider call starts at 0ms, first delta at 300ms.
+        timing.note_streamed(at(base, 300));
+        timing.close_round();
+        // Tool time elapses here and is excluded; round 2 opens at 5000ms.
+        timing.open_round(at(base, 5_000));
+        timing.note_streamed(at(base, 5_200));
+        timing.close_round();
+        // 300 + 200 = 500ms of provider-active time (`rows.ts:451-453`).
+        assert_eq!(timing.streamed_ms(), Some(500));
+    }
+
+    #[test]
+    fn msg008_later_deltas_do_not_move_the_first_stamp() {
+        let base = Instant::now();
+        let mut timing = StreamTiming::started(at(base, 0));
+        timing.note_streamed(at(base, 100));
+        timing.note_streamed(at(base, 900));
+        timing.close_round();
+        assert_eq!(timing.streamed_ms(), Some(100));
+    }
+
+    #[test]
+    fn msg008_any_unstreamed_round_makes_throughput_absent() {
+        // Upstream requires EVERY assistant step to carry `time.streamed`
+        // (`rows.ts:453-454`), so one unstreamed round hides the whole rate.
+        let base = Instant::now();
+        let mut timing = StreamTiming::started(at(base, 0));
+        timing.note_streamed(at(base, 200));
+        timing.close_round();
+        timing.open_round(at(base, 1_000));
+        timing.close_round();
+        assert_eq!(timing.streamed_ms(), None);
+    }
+
+    #[test]
+    fn msg008_no_streamed_round_stays_absent() {
+        let base = Instant::now();
+        let mut timing = StreamTiming::started(at(base, 0));
+        timing.close_round();
+        assert_eq!(timing.streamed_ms(), None);
     }
 }

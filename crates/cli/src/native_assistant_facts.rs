@@ -88,6 +88,14 @@ pub struct AssistantFacts {
     /// both stamps exist and the delta is positive — upstream hides a zero
     /// duration.
     pub duration_ms: Option<u64>,
+    /// MSG-008: provider-active streamed time for the turn, in milliseconds —
+    /// the aggregate of each provider round's `first_delta - round_start`
+    /// (upstream `time.streamed - time.created` summed per assistant step,
+    /// `routes/session/rows.ts:451-453`). Real wire fact from the
+    /// `assistant_message` frame (live) or the stored `execution` object
+    /// (history). `None` when the producer observed no streamed round, so
+    /// throughput stays absent rather than fabricated.
+    pub streamed_ms: Option<u64>,
     /// True only when the TYPED error transport code was [`CANCELLED_CODE`] —
     /// the native equivalent of upstream's `"Step interrupted"` suffix
     /// condition. Never derived from message text.
@@ -119,6 +127,7 @@ impl AssistantFacts {
                 .and_then(|usage| usage.get("reasoning_tokens"))
                 .and_then(Value::as_u64),
             duration_ms: None,
+            streamed_ms: frame.get("streamed_ms").and_then(Value::as_u64),
             interrupted: false,
             error_message: None,
         }
@@ -137,6 +146,7 @@ impl AssistantFacts {
             output_tokens: None,
             reasoning_tokens: None,
             duration_ms: None,
+            streamed_ms: None,
             interrupted,
             error_message: Some(message),
         }
@@ -164,6 +174,7 @@ impl AssistantFacts {
                 .and_then(|usage| usage.get("reasoning_tokens"))
                 .and_then(Value::as_u64),
             duration_ms: None,
+            streamed_ms: execution.get("streamed_ms").and_then(Value::as_u64),
             interrupted: false,
             error_message: None,
         };
@@ -211,6 +222,27 @@ pub fn created_at_ms(record: &Value, pointer: &str) -> Option<i64> {
 pub fn turn_duration_ms(started_ms: i64, completed_ms: i64) -> Option<u64> {
     let delta = completed_ms.checked_sub(started_ms)?;
     (delta > 0).then_some(delta as u64)
+}
+
+/// Provider-active throughput for one assistant turn (upstream
+/// `turnTokensPerSecond`, `packages/tui/src/routes/session/rows.ts:442-463`):
+/// `(output + reasoning) / (streamed_ms / 1000)`. Tool time is excluded because
+/// `streamed_ms` aggregates only the provider-active spans. Returns `None` when
+/// there is no streamed span, no output, or either value is degenerate — so a
+/// missing fact renders nothing instead of an infinite/zero rate.
+#[must_use]
+pub fn tokens_per_second(
+    output_tokens: Option<u64>,
+    reasoning_tokens: Option<u64>,
+    streamed_ms: Option<u64>,
+) -> Option<f64> {
+    let output = output_tokens.unwrap_or(0).saturating_add(reasoning_tokens.unwrap_or(0));
+    let streamed = streamed_ms?;
+    if output == 0 || streamed == 0 {
+        return None;
+    }
+    #[allow(clippy::cast_precision_loss)]
+    Some(output as f64 / (streamed as f64 / 1_000.0))
 }
 
 // ---------------------------------------------------------------------------
@@ -346,6 +378,11 @@ impl AssistantFooter {
     pub fn from_facts(facts: &AssistantFacts) -> Self {
         Self {
             duration_ms: facts.duration_ms,
+            tokens_per_second: tokens_per_second(
+                facts.output_tokens,
+                facts.reasoning_tokens,
+                facts.streamed_ms,
+            ),
             interrupted: facts.interrupted,
             error_message: facts.error_message.clone(),
             ..Self::default()
@@ -482,6 +519,51 @@ mod native_assistant_facts_tests {
         assert_eq!(turn_duration_ms(1_000, 1_000), None);
         assert_eq!(turn_duration_ms(2_000, 1_000), None);
         assert_eq!(turn_duration_ms(i64::MIN, i64::MAX), None, "overflowing span is absent");
+    }
+
+    // MSG-008: provider-active throughput (`turnTokensPerSecond`,
+    // `packages/tui/src/routes/session/rows.ts:442-463`).
+
+    #[test]
+    fn msg008_tokens_per_second_aggregates_output_and_reasoning_over_streamed_time() {
+        // (output + reasoning) / (streamed_ms / 1000).
+        assert_eq!(tokens_per_second(Some(100), Some(0), Some(2_000)), Some(50.0));
+        assert_eq!(tokens_per_second(Some(60), Some(40), Some(2_000)), Some(50.0));
+        // A missing streamed span or zero output hides throughput entirely.
+        assert_eq!(tokens_per_second(Some(100), Some(0), None), None);
+        assert_eq!(tokens_per_second(Some(100), Some(0), Some(0)), None);
+        assert_eq!(tokens_per_second(Some(0), Some(0), Some(2_000)), None);
+        assert_eq!(tokens_per_second(None, None, Some(2_000)), None);
+    }
+
+    #[test]
+    fn msg008_streamed_ms_is_a_real_wire_fact_from_frame_and_history() {
+        let frame = json!({
+            "type": "assistant_message",
+            "usage": {"output_tokens": 50, "reasoning_tokens": 10},
+            "streamed_ms": 1_500
+        });
+        let live = AssistantFacts::from_message_frame(&frame);
+        assert_eq!(live.streamed_ms, Some(1_500));
+        assert_eq!(tokens_per_second(live.output_tokens, live.reasoning_tokens, live.streamed_ms), Some(40.0));
+
+        let record = json!({
+            "execution": {
+                "usage": {"output_tokens": 50, "reasoning_tokens": 10},
+                "streamed_ms": 1_500
+            }
+        });
+        let history = AssistantFacts::from_history_record(&record).expect("stored facts");
+        assert_eq!(history.streamed_ms, Some(1_500));
+
+        // Absent streamed timing stays absent, never a fabricated zero.
+        let no_timing = AssistantFacts::from_message_frame(&json!({"type": "assistant_message"}));
+        assert_eq!(no_timing.streamed_ms, None);
+        let history_no_timing = AssistantFacts::from_history_record(&json!({
+            "execution": {"stop_reason": "completed"}
+        }))
+        .expect("stored facts");
+        assert_eq!(history_no_timing.streamed_ms, None);
     }
 
     #[test]

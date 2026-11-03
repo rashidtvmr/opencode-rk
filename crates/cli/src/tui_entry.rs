@@ -7348,6 +7348,18 @@ fn native_loop(
         append_transcript(&mut transcript, format!("error: {diagnostic}"));
     }
     view.set_scrollbar_enabled(scrollbar_enabled);
+    // MSG-008: session `tps` setting (`config/index.tsx:328`, consumed at
+    // `routes/session/index.tsx:2061`). Defaults true; gates only the footer
+    // throughput span.
+    let (tps_enabled, tps_diagnostics) =
+        crate::native_ui_preferences::UiPreferences::session_tps(
+            cli_path.as_deref(),
+            inline_cli.as_deref(),
+        );
+    for diagnostic in tps_diagnostics {
+        append_transcript(&mut transcript, format!("error: {diagnostic}"));
+    }
+    view.set_tps_enabled(tps_enabled);
     view.set_prompt_width(match preferences.prompt_width {
         Some(crate::native_ui_preferences::PromptWidth::Auto) => {
             crate::native_view::PromptWidth::Auto
