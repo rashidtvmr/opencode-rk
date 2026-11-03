@@ -12486,3 +12486,59 @@ Canonical SHA: `b5ec63c7` (remote `main-v2` verified via `git ls-remote`).
     driver + POST. Held, not landed.
 
 Canonical SHA: `5e3d797b` (remote `main-v2` verified via `git ls-remote`).
+
+### Wave-64 — STATE-002 landed; wave-65 parallel dispatch (2026-11-03)
+
+- **STATE-002 — LANDED `6a72aa61`** (pushed; remote verified). Orchestrator build
+  from the wave-64 worker patch + fixes. Durable compaction marker end-to-end:
+  - contracts `MessageRole::Compaction` (snake_case `compaction`); role codec 4
+    (TEXT + v2); `workspace.sql` CHECK widened to 0..4;
+    `bounded_history_from` now filters `role<>'compaction'` so a marker can never
+    enter provider replay (test
+    `bounded_history_excludes_compaction_markers_from_provider_replay`).
+  - server `append_compaction_message` persists the compaction request's own
+    `window.usage`; `compaction_wire_part` emits
+    `{type,status,providerNative,reason,usage:{input,output}}`; BOTH `/messages`
+    and `/history` (the CLI transcript reads `/history`) surface the typed part;
+    `history_item_to_responses_item` rejects the role as a safety net.
+  - CLI `ChatPart::Compaction` carries
+    `status`/`provider_native`/`cancelled`/`usage`; the render arm labels a
+    completed provider-native compaction `Provider compaction` (else
+    `Compaction`), appends `· cancelled` for an aborted failure and
+    `· {in} in · {out} out` once not running (`index.tsx:2196-2218`).
+  - Tests: server `compaction_wire_part_tests` (4), CLI
+    `compaction_part_projects_status_provider_native_cancelled_and_usage` +
+    `compaction_part_renders_upstream_label_cancelled_and_request_usage`.
+    CLI **2215/0**, server **313/0**, storage **126/0**, sessions **44/0**.
+  - **STATE-002 → `LANDED`.** Counts: 145 `ALREADY_CORRECT` / 1 `REAL_GAP` /
+    47 `BLOCKED` / 30 `LANDED` = 223.
+
+- **Wave-65 — 20 grouped workers dispatched in parallel** (user direction:
+  20–30 parallel, group 5–10 related items, detailed single-shot briefs, tests,
+  resume failures 2–3× switching provider). Each worker clones `--shared` to
+  `/tmp/w65-<ID>`, edits, returns `git diff` + an artifact under
+  `/private/var/folders/.../opencode/wave65/<ID>.impl.json`; the orchestrator
+  applies + compiles + tests + commits + pushes. Groups:
+  - `@vyce-deepseek-v41` (8): DIALOG-A (06–09), DIALOG-B (13–15),
+    DIALOG-C (16–19), TAB (06,21), SIDE (05), MSG-A (001–003), MSG-B (005),
+    TOOL (006,011).
+  - `@9router-vyce-deepseek-v4.1-free-combined` (10): DIFF (001,003,PAR-19),
+    THEME-A (08,PAR-09), THEME-B (09), THEME-C (13), THEME-D (14),
+    MD (007–009), LAY (10,11,13), CP (07,09), FFI-A (02–04), FFI-B (06–08,11).
+  - `@9router-river-glm-5-3-flash` (1): PAR (02,03,06,07).
+  - `@9router-luna-free` (1): FORM (FORM-001 sub-behaviors 3,4).
+  - Session IDs: DIALOG-A `ses_e5f86e2d7ffdYojsuQoKL1PutF`, DIALOG-B
+    `ses_e5f86e2d7ffcU8h1GFWhp62xgP`, DIALOG-C `ses_e5f86e2d6ffeJBakqy1uC4s8md`,
+    TAB `ses_e5f86e2d6ffdF6lyUtFH07vYMT`, SIDE `ses_e5f86e2d6ffc60Ydr2Z8sF6QcT`,
+    MSG-A `ses_e5f86e2d1ffeADOf8CUnHADRzm`, MSG-B `ses_e5f86e2d1ffdbPIwUZl0MsPhrK`,
+    TOOL `ses_e5f86e2d0fferhqtCQ70ypyAii`, DIFF `ses_e5f866921ffevhmbfDbORSsIuE`,
+    THEME-A `ses_e5f866921ffdccDSn7s6q3VkZM`, THEME-B `ses_e5f866921ffcleLiSwUYkZtSwb`,
+    THEME-C `ses_e5f866920ffeOb4QrrwuyC9qzo`, THEME-D `ses_e5f866920ffdCiNt60nCF1Kxo5`,
+    MD `ses_e5f866918ffeOJvnuS1zQUtRDb`, LAY `ses_e5f866918ffd99YRzyUdkIGANG`,
+    CP `ses_e5f866918ffcgin7QCEZfe5VwT`, FFI-A `ses_e5f866917ffeJrcI4bbIPN2M4j`,
+    FFI-B `ses_e5f866917ffd1RmXod2K4czB5m`, PAR `ses_e5f864a62ffeMCCdt9UPu9kY4M`,
+    FORM `ses_e5f864a62ffduxLy2gEY7Xz8SY`.
+  - First failure: DIALOG-B returned "Invalid request" — to be resumed 2–3× on
+    another authorized route before ignoring.
+
+Canonical SHA: `6a72aa61` (remote `main-v2` verified via `git ls-remote`).

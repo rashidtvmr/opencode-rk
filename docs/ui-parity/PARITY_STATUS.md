@@ -1,6 +1,6 @@
 # OpenCode V2 UI parity — consolidated status
 
-- **Canonical line:** `main-v2` @ `5e3d797b` (remote verified)
+- **Canonical line:** `main-v2` @ `6a72aa61` (remote verified)
 - **Upstream oracle:** `/Users/mymac/Projects/tmp/opencode` @ `450e7b92412c780a7b5a75226bb8d49aaca24e22`
 - **Checklist:** `docs/ui-parity/opencode-ui-parity-kit/checklist.json` (223 items)
 - **Method:** source inspection of the live Rust path (implementation + a
@@ -278,8 +278,8 @@ the wave-44 verdict supersedes it.
 | --- | --- |
 | `ALREADY_CORRECT` | 145 |
 | `REAL_GAP` | 1 |
-| `BLOCKED` | 48 |
-| `LANDED` (wave-45..64) | 29 |
+| `BLOCKED` | 47 |
+| `LANDED` (wave-45..64) | 30 |
 | **Total** | **223** |
 
 ### Landed fixes (wave-45..56) — moved out of `REAL_GAP`/`BLOCKED`
@@ -328,6 +328,7 @@ full single-threaded CLI suite, and was pushed + remote-verified.
 | MSG-008 | `6a49151f` | **Producer chain built end to end.** `MessageExecution.streamed_ms` (contracts) + `message_execution.streamed_ms` column with idempotent `pragma_table_info` ALTER (storage) + `MessageExecutionInput.streamed_ms` (sessions); server `StreamTiming` accumulates each provider round's `first_delta − round_start` (upstream `time.streamed − time.created`, `rows.ts:451-453`), excludes tool time, and returns `None` when **any** round never streamed (`rows.ts:453-454`); published as `streamed_ms` on the `assistant_message` frame and stored `execution_json`. CLI `AssistantFacts.streamed_ms` + `tokens_per_second()`; footer ` · {tps:.1} tok/s` span gated on `session.tps` (`config/index.tsx:328` default true, consumed `index.tsx:2061`); `ChatView` threads `tps_enabled` through both render paths; `tui_entry` reads `session_tps`. 4 server + 2 facts + 1 footer + 3 prefs tests + storage/sessions round-trip; CLI **2211/0**, server lib **309/0**. |
 | SIDE-03 (cost producer half) | `b5ec63c7` | `native_setup::ModelCost { input, output }` (USD per 1M tokens) parsed from the catalogue entry's first `cost` row (`entry["cost"][0]`, upstream `ModelInfo.cost`); `ModelCost::price(input,output) = (input*in + output*out)/1e6`, `None` unless finite and positive. `Model` gains `cost: Option<ModelCost>` (drops `Eq` for the f64 field). The live `native_turn::Event::Usage` arm now calls `view.set_cost(selected.cost.price(input,output))` — the first live `set_cost` caller, so the sidebar `$X.XX spent` row (`context.tsx:14/36-38`) renders from real pricing. 1 focused test (parse + price + zero guards); CLI **2212/0**. |
 | SIDE-03 (history-load half) | `5e3d797b` | Completes SIDE-03. `native_chat_projection::SessionUsage` + `last_assistant_usage(records, boundary)` mirrors upstream `lastAssistantWithUsage` (`packages/client/src/solid/usage.ts:8-21`) and `contextUsage` (`util/session.ts:44-63`): an unknown revert boundary yields absent usage (never stale tokens); records at/after the boundary are excluded; the last completed compaction hides everything before it; the model is the message's own `execution.provider_id/model_id`. `LiveSnapshot.session_revert_boundary` carries `revert.messageID`; a `usage_live_generation` guard keeps a live `Event::Usage` value authoritative for its binding; the per-frame publish otherwise sets the five usage classes and the message model's `context_window` (missing limit ⇒ tokens without percent, never the selected UI model). Test `last_assistant_usage_honours_revert_and_compaction_boundaries`; CLI **2213/0**. |
+| STATE-002 | `6a72aa61` | Durable compaction marker rendered live. `MessageRole::Compaction` (contracts, snake_case `compaction`, never a provider history role); role codec 4 (TEXT + v2) + schema CHECK widened to 0..4; `bounded_history_from` filters `role<>'compaction'` so a marker can never enter provider replay (test `bounded_history_excludes_compaction_markers_from_provider_replay`). `append_compaction_message` persists the compaction request's own `window.usage`; `compaction_wire_part` emits `{type,status,providerNative,reason,usage:{input,output}}`; BOTH `/messages` and `/history` surface the typed part; `history_item_to_responses_item` rejects the role as a safety net. CLI `ChatPart::Compaction` carries `status`/`provider_native`/`cancelled`/`usage`; the render arm labels a completed provider-native compaction `Provider compaction` (else `Compaction`), appends `· cancelled` for an aborted failure and `· {in} in · {out} out` once not running (`index.tsx:2196-2218`). Tests: server `compaction_wire_part_tests` (4), CLI `compaction_part_projects_status_provider_native_cancelled_and_usage` + `compaction_part_renders_upstream_label_cancelled_and_request_usage`; CLI **2215/0**, server **313/0**, storage **126/0**, sessions **44/0**. |
 
 ### `REAL_GAP` — faithful model + focused test exist, no live consumer (1)
 
@@ -345,13 +346,13 @@ Selected high-value seams:
 | THEME-13 | `SystemThemeState`/`palette_reply` (`native_theme_runtime.rs:2183/2264`) have zero non-test callers; no OSC palette-query emitter and no payload-carrying input event to decode a reply. |
 | THEME-09 | **BLOCKED (verified wave-53).** The live chat `Patch`/diff-fence painter hardcodes `DiffViewMode::Unified` (`native_view_chat.rs:2202/2730`) and `resolve_view_mode`/`config.diffs.view` (`native_diff_view.rs:586`) have no live caller. Threading the preference is not sufficient: a split row is `SplitRow::Pair { left, right }` (`native_diff_view.rs:709-715`) with two independent backgrounds, but the live row model is `(String, ChatRowClass)` with exactly one class per row (`native_view_chat.rs:902`) and the painter maps a class to a single background (`tui_entry.rs:2880-2898 chat_row_background`). The split view is therefore not renderable without extending the row model — the same blocker as DIFF-001. |
 
-### `BLOCKED` — needs a producer/transport/contract field that does not exist (49)
+### `BLOCKED` — needs a producer/transport/contract field that does not exist (47)
 
 `PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-19,
 TAB-06, TAB-21, SIDE-05,
 MSG-001, MSG-002, MSG-003, MSG-005,
 TOOL-006, TOOL-011, DIFF-001, DIFF-003, FFI-02, FFI-03, FFI-04, FFI-06,
-FFI-07, FFI-08, FFI-11, STATE-002, THEME-08, THEME-09, THEME-13,
+FFI-07, FFI-08, FFI-11, THEME-08, THEME-09, THEME-13,
 THEME-14, CP-07, CP-09,
 DIALOG-06, DIALOG-07, DIALOG-08, DIALOG-09,
 DIALOG-13, DIALOG-14, DIALOG-15, DIALOG-16, DIALOG-17, DIALOG-18,
@@ -382,7 +383,7 @@ DIALOG-19, LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009`.
 | SIDE-04 | Live `set_usage` (`native_view_status.rs:1146`) sums `input+output` only; `set_usage_classes` (`:1168`) and `set_cost` (`:1160`) have zero non-test callers. No `lastAssistantWithUsage` selector, no revert boundary reaching the view, no cost producer, and the wire `input_tokens` is inclusive of cached (`server/src/auto_compaction.rs:102`), so disjoint classes need a `nonCachedInput` producer. **All landed**: classes (`0d4f26a7`), cost producer (`b5ec63c7`), and the history-load `lastAssistantWithUsage` selector with the message's own model limit (`5e3d797b`). |
 | SIDE-05 | `set_limit` (`native_view_status.rs:1175`) test-only; no usage-limits pipeline reaches the CLI. |
 | SIDE-10 | `todo_http.rs:31-38` returns the stored `session_todos` table verbatim; `stage_session_revert` (`server/src/lib.rs:1193-1209`) stores the boundary but never recomputes the latest-completed-`todowrite` list sliced at the revert boundary (upstream `util/todo.ts:32-43`). |
-| STATE-002 | Live transcript renders compaction as a placeholder (`native_view_chat.rs:2689`); projection (`native_chat_projection.rs:392`) drops status/summary/provider-native/tokens; rich `CompactionState` (`native_timeline.rs:382`) has zero consumers; `compact_session` (`server/src/lib.rs:1668`) never persists/pushes a compaction part. |
+| STATE-002 | `LANDED` (`6a72aa61`) | Durable `role='compaction'` marker flows end-to-end: `append_compaction_message` writes it, both `/messages` and `/history` surface a typed `parts` entry (`compaction_wire_part`), and the live transcript renders the upstream `CompactionMessage` semantics (`Provider compaction` vs `Compaction`, `· cancelled`, `· {in} in · {out} out`). Role codec 4 (TEXT + v2), schema CHECK widened, `bounded_history_from` filters `role<>'compaction'` so it never enters provider replay. |
 | MSG-005 | Chips need a server/storage `files`/`skills` field that does not exist (`MessageRecord` `contracts/src/lib.rs:250-257`). |
 | MSG-009 | `TranscriptSurfaces`/`RevertCard`/`TranscriptNotice`/`ChildCompletionNotice` (`native_view_chat.rs:4482/4103/4273/4409`) have no live consumer; `SessionRevert` (`contracts/src/lib.rs:191`) has no count; server stage route hardcodes `files:None`; no notice projection; no child-completion metadata. |
 | TOOL-011 | `execute_dialog` (`native_tool_rows.rs:1159`) zero consumers; live render placeholder (`native_view_dialogs.rs:1429`); no `ExecuteDialog` payload on `OpenDialog`/`DialogView`; no syntax producer (`opentui-bridge/src/highlight.rs:27-29`). |
@@ -484,14 +485,14 @@ field is absent).
 Of the 223 checklist obligations, **145 are `ALREADY_CORRECT`** (a faithful
 implementation, a focused test, and a traced live consumer), **1 is
 `REAL_GAP`** (model + test exist but the live TUI does not consume them),
-**48 are `BLOCKED`** (a producer/transport/contract field does not exist), and
-**29 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
+**47 are `BLOCKED`** (a producer/transport/contract field does not exist), and
+**30 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
 `CP-05`, `CP-06` in wave-46; `MSG-007` in wave-47; `SIDE-08`, `THEME-12`,
 `DIALOG-04` in wave-48; `PAR-04` in wave-49; `TAB-23`, `DIALOG-10`,
 `DIALOG-20` (toast half) in wave-51; `PAR-16`, `PAR-22` in wave-53;
 `TAB-04` in wave-56; `SIDE-14` in wave-57; `PAR-10`, `FORM-001` (sub-behavior 1),
 `TAB-10`, `SIDE-04`, `SIDE-10`, `FFI-01`, `DIALOG-12`, `MSG-009`, `DIALOG-02`,
-`MSG-008` in wave-61/62/63; `SIDE-03` in wave-64).
+`MSG-008` in wave-61/62/63; `SIDE-03` and `STATE-002` in wave-64).
 
 The remaining work is therefore **not** more UI drawing:
 
