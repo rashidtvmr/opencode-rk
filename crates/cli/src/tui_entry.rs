@@ -2068,6 +2068,18 @@ mod tab_context_menu_dispatch_tests {
     }
 
     #[test]
+    fn dialog04_ctrl_c_closes_dialog_but_ctrl_d_keeps_byte_exit() {
+        // Upstream `ui/dialog.tsx:345-384`: the `modal` keymap layer traps
+        // every key while the stack is non-empty and binds Escape and Ctrl+C
+        // to close the top dialog. Ctrl+D is not bound there, so it keeps its
+        // global byte-exit meaning.
+        assert!(dialog_consumes_byte(3), "Ctrl-C closes the dialog, never exits");
+        assert!(dialog_consumes_byte(27), "Escape closes the dialog");
+        assert!(dialog_consumes_byte(b'x'), "printable bytes stay trapped");
+        assert!(!dialog_consumes_byte(4), "Ctrl-D keeps its byte-exit meaning");
+    }
+
+    #[test]
     fn rename_request_uses_real_patch_route_and_stable_ack_identity() {
         assert_eq!(rename_request_path("stable-session-id"), "/api/sessions/stable-session-id");
         assert_eq!(rename_request_body("Renamed"), r#"{"title":"Renamed"}"#);
@@ -3665,6 +3677,18 @@ fn menu_dismisses(event: &native_input_decoder::InputEvent) -> bool {
         native_input_decoder::InputEvent::Escape
             | native_input_decoder::InputEvent::Byte(3 | 4)
     )
+}
+
+/// DIALOG-04: whether the modal dialog stack consumes this raw byte while it
+/// owns input. Upstream enables the `modal` keymap layer exactly while the
+/// stack is non-empty (`ui/dialog.tsx:320-324`), so every key is trapped; the
+/// layer binds Escape and Ctrl+C to close the top dialog
+/// (`ui/dialog.tsx:345-384`) and does NOT bind Ctrl+D, which therefore keeps
+/// its global byte-exit meaning. The live loop routes Ctrl+C through the same
+/// close/reject path as Escape instead of quitting the app.
+#[cfg(feature = "native")]
+fn dialog_consumes_byte(byte: u8) -> bool {
+    byte != 4
 }
 
 /// Enter (CR/LF) closes an open message menu. The option it confirms is
@@ -10036,6 +10060,31 @@ fn native_loop(
                             }
                         }
                     }
+                    // DIALOG-04: a backdrop mouse-up (a release outside the
+                    // panel rect) closes the top dialog (`ui/dialog.tsx:54-60`).
+                    // A press that ends with a text selection must not close
+                    // it; this loop has no live selection state, so the
+                    // release closes. A pending decision is never abandoned:
+                    // `cancel()`/`close()` refuse and the dialog stays.
+                    if kind == 2 && modifiers == 0
+                        && (x < modal.x
+                            || x >= modal.x.saturating_add(modal.width)
+                            || y < modal.y)
+                    {
+                        let mcp_open = view.dialogs.open_kind()
+                            == Some(crate::native_view_dialogs::DialogKind::Mcp);
+                        if mcp_open {
+                            view.dialogs.close();
+                        } else if let Ok(intent) = view.dialogs.cancel() {
+                            dispatch_permission_reply(
+                                &mut view,
+                                &mut transcript,
+                                live.as_ref().map(|snapshot| snapshot.origin.as_str()),
+                                auth,
+                                intent,
+                            );
+                        }
+                    }
                     needs_paint = true;
                     continue;
                 }
@@ -10816,7 +10865,13 @@ fn native_loop(
         // never a local close, even if Help is open. Ctrl-C / Ctrl-D keep
         // exit priority above every modal: they fall through here and break
         // in the dispatch below.
-        if view.dialogs.intercepts_input() && !matches!(byte, 3 | 4) {
+        // DIALOG-04: while the modal stack owns input, Ctrl-C (0x03) closes
+        // the top dialog instead of quitting the app. Upstream binds the
+        // `modal` keymap layer's `ctrl+c` to the same close action as
+        // `escape` (`ui/dialog.tsx:364-384`), and the LAY-12 host model
+        // asserts the same (`native_host.rs:982`). Ctrl-D (0x04) is not bound
+        // in the modal layer, so it keeps its byte-exit meaning.
+        if view.dialogs.intercepts_input() && dialog_consumes_byte(byte) {
             // SIDE-08: the `DialogMcp` server list is a local select, not a
             // backend decision. Enter toggles the focused server through the
             // same `PUT /api/sessions/{id}/mcp/{name}` the sidebar row used
@@ -10841,7 +10896,7 @@ fn native_loop(
                             );
                         }
                     }
-                    27 => view.dialogs.close(),
+                    27 | 3 => view.dialogs.close(),
                     _ => {}
                 }
                 utf8.reset();
@@ -10864,7 +10919,7 @@ fn native_loop(
                         format!("error: permission answer: {}", error.code()),
                     ),
                 },
-                27 => match view.dialogs.cancel() {
+                27 | 3 => match view.dialogs.cancel() {
                     Ok(intent) => dispatch_permission_reply(
                         &mut view,
                         &mut transcript,
