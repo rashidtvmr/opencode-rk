@@ -244,8 +244,8 @@ the wave-44 verdict supersedes it.
 | Verdict | Count |
 | --- | --- |
 | `ALREADY_CORRECT` | 144 |
-| `REAL_GAP` | 6 |
-| `BLOCKED` | 59 |
+| `REAL_GAP` | 4 |
+| `BLOCKED` | 61 |
 | `LANDED` (wave-45..51) | 14 |
 | **Total** | **223** |
 
@@ -268,9 +268,9 @@ the wave-44 verdict supersedes it.
 | DIALOG-10 | `a52c222a` | The live session rename painted an ad-hoc rectangle with its own `String` buffer and never used the tested `DialogPrompt`. Adds `DialogView::open_prompt` (kind `Prompt`, seeded from `native_palette::select::PromptState`) plus `prompt_value`/`push`/`backspace`/`submit`/`escape`/`set_busy`/`set_message` forwarders, renders the value (or the busy line) and the upstream footer `Enter: save · Esc: cancel`, and routes the live rename through it (`MenuAction::Rename` opens the prompt; the key block edits/submits; the settlement closes it or sets busy/inline-error). Escape/submit are suppressed while busy (`dialog-prompt.tsx:43-46,93-100,168-170`). The ad-hoc `PaintCtx.rename_dialog` paint path is removed. Focused test + full CLI suite (2177/0) green. |
 | DIALOG-20 (toast half) | `d891f9c3` | The tested `Toast`/`ToastFrame` model had no live consumer. Adds `PaintCtx.toast`, paints the frame as the topmost overlay in `native_paint` (surface fill + each styled `CellRun`), owns a live `Toast` in the loop whose logical clock advances on the animation tick so a visible toast auto-dismisses after 5000 ms, and triggers it from the session-id copy path (`Copied to clipboard`, `app.tsx:605`). The crash/error-details half remains `BLOCKED`. Full CLI suite (2177/0) green. |
 
-### `REAL_GAP` — faithful model + focused test exist, no live consumer (6)
+### `REAL_GAP` — faithful model + focused test exist, no live consumer (4)
 
-`THEME-08, THEME-09, THEME-13, CP-07, MEDIA-001, DIALOG-02`.
+`THEME-09, CP-07, MEDIA-001, DIALOG-02`.
 
 Per-ID seams are recorded in the wave-44 batch tables above and in
 `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave44/<ID>.json`.
@@ -285,13 +285,13 @@ Selected high-value seams:
 | THEME-13 | `SystemThemeState`/`palette_reply` (`native_theme_runtime.rs:2183/2264`) have zero non-test callers; no OSC palette-query emitter and no payload-carrying input event to decode a reply. |
 | THEME-09 | The live chat `Patch`/diff-fence painter hardcodes `DiffViewMode::Unified` (`native_view_chat.rs:2200/2730`); `resolve_view_mode`/`config.diffs.view` (`native_diff_view.rs:586`) have no live caller, so the upstream width>120 auto-split is unreachable. |
 
-### `BLOCKED` — needs a producer/transport/contract field that does not exist (59)
+### `BLOCKED` — needs a producer/transport/contract field that does not exist (61)
 
 `PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-10, PAR-16, PAR-19, PAR-22,
 TAB-04, TAB-06, TAB-10, TAB-21, SIDE-03, SIDE-04, SIDE-05, SIDE-10, SIDE-14,
 MSG-001, MSG-002, MSG-003, MSG-005, MSG-008, MSG-009, MSG-010,
 TOOL-006, TOOL-011, DIFF-001, DIFF-003, FFI-01, FFI-02, FFI-03, FFI-04, FFI-06,
-FFI-07, FFI-08, FFI-11, FORM-001, STATE-002, THEME-14, CP-09,
+FFI-07, FFI-08, FFI-11, FORM-001, STATE-002, THEME-08, THEME-13, THEME-14, CP-09,
 DIALOG-06, DIALOG-07, DIALOG-08, DIALOG-09,
 DIALOG-12, DIALOG-13, DIALOG-14, DIALOG-15, DIALOG-16, DIALOG-17, DIALOG-18,
 DIALOG-19, LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009`.
@@ -404,9 +404,9 @@ field is absent).
 ## Honest completion statement
 
 Of the 223 checklist obligations, **144 are `ALREADY_CORRECT`** (a faithful
-implementation, a focused test, and a traced live consumer), **6 are
+implementation, a focused test, and a traced live consumer), **4 are
 `REAL_GAP`** (model + test exist but the live TUI does not consume them),
-**59 are `BLOCKED`** (a producer/transport/contract field does not exist), and
+**61 are `BLOCKED`** (a producer/transport/contract field does not exist), and
 **14 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
 `CP-05`, `CP-06` in wave-46; `MSG-007` in wave-47; `SIDE-08`, `THEME-12`,
 `DIALOG-04` in wave-48; `PAR-04` in wave-49; `TAB-23`, `DIALOG-10`,

@@ -11881,3 +11881,25 @@ crash/error-details half remains BLOCKED (no `std::panic::set_hook`, no
 
 PARITY_STATUS reconciled to a self-consistent 144 `ALREADY_CORRECT` / 6
 `REAL_GAP` / 59 `BLOCKED` / 14 `LANDED` = 223. Remote `main-v2` == `d891f9c3`.
+
+### Wave-52 status — grouped fleet mostly empty (2026-11-03)
+
+Dispatched 20 grouped workers (base `34fffc2d`) across the 4 authorized routes.
+Result: the fleet failed at the provider as in prior waves. Only G-TOOL
+(`@9router-river-glm-5-3-flash`) and G-THEME/G-DIFF (`vyce`/`luna-free`) returned
+text; none wrote artifacts to the private dir (only BRIEF.md/TASKS52.md present).
+
+Source-backed findings that stand:
+- TOOL-006 / TOOL-011 BLOCKED (4-crate chain: server shell service + executor
+  background branch + `shellID` metadata contract + live polling consumer).
+- THEME-09 bounded (needs `diffs.view` reader + `DiffViewPreference` threading
+  through the chat fence painter + `InlineDiffRow::Split` handling).
+- THEME-08 / THEME-13 / THEME-14 confirmed BLOCKED (no tokenizer/grammar
+  producer; OSC payload retention impossible by design at
+  `native_input_decoder.rs:301`; `syntaxStyleRegister` intentionally absent
+  from the bridge ABI at `opentui-bridge/src/text.rs:7`).
+- DIFF-001 / DIFF-003: split arithmetic exists but live chat painter applies one
+  background per row; `diffs.view` has no loader.
+
+PARITY_STATUS reclassified to 144 `ALREADY_CORRECT` / 4 `REAL_GAP` / 61
+`BLOCKED` / 14 `LANDED` = 223.
