@@ -4012,6 +4012,91 @@ fn tab_menu_target_at(navigation: &crate::native_navigation::NavigationState, ta
     tabs.add_rect.filter(|r| x>=r.x && x<r.x.saturating_add(r.width) && y>=r.y && y<r.y.saturating_add(r.height)).map(|_| recent_closed_menu_target(navigation))
 }
 
+/// SIDE-14: `openPath` (`packages/util/src/open.ts:10-12`, the `open` package)
+/// — hand the working directory to the system file manager. The path is one
+/// argv value; no shell interpolation or concatenated command string is
+/// involved.
+#[cfg(feature = "native")]
+fn open_directory_in_file_manager(path: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = std::process::Command::new("cmd");
+        command.args(["/C", "start", "", path]);
+        command
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = std::process::Command::new("open");
+        command.arg(path);
+        command
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut command = std::process::Command::new("xdg-open");
+        command.arg(path);
+        command
+    };
+    #[cfg(not(any(target_os = "windows", target_os = "macos", unix)))]
+    return Err("opening a directory is unsupported on this platform".to_owned());
+
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("open folder failed: {error}"))
+}
+
+/// SIDE-14: run the focused working-directory menu action
+/// (`working-directory-actions.tsx:24-54`). Copy path writes the directory to
+/// the clipboard (OSC 52, the same frame selection copy uses) and toasts
+/// `Path copied to clipboard`; Open folder hands it to the system file
+/// manager. Both close the menu, matching upstream's `dialog.clear()`.
+#[cfg(feature = "native")]
+fn dispatch_working_directory_action(
+    view: &mut crate::native_view::NativeView,
+    transcript: &mut NativeChatHistory,
+    toast: &mut crate::native_toast::Toast,
+    action: crate::native_view_status::native_sidebar::FooterAction,
+) {
+    use crate::native_view_status::native_sidebar::FooterAction;
+    let Some(directory) = view.footer_directory().map(str::to_owned) else {
+        view.dialogs.close();
+        return;
+    };
+    match action {
+        FooterAction::CopyPath => {
+            let frame = selection_clipboard_frame(&directory);
+            let written = {
+                let mut stdout = std::io::stdout().lock();
+                stdout.write_all(frame.as_bytes()).and_then(|()| stdout.flush())
+            };
+            view.dialogs.close();
+            match written {
+                Ok(()) => toast.show(crate::native_toast::ToastOptions::new(
+                    crate::native_toast::ToastVariant::Info,
+                    "Path copied to clipboard",
+                )),
+                Err(error) => {
+                    append_transcript(transcript, format!("error: copy path failed: {error}"))
+                }
+            }
+        }
+        FooterAction::OpenFolder => {
+            view.dialogs.close();
+            if let Err(error) = open_directory_in_file_manager(&directory) {
+                append_transcript(transcript, format!("error: {error}"));
+            }
+        }
+        FooterAction::Workspaces => {
+            // No live `DialogWorkspaces` route exists, so the menu never
+            // offers this entry (`can_move` is false); defensive close only.
+            view.dialogs.close();
+        }
+    }
+}
+
 #[cfg(feature = "native")]
 fn selection_clipboard_frame(text: &str) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -9699,6 +9784,13 @@ fn native_loop(
                         continue;
                     }
                     if kind == 7 {
+                        // SIDE-14: pinned footer hover (`footer.tsx:98-109`
+                        // `onMouseOver`/`onMouseOut` on the
+                        // `sidebar.footer.location` box). Repaint only on a
+                        // real transition.
+                        if view.set_footer_hover(x, y) {
+                            needs_paint = true;
+                        }
                         tab_hovered = if effective_orientation == TabOrientation::Vertical {
                             rendered_rail.as_ref().and_then(|rail| match rail.hit(x, y) { Some(crate::native_tab_rail::RailHit::Session(id)) => Some(id), _ => None })
                         } else {
@@ -10189,9 +10281,12 @@ fn native_loop(
                             || x >= modal.x.saturating_add(modal.width)
                             || y < modal.y)
                     {
-                        let mcp_open = view.dialogs.open_kind()
-                            == Some(crate::native_view_dialogs::DialogKind::Mcp);
-                        if mcp_open {
+                        let local_close = matches!(
+                            view.dialogs.open_kind(),
+                            Some(crate::native_view_dialogs::DialogKind::Mcp)
+                                | Some(crate::native_view_dialogs::DialogKind::Select)
+                        );
+                        if local_close {
                             view.dialogs.close();
                         } else if let Ok(intent) = view.dialogs.cancel() {
                             dispatch_permission_reply(
@@ -10376,6 +10471,16 @@ fn native_loop(
                         if let Err(error) = view.mcp_dialog_open(&name, failed) {
                             append_transcript(&mut transcript, format!("error: mcp dialog: {}", error.code()));
                         }
+                        needs_paint = true;
+                        continue;
+                    }
+                    if view.footer_click(x, y, selection.selected_text().is_some()) {
+                        // SIDE-14: a press on the pinned footer location row
+                        // opens the local `DialogSelect` working-directory
+                        // menu (`footer.tsx:98-109` `onMouseUp` ->
+                        // `working-directory-actions.tsx:16-58`). A click while
+                        // text is selected is ignored, matching upstream
+                        // `openMenu`'s `getSelectedText()` early-return.
                         needs_paint = true;
                         continue;
                     }
@@ -11011,6 +11116,33 @@ fn native_loop(
                                 auth,
                                 &name,
                                 included,
+                            );
+                        }
+                    }
+                    27 | 3 => view.dialogs.close(),
+                    _ => {}
+                }
+                utf8.reset();
+                continue;
+            }
+            // SIDE-14: the working-directory menu is a local `DialogSelect`
+            // (`working-directory-actions.tsx:20-56`), not a backend decision.
+            // Enter runs the focused action; Esc (and the modal-layer Ctrl-C,
+            // `ui/dialog.tsx:364-384`) closes it locally. It is the only
+            // producer of `DialogKind::Select`.
+            if view.dialogs.open_kind()
+                == Some(crate::native_view_dialogs::DialogKind::Select)
+            {
+                match byte {
+                    14 => view.dialogs.next(),
+                    2 => view.dialogs.prev(),
+                    13 | 10 => {
+                        if let Some(action) = view.working_directory_choice() {
+                            dispatch_working_directory_action(
+                                &mut view,
+                                &mut transcript,
+                                &mut toast,
+                                action,
                             );
                         }
                     }

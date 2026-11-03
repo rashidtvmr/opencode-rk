@@ -298,6 +298,18 @@ struct SidebarFooter {
     branch: Option<String>,
 }
 
+impl SidebarFooter {
+    /// The exact pinned label (`native_sidebar::Footer::label`), so the footer
+    /// hit test can address the same row the sidebar paints.
+    fn label(&self) -> String {
+        native_sidebar::footer_label(
+            &self.directory,
+            self.branch.as_deref(),
+            native_sidebar::FOOTER_PATH_MAX_WIDTH,
+        )
+    }
+}
+
 #[cfg(test)]
 mod conditional_sidebar_tests {
     use super::StatusView;
@@ -633,6 +645,39 @@ mod conditional_sidebar_tests {
             roles(&view),
             [Role::Description],
             "leaving the row restores muted text"
+        );
+    }
+
+    /// SIDE-14: the pinned footer row is addressable by index and its menu is
+    /// the exact upstream three-entry shape (`working-directory-actions.tsx:24-54`),
+    /// gated on a known directory and a live move route.
+    #[test]
+    fn footer_row_and_menu_address_the_pinned_location() {
+        use super::native_sidebar::{FooterAction, FOOTER_MENU_TITLE};
+        let mut view = StatusView::default();
+        assert!(view.footer_row(38, 30).is_none(), "no directory, no footer row");
+        assert!(view.footer_directory().is_none());
+        assert!(view.footer_menu(false, true).is_none(), "no directory, no menu");
+
+        view.set_working_directory(Some("/projects/oc2".into()), Some("main".into()));
+        let row = view.footer_row(38, 30).expect("pinned footer row");
+        let rows = view.render_sidebar_styled(38, 30);
+        assert_eq!(rows[row].text.trim_end(), "/projects/oc2:main");
+        assert_eq!(view.footer_directory(), Some("/projects/oc2"));
+        assert_eq!(FOOTER_MENU_TITLE, "Working directory");
+
+        let menu = view.footer_menu(false, false).expect("menu without move");
+        assert_eq!(
+            menu.iter().map(|item| item.action).collect::<Vec<_>>(),
+            [FooterAction::CopyPath, FooterAction::OpenFolder]
+        );
+        assert_eq!(menu[0].description, "/projects/oc2");
+        let with_move = view.footer_menu(false, true).expect("menu with move");
+        assert_eq!(with_move.len(), 3);
+        assert_eq!(with_move[2].action, FooterAction::Workspaces);
+        assert!(
+            view.footer_menu(true, true).is_none(),
+            "an active text selection suppresses the menu"
         );
     }
 }
@@ -1227,6 +1272,13 @@ impl StatusView {
         self.footer_hovered = hovered;
     }
 
+    /// SIDE-14: the current pinned footer hover fact, so a pointer-move
+    /// producer can repaint only on a real transition.
+    #[must_use]
+    pub fn footer_hovered(&self) -> bool {
+        self.footer_hovered
+    }
+
     /// Getting-started facts for the pinned footer (`footer.tsx:18-23`).
     /// `None` means the integration list was never observed, so no onboarding
     /// box is claimed.
@@ -1264,6 +1316,45 @@ impl StatusView {
         self.sidebar_rows(width, height)
             .iter()
             .position(|row| row.line.text.contains("Getting started") && row.line.text.ends_with('\u{2715}'))
+    }
+
+    /// SIDE-14: row index of the pinned footer location row
+    /// (`footer.tsx:94-112`, `id="sidebar.footer.location"`), or `None` when
+    /// no working directory is known. Row indexes address exactly the rows
+    /// [`Self::render_sidebar_styled`] returns, so a caller can hit-test the
+    /// published row against a pointer `(x, y)`. The pinned location row is
+    /// composed last (`native_sidebar::Sidebar::footer_rows`), so the last
+    /// matching row wins if a body/header row happens to repeat the path.
+    #[must_use]
+    pub fn footer_row(&self, width: usize, height: usize) -> Option<usize> {
+        let footer = self.footer.as_ref()?;
+        let expected = native_sidebar::take_cells(&footer.label(), width);
+        if expected.is_empty() {
+            return None;
+        }
+        self.sidebar_rows(width, height)
+            .iter()
+            .rposition(|row| row.line.text == expected)
+    }
+
+    /// SIDE-14: the confirmed working directory the pinned footer shows
+    /// (`footer.tsx:87-92`), or `None` when none was observed. The footer menu
+    /// (`working-directory-actions.tsx:16-58`) is offered only for a known
+    /// directory.
+    #[must_use]
+    pub fn footer_directory(&self) -> Option<&str> {
+        self.footer.as_ref().map(|footer| footer.directory.as_str())
+    }
+
+    /// SIDE-14: the pinned footer's working-directory menu
+    /// (`working-directory-actions.tsx:16-58`). `None` while a text selection
+    /// is active (the footer click must not open the menu) or when the
+    /// directory is unknown. `Workspaces` is offered only when the caller can
+    /// move the session.
+    #[must_use]
+    pub fn footer_menu(&self, selection_active: bool, can_move: bool) -> Option<Vec<native_sidebar::FooterMenuItem>> {
+        let footer = self.footer.as_ref()?;
+        native_sidebar::footer_menu(Some(footer.directory.as_str()), selection_active, can_move)
     }
 
     /// Confirmed connection observation, if any.

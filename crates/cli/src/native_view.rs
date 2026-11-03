@@ -241,6 +241,12 @@ pub struct NativeView {
     /// shows. Invalidated on any scroll/resize/route change exactly like
     /// `mcp_toggle_hit`, so a stale rect can never dismiss a hidden box.
     onboarding_dismiss_hit: Option<(u16, u16, u16)>,
+    /// SIDE-14: absolute hit rect (left, top, width) of the pinned footer
+    /// location row (`footer.tsx:94-112`), published only while a working
+    /// directory is known. Invalidated on any scroll/resize/route change
+    /// exactly like `onboarding_dismiss_hit`, so a stale rect can never open
+    /// the working-directory menu over a hidden footer.
+    footer_hit: Option<(u16, u16, u16)>,
     sidebar_content_height: usize,
     /// Frame reservation owned by the live session-tab shell.
     tab_reservation: TabReservation,
@@ -322,6 +328,73 @@ mod page_spacing_tests {
         assert!(view.onboarding_dismiss_hit.is_some());
         view.scroll_sidebar_at(view.presentation().sidebar_offset.unwrap() + 1, 2, 1);
         assert!(view.onboarding_dismiss_hit.is_none());
+    }
+
+    /// SIDE-14: the pinned footer location row publishes a hit rect only while
+    /// a working directory is known, and the hover fact flips once per real
+    /// transition (`footer.tsx:98-109`). A scroll invalidates the geometry
+    /// until the next paint, so a stale rect can never hover a hidden row.
+    #[test]
+    fn footer_hit_is_published_only_while_a_directory_is_known() {
+        let mut view = NativeView::new(148, 30);
+        view.set_session_route(true);
+        let _ = view.render("", &[], false, &[]);
+        assert!(view.footer_hit.is_none(), "no directory publishes no footer hit");
+        assert!(!view.set_footer_hover(1, 1), "no footer to hover");
+
+        view.set_sidebar_location(Some("/projects/oc2".into()), Some("main".into()));
+        let _ = view.render("", &[], false, &[]);
+        let (left, top, width) = view.footer_hit.expect("painted footer hit");
+        assert!(width > 0);
+        assert!(view.set_footer_hover(left, top), "hover over the row sets it");
+        assert!(!view.set_footer_hover(left, top), "no transition, no repaint");
+        assert!(
+            view.set_footer_hover(left, top.saturating_add(1)),
+            "moving off the row clears it"
+        );
+        assert!(!view.status.footer_hovered(), "hover is cleared off-row");
+        view.scroll_sidebar_at(left, top, 1);
+        assert!(view.footer_hit.is_none(), "scroll clears stale footer geometry");
+    }
+
+    /// SIDE-14: a press on the pinned footer opens the local `DialogSelect`
+    /// working-directory menu (`working-directory-actions.tsx:16-58`); a click
+    /// while text is selected is ignored (`openMenu`'s `getSelectedText()`
+    /// early-return); the focused row maps back to its action; `Workspaces` is
+    /// never offered without a live move route.
+    #[test]
+    fn footer_click_opens_the_working_directory_menu() {
+        use crate::native_view_status::native_sidebar::FooterAction;
+        let mut view = NativeView::new(148, 30);
+        view.set_session_route(true);
+        view.set_sidebar_location(Some("/projects/oc2".into()), Some("main".into()));
+        let _ = view.render("", &[], false, &[]);
+        let (left, top, width) = view.footer_hit.expect("painted footer hit");
+        assert!(
+            !view.footer_click(left, top.saturating_sub(1), false),
+            "a miss above the row does nothing"
+        );
+        assert!(
+            !view.footer_click(left.saturating_add(width), top, false),
+            "a press past the row does nothing"
+        );
+        assert!(view.footer_click(left, top, false), "a press opens the menu");
+        assert_eq!(
+            view.dialogs.open_kind(),
+            Some(crate::native_view_dialogs::DialogKind::Select)
+        );
+        assert_eq!(view.dialogs.focused_choice(), Some("Copy path"));
+        assert_eq!(view.working_directory_choice(), Some(FooterAction::CopyPath));
+        view.dialogs.next();
+        assert_eq!(view.working_directory_choice(), Some(FooterAction::OpenFolder));
+        // No `Workspaces` row: no live move route offers it (`can_move = false`).
+        assert_eq!(view.footer_menu(false, false).map(|items| items.len()), Some(2));
+        view.dialogs.close();
+        assert!(
+            !view.footer_click(left, top, true),
+            "a click while text is selected must not open the menu"
+        );
+        assert!(!view.dialogs.is_open(), "the selection guard opened nothing");
     }
 
     #[test]
@@ -1021,6 +1094,7 @@ impl NativeView {
             mcp_hit: Vec::new(),
             mcp_toggle_hit: None,
             onboarding_dismiss_hit: None,
+            footer_hit: None,
             sidebar_content_height: 0,
             tab_reservation: TabReservation::default(),
             markdown_mode: crate::markdown_runs::MarkdownMode::Rendered,
@@ -1035,6 +1109,7 @@ impl NativeView {
             self.mcp_hit.clear();
             self.mcp_toggle_hit = None;
             self.onboarding_dismiss_hit = None;
+            self.footer_hit = None;
             self.context_usage_hit = None;
             self.live_footer_hit = None;
         }
@@ -1061,6 +1136,7 @@ impl NativeView {
         self.mcp_hit.clear();
         self.mcp_toggle_hit = None;
         self.onboarding_dismiss_hit = None;
+        self.footer_hit = None;
         self.context_usage_hit = None;
         self.live_footer_hit = None;
         self.sidebar_content_height = 0;
@@ -1785,6 +1861,7 @@ impl NativeView {
             self.mcp_hit.clear();
             self.mcp_toggle_hit = None;
             self.onboarding_dismiss_hit = None;
+            self.footer_hit = None;
         }
         self.box_appearance = appearance;
     }
@@ -1794,6 +1871,7 @@ impl NativeView {
             self.mcp_hit.clear();
             self.mcp_toggle_hit = None;
             self.onboarding_dismiss_hit = None;
+            self.footer_hit = None;
             self.context_usage_hit = None;
             self.live_footer_hit = None;
             self.dock_hit.clear();
@@ -1811,6 +1889,7 @@ impl NativeView {
         self.mcp_hit.clear();
         self.mcp_toggle_hit = None;
         self.onboarding_dismiss_hit = None;
+        self.footer_hit = None;
         self.live_footer_hit = None;
         let visible = self.sidebar_visible();
         self.sidebar_hidden = visible;
@@ -1822,6 +1901,7 @@ impl NativeView {
         self.mcp_hit.clear();
         self.mcp_toggle_hit = None;
         self.onboarding_dismiss_hit = None;
+        self.footer_hit = None;
         self.live_footer_hit = None;
         self.sidebar_hidden = hidden;
         self.sidebar_open = false;
@@ -1874,6 +1954,7 @@ impl NativeView {
             self.mcp_hit.clear();
             self.mcp_toggle_hit = None;
             self.onboarding_dismiss_hit = None;
+            self.footer_hit = None;
             self.live_footer_hit = None;
             self.dock_hit.clear();
         }
@@ -2403,6 +2484,119 @@ impl NativeView {
         dismissed
     }
 
+    /// SIDE-14: pinned footer hover routing (`footer.tsx:98-109`
+    /// `onMouseOver`/`onMouseOut` on the `sidebar.footer.location` box).
+    /// Returns `true` when the hover fact changed, so the caller repaints only
+    /// on a real transition. A pointer outside the published footer row clears
+    /// the hover; a pointer over it sets it.
+    pub fn set_footer_hover(&mut self, x: u16, y: u16) -> bool {
+        let hovered = self.presentation().sidebar_offset.is_some()
+            && !self.dialogs.intercepts_input()
+            && !self.command_palette_open()
+            && self.footer_hit.is_some_and(|(left, top, width)| {
+                x >= left && x < left.saturating_add(width) && y == top
+            });
+        if self.status.footer_hovered() == hovered {
+            return false;
+        }
+        self.status.set_footer_hovered(hovered);
+        true
+    }
+
+    /// SIDE-14: a pointer press on the pinned footer location row opens the
+    /// working-directory menu (`footer.tsx:98-109` `onMouseUp` ->
+    /// `working-directory-actions.tsx:16-58`). `selection_active` mirrors
+    /// upstream `openMenu`'s `renderer.getSelection()?.getSelectedText()`
+    /// early-return: a click while text is selected must not open the menu.
+    /// Returns `true` only when the menu actually opened, so the caller
+    /// repaints once per real open and never for a click on a stale or hidden
+    /// footer.
+    pub fn footer_click(&mut self, x: u16, y: u16, selection_active: bool) -> bool {
+        if self.presentation().sidebar_offset.is_none()
+            || self.dialogs.intercepts_input()
+            || self.command_palette_open()
+        {
+            return false;
+        }
+        let Some((left, top, width)) = self.footer_hit else {
+            return false;
+        };
+        if x < left || x >= left.saturating_add(width) || y != top {
+            return false;
+        }
+        // `Workspaces` stays unoffered: no live `DialogWorkspaces` route
+        // exists, so the caller cannot move the session (`can_move = false`).
+        self.open_working_directory_menu(selection_active, false).is_ok()
+    }
+
+    /// SIDE-14: the pinned footer's working-directory menu
+    /// (`working-directory-actions.tsx:16-58`). `None` while a text selection
+    /// is active or when the directory is unknown. `Workspaces` is offered only
+    /// when the caller can move the session.
+    #[must_use]
+    pub fn footer_menu(
+        &self,
+        selection_active: bool,
+        can_move: bool,
+    ) -> Option<Vec<crate::native_view_status::native_sidebar::FooterMenuItem>> {
+        self.status.footer_menu(selection_active, can_move)
+    }
+
+    /// SIDE-14: the confirmed working directory the pinned footer shows.
+    #[must_use]
+    pub fn footer_directory(&self) -> Option<&str> {
+        self.status.footer_directory()
+    }
+
+    /// SIDE-14: open the live `DialogSelect` working-directory menu
+    /// (`working-directory-actions.tsx:20-56`, `dialog.replace(<DialogSelect
+    /// title="Working directory" ...>)`). A local select list, not a backend
+    /// decision: Enter is handled by the caller reading
+    /// [`Self::working_directory_choice`] and Esc closes through
+    /// [`DialogView::close`]. Refuses while a dialog is already open.
+    pub fn open_working_directory_menu(
+        &mut self,
+        selection_active: bool,
+        can_move: bool,
+    ) -> Result<(), crate::native_view_dialogs::DialogError> {
+        let items = self
+            .status
+            .footer_menu(selection_active, can_move)
+            .ok_or(crate::native_view_dialogs::DialogError::NoChoices)?;
+        let choices: Vec<String> = items.iter().map(|item| item.title.to_owned()).collect();
+        self.dialogs
+            .open_request(crate::native_view_dialogs::DialogRequest {
+                id: "working-directory".to_owned(),
+                session_id: String::new(),
+                kind: crate::native_view_dialogs::DialogKind::Select,
+                title: crate::native_view_status::native_sidebar::FOOTER_MENU_TITLE.to_owned(),
+                choices,
+                message: None,
+                disabled: Vec::new(),
+                error: None,
+            })
+    }
+
+    /// SIDE-14: the focused working-directory menu action, or `None` when the
+    /// menu is not open. Maps the focused row title back to its
+    /// [`crate::native_view_status::native_sidebar::FooterAction`].
+    #[must_use]
+    pub fn working_directory_choice(
+        &self,
+    ) -> Option<crate::native_view_status::native_sidebar::FooterAction> {
+        if self.dialogs.open_kind() != Some(crate::native_view_dialogs::DialogKind::Select) {
+            return None;
+        }
+        let title = self.dialogs.focused_choice()?;
+        [
+            crate::native_view_status::native_sidebar::FooterAction::CopyPath,
+            crate::native_view_status::native_sidebar::FooterAction::OpenFolder,
+            crate::native_view_status::native_sidebar::FooterAction::Workspaces,
+        ]
+        .into_iter()
+        .find(|action| action.title() == title)
+    }
+
     pub fn mcp_sidebar_action(&self, x: u16, y: u16) -> Option<(String, bool)> {
         if self.presentation().sidebar_offset.is_none()
             || self.dialogs.intercepts_input()
@@ -2499,6 +2693,7 @@ impl NativeView {
         self.mcp_hit.clear();
         self.mcp_toggle_hit = None;
         self.onboarding_dismiss_hit = None;
+        self.footer_hit = None;
         true
     }
 
@@ -3506,6 +3701,7 @@ impl NativeView {
         self.mcp_hit.clear();
         self.mcp_toggle_hit = None;
         self.onboarding_dismiss_hit = None;
+        self.footer_hit = None;
         let mut sidebar: Vec<String> = sidebar_styled
             .iter()
             .map(|line| padded(&line.text, presentation.sidebar_width))
@@ -3666,6 +3862,19 @@ impl NativeView {
                         left.saturating_add(sidebar_inset).saturating_add(dismiss_column as u16),
                         if sidebar_frame_painted { sidebar_top.saturating_add(1).saturating_add(index as u16) } else { index as u16 },
                         1,
+                    ));
+                }
+                // SIDE-14: publish the pinned footer location row hit rect
+                // while a working directory is known, so a pointer press can
+                // open the working-directory menu (`footer.tsx:98-109`
+                // `onMouseUp`). Upstream binds the handlers to the
+                // `sidebar.footer.location` box, so the hit is the whole
+                // painted row.
+                if self.status.footer_row(38, self.sidebar_content_height) == Some(index) {
+                    self.footer_hit = Some((
+                        left.saturating_add(sidebar_inset),
+                        if sidebar_frame_painted { sidebar_top.saturating_add(1).saturating_add(index as u16) } else { index as u16 },
+                        sidebar_text_width,
                     ));
                 }
                 if let Some((name, included)) =
