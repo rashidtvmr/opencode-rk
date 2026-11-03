@@ -650,6 +650,8 @@ pub enum ChatRole {
     Assistant,
     Tool,
     System,
+    /// Local extension: a durable compaction marker row. Never provider history.
+    Compaction,
 }
 
 /// DIFF-002: one upstream `Diagnostics` row
@@ -720,6 +722,18 @@ pub enum ChatPart {
     },
     Compaction {
         reason: String,
+        /// STATE-002: upstream `CompactionMessage` status (`index.tsx:2175`):
+        /// `queued`/`running`/`completed`/`failed`.
+        status: String,
+        /// Upstream `message.native?.messages` (`index.tsx:2208`): a completed
+        /// provider-native compaction is labelled `Provider compaction`.
+        provider_native: bool,
+        /// Upstream `cancelled()` (`index.tsx:2177`): `status == "failed"` and
+        /// the error was an abort. Recorded by the producer, never inferred.
+        cancelled: bool,
+        /// Upstream usage (`index.tsx:2182-2190`): the compaction request's own
+        /// `{input, output}` totals; `None` when the marker carries no usage.
+        usage: Option<(u64, u64)>,
     },
     Patch {
         path: String,
@@ -1079,7 +1093,7 @@ fn boxed_message_rows_spans_mode(
     } else {
         match message.role {
             ChatRole::User => BoxId::User,
-            ChatRole::System => BoxId::System,
+            ChatRole::System | ChatRole::Compaction => BoxId::System,
             ChatRole::Assistant => BoxId::Assistant,
             ChatRole::Tool => BoxId::Tool,
         }
@@ -1326,7 +1340,7 @@ fn expand_code_tabs(text: &str) -> String {
 fn text_prefix(role: ChatRole) -> &'static str {
     match role {
         ChatRole::User | ChatRole::Tool => "  ",
-        ChatRole::Assistant | ChatRole::System => "",
+        ChatRole::Assistant | ChatRole::System | ChatRole::Compaction => "",
     }
 }
 
@@ -1340,7 +1354,7 @@ fn starts_new_group(index: usize, messages: &[ChatMessage]) -> bool {
     match messages[index].role {
         ChatRole::User => true,
         ChatRole::System => messages[index - 1].role != ChatRole::System,
-        ChatRole::Assistant | ChatRole::Tool => false,
+        ChatRole::Assistant | ChatRole::Tool | ChatRole::Compaction => false,
     }
 }
 
@@ -2582,6 +2596,7 @@ fn typed_message_rows_with_prefix_spans_mode(
                     ChatRole::Assistant => ChatRowClass::AssistantCard,
                     ChatRole::System => ChatRowClass::SystemCard,
                     ChatRole::Tool => ChatRowClass::ToolResult,
+                    ChatRole::Compaction => ChatRowClass::Metadata,
                 };
                 let before = rows.len();
                 if message.role == ChatRole::User {
@@ -2730,14 +2745,38 @@ fn typed_message_rows_with_prefix_spans_mode(
                     ChatRowClass::Metadata,
                 );
             }
-            ChatPart::Compaction { reason } => {
-                push_wrapped(
-                    &mut rows,
-                    width,
-                    &format!("[compaction] {reason}"),
-                    "  ",
-                    ChatRowClass::Metadata,
-                );
+            ChatPart::Compaction {
+                reason,
+                status,
+                provider_native,
+                cancelled,
+                usage,
+            } => {
+                // Upstream `CompactionMessage` (`index.tsx:2196-2218`): the
+                // label is `Provider compaction` only for a completed
+                // provider-native compaction, `· cancelled` marks an aborted
+                // failure, and the request's own usage shows once it is no
+                // longer running (never the resulting context size).
+                let label = if status == "completed" && *provider_native {
+                    "Provider compaction"
+                } else {
+                    "Compaction"
+                };
+                let mut header = format!("[{label}]");
+                if *cancelled {
+                    header.push_str(" · cancelled");
+                }
+                if status != "running" {
+                    if let Some((input, output)) = usage {
+                        if input.saturating_add(*output) > 0 {
+                            header.push_str(&format!(" · {input} in · {output} out"));
+                        }
+                    }
+                }
+                push_wrapped(&mut rows, width, &header, "  ", ChatRowClass::Metadata);
+                if !reason.is_empty() {
+                    push_wrapped(&mut rows, width, reason, "  ", ChatRowClass::Metadata);
+                }
             }
             ChatPart::Patch { path, diff, diagnostics } => {
                 rows.push((
@@ -2903,6 +2942,49 @@ mod diff_wiring_v2_regressions {
 
     fn patch_message(diff: String) -> ChatMessage {
         ChatMessage { role: ChatRole::Assistant, parts: vec![ChatPart::Patch { path: "many.rs".into(), diff, diagnostics: Vec::new() }], agent: None, model: None, assistant_facts: None, message_id: None }
+    }
+
+    #[test]
+    fn compaction_part_renders_upstream_label_cancelled_and_request_usage() {
+        // STATE-002: upstream `CompactionMessage` (`index.tsx:2196-2218`)
+        // labels a completed provider-native compaction `Provider compaction`,
+        // marks an aborted failure `· cancelled`, and shows the request's own
+        // usage only once the compaction is no longer running.
+        let message = |status: &str, provider_native: bool, cancelled: bool, usage: Option<(u64, u64)>| ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![ChatPart::Compaction {
+                reason: "kept the last turns".into(),
+                status: status.into(),
+                provider_native,
+                cancelled,
+                usage,
+            }],
+            agent: None,
+            model: None,
+            assistant_facts: None,
+            message_id: None,
+        };
+        let rows = typed_message_rows(100, &message("completed", true, false, Some((120, 30))), false);
+        assert!(
+            rows.iter().any(|(row, _)| row.contains("[Provider compaction] · 120 in · 30 out")),
+            "{rows:?}"
+        );
+        let rows = typed_message_rows(100, &message("completed", false, false, Some((5, 1))), false);
+        assert!(
+            rows.iter().any(|(row, _)| row.contains("[Compaction] · 5 in · 1 out")),
+            "{rows:?}"
+        );
+        let rows = typed_message_rows(100, &message("failed", false, true, None), false);
+        assert!(
+            rows.iter().any(|(row, _)| row.contains("[Compaction] · cancelled")),
+            "{rows:?}"
+        );
+        // Running: the request usage is not shown yet (never mislabelled).
+        let rows = typed_message_rows(100, &message("running", false, false, Some((9, 0))), false);
+        assert!(
+            rows.iter().any(|(row, _)| row.contains("[Compaction]") && !row.contains(" in · ")),
+            "{rows:?}"
+        );
     }
 
     #[test]
@@ -3828,7 +3910,7 @@ fn message_copy_text(message: &ChatMessage) -> String {
             .filter_map(chat_part_text)
             .collect::<Vec<_>>()
             .join("\n"),
-        ChatRole::System | ChatRole::Tool => {
+        ChatRole::System | ChatRole::Tool | ChatRole::Compaction => {
             message.parts.iter().find_map(chat_part_text).unwrap_or_default().to_owned()
         }
     }

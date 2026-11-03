@@ -1132,7 +1132,7 @@ pub fn row_message_from_chat(id: &str, message: &ChatMessage) -> RowMessage {
     let mut row = match message.role {
         ChatRole::User => RowMessage::user(id, text),
         ChatRole::Assistant => RowMessage::assistant(id, Vec::new()),
-        ChatRole::System | ChatRole::Tool => {
+        ChatRole::System | ChatRole::Tool | ChatRole::Compaction => {
             let mut row = RowMessage::notice(id, text.clone());
             row.role = if message.role == ChatRole::Tool {
                 RowRole::Shell
@@ -2069,7 +2069,7 @@ pub fn role_gutter_for_delivery(role: ChatRole, delivery_pending: bool) -> RoleG
             content_column: CONTENT_GUTTER,
             hover_background: true,
         },
-        ChatRole::Assistant | ChatRole::Tool | ChatRole::System => RoleGutter {
+        ChatRole::Assistant | ChatRole::Tool | ChatRole::System | ChatRole::Compaction => RoleGutter {
             border: None,
             rail_color: None,
             padding_left: CONTENT_GUTTER,

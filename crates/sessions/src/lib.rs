@@ -312,6 +312,7 @@ fn decode_role(value: i64) -> Result<MessageRole, rusqlite::Error> {
         1 => Ok(MessageRole::User),
         2 => Ok(MessageRole::Assistant),
         3 => Ok(MessageRole::Tool),
+        4 => Ok(MessageRole::Compaction),
         _ => Err(rusqlite::Error::InvalidQuery),
     }
 }

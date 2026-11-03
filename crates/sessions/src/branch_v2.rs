@@ -590,5 +590,6 @@ fn role_code(role: MessageRole) -> i64 {
         MessageRole::User => 1,
         MessageRole::Assistant => 2,
         MessageRole::Tool => 3,
+        MessageRole::Compaction => 4,
     }
 }

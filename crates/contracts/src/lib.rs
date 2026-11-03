@@ -230,6 +230,9 @@ pub enum MessageRole {
     User,
     Assistant,
     Tool,
+    /// Local extension: a durable compaction marker row rendered in the
+    /// transcript. Never a provider history role (rejected before replay).
+    Compaction,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

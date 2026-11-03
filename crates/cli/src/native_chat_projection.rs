@@ -86,6 +86,7 @@ fn role_of(message: &Value) -> Option<ChatRole> {
         "assistant" => Some(ChatRole::Assistant),
         "tool" => Some(ChatRole::Tool),
         "system" => Some(ChatRole::System),
+        "compaction" => Some(ChatRole::Compaction),
         _ => None,
     }
 }
@@ -391,7 +392,29 @@ fn hydrated_parts(message: &Value, budget: &mut usize) -> Vec<ChatPart> {
             | "model-switched" => output.push(ChatPart::Step {
                 kind: take(text("type"), budget), detail: take(&part.to_string(), budget),
             }),
-            "compaction" => output.push(ChatPart::Compaction { reason: take(text("reason"), budget) }),
+            "compaction" => {
+                // STATE-002: the durable compaction marker's typed part
+                // (`compaction_wire_part`). Usage is the request's own totals.
+                let usage = part.get("usage").and_then(|usage| {
+                    let input = usage.get("input").and_then(Value::as_u64);
+                    let output = usage.get("output").and_then(Value::as_u64);
+                    (input.is_some() || output.is_some())
+                        .then(|| (input.unwrap_or(0), output.unwrap_or(0)))
+                });
+                output.push(ChatPart::Compaction {
+                    reason: take(text("reason"), budget),
+                    status: text("status").to_owned(),
+                    provider_native: part
+                        .get("providerNative")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    cancelled: part
+                        .get("cancelled")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    usage,
+                });
+            }
             "patch" => output.push(ChatPart::Patch {
                 path: take(text("path"), budget), diff: take(text("diff"), budget),
                 // The standalone `"patch"` message part has no tool metadata
@@ -2151,6 +2174,55 @@ mod tests {
     }
 
     #[test]
+    fn compaction_part_projects_status_provider_native_cancelled_and_usage() {
+        // STATE-002: the server's `compaction_wire_part` shape projects into
+        // the typed `ChatPart::Compaction` the transcript renders.
+        let projected = project_message(&json!({
+            "role": "compaction",
+            "parts": [{
+                "type": "compaction",
+                "status": "completed",
+                "providerNative": true,
+                "reason": "kept the last turns",
+                "usage": {"input": 120, "output": 30}
+            }]
+        }))
+        .expect("compaction message projects");
+        assert_eq!(projected.role, ChatRole::Compaction);
+        assert_eq!(
+            projected.parts,
+            vec![ChatPart::Compaction {
+                reason: "kept the last turns".to_owned(),
+                status: "completed".to_owned(),
+                provider_native: true,
+                cancelled: false,
+                usage: Some((120, 30)),
+            }]
+        );
+        // Missing usage stays absent (never a fabricated zero pair); a
+        // cancelled failure carries its explicit fact.
+        let cancelled = project_message(&json!({
+            "role": "compaction",
+            "parts": [{
+                "type": "compaction",
+                "status": "failed",
+                "cancelled": true
+            }]
+        }))
+        .expect("cancelled compaction projects");
+        assert_eq!(
+            cancelled.parts,
+            vec![ChatPart::Compaction {
+                reason: String::new(),
+                status: "failed".to_owned(),
+                provider_native: false,
+                cancelled: true,
+                usage: None,
+            }]
+        );
+    }
+
+    #[test]
     fn parts_are_bounded_and_clip_on_char_boundaries() {
         let big = "漢".repeat(20 * 1024); // 60 KiB of 3-byte scalars
         let projected = project_message(&json!({
@@ -2196,7 +2268,7 @@ mod tests {
                 } => agent.len() + description.len(),
                 ChatPart::Retry { message, .. } => message.len(),
                 ChatPart::Step { kind, detail } => kind.len() + detail.len(),
-                ChatPart::Compaction { reason } => reason.len(),
+                ChatPart::Compaction { reason, status, .. } => reason.len() + status.len(),
                 ChatPart::Patch { path, diff, diagnostics } => path.len() + diff.len() + diagnostics.iter().map(|d| d.message.len()).sum::<usize>(),
                 ChatPart::ToolResult { name, output, .. } => name.len() + output.len(),
                 ChatPart::PatchToolRows { rows: entries } => entries.iter()

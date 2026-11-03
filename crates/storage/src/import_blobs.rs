@@ -410,6 +410,7 @@ fn encode_role(value: &str) -> Option<i64> {
         "user" => Some(1),
         "assistant" => Some(2),
         "tool" => Some(3),
+        "compaction" => Some(4),
         _ => None,
     }
 }

@@ -1442,6 +1442,13 @@ async fn list_messages(
         let message_id = message.id;
         let mut value = serde_json::to_value(message).map_err(ApiFailure::internal)?;
         let mut parts = Vec::new();
+        if message.role == MessageRole::Compaction {
+            if let PayloadRef::Inline { text } = &message.body {
+                if let Some(part) = compaction_wire_part(text) {
+                    parts.push(part);
+                }
+            }
+        }
         for tool in tools.iter().filter(|tool| tool.message_id == message_id) {
             if tool.kind == "call" {
                 // Match the live event projection: write content remains in
@@ -1485,6 +1492,80 @@ async fn list_messages(
     Ok(Json(json!({"messages":rows})))
 }
 
+/// Parse a durable compaction marker body into a public transcript `parts`
+/// entry. Returns `None` for non-compaction or unparseable bodies so callers
+/// omit (never fake) the row. Pure: no DB or state access.
+#[must_use]
+fn compaction_wire_part(body: &str) -> Option<Value> {
+    let parsed: Value = serde_json::from_str(body).ok()?;
+    let status = parsed.get("status").and_then(Value::as_str)?;
+    // Upstream `CompactionMessage` (`index.tsx:2182-2190`) shows the compaction
+    // request's own usage, never the resulting context size. The provider's
+    // reported totals are already inclusive (`auto_compaction.rs:102`: input is
+    // inclusive of cached; output is inclusive of reasoning), so `input`/
+    // `output` are the authoritative measured totals.
+    let usage = parsed.get("usage").and_then(|usage| {
+        let input = usage.get("input_tokens").and_then(Value::as_u64);
+        let output = usage.get("output_tokens").and_then(Value::as_u64);
+        (input.is_some() || output.is_some()).then(|| {
+            json!({"input": input.unwrap_or(0), "output": output.unwrap_or(0)})
+        })
+    });
+    Some(json!({
+        "type": "compaction",
+        "status": status,
+        "providerNative": parsed.get("providerNative").and_then(Value::as_bool).unwrap_or(false),
+        "reason": parsed.get("summary").and_then(Value::as_str).unwrap_or(""),
+        "usage": usage,
+    }))
+}
+
+#[cfg(test)]
+mod compaction_wire_part_tests {
+    use super::*;
+
+    #[test]
+    fn parses_durable_body_into_parts_entry() {
+        let part = compaction_wire_part(
+            r#"{"status":"completed","summary":"kept the last turns","providerNative":true,"usage":{"input_tokens":120,"output_tokens":30}}"#,
+        )
+        .expect("valid compaction body");
+        assert_eq!(part["type"], "compaction");
+        assert_eq!(part["status"], "completed");
+        assert_eq!(part["providerNative"], true);
+        assert_eq!(part["reason"], "kept the last turns");
+        assert_eq!(part["usage"]["input"], 120);
+        assert_eq!(part["usage"]["output"], 30);
+    }
+
+    #[test]
+    fn omits_unparseable_and_missing_status() {
+        assert!(compaction_wire_part("not json").is_none());
+        assert!(compaction_wire_part(r#"{"providerNative":true}"#).is_none());
+    }
+
+    #[test]
+    fn missing_facts_default_but_never_fabricate() {
+        let part = compaction_wire_part(r#"{"status":"completed"}"#).expect("valid body");
+        assert_eq!(part["providerNative"], false);
+        assert_eq!(part["reason"], "");
+        // No usage => no usage object, never a fabricated zero pair.
+        assert!(part["usage"].is_null());
+    }
+
+    #[test]
+    fn running_status_keeps_usage_but_render_gates_it() {
+        // The wire part carries the measured tokens; the *renderer* is what
+        // suppresses usage while running (`index.tsx:2182`).
+        let part = compaction_wire_part(
+            r#"{"status":"running","usage":{"input_tokens":5,"output_tokens":0}}"#,
+        )
+        .expect("valid body");
+        assert_eq!(part["status"], "running");
+        assert_eq!(part["usage"]["input"], 5);
+    }
+}
+
 async fn list_history_page(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -1510,7 +1591,20 @@ async fn list_history_page(
     // extra startup route.
     let mut rows = messages
         .iter()
-        .map(|message| serde_json::to_value(message).map_err(ApiFailure::internal))
+        .map(|message| {
+            let mut value = serde_json::to_value(message).map_err(ApiFailure::internal)?;
+            // STATE-002: the CLI transcript reads `/history`, so the durable
+            // compaction marker must surface its typed part here too (the same
+            // shape `/messages` emits). `role` serializes as `"compaction"`.
+            if message.role == MessageRole::Compaction {
+                if let PayloadRef::Inline { text } = &message.body {
+                    if let Some(part) = compaction_wire_part(text) {
+                        value["parts"] = json!([part]);
+                    }
+                }
+            }
+            Ok(value)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     attach_execution(&state.sessions, &messages, &mut rows).await?;
     Ok(Json(json!({
@@ -1830,6 +1924,7 @@ fn default_compact_strategy() -> String { "auto".into() }
 async fn compact_session(
     State(state): State<AppState>,
     Path(raw_id): Path<String>,
+    Extension(events): Extension<event_bus::EventBus>,
     Json(body): Json<CompactBody>,
 ) -> Result<Json<Value>, ApiFailure> {
     let id = parse_session_id(&raw_id)?;
@@ -1856,6 +1951,7 @@ async fn compact_session(
     if strategy == "fallback" {
         let client = responses_client(provider_id).await.map_err(provider_failure)?;
         fallback_compaction::compact(&state.sessions, &client, &owner, provider_id, model_id, keep_recent_turns).await?;
+        append_compaction_message(&state, &events, id, "completed", None, false, None).await?;
         return Ok(Json(json!({"compacted":true,"strategy":"fallback"})));
     }
     // Capture the actual durable head before loading input. The transactional
@@ -1884,7 +1980,50 @@ async fn compact_session(
     commit_compaction_checkpoint(state.sessions.clone(), owner.clone(), CompactionCheckpoint {
         boundary_message_id: boundary.id, provider_id: provider_id.to_owned(), model_id: model_id.to_owned(), window_json: window_json.clone(),
     }).await?;
+    append_compaction_message(
+        &state,
+        &events,
+        id,
+        "completed",
+        None,
+        true,
+        window.usage.clone(),
+    )
+    .await?;
     Ok(Json(json!({"compacted":true,"strategy":"native"})))
+}
+
+/// Append a durable compaction marker row and publish it so live transcript
+/// subscribers render the compaction. Local extension: the role never enters
+/// provider history (`history_item_to_responses_item` rejects it).
+async fn append_compaction_message(
+    state: &AppState,
+    events: &event_bus::EventBus,
+    id: SessionId,
+    status: &str,
+    summary: Option<&str>,
+    provider_native: bool,
+    usage: Option<Value>,
+) -> Result<(), ApiFailure> {
+    // STATE-002: persist the compaction request's OWN provider usage object
+    // (never the resulting context size). The transcript part derives the
+    // `input`/`output` totals from it (`index.tsx:2182-2190`).
+    let part = json!({
+        "status": status,
+        "summary": summary,
+        "providerNative": provider_native,
+        "usage": usage,
+    });
+    let message = state
+        .sessions
+        .append_text(id, MessageRole::Compaction, part.to_string())
+        .await
+        .map_err(ApiFailure::internal)?;
+    let _ = events.publish(event_bus::ServerEvent::MessageStored {
+        session: id,
+        message_id: message.id,
+    });
+    Ok(())
 }
 
 async fn commit_compaction_checkpoint(
@@ -3648,6 +3787,11 @@ fn history_item_to_responses_item(item: HistoryItem) -> Result<ResponsesItem, Se
                 MessageRole::Assistant => ResponsesRole::Assistant,
                 MessageRole::Tool => {
                     return Err(SessionError::Contract("unlinked tool history".to_owned()));
+                }
+                MessageRole::Compaction => {
+                    return Err(SessionError::Contract(
+                        "compaction marker cannot enter provider history".to_owned(),
+                    ));
                 }
             };
             let PayloadRef::Inline { text } = &message.body else {

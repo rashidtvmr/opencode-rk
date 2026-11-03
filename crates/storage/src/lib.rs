@@ -595,9 +595,12 @@ impl Storage {
             }
         }
         drop(headers);
+        // STATE-002: a durable compaction marker is a transcript-only row
+        // (`role='compaction'`); it must never enter provider history, so it is
+        // excluded here before the provider item/byte budgets are applied.
         let mut messages = tx.prepare(
             "SELECT rowid,length(CAST(id AS BLOB)),length(CAST(role AS BLOB)),length(CAST(inline_text AS BLOB)),blob_hash IS NOT NULL,byte_len
-             FROM messages WHERE session_id=?1 AND rowid>?3 AND (?4=0 OR NOT EXISTS (SELECT 1 FROM session_context_exclusions e WHERE e.session_id=?1 AND e.item_kind='message' AND e.item_id=messages.id)) ORDER BY rowid LIMIT ?2",
+             FROM messages WHERE session_id=?1 AND rowid>?3 AND role<>'compaction' AND (?4=0 OR NOT EXISTS (SELECT 1 FROM session_context_exclusions e WHERE e.session_id=?1 AND e.item_kind='message' AND e.item_id=messages.id)) ORDER BY rowid LIMIT ?2",
         )?;
         let lim = i64::try_from(
             max_provider_items
@@ -2077,6 +2080,7 @@ fn encode_role(role: MessageRole) -> &'static str {
         MessageRole::User => "user",
         MessageRole::Assistant => "assistant",
         MessageRole::Tool => "tool",
+        MessageRole::Compaction => "compaction",
     }
 }
 fn decode_role(value: &str) -> Result<MessageRole, rusqlite::Error> {
@@ -2085,6 +2089,7 @@ fn decode_role(value: &str) -> Result<MessageRole, rusqlite::Error> {
         "user" => Ok(MessageRole::User),
         "assistant" => Ok(MessageRole::Assistant),
         "tool" => Ok(MessageRole::Tool),
+        "compaction" => Ok(MessageRole::Compaction),
         _ => Err(rusqlite::Error::InvalidQuery),
     }
 }
@@ -2230,6 +2235,47 @@ mod tests {
         assert!(storage.list_sessions(false).unwrap().is_empty());
         assert_eq!(storage.get_session(expected.id).unwrap(), expected);
     }
+    #[test]
+    fn bounded_history_excludes_compaction_markers_from_provider_replay() {
+        // STATE-002: a durable compaction marker (`role='compaction'`) is a
+        // transcript-only row. It must never enter provider history, so the
+        // bounded provider reader must skip it while keeping the real rows.
+        let temp = tempdir().unwrap();
+        let storage = Storage::open_in_memory(temp.path().join("blobs")).unwrap();
+        let session = session("compaction");
+        storage.create_session(&session).unwrap();
+        let record = |role: MessageRole, text: &str| MessageRecord {
+            id: MessageId::new(),
+            session_id: session.id,
+            role,
+            body: PayloadRef::Inline {
+                text: text.to_owned(),
+            },
+            created_at: now(),
+        };
+        storage
+            .append_message(&record(MessageRole::User, "hello"))
+            .unwrap();
+        storage
+            .append_message(&record(
+                MessageRole::Compaction,
+                r#"{"status":"completed","providerNative":true}"#,
+            ))
+            .unwrap();
+        storage
+            .append_message(&record(MessageRole::Assistant, "hi"))
+            .unwrap();
+        let history = storage.bounded_history(session.id, 16, 1 << 20).unwrap();
+        let roles: Vec<MessageRole> = history
+            .iter()
+            .filter_map(|item| match item {
+                HistoryItem::Message(message) => Some(message.role),
+                HistoryItem::Tool(_) => None,
+            })
+            .collect();
+        assert_eq!(roles, vec![MessageRole::User, MessageRole::Assistant]);
+    }
+
     #[test]
     fn set_session_revert_makes_revert_fact_real() {
         let temp = tempdir().unwrap();

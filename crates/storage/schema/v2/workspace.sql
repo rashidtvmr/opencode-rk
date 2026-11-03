@@ -84,7 +84,7 @@ CREATE TABLE messages (
     id BLOB NOT NULL UNIQUE CHECK(length(id) = 16),
     session_pk INTEGER NOT NULL REFERENCES sessions(pk) ON DELETE CASCADE,
     seq INTEGER NOT NULL CHECK(seq > 0),
-    role INTEGER NOT NULL CHECK(role BETWEEN 0 AND 3), -- system, user, assistant, tool
+    role INTEGER NOT NULL CHECK(role BETWEEN 0 AND 4), -- system, user, assistant, tool, compaction
     status INTEGER NOT NULL CHECK(status BETWEEN 0 AND 3), -- open, complete, failed, interrupted
     provider_id TEXT CHECK(provider_id IS NULL OR length(CAST(provider_id AS BLOB)) BETWEEN 1 AND 128),
     model_id TEXT CHECK(model_id IS NULL OR length(CAST(model_id AS BLOB)) BETWEEN 1 AND 512),

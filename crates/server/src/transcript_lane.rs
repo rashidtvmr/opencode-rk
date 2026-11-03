@@ -18,6 +18,9 @@ pub enum MessageRole {
     Assistant,
     System,
     Tool,
+    /// STATE-002: a durable compaction marker row. Transcript-only; never a
+    /// provider history role.
+    Compaction,
 }
 
 /// Geometry decision for one transcript row.
@@ -170,7 +173,7 @@ pub fn row_actions(role: MessageRole, retry_available: bool) -> Vec<RowAction> {
                 simulated_success: false,
             });
         }
-        MessageRole::System | MessageRole::Tool => {}
+        MessageRole::System | MessageRole::Tool | MessageRole::Compaction => {}
     }
     debug_assert!(actions.len() <= MAX_ACTIONS);
     actions.truncate(MAX_ACTIONS);
@@ -205,6 +208,7 @@ pub fn normalize_persisted_role(raw: &str) -> Option<MessageRole> {
         "assistant" => Some(MessageRole::Assistant),
         "system" => Some(MessageRole::System),
         "tool" => Some(MessageRole::Tool),
+        "compaction" => Some(MessageRole::Compaction),
         _ => None,
     }
 }
