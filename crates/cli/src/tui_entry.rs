@@ -497,6 +497,50 @@ fn composer_enter_plan(
     crate::native_composer::plan_submit(draft, delivery, ctx)
 }
 
+/// PAR-07 event-trace payloads for the live journal
+/// (`native_debug::event`): queue/steer and submission sinks record
+/// bounded behavior facts only (session, size, depth, kind) -- never
+/// draft content -- mirroring the bounded style of `permission.reply`
+/// and `turn.submit_rejected`.
+#[cfg(feature = "native")]
+fn prompt_queued_event_fields(
+    session_id: Option<&str>,
+    chars: usize,
+    depth: usize,
+) -> serde_json::Value {
+    serde_json::json!({"session_id":session_id,"chars":chars,"depth":depth})
+}
+
+#[cfg(feature = "native")]
+fn prompt_steer_promoted_event_fields(
+    session_id: Option<&str>,
+    chars: usize,
+) -> serde_json::Value {
+    serde_json::json!({"session_id":session_id,"delivery":"steer","chars":chars})
+}
+
+#[cfg(feature = "native")]
+fn prompt_submitted_event_fields(
+    session_id: &str,
+    kind: &str,
+    chars: usize,
+) -> serde_json::Value {
+    serde_json::json!({"session_id":session_id,"kind":kind,"chars":chars})
+}
+
+/// Bounded submission classification carried by `prompt.submit`
+/// (shell `!` input, configured slash commands, ordinary prompt sends).
+#[cfg(feature = "native")]
+fn prompt_submit_kind(text: &str) -> &'static str {
+    if text.starts_with('!') {
+        "shell"
+    } else if configured_command_input(text).is_some() {
+        "command"
+    } else {
+        "prompt"
+    }
+}
+
 /// CP-08: locate the first queued prompt owned by `active`, not merely the
 /// queue front. Upstream `onEmptySubmit` is session-scoped — it promotes the
 /// first queued prompt *of the current session* (`routes/session/index.tsx:
@@ -8506,6 +8550,7 @@ fn native_loop(
                             needs_paint = true;
                         }
                         if !view.dialogs.is_open() {
+                            let permission_request_id = pending.id.clone();
                             let result = view.dialogs.open_permission_with_persistent(
                                 pending.id,
                                 snapshot.session_id.clone(),
@@ -8514,6 +8559,13 @@ fn native_loop(
                             );
                             match result {
                                 Ok(()) => {
+                                    // PAR-07: permission presentation is a
+                                    // journal-visible fact; the decision half
+                                    // is already covered by `permission.reply`.
+                                    crate::native_debug::event(
+                                        "permission.present",
+                                        serde_json::json!({"request_id":permission_request_id,"session_id":snapshot.session_id,"persistent_allowed":pending.persistent_allowed}),
+                                    );
                                     // A fresh prompt implies the previous
                                     // decision cycle ended in an explicit
                                     // valid resolution (the retry flag only
@@ -12438,8 +12490,20 @@ fn native_loop(
                                     ),
                                 );
                             } else {
-                                queued_drafts
-                                    .push_back((live.as_ref().map(|snapshot| snapshot.session_id.clone()), crate::native_paste::expand_for_submit(&draft, &draft_parts)));
+                                let queued_text =
+                                    crate::native_paste::expand_for_submit(&draft, &draft_parts);
+                                crate::native_debug::event(
+                                    "prompt.queued",
+                                    prompt_queued_event_fields(
+                                        live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
+                                        queued_text.chars().count(),
+                                        queued_drafts.len() + 1,
+                                    ),
+                                );
+                                queued_drafts.push_back((
+                                    live.as_ref().map(|snapshot| snapshot.session_id.clone()),
+                                    queued_text,
+                                ));
                                 // The queued snapshot clears the composer
                                 // (`index.tsx:1172-1174` resetComposer).
                                 crate::native_composer::replace_draft_with_cursor(
@@ -12468,6 +12532,16 @@ fn native_loop(
                                     next_queued_for_session(&queued_drafts, active.as_deref());
                                 if let Some((index, next)) = next {
                                     queued_drafts.remove(index);
+                                    // PAR-07: the queue->steer transition
+                                    // (`mutatePending("steer", next.id)`)
+                                    // is now a journal-visible fact.
+                                    crate::native_debug::event(
+                                        "prompt.queued_promoted",
+                                        prompt_steer_promoted_event_fields(
+                                            active.as_deref(),
+                                            next.chars().count(),
+                                        ),
+                                    );
                                     crate::native_composer::replace_draft_with_cursor(
                                         &mut draft,
                                         &mut draft_cursor,
@@ -13485,6 +13559,11 @@ fn native_loop(
                             }
                             continue;
                         }
+                        // PAR-07: classify the live submission once; the
+                        // journal event is emitted only after a worker
+                        // actually starts (admission success).
+                        let submit_kind = prompt_submit_kind(&text);
+                        let submit_chars = text.chars().count();
                         {
                             let result = if let Some(command) = text.strip_prefix('!') {
                                 native_turn::TurnWorker::start_shell(
@@ -13541,6 +13620,18 @@ fn native_loop(
                                     state: crate::native_navigation::WorkState::Running,
                                 });
                                 worker = Some(started);
+                                // PAR-07: input-submission trace sink; a
+                                // worker start is the single live admission
+                                // fact (`turn.submit_rejected` covers the
+                                // failure side). Behavior facts only.
+                                crate::native_debug::event(
+                                    "prompt.submit",
+                                    prompt_submitted_event_fields(
+                                        snapshot.session_id.as_str(),
+                                        submit_kind,
+                                        submit_chars,
+                                    ),
+                                );
                                 partial.clear();
                                 last_delta_seq = 0;
                             });
@@ -14845,6 +14936,44 @@ mod tab_binding_tests {
 #[cfg(all(test, feature = "native"))]
 mod command_consumption_tests {
     use super::native_input_decoder::InputEvent;
+
+    #[test]
+    fn prompt_trace_event_payloads_are_bounded_facts() {
+        // PAR-07: journal payloads carry bounded behavior facts only
+        // (session, size, depth, kind); draft content never appears.
+        assert_eq!(
+            super::prompt_queued_event_fields(Some("s-1"), 7, 2),
+            serde_json::json!({"session_id":"s-1","chars":7,"depth":2})
+        );
+        assert_eq!(
+            super::prompt_queued_event_fields(None, 0, 1),
+            serde_json::json!({"session_id":null,"chars":0,"depth":1})
+        );
+        assert_eq!(
+            super::prompt_steer_promoted_event_fields(Some("s-1"), 5),
+            serde_json::json!({"session_id":"s-1","delivery":"steer","chars":5})
+        );
+        assert_eq!(
+            super::prompt_submitted_event_fields("s-1", "shell", 9),
+            serde_json::json!({"session_id":"s-1","kind":"shell","chars":9})
+        );
+        assert_eq!(super::prompt_submit_kind("!ls"), "shell");
+        assert_eq!(super::prompt_submit_kind("/compact"), "command");
+        assert_eq!(super::prompt_submit_kind("hi"), "prompt");
+        // Field-name audit: no payload key can smuggle draft content.
+        for payload in [
+            super::prompt_queued_event_fields(Some("s"), 1, 1),
+            super::prompt_steer_promoted_event_fields(Some("s"), 1),
+            super::prompt_submitted_event_fields("s", "shell", 1),
+        ] {
+            for key in payload.as_object().expect("object").keys() {
+                assert!(matches!(
+                    key.as_str(),
+                    "session_id" | "chars" | "depth" | "kind" | "delivery"
+                ));
+            }
+        }
+    }
 
     fn send_click(view: &crate::native_view::NativeView, draft: &str) -> InputEvent {
         let (x, y, _) = view.send_button_region(draft).expect("visible Send control");
