@@ -12221,3 +12221,27 @@ progress requires building backend producers (server payload fields, routes,
 engines), which is a different work class than the UI-parity checklist and
 cannot be satisfied by a bounded single-file patch. No count change this wave:
 144 `ALREADY_CORRECT` / 2 `REAL_GAP` / 59 `BLOCKED` / 18 `LANDED` = 223.
+
+### Wave-61 dispatch — implementation framing (base `5dec9a64`)
+
+Waves 58/59/60 produced 0 landable patches because every remaining `BLOCKED`
+item needs a **backend producer**, not a CLI-only consumer wire-up. Wave-61
+therefore reframes workers as **producer-chain implementers** (not classifiers):
+each returns a `git apply -p1`-able patch + focused tests, which the orchestrator
+compiles/tests/lands.
+
+- Shared brief: `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave61/BRIEF.md`
+  (base SHA, hard rules, per-group targets, deliverable schema).
+- 20 groups G1–G20 dispatched on the 4 authorized routes:
+  - vyce-deepseek-v41 (8): G1 TAB-06/10/21; G2 SIDE-03/04/05/10;
+    G3 MSG-001/002/003; G4 MSG-005/008/009/010; G5 DIFF-001/003+THEME-09+PAR-19;
+    G6 PAR-09+THEME-08+TOOL-011; G7 DIALOG-02/06..09; G8 DIALOG-12..19.
+  - vyce-combined (10): G9 LAY-10/11/13; G10 TOOL-006/011; G11 MD-007/008/009;
+    G12 CP-07/CP-09; G13 FORM-001/STATE-002; G14 MEDIA-001; G15 SIDE-10;
+    G16 PAR-10; G17 THEME-13; G18 PAR-02/03/06/07.
+  - river-glm-5.3-flash (1): G19 FFI-01..04/06..08/11.
+  - luna-free (1): G20 THEME-14.
+- Deliverables land in the wave-61 dir as `<GROUP>.patch.diff` + `<GROUP>.impl.json`
+  (or `<GROUP>.blocked.json`). Orchestrator applies → `cargo check` → focused test
+  → full CLI suite (single-threaded) → commit → push → verify remote.
+- Retry rule: failed workers retried 2–3× on a working provider before ignoring.
