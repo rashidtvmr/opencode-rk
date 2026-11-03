@@ -1,6 +1,6 @@
 # OpenCode V2 UI parity — consolidated status
 
-- **Canonical line:** `main-v2` @ `d5611712` (remote verified)
+- **Canonical line:** `main-v2` @ `53491495` (remote verified)
 - **Upstream oracle:** `/Users/mymac/Projects/tmp/opencode` @ `450e7b92412c780a7b5a75226bb8d49aaca24e22`
 - **Checklist:** `docs/ui-parity/opencode-ui-parity-kit/checklist.json` (223 items)
 - **Method:** source inspection of the live Rust path (implementation + a
@@ -23,6 +23,31 @@
 - The remaining work is **not** parallelizable UI work: it is a small set of
   live-wiring gaps and a smaller set of backend-producer gaps. No item is
   blocked on "more agents"; each blocked item names the exact missing seam.
+
+### Wave-58/59/60 — CLI-only patch approach exhausted (2026-11-03)
+
+Three consecutive waves (58, 59, 60) of read-only patch workers produced **zero
+landable patches**. The cause is structural, not worker quality: for every
+remaining `BLOCKED` item the CLI already carries a faithful, unit-tested model,
+but the **backend never produces the fact** the model consumes, so no bounded
+CLI-only change can wire a live consumer. Two seams were independently
+re-verified by the orchestrator and both are genuinely backend-blocked:
+
+- `SIDE-03` cost: `StatusView::set_cost` is rendered live
+  (`native_view.rs:4222`), but the CLI model catalogue (`native_setup.rs:184
+  catalogue()` → `Model`) parses **no `cost` field** and the catalogue is not
+  retained at the history-fetch site, so there is no live pricing source.
+- `TAB-21`: the server route `POST /api/sessions/{id}/view` + `set_viewed` +
+  `SessionSummary.viewed_at` all exist, but the **idle-transition timestamp**
+  does not: upstream sets `time_idle` on every terminal execution
+  (`projector.ts:423-447`, `:704-706`), while our `SessionSummary` has no
+  `idle_at` and no turn-terminal path writes one. (The CLI's *local* unread
+  marker is already live via `DaemonEvent::WorkState` → `mark_unread`; only the
+  server-global acknowledgement POST is missing.)
+
+Further progress therefore requires building **server-side producers** (payload
+fields, routes, engines, contract fields) — a different work class from the
+UI-parity checklist, not satisfiable by a bounded single-file patch.
 
 ## Wave-44 verification pass (2026-11-02)
 
