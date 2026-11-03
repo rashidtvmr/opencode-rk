@@ -6955,6 +6955,11 @@ fn native_loop(
         None => None,
     };
     view.set_sidebar_hidden(preferences.sidebar_hidden);
+    // DIALOG-02: thread the live new-designs experiment fact into the dialog
+    // shell so the shared header/footer/description gaps match the selected
+    // `new_designs` state (dialog.tsx:105-160). Seeded from the same preference
+    // read that selected the theme and passed `new_designs` to `load_native_theme`.
+    view.dialogs.set_new_designs(new_designs);
     // SIDE-09: seed the persisted MCP disclosure BEFORE the first
     // `refresh_session_mcp` below, so the first ACK cannot clobber it
     // (`sidebar/mcp.tsx:6/25-31`, `plugin/api.tsx:201`).

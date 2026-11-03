@@ -431,6 +431,10 @@ pub struct DialogView {
     dialog: Option<OpenDialog>,
     selection: Option<usize>,
     question_capable: bool,
+    /// `useNewDesigns()` (`ui/dialog.tsx:105,109`): the live new-designs
+    /// experiment fact. Defaults to `false` (legacy shell); the composition
+    /// root seeds it from the same preference read that selects the theme.
+    new_designs: bool,
     rejected: bool,
     /// Locally monotonic decision-attempt counter. Never reset on close,
     /// `open_request` or rejected ACK; fails closed on overflow.
@@ -631,6 +635,7 @@ impl DialogView {
             dialog: None,
             selection: None,
             question_capable: false,
+            new_designs: false,
             rejected: false,
             attempt_counter: 0,
             pending_attempt: 0,
@@ -690,6 +695,22 @@ impl DialogView {
     #[must_use]
     pub fn question_capable(&self) -> bool {
         self.question_capable
+    }
+
+    /// Seed the live `new-designs` experiment fact (`useNewDesigns()`,
+    /// `ui/dialog.tsx:105`). The composition root reads it from the same
+    /// preference source that selects the theme (`tui_entry.rs`
+    /// `new_designs_enabled`) and applies it before the first paint. Purely
+    /// presentational: it changes the header weight/color, the description
+    /// line and the footer gap, never any decision or focus semantics.
+    pub fn set_new_designs(&mut self, enabled: bool) {
+        self.new_designs = enabled;
+    }
+
+    /// Whether the new-designs shell is active for this view.
+    #[must_use]
+    pub fn new_designs(&self) -> bool {
+        self.new_designs
     }
 
     /// The visible dialog's kind when it gates session-tab attention: a
@@ -1643,8 +1664,22 @@ impl DialogView {
         let mut lines = Vec::new();
         let line = |text, role| Line {text,role,detail_from:None};
         if let Some(dialog) = self.dialog.as_ref() {
-            // Heading first: prioritized on short terminals.
-            lines.push(line(dialog.title.clone(), if dialog.kind == DialogKind::Permission { Role::Warning } else { Role::Heading }));
+            // Heading first: prioritized on short terminals. The new-designs
+            // shell drops the title's bold weight and paints it in the base
+            // text color (`ui/dialog.tsx:109`: `attributes={newDesigns() ?
+            // undefined : TextAttributes.BOLD}`). The permission heading keeps
+            // its Warning role because that is a security signal, not a
+            // decoration the experiment toggles.
+            lines.push(line(
+                dialog.title.clone(),
+                if dialog.kind == DialogKind::Permission {
+                    Role::Warning
+                } else if self.new_designs {
+                    Role::Item
+                } else {
+                    Role::Heading
+                },
+            ));
             let roomy = height >= dialog.choices.len() + 7;
             if roomy {
                 lines.push(line(String::new(), Role::Description));
@@ -1734,6 +1769,13 @@ impl DialogView {
                 lines.push(line(text,
                     if self.selection == Some(index) { Role::Selected } else if dialog.disabled[index] { Role::Description } else if dialog.kind == DialogKind::Permission { Role::Action } else { Role::Item }));
             }
+            // `dialog.tsx:159`: `paddingBottom={newDesigns() && footer ?
+            // (footerGap ?? 1) - 1 : 0}`. With the default `footerGap` of 1 the
+            // value is 0 in both experiment states, and the callers that pass
+            // `footerGap={2}` (`dialog-prompt.tsx:133`,
+            // `dialog-export-result.tsx:49`, `dialog-export-options.tsx:104`)
+            // get `1` — i.e. new-designs adds bottom padding, it never removes
+            // it. The legacy gap row therefore stays in both states.
             if roomy && has_footer {
                 lines.push(line(String::new(), Role::Description));
             }
@@ -6076,6 +6118,58 @@ mod tests {
         assert_eq!(rows[choice - 1], "");
         let footer = rows.iter().position(|row| row.contains("Enter")).unwrap();
         assert_eq!(rows[footer - 1], "");
+    }
+
+    // DIALOG-02: the live new-designs shell threads through the dialog layout.
+    // `ui/dialog.tsx:109` drops the title bold weight under the experiment
+    // (`attributes={newDesigns() ? undefined : TextAttributes.BOLD}`), painting
+    // it in the base text color. The Permission heading keeps its Warning role:
+    // that is a security signal, not a decoration the experiment toggles. The
+    // footer gap row is NOT toggled: `dialog.tsx:159` yields `0` for the default
+    // `footerGap` of 1 in both states and `1` for the `footerGap={2}` callers,
+    // so new-designs never removes it.
+    #[test]
+    fn new_designs_shell_changes_title_role() {
+        // Legacy default: bold Heading title.
+        let mut legacy = DialogView::new();
+        legacy.open_request(DialogRequest {
+            id: "d02-legacy".to_string(),
+            session_id: "ses-1".to_string(),
+            kind: DialogKind::Confirm,
+            title: "Confirm change".to_string(),
+            choices: vec!["yes".to_string(), "no".to_string()],
+            message: None,
+            disabled: Vec::new(),
+            error: None,
+        }).unwrap();
+        assert!(!legacy.new_designs());
+        let legacy_rows = legacy.render_styled(56, 12);
+        assert_eq!(legacy_rows[0].role, crate::native_ui_style::Role::Heading);
+        let legacy_footer = legacy_rows.iter().position(|l| l.text.contains("Enter")).unwrap();
+        assert_eq!(legacy_rows[legacy_footer - 1].text, "", "legacy keeps the gap row");
+
+        // New designs: base-color (unbolded) title; the gap row is unchanged.
+        let mut designed = DialogView::new();
+        designed.set_new_designs(true);
+        designed.open_request(DialogRequest {
+            id: "d02-new".to_string(),
+            session_id: "ses-1".to_string(),
+            kind: DialogKind::Confirm,
+            title: "Confirm change".to_string(),
+            choices: vec!["yes".to_string(), "no".to_string()],
+            message: None,
+            disabled: Vec::new(),
+            error: None,
+        }).unwrap();
+        assert!(designed.new_designs());
+        let designed_rows = designed.render_styled(56, 12);
+        assert_eq!(designed_rows[0].role, crate::native_ui_style::Role::Item);
+        let designed_footer = designed_rows.iter().position(|l| l.text.contains("Enter")).unwrap();
+        assert_eq!(designed_rows[designed_footer - 1].text, "", "gap row is state-independent");
+        // The permission heading is still a security signal under new designs.
+        let mut perm = open_permission();
+        perm.set_new_designs(true);
+        assert_eq!(perm.render_styled(56, 12)[0].role, crate::native_ui_style::Role::Warning);
     }
 
     #[test]
