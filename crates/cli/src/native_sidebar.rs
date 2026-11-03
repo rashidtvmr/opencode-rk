@@ -225,6 +225,32 @@ impl UsageClasses {
     }
 }
 
+/// SIDE-04: derive the five disjoint provider classes from the wire usage.
+///
+/// OpenResponses `input_tokens` is the authoritative total *inclusive of
+/// cached input* (`crates/server/src/auto_compaction.rs:102`), so the
+/// non-cached class is `input - cached` and `cache.read` is the cached subset;
+/// cache is subtracted once and re-added once, never double counted. The wire
+/// reports no `cache.write`, so that class stays an honest zero rather than a
+/// fabricated value. `cached` is clamped to `input` (a provider that reports
+/// more cached than total cannot push `input` negative).
+#[must_use]
+pub fn classes_from_wire(
+    input: u64,
+    output: u64,
+    cached: Option<u64>,
+    reasoning: Option<u64>,
+) -> UsageClasses {
+    let cache_read = cached.unwrap_or(0).min(input);
+    UsageClasses {
+        input: input.saturating_sub(cache_read),
+        output,
+        reasoning: reasoning.unwrap_or(0),
+        cache_read,
+        cache_write: 0,
+    }
+}
+
 /// Sidebar `Context` contribution (`context.tsx:16-41`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ContextSection {
@@ -1633,6 +1659,26 @@ mod tests {
         assert_eq!(percent_used(200_000, 200_000), 100);
         assert_eq!(percent_used(400_000, 200_000), 200);
         assert_eq!(percent_used(150, 0), 0);
+    }
+
+    /// SIDE-04: the wire is inclusive-of-cached, so the class producer must
+    /// subtract cache exactly once and clamp a provider that over-reports it.
+    #[test]
+    fn wire_usage_derives_disjoint_classes_without_double_counting_cache() {
+        // input_tokens=120 already includes cached_tokens=40.
+        let classes = classes_from_wire(120, 30, Some(40), Some(10));
+        assert_eq!(classes.input, 80);
+        assert_eq!(classes.cache_read, 40);
+        assert_eq!(classes.cache_write, 0, "wire reports no cache write");
+        assert_eq!(classes.reasoning, 10);
+        assert_eq!(classes.total(), 80 + 30 + 10 + 40 + 0);
+        // No cache reported: the whole input is non-cached.
+        assert_eq!(classes_from_wire(120, 30, None, None).total(), 150);
+        // Over-reported cache clamps to input, never underflows input.
+        let clamped = classes_from_wire(5, 1, Some(999), None);
+        assert_eq!(clamped.input, 0);
+        assert_eq!(clamped.cache_read, 5);
+        assert_eq!(clamped.total(), 6);
     }
 
     /// CP-18: number and currency formatting boundaries.

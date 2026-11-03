@@ -1374,6 +1374,16 @@ impl NativeView {
         self.status.set_cost(cost);
     }
 
+    /// SIDE-04: confirmed five-class provider usage (`util/session.ts:52-55`),
+    /// replacing the inclusive-total measured arithmetic. Mirrors
+    /// [`crate::native_view_status::StatusView::set_usage_classes`].
+    pub fn set_usage_classes(
+        &mut self,
+        classes: Option<crate::native_view_status::native_sidebar::UsageClasses>,
+    ) {
+        self.status.set_usage_classes(classes);
+    }
+
     /// Footer live label hit `(x, y, cells)` from the last painted frame.
     #[must_use]
     pub fn live_footer_hit(&self) -> Option<(u16, u16, u16)> {

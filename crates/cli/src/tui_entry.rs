@@ -7885,7 +7885,19 @@ fn native_loop(
                         }
                         native_turn::Event::ReasoningDelta(delta) => transcript.reasoning_event(&delta,false),
                         native_turn::Event::ReasoningFinal(summary) => transcript.reasoning_event(&summary,true),
-                        native_turn::Event::Usage {input,output,cached,reasoning} => view.set_usage(input,output,cached,reasoning),
+                        native_turn::Event::Usage {input,output,cached,reasoning} => {
+                            // SIDE-04: this event is the last eligible assistant
+                            // message's usage, so the five-class sidebar uses it
+                            // directly. Wire `input` is inclusive of cached, so
+                            // derive the disjoint classes; keep the inclusive
+                            // measured total for the legacy context row too.
+                            view.set_usage_classes(Some(
+                                crate::native_view_status::native_sidebar::classes_from_wire(
+                                    input, output, cached, reasoning,
+                                ),
+                            ));
+                            view.set_usage(input,output,cached,reasoning);
+                        }
                         native_turn::Event::ToolCall {
                             call_id,
                             name,

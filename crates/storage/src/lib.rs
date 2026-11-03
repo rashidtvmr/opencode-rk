@@ -2307,4 +2307,69 @@ mod tests {
             Err(StorageError::EventPayloadTooLarge)
         ));
     }
+
+    #[test]
+    fn session_todos_at_derives_latest_completed_todowrite() {
+        let temp = tempdir().unwrap();
+        let storage = Storage::open_in_memory(temp.path().join("blobs")).unwrap();
+        let session = session("todos");
+        storage.create_session(&session).unwrap();
+        // A user turn, then two todowrite rounds. Only completed outputs count.
+        let user = MessageRecord {
+            id: MessageId::new(),
+            session_id: session.id,
+            role: MessageRole::User,
+            body: PayloadRef::inline("do work").unwrap(),
+            created_at: Timestamp::now(),
+        };
+        storage.append_message(&user).unwrap();
+        let store_todowrite = |ordinal: u32, arguments: &str, session: &SessionSummary| {
+            let round = ToolRound {
+                round_id: format!("round-{}-0", ordinal),
+                session_id: session.id,
+                turn_message_id: user.id,
+                round_ordinal: ordinal,
+                expected_pairs: 1,
+            };
+            let call_message = MessageRecord {
+                id: MessageId::new(),
+                session_id: session.id,
+                role: MessageRole::Tool,
+                body: PayloadRef::inline("[todowrite] pending").unwrap(),
+                created_at: Timestamp::now(),
+            };
+            storage
+                .admit_tool_round(
+                    &round,
+                    &[ToolCallAdmission {
+                        call_id: format!("call-{ordinal}"),
+                        name: "todowrite".to_owned(),
+                        arguments: arguments.to_owned(),
+                        message: call_message.clone(),
+                    }],
+                )
+                .unwrap();
+            storage
+                .append_tool_output(&round, 0, "ok", call_message.id)
+                .unwrap();
+            call_message.id
+        };
+        let first_args = r#"{"todos":[{"id":"a","content":"First","status":"pending","priority":"high"}]}"#;
+        store_todowrite(0, first_args, &session);
+        // No staged revert: the newest completed todowrite wins.
+        let latest = storage.session_todos_at(session.id, None).unwrap();
+        assert_eq!(latest.len(), 1);
+        assert_eq!(latest[0].id, "a");
+        let second_args = r#"{"todos":[{"id":"b","content":"Second","status":"in_progress","priority":"low"}]}"#;
+        let second_id = store_todowrite(1, second_args, &session);
+        // Boundary at the second todowrite message: at-or-before means only the
+        // first call is eligible, so the derived list is the first one.
+        let at_second = storage
+            .session_todos_at(session.id, Some(second_id))
+            .unwrap();
+        assert_eq!(at_second.len(), 1);
+        assert_eq!(at_second[0].id, "a");
+        let no_boundary = storage.session_todos_at(session.id, None).unwrap();
+        assert_eq!(no_boundary[0].id, "b");
+    }
 }

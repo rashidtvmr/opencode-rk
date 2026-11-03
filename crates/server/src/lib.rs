@@ -1192,6 +1192,7 @@ struct StageRevertBody {
 /// applied.
 async fn stage_session_revert(
     State(state): State<AppState>,
+    Extension(events): Extension<event_bus::EventBus>,
     Path(id): Path<String>,
     Json(body): Json<StageRevertBody>,
 ) -> Result<Json<Value>, ApiFailure> {
@@ -1207,6 +1208,25 @@ async fn stage_session_revert(
         .set_revert(id, Some(revert))
         .await
         .map_err(ApiFailure::internal)?;
+    // A staged revert changes the effective todo list: upstream derives it as
+    // the latest completed `todowrite` input sliced at the boundary
+    // (`packages/tui/src/util/todo.ts:32-43`). Recompute from typed tool
+    // history and persist it, so the stored list and the `todo.updated`
+    // publication both reflect the reverted state.
+    let todos = state
+        .sessions
+        .todos_at_boundary(id)
+        .await
+        .map_err(ApiFailure::internal)?;
+    state
+        .sessions
+        .replace_todos(id, todos.clone())
+        .await
+        .map_err(ApiFailure::internal)?;
+    let _ = events.publish(event_bus::ServerEvent::TodoUpdated {
+        session: id,
+        todos,
+    });
     let session = state.sessions.get(id).await.map_err(ApiFailure::internal)?;
     Ok(Json(json!({"session":session})))
 }

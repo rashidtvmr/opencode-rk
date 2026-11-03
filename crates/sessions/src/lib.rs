@@ -419,6 +419,27 @@ impl SessionService {
         run_blocking(move || storage.session_todos(id)).await.map_err(todo_error)
     }
 
+    /// Derive the session's effective todo list from typed tool history, sliced
+    /// at the session's staged revert boundary. Mirrors upstream `sessionTodos`
+    /// (`packages/tui/src/util/todo.ts:32-43`): the input of the latest
+    /// completed `todowrite` before `revert.messageID`. Without a staged
+    /// revert this returns the newest completed `todowrite` input.
+    pub async fn todos_at_boundary(
+        &self,
+        id: SessionId,
+    ) -> Result<Vec<opencode_rk_storage::session_todos::Todo>, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || {
+            let boundary = storage
+                .get_session(id)?
+                .revert
+                .map(|revert| revert.message_id);
+            storage.session_todos_at(id, boundary)
+        })
+        .await
+        .map_err(todo_error)
+    }
+
     pub async fn replace_todos(&self, id: SessionId, todos: Vec<opencode_rk_storage::session_todos::Todo>) -> Result<(), SessionError> {
         let storage = Arc::clone(&self.storage);
         run_blocking(move || storage.replace_session_todos(id, &todos)).await.map_err(todo_error)
