@@ -49,7 +49,46 @@ Further progress therefore requires building **server-side producers** (payload
 fields, routes, engines, contract fields) — a different work class from the
 UI-parity checklist, not satisfiable by a bounded single-file patch.
 
-## Wave-44 verification pass (2026-11-02)
+## Wave-66 — verification verdicts and rejected patches (2026-11-03)
+
+Base `51538ca1` (TAB-21 landed). 25 groups on three provider-verified routes
+(`th/deepseek-v4-flash:free`, `th/gpt-5.6-luna`, `xk/openai/gpt-5.6-luna`);
+`vyce-deepseek-v41`, `9router-vyce-deepseek-v4.1-free-combined`,
+`9router-river-glm-5-3-flash`, `9router-th-free` and `xkiro-mimo-v2-6-flash` were
+excluded — the first two return provider HTTP 400 on every request, the river
+model is absent from the 1499-model catalogue, and no `xkiro` provider is
+configured.
+
+**Verifier results (independent, source-inspected, exact base SHA).**
+
+| Group | Result |
+| --- | --- |
+| VTAB | 20 `CONFIRMED`; TAB-21 was mislabeled `BLOCKED` → corrected to `LANDED` above |
+| VSIDE | 13 `CONFIRMED`; SIDE-05 mislabeled `BLOCKED` → `REAL_GAP` above |
+| VCP | 5 `CONFIRMED` (CP-03/04/10/40/41), no gaps |
+
+**Rejected patches — implemented nothing observable, or regressed the screen.**
+Each was independently reviewed against the pinned upstream component before
+rejection; none was landed.
+
+| Group | Patch claim | Rejection reason |
+| --- | --- | --- |
+| TOOL | "wire `execute_dialog` into the live transcript" | Replaces the stored tool `args` JSON with the already-extracted `code`, so the live painter's own `parse_args`/`str_field` classification degrades to the raw fallback. No new rows, no test, no upstream behavior change — a data-mangling no-op. TOOL-006/011 stay `BLOCKED`. |
+| MSG005 | "add `MessageRecord.files/skills`" | Invented flat `Vec<String>` fields with `serde(default)` that nothing persists (defaults are never written), plus fields injected into `ResponsesCompactionWindow` that the struct does not define. Cannot compile as written and would render no real attachment chip. MSG-005 stays `BLOCKED` on part-level attachment data. |
+| MARKDOWN | "paint mermaid/latex fence footprint" | The concrete painter/engine are geometry-only, so a valid fence reserves blank canvas rows: the readable source block disappears and nothing replaces it. Worse than the fail-closed code block until a real canvas rasterizer exists. MD-007/008/009 stay `BLOCKED`. |
+| MISC | "ignore an empty worktree branch" | Production `branch` comes from `VcsInfo::branch_from_head`, which already returns `None` for an empty name, so the change is behaviourally inert outside a new test. Rejected as non-progress. |
+| HARNESS | "stable transcript row keys" | Empty diff; `row_key`/anchor contracts were already live. |
+
+**MEDIA-001 (sole `REAL_GAP`) is now substrate-blocked, not wiring-blocked.** The
+bridge can rasterize an existing RGBA buffer into cells
+(`opentui-bridge/src/image.rs:143,294`), but the workspace has **no image decoder**
+(`png`/`image`/`flate2`/`miniz_oxide` are absent from `Cargo.lock`, and builds run
+`--offline --locked`), and the safe renderer exposes no graphics-protocol
+passthrough (`OSC 1337`/kitty) — it paints a cell grid and strips escapes. Displaying
+an image therefore needs either a vendored decoder or a renderer passthrough
+channel; neither is a CLI-only patch.
+
+
 
 Base SHA `0d74af30`. 28 parallel workers on the four authorized routes, each
 artifact-first and read-only on canonical. Per-ID JSON verdicts live in
@@ -99,7 +138,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | THEME-08 | `REAL_GAP` | `theme_runtime.rs:965` + tests `:3607-3757`; markdown half live `tui_entry.rs:4747`; `syntax_rules()` has zero callers, no highlight producer |
 | THEME-09 | `REAL_GAP` | `tui_entry.rs:2849,2866`; test `theme_runtime.rs:3757`; unified live `tui_entry.rs:4626`; split unreachable (`native_view_chat.rs:2179` hardcodes Unified) |
 | THEME-10 | `ALREADY_CORRECT` | `theme_runtime.rs:1592,1665,1754,1768`; tests `:4167-4241`; live `tui_entry.rs:6744,11425` |
-| TAB-21 | `BLOCKED` | `ViewAcknowledgement` (`native_navigation.rs:1133`, test `:2067`) zero live callers; `tui_entry.rs:8689-8694` defers driver; no idle/viewed watermark into CLI (`LiveSnapshot` `tui_entry.rs:573`; `SessionSummary` `contracts/src/lib.rs:202-213`) |
+| TAB-21 | `LANDED` (`51538ca1`) | **Cross-crate producer built.** `SessionSummary.idle_at` (contracts) + storage `idle_at` column with idempotent migration and monotone `set_session_idle` + sessions `mark_idle` and the guarded `set_viewed`; server stamps idle on `create_turn`, the streamed `Done` frame and both compaction terminals; CLI `LiveSnapshot.session_idle_at`/`session_viewed_at` drive the live `ViewAcknowledgement` POST with backoff. CLI 2217/0, server 313/0, storage 127/0, sessions 45/0. (Wave-66 verifier VTAB re-confirmed this; the earlier `BLOCKED` entry was stale.) |
 | TAB-23 | `LANDED` | `ae56897f` — live `session.tab.*` dispatch now resolves through the config `keybinds` chord table (`native_navigation::tab_keybinds`); `UiPreferences.keybinds` (raw JSON) + focused tests. |
 | SIDE-03 | `LANDED` (`5e3d797b`) | Renderer+test correct (`native_sidebar.rs:230-287`); live `set_usage_classes` (SIDE-04 `0d4f26a7`) and `set_cost` (`b5ec63c7`) wired into the live `Event::Usage` arm. History-load `lastAssistantWithUsage` selector landed (`5e3d797b`): `native_chat_projection::last_assistant_usage` honours the staged revert boundary (unknown ⇒ absent) and the last completed compaction, and the per-frame publish uses the message's OWN model `context_window` (missing limit ⇒ tokens without percent), never the selected UI model. A live-turn guard keeps `Event::Usage` authoritative for its binding. |
 | SIDE-04 | `REAL_GAP` | Five-class arithmetic `native_sidebar.rs:205-287` (test `:1608`) dead on live path; no last-eligible-assistant selector; limit joined only from selected UI model (`tui_entry.rs:8112`); wire `input_tokens` is inclusive of cached (`server/src/auto_compaction.rs:102`) so disjoint classes need a `nonCachedInput` producer |
@@ -140,7 +179,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | TAB-07 | `ALREADY_CORRECT` | `native_tabs.rs:1940`; test `:3852`; live `tui_entry.rs:4964` |
 | TAB-08 | `ALREADY_CORRECT` | `native_tabs.rs:2027`; test `:4032`; live `tui_entry.rs:5009` |
 | TAB-09 | `ALREADY_CORRECT` | `native_tabs.rs:2146`; test `:4052`; live `tui_entry.rs:7930` |
-| TAB-10 | `REAL_GAP` | geometry live (`render:471` → `tui_entry.rs:8281`); `session_tab_detail` (`native_tab_rail.rs:103`) no live consumer; `rail_inputs_for_navigation` (`tui_entry.rs:5277`) feeds only `project_label` |
+| TAB-10 | `LANDED` (`53a3efe4`) | `VcsInfo` + git HEAD parsers (`native_navigation.rs`); `git_vcs_info` producer + `LiveSnapshot.session_vcs` + live `rail_inputs_for_navigation` (`tui_entry.rs:5277`) so the tab rail shows branch/worktree from the session cwd. Wave-66 verifier VTAB re-confirmed the row is implemented and live; a proposed empty-branch guard was rejected as production-neutral (`branch_from_head` already yields `None` for an empty name). |
 | TAB-11 | `ALREADY_CORRECT` | `native_tab_rail.rs:778`; test `:2363`; live `tui_entry.rs:8281` |
 | TAB-12 | `ALREADY_CORRECT` | `native_tab_rail.rs:1138`; test `:2228`; live `tui_entry.rs:5072` |
 | MD-001..006 | `ALREADY_CORRECT` | Live path `native_view_chat.rs:2320 push_block_markdown` → `native_markdown_flow.rs:770` → paint `tui_entry.rs:4753`; per-ID tests in `native_markdown_flow.rs` |
@@ -381,7 +420,7 @@ DIALOG-19, LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009`.
 | Item | Exact missing seam |
 | --- | --- |
 | SIDE-04 | Live `set_usage` (`native_view_status.rs:1146`) sums `input+output` only; `set_usage_classes` (`:1168`) and `set_cost` (`:1160`) have zero non-test callers. No `lastAssistantWithUsage` selector, no revert boundary reaching the view, no cost producer, and the wire `input_tokens` is inclusive of cached (`server/src/auto_compaction.rs:102`), so disjoint classes need a `nonCachedInput` producer. **All landed**: classes (`0d4f26a7`), cost producer (`b5ec63c7`), and the history-load `lastAssistantWithUsage` selector with the message's own model limit (`5e3d797b`). |
-| SIDE-05 | `set_limit` (`native_view_status.rs:1175`) test-only; no usage-limits pipeline reaches the CLI. |
+| SIDE-05 | `REAL_GAP` | `set_limit` (`native_view_status.rs:1175`) test-only; no usage-limits pipeline reaches the CLI. Wave-66 verifier VSIDE refuted the `BLOCKED` label: this is implementable in-repo (server quota snapshot + contract field + live consumer), not dependent on an absent external transport. |
 | SIDE-10 | `todo_http.rs:31-38` returns the stored `session_todos` table verbatim; `stage_session_revert` (`server/src/lib.rs:1193-1209`) stores the boundary but never recomputes the latest-completed-`todowrite` list sliced at the revert boundary (upstream `util/todo.ts:32-43`). |
 | STATE-002 | `LANDED` (`6a72aa61`) | Durable `role='compaction'` marker flows end-to-end: `append_compaction_message` writes it, both `/messages` and `/history` surface a typed `parts` entry (`compaction_wire_part`), and the live transcript renders the upstream `CompactionMessage` semantics (`Provider compaction` vs `Compaction`, `· cancelled`, `· {in} in · {out} out`). Role codec 4 (TEXT + v2), schema CHECK widened, `bounded_history_from` filters `role<>'compaction'` so it never enters provider replay. |
 | MSG-005 | Chips need a server/storage `files`/`skills` field that does not exist (`MessageRecord` `contracts/src/lib.rs:250-257`). |
