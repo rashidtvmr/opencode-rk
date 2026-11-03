@@ -416,6 +416,13 @@ struct OpenDialog {
     /// `native_palette::dialog::PromptState`; the live session-rename flow
     /// drives it.
     prompt: Option<crate::native_palette::select::PromptState>,
+    /// DIALOG-02: the caller's `footerGap` prop (`ui/dialog.tsx:152,159`).
+    /// `None` means the upstream default of 1; the live `dialog-prompt`
+    /// caller passes 2 (`dialog-prompt.tsx:133`). Under the new-designs
+    /// experiment a footer with gap `n` adds `n - 1` body bottom padding
+    /// rows, so this is the live input to
+    /// [`crate::native_palette::dialog::body_bottom_padding`].
+    footer_gap: Option<u16>,
 }
 
 /// Focus-owning dialog overlay state. `Default` is a closed view.
@@ -1069,6 +1076,7 @@ impl DialogView {
                 .unwrap_or_default(),
             error: request.error.unwrap_or(StaticError::BackendUnavailable),
             prompt: None,
+            footer_gap: None,
         });
         // `DialogSelect` seeds `selected: 0` (`ui/dialog-select.tsx:152`), so
         // the first enabled row is selected on open and the first Down moves
@@ -1146,6 +1154,7 @@ impl DialogView {
             message_lines,
             error: StaticError::BackendUnavailable,
             prompt: None,
+            footer_gap: None,
         });
         // `DialogSelect` seeds `selected` to the focused row
         // (`dialog-select.tsx:152`, `dialog-mcp.tsx:61` `preserveSelection`).
@@ -1212,6 +1221,8 @@ impl DialogView {
             prompt: Some(crate::native_palette::select::PromptState::open(
                 initial_value,
             )),
+            // `dialog-prompt.tsx:133` passes `footerGap={2}`.
+            footer_gap: Some(2),
         });
         self.selection = None;
         self.rejected = false;
@@ -1761,10 +1772,15 @@ impl DialogView {
                 if lines.len() < height && !dialog.disabled[index] && self.phase == Phase::Open {
                     hits[lines.len()] = Some(index);
                 }
-                let marker = if self.selection == Some(index) {
-                    " > "
+                // DIALOG-02: the row's left pad is the tested
+                // `dialog::row_padding` value (`dialog-select.tsx:915-920`):
+                // a marked row reserves one cell, an unmarked row three.
+                let marked = self.selection == Some(index);
+                let (row_left, _) = crate::native_palette::dialog::row_padding(marked, self.new_designs);
+                let marker = if marked {
+                    format!("{}> ", " ".repeat(row_left as usize))
                 } else {
-                    "   "
+                    " ".repeat(row_left as usize)
                 };
                 let suffix = if dialog.disabled[index] {
                     " (disabled)"
@@ -1783,13 +1799,19 @@ impl DialogView {
                 lines.push(line(text,
                     if self.selection == Some(index) { Role::Selected } else if dialog.disabled[index] { Role::Description } else if dialog.kind == DialogKind::Permission { Role::Action } else { Role::Item }));
             }
-            // `dialog.tsx:159`: `paddingBottom={newDesigns() && footer ?
-            // (footerGap ?? 1) - 1 : 0}`. With the default `footerGap` of 1 the
-            // value is 0 in both experiment states, and the callers that pass
-            // `footerGap={2}` (`dialog-prompt.tsx:133`,
-            // `dialog-export-result.tsx:49`, `dialog-export-options.tsx:104`)
-            // get `1` — i.e. new-designs adds bottom padding, it never removes
-            // it. The legacy gap row therefore stays in both states.
+            // DIALOG-02: the body box's own bottom padding
+            // (`dialog.tsx:159`): `newDesigns() && footer ? (footerGap ?? 1) - 1
+            // : 0`. The live `dialog-prompt` caller passes `footerGap={2}`, so
+            // under the experiment a footer adds one body padding row.
+            for _ in 0..crate::native_palette::dialog::body_bottom_padding(
+                self.new_designs,
+                has_footer,
+                dialog.footer_gap,
+            ) {
+                lines.push(line(String::new(), Role::Description));
+            }
+            // `dialog.tsx:157`: the outer layout's `gap={1}` puts one blank row
+            // between the body and the footer.
             if roomy && has_footer {
                 lines.push(line(String::new(), Role::Description));
             }
@@ -6199,6 +6221,38 @@ mod tests {
         let mut perm = open_permission();
         perm.set_new_designs(true);
         assert_eq!(perm.render_styled(56, 12)[0].role, crate::native_ui_style::Role::Warning);
+    }
+
+    #[test]
+    fn dialog02_prompt_footer_gap_adds_body_padding_under_new_designs() {
+        // DIALOG-02: `ui/dialog.tsx:159` — a footer with `footerGap={2}` (the
+        // live `dialog-prompt.tsx:133` caller) adds one body bottom padding row
+        // under the new-designs experiment, and none in legacy. The live layout
+        // now reads the tested `dialog::body_bottom_padding` helper.
+        let mut legacy = DialogView::new();
+        legacy.open_prompt("p", "s", "Rename", "value", None).unwrap();
+        let legacy_rows = legacy.render_styled(56, 14);
+        let legacy_footer = legacy_rows
+            .iter()
+            .position(|l| l.text.contains("Enter"))
+            .expect("prompt footer");
+        assert_eq!(legacy_rows[legacy_footer - 1].text, "", "legacy keeps only the gap row");
+
+        let mut designed = DialogView::new();
+        designed.set_new_designs(true);
+        designed.open_prompt("p", "s", "Rename", "value", None).unwrap();
+        let designed_rows = designed.render_styled(56, 14);
+        let designed_footer = designed_rows
+            .iter()
+            .position(|l| l.text.contains("Enter"))
+            .expect("prompt footer");
+        assert_eq!(designed_rows[designed_footer - 1].text, "", "gap row");
+        assert_eq!(designed_rows[designed_footer - 2].text, "", "body padding row");
+        assert_eq!(
+            designed_footer,
+            legacy_footer + 1,
+            "footerGap=2 adds exactly one body padding row"
+        );
     }
 
     #[test]
