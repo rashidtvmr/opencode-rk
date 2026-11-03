@@ -1,5 +1,35 @@
 # Orchestrator scratchpad
 
+## 2026-11-03 (later) — Wave-68 first landings on persistent worktrees
+
+Canonical `main-v2` advanced two commits, both pushed and `git ls-remote`-verified
+against `git@github.com:rashidtvmr/opencode-rk.git`:
+
+- `43050ee0` — **F1 / DIFF-001 (inline half)**. `config.diffs.view`
+  (`auto`/`split`/`unified`) parsed from the global CLI config + inline `--config`
+  (inline wins, bounded read) and threaded to the live inline patch renderer;
+  `auto` keeps the 120/121 content rule, explicit literals override. Independently
+  reviewed `APPROVE`; CLI 2225/0.
+- `ee8e468c` — docs: durable-worktree policy + wave-68 parity status.
+
+Candidates in flight (worktrees under `/Users/mymac/Projects/.oc2-features-20261103/`):
+`f26671f4` (`recovery/ui`, F2 DIALOG-06/08/09 — select model single source of
+truth, CLI 2234/0, review in flight) and `a08a2a06` (`recovery/runtime`, F3
+SIDE-10 — GET /todo derives from tool history; independent review `NEEDS_FIX`
+because two pre-existing lifecycle tests still assert the superseded verbatim
+contract; repair dispatched on the same lane).
+
+Verdict artifacts corrected this wave, all transcribed under
+`artifacts/verdicts/`: STATE-002 `LANDED` (`6a72aa61`), FORM-001
+`ALREADY_CORRECT`, CP-35 `ALREADY_CORRECT`, CP-33 `ALREADY_CORRECT`, CP-34
+`REAL_GAP`, STATE-001/003/004 `REAL_GAP`; CP-07/DIFF-003/MSG-005 stay `BLOCKED`.
+Missing-verdict set dropped to the LAY/CP-17..29/TOOL/FORM groups (running
+artifact-first) plus TOOL-007..012 and FORM-003..008.
+
+Two new implementation packages dispatched on the freed lanes: **I3**
+(CP-11/13/14/15/16 rail facts) on `recovery/core`, **I4** (DIALOG-12..15 pickers)
+on `recovery/platform` based at `43050ee0`.
+
 ## 2026-11-03 — Mandatory persistent-disk feature worktrees
 
 Owner requested worktrees and discouraged temp/RAM-backed implementation storage.
