@@ -244,9 +244,9 @@ the wave-44 verdict supersedes it.
 | Verdict | Count |
 | --- | --- |
 | `ALREADY_CORRECT` | 143 |
-| `REAL_GAP` | 8 |
+| `REAL_GAP` | 7 |
 | `BLOCKED` | 63 |
-| `LANDED` (wave-45..48) | 9 |
+| `LANDED` (wave-45..48) | 10 |
 | **Total** | **223** |
 
 ### Landed fixes (wave-45..48) — moved out of `REAL_GAP`
@@ -262,11 +262,11 @@ the wave-44 verdict supersedes it.
 | SIDE-08 | `76fcb75a` | The sidebar MCP row click now opens the `DialogMcp` server list (`dialog-mcp.tsx`) instead of PUT-toggling in place: adds `DialogKind::Mcp`, `DialogView::open_mcp`/`open_kind`/`focused_choice`, `OpenDialog.mcp_status`, the Mcp render arm, `NativeView::mcp_entries`/`mcp_dialog_open`/`mcp_dialog_toggle`/`mcp_server_failed` and `dispatch_mcp_toggle`; Enter toggles the focused server via the same `PUT /api/sessions/{id}/mcp/{name}`, Esc closes locally. Focused tests + full CLI suite (2172/0) green. |
 | MSG-007 / CP-11 review fix | `df4f4e29` | MSG-007: `SessionMessageMenu::resync` now takes the captured session id and guards `actions.session_id() == Some(session_id)`, so a live-session switch with a colliding message id cannot retarget Copy/Revert/Fork (`dialog-message.tsx:23`). CP-11: the running scanner + interrupt label moved from the shared shell footer (`footer_line`) into the composer footer slot (`composer_footer_row`, the `prompt.footer` slot) via `NativeView::composer_status_text`; the shell footer keeps the idle directory. Focused tests + full CLI suite (2172/0) green. |
 | THEME-12 | `bc24dd30` | The live theme picker (`tui_entry.rs`) persisted only on Enter, so arrowing through the list showed no preview and Esc left the last previewed theme in place. Adds `ThemePicker` (a live wrapper over the tested `ThemeController`) plus `theme_picker_move`/`theme_picker_cancel`: page_next/page_prev on the Theme page preview+persist the focused row, Esc restores+persists the pre-open selection, Enter clears the picker (`dialog-theme-list.tsx:32-37` -> `context/theme.tsx:341-349`). Focused test `theme12_live_picker_previews_on_move_and_reverts_on_cancel` + full CLI suite (2173/0) green. |
+| DIALOG-04 | `d137313d` | The ordered modal routes (`native_modal_layer.rs:489-600`) had no live consumer: the live loop quit the app on Ctrl-C even with a dialog open, and a backdrop click did nothing. Ctrl-C (0x03) now routes through the same close/reject path as Escape while the dialog stack owns input (`dialog_consumes_byte`); Ctrl-D (not bound in the modal layer) keeps its byte-exit meaning. A left-button release outside the panel rect closes the top dialog (`ui/dialog.tsx:54-60`); a pending decision is never abandoned. Focused test `dialog04_ctrl_c_closes_dialog_but_ctrl_d_keeps_byte_exit` + full CLI suite (2174/0) green. |
 
-### `REAL_GAP` — faithful model + focused test exist, no live consumer (8)
+### `REAL_GAP` — faithful model + focused test exist, no live consumer (7)
 
-`THEME-05, THEME-08, THEME-09, THEME-13, CP-07, MEDIA-001, DIALOG-02,
-DIALOG-04`.
+`THEME-05, THEME-08, THEME-09, THEME-13, CP-07, MEDIA-001, DIALOG-02`.
 
 Per-ID seams are recorded in the wave-44 batch tables above and in
 `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave44/<ID>.json`.
@@ -274,9 +274,13 @@ Selected high-value seams:
 
 | Item | Seam |
 | --- | --- |
-| MEDIA-001 | `image_attachments`/`inline_tool_images`/`gallery_model` (`native_image_preview.rs:1047-1160`) have zero non-test callers; `PageState::open_image_preview` (`native_view_pages.rs:788`) never invoked live, so the preview always renders "no image attached". |
-| DIALOG-02 / DIALOG-04 | `native_palette.rs:667-721` dialog shell metrics and `native_modal_layer.rs:489-600` escape/ctrl-c/backdrop routes are not read by the live `DialogView::layout` (`native_view_dialogs.rs:1393`) / `tui_entry.rs:10666-10730` dialog dispatch. |
-| CP-07 | `selectable_agents`/`agent_color` (`native_prompt_pane.rs:591-631`) have no live `AgentFact` color producer. |
+| MEDIA-001 | `image_attachments`/`inline_tool_images`/`gallery_model` (`native_image_preview.rs:1047-1160`) have zero non-test callers; `PageState::open_image_preview` (`native_view_pages.rs:788`) never invoked live, so the preview always renders "no image attached". Wave-48 re-confirmed: no clipboard-image read path, no live `PromptPaneInput` attachment field, and `LocalFiles` (`native_image_preview.rs:67`) has only a test implementation. |
+| DIALOG-02 | `native_palette.rs:667-721` dialog shell metrics (gap/row-pad/footer-band) are not read by the live `DialogView::layout` (`native_view_dialogs.rs:1494`). |
+| CP-07 | `selectable_agents`/`agent_color` (`native_prompt_pane.rs:591-631`) have no live `AgentFact` color producer; `set_composer_agent` (`native_view.rs:1232`) has zero non-test callers and the agent catalogue contract carries no `color` field. |
+| THEME-08 | `syntax_rules()` (`native_theme_runtime.rs:965`) has zero non-test callers; no tokenizer/highlighter producer and no renderer syntax-style sink (`safe_renderer.rs:906` takes explicit fg/bg/attrs only). |
+| THEME-13 | `SystemThemeState`/`palette_reply` (`native_theme_runtime.rs:2183/2264`) have zero non-test callers; no OSC palette-query emitter and no payload-carrying input event to decode a reply. |
+| THEME-09 | The live chat `Patch`/diff-fence painter hardcodes `DiffViewMode::Unified` (`native_view_chat.rs:2200/2730`); `resolve_view_mode`/`config.diffs.view` (`native_diff_view.rs:586`) have no live caller, so the upstream width>120 auto-split is unreachable. |
+| THEME-05 | No live per-cell `ActionStates` map; the live `PaintCtx` (`tui_entry.rs:8668`) threads no state map, so disabled/pressed/focused/selected/hovered combinations are not painted. |
 
 ### `BLOCKED` — needs a producer/transport/contract field that does not exist (63)
 
@@ -428,6 +432,32 @@ The remaining work is therefore **not** more UI drawing:
   render-substrate models (`FFI-01/03/04/06/07/08/11`), and the tab
   indicators/pending/branch producers (`TAB-04/06/10`).
   `FORM-001` sub-behavior 1 is a deliberate extension, not a gap.
+
+### Wave-48 re-confirmation (2026-11-03)
+
+Independent workers re-examined the remaining `REAL_GAP`/`BLOCKED` seams against
+upstream pin `450e7b92412c780a7b5a75226bb8d49aaca24e22` and confirmed the
+following as genuinely missing producers (not bounded wiring):
+
+- `THEME-08` — no tokenizer/highlighter producer and no renderer syntax-style
+  sink; `syntax_rules()` stays test-only.
+- `THEME-13` — no OSC palette-query emitter and no reply-carrying input event;
+  `SystemThemeState`/`palette_reply` stay test-only.
+- `CP-07` / `CP-09` — no live selected-agent id and no `color` field on the
+  agent catalogue contract; `AgentFact`/`set_composer_agent` stay test-only.
+- `TAB-10` — no `current_branch`/`default_branch`/`is_worktree` producer;
+  `session_tab_detail` stays test-only.
+- `TAB-21` — the `idle` half of the unread pair is absent from storage,
+  contract, transport and snapshot; wiring the `/view` POST alone cannot
+  produce an observable unread transition.
+- `TOOL-011` — no `ExecuteDialog` payload on the dialog contract, no live
+  per-row tool-part owner, and no highlight producer.
+
+`DIALOG-04` was the one bounded item and is now landed (`d137313d`). `THEME-09`
+is re-scoped: the diff colors are live, but the upstream width>120 auto-split
+(`routes/session/index.tsx:3457-3459`) is unreachable because the live chat
+painter hardcodes `DiffViewMode::Unified` and `config.diffs.view` is never
+parsed.
 
 This document is a status map, not acceptance. No item is marked
 runtime-proven; captured styled-cell/cursor goldens were not produced.
