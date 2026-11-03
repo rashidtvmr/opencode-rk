@@ -188,6 +188,13 @@ evidence in `artifacts/verdicts/`).
 | `FORM-003..008` | unrecorded | `REAL_GAP` | the ported `FormPrompt` (`native_view_dialogs.rs:2615-3578`) is test-only; the live loop (`tui_entry.rs:11619-11707`) routes only Mcp/Select/permission, so there is no live daemon-form renderer/dispatch; upstream `component/form.tsx` |
 | `CP-25` | unrecorded | `ALREADY_CORRECT` | live dock status cells (`native_view.rs:1617-1623`) from `SubagentsTab::rows`; `status_label` "Running" (`native_children.rs:1176`); test `cp25_running_label_is_literal_without_progress`; upstream `subagents-tab.tsx:209` |
 | `CP-24`/`CP-26`/`CP-27`/`CP-28`/`CP-29` | unrecorded | `REAL_GAP` | tab/keymap/focus models exist but are unwired: `SubagentsTab` command/set_active (`native_children.rs:1620`), `SessionDock::set_shells` (`native_shell.rs:1244`), `TerminalsTab` (`native_dock.rs:1183`), `KeymapDefaults::upstream` (`native_composer.rs:1690`) and composer `PromptFocus` remount (`:1745`) all have no live consumer |
+| `CP-19`/`CP-20` | unrecorded | `ALREADY_CORRECT` | live `rail_spans` fit/hover role selection (`native_view.rs:4389`); tests `cp19_usage_outranks_shortcuts_at_the_fit_boundary`, `cp20_hover_and_disabled_hints_keep_their_shortcut_identity`; upstream `footer.tsx:55-88,146-155` |
+| `CP-21`/`CP-22`/`CP-23` | unrecorded | `ALREADY_CORRECT` | live queue dock rows (`tui_entry.rs:9104`, `native_view.rs:3703-3718`), prompt-slot precedence (`native_view.rs:3496-3503,3776-3783`) and dock title/hint (`native_view.rs:1091-1096,3641-3701`); tests `queue_dock_paints_only_the_published_active_session_rows`, `cp22_bottom_slot_precedence_covers_every_combination`, `cp23_title_and_hint_layout` |
+
+**Checklist coverage.** As of this wave **all 223 items carry a verdict row**
+(docs + `artifacts/verdicts/`), so the verification census is complete. The
+remaining `REAL_GAP`/`BLOCKED` items below are the open implementation work, not
+unverified items.
 
 Base SHA `0d74af30`. 28 parallel workers on the four authorized routes, each
 artifact-first and read-only on canonical. Per-ID JSON verdicts live in
