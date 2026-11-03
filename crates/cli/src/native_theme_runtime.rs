@@ -2017,6 +2017,54 @@ impl ThemeController {
     }
 }
 
+/// THEME-12: the live theme picker. Wraps [`ThemeController`] with the exact
+/// transition the live loop performs for each key, so the live
+/// preview/cancel/confirm sequence is exercised by a focused test rather than
+/// only by the controller's own test. The live loop owns loading and
+/// persisting; this decides *which* theme name to apply for each key
+/// (`dialog-theme-list.tsx:32-37` -> `context/theme.tsx:341-349`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThemePicker {
+    controller: ThemeController,
+}
+
+impl ThemePicker {
+    /// Open the picker, snapshotting the pre-picker selection for cancel.
+    #[must_use]
+    pub fn open(
+        preferences: ThemePreferences,
+        renderer: Option<ThemeMode>,
+        startup: ThemeMode,
+    ) -> Self {
+        Self {
+            controller: ThemeController::new(preferences, renderer, startup),
+        }
+    }
+
+    /// Movement: preview AND persist, mirroring upstream `onMove` ->
+    /// `themes.set`. Returns the name the live loop must apply.
+    pub fn on_move(&mut self, name: &str) -> String {
+        self.controller.preview(name);
+        self.controller.active_name().to_owned()
+    }
+
+    /// Esc: restore AND persist the pre-open selection. Returns the name the
+    /// live loop must apply.
+    pub fn on_cancel(&mut self) -> String {
+        self.controller.cancel_pick().name
+    }
+
+    /// Enter: persist the previewed selection. Returns the confirmed name.
+    pub fn on_confirm(&mut self) -> String {
+        self.controller.confirm_pick().name
+    }
+
+    #[must_use]
+    pub fn active_name(&self) -> &str {
+        self.controller.active_name()
+    }
+}
+
 // ── System theme cold start / probe (THEME-13) ────────────────────────
 //
 // Upstream `packages/tui/src/context/theme.tsx` + `theme/system.ts`:
@@ -3824,6 +3872,39 @@ fn theme12_picker_preview_cancel_and_confirm_preserve_preferences() {
     assert_eq!(confirmed.name, "dracula");
     assert_eq!(controller.active_name(), "dracula");
     assert_eq!(controller.persisted(), &confirmed);
+}
+
+#[test]
+fn theme12_live_picker_previews_on_move_and_reverts_on_cancel() {
+    // THEME-12 live consumer: the exact sequence `tui_entry.rs` performs.
+    let mut picker = ThemePicker::open(
+        ThemePreferences {
+            name: "opencode".to_owned(),
+            mode: ModePreference::System,
+        },
+        None,
+        ThemeMode::Dark,
+    );
+    assert_eq!(picker.on_move("nord"), "nord");
+    assert_eq!(picker.on_move("dracula"), "dracula");
+    assert_eq!(
+        picker.on_cancel(),
+        "opencode",
+        "Esc restores the pre-open selection"
+    );
+    assert_eq!(picker.active_name(), "opencode");
+    // A fresh picker confirms the previewed name.
+    let mut picker = ThemePicker::open(
+        ThemePreferences {
+            name: "opencode".to_owned(),
+            mode: ModePreference::System,
+        },
+        None,
+        ThemeMode::Dark,
+    );
+    picker.on_move("nord");
+    assert_eq!(picker.on_confirm(), "nord");
+    assert_eq!(picker.active_name(), "nord");
 }
 
 #[test]

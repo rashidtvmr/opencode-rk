@@ -6136,6 +6136,79 @@ fn load_native_theme(
     load_native_theme_with_budget(name, mode, config_paths, new_designs, &mut budget)
 }
 
+/// THEME-12: the live picker's movement transition. Initialises the picker
+/// from the current theme on the first move, previews the focused Theme row,
+/// then persists and applies the previewed theme. A non-Theme page or a
+/// disabled row is a no-op (`dialog-theme-list.tsx:32-37`).
+#[cfg(feature = "native")]
+fn theme_picker_move(
+    pick: &mut Option<crate::native_theme_runtime::ThemePicker>,
+    theme: &mut crate::native_theme_runtime::RuntimeTheme,
+    view: &crate::native_view::NativeView,
+    transcript: &mut NativeChatHistory,
+    config_paths: &[std::path::PathBuf],
+    state_path: &std::path::Path,
+    new_designs: bool,
+) {
+    if view.page() != crate::native_view_pages::Page::Theme {
+        return;
+    }
+    let Some(name) = view
+        .page_selected()
+        .filter(|row| row.enabled)
+        .map(|row| row.id.clone())
+    else {
+        return;
+    };
+    let picker = pick.get_or_insert_with(|| {
+        crate::native_theme_runtime::ThemePicker::open(
+            crate::native_theme_runtime::ThemePreferences {
+                name: theme.name.clone(),
+                mode: crate::native_theme_runtime::ModePreference::System,
+            },
+            None,
+            theme.mode,
+        )
+    });
+    let name = picker.on_move(&name);
+    match load_native_theme(&name, theme.mode, config_paths, new_designs) {
+        Ok(next) => {
+            let _ = crate::native_ui_preferences::UiPreferences::persist_theme_selection(
+                state_path,
+                &name,
+                next.mode.key(),
+            );
+            *theme = next;
+        }
+        Err(error) => append_transcript(transcript, format!("error: {error}")),
+    }
+}
+
+/// THEME-12: the live picker's Esc transition. Restores and persists the
+/// pre-open selection; a picker that was never moved (or a non-Theme page) is
+/// a no-op.
+#[cfg(feature = "native")]
+fn theme_picker_cancel(
+    pick: &mut Option<crate::native_theme_runtime::ThemePicker>,
+    theme: &mut crate::native_theme_runtime::RuntimeTheme,
+    config_paths: &[std::path::PathBuf],
+    state_path: &std::path::Path,
+    new_designs: bool,
+) {
+    let Some(mut picker) = pick.take() else {
+        return;
+    };
+    let name = picker.on_cancel();
+    if let Ok(next) = load_native_theme(&name, theme.mode, config_paths, new_designs) {
+        let _ = crate::native_ui_preferences::UiPreferences::persist_theme_selection(
+            state_path,
+            &name,
+            next.mode.key(),
+        );
+        *theme = next;
+    }
+}
+
 #[cfg(feature = "native")]
 fn load_native_theme_with_budget(
     name: &str,
@@ -6801,6 +6874,10 @@ fn native_loop(
             crate::native_theme_runtime::RuntimeTheme::builtin_default(theme_mode)
         }
     };
+    // THEME-12: the live theme picker's preview/cancel state. `Some` while the
+    // Theme page is open; movement previews (and persists) the focused row and
+    // Esc restores the pre-open selection (`dialog-theme-list.tsx:32-37`).
+    let mut theme_pick: Option<crate::native_theme_runtime::ThemePicker> = None;
     // THEME-14: parse `tui.cursor` once (fail-closed: an invalid object logs a
     // diagnostic and behaves as absent, so the terminal keeps its own cursor).
     let cursor_config = match preferences.cursor.as_ref() {
@@ -10991,6 +11068,11 @@ fn native_loop(
                 // the command-input cancel: the query buffer lives in the
                 // page state and the composer draft — including unsent
                 // text typed before Ctrl-K — comes back byte-identical.
+                // THEME-12: Esc also cancels the theme picker, restoring and
+                // persisting the pre-open selection (`dialog-theme-list.tsx`).
+                if view.page() == crate::native_view_pages::Page::Theme {
+                    theme_picker_cancel(&mut theme_pick, &mut theme, &config_paths, &state_path, new_designs);
+                }
                 view.close_page();
                 utf8.reset();
             }
@@ -11032,10 +11114,12 @@ fn native_loop(
             // Page navigation while a page owns focus (Enter confirms).
             14 if page_open => {
                 view.page_next();
+                theme_picker_move(&mut theme_pick, &mut theme, &view, &mut transcript, &config_paths, &state_path, new_designs);
                 utf8.reset();
             }
             2 if page_open => {
                 view.page_prev();
+                theme_picker_move(&mut theme_pick, &mut theme, &view, &mut transcript, &config_paths, &state_path, new_designs);
                 utf8.reset();
             }
             // Chat keyboard scroll (Ctrl-F / Ctrl-B): bounded view state
@@ -11526,7 +11610,7 @@ fn native_loop(
                                 match load_native_theme(&name, theme.mode, &config_paths, new_designs) {
                                     Ok(next) => {
                                         match crate::native_ui_preferences::UiPreferences::persist_theme_selection(&state_path, &name, next.mode.key()) {
-                                            Ok(()) => { theme = next; view.close_page(); }
+                                            Ok(()) => { theme = next; theme_pick = None; view.close_page(); }
                                             Err(error) => append_transcript(&mut transcript, format!("error: {error}")),
                                         }
                                     }
