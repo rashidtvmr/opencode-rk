@@ -27,7 +27,11 @@ pub(crate) async fn get(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiFailure> {
     let id = parse_session_id(&id)?;
-    let todos = state.sessions.todos(id).await.map_err(map_session_error)?;
+    let todos = state
+        .sessions
+        .todos_at_boundary(id)
+        .await
+        .map_err(map_session_error)?;
     Ok(Json(json!({"todos": todos})))
 }
 

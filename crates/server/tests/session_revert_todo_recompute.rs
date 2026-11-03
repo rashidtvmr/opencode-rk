@@ -122,3 +122,45 @@ async fn staged_revert_recomputes_and_persists_derived_todos() {
     assert_eq!(derived["todos"][0]["id"], json!("a"));
     assert_eq!(derived["todos"].as_array().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn todo_get_uses_latest_completed_tool_input_over_stale_storage() {
+    let root = tempfile::tempdir().unwrap();
+    let storage = Arc::new(Storage::open(StoragePaths::under(root.path())).unwrap());
+    let sessions = SessionService::new(Arc::clone(&storage));
+    let app = router(AppState {
+        sessions: sessions.clone(),
+        catalog: Arc::new(Catalog::default()),
+    });
+    let (_, body) = send(&app, "POST", "/api/sessions", json!({"title":"t"})).await;
+    let id = body["session"]["id"].as_str().unwrap().to_owned();
+    let session = id.parse::<opencode_rk_contracts::SessionId>().unwrap();
+    let turn = sessions
+        .append_text(session, MessageRole::User, "work".to_owned())
+        .await
+        .unwrap();
+    append_todowrite(
+        &sessions,
+        session,
+        turn.id,
+        0,
+        r#"{"todos":[{"id":"derived","content":"Latest tool state","status":"in_progress","priority":"high"}]}"#,
+    )
+    .await;
+    let path = format!("/api/sessions/{id}/todo");
+    assert_eq!(
+        send(
+            &app,
+            "PUT",
+            &path,
+            json!({"todos":[{"id":"stale","content":"Stale stored state","status":"pending","priority":"low"}]}),
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+
+    let (status, body) = send(&app, "GET", &path, Value::Null).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["todos"][0]["id"], json!("derived"));
+}
