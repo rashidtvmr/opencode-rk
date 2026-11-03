@@ -38,11 +38,12 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 > `REAL_GAP` are superseded as follows:
 > - to `BLOCKED`: `PAR-04`, `PAR-09`, `PAR-10`, `PAR-19`, `SIDE-04`,
 >   `MSG-001..003`, `MSG-005`, `MSG-008..010`, `DIALOG-12..20`,
->   `FFI-01/03/04/06/07/08/11`, `LAY-10/11/13`, `TAB-04/06/10`, `CP-07`,
+>   `FFI-01/03/04/06/07/08/11`, `LAY-10/11/13`, `TAB-06/10`, `CP-07`,
 >   `CP-09`, `MD-007`, `THEME-08/09/13/14`, `TOOL-006/011`, `DIFF-001/003`,
 >   `STATE-002`, `FORM-001`;
 > - to `ALREADY_CORRECT`: `PAR-11`, `LAY-12`, `LAY-17`, `MSG-004`, `FFI-05`,
 >   `CP-08`, `THEME-05`;
+> - to `LANDED`: `TAB-04` (wave-56, `config.tabs.indicators` wired live);
 > - to `LANDED`: `MSG-007` (`4a6b487b`), `CP-11` (`f8e276cf`), `DIALOG-04`
 >   (`d137313d`), `DIALOG-20` (toast half, `d891f9c3`), `TAB-23` (`ae56897f`),
 >   `SIDE-08` (`76fcb75a`), `THEME-12` (`bc24dd30`), `PAR-16`/`PAR-22`
@@ -108,7 +109,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | TAB-01 | `ALREADY_CORRECT` | `native_tabs.rs:1440`; test `:3576`; live `tui_entry.rs:8245` |
 | TAB-02 | `ALREADY_CORRECT` | `native_tabs.rs:34`; test `:3607`; live `tui_entry.rs:5032` |
 | TAB-03 | `ALREADY_CORRECT` | `native_tabs.rs:1592`; test `:3640`; live `tui_entry.rs:4998` |
-| TAB-04 | `REAL_GAP` | numbers-mode `TabIndicators` (`native_tabs.rs:1773`) has no live config source; `config.tabs.indicators` not loaded; render `tui_entry.rs:8245` hardcodes status |
+| TAB-04 | `LANDED` (wave-56) | numbers-mode `TabIndicators` now has a live config source: `config_tab_indicators` + `UiPreferences::tab_indicators` read `config.tabs.indicators` (`config/index.tsx:199,336`), the live loop applies it to every `TabInput`, and `horizontal_row` paints the number in `Numbers` mode |
 | TAB-05 | `ALREADY_CORRECT` | `native_tabs.rs:754`; test `:3783`; live `tui_entry.rs:8215` |
 | TAB-06 | `REAL_GAP` | `enqueue_user_prompt`/`pending_marks_busy` (`native_tabs.rs:1877/1893`) zero callers; `queued_drafts` push (`tui_entry.rs:11512`) carries no per-tab flash/busy feed |
 | TAB-07 | `ALREADY_CORRECT` | `native_tabs.rs:1940`; test `:3852`; live `tui_entry.rs:4964` |
@@ -252,11 +253,11 @@ the wave-44 verdict supersedes it.
 | --- | --- |
 | `ALREADY_CORRECT` | 144 |
 | `REAL_GAP` | 2 |
-| `BLOCKED` | 61 |
-| `LANDED` (wave-45..53) | 16 |
+| `BLOCKED` | 60 |
+| `LANDED` (wave-45..56) | 17 |
 | **Total** | **223** |
 
-### Landed fixes (wave-45..51) — moved out of `REAL_GAP`/`BLOCKED`
+### Landed fixes (wave-45..56) — moved out of `REAL_GAP`/`BLOCKED`
 
 | Item | Commit | What changed |
 | --- | --- | --- |
@@ -275,6 +276,8 @@ the wave-44 verdict supersedes it.
 | DIALOG-10 | `a52c222a` | The live session rename painted an ad-hoc rectangle with its own `String` buffer and never used the tested `DialogPrompt`. Adds `DialogView::open_prompt` (kind `Prompt`, seeded from `native_palette::select::PromptState`) plus `prompt_value`/`push`/`backspace`/`submit`/`escape`/`set_busy`/`set_message` forwarders, renders the value (or the busy line) and the upstream footer `Enter: save · Esc: cancel`, and routes the live rename through it (`MenuAction::Rename` opens the prompt; the key block edits/submits; the settlement closes it or sets busy/inline-error). Escape/submit are suppressed while busy (`dialog-prompt.tsx:43-46,93-100,168-170`). The ad-hoc `PaintCtx.rename_dialog` paint path is removed. Focused test + full CLI suite (2177/0) green. |
 | DIALOG-20 (toast half) | `d891f9c3` | The tested `Toast`/`ToastFrame` model had no live consumer. Adds `PaintCtx.toast`, paints the frame as the topmost overlay in `native_paint` (surface fill + each styled `CellRun`), owns a live `Toast` in the loop whose logical clock advances on the animation tick so a visible toast auto-dismisses after 5000 ms, and triggers it from the session-id copy path (`Copied to clipboard`, `app.tsx:605`). The crash/error-details half remains `BLOCKED`. Full CLI suite (2177/0) green. |
 | PAR-16 / PAR-22 | `f240367b` | Harness-side (Python). PAR-16: fixtures carry exactly one class (`baseline`/`optional`/`experimental`/`extension`); `fixture_class` defaults to `baseline`, `validate_fixture_class` rejects an unknown value, `--class` filters the selection, the class travels into `build_request`/`golden_from_screen`, and `compare_screens` raises a hard `fixture_class` diff on a golden/fixture class mismatch. PAR-22: `--evidence-bundle` + `build_evidence_bundle` write a SHA-bound bundle (`rust_sha`, spec/golden/fixture sha256s, class counts, exact reproduction commands, per-fixture outcomes, installed-capture hashes). `tools/ui_parity/selftest.py` 32 checks PASS (+10). |
+| TAB-04 | `bf779d09` | The tested numbers-mode `TabIndicators`/`indicator_text` model had no live config source: `config.tabs.indicators` (`config/index.tsx:199`, default `"status"` at `:336`, consumed `session-tabs.tsx:525`) was never read, and the live horizontal row painted the status glyph unconditionally. Adds `config_tab_indicators`/`config_tab_indicators_present`, `parse_cli_tab_indicators` + `UiPreferences::tab_indicators` (disk then inline; an omitting document never clobbers a lower-precedence value), `TabInput.indicators`/`number` (+ `with_indicators`), the 1-based number in `from_navigation`, and the numbers branch in `horizontal_row`; the live loop resolves it once beside `new_designs` and applies it to every per-frame `TabInput`. Status mode unchanged. Focused tests + full CLI suite (2181/0) green. |
+| DIALOG-02 (title half) | `ce9dc211` | The live `DialogView` now carries the new-designs experiment fact (`set_new_designs`, seeded `tui_entry.rs:6958`) and paints the non-permission title `Role::Item` (base color, unbolded) under the experiment (`dialog.tsx:109`); the Permission heading keeps `Role::Warning`. The footer-gap half was deliberately **not** landed: `dialog.tsx:159` yields `0` for the default `footerGap` of 1 in both states and `1` for the `footerGap={2}` callers, so new-designs never removes the gap row. DIALOG-02 stays `REAL_GAP` for the description / footer-gap / per-select-row-pad halves. Focused test + full CLI suite (2178/0) green. |
 
 ### `REAL_GAP` — faithful model + focused test exist, no live consumer (2)
 
@@ -292,7 +295,7 @@ Selected high-value seams:
 | THEME-13 | `SystemThemeState`/`palette_reply` (`native_theme_runtime.rs:2183/2264`) have zero non-test callers; no OSC palette-query emitter and no payload-carrying input event to decode a reply. |
 | THEME-09 | **BLOCKED (verified wave-53).** The live chat `Patch`/diff-fence painter hardcodes `DiffViewMode::Unified` (`native_view_chat.rs:2202/2730`) and `resolve_view_mode`/`config.diffs.view` (`native_diff_view.rs:586`) have no live caller. Threading the preference is not sufficient: a split row is `SplitRow::Pair { left, right }` (`native_diff_view.rs:709-715`) with two independent backgrounds, but the live row model is `(String, ChatRowClass)` with exactly one class per row (`native_view_chat.rs:902`) and the painter maps a class to a single background (`tui_entry.rs:2880-2898 chat_row_background`). The split view is therefore not renderable without extending the row model — the same blocker as DIFF-001. |
 
-### `BLOCKED` — needs a producer/transport/contract field that does not exist (61)
+### `BLOCKED` — needs a producer/transport/contract field that does not exist (60)
 
 `PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-10, PAR-19,
 TAB-04, TAB-06, TAB-10, TAB-21, SIDE-03, SIDE-04, SIDE-05, SIDE-10, SIDE-14,
@@ -414,11 +417,14 @@ field is absent).
 Of the 223 checklist obligations, **144 are `ALREADY_CORRECT`** (a faithful
 implementation, a focused test, and a traced live consumer), **2 are
 `REAL_GAP`** (model + test exist but the live TUI does not consume them),
-**61 are `BLOCKED`** (a producer/transport/contract field does not exist), and
-**16 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
+**60 are `BLOCKED`** (a producer/transport/contract field does not exist), and
+**17 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
 `CP-05`, `CP-06` in wave-46; `MSG-007` in wave-47; `SIDE-08`, `THEME-12`,
 `DIALOG-04` in wave-48; `PAR-04` in wave-49; `TAB-23`, `DIALOG-10`,
-`DIALOG-20` (toast half) in wave-51; `PAR-16`, `PAR-22` in wave-53).
+`DIALOG-20` (toast half) in wave-51; `PAR-16`, `PAR-22` in wave-53;
+`TAB-04` in wave-56). `DIALOG-02`'s title-weight half landed in wave-56 but the
+item stays `REAL_GAP` for its remaining description / footer-gap /
+per-select-row-pad halves.
 
 The remaining work is therefore **not** more UI drawing:
 
