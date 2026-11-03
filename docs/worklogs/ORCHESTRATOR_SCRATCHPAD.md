@@ -12273,3 +12273,63 @@ compiles/tests/lands.
   server routes; DIALOG-13/14/17 are gated on an absent worktree/open picker
   host + route; DIALOG-16 needs an experiments config source; DIALOG-18/19 need
   live open routes.
+
+### Wave-62 single-item landings (2026-11-03)
+
+Canonical advanced `8971a653 → 2c858980`; each commit compiled, focused-tested,
+full CLI suite single-threaded, then pushed and remote-verified via `ls-remote`.
+
+- **`8971a653` FORM-001** (sub-behavior 1): live `open_permission_with_persistent`
+  emits the upstream once/always/reject set; orchestrator fixed `permission_alias`
+  to accept `"Reject"`. Suite 2187/0.
+- **`53a3efe4` TAB-10**: `VcsInfo` + git HEAD parsers (`native_navigation.rs`);
+  `git_vcs_info` producer + `LiveSnapshot.session_vcs` + live
+  `rail_inputs_for_navigation` wiring (`tui_entry.rs`). 7 focused tests; suite 2192/0.
+- **`0d4f26a7` SIDE-04 + SIDE-10**: SIDE-04 `classes_from_wire` + `set_usage_classes`
+  wired into the live `native_turn::Event::Usage` arm; SIDE-10 storage
+  `session_todos_at` + sessions `todos_at_boundary` + `stage_session_revert`
+  recompute/persist/publish `TodoUpdated` + server e2e test. Suite 2194/0.
+- **`019ecafa` FFI-01**: `native_loop` probes pinned OpenTUI artifact identity
+  before `NativeRenderer::create`; fail-closed on drift, proceeds when
+  unverifiable; 3 tests (worker had a `);`/`,` syntax slip the orchestrator fixed).
+  Suite 2197/0.
+- **`2c858980` DIALOG-12**: model picker now reads persisted favorites
+  (`favorite_keys`) and hoists them above recents; **ctrl+f** toggles favorite for
+  the focused row (`toggle_favorite`); committing a model that advertises
+  variants opens the **flat variant picker** (`post_select_dialog` /
+  `variant_options` / `save_variant`), rendered and keyed live in `tui_entry.rs`
+  (Up/Down/Enter/Escape + text-input suppression). `Model.variants` parsed from
+  the catalogue. 5 new tests; suite **2202/0**. All helpers now have live callers.
+
+### Holds — producer-only, no live consumer (NOT landed)
+
+Per the "no dead helper/field" rule, these worker artifacts were reviewed and
+**held** rather than landed:
+
+- **MSG-009** (`/tmp/w62-msg009`, +144): server computes real `revert.count` +
+  `revert.files` (live `/revert/stage` route) and adds `SessionRevert.count`;
+  but the TUI reader is absent — `TranscriptSurfaces`/`RevertCard` still have no
+  live caller in `native_view.rs` (the chat body composes messages + dock +
+  queue only; there is no surfaces slot). Landing the contract field alone would
+  be a produced-but-unread field. Seam: add a `revert` slot to `NativeView`,
+  project `target["revert"]` in `build_live_snapshot` (`tui_entry.rs:1282`) into
+  `RevertCard`, and splice its rows into the transcript body before the composer.
+- **DIFF-001** (`/tmp/w62-diff001`, +54): `config.diffs.view` producer only; the
+  live diff painter hardcodes `Unified` and the row model is one class per row —
+  a split row needs a `SplitRow→ChatRowClass` adapter (same blocker as THEME-09).
+- **MEDIA-001** (`/tmp/w62-media001`, +117): producer chain (server file part +
+  `ChatPart::File.uri` + `chat_image_attachments` + `NativeView::open_image_preview`)
+  but no live trigger (`/image` command or hit region) was wired.
+- **THEME-13** (`/tmp/w62-theme13`, +126): OSC 10/11 decoder only; no live
+  palette-query emitter and no theme consumer.
+- **DIALOG-06** (`/tmp/w62-dialog06`, +15): field only, no render wiring.
+- **STATE-002**: empty clone, no artifact.
+
+### Next actions
+
+1. Build the MSG-009 TUI consumer (the seam above) so the server slice lands with
+   a live reader.
+2. Build server-side producers for the remaining BLOCKED items (SIDE-03 cost,
+   MSG-008/010 timing, STATE-002 compaction part, MSG-005 files/skills) — these
+   are producer work, not UI wiring.
+3. Update `docs/ui-parity/PARITY_STATUS.md` verdicts for the wave-62 landings.

@@ -1,6 +1,6 @@
 # OpenCode V2 UI parity — consolidated status
 
-- **Canonical line:** `main-v2` @ `53491495` (remote verified)
+- **Canonical line:** `main-v2` @ `2c858980` (remote verified)
 - **Upstream oracle:** `/Users/mymac/Projects/tmp/opencode` @ `450e7b92412c780a7b5a75226bb8d49aaca24e22`
 - **Checklist:** `docs/ui-parity/opencode-ui-parity-kit/checklist.json` (223 items)
 - **Method:** source inspection of the live Rust path (implementation + a
@@ -278,8 +278,8 @@ the wave-44 verdict supersedes it.
 | --- | --- |
 | `ALREADY_CORRECT` | 144 |
 | `REAL_GAP` | 2 |
-| `BLOCKED` | 59 |
-| `LANDED` (wave-45..57) | 18 |
+| `BLOCKED` | 52 |
+| `LANDED` (wave-45..62) | 25 |
 | **Total** | **223** |
 
 ### Landed fixes (wave-45..56) — moved out of `REAL_GAP`/`BLOCKED`
@@ -305,6 +305,25 @@ the wave-44 verdict supersedes it.
 | DIALOG-02 (title half) | `ce9dc211` | The live `DialogView` now carries the new-designs experiment fact (`set_new_designs`, seeded `tui_entry.rs:6958`) and paints the non-permission title `Role::Item` (base color, unbolded) under the experiment (`dialog.tsx:109`); the Permission heading keeps `Role::Warning`. The footer-gap half was deliberately **not** landed: `dialog.tsx:159` yields `0` for the default `footerGap` of 1 in both states and `1` for the `footerGap={2}` callers, so new-designs never removes the gap row. DIALOG-02 stays `REAL_GAP` for the description / footer-gap / per-select-row-pad halves. Focused test + full CLI suite (2178/0) green. |
 | SIDE-14 | `d5611712` | The pinned footer location row (`footer.tsx:94-112`) had no hit rect, hover routing or menu route. Adds `StatusView::footer_row`/`footer_directory`/`footer_menu`/`footer_hovered`, a `NativeView` footer hit rect published during sidebar render (cleared on scroll/resize/route/toggle exactly like the onboarding dismiss rect), pointer-move hover (`kind==7`), a press that opens the local `DialogSelect` (`working-directory-actions.tsx:16-58`; the selection guard mirrors `openMenu`'s `getSelectedText()` early-return), and Enter/Esc/backdrop handling that runs Copy path (OSC 52 + `Path copied to clipboard` info toast) or Open folder (`openPath`, `packages/util/src/open.ts:10-12`). `Workspaces` stays unoffered (no live move route → `can_move=false`). 3 focused tests + full CLI suite (2184/0) green. |
 
+### Landed fixes (wave-61/62, 2026-11-03) — single-item workers
+
+The wave-58/59/60 finding was that **group size**, not worker quality, was the
+failure mode: multi-item/multi-crate groups hit the agent step cap during
+reconnaissance and produced no artifact. Wave-61/62 switched to **one item per
+worker** with a fully prescriptive prompt (exact file:line seams, artifact
+written after every edit). Every item below compiled, passed focused tests, the
+full single-threaded CLI suite, and was pushed + remote-verified.
+
+| Item | Commit | What changed |
+| --- | --- | --- |
+| PAR-10 | `da7d1a0b` | Server tags each `assistant_delta` NDJSON frame with a monotonic `seq` (`TurnStreamState.delta_seq`); CLI `native_turn::Event::Delta { text, seq }` surfaces it and the TUI consumer drops non-increasing seq (`last_delta_seq`). 2 focused tests; suite 2186/0. |
+| FORM-001 (sub-behavior 1) | `8971a653` | Live `open_permission_with_persistent` (`native_view_dialogs.rs`) emits the upstream once/always/reject label set; `permission_alias` accepts `"Reject"`. Suite 2187/0. |
+| TAB-10 | `53a3efe4` | `VcsInfo` + git HEAD parsers (`native_navigation.rs`); `git_vcs_info` producer + `LiveSnapshot.session_vcs` + live `rail_inputs_for_navigation` wiring so the tab rail shows branch/worktree from the session cwd. 7 focused tests; suite 2192/0. |
+| SIDE-04 | `0d4f26a7` | `classes_from_wire` derives the five disjoint usage classes from the inclusive-of-cached wire; `set_usage_classes` wired into the live `native_turn::Event::Usage` arm. |
+| SIDE-10 | `0d4f26a7` | Storage `session_todos_at` + sessions `todos_at_boundary`; `stage_session_revert` recomputes, persists and publishes the boundary-derived todo list (`TodoUpdated`) + server e2e test. Suite 2194/0. |
+| FFI-01 | `019ecafa` | `native_loop` probes the pinned OpenTUI artifact identity before `NativeRenderer::create`; fail-closed on drift, proceeds when unverifiable. 3 tests; suite 2197/0. |
+| DIALOG-12 | `2c858980` | Model picker reads persisted favorites and hoists them above recents; **ctrl+f** toggles favorite for the focused row; committing a model that advertises variants opens the **flat variant picker** (rendered + keyed live: Up/Down/Enter/Escape, text-input suppressed); `Model.variants` parsed from the catalogue. 5 new tests; suite **2202/0**. |
+
 ### `REAL_GAP` — faithful model + focused test exist, no live consumer (2)
 
 `MEDIA-001, DIALOG-02`.
@@ -321,16 +340,16 @@ Selected high-value seams:
 | THEME-13 | `SystemThemeState`/`palette_reply` (`native_theme_runtime.rs:2183/2264`) have zero non-test callers; no OSC palette-query emitter and no payload-carrying input event to decode a reply. |
 | THEME-09 | **BLOCKED (verified wave-53).** The live chat `Patch`/diff-fence painter hardcodes `DiffViewMode::Unified` (`native_view_chat.rs:2202/2730`) and `resolve_view_mode`/`config.diffs.view` (`native_diff_view.rs:586`) have no live caller. Threading the preference is not sufficient: a split row is `SplitRow::Pair { left, right }` (`native_diff_view.rs:709-715`) with two independent backgrounds, but the live row model is `(String, ChatRowClass)` with exactly one class per row (`native_view_chat.rs:902`) and the painter maps a class to a single background (`tui_entry.rs:2880-2898 chat_row_background`). The split view is therefore not renderable without extending the row model — the same blocker as DIFF-001. |
 
-### `BLOCKED` — needs a producer/transport/contract field that does not exist (59)
+### `BLOCKED` — needs a producer/transport/contract field that does not exist (52)
 
-`PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-10, PAR-19,
-TAB-06, TAB-10, TAB-21, SIDE-03, SIDE-04, SIDE-05, SIDE-10,
+`PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-19,
+TAB-06, TAB-21, SIDE-03, SIDE-05,
 MSG-001, MSG-002, MSG-003, MSG-005, MSG-008, MSG-009, MSG-010,
-TOOL-006, TOOL-011, DIFF-001, DIFF-003, FFI-01, FFI-02, FFI-03, FFI-04, FFI-06,
-FFI-07, FFI-08, FFI-11, FORM-001, STATE-002, THEME-08, THEME-09, THEME-13,
+TOOL-006, TOOL-011, DIFF-001, DIFF-003, FFI-02, FFI-03, FFI-04, FFI-06,
+FFI-07, FFI-08, FFI-11, STATE-002, THEME-08, THEME-09, THEME-13,
 THEME-14, CP-07, CP-09,
 DIALOG-06, DIALOG-07, DIALOG-08, DIALOG-09,
-DIALOG-12, DIALOG-13, DIALOG-14, DIALOG-15, DIALOG-16, DIALOG-17, DIALOG-18,
+DIALOG-13, DIALOG-14, DIALOG-15, DIALOG-16, DIALOG-17, DIALOG-18,
 DIALOG-19, LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009`.
 
 | Item | Exact missing seam |
