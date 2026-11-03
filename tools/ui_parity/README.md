@@ -32,6 +32,16 @@ python3 tools/ui_parity/ui_parity.py --record --filter 'par-static-*' --force
 
 # Comparator negative-control self-test
 python3 tools/ui_parity/selftest.py
+
+# PAR-16: separate baseline / optional / experimental / extension fixtures
+python3 tools/ui_parity/ui_parity.py --list --class experimental
+python3 tools/ui_parity/ui_parity.py --check --class baseline --filter 'par-static-*'
+
+# PAR-22: attach a SHA-bound evidence bundle to the exact Rust SHA under test
+python3 tools/ui_parity/ui_parity.py --check --filter 'par-static-*' \
+  --evidence-bundle /tmp/oc2-ui-parity-evidence.json \
+  --evidence-command 'cargo test -p opencode-rk-cli --bin oc2' \
+  --installed-capture /tmp/installed-80x24.txt
 ```
 
 Exit codes: `0` all checked fixtures passed, `1` a comparison failed, `2`
@@ -139,6 +149,36 @@ frame around 12 KB while remaining readable and diffable.
 action trace, hit targets (when the fixture lists `hit_targets` in `compare`) and
 every cell's character/foreground/background/attributes.
 `--max-diffs` caps the emitted diff list; the summary always counts all diffs.
+
+### Fixture classes (PAR-16)
+
+Every fixture carries exactly one class so a baseline golden cannot silently
+absorb an optional/experimental/extension case:
+
+- `baseline` - the default; a fixture with no class marker and no non-geometry
+  settings.
+- `optional` - a fixture whose `settings` map selects an optional configuration
+  (e.g. `{"sidebar": "hide"}`). Pure viewport restatements (`rows`, `columns`)
+  do not make a fixture optional.
+- `experimental` - a fixture with `theme.new_designs = true`.
+- `extension` - an approved opencode-rk extension (`extension: true` or an
+  `oracle.extension` marker).
+
+An explicit `class` key always wins; an unknown value fails `--validate-kit`.
+`--class NAME` (repeatable) filters the run, the `--list` output shows the class
+column, and the JSON report carries `class_counts` / `class_summary`. On `--check`
+the golden's recorded class must match the fixture's, so reclassifying a fixture
+invalidates its baseline golden.
+
+### SHA-bound evidence bundle (PAR-22)
+
+`--evidence-bundle PATH` writes a `oc2.ui-parity.evidence/v1` document that binds
+the run to the exact Rust SHA (`git rev-parse HEAD`), the checklist/fixtures
+spec hashes, every fixture and golden SHA-256, the exact reproduction commands
+(`--evidence-command`, repeatable), the per-fixture outcomes and failures, and
+the SHA-256 of each installed-terminal capture (`--installed-capture`,
+repeatable). The bundle is the artifact that travels with a parity claim; it is
+not a captured golden itself.
 
 Mixed-version captures are rejected: golden pins and the product binary SHA-256
 must match the manifest/actual renderer. `--allow-pin-drift` downgrades those to

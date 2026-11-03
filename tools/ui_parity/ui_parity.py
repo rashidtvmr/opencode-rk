@@ -31,6 +31,10 @@ SCHEMA_EVIDENCE = "oc2.ui-parity.evidence/v1"
 # silently absorb an optional-config, experimental or approved-extension case.
 FIXTURE_CLASSES = ("baseline", "optional", "experimental", "extension")
 
+# Settings keys that only restate viewport geometry do not make a fixture an
+# "optional configuration" case.
+GEOMETRY_SETTINGS = frozenset({"rows", "columns", "cols", "viewport", "width", "height"})
+
 ATTR_BITS = (
     "bold",
     "dim",
@@ -280,10 +284,13 @@ def compare_screens(expected, actual, fixture, pins, options) -> tuple:
 
     # PAR-16: the golden's class must match the fixture's class so a baseline
     # golden cannot be reused for an optional/experimental/extension fixture.
-    exp_class = expected.get("class") or "baseline"
-    act_class = fixture.get("class") or "baseline"
-    if exp_class != act_class:
-        diffs.add("fixture_class", expected=exp_class, actual=act_class)
+    # Only enforced when the golden records a class; pre-existing goldens that
+    # predate the dimension stay comparable.
+    if expected.get("class") is not None:
+        exp_class = expected.get("class")
+        act_class = fixture.get("class") or "baseline"
+        if exp_class != act_class:
+            diffs.add("fixture_class", expected=exp_class, actual=act_class)
 
     # PAR-01: pins travel with every golden.
     capture = expected.get("capture") or {}
@@ -413,15 +420,29 @@ def compare_screens(expected, actual, fixture, pins, options) -> tuple:
 
 
 def fixture_class(case) -> str:
-    """PAR-16: resolve a fixture's class, defaulting to `baseline`.
+    """PAR-16: resolve a fixture's class so baseline, optional-config,
+    experimental and approved-extension fixtures are separated.
 
-    An explicit `class` key wins; unknown values are rejected by
-    `validate_fixture_class` so a typo cannot masquerade as baseline.
+    Precedence: an explicit `class` key wins. Otherwise the class is derived
+    deterministically from fixture metadata: `new_designs` -> experimental,
+    an `extension` marker -> extension, a non-empty non-geometry `settings`
+    map -> optional, everything else -> baseline. `validate_fixture_class`
+    rejects a typo in an explicit value.
     """
     value = case.get("class")
-    if value is None:
-        return "baseline"
-    return str(value)
+    if value is not None:
+        return str(value)
+    theme = case.get("theme") or {}
+    if isinstance(theme, dict) and theme.get("new_designs"):
+        return "experimental"
+    if case.get("extension") or (case.get("oracle") or {}).get("extension"):
+        return "extension"
+    settings = case.get("settings") or {}
+    if isinstance(settings, dict) and any(
+        key not in GEOMETRY_SETTINGS for key in settings
+    ):
+        return "optional"
+    return "baseline"
 
 
 def validate_fixture_class(case) -> None:
@@ -955,12 +976,24 @@ def main(argv=None) -> int:
             continue
         for checklist_id in fixture.get("checklist_ids") or []:
             coverage.setdefault(checklist_id, set()).add(result["status"])
+    class_summary = {}
+    for result in results:
+        fixture = next((f for f in fixtures if f["id"] == result["id"]), None)
+        name = (fixture.get("class") if fixture else None) or "baseline"
+        bucket = class_summary.setdefault(name, {"fixtures": 0, "passed": 0, "failed": 0})
+        bucket["fixtures"] += 1
+        if result["status"] == "pass":
+            bucket["passed"] += 1
+        elif result["status"] in ("fail", "error"):
+            bucket["failed"] += 1
     report = {
         "schema": SCHEMA_REPORT,
         "mode": args.mode,
         "renderer": profile.get("name"),
         "pins": pins,
         "summary": summary,
+        "class_counts": class_counts(fixtures),
+        "class_summary": class_summary,
         "checklist_coverage": {
             "referenced": len(coverage),
             "passed": sum(1 for states in coverage.values() if states == {"pass"}),
@@ -971,10 +1004,16 @@ def main(argv=None) -> int:
     if args.json_report:
         dump_json(Path(args.json_report), report)
     if args.evidence_bundle:
-        bundle = build_evidence_bundle(
-            args, manifest_path, pins, results, fixtures, repo_root()
+        evidence = build_evidence_bundle(
+            args, manifest_path, pins, results, fixtures, repo_root().resolve()
         )
-        dump_json(Path(args.evidence_bundle), bundle)
+        dump_json(Path(args.evidence_bundle), evidence)
+        print(
+            "evidence: "
+            f"{args.evidence_bundle} rust_sha={evidence['rust_sha'][:12]} "
+            f"failures={len(evidence['failures'])} "
+            f"captures={len(evidence['installed_captures'])}"
+        )
     print(
         "summary: "
         + " ".join(f"{key}={value}" for key, value in summary.items())

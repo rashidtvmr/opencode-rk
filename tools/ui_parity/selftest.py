@@ -256,34 +256,70 @@ def main() -> int:
         )
         ok("wide cell keeps a continuation column", wide[1]["cont"] and not truncated)
 
-        # PAR-16: a fixture belongs to exactly one class, and a golden whose
-        # class disagrees with its fixture is a hard diff.
-        ok("fixture class defaults to baseline", harness.fixture_class({"id": "x"}) == "baseline")
-        try:
-            harness.validate_fixture_class({"id": "x", "class": "bogus"})
-            ok("unknown fixture class is rejected", False, "no ValueError raised")
-        except ValueError:
-            ok("unknown fixture class is rejected", True)
-        expected["class"] = "baseline"
-        class_diffs, _ = harness.compare_screens(
-            expected, screen, {"id": "selftest-static", "class": "optional"}, {}, Options()
+        # PAR-16: baseline / optional / experimental / extension separation.
+        ok(
+            "class: geometry-only settings stay baseline",
+            harness.fixture_class({"id": "a", "settings": {"rows": 10}}) == "baseline",
         )
         ok(
-            "golden/fixture class mismatch is a diff",
+            "class: non-geometry settings become optional",
+            harness.fixture_class({"id": "a", "settings": {"sidebar": "hide"}})
+            == "optional",
+        )
+        ok(
+            "class: new_designs becomes experimental",
+            harness.fixture_class({"id": "a", "theme": {"new_designs": True}})
+            == "experimental",
+        )
+        ok(
+            "class: extension marker wins",
+            harness.fixture_class({"id": "a", "extension": True}) == "extension",
+        )
+        ok(
+            "class: explicit value wins",
+            harness.fixture_class({"id": "a", "class": "extension"}) == "extension",
+        )
+        try:
+            harness.validate_fixture_class({"id": "a", "class": "bogus"})
+            ok("class: unknown value rejected", False, "no error raised")
+        except ValueError:
+            ok("class: unknown value rejected", True)
+
+        # A golden recorded as baseline must not satisfy a fixture reclassified
+        # to another class.
+        expected_baseline = harness.load_json(golden_path)
+        expected_baseline = dict(expected_baseline)
+        expected_baseline["class"] = "baseline"
+        reclassified = dict(case)
+        reclassified["class"] = "experimental"
+        class_diffs, _ = harness.compare_screens(
+            expected_baseline, screen, reclassified, expected_baseline["capture"]["pins"], Options()
+        )
+        ok(
+            "class: baseline golden rejected for experimental fixture",
             "fixture_class" in class_diffs.counts,
             class_diffs.counts,
         )
-        baseline_only = run(["--check", "--class", "baseline"] + common)
-        ok("--class baseline selects the fixture", baseline_only.returncode == 0, baseline_only.stdout)
-        other_class = run(["--check", "--class", "experimental"] + common)
+
+        # --class filter selects only matching fixtures.
+        filtered = run(
+            ["--list", "--class", "experimental"] + common
+        )
         ok(
-            "--class experimental selects nothing",
-            other_class.returncode != 0 and "no fixtures selected" in other_class.stderr,
-            other_class.stderr,
+            "class filter selects nothing for a baseline fixture",
+            "selftest-static" not in filtered.stdout,
+            filtered.stdout,
+        )
+        unfiltered = run(["--list"] + common)
+        ok(
+            "no class filter lists the baseline fixture",
+            "selftest-static" in unfiltered.stdout,
+            unfiltered.stdout,
         )
 
-        # PAR-22: the evidence bundle binds the exact SHA, spec hashes, class
-        # counts, reproduction commands and per-fixture outcomes.
+        # PAR-22: SHA-bound evidence bundle.
+        capture = root / "installed-capture.txt"
+        capture.write_text("installed capture fixture\n", encoding="utf-8")
         bundle_path = root / "evidence.json"
         bundle_run = run(
             [
@@ -291,23 +327,50 @@ def main() -> int:
                 "--evidence-bundle",
                 str(bundle_path),
                 "--evidence-command",
-                "cargo test -p opencode-rk-cli",
+                "python3 tools/ui_parity/selftest.py",
+                "--installed-capture",
+                str(capture),
             ]
             + common
         )
-        ok("evidence bundle run exits 0", bundle_run.returncode == 0, bundle_run.stdout)
+        ok("evidence bundle run exits 0", bundle_run.returncode == 0, bundle_run.stdout + bundle_run.stderr)
         bundle = json.loads(bundle_path.read_text())
-        ok("evidence bundle schema", bundle["schema"] == harness.SCHEMA_EVIDENCE)
-        ok("evidence bundle binds a rust sha", bool(bundle["rust_sha"]), bundle["rust_sha"])
+        ok("bundle schema", bundle["schema"] == harness.SCHEMA_EVIDENCE, bundle["schema"])
+        ok("bundle binds a git sha", len(bundle["rust_sha"]) == 40, bundle["rust_sha"])
         ok(
-            "evidence bundle records class counts",
-            bundle["class_counts"].get("baseline", 0) >= 1,
-            bundle["class_counts"],
+            "bundle hashes the spec",
+            len(bundle["spec"]["checklist_sha256"]) == 64
+            and len(bundle["spec"]["fixtures_sha256"]) == 64
+            and len(bundle["spec"]["manifest_sha256"]) == 64,
+            bundle["spec"],
         )
         ok(
-            "evidence bundle records reproduction command",
-            "cargo test -p opencode-rk-cli" in bundle["test_commands"],
+            "bundle hashes the fixture and golden",
+            len(bundle["fixture_hashes"]["selftest-static"]) == 64
+            and len(bundle["golden_hashes"]["selftest-static"]) == 64,
+            (bundle["fixture_hashes"], bundle["golden_hashes"]),
+        )
+        ok(
+            "bundle records the exact test command",
+            bundle["test_commands"] == ["python3 tools/ui_parity/selftest.py"],
             bundle["test_commands"],
+        )
+        ok(
+            "bundle hashes the installed capture",
+            bundle["installed_captures"][0]["exists"]
+            and len(bundle["installed_captures"][0]["sha256"]) == 64,
+            bundle["installed_captures"],
+        )
+        ok(
+            "bundle records no failures on a passing run",
+            bundle["failures"] == [],
+            bundle["failures"],
+        )
+        ok(
+            "bundle counts fixture classes",
+            isinstance(bundle["class_counts"], dict)
+            and bundle["class_counts"]["baseline"] >= 1,
+            bundle["class_counts"],
         )
 
         kit = harness.load_json(
