@@ -44,7 +44,9 @@
 use serde_json::Value;
 
 use crate::native_assistant_facts::{created_at_ms, turn_duration_ms, AssistantFacts};
-use crate::native_view_chat::{ChatMessage, ChatPart, ChatRole};
+use crate::native_view_chat::{
+    ChatMessage, ChatPart, ChatRole, RevertCard, RevertFileChange, RevertFileStatus,
+};
 
 /// Max bytes retained per message part (matches the chat view's per-row input
 /// bound `native_view_chat::MAX_INPUT_ROW_BYTES`).
@@ -750,6 +752,59 @@ pub fn project_history(messages: &[Value]) -> Vec<ChatMessage> {
     projected
 }
 
+/// Project the wire `Session.Revert` (`packages/schema/src/session-revert.ts:7-14`,
+/// serialized by `SessionSummary.revert`) into the render-ready [`RevertCard`].
+///
+/// The card is shown only when the session actually carries a staged revert.
+/// `count` is the server-computed boundary-onward user-message count
+/// (`index.tsx:1561`); `files` are the real `FileDiffInfo` rows
+/// (`index.tsx:1562`). A malformed file row is dropped rather than fabricated.
+#[must_use]
+pub fn project_session_revert(revert: &Value) -> Option<RevertCard> {
+    if !revert.is_object() {
+        return None;
+    }
+    let count = revert
+        .get("count")
+        .and_then(Value::as_u64)
+        .and_then(|count| usize::try_from(count).ok())
+        .unwrap_or(0);
+    let files: Vec<RevertFileChange> = revert
+        .get("files")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| {
+                    let file = row.get("file").and_then(Value::as_str)?;
+                    if file.is_empty() {
+                        return None;
+                    }
+                    let status = match row.get("status").and_then(Value::as_str) {
+                        Some("added") => RevertFileStatus::Added,
+                        Some("deleted") => RevertFileStatus::Deleted,
+                        _ => RevertFileStatus::Modified,
+                    };
+                    Some(RevertFileChange {
+                        file: file.to_owned(),
+                        status,
+                        additions: row
+                            .get("additions")
+                            .and_then(Value::as_u64)
+                            .and_then(|n| usize::try_from(n).ok())
+                            .unwrap_or(0),
+                        deletions: row
+                            .get("deletions")
+                            .and_then(Value::as_u64)
+                            .and_then(|n| usize::try_from(n).ok())
+                            .unwrap_or(0),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(RevertCard::new(count, files))
+}
+
 /// Project the same bounded history while retaining the backend message id
 /// beside each display message.  The id is an anchor identity only; all
 /// rendering still uses the exact typed projection returned by
@@ -1294,6 +1349,38 @@ impl NativeHistoryWindow {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn project_session_revert_reads_count_and_files_and_rejects_non_objects() {
+        // MSG-009: the wire `Session.Revert` (server-computed count + files)
+        // projects into the render-ready card.
+        let card = project_session_revert(&json!({
+            "messageID": "00000000-0000-4000-8000-000000000002",
+            "count": 3,
+            "files": [
+                {"file": "src/a.rs", "patch": "", "additions": 5, "deletions": 2, "status": "modified"},
+                {"file": "src/b.rs", "patch": "", "additions": 1, "deletions": 0, "status": "added"},
+                {"file": "src/c.rs", "patch": "", "additions": 0, "deletions": 4, "status": "deleted"},
+                {"file": "", "patch": "", "additions": 0, "deletions": 0, "status": "modified"}
+            ]
+        }))
+        .expect("object reverts to a card");
+        assert_eq!(card.count, 3);
+        assert_eq!(card.files.len(), 3, "the empty-file row is dropped");
+        assert_eq!(card.files[0].status, RevertFileStatus::Modified);
+        assert_eq!(card.files[1].status, RevertFileStatus::Added);
+        assert_eq!(card.files[2].status, RevertFileStatus::Deleted);
+        assert_eq!((card.files[0].additions, card.files[0].deletions), (5, 2));
+        // A revert with no files still yields a card (the count-only case).
+        let count_only = project_session_revert(&json!({
+            "messageID": "00000000-0000-4000-8000-000000000003", "count": 1
+        }))
+        .expect("count-only revert is a card");
+        assert_eq!(count_only.count, 1);
+        assert!(count_only.files.is_empty());
+        // A non-object (absent revert) is not a card.
+        assert!(project_session_revert(&Value::Null).is_none());
+    }
 
     fn actual_tool_record(parts: Value, body: &str) -> Value {
         json!({

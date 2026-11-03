@@ -2224,6 +2224,7 @@ mod tests {
             part_id: Some("p1".to_owned()),
             snapshot: Some("snap-1".to_owned()),
             files: None,
+            count: None,
         };
         let at = now();
         storage

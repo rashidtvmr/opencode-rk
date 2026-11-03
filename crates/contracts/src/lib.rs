@@ -197,6 +197,12 @@ pub struct SessionRevert {
     pub snapshot: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files: Option<Vec<FileDiffInfo>>,
+    /// Real count of user messages from the revert boundary onward, computed
+    /// server-side (`stage_session_revert`) and carried to the TUI revert card
+    /// (`index.tsx:1561` counts `messagesFromRevert().filter(user).length`).
+    /// Optional and skipped when absent so older persisted rows still decode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count: Option<u32>,
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SessionSummary {
@@ -530,10 +536,23 @@ mod tests {
             part_id: None,
             snapshot: None,
             files: None,
+            count: None,
         };
         let value = serde_json::to_value(&revert).unwrap();
         assert!(value.get("partID").is_none());
         assert!(value.get("snapshot").is_none());
         assert!(value.get("files").is_none());
+        assert!(value.get("count").is_none());
+    }
+    #[test]
+    fn session_revert_round_trips_real_user_message_count() {
+        // MSG-009: the server computes the boundary-onward user-message count
+        // (`stage_session_revert`) and the TUI card reads it verbatim
+        // (`index.tsx:1561`).
+        let json = r#"{"messageID":"00000000-0000-4000-8000-000000000002","count":3}"#;
+        let revert: SessionRevert = serde_json::from_str(json).unwrap();
+        assert_eq!(revert.count, Some(3));
+        let value = serde_json::to_value(&revert).unwrap();
+        assert_eq!(value.get("count"), Some(&serde_json::json!(3)));
     }
 }

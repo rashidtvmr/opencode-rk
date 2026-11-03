@@ -106,7 +106,8 @@ use futures_util::{StreamExt, stream};
 use opencode_rk_agents::agent_executor::AgentExecutor;
 use opencode_rk_catalog::{Catalog, CatalogQuery};
 use opencode_rk_contracts::{
-    ArtifactId, ArtifactKind, AttachmentId, MAX_DRAFT_ATTACHMENT_BYTES, MessageId, MessageRecord,
+    ArtifactId, ArtifactKind, AttachmentId, FileDiffInfo, FileDiffStatus,
+    MAX_DRAFT_ATTACHMENT_BYTES, MessageId, MessageRecord,
     MessageRole, PayloadRef, SessionId, SessionRevert, Timestamp, WIRE_SCHEMA_VERSION,
 };
 use opencode_rk_providers::custom_provider::{self, CustomProviderConfig};
@@ -1197,11 +1198,38 @@ async fn stage_session_revert(
     Json(body): Json<StageRevertBody>,
 ) -> Result<Json<Value>, ApiFailure> {
     let id = parse_session_id(&id)?;
+    // MSG-009: compute the real facts the TUI revert card paints — the count of
+    // user messages from the boundary onward (`index.tsx:1561`) and the file
+    // changes from the durable typed tool history in that same range
+    // (`index.tsx:1562`, `revert.files`). No snapshot restore is performed, so
+    // `snapshot` stays `None` and no filesystem mutation occurs.
+    let messages = state
+        .sessions
+        .messages(id, 500)
+        .await
+        .map_err(ApiFailure::internal)?;
+    let count = revert_user_count(&messages, body.message_id);
+    let tools = state
+        .sessions
+        .display_tool_history(id, 500)
+        .await
+        .map_err(ApiFailure::internal)?;
+    let tool_facts: Vec<RevertToolFact<'_>> = tools
+        .iter()
+        .map(|tool| RevertToolFact {
+            kind: &tool.kind,
+            name: &tool.name,
+            payload: &tool.payload,
+            message_id: tool.message_id,
+        })
+        .collect();
+    let files = revert_files_from_tool_history(&tool_facts, &messages, body.message_id);
     let revert = SessionRevert {
         message_id: body.message_id,
         part_id: None,
         snapshot: None,
-        files: None,
+        files: (!files.is_empty()).then_some(files),
+        count: Some(count),
     };
     state
         .sessions
@@ -1229,6 +1257,114 @@ async fn stage_session_revert(
     });
     let session = state.sessions.get(id).await.map_err(ApiFailure::internal)?;
     Ok(Json(json!({"session":session})))
+}
+
+/// Count user-role messages from the revert boundary (inclusive) onward,
+/// matching upstream `messagesFromRevert().filter(type === "user").length`
+/// (`index.tsx:186-190`, `:1561`). A boundary id absent from the window yields
+/// `0` rather than fabricating a count.
+fn revert_user_count(messages: &[MessageRecord], boundary: MessageId) -> u32 {
+    let Some(index) = messages.iter().position(|message| message.id == boundary) else {
+        return 0;
+    };
+    messages[index..]
+        .iter()
+        .filter(|message| message.role == MessageRole::User)
+        .count()
+        .try_into()
+        .unwrap_or(u32::MAX)
+}
+
+/// One durable typed-tool fact the revert projection needs. Kept local so the
+/// server does not name the storage crate's `ToolHistoryItem` (it is only a
+/// dev-dependency) while still reading the real persisted fields.
+struct RevertToolFact<'a> {
+    kind: &'a str,
+    name: &'a str,
+    payload: &'a str,
+    message_id: MessageId,
+}
+
+/// Real file changes for the revert card, projected from the durable typed
+/// tool history in the boundary range. A `write`/`edit` output is the
+/// `opencode.file-edit.v1` envelope (`tools/src/executor.rs:253`) carrying the
+/// written `path` and unified `diff`; `apply_patch` `metadata.files` are
+/// carried on the call arguments. Only real facts are surfaced: a record with
+/// no parseable patch contributes no file row.
+fn revert_files_from_tool_history(
+    tools: &[RevertToolFact<'_>],
+    messages: &[MessageRecord],
+    boundary: MessageId,
+) -> Vec<FileDiffInfo> {
+    let in_range = |message_id: MessageId| {
+        messages
+            .iter()
+            .position(|message| message.id == boundary)
+            .is_some_and(|index| messages[index..].iter().any(|message| message.id == message_id))
+    };
+    let mut files: Vec<FileDiffInfo> = Vec::new();
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut add = |file: String, patch: String, status: FileDiffStatus| {
+        if file.is_empty() || !seen.insert(file.clone()) {
+            return;
+        }
+        let (additions, deletions) = count_diff_lines(&patch);
+        files.push(FileDiffInfo { file, patch, additions, deletions, status });
+    };
+    for tool in tools {
+        if !in_range(tool.message_id) {
+            continue;
+        }
+        if tool.kind == "output" {
+            let Ok(value) = serde_json::from_str::<Value>(&tool.payload) else {
+                continue;
+            };
+            if value["format"] == "opencode.file-edit.v1" {
+                if let (Some(path), Some(diff)) = (value["path"].as_str(), value["diff"].as_str()) {
+                    add(path.to_owned(), diff.to_owned(), FileDiffStatus::Modified);
+                }
+            }
+        } else if tool.kind == "call" && tool.name == "apply_patch" {
+            let Ok(value) = serde_json::from_str::<Value>(&tool.payload) else {
+                continue;
+            };
+            for entry in value["files"].as_array().into_iter().flatten() {
+                let Some(path) = entry["file"].as_str().or_else(|| entry["filePath"].as_str())
+                else {
+                    continue;
+                };
+                let status = match entry["type"].as_str() {
+                    Some("add") | Some("added") => FileDiffStatus::Added,
+                    Some("delete") | Some("deleted") => FileDiffStatus::Deleted,
+                    _ => FileDiffStatus::Modified,
+                };
+                add(
+                    path.to_owned(),
+                    entry["patch"].as_str().unwrap_or("").to_owned(),
+                    status,
+                );
+            }
+        }
+    }
+    files
+}
+
+/// Count `+`/`-` content lines in a unified diff, ignoring the `+++`/`---`
+/// file headers, matching `FileDiff.Info.additions/deletions`.
+fn count_diff_lines(patch: &str) -> (u32, u32) {
+    let mut additions = 0u32;
+    let mut deletions = 0u32;
+    for line in patch.lines() {
+        if line.starts_with("+++") || line.starts_with("---") {
+            continue;
+        }
+        if line.starts_with('+') {
+            additions = additions.saturating_add(1);
+        } else if line.starts_with('-') {
+            deletions = deletions.saturating_add(1);
+        }
+    }
+    (additions, deletions)
 }
 
 #[derive(Debug, Deserialize)]

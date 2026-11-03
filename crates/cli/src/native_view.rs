@@ -211,6 +211,9 @@ pub struct NativeView {
     dock: ComposerDock,
     /// Active-session queued prompts shown above the composer.
     queued_prompts: crate::native_view_chat::QueueDock,
+    /// MSG-009: the staged session revert card, rendered in the transcript after
+    /// the reverted rows (`index.tsx:2254-2324`). `None` when no revert is staged.
+    session_revert: Option<crate::native_view_chat::RevertCard>,
     /// Subagents tab state fed from the observed `/children` listing.
     dock_tab: SubagentsTab,
     /// Session the retained child rows belong to.
@@ -1072,6 +1075,7 @@ impl NativeView {
             rail_animations: true,
             rail_elapsed_ms: 0,
             queued_prompts: crate::native_view_chat::QueueDock::default(),
+            session_revert: None,
             dock: {
                 // CP-23 (`composer/index.tsx:127-128`): both always-mounted
                 // tabs (Subagents, Shell) are registered in the production
@@ -1481,6 +1485,15 @@ impl NativeView {
         prompts: impl IntoIterator<Item = crate::native_view_chat::QueuedPrompt>,
     ) {
         self.queued_prompts = crate::native_view_chat::QueueDock::new(prompts);
+    }
+
+    /// MSG-009: set (or clear) the staged session revert card. The card renders
+    /// in the transcript after the reverted rows (`index.tsx:2254-2324`).
+    pub fn set_session_revert(
+        &mut self,
+        revert: Option<crate::native_view_chat::RevertCard>,
+    ) {
+        self.session_revert = revert;
     }
 
     /// Active dock tab while open.
@@ -3427,12 +3440,27 @@ impl NativeView {
                 self.queued_prompts.render_rows(width.saturating_sub(4) as usize)
             };
             let queue_height = queue_rows.len();
+            // MSG-009: the staged revert card is part of the transcript foot
+            // (`index.tsx:2254-2324`), so it shares the body budget with the
+            // transcript and the composer, exactly like the dock/queue.
+            let revert_rows = if has_permission {
+                Vec::new()
+            } else {
+                self.session_revert
+                    .as_ref()
+                    .map(|card| card.render_rows(width.saturating_sub(4) as usize))
+                    .unwrap_or_default()
+            };
+            let revert_height = revert_rows.len();
             let dock_height = dock.as_ref().map_or(0, |block| usize::from(block.height()));
             let body_height = if let Some(permission_height) = permission_height {
                 // The shared shell footer is still a non-prompt sibling.
                 height.saturating_sub(1).saturating_sub(permission_height)
             } else {
-                self.session_body_height().saturating_sub(dock_height).saturating_sub(queue_height)
+                self.session_body_height()
+                    .saturating_sub(dock_height)
+                    .saturating_sub(queue_height)
+                    .saturating_sub(revert_height)
             };
             let mut body = if let Some(messages) = messages {
                 let (rows, markdown_spans) = if has_permission {
@@ -3498,6 +3526,25 @@ impl NativeView {
                     *class = crate::native_view_chat::ChatRowClass::Metadata;
                 }
                 if let Some(spans) = self.chat_markdown_spans.get_mut(row) { spans.clear(); }
+            }
+            // MSG-009: the staged revert card sits at the transcript foot,
+            // directly after the reverted rows and above the composer
+            // siblings (dock/queue). Inserted first so it lands highest.
+            if !revert_rows.is_empty() {
+                let insert = body.len().saturating_sub(prompt.height);
+                let mut revert_texts = Vec::with_capacity(revert_rows.len());
+                let mut revert_classes = Vec::with_capacity(revert_rows.len());
+                for (text, class) in revert_rows {
+                    revert_texts.push(padded(&text, width));
+                    revert_classes.push(class);
+                }
+                self.chat_row_classes
+                    .splice(insert..insert, revert_classes);
+                self.chat_text_bounds
+                    .splice(insert..insert, std::iter::repeat_n(None, revert_texts.len()));
+                self.chat_markdown_spans
+                    .splice(insert..insert, std::iter::repeat_n(Vec::new(), revert_texts.len()));
+                body.splice(insert..insert, revert_texts);
             }
             // Dock rows sit in the slot directly above the composer, exactly
             // where the composer started before the dock claimed its rows.
@@ -8386,6 +8433,43 @@ mod transcript_scrollbar_tests {
         let _ = view.render_typed("draft", &messages, false, &[]);
         assert_eq!(view.transcript_scrollbar(), None);
         assert!(!view.scrollbar_enabled());
+    }
+
+    #[test]
+    fn staged_revert_card_renders_at_the_transcript_foot() {
+        // MSG-009: a staged revert paints the real card (`index.tsx:2254-2324`)
+        // in the transcript, above the composer, and consumes its own rows from
+        // the body budget.
+        let mut view = NativeView::new(96, 24);
+        view.set_session_route(true);
+        view.set_session_revert(Some(crate::native_view_chat::RevertCard::new(
+            2,
+            [crate::native_view_chat::RevertFileChange {
+                file: "src/a.rs".to_owned(),
+                status: crate::native_view_chat::RevertFileStatus::Modified,
+                additions: 3,
+                deletions: 1,
+            }],
+        )));
+        let messages = long_conversation(3);
+        let frame = view.render_typed("draft", &messages, false, &[]);
+        let joined = frame.join("\n");
+        assert!(
+            joined.contains("2 messages reverted"),
+            "the revert card count row is painted: {joined:?}"
+        );
+        assert!(
+            joined.contains("M src/a.rs") && joined.contains("+3") && joined.contains("-1"),
+            "the file row carries status and line counts: {joined:?}"
+        );
+        assert!(
+            joined.contains("/redo to restore"),
+            "the redo hint is painted: {joined:?}"
+        );
+        // Clearing the card removes it from the next frame.
+        view.set_session_revert(None);
+        let cleared = view.render_typed("draft", &messages, false, &[]).join("\n");
+        assert!(!cleared.contains("messages reverted"), "cleared card is gone: {cleared:?}");
     }
 
     #[test]
