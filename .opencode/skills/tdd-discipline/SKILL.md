@@ -5,10 +5,12 @@ description: Enforce Rust RED-GREEN-refactor for features and bugfixes, compilin
 
 # TDD Discipline
 
-Feature owners work in a full candidate checkout with an explicit expert role
+Feature owners work in a registered persistent-disk Git worktree with an explicit expert role
 and test grant (`docs/AGENT_WORKER_PRACTICES.md`). Return a mergeable revision and
 verification evidence, not copied-file fragments. Author/test-runner failures
 return to the feature owner for repair; main is not the default code assembler.
+No temp-folder or RAM-disk implementation fallback. Disposable test fixtures may
+be temporary, but export required evidence to granted persistent disk storage.
 
 Use `docs/TDD.md` and the current implementation-first policy. Establish a
 meaningful compiling RED before the repair. If a candidate already exists,

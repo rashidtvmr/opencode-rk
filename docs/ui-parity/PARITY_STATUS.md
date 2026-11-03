@@ -1,6 +1,6 @@
 # OpenCode V2 UI parity — consolidated status
 
-- **Canonical line:** `main-v2` @ `51538ca1` (remote verified via `git ls-remote`)
+- **Canonical line:** `main-v2` @ `43050ee0` (remote verified via `git ls-remote`)
 - **Upstream oracle:** `/Users/mymac/Projects/tmp/opencode` @ `450e7b92412c780a7b5a75226bb8d49aaca24e22`
 - **Checklist:** `docs/ui-parity/opencode-ui-parity-kit/checklist.json` (223 items)
 - **Method:** source inspection of the live Rust path (implementation + a
@@ -90,6 +90,81 @@ channel; neither is a CLI-only patch.
 
 
 
+## Wave-67 — complete-feature pilots, suites green (2026-11-03)
+
+Base `f1c999f1`. Delivery changed shape here: **one complete observable feature
+per expert owner in one controller-provisioned workspace** (`/tmp/fp-DIFF`,
+`/tmp/fp-DIALOG`, `/tmp/fp-MCP`), each delivering a mergeable commit plus executed
+evidence — not per-group fragment patches assembled by the orchestrator. The rule
+is recorded in `AGENTS.md` and `docs/AGENT_WORKER_PRACTICES.md`.
+
+**Landed on `main-v2`.**
+
+| Commit | Change | Evidence |
+| --- | --- | --- |
+| `7285a322` | CP-08 catalogue-load edge retains the previous prompt label; CP-11 fills `RailFacts.location`/`location_width` so the idle footer paints the Location slot; CP-42 pins `set_prompt_turn` to worker start/settle; **THEME-09** live `ChatPart::Patch` resolves `DiffSurface::Inline` by content width and pairs `-`/`+` panes through `paint_rows_split` while narrow keeps the numbered gutter; THEME-12 confirms the theme page through live `ThemePicker::on_confirm`. | `cp08_catalog_load_retains_previous_prompt_display`, `cp11_location_slot_and_prompt_turn_chrome_drive_the_composer_status_text`, `theme09_wide_terminal_pairs_patch_panes_and_narrow_stays_unified`; CLI 2220/0 |
+| `5e1a4409` | Test repairs: `session_view` posts the idle transition before `POST /view`; `session_turn_stream_api` expects the PAR-10 `seq`. | server suite |
+| `4d797846` | `compaction_strategy_resolution` names the **pre-compaction** boundary head. | server suite |
+| `782d275d` | Four stale fixtures account for the durable `MessageRole::Compaction` notice: `context_checkpoint_selection`, `context_selection_projection`, `session_fallback_compaction`, `session_native_compaction`. | server suite |
+
+**Full-suite state on `f1c999f1`.** Server
+`cargo test -p opencode-rk-server --tests --no-fail-fast -- --test-threads=1`
+with `OC2_TEST_BINARY=$PWD/target/debug/oc2` → **exit 0, 134/134 binaries ok,
+0 failures** (`/tmp/server-all4.log`). CLI `--bin oc2 --test-threads=1` →
+**2220 passed, 0 failed**. The two auth suites (`prov_025_request_auth`,
+`prov_030_auth_sources`) spawn the real daemon and fail fast without
+`OC2_TEST_BINARY`; that is a harness requirement, not a product failure.
+
+**Verdict corrections (independent, source-inspected).**
+
+| Item | Was | Now | Evidence |
+| --- | --- | --- | --- |
+| `THEME-09` | `REAL_GAP` | `LANDED` | `7285a322`; see the row above and the landed table |
+| `FFI-10` | `ALREADY_CORRECT` | `REAL_GAP` | `safe_renderer.rs:69` is a same-named **termios** struct, not `terminal_input::TerminalInput`; no CLI module constructs the parser, so paste/kitty event decoding has no live consumer |
+| `PAR-07` | `BLOCKED` | `REAL_GAP` | queue/steer (`tui_entry.rs:12558/12601`), submission (`:13693`) and permission reply (`:6212`) traces are live; the residual is form traces, and the CLI has no form dialog surface |
+
+**Additional rejected patches.** Preserved with status files under
+`/tmp/archive-w66b/`; none landed.
+
+| Group | Claim | Rejection reason |
+| --- | --- | --- |
+| MSGROW | grow the message row model | Breaks the existing `rendered_anchor_survives_*` contracts it was meant to preserve. |
+| LAYOUT | reflow the session layout | Its own new tests fail on the current base. |
+| PALSEL | wire `SelectDialog` filtering into the dialog view | Unfinished mid-edit: duplicate `prev` and `.disabled(flag)` against the current zero-argument API — does not compile. Kept as design reference for pilot F2. |
+| DIFF | add `DiffViewPreference` to `ChatView` | Model with no producer: nothing set it from config and the Patch painter never read it. Superseded by pilot F1. |
+| VFFI | route input bytes through the OpenTUI terminal-input bridge | Feeds the parser then discards every decoded event — logging only, no behaviour change. |
+
+## Wave-68 — persistent expert workspaces, first landings (2026-11-03)
+
+Base `f1c999f1` → published `43050ee0`. The temp-disk pilots were replaced by
+controller-managed Git worktrees on persistent disk under
+`/Users/mymac/Projects/.oc2-features-20261103/`, per the owner's durable-storage
+instruction. Each owner delivers one complete observable feature (production +
+tests) and a mergeable commit.
+
+**Landed on `main-v2`.**
+
+| Commit | Change | Evidence |
+| --- | --- | --- |
+| `43050ee0` | **F1 / DIFF-001 (inline half).** `config.diffs.view` (`auto`/`split`/`unified`) is parsed from the global CLI config and the inline `--config` document (inline wins, bounded read) and threaded to the live inline patch renderer, which previously hard-coded `DiffViewPreference::Auto`. `auto` keeps the 120/121 content-width rule; `split`/`unified` override it. | `native_ui_preferences::diff001_preferences_tests::*` (6), `native_view_chat::diff_wiring_v2_regressions::diff001_*`, `native_diff_view::tests::diff001_surface_split_boundaries_match_upstream`; CLI 2225/0; independent review `VERDICT: APPROVE` |
+
+**Candidates awaiting review / integration.**
+
+| Candidate | Lane | Change |
+| --- | --- | --- |
+| `f26671f4` | `recovery/ui` | **F2 / DIALOG-06/08/09.** The live working-directory `DialogSelect` owns the tested `native_palette::select` model (filter, backspace, filtered navigation, PageUp/PageDown, empty states). Fixes the `51c60d58` blocker by making the select model the single source of truth (a suppressed `locked` move can no longer desync the mirror; `select_id` refuses while locked). CLI 2234/0. |
+| `a08a2a06` | `recovery/runtime` | **F3 / SIDE-10.** `GET /todo` derives from the latest completed `todowrite` before the revert boundary (`SessionService::todos_at_boundary`) instead of echoing the stored row. Independent review `NEEDS_FIX`: the new behaviour is upstream-correct, but two pre-existing lifecycle tests still assert the superseded verbatim contract. Repair in flight. |
+
+**Verdict corrections (independent, source-inspected this wave).**
+
+| Item | Was | Now | Evidence |
+| --- | --- | --- | --- |
+| `STATE-002` | `BLOCKED` | `LANDED` | `6a72aa61` persists and pushes a durable compaction notice (`append_compaction_message`, `server/src/lib.rs:1954/1985`) and surfaces it as a typed part (`compaction_wire_part`, `:1499`); upstream `index.tsx:2182-2190` |
+| `FORM-001` | `BLOCKED` | `ALREADY_CORRECT` | Live poll calls the 3-label opener (`tui_entry.rs:8599` → `native_view_dialogs.rs:1374-1396`), matching `routes/session/permission.tsx:232-240`; the 6-label `open_permission` is test-only |
+
+`CP-07`, `DIFF-003` and `MSG-005` re-verified as still `BLOCKED` with the exact
+missing producer recorded in `artifacts/verdicts/W69-V14-recheck-a.md`.
+
 Base SHA `0d74af30`. 28 parallel workers on the four authorized routes, each
 artifact-first and read-only on canonical. Per-ID JSON verdicts live in
 `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave44/`.
@@ -136,13 +211,13 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | THEME-06 | `ALREADY_CORRECT` | `theme_runtime.rs:1712,1244`; test `:3148`; live `tui_entry.rs:4491` dialog_panel in modal paint |
 | THEME-07 | `ALREADY_CORRECT` | `theme_runtime.rs:120,142`; tests `:2654-2691`; live `tui_entry.rs:4118` paint_color |
 | THEME-08 | `REAL_GAP` | `theme_runtime.rs:965` + tests `:3607-3757`; markdown half live `tui_entry.rs:4747`; `syntax_rules()` has zero callers, no highlight producer |
-| THEME-09 | `REAL_GAP` | `tui_entry.rs:2849,2866`; test `theme_runtime.rs:3757`; unified live `tui_entry.rs:4626`; split unreachable (`native_view_chat.rs:2179` hardcodes Unified) |
+| THEME-09 | `LANDED` | `7285a322`: the live `ChatPart::Patch` branch resolves `DiffSurface::Inline` by measured content width and paints `SplitRow::Pair` halves through `paint_rows_split` with `ChatRowClass::{DiffAdded,DiffRemoved,DiffHunkHeader}`, so content/gutter/span/hunk colors stay distinct in both presentations. Test `theme09_wide_terminal_pairs_patch_panes_and_narrow_stays_unified`. The config override is DIFF-001 (pilot F1). |
 | THEME-10 | `ALREADY_CORRECT` | `theme_runtime.rs:1592,1665,1754,1768`; tests `:4167-4241`; live `tui_entry.rs:6744,11425` |
 | TAB-21 | `LANDED` (`51538ca1`) | **Cross-crate producer built.** `SessionSummary.idle_at` (contracts) + storage `idle_at` column with idempotent migration and monotone `set_session_idle` + sessions `mark_idle` and the guarded `set_viewed`; server stamps idle on `create_turn`, the streamed `Done` frame and both compaction terminals; CLI `LiveSnapshot.session_idle_at`/`session_viewed_at` drive the live `ViewAcknowledgement` POST with backoff. CLI 2217/0, server 313/0, storage 127/0, sessions 45/0. (Wave-66 verifier VTAB re-confirmed this; the earlier `BLOCKED` entry was stale.) |
 | TAB-23 | `LANDED` | `ae56897f` — live `session.tab.*` dispatch now resolves through the config `keybinds` chord table (`native_navigation::tab_keybinds`); `UiPreferences.keybinds` (raw JSON) + focused tests. |
 | SIDE-03 | `LANDED` (`5e3d797b`) | Renderer+test correct (`native_sidebar.rs:230-287`); live `set_usage_classes` (SIDE-04 `0d4f26a7`) and `set_cost` (`b5ec63c7`) wired into the live `Event::Usage` arm. History-load `lastAssistantWithUsage` selector landed (`5e3d797b`): `native_chat_projection::last_assistant_usage` honours the staged revert boundary (unknown ⇒ absent) and the last completed compaction, and the per-frame publish uses the message's OWN model `context_window` (missing limit ⇒ tokens without percent), never the selected UI model. A live-turn guard keeps `Event::Usage` authoritative for its binding. |
 | SIDE-04 | `REAL_GAP` | Five-class arithmetic `native_sidebar.rs:205-287` (test `:1608`) dead on live path; no last-eligible-assistant selector; limit joined only from selected UI model (`tui_entry.rs:8112`); wire `input_tokens` is inclusive of cached (`server/src/auto_compaction.rs:102`) so disjoint classes need a `nonCachedInput` producer |
-| SIDE-08 | `REAL_GAP` | No `DialogKind::Mcp` (`native_view_dialogs.rs:129`); row click toggles via PUT (`tui_entry.rs:10050`), never opens dialog. Upstream `mcp.tsx:56-60` |
+| SIDE-08 | `LANDED` | `76fcb75a` (wave-48): the sidebar MCP row click opens the `DialogMcp` server list instead of PUT-toggling — `DialogKind::Mcp`, `DialogView::open_mcp`/`focused_choice`, `OpenDialog.mcp_status`, live opener `tui_entry.rs:10794`, Enter toggles the focused server through `PUT /api/sessions/{id}/mcp/{name}`, Esc closes locally. The residual select-surface behaviors (typing filter, Backspace, PageUp/PageDown, empty states) are DIALOG-06..09, tracked separately. |
 | SIDE-14 | `LANDED` (`d5611712`) | Footer hit rect + hover routing + local `DialogSelect` menu + CopyPath/OpenFolder executors wired live; `Workspaces` unoffered (no live move route). See the landed-fixes table. |
 | MSG-005 | `BLOCKED` | Chip helpers `native_message_rows.rs:1904-2046` (tests `:2449-2514`) zero consumers; `MessageRecord` (`contracts/src/lib.rs:250-257`) has no files/skills; producer chain absent `sessions/src/lib.rs:623`, `storage/src/writer_v2.rs:129`, `server/src/lib.rs:1256`, `native_chat_projection.rs:641`, `native_view_chat.rs:1069/:2635` |
 | MSG-008 | `REAL_GAP` | Widths/agent/model/duration/interrupted live (`native_footer.rs:377`, `native_assistant_facts.rs:391`); TPS dead end-to-end: producer `server/src/lib.rs:2894-2901` emits no streamed stamp; `MessageExecution` (`contracts/src/lib.rs:284-293`) has no timing field; `RowTiming.streamed_ms` (`native_message_rows.rs:825`) never set; `tps_enabled` test-only (`native_assistant_facts.rs:325`); `data.session.tps` absent |
@@ -164,7 +239,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | PAR-04 | `REAL_GAP` | text/pos/style/clipping/cursor covered+tested; hit targets never modeled (no `hit_targets` compare key) |
 | PAR-05 | `ALREADY_CORRECT` | Wide-cell continuation + combining fold (`ui_parity.py:65-73,139-182`), tested (`selftest.py:244`) |
 | PAR-06 | `BLOCKED` | Cell/text-only harness; no font/pixel capture path (`oc2_pty.py:362-369`) |
-| PAR-07 | `BLOCKED` | Frame side complete (`native_capture.rs`); event-trace sink (`native_debug.rs:81`) misses queue/steer, permissions, forms, input-submission; seam `native_composer.rs` submit path |
+| PAR-07 | `REAL_GAP` | The old `BLOCKED` reason is stale. Three of the four cited traces are live: queue/steer (`tui_entry.rs:12558` `prompt.queued`, `:12601` `prompt.queued_promoted`), submission (`:13693` `prompt.submit`), and permission reply (`:6212` `permission.reply`, reached from `dispatch_permission_reply`). Residual: form submit/validation events — the native CLI has no form dialog surface at all (`DialogKind` has no form variant), so no form trace can be emitted. Frame capture (`native_capture.rs`) is complete. |
 | PAR-08 | `ALREADY_CORRECT` | `native_clock.rs` FrameClock; live `tui_entry.rs:6666` |
 | PAR-09 | `REAL_GAP` | async syntax await + stale/blank rejection in `highlight.rs`; `pub mod highlight` has zero cli call sites |
 | PAR-10 | `REAL_GAP` | `native_transcript.rs` accums; live path consumes only `strip_ansi` |
@@ -210,7 +285,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | FFI-07 | `REAL_GAP` | `highlight.rs:683` impl, `:1133` test; no cli consumer (cli renders through its own `native_*` models) |
 | FFI-08 | `REAL_GAP` | `diff.rs:1140` impl, `:1434` test; live path is separate `native_diff_view.rs` |
 | FFI-09 | `ALREADY_CORRECT` | `scroll.rs:328/:411`; consumer `native_view.rs:5580` (`scrollbar_thumb`) |
-| FFI-10 | `ALREADY_CORRECT` | `terminal_input.rs:327/:1113`; consumer `safe_renderer.rs:69` |
+| FFI-10 | `REAL_GAP` | `TerminalInput` parity parser (`terminal_input.rs:327-360`, tests `:1113`) has **no live consumer**: `safe_renderer.rs:69` declares its own termios struct of the same name (the input-mode owner), not the parser, and no CLI module constructs `terminal_input::TerminalInput`. The wave-66 VFFI patch fed bytes into it but discarded the decoded events, so it changed no behaviour. Needs the live input loop to consume typed events (paste atomicity, kitty/CSI-u keys) instead of the byte-level `native_input_decoder`. |
 | FFI-11 | `REAL_GAP` | `scene.rs:442` impl, `:1149` test; no cli consumer |
 | MD-006 | `ALREADY_CORRECT` | `native_view_chat.rs:2432`, test `:5826`, consumer `:2574`; redacted-only renders nothing (`:2586`) |
 | MD-007 | `REAL_GAP` | `MarkdownPluginRegistry`/`set_fence_handlers` (`native_markdown_flow.rs:468/681`, test `:2570`) zero non-test callers; live flow `native_view_chat.rs:2334` never binds registry |
@@ -315,10 +390,10 @@ the wave-44 verdict supersedes it.
 
 | Verdict | Count |
 | --- | --- |
-| `ALREADY_CORRECT` | 145 |
-| `REAL_GAP` | 1 |
-| `BLOCKED` | 47 |
-| `LANDED` (wave-45..64) | 30 |
+| `ALREADY_CORRECT` | 144 |
+| `REAL_GAP` | 3 |
+| `BLOCKED` | 45 |
+| `LANDED` (wave-45..67) | 31 |
 | **Total** | **223** |
 
 ### Landed fixes (wave-45..56) — moved out of `REAL_GAP`/`BLOCKED`
@@ -369,9 +444,12 @@ full single-threaded CLI suite, and was pushed + remote-verified.
 | SIDE-03 (history-load half) | `5e3d797b` | Completes SIDE-03. `native_chat_projection::SessionUsage` + `last_assistant_usage(records, boundary)` mirrors upstream `lastAssistantWithUsage` (`packages/client/src/solid/usage.ts:8-21`) and `contextUsage` (`util/session.ts:44-63`): an unknown revert boundary yields absent usage (never stale tokens); records at/after the boundary are excluded; the last completed compaction hides everything before it; the model is the message's own `execution.provider_id/model_id`. `LiveSnapshot.session_revert_boundary` carries `revert.messageID`; a `usage_live_generation` guard keeps a live `Event::Usage` value authoritative for its binding; the per-frame publish otherwise sets the five usage classes and the message model's `context_window` (missing limit ⇒ tokens without percent, never the selected UI model). Test `last_assistant_usage_honours_revert_and_compaction_boundaries`; CLI **2213/0**. |
 | STATE-002 | `6a72aa61` | Durable compaction marker rendered live. `MessageRole::Compaction` (contracts, snake_case `compaction`, never a provider history role); role codec 4 (TEXT + v2) + schema CHECK widened to 0..4; `bounded_history_from` filters `role<>'compaction'` so a marker can never enter provider replay (test `bounded_history_excludes_compaction_markers_from_provider_replay`). `append_compaction_message` persists the compaction request's own `window.usage`; `compaction_wire_part` emits `{type,status,providerNative,reason,usage:{input,output}}`; BOTH `/messages` and `/history` surface the typed part; `history_item_to_responses_item` rejects the role as a safety net. CLI `ChatPart::Compaction` carries `status`/`provider_native`/`cancelled`/`usage`; the render arm labels a completed provider-native compaction `Provider compaction` (else `Compaction`), appends `· cancelled` for an aborted failure and `· {in} in · {out} out` once not running (`index.tsx:2196-2218`). Tests: server `compaction_wire_part_tests` (4), CLI `compaction_part_projects_status_provider_native_cancelled_and_usage` + `compaction_part_renders_upstream_label_cancelled_and_request_usage`; CLI **2215/0**, server **313/0**, storage **126/0**, sessions **44/0**. |
 
-### `REAL_GAP` — faithful model + focused test exist, no live consumer (1)
+### `REAL_GAP` — faithful model + focused test exist, no live consumer (3)
 
-`MEDIA-001`.
+`MEDIA-001`, `FFI-10` (terminal-input parity parser never consumed; the
+`safe_renderer.rs:69` "consumer" is a same-named termios struct), `PAR-07`
+(live queue/steer/submission/permission traces exist; the residual is form
+traces, which have no form surface yet).
 
 Per-ID seams are recorded in the wave-44 batch tables above and in
 `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave44/<ID>.json`.
@@ -383,15 +461,14 @@ Selected high-value seams:
 | DIALOG-02 | `native_palette.rs:667-733` dialog shell/list-row metrics are not read by the live `DialogView::layout` (`native_view_dialogs.rs:1627`); the `SelectDialog` port (`native_palette.rs:1251`) that consumes them has zero live callers. Wave-56 landed the title-weight/color half: the live `DialogView` reads `new_designs` (`set_new_designs`, seeded `tui_entry.rs:6958`) and paints the non-permission title `Role::Item` (base, unbolded) under the experiment (`dialog.tsx:109`). Remaining: description gating, footer-gap gating (`dialog.tsx:159` *adds* a row for `footerGap={2}` callers), and per-select-row pad. |
 | THEME-08 | `syntax_rules()` (`native_theme_runtime.rs:965`) has zero non-test callers; no tokenizer/highlighter producer and no renderer syntax-style sink (`safe_renderer.rs:906` takes explicit fg/bg/attrs only). |
 | THEME-13 | `SystemThemeState`/`palette_reply` (`native_theme_runtime.rs:2183/2264`) have zero non-test callers; no OSC palette-query emitter and no payload-carrying input event to decode a reply. |
-| THEME-09 | **BLOCKED (verified wave-53).** The live chat `Patch`/diff-fence painter hardcodes `DiffViewMode::Unified` (`native_view_chat.rs:2202/2730`) and `resolve_view_mode`/`config.diffs.view` (`native_diff_view.rs:586`) have no live caller. Threading the preference is not sufficient: a split row is `SplitRow::Pair { left, right }` (`native_diff_view.rs:709-715`) with two independent backgrounds, but the live row model is `(String, ChatRowClass)` with exactly one class per row (`native_view_chat.rs:902`) and the painter maps a class to a single background (`tui_entry.rs:2880-2898 chat_row_background`). The split view is therefore not renderable without extending the row model — the same blocker as DIFF-001. |
 
-### `BLOCKED` — needs a producer/transport/contract field that does not exist (47)
+### `BLOCKED` — needs a producer/transport/contract field that does not exist (45)
 
-`PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-19,
+`PAR-02, PAR-03, PAR-06, PAR-09, PAR-19,
 TAB-06, TAB-21, SIDE-05,
 MSG-001, MSG-002, MSG-003, MSG-005,
 TOOL-006, TOOL-011, DIFF-001, DIFF-003, FFI-02, FFI-03, FFI-04, FFI-06,
-FFI-07, FFI-08, FFI-11, THEME-08, THEME-09, THEME-13,
+FFI-07, FFI-08, FFI-11, THEME-08, THEME-13,
 THEME-14, CP-07, CP-09,
 DIALOG-06, DIALOG-07, DIALOG-08, DIALOG-09,
 DIALOG-13, DIALOG-14, DIALOG-15, DIALOG-16, DIALOG-17, DIALOG-18,
@@ -430,11 +507,11 @@ DIALOG-19, LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009`.
 | FORM-001 | The upstream-correct `PermissionPrompt` (`native_permissions.rs:557`) is dead code; the live path (`native_view_dialogs.rs:1090`) is a flat choice list. Sub-behavior 1 (3-option realign) is **not** a parity bug: the canonical server supports `scope ∈ {once,session,always}` (`run_owner.rs:232`) and the 6-choice scoped set is a deliberate extension protected by semantic tests. Sub-behaviors 3 (always-body swap, static `:1420`) and 4 (nested rejection stage) need a stage+textarea in `DialogView`. |
 | PAR-02 / PAR-03 / PAR-06 / PAR-07 | Harness-side: capability table empty (`audit-implementation.md:79-96`); no upstream TS/OpenTUI adapter (`README.md:148`); no font/pixel capture path; event-trace sink misses queue/steer/permissions/forms. |
 
-### `ALREADY_CORRECT` — implementation + focused test + traced live consumer (145)
+### `ALREADY_CORRECT` — implementation + focused test + traced live consumer (144)
 
 Everything not listed in the two sections above. This includes the full
 `CP-12..CP-39` range, `TAB-01..03/05/07..09/11..20/22/24`, `SIDE-01/02/06/07/09/11/12/13/15`,
-`THEME-01..04/06/07/10/11/15..18`, `DIALOG-01/03/05/11`, `FFI-09/10`,
+`THEME-01..04/06/07/10/11/15..18`, `DIALOG-01/03/05/11`, `FFI-09`,
 `MD-001..006`, `MSG-006`, `TOOL-001..005/007..010/012`, `DIFF-002/004/005`,
 `FORM-002/005..008`, `STATE-001/003/004`, `LAY-01..09/14/16/18/19/20`,
 `CP-03/04/10/40/41`, `PAR-01/05/08/12/13/14/15/17/18/20/21/23/24`.
@@ -521,17 +598,19 @@ field is absent).
 
 ## Honest completion statement
 
-Of the 223 checklist obligations, **145 are `ALREADY_CORRECT`** (a faithful
-implementation, a focused test, and a traced live consumer), **1 is
-`REAL_GAP`** (model + test exist but the live TUI does not consume them),
-**47 are `BLOCKED`** (a producer/transport/contract field does not exist), and
-**30 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
+Of the 223 checklist obligations, **144 are `ALREADY_CORRECT`** (a faithful
+implementation, a focused test, and a traced live consumer), **3 are
+`REAL_GAP`** (model + test exist but the live TUI does not consume them:
+`MEDIA-001`, `FFI-10`, `PAR-07`),
+**45 are `BLOCKED`** (a producer/transport/contract field does not exist), and
+**31 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
 `CP-05`, `CP-06` in wave-46; `MSG-007` in wave-47; `SIDE-08`, `THEME-12`,
 `DIALOG-04` in wave-48; `PAR-04` in wave-49; `TAB-23`, `DIALOG-10`,
 `DIALOG-20` (toast half) in wave-51; `PAR-16`, `PAR-22` in wave-53;
 `TAB-04` in wave-56; `SIDE-14` in wave-57; `PAR-10`, `FORM-001` (sub-behavior 1),
 `TAB-10`, `SIDE-04`, `SIDE-10`, `FFI-01`, `DIALOG-12`, `MSG-009`, `DIALOG-02`,
-`MSG-008` in wave-61/62/63; `SIDE-03` and `STATE-002` in wave-64).
+`MSG-008` in wave-61/62/63; `SIDE-03` and `STATE-002` in wave-64;
+`THEME-09` in wave-67).
 
 The remaining work is therefore **not** more UI drawing:
 

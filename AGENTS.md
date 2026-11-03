@@ -4,6 +4,32 @@ This repository is in **product-convergence mode**. The goal is a working OpenCo
 
 ## Complete-feature delivery instruction — 2026-11-03
 
+### Mandatory durable worktree storage
+
+The owner's latest instruction requires implementation in a controller-managed
+Git worktree on persistent disk, not an arbitrary private folder or copied-file
+checkout. This overrides the earlier "equivalent isolated checkout" alternative.
+Provision one worktree per active feature from its declared base with an owned
+branch/ref and lease. Record it in `git worktree list`; retain it through repairs.
+
+Do not store implementation source, sole candidate patches, handoffs, retained
+evidence or release artifacts under `/tmp`, `/private/tmp`, `$TMPDIR`, OS temp/cache
+directories, tmpfs or RAM disks. Use an explicitly granted persistent workspace
+root outside the canonical checkout and `.git`; keep retained evidence/build
+storage in designated persistent locations outside `.git` too. Ordinary process
+memory is unaffected. Disposable test HOME/DB/PTY fixtures may use temporary
+storage, but export required evidence to persistent disk before fixture cleanup.
+
+Before dispatch, verify registered worktree, exact HEAD, ownership, persistent
+physical location (including symlink resolution) and granted write paths. If the
+controller or protected topology cannot provision this, fix that specific
+capability or obtain its required amendment. Do not bypass hooks or silently use
+`/tmp`, a RAM disk, detached per-job clone or fragment-only fallback. Current
+per-job clone machinery does not enforce this rule yet; do not claim otherwise.
+Preserve existing temporary candidates until verified migration; this instruction
+does not authorize bulk moving/deleting live or unique work. Normal merged/pushed,
+clean/inactive and retention requirements still govern worktree retirement.
+
 The owner requests complete feature workspaces and mergeable candidates instead
 of fragment-only handoffs. This supersedes older worker instructions requiring
 one/two copied files, `.json.part` implementation outputs or main-agent assembly.
@@ -15,7 +41,7 @@ one/two copied files, `.json.part` implementation outputs or main-agent assembly
   routinely rewrite worker output.
 - Use one controller-provisioned feature workspace through implementation,
   review repairs and integration fixes. A managed worktree/feature branch is the
-  preferred lifecycle; a complete isolated checkout is acceptable. No worker
+  required lifecycle on persistent disk. No worker
   invents persistent refs or bypasses protected topology/hooks. If current tooling
   cannot provision this safely, repair that execution path rather than pretending
   copied fragments are a complete feature workspace.

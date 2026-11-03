@@ -22,8 +22,9 @@ authorize a second scheduler. Do not rewrite historical evidence as current fact
 
 Stop new fragment-only implementation assignments. Preserve existing fragments
 and give their feature owner the full checkout needed to integrate them. Provision
-one managed worktree/feature branch per active feature, or an equivalent complete
-isolated checkout, from a known base. Retain that workspace through repairs;
+one controller-managed Git worktree/feature branch per active feature on persistent
+disk, from a known base. An arbitrary private folder, temp checkout or detached
+per-job clone is not an allowed implementation fallback. Retain it through repairs;
 reviewers consume immutable candidate revisions instead of each requiring a new
 writer environment. Revoke stale leases before replacing an owner.
 
@@ -48,6 +49,27 @@ throughput supports them. Do not begin a Rust rewrite or replacement framework
 as a prerequisite. Controller-managed feature refs need supported provisioning
 and any required protected-policy amendment; worker-created arbitrary branch
 families remain forbidden. Do not bypass existing safeguards to simulate rollout.
+
+### Durable storage and dispatch admission
+
+The controller records the worktree's absolute path, resolved physical location,
+base HEAD, branch/ref, feature owner and lease. Verify registration using Git's
+worktree inventory and persistent backing storage, not just a folder name. The
+approved workspace root is outside canonical source and `.git`, on persistent
+disk; evidence and build caches use separately granted persistent roots outside
+`.git`. Never use `/tmp`, `/private/tmp`, `$TMPDIR`, OS temp/cache locations, tmpfs
+or RAM disks for implementation source or the sole copy of candidates, handoffs,
+retained evidence or releases. Normal process memory is not restricted.
+
+Temporary disposable test fixtures are allowed. Copy required logs/captures and
+reproduction inputs to the persistent evidence location before removing fixtures.
+If registration, disk backing or ownership cannot be established, do not dispatch
+an implementation writer into a fallback folder. Repair provisioning while useful
+read-only or already-provisioned independent work continues. Current controller
+cloning/permission restrictions require a scoped implementation change before
+this provisioning path is operational. Existing temp artifacts remain preserved;
+migrate only under an explicit ownership grant with verified byte custody, never
+by bulk cleanup of another worker's active environment.
 
 Assign a persistent expert owner to a coherent subsystem or end-to-end behavior,
 not one researcher, one helper author and a later wiring task. The owner reads
@@ -217,7 +239,7 @@ This table is a point-in-time observation, not a permanent limit or fake rollout
 | Three concurrent heavy delivery checks | Config says 3; `jobs.py:heavy_lock` still takes one exclusive `heavy-validation.lock` | Shared resource admission across all lock consumers; concurrency/crash tests |
 | Dependent candidate stacks | NOT implemented: dependencies require accepted state | Parent-version invalidation and stack tests before enabling |
 | Review reuse across changed SHAs | NOT implemented; exact-candidate checks remain | Dependency/content-bound review reuse, separately evaluated |
-| Persistent complete-feature workspaces | NOT implemented by current per-job detached-repository lifecycle in `jobs.py:create_workspace`; worker prompt denies commits and controller checkpoints them | Retain one full feature environment across repairs with fenced ownership, immutable review revisions and mechanical candidate commits; no main-agent reconstruction |
+| Persistent complete-feature worktrees | REQUIRED but NOT implemented by current per-job detached-repository lifecycle in `jobs.py:create_workspace`; worker prompt denies commits and controller checkpoints them | Provision registered persistent-disk worktrees outside `.git`/temp/RAM storage; verify owner/base/backing at admission; retain across repairs, no fallback clones or fragments |
 | Reusable worker slots | NOT implemented: per-job detached repositories | Lease-safe capture/restore/recycle after verified feature disposition |
 | Automatic safe workspace reclamation | `engine.py` unconditionally calls `cleanup.collect`, even without publication; commit-diff archival omits merged/pushed and dirty/ignored proofs. Manual reclaim-script restriction does not disable it | Verified retention-safe collector or supported non-destructive mode before supervisor launch; guard/ancestry/race tests |
 | Distributed builds / cache deduplication | Proposed, not established by numeric configs | Isolated build workers and reproducible artifact keys |

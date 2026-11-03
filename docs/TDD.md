@@ -14,10 +14,12 @@ this document operationalizes.
 
 ## 1. Scope and authority
 
-- A feature owner works in a full candidate checkout and owns meaningful tests
+- A feature owner works in a registered persistent-disk Git worktree and owns meaningful tests
   plus production wiring. Execute author checks under granted resources, or
   submit them to the trusted test runner; return failures to that owner. Do not
   replace a complete tested candidate with fragments for main to reconstruct.
+  Disposable test fixtures may use temporary storage; candidate source and
+  retained test evidence must live in granted durable storage outside `.git`.
 
 - Protected tests and verifier configuration are **not writable by the
   implementation sandbox**. New checkpoint tests may be authored in granted

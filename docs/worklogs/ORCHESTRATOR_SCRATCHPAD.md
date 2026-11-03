@@ -1,5 +1,28 @@
 # Orchestrator scratchpad
 
+## 2026-11-03 — Mandatory persistent-disk feature worktrees
+
+Owner requested worktrees and discouraged temp/RAM-backed implementation storage.
+Updated existing AGENTS, strategy, worker/dispatch, delivery/contract,
+convergence/recovery, TDD and skill instructions: registered controller-managed
+Git worktree mandatory; no equivalent private-folder/detached-clone fallback.
+Source/candidates/retained evidence/releases use granted durable disk roots
+outside canonical `.git`, OS temporary/cache storage and RAM disks. Disposable
+test fixtures may remain temporary, with required evidence exported first.
+Admission requires worktree identity/base/owner/physical backing checks. Runtime
+per-job clone provisioning remains unmodified and explicitly noncompliant with
+the required target; no runtime enforcement or worktree creation claimed.
+Existing temp work must be preserved until scoped verified migration; no deletion
+or blanket movement authorized. Unrelated dirty docs/ui-parity/PARITY_STATUS.md
+was preserved. No new policy files or product/controller processes created.
+Independent @general session `ses_e6450cf76ffetMJhYT9FxDULRv` APPROVED the focused
+durable-worktree instruction update, including fixture exceptions and preservation.
+Main checked nine instruction files, balanced fences, 16 retained role IDs and
+git diff --check: PASS. Executable recheck: jobs.py:create_workspace still uses
+`store.root/workspaces/<job>` plus `git init` (lines75–85), NOT registered worktrees.
+Therefore the mandatory worker policy is updated, but runtime provisioning and
+automatic admission enforcement are not claimed delivered by these edits.
+
 ## 2026-11-03 — Complete-feature workspace instructions
 
 Owner requested existing instructions explicitly require complete features in
@@ -12634,3 +12657,85 @@ Conclusion recorded in the status doc: MEDIA-001 is substrate-blocked — the
 bridge rasterizes RGBA to cells, but `Cargo.lock` has no image decoder and the
 renderer has no OSC-1337/kitty passthrough, so no CLI-only patch can display an
 image.
+
+### 2026-11-03 — wave-67: complete-feature pilots, full server suite green
+
+Canonical SHA: `f1c999f1` (remote `main-v2` verified via `git ls-remote`), tree clean.
+
+**Landings this wave (all pushed and remote-verified).**
+
+- `7285a322` — CP-08 (catalogue-load retains the previous prompt label), CP-11
+  (`RailFacts.location`/`location_width` → idle footer Location slot), CP-42
+  (`set_prompt_turn` pinned to worker start/settle), **THEME-09** (live
+  `ChatPart::Patch` resolves `DiffSurface::Inline` by content width and paints
+  `SplitRow::Pair` through `paint_rows_split`; narrow keeps the numbered gutter),
+  THEME-12 (live `ThemePicker::on_confirm`). Tests:
+  `cp08_catalog_load_retains_previous_prompt_display`,
+  `cp11_location_slot_and_prompt_turn_chrome_drive_the_composer_status_text`,
+  `theme09_wide_terminal_pairs_patch_panes_and_narrow_stays_unified`. CLI 2220/0.
+- `5e1a4409` — test repairs: `session_view` posts the idle transition before
+  `POST /view`; `session_turn_stream_api` expects the PAR-10 `seq`.
+- `4d797846` — `compaction_strategy_resolution` names the **pre-compaction**
+  boundary head (diagnosed with a temporary DIAG print: durable head is the
+  Assistant "second answer", the route appends `MessageRole::Compaction`
+  afterwards, and the fixture expected the notice).
+- `782d275d` — four more stale fixtures account for the durable Compaction
+  notice: `context_checkpoint_selection`, `context_selection_projection`,
+  `session_fallback_compaction`, `session_native_compaction`. Counts became
+  7/13/103/104 respectively; each captures the head **before** the POST.
+- `f1c999f1` — complete-feature delivery instruction across AGENTS/strategy/
+  worker/delivery/convergence/recovery/subagent/TDD docs + scratchpad.
+
+**Full-suite evidence (exact SHA `f1c999f1`).**
+
+- Server: `OC2_TEST_BINARY=$PWD/target/debug/oc2 cargo test -p opencode-rk-server
+  --tests --no-fail-fast -- --test-threads=1` → exit 0, **134/134 binaries ok,
+  0 failures** (`/tmp/server-all4.log`). Without `OC2_TEST_BINARY` the two auth
+  suites (`prov_025_request_auth`, `prov_030_auth_sources`) fail before any
+  assertion because they spawn the real daemon — harness requirement, not a bug.
+- CLI: `cargo test -p opencode-rk-cli --bin oc2 -- --test-threads=1` →
+  **2220 passed, 0 failed**.
+
+**Verdict corrections (source-inspected, recorded in PARITY_STATUS wave-67).**
+
+- `THEME-09` `REAL_GAP` → `LANDED` (`7285a322`).
+- `FFI-10` `ALREADY_CORRECT` → `REAL_GAP`: `safe_renderer.rs:69` is a same-named
+  termios struct, not `terminal_input::TerminalInput`, and no CLI module
+  constructs the parser (the VFFI patch decoded events then discarded them).
+- `PAR-07` `BLOCKED` → `REAL_GAP`: queue/steer (`tui_entry.rs:12558/12601`),
+  submission (`:13693`) and permission reply (`:6212`) traces are live; only
+  form traces are missing, and there is no form dialog surface at all.
+- Consolidated counts reconciled: 144 `ALREADY_CORRECT` + 3 `REAL_GAP` +
+  45 `BLOCKED` + 31 `LANDED` = 223.
+
+**Rejected patches (archived, not landed).** MSGROW (breaks
+`rendered_anchor_survives_*`), LAYOUT (own tests fail), PALSEL (duplicate `prev`,
+`.disabled(flag)` against the zero-arg API — does not compile), DIFF (model with
+no producer), VFFI (debug logging only). All under `/tmp/archive-w66b/`.
+
+**Disk.** 25 wave-66 worker clones archived to `/tmp/archive-w66b/` (52 files,
+240 KB incl. `w66-HARNESS.native_syntax.rs` sha `31dc08ff…`) then deleted;
+31 GiB free, 93 % used. `target/` is 54 GiB and retained.
+
+**Wave-67 delivery model — three complete-feature pilots (owner, not fragments).**
+
+| Pilot | Role | Feature | Workspace | Session |
+| --- | --- | --- | --- | --- |
+| F1 | `terminal-rendering` | DIFF-001: inline 120/121 + permission 120/121 thresholds and `config.diffs.view`; viewer 99/100 explicitly BLOCKED (no CLI diff-viewer route) | `/tmp/fp-DIFF` | `ses_e5e489cfcffeS39h02dnPMlzo2` |
+| F2 | `native-interaction` | DIALOG-06/07/08/09: live select filtering/backspace/paging/empty states + original identity on confirm | `/tmp/fp-DIALOG` | `ses_e5e488190ffesxhUNMFCzd16jm` |
+| F3 | `native-interaction` | SIDE-08: live MCP dialog from the status row over real `GET /api/mcp` + connect/disconnect + refresh | `/tmp/fp-MCP` | `ses_e5e486ccdffeMqfVpYrCKfWYl9` |
+
+All three at base `f1c999f1`, route `9router/luna-free`, shared
+`CARGO_TARGET_DIR=/tmp/pilot-target`, `CARGO_BUILD_JOBS=1`, local commits only,
+deliver `format-patch` + `RESULT.md`. Briefs under
+`<tempdir>/opencode/pilot/F{1,2,3}-*.md`.
+
+F1 scope was corrected mid-flight after source inspection: the transcript Patch
+part is the **Inline** surface (strict `> 120`), not Viewer; `build_permission_diff`
+has the right threshold but zero live callers; `DiffSurface::Viewer` has zero
+non-test callers and there is no diff-viewer page, so that third is reported
+BLOCKED rather than invented.
+
+Nothing is accepted until an independent adversarial review of the exact
+candidate SHA, a clean `git apply` onto current `main-v2`, focused tests, the full
+CLI suite, and (where server code is touched) the server suite.

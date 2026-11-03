@@ -3,7 +3,8 @@
 Status: **ACTIVE**
 
 **2026-11-03 complete-feature direction:** worker isolation must provide a full
-feature checkout, not copied-file fragments for main to reconstruct. Current
+registered persistent-disk Git worktree, not copied-file fragments or temp/RAM
+storage for main to reconstruct. Current
 topology protection still requires authorized controller provisioning; an agent
 cannot create arbitrary refs or bypass hooks. Implement the managed feature
 workspace lifecycle through the existing controller, as specified in

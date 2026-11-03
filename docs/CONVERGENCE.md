@@ -39,7 +39,8 @@ Gates may advance in parallel when path ownership does not overlap. A gate is GR
 ## Scheduling
 
 Use the complete-feature workspace contract in `AGENT_STRATEGY_V2.md` section 2:
-expert owner, full checkout, complete wiring/tests, mergeable revision, owner-fixed
+expert owner, registered disk-backed feature worktree outside `.git`/temp/RAM
+storage, complete wiring/tests, mergeable revision, owner-fixed
 conflicts, prompt merge/push and proven safe retirement. The main orchestrator is
 not a manual assembler of file or JSON fragments. Runtime gaps remain explicit.
 

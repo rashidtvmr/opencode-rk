@@ -13,14 +13,18 @@ worker lease. Ordinary work is admitted from an owner-controlled task manifest.
 
 ## What it runs
 
-**Required next execution-path change (2026-11-03):** retain one complete feature
-workspace across author repairs, deliver mergeable revisions and send conflict/
+**Required next execution-path change (2026-11-03):** provision and retain one
+registered Git feature worktree on persistent disk outside `.git`/temp/RAM storage
+across author repairs, deliver mergeable revisions and send conflict/
 test failures back to its owner. Main must not reconstruct fragment-only handoffs.
 The current implementation below still uses per-job repositories; it does not yet
 provide that persistent lifecycle. `runtime.py:prompt_for` denies worker commits,
 so the controller must checkpoint exact worker changes, not manually rewrite them.
 Do not promise worker branch/commit rights unless explicitly provisioned. See
 `AGENT_STRATEGY_V2.md` section 2 for the complete-feature contract and pilot.
+Do not launch implementation jobs using its detached-clone fallback under the
+new worktree contract. Provisioning/admission must first verify worktree identity,
+ownership and durable backing. This is not permission to bypass protected topology.
 
 ```
 admit task -> independent implementation workspace -> independent review

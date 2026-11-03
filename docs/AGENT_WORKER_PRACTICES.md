@@ -48,12 +48,20 @@ An integration worker that changes behavior is an author, not its own evaluator.
 
 ## Mandatory dispatch template
 
+Implementation assignments require a registered, controller-provisioned Git
+worktree on persistent disk. No private-folder/temporary-clone/RAM-disk fallback.
+Source, candidate revisions, retained handoffs/evidence and release artifacts must
+not depend on `/tmp`, `/private/tmp`, `$TMPDIR` or OS temp/cache storage. Worktree,
+evidence and build roots must be explicitly granted and outside canonical `.git`.
+Disposable test fixtures may be temporary; retain required results on disk first.
+
 ```text
 Role: <catalog role> — expert in <specific subsystem>
 Goal: <one end-to-end behavior or coherent subsystem responsibility>
 Success/failure: <observable journeys, negative cases, exact required checks>
 Base: <SHA; absolute canonical and full feature-workspace paths>
-Workspace: <controller-provisioned checkout/worktree; branch/ref owner; lease>
+Workspace: <registered Git worktree; persistent physical path; branch/ref owner; lease>
+Storage proof: <Git inventory, resolved path/backing, exact HEAD, durable evidence root>
 Git authority: <explicit worker commit grant OR controller exact-byte checkpoint>
 Reference: <selected upstream SHA, absolute paths and entry symbols>
 Production chain: <input/API -> state -> effect -> output; existing Rust callers>
@@ -70,7 +78,9 @@ Read docs/AGENT_WORKER_PRACTICES.md and applicable scoped rules.
 Implementation instruction: "Read the pinned source directly and implement the
 behavior in the existing Rust application. Include production wiring and tests.
 Do not return only a research report or plan unless a named blocker prevents
-implementation. Work in the full supplied source tree; do not return copied
+implementation. Work in the full registered disk-backed feature worktree; if
+provisioning is missing, request that correction rather than using temp/RAM storage.
+Do not return copied
 files, .json.part code fragments or instructions for main to wire the feature.
 Deliver a candidate revision (or exact changes for controller checkpointing),
 test evidence and unresolved issues. Keep ownership through review, failed tests
