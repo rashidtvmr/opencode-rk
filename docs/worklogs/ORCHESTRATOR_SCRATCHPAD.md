@@ -12245,3 +12245,31 @@ compiles/tests/lands.
   (or `<GROUP>.blocked.json`). Orchestrator applies → `cargo check` → focused test
   → full CLI suite (single-threaded) → commit → push → verify remote.
 - Retry rule: failed workers retried 2–3× on a working provider before ignoring.
+
+### Wave-61 outcome so far — key finding: split into SINGLE items
+
+- **LANDED `da7d1a0b` (PAR-10)**: server now tags each `assistant_delta`
+  NDJSON frame with a monotonic `seq` (`TurnStreamState.delta_seq`); CLI
+  `native_turn::Event::Delta { text, seq }` surfaces it and the TUI consumer
+  drops non-increasing seq (`tui_entry.rs` `last_delta_seq`). 2 focused tests +
+  full CLI suite 2186/0. Pushed; remote `main-v2` = `da7d1a0b`.
+- **THEME-14 confirmed BLOCKED** (`G20.blocked.json`): the four syntax-style
+  dylib exports exist but have no authorized ABI declaration; calling them would
+  cross the authorization boundary.
+- **CRITICAL FINDING — group size is the failure mode.** Every multi-item,
+  multi-crate group (G1–G15) hit the agent step cap during reconnaissance and
+  produced NO artifact. The single-item, fully-prescriptive G16 (PAR-10)
+  completed and landed. G4 and G8 both independently recommended splitting into
+  single-item vertical chains.
+  - **New dispatch rule: ONE item (or one bounded vertical slice) per worker,
+    prescriptive prompt naming exact file:line seams, ~20 tool-call time-box,
+    write the artifact after every edit.**
+- Wave-62 (single-item workers) dispatched: MSG-005, MSG-008, MSG-009, SIDE-03,
+  SIDE-04, TAB-06, TAB-10, DIFF-001, PAR-09, TOOL-011, DIALOG-02, STATE-002,
+  FORM-001, MEDIA-001, THEME-13, DIALOG-06..09, plus retries of G1/G2/G3/G5/G6/
+  G7/G10/G12/G15.
+- G8 map (DIALOG-12..19): only **DIALOG-12** (favorites/variant producer in
+  `native_setup.rs` + live `tui_entry.rs` consumer) is landable without new
+  server routes; DIALOG-13/14/17 are gated on an absent worktree/open picker
+  host + route; DIALOG-16 needs an experiments config source; DIALOG-18/19 need
+  live open routes.
