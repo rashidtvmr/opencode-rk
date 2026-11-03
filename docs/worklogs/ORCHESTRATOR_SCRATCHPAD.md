@@ -12399,3 +12399,44 @@ Counts reconciled: 145 `ALREADY_CORRECT` / 1 `REAL_GAP` (MEDIA-001) / 49
 `BLOCKED` / 28 `LANDED` = 223.
 
 Canonical SHA: `ed0547bb` (remote `main-v2` verified via `git ls-remote`).
+
+### Wave-63 continued — SIDE-03 cost producer (2026-11-03)
+
+- **SIDE-03 (cost producer half) — LANDED `b5ec63c7`** (pushed; remote verified).
+  Worker `9router-vyce-deepseek-v4.1-free-combined`
+  (`ses_e5fa94313ffeVlzpsPa7xtoc6D`) returned a clean `git apply -p1` patch
+  (`/private/var/folders/.../wave63/SIDE-03.patch`, sha256 `e2fc469c…dd66c64`;
+  2 files, +89/−17). Orchestrator applied, compiled, ran the focused test
+  (`catalogue_parses_first_cost_row_and_prices_usage`) and the full CLI suite
+  (**2212/0**), committed and pushed.
+  - `native_setup::ModelCost { input, output }` (USD per 1M tokens) parsed from
+    the catalogue entry's first `cost` row (`entry["cost"][0]`, upstream
+    `ModelInfo.cost`); `price(input,output) = (input*in + output*out)/1e6`,
+    `None` unless finite and positive. `Model` gains `cost: Option<ModelCost>`
+    (drops `Eq` for the f64 field); `free` derivation unchanged.
+  - Live `native_turn::Event::Usage` arm now calls
+    `view.set_cost(selected.cost.price(input,output))` — first live `set_cost`
+    caller, so the sidebar `$X.XX spent` row renders from real pricing.
+  - **SIDE-03 remains `BLOCKED`** (compound item): the remaining half is a
+    history-load `lastAssistantWithUsage` selector honouring the revert boundary
+    and the last completed compaction, with the model looked up from the message
+    (`packages/client/src/solid/usage.ts:8-21`, `util/session.ts:52-63`). The
+    compaction-boundary sub-case additionally depends on STATE-002.
+
+- **STATE-002 worker** (`9router-river-glm-5-3-flash`,
+  `ses_e5fa94311ffe1bxb8nIYyfyDr3`) hit the step cap with **no artifact** but
+  returned a complete, verified edit plan (contracts `MessageRole::Compaction`;
+  `writer_v2`/`sessions` role codec 4; `history_item_to_responses_item` +
+  `row_actions` exhaustive arms; `compact_session` appends + publishes a
+  compaction message; `list_messages` decodes a typed `compaction` part; CLI
+  `ChatRole`/`role_of`/render arms). No canonical change. Re-dispatch or build
+  from the plan.
+
+- **MSG-005 worker** (`9router-luna-free`,
+  `ses_e5fa94310ffemx02s0gdmsbvyp`) still running.
+
+Counts unchanged: 145 `ALREADY_CORRECT` / 1 `REAL_GAP` (MEDIA-001) / 49
+`BLOCKED` / 28 `LANDED` = 223 (SIDE-03 is a partial landing within a `BLOCKED`
+item).
+
+Canonical SHA: `b5ec63c7` (remote `main-v2` verified via `git ls-remote`).
