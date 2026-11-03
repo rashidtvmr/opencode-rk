@@ -11844,3 +11844,23 @@ tab dispatch through the resolved chord table. No config yields exactly
 
 PARITY_STATUS updated: 144 `ALREADY_CORRECT` / 6 `REAL_GAP` / 61 `BLOCKED` /
 12 `LANDED` = 223. Remote `main-v2` == `ae56897f`.
+
+### Wave-51 landing — DIALOG-10 (2026-11-03)
+
+`DIALOG-10` **LANDED** (`a52c222a`, pushed to remote `main-v2`). Implemented
+directly in the orchestrator (the DIALOG-A worker returned nothing).
+
+What changed: the live session rename painted an ad-hoc rectangle with its own
+`String` buffer and never used the tested `DialogPrompt`. Adds
+`DialogView::open_prompt` (kind `Prompt`, seeded from
+`native_palette::select::PromptState`) plus `prompt_value`/`push`/`backspace`/
+`submit`/`escape`/`set_busy`/`set_message` forwarders, renders the value (or the
+busy line) and the upstream footer `Enter: save · Esc: cancel`, and routes the
+live rename through it (`MenuAction::Rename` opens the prompt; the key block
+edits/submits; the settlement closes it or sets busy/inline-error). Escape and
+submit are suppressed while busy (`dialog-prompt.tsx:43-46,93-100,168-170`). The
+ad-hoc `PaintCtx.rename_dialog` paint path is removed. Focused test
+`prompt_dialog_edits_value_and_reports_busy_state`. Full CLI suite 2177/0 green.
+
+PARITY_STATUS updated: 144 `ALREADY_CORRECT` / 5 `REAL_GAP` / 61 `BLOCKED` /
+13 `LANDED` = 223. Remote `main-v2` == `a52c222a`.

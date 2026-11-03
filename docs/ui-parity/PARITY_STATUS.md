@@ -209,7 +209,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | DIALOG-07 | `REAL_GAP` | `row_footer()` (`native_palette.rs:1136`, test `:3832`); same seam |
 | DIALOG-08 | `REAL_GAP` | `page_down/page_up` (`native_palette.rs:1598`, test `:3442`); same seam |
 | DIALOG-09 | `REAL_GAP` | `SelectExperiment` (`native_palette.rs:1151`, test `:3727`); same seam |
-| DIALOG-10 | `REAL_GAP` | `PromptState` (`native_palette.rs:1922`, test `:3922`); same seam |
+| DIALOG-10 | `LANDED` | `a52c222a` — live session rename drives the `DialogPrompt` (`DialogView::open_prompt` + `prompt_*` forwarders over `native_palette::select::PromptState`); ad-hoc paint path removed. |
 | MSG-001 | `REAL_GAP` | Row model `reduce_session_rows` (`native_message_rows.rs:242,265,150,2088,960`, tests `:2148-2232`) never called by the live painter (`native_view_chat.rs:2505/3340` flatten `ChatMessage.parts`; grouping only by `starts_new_group` `:1294`) |
 
 **Additional wave-44 verdicts (seventh batch):**
@@ -244,12 +244,12 @@ the wave-44 verdict supersedes it.
 | Verdict | Count |
 | --- | --- |
 | `ALREADY_CORRECT` | 144 |
-| `REAL_GAP` | 6 |
+| `REAL_GAP` | 5 |
 | `BLOCKED` | 61 |
-| `LANDED` (wave-45..51) | 12 |
+| `LANDED` (wave-45..51) | 13 |
 | **Total** | **223** |
 
-### Landed fixes (wave-45..49) — moved out of `REAL_GAP`/`BLOCKED`
+### Landed fixes (wave-45..51) — moved out of `REAL_GAP`/`BLOCKED`
 
 | Item | Commit | What changed |
 | --- | --- | --- |
@@ -265,6 +265,7 @@ the wave-44 verdict supersedes it.
 | DIALOG-04 | `d137313d` | The ordered modal routes (`native_modal_layer.rs:489-600`) had no live consumer: the live loop quit the app on Ctrl-C even with a dialog open, and a backdrop click did nothing. Ctrl-C (0x03) now routes through the same close/reject path as Escape while the dialog stack owns input (`dialog_consumes_byte`); Ctrl-D (not bound in the modal layer) keeps its byte-exit meaning. A left-button release outside the panel rect closes the top dialog (`ui/dialog.tsx:54-60`); a pending decision is never abandoned. Focused test `dialog04_ctrl_c_closes_dialog_but_ctrl_d_keeps_byte_exit` + full CLI suite (2174/0) green. |
 | PAR-04 | `669036cd` | Harness-side (Python): the Rust capture model already serialized `Frame.hit_targets` (`native_capture.rs:142`, canonical `hit={x},{y},{action}`) but the renderer transport dropped the key and the comparator had no member. Adds the key to every renderer output, a canonical `(y,x,action)`-sorted comparator member gated on the fixture's `compare` list, validation, README, selftest coverage and the matching empty-list goldens. The PTY channel exposes no pointer events, so the live `oc2-pty` adapter emits an empty list; the member is exercised by the deterministic static renderer. `tools/ui_parity/selftest.py` 22 checks PASS. |
 | TAB-23 | `ae56897f` | The live `session.tab.*` dispatch was a hardcoded `InputEvent → TabCommand` match and the config `keybinds` root key (`config/index.tsx:78` `Schema.optional(TuiKeybind.KeybindOverrides)`) was never read. Adds `UiPreferences.keybinds` (raw JSON, like `cursor`), a `native_navigation::tab_keybinds` resolver (defaults + per-command replace, `false`/`"none"` disable, `KeyStroke` objects, both command-name spellings, unknown keys ignored, `super`/`hyper` dropped), and drives the live tab dispatch through the resolved chord table. No config yields exactly `DEFAULT_TAB_KEYBINDS`. Focused tests + full CLI suite (2176/0) green. |
+| DIALOG-10 | `a52c222a` | The live session rename painted an ad-hoc rectangle with its own `String` buffer and never used the tested `DialogPrompt`. Adds `DialogView::open_prompt` (kind `Prompt`, seeded from `native_palette::select::PromptState`) plus `prompt_value`/`push`/`backspace`/`submit`/`escape`/`set_busy`/`set_message` forwarders, renders the value (or the busy line) and the upstream footer `Enter: save · Esc: cancel`, and routes the live rename through it (`MenuAction::Rename` opens the prompt; the key block edits/submits; the settlement closes it or sets busy/inline-error). Escape/submit are suppressed while busy (`dialog-prompt.tsx:43-46,93-100,168-170`). The ad-hoc `PaintCtx.rename_dialog` paint path is removed. Focused test + full CLI suite (2177/0) green. |
 
 ### `REAL_GAP` — faithful model + focused test exist, no live consumer (6)
 
@@ -402,12 +403,12 @@ field is absent).
 ## Honest completion statement
 
 Of the 223 checklist obligations, **144 are `ALREADY_CORRECT`** (a faithful
-implementation, a focused test, and a traced live consumer), **6 are
+implementation, a focused test, and a traced live consumer), **5 are
 `REAL_GAP`** (model + test exist but the live TUI does not consume them),
 **61 are `BLOCKED`** (a producer/transport/contract field does not exist), and
-**12 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
+**13 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
 `CP-05`, `CP-06` in wave-46; `MSG-007` in wave-47; `SIDE-08`, `THEME-12`,
-`DIALOG-04` in wave-48; `PAR-04` in wave-49; `TAB-23` in wave-51).
+`DIALOG-04` in wave-48; `PAR-04` in wave-49; `TAB-23`, `DIALOG-10` in wave-51).
 
 The remaining work is therefore **not** more UI drawing:
 
@@ -533,8 +534,8 @@ Every other item re-confirmed as before:
 - `DIALOG-12..20` — toast (`DIALOG-20`) is the one bounded target (complete
   tested producer, only a live construction + paint call missing); the rest need
   live driving-fact producers. `DIALOG-06..10` — `DIALOG-10` (Prompt / session
-  rename) is bounded; `DIALOG-06..09` (Select) are blocked by the pinned SIDE-08
-  `DialogMcp` consumer.
+  rename) **LANDED** (`a52c222a`); `DIALOG-06..09` (Select) are blocked by the
+  pinned SIDE-08 `DialogMcp` consumer.
 
 This document is a status map, not acceptance. No item is marked
 runtime-proven; captured styled-cell/cursor goldens were not produced.
