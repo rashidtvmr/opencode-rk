@@ -1,6 +1,6 @@
 # OpenCode V2 UI parity — consolidated status
 
-- **Canonical line:** `main-v2` @ `09974664` (remote verified)
+- **Canonical line:** `main-v2` @ `67f97876` (remote verified)
 - **Upstream oracle:** `/Users/mymac/Projects/tmp/opencode` @ `450e7b92412c780a7b5a75226bb8d49aaca24e22`
 - **Checklist:** `docs/ui-parity/opencode-ui-parity-kit/checklist.json` (223 items)
 - **Method:** source inspection of the live Rust path (implementation + a
@@ -277,9 +277,9 @@ the wave-44 verdict supersedes it.
 | Verdict | Count |
 | --- | --- |
 | `ALREADY_CORRECT` | 144 |
-| `REAL_GAP` | 2 |
+| `REAL_GAP` | 1 |
 | `BLOCKED` | 51 |
-| `LANDED` (wave-45..62) | 26 |
+| `LANDED` (wave-45..63) | 27 |
 | **Total** | **223** |
 
 ### Landed fixes (wave-45..56) — moved out of `REAL_GAP`/`BLOCKED`
@@ -324,10 +324,11 @@ full single-threaded CLI suite, and was pushed + remote-verified.
 | FFI-01 | `019ecafa` | `native_loop` probes the pinned OpenTUI artifact identity before `NativeRenderer::create`; fail-closed on drift, proceeds when unverifiable. 3 tests; suite 2197/0. |
 | DIALOG-12 | `2c858980` | Model picker reads persisted favorites and hoists them above recents; **ctrl+f** toggles favorite for the focused row; committing a model that advertises variants opens the **flat variant picker** (rendered + keyed live: Up/Down/Enter/Escape, text-input suppressed); `Model.variants` parsed from the catalogue. 5 new tests; suite **2202/0**. |
 | MSG-009 | `09974664` | Server `stage_session_revert` computes the real boundary-onward user-message `count` and `files` (typed tool history + unified-diff line counts), adding `SessionRevert.count`; the TUI now projects `SessionSummary.revert` into a `RevertCard` and splices its rows into the transcript foot before the dock/queue, driven from the live `LiveSnapshot`. 2 CLI + 1 server + contracts/storage tests; suite **2204/0**. |
+| DIALOG-02 | `67f97876` | The live `DialogView::layout` now reads the tested `native_palette::dialog` helpers: select-row left pad from `row_padding`, and the body bottom padding from `body_bottom_padding` (new `OpenDialog.footer_gap`, `Some(2)` for the live `dialog-prompt` caller). Under new designs a `footerGap=2` footer adds one body padding row; legacy unchanged. 1 new test; suite **2205/0**. |
 
-### `REAL_GAP` — faithful model + focused test exist, no live consumer (2)
+### `REAL_GAP` — faithful model + focused test exist, no live consumer (1)
 
-`MEDIA-001, DIALOG-02`.
+`MEDIA-001`.
 
 Per-ID seams are recorded in the wave-44 batch tables above and in
 `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave44/<ID>.json`.

@@ -12329,9 +12329,36 @@ Per the "no dead helper/field" rule, these worker artifacts were reviewed and
 
 ### Next actions
 
-1. Build the MSG-009 TUI consumer (the seam above) so the server slice lands with
-   a live reader.
-2. Build server-side producers for the remaining BLOCKED items (SIDE-03 cost,
+1. Build server-side producers for the remaining BLOCKED items (SIDE-03 cost,
    MSG-008/010 timing, STATE-002 compaction part, MSG-005 files/skills) — these
    are producer work, not UI wiring.
-3. Update `docs/ui-parity/PARITY_STATUS.md` verdicts for the wave-62 landings.
+2. Update `docs/ui-parity/PARITY_STATUS.md` verdicts for each landing.
+
+### Wave-63 (base `bf5226ed`) — single-item workers + orchestrator build (2026-11-03)
+
+Dispatched three single-item background workers (one item each, prescriptive
+briefs in `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave63/`):
+
+- **TOOL-011** (`/tmp/w63-tool011`, `vyce-deepseek-v41`) — **completed with NO
+  artifact** (empty clone diff; step-cap failure). Needs retry.
+- **MSG-008** (`/tmp/w63-msg008`, `9router-vyce-deepseek-v4.1-free-combined`) —
+  **completed with NO artifact** (empty clone diff; step-cap failure). The 10-leg
+  chain is too large for one worker step budget.
+- **PAR-19** (`/tmp/w63-par19`, `vyce-deepseek-v41`) — no artifact yet.
+
+**Orchestrator-built landing:**
+
+- **DIALOG-02** — **LANDED `67f97876`**. The live `DialogView::layout` now reads
+  the tested `native_palette::dialog` helpers instead of a parallel re-derivation:
+  the select-row left pad comes from `dialog::row_padding(marked, new_designs)`
+  (`dialog-select.tsx:915-920`) and the body bottom padding from
+  `dialog::body_bottom_padding(new_designs, has_footer, footer_gap)`
+  (`dialog.tsx:159`). Adds `OpenDialog.footer_gap` (`None` = upstream default 1;
+  the live `open_prompt` caller passes `Some(2)` per `dialog-prompt.tsx:133`).
+  Under new designs a `footerGap=2` footer adds exactly one body padding row;
+  legacy is unchanged (the helper returns 0). New test
+  `dialog02_prompt_footer_gap_adds_body_padding_under_new_designs`; CLI suite
+  **2205/0**. DIALOG-02 moves `REAL_GAP` -> `LANDED`.
+
+Counts reconciled: 144 `ALREADY_CORRECT` / 1 `REAL_GAP` (MEDIA-001) / 51
+`BLOCKED` / 27 `LANDED` = 223.
