@@ -1,6 +1,6 @@
 # OpenCode V2 UI parity — consolidated status
 
-- **Canonical line:** `main-v2` @ `b5ec63c7` (remote verified)
+- **Canonical line:** `main-v2` @ `5e3d797b` (remote verified)
 - **Upstream oracle:** `/Users/mymac/Projects/tmp/opencode` @ `450e7b92412c780a7b5a75226bb8d49aaca24e22`
 - **Checklist:** `docs/ui-parity/opencode-ui-parity-kit/checklist.json` (223 items)
 - **Method:** source inspection of the live Rust path (implementation + a
@@ -101,7 +101,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | THEME-10 | `ALREADY_CORRECT` | `theme_runtime.rs:1592,1665,1754,1768`; tests `:4167-4241`; live `tui_entry.rs:6744,11425` |
 | TAB-21 | `BLOCKED` | `ViewAcknowledgement` (`native_navigation.rs:1133`, test `:2067`) zero live callers; `tui_entry.rs:8689-8694` defers driver; no idle/viewed watermark into CLI (`LiveSnapshot` `tui_entry.rs:573`; `SessionSummary` `contracts/src/lib.rs:202-213`) |
 | TAB-23 | `LANDED` | `ae56897f` — live `session.tab.*` dispatch now resolves through the config `keybinds` chord table (`native_navigation::tab_keybinds`); `UiPreferences.keybinds` (raw JSON) + focused tests. |
-| SIDE-03 | `BLOCKED` (cost producer half LANDED `b5ec63c7`) | Renderer+test correct (`native_sidebar.rs:230-287`); live `set_usage_classes` (SIDE-04 `0d4f26a7`) and `set_cost` (`b5ec63c7`) now wired into the live `Event::Usage` arm. Remaining: no history-load `lastAssistantWithUsage` selector — the sidebar usage/cost is only set during a live turn, not when an existing session is opened; the revert boundary (`session.revert.messageID`, unknown boundary ⇒ absent) and the last completed compaction boundary (`lastAssistantWithUsage`, `packages/client/src/solid/usage.ts:8-21`) do not reach the view, and the model is looked up from the selected UI model rather than the message's own model (`util/session.ts:52-63`) |
+| SIDE-03 | `LANDED` (`5e3d797b`) | Renderer+test correct (`native_sidebar.rs:230-287`); live `set_usage_classes` (SIDE-04 `0d4f26a7`) and `set_cost` (`b5ec63c7`) wired into the live `Event::Usage` arm. History-load `lastAssistantWithUsage` selector landed (`5e3d797b`): `native_chat_projection::last_assistant_usage` honours the staged revert boundary (unknown ⇒ absent) and the last completed compaction, and the per-frame publish uses the message's OWN model `context_window` (missing limit ⇒ tokens without percent), never the selected UI model. A live-turn guard keeps `Event::Usage` authoritative for its binding. |
 | SIDE-04 | `REAL_GAP` | Five-class arithmetic `native_sidebar.rs:205-287` (test `:1608`) dead on live path; no last-eligible-assistant selector; limit joined only from selected UI model (`tui_entry.rs:8112`); wire `input_tokens` is inclusive of cached (`server/src/auto_compaction.rs:102`) so disjoint classes need a `nonCachedInput` producer |
 | SIDE-08 | `REAL_GAP` | No `DialogKind::Mcp` (`native_view_dialogs.rs:129`); row click toggles via PUT (`tui_entry.rs:10050`), never opens dialog. Upstream `mcp.tsx:56-60` |
 | SIDE-14 | `LANDED` (`d5611712`) | Footer hit rect + hover routing + local `DialogSelect` menu + CopyPath/OpenFolder executors wired live; `Workspaces` unoffered (no live move route). See the landed-fixes table. |
@@ -276,10 +276,10 @@ the wave-44 verdict supersedes it.
 
 | Verdict | Count |
 | --- | --- |
-| `ALREADY_CORRECT` | 144 |
+| `ALREADY_CORRECT` | 145 |
 | `REAL_GAP` | 1 |
-| `BLOCKED` | 51 |
-| `LANDED` (wave-45..63) | 27 |
+| `BLOCKED` | 48 |
+| `LANDED` (wave-45..64) | 29 |
 | **Total** | **223** |
 
 ### Landed fixes (wave-45..56) — moved out of `REAL_GAP`/`BLOCKED`
@@ -326,7 +326,8 @@ full single-threaded CLI suite, and was pushed + remote-verified.
 | MSG-009 | `09974664` | Server `stage_session_revert` computes the real boundary-onward user-message `count` and `files` (typed tool history + unified-diff line counts), adding `SessionRevert.count`; the TUI now projects `SessionSummary.revert` into a `RevertCard` and splices its rows into the transcript foot before the dock/queue, driven from the live `LiveSnapshot`. 2 CLI + 1 server + contracts/storage tests; suite **2204/0**. |
 | DIALOG-02 | `67f97876` | The live `DialogView::layout` now reads the tested `native_palette::dialog` helpers: select-row left pad from `row_padding`, and the body bottom padding from `body_bottom_padding` (new `OpenDialog.footer_gap`, `Some(2)` for the live `dialog-prompt` caller). Under new designs a `footerGap=2` footer adds one body padding row; legacy unchanged. 1 new test; suite **2205/0**. |
 | MSG-008 | `6a49151f` | **Producer chain built end to end.** `MessageExecution.streamed_ms` (contracts) + `message_execution.streamed_ms` column with idempotent `pragma_table_info` ALTER (storage) + `MessageExecutionInput.streamed_ms` (sessions); server `StreamTiming` accumulates each provider round's `first_delta − round_start` (upstream `time.streamed − time.created`, `rows.ts:451-453`), excludes tool time, and returns `None` when **any** round never streamed (`rows.ts:453-454`); published as `streamed_ms` on the `assistant_message` frame and stored `execution_json`. CLI `AssistantFacts.streamed_ms` + `tokens_per_second()`; footer ` · {tps:.1} tok/s` span gated on `session.tps` (`config/index.tsx:328` default true, consumed `index.tsx:2061`); `ChatView` threads `tps_enabled` through both render paths; `tui_entry` reads `session_tps`. 4 server + 2 facts + 1 footer + 3 prefs tests + storage/sessions round-trip; CLI **2211/0**, server lib **309/0**. |
-| SIDE-03 (cost producer half) | `b5ec63c7` | `native_setup::ModelCost { input, output }` (USD per 1M tokens) parsed from the catalogue entry's first `cost` row (`entry["cost"][0]`, upstream `ModelInfo.cost`); `ModelCost::price(input,output) = (input*in + output*out)/1e6`, `None` unless finite and positive. `Model` gains `cost: Option<ModelCost>` (drops `Eq` for the f64 field). The live `native_turn::Event::Usage` arm now calls `view.set_cost(selected.cost.price(input,output))` — the first live `set_cost` caller, so the sidebar `$X.XX spent` row (`context.tsx:14/36-38`) renders from real pricing. 1 focused test (parse + price + zero guards); CLI **2212/0**. Remaining SIDE-03 half: a history-load `lastAssistantWithUsage` selector honouring the revert boundary and the last completed compaction, with the model looked up from the message (see the `BLOCKED` entry). |
+| SIDE-03 (cost producer half) | `b5ec63c7` | `native_setup::ModelCost { input, output }` (USD per 1M tokens) parsed from the catalogue entry's first `cost` row (`entry["cost"][0]`, upstream `ModelInfo.cost`); `ModelCost::price(input,output) = (input*in + output*out)/1e6`, `None` unless finite and positive. `Model` gains `cost: Option<ModelCost>` (drops `Eq` for the f64 field). The live `native_turn::Event::Usage` arm now calls `view.set_cost(selected.cost.price(input,output))` — the first live `set_cost` caller, so the sidebar `$X.XX spent` row (`context.tsx:14/36-38`) renders from real pricing. 1 focused test (parse + price + zero guards); CLI **2212/0**. |
+| SIDE-03 (history-load half) | `5e3d797b` | Completes SIDE-03. `native_chat_projection::SessionUsage` + `last_assistant_usage(records, boundary)` mirrors upstream `lastAssistantWithUsage` (`packages/client/src/solid/usage.ts:8-21`) and `contextUsage` (`util/session.ts:44-63`): an unknown revert boundary yields absent usage (never stale tokens); records at/after the boundary are excluded; the last completed compaction hides everything before it; the model is the message's own `execution.provider_id/model_id`. `LiveSnapshot.session_revert_boundary` carries `revert.messageID`; a `usage_live_generation` guard keeps a live `Event::Usage` value authoritative for its binding; the per-frame publish otherwise sets the five usage classes and the message model's `context_window` (missing limit ⇒ tokens without percent, never the selected UI model). Test `last_assistant_usage_honours_revert_and_compaction_boundaries`; CLI **2213/0**. |
 
 ### `REAL_GAP` — faithful model + focused test exist, no live consumer (1)
 
@@ -347,7 +348,7 @@ Selected high-value seams:
 ### `BLOCKED` — needs a producer/transport/contract field that does not exist (49)
 
 `PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-19,
-TAB-06, TAB-21, SIDE-03, SIDE-05,
+TAB-06, TAB-21, SIDE-05,
 MSG-001, MSG-002, MSG-003, MSG-005,
 TOOL-006, TOOL-011, DIFF-001, DIFF-003, FFI-02, FFI-03, FFI-04, FFI-06,
 FFI-07, FFI-08, FFI-11, STATE-002, THEME-08, THEME-09, THEME-13,
@@ -378,7 +379,7 @@ DIALOG-19, LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009`.
 
 | Item | Exact missing seam |
 | --- | --- |
-| SIDE-03 | Live `set_usage` (`native_view_status.rs:1146`) sums `input+output` only; `set_usage_classes` (`:1168`) and `set_cost` (`:1160`) have zero non-test callers. No `lastAssistantWithUsage` selector, no revert boundary reaching the view, no cost producer, and the wire `input_tokens` is inclusive of cached (`server/src/auto_compaction.rs:102`), so disjoint classes need a `nonCachedInput` producer. **Cost producer + classes now landed** (`b5ec63c7`/`0d4f26a7`); the remaining seam is the history-load `lastAssistantWithUsage` selector (revert + completed-compaction boundary, per-message model lookup). |
+| SIDE-04 | Live `set_usage` (`native_view_status.rs:1146`) sums `input+output` only; `set_usage_classes` (`:1168`) and `set_cost` (`:1160`) have zero non-test callers. No `lastAssistantWithUsage` selector, no revert boundary reaching the view, no cost producer, and the wire `input_tokens` is inclusive of cached (`server/src/auto_compaction.rs:102`), so disjoint classes need a `nonCachedInput` producer. **All landed**: classes (`0d4f26a7`), cost producer (`b5ec63c7`), and the history-load `lastAssistantWithUsage` selector with the message's own model limit (`5e3d797b`). |
 | SIDE-05 | `set_limit` (`native_view_status.rs:1175`) test-only; no usage-limits pipeline reaches the CLI. |
 | SIDE-10 | `todo_http.rs:31-38` returns the stored `session_todos` table verbatim; `stage_session_revert` (`server/src/lib.rs:1193-1209`) stores the boundary but never recomputes the latest-completed-`todowrite` list sliced at the revert boundary (upstream `util/todo.ts:32-43`). |
 | STATE-002 | Live transcript renders compaction as a placeholder (`native_view_chat.rs:2689`); projection (`native_chat_projection.rs:392`) drops status/summary/provider-native/tokens; rich `CompactionState` (`native_timeline.rs:382`) has zero consumers; `compact_session` (`server/src/lib.rs:1668`) never persists/pushes a compaction part. |
@@ -483,14 +484,14 @@ field is absent).
 Of the 223 checklist obligations, **145 are `ALREADY_CORRECT`** (a faithful
 implementation, a focused test, and a traced live consumer), **1 is
 `REAL_GAP`** (model + test exist but the live TUI does not consume them),
-**49 are `BLOCKED`** (a producer/transport/contract field does not exist), and
-**28 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
+**48 are `BLOCKED`** (a producer/transport/contract field does not exist), and
+**29 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
 `CP-05`, `CP-06` in wave-46; `MSG-007` in wave-47; `SIDE-08`, `THEME-12`,
 `DIALOG-04` in wave-48; `PAR-04` in wave-49; `TAB-23`, `DIALOG-10`,
 `DIALOG-20` (toast half) in wave-51; `PAR-16`, `PAR-22` in wave-53;
 `TAB-04` in wave-56; `SIDE-14` in wave-57; `PAR-10`, `FORM-001` (sub-behavior 1),
 `TAB-10`, `SIDE-04`, `SIDE-10`, `FFI-01`, `DIALOG-12`, `MSG-009`, `DIALOG-02`,
-`MSG-008` in wave-61/62/63).
+`MSG-008` in wave-61/62/63; `SIDE-03` in wave-64).
 
 The remaining work is therefore **not** more UI drawing:
 

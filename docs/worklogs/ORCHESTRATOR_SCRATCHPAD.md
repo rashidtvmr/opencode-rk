@@ -12440,3 +12440,49 @@ Counts unchanged: 145 `ALREADY_CORRECT` / 1 `REAL_GAP` (MEDIA-001) / 49
 item).
 
 Canonical SHA: `b5ec63c7` (remote `main-v2` verified via `git ls-remote`).
+
+### Wave-64 — SIDE-03 completed; worker outcomes (2026-11-03)
+
+- **SIDE-03 (history-load half) — LANDED `5e3d797b`** (pushed; remote verified).
+  Orchestrator build (no worker artifact). Completes the compound SIDE-03 item:
+  - `native_chat_projection::SessionUsage` + `last_assistant_usage(records,
+    boundary)` mirror upstream `lastAssistantWithUsage`
+    (`packages/client/src/solid/usage.ts:8-21`) + `contextUsage`
+    (`util/session.ts:44-63`): unknown revert boundary ⇒ absent usage; records
+    at/after the boundary excluded; last completed compaction hides everything
+    before it; model = the message's own `execution.provider_id/model_id`.
+  - `tui_entry`: `LiveSnapshot.session_revert_boundary` from
+    `target["revert"]["messageID"]`; `usage_live_generation` guard keeps a live
+    `Event::Usage` value authoritative for its binding; the per-frame publish
+    otherwise sets the five usage classes + the message model's `context_window`
+    (missing limit ⇒ tokens without percent, never the selected UI model).
+  - Test `last_assistant_usage_honours_revert_and_compaction_boundaries`;
+    CLI **2213/0**.
+  - **SIDE-03 → `LANDED`.** Counts: 145 `ALREADY_CORRECT` / 1 `REAL_GAP` /
+    48 `BLOCKED` / 29 `LANDED` = 223.
+
+- **Wave-64 worker outcomes** (all step-cap/error, no landable full artifact):
+  - **STATE-002** (`9router-vyce-deepseek-v4.1-free-combined`,
+    `ses_e5f9c7d88ffdFARYfvlWjYMVU2`) — still running at checkpoint; prior
+    wave-63 attempt returned a complete verified edit plan (contracts
+    `MessageRole::Compaction`; role codec 4; `compact_session` appends +
+    publishes; `list_messages` typed `compaction` part; CLI `ChatRole`/render
+    arms). Build from the plan if the worker does not land it.
+  - **MSG-005** (`9router-vyce-deepseek-v4.1-free-combined`,
+    `ses_e5f9c7d88ffcLvKrxqMHMqbK47`) — "completed without a text response",
+    no artifact.
+  - **TOOL-011** (`9router-vyce-deepseek-v4.1-free-combined`,
+    `ses_e5f9c4828ffefLbHKWIa5yvDQm`) — "Invalid request", no artifact.
+  - **CP-09** (`9router-river-glm-5-3-flash`,
+    `ses_e5f9c4827ffe2vtfBPL6VTUt2E`) — **partial**: server `mention_agents`
+    emits a validated hex `color`; CLI `native_prompt_pane::from_hex_rgba` +
+    `agent_facts` parse it (4 focused tests). Remaining seam: no live
+    composer-agent producer (`set_composer_agent` has zero live callers) and the
+    theme categorical scales are not resident in the CLI view. Held, not landed.
+  - **TAB-21** (`9router-luna-free`, `ses_e5f9c1122ffeTRFqiUSAjUmRjw`) —
+    **partial**: storage `idle_at` + migration + `set_session_idle`, contracts
+    `SessionSummary.idle_at`, sessions `mark_idle`. Remaining: wire `mark_idle`
+    into both server completion paths + the CLI focus-aware `ViewAcknowledgement`
+    driver + POST. Held, not landed.
+
+Canonical SHA: `5e3d797b` (remote `main-v2` verified via `git ls-remote`).
