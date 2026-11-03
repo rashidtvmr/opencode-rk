@@ -12034,3 +12034,31 @@ workers to *implement* the missing producers, not just verify:
 Each returns a `git apply -p1` patch + focused test, or `<ID>.blocked.json` with
 the exact remaining seam. No canonical writes; orchestrator applies + compiles +
 tests + commits.
+
+### Wave-56 landings (base `e4716953` -> `8a585386`)
+
+Workers kept hitting the subagent step cap during reconnaissance and returning
+nothing (G55-MSG/CP-TAB/DIALOG/TOOL-STATE-FORM/MD, G54-MEDIA retry, G54-TAB04
+retry, G54-SIDE10/14 all produced no artifact). Switched to implementing the
+bounded items directly.
+
+- **`ce9dc211` DIALOG-02 (title-weight half).** The live `DialogView` now carries
+  `new_designs` (`set_new_designs`, seeded `tui_entry.rs:6958`) and paints the
+  non-permission title `Role::Item` (base, unbolded) under the experiment
+  (`dialog.tsx:109`); Permission keeps `Role::Warning`. **Deliberately rejected
+  the worker patch's footer-gap change**: `dialog.tsx:159` yields `0` for the
+  default `footerGap` of 1 in both states and `1` for the `footerGap={2}`
+  callers (`dialog-prompt.tsx:133`, `dialog-export-result.tsx:49`,
+  `dialog-export-options.tsx:104`) — new-designs *adds* bottom padding, it never
+  removes it. DIALOG-02 stays `REAL_GAP`.
+- **`bf779d09` TAB-04.** Wired `config.tabs.indicators` into the live strip:
+  `config_tab_indicators`/`config_tab_indicators_present`, `parse_cli_tab_indicators`
+  + `UiPreferences::tab_indicators` (disk then inline; an omitting document never
+  clobbers), `TabInput.indicators`/`number` (+ `with_indicators`), the 1-based
+  number in `from_navigation`, the numbers branch in `horizontal_row`, and the
+  once-per-boot resolve + per-frame apply in the live loop. TAB-04: BLOCKED ->
+  LANDED. Counts now 144/2/60/17.
+- **`8a585386`** docs reconciliation.
+
+G55-LAY confirmed LAY-10/11/13 stay BLOCKED (the producer is a cross-crate
+contract+server+CLI chain: a live right-pane/plugin-panel/terminal host).
