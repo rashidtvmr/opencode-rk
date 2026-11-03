@@ -12542,3 +12542,39 @@ Canonical SHA: `5e3d797b` (remote `main-v2` verified via `git ls-remote`).
     another authorized route before ignoring.
 
 Canonical SHA: `6a72aa61` (remote `main-v2` verified via `git ls-remote`).
+
+- **Wave-66 — 26 distinct groups dispatched in parallel** (user direction:
+  20–30 parallel, group 5–10 related items, detailed single-shot briefs, tests,
+  resume failures 2–3× switching provider, merge+push+delete per completion).
+  Briefs live in `/private/var/folders/.../opencode/wave66/` (`COMMON.md` for
+  implementation groups, `V-COMMON.md` for adversarial-verification groups).
+  Each worker clones `--shared` to `/tmp/w66-<ID>`, edits, returns `git diff` +
+  `/tmp/w66-<ID>.impl.json`; the orchestrator applies + compiles + tests +
+  commits + pushes. **No group from wave-65 is re-dispatched**; verification
+  groups adversarially re-check the `ALREADY_CORRECT`/`LANDED` rows and only
+  patch items they can refute.
+  - `@vyce-deepseek-v41` (8): MSGROW (MSG-001/002/003) `ses_e5f6cc85cffeKH4JniIo618hpM`,
+    PALSEL (DIALOG-06..09) `ses_e5f6cc85cffd7cYrYTEAg5ox33`,
+    PALPICK (DIALOG-13/14/15) `ses_e5f6cc85cffc1skNSLIdmvSOic`,
+    DIALMISC (DIALOG-12/16/17/18/19) `ses_e5f6cc85bffexKMPTY4t2WEP8f`,
+    COMPOSER (CP-01/02/05/06/08/09/11/42) `ses_e5f6cc84fffeJtzgveEdz0N3r8`,
+    THEME (THEME-05/08/09/12/13/14) `ses_e5f6cc84fffdkqqcL0iz8lMNCQ`,
+    LAYOUT (LAY-10/11/13/15/17) `ses_e5f6cc84fffcJiiTQV4p3jViaH`,
+    MARKDOWN (MD-007/008/009) `ses_e5f6cc84effe0Ee6PWMepvDmzm`.
+  - `@9router-vyce-deepseek-v4.1-free-combined` (16): DIFF (DIFF-001/003,PAR-19,THEME-09)
+    `ses_e5f6cc84effdzMTaN82TMGwRgP`, TOOL (TOOL-006/011) `ses_e5f6cc84dffeeqU6AR7Bh7Er6y`,
+    MSG005 (MSG-005) `ses_e5f6cc841ffeM5u3gvxznE6K28`,
+    MISC (MSG-004/009/010,TAB-06/10,SIDE-08/10,CP-07) `ses_e5f6cc840ffe1HCC2TzV4UUqdl`,
+    VTAB `ses_e5f6390a8ffe31cONgS37N7QEC`, VSIDE `ses_e5f6390a8ffdo7xrKvB597hQcw`,
+    VCP `ses_e5f6390a7ffe9IdNdGH5zmGWsV`, VTOOL `ses_e5f6390a6ffeH7M0mR5SMMjKLR`,
+    VMD `ses_e5f639074ffeDX0w1bStKhIXB4`, VTHEME `ses_e5f639074ffdEglP9JxTAwNmRY`,
+    VLAY `ses_e5f639073ffeehTH0qNuXv6zgB`, VDIALOG `ses_e5f639073ffd58J6Vca1nQ8rDm`,
+    VMSG `ses_e5f639072ffeLHCgN9byWHNbnz`, VPAR `ses_e5f639072ffdFDZiLrOYI2xdIn`,
+    VFFI `ses_e5f63905affehDXn0CLjaMQuu2`, LEFTOVER (STATE-002 verify, FORM-001, MEDIA-001)
+    `ses_e5f63905affdlMtjhsebXoEHTC`.
+  - `@9router-river-glm-5-3-flash` (1): HARNESS (PAR-02/03/06/09/10/11, FFI-01..08/11)
+    `ses_e5f6cc840ffdsSIB9gMRJQV7Nr`.
+  - `@9router-luna-free` (1): CLEANUP (merged-and-pushed branch/worktree reclaim)
+    `ses_e5f6cc840ffcTFVRgkQwioYFPT`.
+
+Canonical SHA: `51538ca1` (remote `main-v2` verified via `git ls-remote`).
