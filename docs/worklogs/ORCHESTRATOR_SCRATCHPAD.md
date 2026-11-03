@@ -2,15 +2,19 @@
 
 ## 2026-11-03 (later) — Wave-68 first landings on persistent worktrees
 
-Canonical `main-v2` advanced two commits, both pushed and `git ls-remote`-verified
-against `git@github.com:rashidtvmr/opencode-rk.git`:
+Canonical `main-v2` advanced, all pushed and `git ls-remote`-verified against
+`git@github.com:rashidtvmr/opencode-rk.git`:
 
 - `43050ee0` — **F1 / DIFF-001 (inline half)**. `config.diffs.view`
   (`auto`/`split`/`unified`) parsed from the global CLI config + inline `--config`
   (inline wins, bounded read) and threaded to the live inline patch renderer;
   `auto` keeps the 120/121 content rule, explicit literals override. Independently
   reviewed `APPROVE`; CLI 2225/0.
-- `ee8e468c` — docs: durable-worktree policy + wave-68 parity status.
+- `ee8e468c` / `bbce23cf` / `6f705563` — docs: durable-worktree policy, wave-68
+  parity status with the re-verified verdict table (LAY-01..09 and TOOL-007/008/
+  009/012 `ALREADY_CORRECT`; TOOL-010 `REAL_GAP`; DIALOG-16/17/18 `REAL_GAP`;
+  SIDE-10/STATE-002 `LANDED`; CP-33/CP-35 `ALREADY_CORRECT`; CP-34 and
+  STATE-001/003/004 `REAL_GAP`; PAR-02/03/06 and TOOL-011 hold `BLOCKED`).
 
 Candidates in flight (worktrees under `/Users/mymac/Projects/.oc2-features-20261103/`):
 `f26671f4` (`recovery/ui`, F2 DIALOG-06/08/09 — select model single source of
