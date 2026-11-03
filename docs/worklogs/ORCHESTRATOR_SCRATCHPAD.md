@@ -12362,3 +12362,32 @@ briefs in `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wav
 
 Counts reconciled: 144 `ALREADY_CORRECT` / 1 `REAL_GAP` (MEDIA-001) / 51
 `BLOCKED` / 27 `LANDED` = 223.
+
+### Wave-63 orchestrator build — MSG-008 (2026-11-03)
+
+- **MSG-008 — LANDED `6a49151f`** (pushed; remote `main-v2` verified). Built the
+  full producer chain the wave-63 worker could not finish:
+  - contracts `MessageExecution.streamed_ms`; storage `message_execution.streamed_ms`
+    column + idempotent `pragma_table_info` ALTER migration; sessions
+    `MessageExecutionInput.streamed_ms` + `for_message` copy.
+  - server `StreamTiming` (`started`/`note_streamed`/`close_round`/`open_round`/
+    `streamed_ms`, explicit `Instant` params for deterministic tests) accumulates
+    each provider round's `first_delta − round_start`, excludes tool time, and
+    returns `None` when any round never streamed (upstream requires every step to
+    carry `time.streamed`, `rows.ts:453-454`). `note_streamed` on all 3 delta
+    branches; `close_round` at `Completed`; `open_round` at NextRound provider
+    install. Published as `streamed_ms` on the `assistant_message` frame and in
+    stored `execution_json`.
+  - CLI `AssistantFacts.streamed_ms` + `tokens_per_second()`; footer
+    ` · {tps:.1} tok/s` span gated on `session.tps` (`config/index.tsx:328`
+    default true, consumed `index.tsx:2061`); `ChatView.tps_enabled` threaded
+    through both render paths; `tui_entry` reads `session_tps`.
+  - Tests: 4 server `StreamTiming`, 2 `AssistantFacts`, 1 footer span, 3
+    `session_tps`, storage/sessions round-trip. CLI **2211/0**, server lib
+    **309/0**, sessions `message_execution` 3/0, server `message_execution_api` 4/0.
+  - MSG-008 moves `BLOCKED` -> `LANDED`.
+
+Counts reconciled: 144 `ALREADY_CORRECT` / 1 `REAL_GAP` (MEDIA-001) / 50
+`BLOCKED` / 28 `LANDED` = 223.
+
+Canonical SHA: `6a49151f` (remote `main-v2` verified via `git ls-remote`).

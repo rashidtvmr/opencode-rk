@@ -1,6 +1,6 @@
 # OpenCode V2 UI parity — consolidated status
 
-- **Canonical line:** `main-v2` @ `67f97876` (remote verified)
+- **Canonical line:** `main-v2` @ `6a49151f` (remote verified)
 - **Upstream oracle:** `/Users/mymac/Projects/tmp/opencode` @ `450e7b92412c780a7b5a75226bb8d49aaca24e22`
 - **Checklist:** `docs/ui-parity/opencode-ui-parity-kit/checklist.json` (223 items)
 - **Method:** source inspection of the live Rust path (implementation + a
@@ -72,7 +72,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 > - to `LANDED`: `MSG-007` (`4a6b487b`), `CP-11` (`f8e276cf`), `DIALOG-04`
 >   (`d137313d`), `DIALOG-20` (toast half, `d891f9c3`), `TAB-23` (`ae56897f`),
 >   `SIDE-08` (`76fcb75a`), `THEME-12` (`bc24dd30`), `PAR-16`/`PAR-22`
->   (`f240367b`/`99e0e6ae`).
+>   (`f240367b`/`99e0e6ae`), `MSG-008` (`6a49151f`).
 
 **Reclassified / newly finalized:**
 
@@ -325,6 +325,7 @@ full single-threaded CLI suite, and was pushed + remote-verified.
 | DIALOG-12 | `2c858980` | Model picker reads persisted favorites and hoists them above recents; **ctrl+f** toggles favorite for the focused row; committing a model that advertises variants opens the **flat variant picker** (rendered + keyed live: Up/Down/Enter/Escape, text-input suppressed); `Model.variants` parsed from the catalogue. 5 new tests; suite **2202/0**. |
 | MSG-009 | `09974664` | Server `stage_session_revert` computes the real boundary-onward user-message `count` and `files` (typed tool history + unified-diff line counts), adding `SessionRevert.count`; the TUI now projects `SessionSummary.revert` into a `RevertCard` and splices its rows into the transcript foot before the dock/queue, driven from the live `LiveSnapshot`. 2 CLI + 1 server + contracts/storage tests; suite **2204/0**. |
 | DIALOG-02 | `67f97876` | The live `DialogView::layout` now reads the tested `native_palette::dialog` helpers: select-row left pad from `row_padding`, and the body bottom padding from `body_bottom_padding` (new `OpenDialog.footer_gap`, `Some(2)` for the live `dialog-prompt` caller). Under new designs a `footerGap=2` footer adds one body padding row; legacy unchanged. 1 new test; suite **2205/0**. |
+| MSG-008 | `6a49151f` | **Producer chain built end to end.** `MessageExecution.streamed_ms` (contracts) + `message_execution.streamed_ms` column with idempotent `pragma_table_info` ALTER (storage) + `MessageExecutionInput.streamed_ms` (sessions); server `StreamTiming` accumulates each provider round's `first_delta − round_start` (upstream `time.streamed − time.created`, `rows.ts:451-453`), excludes tool time, and returns `None` when **any** round never streamed (`rows.ts:453-454`); published as `streamed_ms` on the `assistant_message` frame and stored `execution_json`. CLI `AssistantFacts.streamed_ms` + `tokens_per_second()`; footer ` · {tps:.1} tok/s` span gated on `session.tps` (`config/index.tsx:328` default true, consumed `index.tsx:2061`); `ChatView` threads `tps_enabled` through both render paths; `tui_entry` reads `session_tps`. 4 server + 2 facts + 1 footer + 3 prefs tests + storage/sessions round-trip; CLI **2211/0**, server lib **309/0**. |
 
 ### `REAL_GAP` — faithful model + focused test exist, no live consumer (1)
 
@@ -346,7 +347,7 @@ Selected high-value seams:
 
 `PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-19,
 TAB-06, TAB-21, SIDE-03, SIDE-05,
-MSG-001, MSG-002, MSG-003, MSG-005, MSG-008, MSG-010,
+MSG-001, MSG-002, MSG-003, MSG-005, MSG-010,
 TOOL-006, TOOL-011, DIFF-001, DIFF-003, FFI-02, FFI-03, FFI-04, FFI-06,
 FFI-07, FFI-08, FFI-11, STATE-002, THEME-08, THEME-09, THEME-13,
 THEME-14, CP-07, CP-09,
@@ -381,7 +382,6 @@ DIALOG-19, LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009`.
 | SIDE-10 | `todo_http.rs:31-38` returns the stored `session_todos` table verbatim; `stage_session_revert` (`server/src/lib.rs:1193-1209`) stores the boundary but never recomputes the latest-completed-`todowrite` list sliced at the revert boundary (upstream `util/todo.ts:32-43`). |
 | STATE-002 | Live transcript renders compaction as a placeholder (`native_view_chat.rs:2689`); projection (`native_chat_projection.rs:392`) drops status/summary/provider-native/tokens; rich `CompactionState` (`native_timeline.rs:382`) has zero consumers; `compact_session` (`server/src/lib.rs:1668`) never persists/pushes a compaction part. |
 | MSG-005 | Chips need a server/storage `files`/`skills` field that does not exist (`MessageRecord` `contracts/src/lib.rs:250-257`). |
-| MSG-008 | Footer TPS needs `time.streamed`; `MessageExecution` (`contracts/src/lib.rs:284-293`) has no timing field and the producer frame (`server/src/lib.rs:2895-2901`) emits none; `RowTiming.streamed_ms` (`native_message_rows.rs:825`) never populated live; `config.data.session.tps` absent. |
 | MSG-009 | `TranscriptSurfaces`/`RevertCard`/`TranscriptNotice`/`ChildCompletionNotice` (`native_view_chat.rs:4482/4103/4273/4409`) have no live consumer; `SessionRevert` (`contracts/src/lib.rs:191`) has no count; server stage route hardcodes `files:None`; no notice projection; no child-completion metadata. |
 | MSG-010 | `turn_tokens_per_second` (`native_message_rows.rs:1242`) reads `step.timing.streamed_ms` (`:1259`), zero live callers, field has no producer. |
 | TOOL-011 | `execute_dialog` (`native_tool_rows.rs:1159`) zero consumers; live render placeholder (`native_view_dialogs.rs:1429`); no `ExecuteDialog` payload on `OpenDialog`/`DialogView`; no syntax producer (`opentui-bridge/src/highlight.rs:27-29`). |
@@ -460,16 +460,16 @@ field is absent).
 ## Honest completion statement
 
 Of the 223 checklist obligations, **144 are `ALREADY_CORRECT`** (a faithful
-implementation, a focused test, and a traced live consumer), **2 are
+implementation, a focused test, and a traced live consumer), **1 is
 `REAL_GAP`** (model + test exist but the live TUI does not consume them),
-**59 are `BLOCKED`** (a producer/transport/contract field does not exist), and
-**18 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
+**50 are `BLOCKED`** (a producer/transport/contract field does not exist), and
+**28 are `LANDED`** (`LAY-15`, `CP-01`, `CP-11`, `CP-02` in wave-45;
 `CP-05`, `CP-06` in wave-46; `MSG-007` in wave-47; `SIDE-08`, `THEME-12`,
 `DIALOG-04` in wave-48; `PAR-04` in wave-49; `TAB-23`, `DIALOG-10`,
 `DIALOG-20` (toast half) in wave-51; `PAR-16`, `PAR-22` in wave-53;
-`TAB-04` in wave-56; `SIDE-14` in wave-57). `DIALOG-02`'s title-weight half
-landed in wave-56 but the item stays `REAL_GAP` for its remaining description /
-footer-gap / per-select-row-pad halves.
+`TAB-04` in wave-56; `SIDE-14` in wave-57; `PAR-10`, `FORM-001` (sub-behavior 1),
+`TAB-10`, `SIDE-04`, `SIDE-10`, `FFI-01`, `DIALOG-12`, `MSG-009`, `DIALOG-02`,
+`MSG-008` in wave-61/62/63).
 
 The remaining work is therefore **not** more UI drawing:
 
@@ -479,7 +479,7 @@ The remaining work is therefore **not** more UI drawing:
 - `BLOCKED` items need cross-crate contract/server changes (serialized by the
   integrator): usage classes + cost + revert boundary (`SIDE-03/04/05/10`),
   compaction transport (`STATE-002`), message chips (`MSG-005`), streamed
-  timing (`MSG-008/010`), revert/notice surfaces (`MSG-009`), view
+  timing (`MSG-010`), revert/notice surfaces (`MSG-009`), view
   acknowledgement (`TAB-21`), execute-dialog payload
   (`TOOL-011`), split-diff config (`DIFF-001/003`), the permission body-swap
   stage (`FORM-001`), the syntax-style bridge ABI (`THEME-14`), the native scene
@@ -518,9 +518,10 @@ following as genuinely missing producers (not bounded wiring):
   (`server/src/lib.rs:1668`) returns an ack only, `MessageRole`
   (`contracts/src/lib.rs:222`) has no compaction variant, and the live render is
   a placeholder (`native_view_chat.rs:2712`).
-- `MSG-008` / `MSG-010` — no per-step streamed timestamp: no contract field, no
-  storage column, no server capture and no `session.tps` config key; the
-  duration half is already live-correct.
+- `MSG-008` — **superseded: LANDED `6a49151f`** (contract field, storage column,
+  server capture and `session.tps` all built). `MSG-010` remains blocked: no
+  per-step streamed timestamp on the `SessionRow` path; the duration half is
+  already live-correct.
 - `LAY-10` / `LAY-11` / `LAY-13` — no live plugin-panel/terminal producer feeding
   `panel_open`/`terminal_selected` (`native_shell_frame.rs:122-124`).
 
