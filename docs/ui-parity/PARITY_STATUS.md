@@ -243,8 +243,8 @@ the wave-44 verdict supersedes it.
 
 | Verdict | Count |
 | --- | --- |
-| `ALREADY_CORRECT` | 143 |
-| `REAL_GAP` | 7 |
+| `ALREADY_CORRECT` | 144 |
+| `REAL_GAP` | 6 |
 | `BLOCKED` | 63 |
 | `LANDED` (wave-45..48) | 10 |
 | **Total** | **223** |
@@ -264,9 +264,9 @@ the wave-44 verdict supersedes it.
 | THEME-12 | `bc24dd30` | The live theme picker (`tui_entry.rs`) persisted only on Enter, so arrowing through the list showed no preview and Esc left the last previewed theme in place. Adds `ThemePicker` (a live wrapper over the tested `ThemeController`) plus `theme_picker_move`/`theme_picker_cancel`: page_next/page_prev on the Theme page preview+persist the focused row, Esc restores+persists the pre-open selection, Enter clears the picker (`dialog-theme-list.tsx:32-37` -> `context/theme.tsx:341-349`). Focused test `theme12_live_picker_previews_on_move_and_reverts_on_cancel` + full CLI suite (2173/0) green. |
 | DIALOG-04 | `d137313d` | The ordered modal routes (`native_modal_layer.rs:489-600`) had no live consumer: the live loop quit the app on Ctrl-C even with a dialog open, and a backdrop click did nothing. Ctrl-C (0x03) now routes through the same close/reject path as Escape while the dialog stack owns input (`dialog_consumes_byte`); Ctrl-D (not bound in the modal layer) keeps its byte-exit meaning. A left-button release outside the panel rect closes the top dialog (`ui/dialog.tsx:54-60`); a pending decision is never abandoned. Focused test `dialog04_ctrl_c_closes_dialog_but_ctrl_d_keeps_byte_exit` + full CLI suite (2174/0) green. |
 
-### `REAL_GAP` — faithful model + focused test exist, no live consumer (7)
+### `REAL_GAP` — faithful model + focused test exist, no live consumer (6)
 
-`THEME-05, THEME-08, THEME-09, THEME-13, CP-07, MEDIA-001, DIALOG-02`.
+`THEME-08, THEME-09, THEME-13, CP-07, MEDIA-001, DIALOG-02`.
 
 Per-ID seams are recorded in the wave-44 batch tables above and in
 `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave44/<ID>.json`.
@@ -280,7 +280,6 @@ Selected high-value seams:
 | THEME-08 | `syntax_rules()` (`native_theme_runtime.rs:965`) has zero non-test callers; no tokenizer/highlighter producer and no renderer syntax-style sink (`safe_renderer.rs:906` takes explicit fg/bg/attrs only). |
 | THEME-13 | `SystemThemeState`/`palette_reply` (`native_theme_runtime.rs:2183/2264`) have zero non-test callers; no OSC palette-query emitter and no payload-carrying input event to decode a reply. |
 | THEME-09 | The live chat `Patch`/diff-fence painter hardcodes `DiffViewMode::Unified` (`native_view_chat.rs:2200/2730`); `resolve_view_mode`/`config.diffs.view` (`native_diff_view.rs:586`) have no live caller, so the upstream width>120 auto-split is unreachable. |
-| THEME-05 | No live per-cell `ActionStates` map; the live `PaintCtx` (`tui_entry.rs:8668`) threads no state map, so disabled/pressed/focused/selected/hovered combinations are not painted. |
 
 ### `BLOCKED` — needs a producer/transport/contract field that does not exist (63)
 
@@ -452,6 +451,21 @@ following as genuinely missing producers (not bounded wiring):
   produce an observable unread transition.
 - `TOOL-011` — no `ExecuteDialog` payload on the dialog contract, no live
   per-row tool-part owner, and no highlight producer.
+- `STATE-002` — no compaction message producer: `compact_session`
+  (`server/src/lib.rs:1668`) returns an ack only, `MessageRole`
+  (`contracts/src/lib.rs:222`) has no compaction variant, and the live render is
+  a placeholder (`native_view_chat.rs:2712`).
+- `MSG-008` / `MSG-010` — no per-step streamed timestamp: no contract field, no
+  storage column, no server capture and no `session.tps` config key; the
+  duration half is already live-correct.
+- `LAY-10` / `LAY-11` / `LAY-13` — no live plugin-panel/terminal producer feeding
+  `panel_open`/`terminal_selected` (`native_shell_frame.rs:122-124`).
+
+`THEME-05` was reclassified `ALREADY_CORRECT`: upstream product code never calls
+the `state()` precedence combinator either (its only callers are upstream's own
+library test `packages/tui/test/theme/v2/component.test.ts`); the live TUI
+already reproduces the same observable behavior through discrete-token
+resolution plus hand-written precedence.
 
 `DIALOG-04` was the one bounded item and is now landed (`d137313d`). `THEME-09`
 is re-scoped: the diff colors are live, but the upstream width>120 auto-split
