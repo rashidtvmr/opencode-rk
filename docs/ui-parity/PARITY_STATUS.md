@@ -196,6 +196,12 @@ evidence in `artifacts/verdicts/`).
 remaining `REAL_GAP`/`BLOCKED` items below are the open implementation work, not
 unverified items.
 
+| Item | Was | Now | Evidence |
+| --- | --- | --- | --- |
+| `CP-37` | `unrecorded` | `REAL_GAP` | `PasteQueue`/`paste_admission` (`native_paste.rs:1303/1272`) test-only; live `tui_entry.rs:11318` pastes synchronously with no queue/admission; upstream `index.tsx:376-392` |
+| `CP-38` | `REAL_GAP` (reconfirmed) | `REAL_GAP` | `image_preview` (`native_paste.rs:1375`) test-only; live composer paints no image strip; upstream `index.tsx:397-402,1680-1712` |
+| `FORM-002` | `BLOCKED` | `REAL_GAP` | `PermissionPrompt` (`native_permissions.rs:557`, fullscreen/escape/ctrl-c/diff model) unwired; live `tui_entry.rs:8608` passes `message: None` and `cancel()` → Reject only; upstream `permission.tsx:428-552` |
+
 Base SHA `0d74af30`. 28 parallel workers on the four authorized routes, each
 artifact-first and read-only on canonical. Per-ID JSON verdicts live in
 `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave44/`.
