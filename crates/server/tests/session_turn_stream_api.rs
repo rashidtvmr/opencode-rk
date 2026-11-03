@@ -315,13 +315,16 @@ async fn session_turn_stream_forwards_deltas_before_completion_and_persists_once
         events[0]["message"]["body"]["text"],
         "Hello streaming agent"
     );
+    // PAR-10 (`da7d1a0b`): every streamed delta carries the turn's monotonic
+    // `seq` so a client can drop a replayed or out-of-order frame. The pair is
+    // still the exact provider text in provider order.
     assert_eq!(
         events[1],
-        json!({"type":"assistant_delta","delta":"Fixture "})
+        json!({"type":"assistant_delta","delta":"Fixture ","seq":1})
     );
     assert_eq!(
         events[2],
-        json!({"type":"assistant_delta","delta":"assistant reply"})
+        json!({"type":"assistant_delta","delta":"assistant reply","seq":2})
     );
     assert_eq!(events[3]["type"], "assistant_message");
     assert_eq!(events[3]["message"]["role"], "assistant");

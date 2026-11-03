@@ -17,8 +17,9 @@ use tower::ServiceExt;
 async fn view_sets_monotone_watermark() {
     let dir = tempfile::tempdir().unwrap();
     let storage = Storage::open_in_memory(dir.path().join("blobs")).unwrap();
+    let sessions = SessionService::new(Arc::new(storage));
     let app = router(AppState {
-        sessions: SessionService::new(Arc::new(storage)),
+        sessions: sessions.clone(),
         catalog: Arc::new(Catalog::default()),
     });
     let post = |uri: String, value: Value| {
@@ -41,6 +42,15 @@ async fn view_sets_monotone_watermark() {
     let bytes = axum::body::to_bytes(response.into_body(), 65536).await.unwrap();
     let value: Value = serde_json::from_slice(&bytes).unwrap();
     let id = value["session"]["id"].as_str().unwrap().to_owned();
+
+    // `session.ts:62-68`: the route is a no-op while the session has no idle
+    // transition to acknowledge, so establish one first - exactly the fact the
+    // projector writes on a terminal execution (`projector.ts:423-447`).
+    let idle = opencode_rk_contracts::Timestamp::from_epoch_millis(1_700_000_000_000).unwrap();
+    sessions
+        .mark_idle(id.parse().unwrap(), idle)
+        .await
+        .expect("record the idle transition");
 
     // A NEWER idle transition advances the watermark and returns 204.
     let response = app
