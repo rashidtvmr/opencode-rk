@@ -1811,6 +1811,9 @@ struct PaintCtx {
     vertical_rail: Option<crate::native_tab_rail::RailFrame>,
     compact_tooltip: Option<crate::native_tab_rail::CompactTooltip>,
     context_menu: Option<crate::native_tab_context_menu::MenuFrame>,
+    /// DIALOG-20: the live toast surface for this frame, when one is visible
+    /// (`ui/toast.tsx`). Painted last, above every other overlay.
+    toast: Option<crate::native_toast::ToastFrame>,
     /// Transcript scrollbar geometry for this frame, when shown.
     transcript_scrollbar: Option<crate::native_view::TranscriptScrollbar>,
     /// Sidebar body scrollbar geometry for this frame, when shown.
@@ -2319,6 +2322,7 @@ mod surface_paint_regressions {
             vertical_rail: None,
             compact_tooltip: None,
             context_menu: None,
+            toast: None,
             transcript_scrollbar: None,
             sidebar_scrollbar: None,
             scrollbar_track: Rgba::rgb(10, 10, 10),
@@ -2379,6 +2383,7 @@ mod surface_paint_regressions {
             vertical_rail: None,
             compact_tooltip: None,
             context_menu: None,
+            toast: None,
             transcript_scrollbar: Some(scrollbar),
             sidebar_scrollbar: None,
             scrollbar_track: Rgba::rgb(12, 12, 12),
@@ -2468,6 +2473,7 @@ mod surface_paint_regressions {
             vertical_rail: None,
             compact_tooltip: None,
             context_menu: None,
+            toast: None,
             transcript_scrollbar: None,
             sidebar_scrollbar: Some(scrollbar),
             scrollbar_track: Rgba::rgb(12, 12, 12),
@@ -2536,6 +2542,7 @@ mod surface_paint_regressions {
             vertical_rail: None,
             compact_tooltip: Some(tooltip.clone()),
             context_menu: None,
+            toast: None,
             transcript_scrollbar: None,
             sidebar_scrollbar: None,
             scrollbar_track: Rgba::rgb(12, 12, 12),
@@ -5236,6 +5243,38 @@ fn native_paint(
             }
         }
     }
+    if let Some(toast) = ctx.toast.as_ref() {
+        // DIALOG-20: the toast surface is the topmost overlay
+        // (`ui/toast.tsx`). Each `CellRun` is a styled span inside the box.
+        let x = u32::from(toast.x);
+        let y = u32::from(toast.y);
+        let w = u32::from(toast.width).min(cols.saturating_sub(x));
+        let h = u32::from(toast.height).min(rows.saturating_sub(y));
+        if w > 0 && h > 0 {
+            renderer.fill_rect(x, y, w, h, Rgba::new(
+                toast.surface[0], toast.surface[1], toast.surface[2], toast.surface[3],
+            ))?;
+        }
+        for row in &toast.rows {
+            if u32::from(row.y) >= rows {
+                continue;
+            }
+            for run in &row.runs {
+                let rx = u32::from(run.x);
+                if rx >= cols {
+                    continue;
+                }
+                renderer.draw_text_styled(
+                    rx,
+                    u32::from(row.y),
+                    &run.text,
+                    Rgba::new(run.fg[0], run.fg[1], run.fg[2], run.fg[3]),
+                    Some(Rgba::new(run.bg[0], run.bg[1], run.bg[2], run.bg[3])),
+                    run.attributes,
+                )?;
+            }
+        }
+    }
     renderer.frame(|_| {})?;
     Ok(())
 }
@@ -6797,6 +6836,10 @@ fn native_loop(
     let mut permission_editor = crate::native_permissions::Editor::default();
     let animation_start = crate::native_clock::FrameClock::new();
     let mut animation_tick = 0u128;
+    // DIALOG-20: the live toast controller (`ui/toast.tsx`). Its logical clock
+    // is advanced on the animation tick so auto-dismiss is deterministic.
+    let mut toast = crate::native_toast::Toast::new();
+    let mut toast_now_ms: u64 = 0;
     let config_paths = native_tui_config_paths().unwrap_or_else(|error| {
         append_transcript(&mut transcript, format!("error: {error}"));
         Vec::new()
@@ -8085,11 +8128,23 @@ fn native_loop(
         // exactly as upstream `component/title-shimmer.tsx:50-55` reports
         // `live = animating` while a rename is pending and motion is on.
         let title_animation = crate::native_tabs::title_shimmer_runs(rename_inflight.is_some(), animations);
-        let busy_animation = worker.is_some() || model_load.is_some() || title_animation;
+        let busy_animation = worker.is_some() || model_load.is_some() || title_animation
+            || toast.current().is_some();
         let next_tick = u128::from(animation_start.now_ms()) / 80;
         if busy_animation && next_tick != animation_tick {
             animation_tick = next_tick;
             needs_paint = true;
+        }
+        // DIALOG-20: advance the toast's logical clock by the elapsed wall time
+        // so a visible toast auto-dismisses after its 5000 ms lifetime
+        // (`ui/toast.tsx`), and a repaint is scheduled while one is visible.
+        {
+            let now_ms = animation_start.now_ms() as u64;
+            if now_ms > toast_now_ms {
+                toast.advance(now_ms - toast_now_ms);
+                toast_now_ms = now_ms;
+                needs_paint = true;
+            }
         }
         // TOOL-002: publish the live spinner frame for busy tool rows. The
         // upstream `<spinner frames interval={80}>` cadence is one frame per
@@ -8660,6 +8715,19 @@ fn native_loop(
                 })
                 .collect();
             selection.set_rows(&selectable, 0, 0, u32::from(presentation.main_width));
+            // DIALOG-20: lay the live toast out into bounded styled cells
+            // (`ui/toast.tsx`); `None` when nothing is visible or the viewport
+            // cannot host the minimum box.
+            let toast_frame = toast.current().and_then(|options| {
+                crate::native_toast::ToastFrame::layout(
+                    options,
+                    toast.pending(),
+                    viewport.0,
+                    viewport.1,
+                    &crate::native_toast::ToastPalette::from_palette(&theme.palette, theme.mode),
+                    false,
+                )
+            });
             native_paint(
                 &mut renderer,
                 &lines,
@@ -8726,6 +8794,7 @@ fn native_loop(
             })),
             vertical_rail: frame_rail.clone(),
             compact_tooltip: frame_tooltip,
+            toast: toast_frame,
             context_menu: message_menu
                 .as_ref()
                 .map(|menu| message_menu_frame(menu, crate::native_tab_context_menu::Viewport { width: viewport.0, height: viewport.1 }))
@@ -9543,7 +9612,7 @@ fn native_loop(
                     let me=match kind { 0=>Some(crate::native_tab_context_menu::MenuEvent::PointerDown{button:crate::native_tab_context_menu::MouseButton::Left,x,y}),2=>Some(crate::native_tab_context_menu::MenuEvent::PointerUp{button:crate::native_tab_context_menu::MouseButton::Left,x,y}),5=>Some(crate::native_tab_context_menu::MenuEvent::PointerDown{button:crate::native_tab_context_menu::MouseButton::Right,x,y}),6=>Some(crate::native_tab_context_menu::MenuEvent::PointerUp{button:crate::native_tab_context_menu::MouseButton::Right,x,y}),7=>Some(crate::native_tab_context_menu::MenuEvent::PointerMove{x,y}),3|4=>Some(crate::native_tab_context_menu::MenuEvent::Scroll{delta:if kind==3{-3}else{3},x,y}),_=>None};
                     if let Some(me)=me { let outcome=menu.handle(me,menu_vp); if let crate::native_tab_context_menu::MenuOutcome::Invoke(action)=outcome { context_menu=None; match action {
                         crate::native_tab_context_menu::MenuAction::NewSession => { let model=selected.as_ref().map(|m|m.qualified()); let saved=if navigation.active().is_some(){navigation.save_active_state(draft.clone(),draft_cursor,view.chat_scroll_offset(),model)}else{Ok(())}; if let Err(e)=saved{append_transcript(&mut transcript,format!("error: new tab: state save refused: {e:?}"));}else{live=None;history_window=None;history_pending=false;history_active=None;history_navigation_request=None;blocked_history_scroll=None;history_tail_refresh_pending=false;history_browsing=false;draft.clear(); draft_parts.clear();draft_cursor=0;navigation.enter_home();session_route=false;view.reset_to_home_after_tab_close();view.set_chat_scroll_offset(0);} },
-                        crate::native_tab_context_menu::MenuAction::CopySessionId{session}=>{let frame=selection_clipboard_frame(&session.0);let mut out=std::io::stdout().lock();out.write_all(frame.as_bytes())?;out.flush()?;},
+                        crate::native_tab_context_menu::MenuAction::CopySessionId{session}=>{let frame=selection_clipboard_frame(&session.0);let mut out=std::io::stdout().lock();out.write_all(frame.as_bytes())?;out.flush()?;toast.show(crate::native_toast::ToastOptions::new(crate::native_toast::ToastVariant::Info,"Copied to clipboard"));needs_paint=true;},
                         crate::native_tab_context_menu::MenuAction::Close{session}=>{close_hold=None;let scroll=view.chat_scroll_offset();match close_tab_transition(&mut view,&mut transcript,&mut navigation,&draft,draft_cursor,daemon_origin,auth,binding_generation,&session,selected.as_ref().map(|m|m.qualified()),scroll){Ok(result)=>apply_close_tab_result(result,&mut view,&mut live,&mut history_window,&mut binding_generation,&mut draft,&mut draft_cursor,&mut selected,&models,&mut session_route,&mut compact_worker),Err(e)=>append_transcript(&mut transcript,format!("error: close tab: {e}"))}},
                         crate::native_tab_context_menu::MenuAction::Rename{session,current_title}=>{
                             rename_error=None;
