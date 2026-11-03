@@ -11903,3 +11903,24 @@ Source-backed findings that stand:
 
 PARITY_STATUS reclassified to 144 `ALREADY_CORRECT` / 4 `REAL_GAP` / 61
 `BLOCKED` / 14 `LANDED` = 223.
+
+### Wave-53 — grouped fleet + THEME-09 reclassification (2026-11-03)
+
+Dispatched 23 grouped workers (base `9a4bf59e`) across the 4 authorized routes
+(8 vyce-deepseek-v41, 13 vyce-combined, 1 river-glm, 1 luna-free), grouped 2-6
+related items each, with a detailed single-shot BRIEF (wave53/BRIEF.md,
+TASKS53.md). Observed failure mode: workers hit the **harness step cap** during
+reconnaissance and return analysis without writing artifacts — not a provider
+outage. Retried G-MSG-C (invalid-request) and G-DIALOG-B (degenerated output) on
+the combined route with surgical prompts.
+
+**THEME-09 reclassified REAL_GAP -> BLOCKED (verified).** Threading
+`DiffViewPreference` is not sufficient: a split row is `SplitRow::Pair { left,
+right }` (`native_diff_view.rs:709-715`) with two independent backgrounds, but
+the live chat row model is `(String, ChatRowClass)` with exactly one class per
+row (`native_view_chat.rs:902`) and `chat_row_background` maps a class to a
+single background (`tui_entry.rs:2880-2898`). Split is not renderable without
+extending the row model — the same blocker as DIFF-001.
+
+PARITY_STATUS now self-consistent: 144 `ALREADY_CORRECT` / 3 `REAL_GAP`
+(CP-07, MEDIA-001, DIALOG-02) / 62 `BLOCKED` / 14 `LANDED` = 223.
