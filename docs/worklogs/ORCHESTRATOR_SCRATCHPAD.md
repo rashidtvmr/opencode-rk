@@ -11692,3 +11692,58 @@ focused test + full CLI suite + commits. Dispatched:
 Commit recipe unchanged: export `OC2_RECOVERY_CANONICAL_TOKEN` from
 `$(git rev-parse --git-common-dir)/recovery-state/canonical-write.token`; the
 `prepared phase` hook line is spurious — confirm via `git log`.
+
+### Wave-48 implementation dispatch (2026-11-02)
+
+Base SHA `df4f4e29` (== remote `main-v2`). Output dir
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave48/`
+(`BRIEF.md`, `TASKS48.md`). Workers are read-only on canonical; each returns
+`<ID>.impl.json` + `<ID>.patch.diff` (PATCH) or `<ID>.blocked.json` (BLOCKED).
+Orchestrator applies + compiles + focused test + full CLI suite + commits one
+artifact at a time, then pushes.
+
+Landed immediately before this wave (review fixes for `REVIEW-landed.json`):
+- `76fcb75a` SIDE-08 (sidebar MCP row click opens DialogMcp server list).
+- `df4f4e29` MSG-007 resync scoped to captured session id; CP-11 running status
+  moved from the shared shell footer into the composer footer slot
+  (`composer_footer_row`), shell footer keeps the idle directory.
+
+Route distribution (authorized list only):
+- `@vyce-deepseek-v41` (8): THEME-12, DIALOG-02, DIALOG-04, CP-07, MEDIA-001,
+  TAB-04, TAB-10, TAB-06.
+- `@9router-vyce-deepseek-v4.1-free-combined` (overflow): TAB-23, DIALOG-20,
+  FORM-001, MSG-001/002/003, MSG-008/010, STATE-002, SIDE-03/04, SIDE-10,
+  SIDE-14, PAR-04, PAR-19, DIFF-001/003, MD-007/008/009, TOOL-011, THEME-08,
+  THEME-13, LAY-10/11/13, DIALOG-06..10, DIALOG-12..19, CP-09, TAB-21,
+  THEME-05 (retry).
+- `@9router-river-glm-5-3-flash` (1): MSG-005.
+- `@9router-luna-free` (1): THEME-05 — FAILED: provider returned
+  `rule "luna-free" left no eligible account for gpt-6-luna`; work moved to the
+  combined route within its overflow allowance.
+
+FORM-003/004 are covered under `ALREADY_CORRECT` (`PARITY_STATUS.md:335`
+`FORM-002/005..008`); the 223-item count is complete, no unaccounted items.
+
+### Wave-48b re-dispatch (2026-11-03)
+
+The first wave-48 batch (31 workers) failed wholesale at the provider with
+`Invalid request. Please check your input and try again.` on every route. A tiny
+probe then returned `READY`, so the failure was transient/provider-wide, not a
+prompt-shape problem. Re-dispatched the whole set minus THEME-12 (landed by the
+orchestrator directly) across the four authorized routes:
+
+- `@vyce-deepseek-v41`: THEME-05, CP-07, MEDIA-001, TAB-04, TAB-06, TAB-10.
+- `@9router-vyce-deepseek-v4.1-free-combined`: DIALOG-20, TAB-23, SIDE-10,
+  PAR-04, TOOL-011, THEME-13, DIFF-001/003, MD-007/008/009, DIALOG-02,
+  DIALOG-04, FORM-001, MSG-001/002/003, MSG-008/010, STATE-002, SIDE-03/04,
+  SIDE-14, PAR-19, LAY-10/11/13, DIALOG-06..10, DIALOG-12..19, CP-09, TAB-21,
+  THEME-08.
+- `@9router-river-glm-5-3-flash`: MSG-005.
+
+Landed by the orchestrator directly while the fleet was down:
+
+- `bc24dd30` THEME-12: live theme picker previews on move and reverts on Esc.
+  Adds `ThemePicker` (live wrapper over `ThemeController`) + `theme_picker_move`/
+  `theme_picker_cancel` in `tui_entry.rs`; focused test
+  `theme12_live_picker_previews_on_move_and_reverts_on_cancel`. Full CLI suite
+  2173/0 green. Pushed to remote `main-v2`.
