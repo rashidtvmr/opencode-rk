@@ -1298,6 +1298,160 @@ pub fn resolve_tab_shortcut(bindings: &[(&str, &str)], key: &str) -> Option<TabC
         .and_then(|(_, name)| TabCommand::from_name(name))
 }
 
+/// Map one upstream `keybinds` override key to its `session.tab.*` command
+/// name. Both spellings occur upstream: the `Definitions` keys
+/// (`config/v1/keybind.ts:91-96,120-129`) and the bare command names
+/// (`CommandMap` values, e.g. the live `keybinds["terminal.suspend"] = "none"`
+/// at `config/index.tsx:295`). Unknown keys are ignorable config here, where
+/// upstream `parse` throws (`keybind.ts` `unknownKeys`).
+fn tab_overridden_command(key: &str) -> Option<String> {
+    let named = match key {
+        "session_tab_next" | "session.tab.next" => Some("session.tab.next"),
+        "session_tab_previous" | "session.tab.previous" => Some("session.tab.previous"),
+        "session_tab_next_unread" | "session.tab.next_unread" => Some("session.tab.next_unread"),
+        "session_tab_previous_unread" | "session.tab.previous_unread" => {
+            Some("session.tab.previous_unread")
+        }
+        "session_tab_close" | "session.tab.close" => Some("session.tab.close"),
+        "session_tab_reopen" | "session.tab.reopen" => Some("session.tab.reopen"),
+        _ => None,
+    };
+    if let Some(name) = named {
+        return Some(name.to_owned());
+    }
+    let slot = key
+        .strip_prefix("session_tab_select_")
+        .or_else(|| key.strip_prefix("session.tab.select."))
+        .and_then(|slot| slot.parse::<usize>().ok())?;
+    (1..=10).contains(&slot).then(|| format!("session.tab.select.{slot}"))
+}
+
+/// Normalize one chord spec to the resolver grammar: lowercase key names with
+/// canonical modifier order `ctrl`, `shift`, `alt`, mirroring the pinned
+/// defaults (`ctrl+shift+tab`, `alt+shift+down`, `config/v1/keybind.ts:92-94`).
+/// `meta` maps to `alt` (`KeyStroke`, `keybind.ts:11-19`); `super` and
+/// `hyper` have no native chord representation and drop the binding.
+/// `<leader>` sequences stay verbatim: leader dispatch is its own live seam
+/// and the resolved table simply never matches a leader chord from the
+/// physical-chord dispatcher.
+fn normalize_chord(chord: &str) -> Option<String> {
+    let trimmed = chord.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {
+        return None;
+    }
+    let mut leader = false;
+    let mut ctrl = false;
+    let mut shift = false;
+    let mut alt = false;
+    let mut keys: Vec<String> = Vec::new();
+    for part in trimmed.split('+') {
+        let lowered = part.trim().to_ascii_lowercase();
+        match lowered.as_str() {
+            "ctrl" | "control" => ctrl = true,
+            "shift" => shift = true,
+            "alt" | "meta" | "option" => alt = true,
+            "super" | "hyper" | "command" | "cmd" => return None,
+            "" => {}
+            "<leader>" if keys.is_empty() => leader = true,
+            key => keys.push(key.to_owned()),
+        }
+    }
+    if keys.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    if leader {
+        out.push_str("<leader>");
+    }
+    if ctrl {
+        out.push_str("ctrl+");
+    }
+    if shift {
+        out.push_str("shift+");
+    }
+    if alt {
+        out.push_str("alt+");
+    }
+    out.push_str(&keys.join("+"));
+    Some(out)
+}
+
+/// One `BindingValueSchema` element (`config/v1/keybind.ts:31-38`): a chord
+/// string or a `KeyStroke` object. Invalid shapes resolve to no chord.
+fn normalize_binding_item(item: &serde_json::Value) -> Option<String> {
+    match item {
+        serde_json::Value::String(text) => normalize_chord(text),
+        serde_json::Value::Object(object) => {
+            let key = normalize_chord(object.get("key").and_then(serde_json::Value::as_str)?)?;
+            let modifiers = [
+                ("ctrl", "ctrl"),
+                ("shift", "shift"),
+                ("alt", "meta"),
+            ]
+            .into_iter()
+            .filter(|(_, flag)| {
+                object.get(*flag).and_then(serde_json::Value::as_bool).unwrap_or(false)
+            })
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>()
+            .join("+");
+            if modifiers.is_empty() {
+                Some(key)
+            } else {
+                Some(format!("{modifiers}+{key}"))
+            }
+        }
+        _ => None,
+    }
+}
+
+/// One `BindingValueSchema` override (`config/v1/keybind.ts:36-41`):
+/// `false`/`"none"` disable the command (empty chord list, e.g. the upstream
+/// `"none"` defaults), an array concatenates items, and anything else is one
+/// string/object item.
+fn parse_binding_value(value: &serde_json::Value) -> Vec<String> {
+    match value {
+        serde_json::Value::Bool(false) => Vec::new(),
+        serde_json::Value::String(text) if text.trim().eq_ignore_ascii_case("none") => Vec::new(),
+        serde_json::Value::Array(items) => {
+            items.iter().filter_map(normalize_binding_item).collect()
+        }
+        value => normalize_binding_item(value).into_iter().collect(),
+    }
+}
+
+/// TAB-23: resolve the live `session.tab.*` chord table from the TUI config's
+/// raw `keybinds` object (`config/index.tsx:78`,
+/// `Schema.optional(TuiKeybind.KeybindOverrides)`), consumed upstream through
+/// `TuiKeybind.parse` + `createBindingLookup` (`config/index.tsx:293,313`).
+/// Upstream `parse` semantics: an override replaces the whole default binding
+/// set of its command (`keybind.ts` decodes the override value wholesale), so
+/// overridden chords are unbound rather than merged. Chords the live decoder
+/// never produces simply do not match, the same unreachable-binding outcome
+/// upstream shows on terminals that cannot send the stroke; arbitrary
+/// keymap normalization is the recorded `native_input_decoder.rs` seam and
+/// stays out of scope. No config or a non-object yields exactly
+/// `DEFAULT_TAB_KEYBINDS`, preserving the frozen default keymap.
+#[must_use]
+pub fn tab_keybinds(overrides: Option<&serde_json::Value>) -> Vec<(String, String)> {
+    let mut bindings: Vec<(String, String)> = DEFAULT_TAB_KEYBINDS
+        .iter()
+        .map(|(binding, name)| ((*binding).to_owned(), (*name).to_owned()))
+        .collect();
+    let Some(object) = overrides.and_then(serde_json::Value::as_object) else {
+        return bindings;
+    };
+    for (key, value) in object {
+        let Some(command) = tab_overridden_command(key) else {
+            continue;
+        };
+        let chords = parse_binding_value(value);
+        bindings.retain(|(_, name)| name != &command);
+        bindings.extend(chords.into_iter().map(|chord| (chord, command.clone())));
+    }
+    bindings
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2189,5 +2343,80 @@ mod tests {
         assert_eq!(nav.step_tab_where(true, |id| id == &s("missing")), None);
         assert_eq!(nav.active().unwrap().session, s("b"));
         assert_eq!(nav.step_tab_where(false, |_| true), Some(0));
+    }
+
+    #[test]
+    fn tab_23_keybinds_resolve_live_chord_table_from_config() {
+        use serde_json::json;
+        // No config (or a non-object) resolves to exactly the frozen default
+        // table (`config/index.tsx:78` optional override).
+        let default_table = tab_keybinds(None);
+        assert_eq!(
+            default_table,
+            DEFAULT_TAB_KEYBINDS
+                .iter()
+                .map(|(b, n)| ((*b).to_owned(), (*n).to_owned()))
+                .collect::<Vec<_>>(),
+            "unset keybinds preserves the default keymap"
+        );
+        assert_eq!(tab_keybinds(Some(&json!("nope"))), default_table);
+
+        // An override REPLACES the whole default binding set of its command
+        // (`config/v1/keybind.ts:222-232`); the old chord is unbound.
+        let overrides = json!({ "session_tab_next": "ctrl+n" });
+        let table = tab_keybinds(Some(&overrides));
+        assert_eq!(
+            resolve_tab_shortcut(
+                &table.iter().map(|(b, n)| (b.as_str(), n.as_str())).collect::<Vec<_>>(),
+                "ctrl+n"
+            ),
+            Some(TabCommand::Next)
+        );
+        assert_eq!(
+            resolve_tab_shortcut(
+                &table.iter().map(|(b, n)| (b.as_str(), n.as_str())).collect::<Vec<_>>(),
+                "ctrl+tab"
+            ),
+            None,
+            "the replaced command's old chord is unbound"
+        );
+        // Unrelated commands keep their defaults.
+        assert_eq!(
+            resolve_tab_shortcut(
+                &table.iter().map(|(b, n)| (b.as_str(), n.as_str())).collect::<Vec<_>>(),
+                "alt+up"
+            ),
+            Some(TabCommand::Previous)
+        );
+
+        // `false` / `"none"` disable a command (empty chord list).
+        for disabled in [json!(false), json!("none")] {
+            let table = tab_keybinds(Some(&json!({ "session.tab.reopen": disabled })));
+            let rows: Vec<(&str, &str)> =
+                table.iter().map(|(b, n)| (b.as_str(), n.as_str())).collect();
+            assert_eq!(resolve_tab_shortcut(&rows, "ctrl+shift+t"), None);
+        }
+
+        // A `KeyStroke` object (`config/v1/keybind.ts:31-38`) and a bare
+        // command-name spelling both resolve; an array concatenates.
+        let strokes = json!({
+            "session.tab.select.3": [{ "key": "x", "ctrl": true }],
+        });
+        let table = tab_keybinds(Some(&strokes));
+        let rows: Vec<(&str, &str)> =
+            table.iter().map(|(b, n)| (b.as_str(), n.as_str())).collect();
+        assert_eq!(resolve_tab_shortcut(&rows, "ctrl+x"), Some(TabCommand::Select(2)));
+        assert_eq!(resolve_tab_shortcut(&rows, "ctrl+3"), None);
+
+        // Unknown keys and unrepresentable modifiers (super/hyper) are ignored
+        // rather than crashing, and never manufacture a binding.
+        let table = tab_keybinds(Some(&json!({
+            "bogus.command": "ctrl+b",
+            "session_tab_next": "super+n",
+        })));
+        let rows: Vec<(&str, &str)> =
+            table.iter().map(|(b, n)| (b.as_str(), n.as_str())).collect();
+        assert_eq!(resolve_tab_shortcut(&rows, "ctrl+b"), None);
+        assert_eq!(resolve_tab_shortcut(&rows, "ctrl+tab"), None, "super dropped the binding");
     }
 }

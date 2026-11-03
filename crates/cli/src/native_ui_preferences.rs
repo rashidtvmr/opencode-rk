@@ -93,6 +93,12 @@ pub struct UiPreferences {
     /// Drives reduced-motion tab/hover paint (TAB-24) and the existing
     /// spinner/status fallbacks.
     pub animations: Option<bool>,
+    /// TAB-23: raw TUI `keybinds` overrides (`config/index.tsx:78`,
+    /// `Schema.optional(TuiKeybind.KeybindOverrides)`). Kept as raw JSON like
+    /// `cursor`; the caller validates entries and resolves the live
+    /// `session.tab.*` chord table with
+    /// [`crate::native_navigation::tab_bindings`].
+    pub keybinds: Option<Value>,
     /// Bounded diagnostics for config/state files skipped during startup.
     pub diagnostics: Vec<String>,
 }
@@ -308,9 +314,10 @@ impl UiPreferences {
         let mut configured_theme = None;
         let mut cursor: Option<Value> = None;
         let mut animations: Option<bool> = None;
+        let mut keybinds: Option<Value> = None;
         let mut diagnostics = Vec::new();
         for path in config_paths {
-            let loaded = (|| -> Result<Option<(Option<PromptWidth>, Option<String>, Option<String>, Option<Value>, Option<bool>)>, String> {
+            let loaded = (|| -> Result<Option<(Option<PromptWidth>, Option<String>, Option<String>, Option<Value>, Option<bool>, Option<Value>)>, String> {
                 let Some(text) = budget.read(path, MAX_CONFIG_BYTES, "TUI config")? else {
                     return Ok(None);
                 };
@@ -389,6 +396,11 @@ impl UiPreferences {
                 // caller parses it with the theme runtime's `CursorConfig`
                 // (validated there, THEME-14).
                 let cursor = object.get("cursor").cloned();
+                // TAB-23: raw `keybinds` overrides (`config/index.tsx:78`
+                // `TuiKeybind.KeybindOverrides`). Raw like `cursor`;
+                // per-entry validation happens in the
+                // `native_navigation::tab_bindings` resolver.
+                let keybinds = object.get("keybinds").cloned();
                 // `tui.animations` (`config/index.tsx:250`). A non-boolean is a
                 // malformed config value, matching the other typed keys.
                 let animations = object
@@ -399,11 +411,11 @@ impl UiPreferences {
                         })
                     })
                     .transpose()?;
-                Ok(Some((width, paste, theme, cursor, animations)))
+                Ok(Some((width, paste, theme, cursor, animations, keybinds)))
             })();
 
             match loaded {
-                Ok(Some((width, paste, theme, cursor_value, animations_value))) => {
+                Ok(Some((width, paste, theme, cursor_value, animations_value, keybinds_value))) => {
                     if let Some(width) = width {
                         prompt_width = Some(width);
                     }
@@ -418,6 +430,9 @@ impl UiPreferences {
                     }
                     if animations_value.is_some() {
                         animations = animations_value;
+                    }
+                    if keybinds_value.is_some() {
+                        keybinds = keybinds_value;
                     }
                 }
                 Ok(None) => {}
@@ -474,6 +489,7 @@ impl UiPreferences {
             onboarding_dismissed,
             cursor,
             animations,
+            keybinds,
             diagnostics,
         })
     }
@@ -1567,6 +1583,33 @@ mod tests {
         );
         let empty = UiPreferences::load(&[], &dir.join("missing-kv.json")).unwrap();
         assert_eq!(empty.cursor, None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// TAB-23: the raw `keybinds` object is surfaced from the last config file
+    /// (`config/index.tsx:78` `Schema.optional(TuiKeybind.KeybindOverrides)`),
+    /// kept as raw JSON like `cursor`; an absent value stays `None` so the live
+    /// resolver falls back to the frozen default keymap.
+    #[test]
+    fn keybinds_object_is_surfaced_from_the_last_config_file() {
+        let dir = std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "opencode-ui-keybinds-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let global = dir.join("global.json");
+        let project = dir.join("project.json");
+        fs::write(&global, r#"{"keybinds":{"session_tab_next":"ctrl+n"}}"#).unwrap();
+        fs::write(&project, r#"{"keybinds":{"session_tab_close":false}}"#).unwrap();
+        let prefs = UiPreferences::load(&[global, project], &dir.join("missing-kv.json")).unwrap();
+        assert_eq!(
+            prefs.keybinds,
+            Some(serde_json::json!({"session_tab_close": false})),
+            "later config wins"
+        );
+        let empty = UiPreferences::load(&[], &dir.join("missing-kv.json")).unwrap();
+        assert_eq!(empty.keybinds, None);
         fs::remove_dir_all(dir).unwrap();
     }
 

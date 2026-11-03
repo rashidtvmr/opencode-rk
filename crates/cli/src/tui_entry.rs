@@ -6822,6 +6822,16 @@ fn native_loop(
     for diagnostic in &preferences.diagnostics {
         append_transcript(&mut transcript, format!("error: {diagnostic}"));
     }
+    // TAB-23: the live `session.tab.*` chord table resolved from the raw
+    // config `keybinds` object (`config/index.tsx:78`), held owned and
+    // re-borrowed as `(&str, &str)` rows for `resolve_tab_shortcut`. With no
+    // config this is exactly `DEFAULT_TAB_KEYBINDS`, so the frozen default
+    // keymap behavior is unchanged.
+    let tab_keybinds_owned = crate::native_navigation::tab_keybinds(preferences.keybinds.as_ref());
+    let tab_keybinds: Vec<(&str, &str)> = tab_keybinds_owned
+        .iter()
+        .map(|(binding, name)| (binding.as_str(), name.as_str()))
+        .collect();
     // SIDE-12: the getting-started box shows only while the connection list
     // is known AND no provider is connected (`footer.tsx:18-23`). The bounded
     // native credential store (`auth.json`, the document the daemon's
@@ -8890,34 +8900,38 @@ fn native_loop(
         // inert, and the permission modal / Help gates above keep
         // precedence over both.
         let page_query_open = view.page().accepts_search();
-        // `session.tab.*` shortcuts (`config/keybind.ts:113-118,152-161`).
-        // Every physical chord names the same `TabCommand` as the leader
-        // path, so default and customized bindings share one dispatch. Like
-        // the leader chord, they only fire while the chat composer owns
-        // focus; dialogs and pages keep their own arrow navigation.
-        let tab_command = match &event {
-            native_input_decoder::InputEvent::AltArrowDown
-            | native_input_decoder::InputEvent::TabNext => {
-                Some(crate::native_navigation::TabCommand::Next)
+        // `session.tab.*` shortcuts (`config/keybind.ts:113-118,152-161`),
+        // TAB-23 resolved through the config `keybinds` chord table
+        // (`TuiKeybind.parse` + `createBindingLookup`, `config/index.tsx:78,
+        // 293,313`). Each decoded event names the physical chord it represents
+        // (`native_input_decoder.rs` Kitty ctrl-/alt-chord arms); the config
+        // table, equal to `DEFAULT_TAB_KEYBINDS` when no config exists, maps
+        // the chord to its `TabCommand`. Like the previous hardcoded match,
+        // they only fire while the chat composer owns focus; dialogs and
+        // pages keep their own arrow navigation.
+        let tab_chord: Option<String> = match &event {
+            native_input_decoder::InputEvent::TabNext => Some("ctrl+tab".to_owned()),
+            native_input_decoder::InputEvent::AltArrowDown => Some("alt+down".to_owned()),
+            native_input_decoder::InputEvent::TabPrevious => {
+                Some("ctrl+shift+tab".to_owned())
             }
-            native_input_decoder::InputEvent::AltArrowUp
-            | native_input_decoder::InputEvent::TabPrevious => {
-                Some(crate::native_navigation::TabCommand::Previous)
-            }
+            native_input_decoder::InputEvent::AltArrowUp => Some("alt+up".to_owned()),
             native_input_decoder::InputEvent::AltShiftArrowDown => {
-                Some(crate::native_navigation::TabCommand::NextUnread)
+                Some("alt+shift+down".to_owned())
             }
             native_input_decoder::InputEvent::AltShiftArrowUp => {
-                Some(crate::native_navigation::TabCommand::PreviousUnread)
+                Some("alt+shift+up".to_owned())
             }
-            native_input_decoder::InputEvent::TabSlot(index) => {
-                Some(crate::native_navigation::TabCommand::Select(*index))
+            native_input_decoder::InputEvent::TabSlot(index) if *index < 9 => {
+                Some(format!("ctrl+{}", index + 1))
             }
-            native_input_decoder::InputEvent::TabReopen => {
-                Some(crate::native_navigation::TabCommand::Reopen)
-            }
+            native_input_decoder::InputEvent::TabSlot(_) => Some("ctrl+0".to_owned()),
+            native_input_decoder::InputEvent::TabReopen => Some("ctrl+shift+t".to_owned()),
             _ => None,
         };
+        let tab_command = tab_chord
+            .as_deref()
+            .and_then(|chord| crate::native_navigation::resolve_tab_shortcut(&tab_keybinds, chord));
         if let Some(command) = tab_command {
             if matches!(dialog, native_setup::Dialog::None)
                 && !page_open
