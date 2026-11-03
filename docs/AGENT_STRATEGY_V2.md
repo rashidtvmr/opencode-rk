@@ -18,6 +18,37 @@ authorize a second scheduler. Do not rewrite historical evidence as current fact
 
 ## 2. Large ownership; small complete deliveries
 
+### Required complete-feature workspace contract (2026-11-03)
+
+Stop new fragment-only implementation assignments. Preserve existing fragments
+and give their feature owner the full checkout needed to integrate them. Provision
+one managed worktree/feature branch per active feature, or an equivalent complete
+isolated checkout, from a known base. Retain that workspace through repairs;
+reviewers consume immutable candidate revisions instead of each requiring a new
+writer environment. Revoke stale leases before replacing an owner.
+
+The feature owner implements production wiring, tests and fixes inside that full
+tree. Its deliverable is a mergeable candidate revision, not files for main to
+reconstruct. If workers lack Git commit permission, the controller checkpoints
+their exact changes mechanically. Grants must include the required caller/test
+seams, or an explicit seam owner must finish them before the feature is ready.
+Never accept an unwired candidate by creating a future "main will integrate" task.
+
+Independent review -> candidate checks -> automatic current-base preparation ->
+author/integration-expert conflict repair -> exact-tree checks -> atomic merge ->
+confirmed push -> verified retirement is the intended path. The orchestrator
+prioritizes, assigns and monitors; routine implementation assembly is not its job.
+Any substantive integration repair is new candidate code requiring review, even
+when Git reports no textual conflict.
+
+First demonstrate three independent complete-feature deliveries on this path,
+including workspace retirement eligibility. No whole-wave wait: merge each ready
+feature immediately. Scale useful feature owners when review/build/integration
+throughput supports them. Do not begin a Rust rewrite or replacement framework
+as a prerequisite. Controller-managed feature refs need supported provisioning
+and any required protected-policy amendment; worker-created arbitrary branch
+families remain forbidden. Do not bypass existing safeguards to simulate rollout.
+
 Assign a persistent expert owner to a coherent subsystem or end-to-end behavior,
 not one researcher, one helper author and a later wiring task. The owner reads
 the pinned source, implements, proposes meaningful tests, fixes review findings
@@ -186,7 +217,8 @@ This table is a point-in-time observation, not a permanent limit or fake rollout
 | Three concurrent heavy delivery checks | Config says 3; `jobs.py:heavy_lock` still takes one exclusive `heavy-validation.lock` | Shared resource admission across all lock consumers; concurrency/crash tests |
 | Dependent candidate stacks | NOT implemented: dependencies require accepted state | Parent-version invalidation and stack tests before enabling |
 | Review reuse across changed SHAs | NOT implemented; exact-candidate checks remain | Dependency/content-bound review reuse, separately evaluated |
-| Reusable worker slots | NOT implemented: per-job detached repositories | Lease-safe capture/restore/recycle with failure recovery |
+| Persistent complete-feature workspaces | NOT implemented by current per-job detached-repository lifecycle in `jobs.py:create_workspace`; worker prompt denies commits and controller checkpoints them | Retain one full feature environment across repairs with fenced ownership, immutable review revisions and mechanical candidate commits; no main-agent reconstruction |
+| Reusable worker slots | NOT implemented: per-job detached repositories | Lease-safe capture/restore/recycle after verified feature disposition |
 | Automatic safe workspace reclamation | `engine.py` unconditionally calls `cleanup.collect`, even without publication; commit-diff archival omits merged/pushed and dirty/ignored proofs. Manual reclaim-script restriction does not disable it | Verified retention-safe collector or supported non-destructive mode before supervisor launch; guard/ancestry/race tests |
 | Distributed builds / cache deduplication | Proposed, not established by numeric configs | Isolated build workers and reproducible artifact keys |
 | OS-enforced worker write grants | Do not infer from prompts or permissions | Demonstrated boundary tests before claiming isolation |

@@ -1,5 +1,19 @@
 # Orchestrator scratchpad
 
+## 2026-11-03 — Complete-feature workspace instructions
+
+Owner requested existing instructions explicitly require complete features in
+full workspaces, mergeable commits, author-owned test/conflict repairs and
+merge/push/verified retirement, with predefined expert roles. Updated existing
+AGENTS, strategy, worker, delivery/operating-contract, convergence/recovery,
+subagent-control and TDD/skill files. All 16 expert roles remain in the existing
+worker file; selecting a role and supplying full-workspace/Git-authority fields
+is now mandatory. No new policy files, worktrees or product fleet created.
+Current controller's per-job repositories and worker commit prohibition remain
+explicit runtime gaps: controller checkpointing of exact worker bytes is allowed,
+manual main-agent reconstruction is not the intended implementation path.
+User/peer dirty `crates/server/tests/compaction_strategy_resolution.rs` preserved.
+
 ## 2026-11-02 — Consolidation into existing instruction files
 
 Owner requested existing-file updates rather than additional rule documents.

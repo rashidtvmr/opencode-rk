@@ -2,6 +2,39 @@
 
 This repository is in **product-convergence mode**. The goal is a working OpenCode-compatible Rust application, not a larger task graph.
 
+## Complete-feature delivery instruction — 2026-11-03
+
+The owner requests complete feature workspaces and mergeable candidates instead
+of fragment-only handoffs. This supersedes older worker instructions requiring
+one/two copied files, `.json.part` implementation outputs or main-agent assembly.
+
+- Assign one predefined expert role from `docs/AGENT_WORKER_PRACTICES.md` and one
+  complete observable feature per implementation owner. Provide a full source
+  checkout at an exact base, grants for all necessary production/test wiring and
+  an explicit workspace/branch owner. Main assigns and coordinates; it does not
+  routinely rewrite worker output.
+- Use one controller-provisioned feature workspace through implementation,
+  review repairs and integration fixes. A managed worktree/feature branch is the
+  preferred lifecycle; a complete isolated checkout is acceptable. No worker
+  invents persistent refs or bypasses protected topology/hooks. If current tooling
+  cannot provision this safely, repair that execution path rather than pretending
+  copied fragments are a complete feature workspace.
+- Deliver a complete candidate commit (worker-owned commit only if explicitly
+  granted, otherwise controller checkpoint of exact worker bytes), executed test
+  evidence and remaining issues. JSON metadata is fine; JSON/file fragments and
+  prose instructions to main are not completed implementations.
+- Return failed checks and merge conflicts to the feature owner or an explicitly
+  assigned integration-repair expert. Repairs receive fresh independent review.
+  Merge each verified ready candidate promptly, push, then retire only when the
+  full merged/pushed/clean/inactive/unique-content lifecycle checks pass.
+- Pilot three independent complete features without a wave barrier. Expand this
+  delivery path after demonstrating integration without main-agent reconstruction
+  and bounded inactive workspace storage. Independent useful work continues.
+- This instruction does not implement workspace pooling, fix automatic cleanup,
+  change runtime grants or authorize a new controller. Existing launch preflight,
+  resource locks and exact-candidate acceptance remain binding. See the strategy
+  runtime ledger for the specific execution-path repairs still required.
+
 ## Current implementation-first contract — 2026-11-02
 
 The user's latest direction is larger end-to-end expert implementation ownership,

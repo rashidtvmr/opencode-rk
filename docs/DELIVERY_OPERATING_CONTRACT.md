@@ -29,8 +29,11 @@ the versioned v2 transcript and instruction summary. Do not invent missing conte
 2. Allocate a single dynamic pool by current eligible demand. Twenty independent
    tasks may use twenty implementation slots; forty slots do not mean forty
    invented tasks. No fixed role quotas or permanent four-lane scheduler.
-3. Own each task through delivery with fresh fenced job leases per stage. Detached
-   private repositories isolate jobs. A worker cannot publish or accept itself.
+3. Own a complete feature through delivery with fresh fenced leases. Required
+   workflow: a full feature workspace retained through repairs and a mergeable
+   revision; no fragment-only handoff requiring main to rewrite/wire it. Current
+   detached per-job repositories are a runtime limitation to repair, not proof
+   persistent feature workspaces exist. A worker cannot publish or self-accept.
 4. Require independent diff-first, structured exact-candidate reviews. P0/P1 need
    two approvals; sensitive changes need security review. Negative findings block.
 5. Run trusted focused checks and meaningful RED probes. Test logs must contain

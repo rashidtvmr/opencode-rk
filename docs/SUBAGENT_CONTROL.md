@@ -1,5 +1,11 @@
 # Subagent lifecycle control - complete specification
 
+Development-worker instruction (2026-11-03): use the predefined expert roles and
+full-feature workspace/commit contract in `AGENT_WORKER_PRACTICES.md`. The owner
+finishes production wiring, tests and conflict repairs; main coordinates rather
+than reconstructing fragments. The product lifecycle API designs below do not
+themselves implement feature-workspace provisioning or expand Git permissions.
+
 Status: product design specification, not a claim that every surface exists in
 the installed harness. Each capability needs production wiring and executed
 verification before being described as implemented. For development-worker roles,

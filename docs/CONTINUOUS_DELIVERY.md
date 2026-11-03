@@ -13,6 +13,15 @@ worker lease. Ordinary work is admitted from an owner-controlled task manifest.
 
 ## What it runs
 
+**Required next execution-path change (2026-11-03):** retain one complete feature
+workspace across author repairs, deliver mergeable revisions and send conflict/
+test failures back to its owner. Main must not reconstruct fragment-only handoffs.
+The current implementation below still uses per-job repositories; it does not yet
+provide that persistent lifecycle. `runtime.py:prompt_for` denies worker commits,
+so the controller must checkpoint exact worker changes, not manually rewrite them.
+Do not promise worker branch/commit rights unless explicitly provisioned. See
+`AGENT_STRATEGY_V2.md` section 2 for the complete-feature contract and pilot.
+
 ```
 admit task -> independent implementation workspace -> independent review
           -> focused tests -> prepare on current main

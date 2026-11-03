@@ -2,6 +2,14 @@
 
 Status: **ACTIVE**
 
+**2026-11-03 complete-feature direction:** worker isolation must provide a full
+feature checkout, not copied-file fragments for main to reconstruct. Current
+topology protection still requires authorized controller provisioning; an agent
+cannot create arbitrary refs or bypass hooks. Implement the managed feature
+workspace lifecycle through the existing controller, as specified in
+`AGENT_STRATEGY_V2.md` section 2. The old no-persistent-worker-worktree rule is not
+a reason to accept incomplete feature handoffs.
+
 **Current orchestration clarification (2026-11-02):**
 `AGENT_STRATEGY_V2.md` governs staffing, expert ownership and handoffs.
 For new dynamically scheduled work, use the single delivery controller described

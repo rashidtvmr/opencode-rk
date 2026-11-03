@@ -8,6 +8,11 @@ expert title without concrete ownership and acceptance is not an assignment.
 
 ## Implementation owners (default allocation)
 
+Every implementation dispatch MUST select a role ID below and name the expert's
+concrete feature ownership. Generic "researcher" or "coder" without domain and
+delivery responsibility is insufficient. One expert may cover adjacent domains
+for a complete feature; role boundaries must not manufacture handoffs.
+
 | Role ID | Expert responsibility | Must deliver through the real path |
 | --- | --- | --- |
 | `native-interaction` | Rust TUI input, cursor, focus, paste, completion | Decoder -> owner routing -> editor -> submit; modal and Unicode cases |
@@ -47,13 +52,15 @@ An integration worker that changes behavior is an author, not its own evaluator.
 Role: <catalog role> — expert in <specific subsystem>
 Goal: <one end-to-end behavior or coherent subsystem responsibility>
 Success/failure: <observable journeys, negative cases, exact required checks>
-Base: <SHA; absolute canonical and private candidate paths>
+Base: <SHA; absolute canonical and full feature-workspace paths>
+Workspace: <controller-provisioned checkout/worktree; branch/ref owner; lease>
+Git authority: <explicit worker commit grant OR controller exact-byte checkpoint>
 Reference: <selected upstream SHA, absolute paths and entry symbols>
 Production chain: <input/API -> state -> effect -> output; existing Rust callers>
 Ownership: <checkpoint write paths, shared-file seam owner, read-only paths>
-Checkpoints: <independently testable slices; submit early; continue independent work>
+Checkpoints: <complete mergeable behavior slices; submit early; no main assembly>
 Dependencies: <interface/accepted revision; unsupported stacks are not assumed>
-Resources: <permitted cheap checks, build-service/lock owner, time/output limits>
+Resources: <permitted author tests, build-service/lock owner, time/output limits>
 Artifacts: <unique private path; patch, raw failure/check receipts, short notes>
 Review: <independent reviewer count/security role; author fixes, never self-accepts>
 Stop/escalate: <precise missing authority or blocker; next independent work>
@@ -63,7 +70,11 @@ Read docs/AGENT_WORKER_PRACTICES.md and applicable scoped rules.
 Implementation instruction: "Read the pinned source directly and implement the
 behavior in the existing Rust application. Include production wiring and tests.
 Do not return only a research report or plan unless a named blocker prevents
-implementation. Keep ownership through review and integration repairs. Do not
+implementation. Work in the full supplied source tree; do not return copied
+files, .json.part code fragments or instructions for main to wire the feature.
+Deliver a candidate revision (or exact changes for controller checkpointing),
+test evidence and unresolved issues. Keep ownership through review, failed tests
+and merge-conflict repairs. Do not
 delegate children unless explicitly granted; do not broaden paths yourself."
 
 Reviewer instruction: "Inspect diff and real callers before the author's
@@ -79,6 +90,10 @@ caller evidence; executed checks/counts/artifact hashes; unresolved findings;
 next checkpoint; lease/workspace retention status. Use INCOMPLETE or UNEXECUTED
 honestly. Keep one concise subsystem source mapping, not repeated research essays.
 The assignment may be large; each acceptance claim must remain narrowly proven.
+Metadata JSON may accompany a candidate; it never replaces the implementation.
+If there is no usable full workspace or no grant for a required production seam,
+request that specific provisioning/grant correction and continue independent
+work. Do not claim completion or shift the missing implementation to main.
 
 ## Execution and preservation
 
