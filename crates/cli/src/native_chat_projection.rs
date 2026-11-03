@@ -805,6 +805,90 @@ pub fn project_session_revert(revert: &Value) -> Option<RevertCard> {
     Some(RevertCard::new(count, files))
 }
 
+/// SIDE-03: the last eligible assistant message's usage for the sidebar
+/// `Context` section, mirroring upstream `lastAssistantWithUsage`
+/// (`packages/client/src/solid/usage.ts:8-21`) and `contextUsage`
+/// (`packages/tui/src/util/session.ts:44-63`).
+///
+/// `boundary` is the staged revert's `messageID`. When it is set but no
+/// matching record exists the usage is absent (upstream returns `undefined`),
+/// so an unknown revert never shows stale tokens. Records at or after the
+/// boundary are excluded, and the last completed compaction before the
+/// boundary hides everything preceding it. The model is the message's own
+/// `execution.provider_id`/`model_id`, never the currently selected UI model.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionUsage {
+    /// Inclusive wire input tokens (`execution.usage.input_tokens`).
+    pub input: u64,
+    pub output: u64,
+    pub cached: Option<u64>,
+    pub reasoning: Option<u64>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+}
+
+impl SessionUsage {
+    /// The five disjoint classes (`native_sidebar::classes_from_wire`).
+    #[must_use]
+    pub fn classes(&self) -> crate::native_view_status::native_sidebar::UsageClasses {
+        crate::native_view_status::native_sidebar::classes_from_wire(
+            self.input,
+            self.output,
+            self.cached,
+            self.reasoning,
+        )
+    }
+}
+
+/// See [`SessionUsage`]. `None` when no eligible assistant record carries a
+/// stored `execution.usage`.
+#[must_use]
+pub fn last_assistant_usage(records: &[Value], boundary: Option<&str>) -> Option<SessionUsage> {
+    let end = match boundary {
+        Some(id) => records
+            .iter()
+            .position(|record| record.get("id").and_then(Value::as_str) == Some(id))?,
+        None => records.len(),
+    };
+    // Upstream hides everything before the last completed compaction
+    // (`usage.ts:14-16`). A compaction record carries `role: "compaction"` and
+    // `status: "completed"` once the compaction producer lands; until then this
+    // is a no-op.
+    let start = records[..end]
+        .iter()
+        .rposition(|record| {
+            record.get("role").and_then(Value::as_str) == Some("compaction")
+                && record.get("status").and_then(Value::as_str) == Some("completed")
+        })
+        .map_or(0, |index| index + 1);
+    records[start..end].iter().rev().find_map(|record| {
+        if record.get("role").and_then(Value::as_str) != Some("assistant") {
+            return None;
+        }
+        let execution = record.get("execution")?;
+        // `execution.usage` exists only when the producer recorded at least one
+        // token field (`server/src/lib.rs` `execution_json`), matching
+        // upstream's `tokens !== undefined` eligibility.
+        let usage = execution.get("usage")?;
+        Some(SessionUsage {
+            input: usage.get("input_tokens").and_then(Value::as_u64).unwrap_or(0),
+            output: usage.get("output_tokens").and_then(Value::as_u64).unwrap_or(0),
+            cached: usage.get("cached_tokens").and_then(Value::as_u64),
+            reasoning: usage.get("reasoning_tokens").and_then(Value::as_u64),
+            provider: execution
+                .get("provider_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned),
+            model: execution
+                .get("model_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned),
+        })
+    })
+}
+
 /// Project the same bounded history while retaining the backend message id
 /// beside each display message.  The id is an anchor identity only; all
 /// rendering still uses the exact typed projection returned by
@@ -1380,6 +1464,66 @@ mod tests {
         assert!(count_only.files.is_empty());
         // A non-object (absent revert) is not a card.
         assert!(project_session_revert(&Value::Null).is_none());
+    }
+
+    fn usage_record(id: &str, role: &str, input: u64, output: u64) -> Value {
+        json!({
+            "id": id,
+            "role": role,
+            "execution": {
+                "provider_id": "openai",
+                "model_id": "gpt-5",
+                "usage": {"input_tokens": input, "output_tokens": output, "cached_tokens": 10},
+            }
+        })
+    }
+
+    #[test]
+    fn last_assistant_usage_honours_revert_and_compaction_boundaries() {
+        // SIDE-03: the sidebar Context selector mirrors upstream
+        // `lastAssistantWithUsage` (`packages/client/src/solid/usage.ts:8-21`).
+        let records = vec![
+            usage_record("m1", "assistant", 100, 20),
+            usage_record("m2", "user", 0, 0),
+            usage_record("m3", "assistant", 200, 40),
+        ];
+        // No boundary: the last assistant with usage wins.
+        let usage = last_assistant_usage(&records, None).expect("last assistant");
+        assert_eq!((usage.input, usage.output), (200, 40));
+        assert_eq!(usage.cached, Some(10));
+        assert_eq!(usage.provider.as_deref(), Some("openai"));
+        assert_eq!(usage.model.as_deref(), Some("gpt-5"));
+        // Five disjoint classes: non-cached input, output, cache.read.
+        let classes = usage.classes();
+        assert_eq!((classes.input, classes.output, classes.cache_read), (190, 40, 10));
+
+        // Revert boundary m3: records at/after the boundary are excluded, so the
+        // earlier assistant is selected.
+        let usage = last_assistant_usage(&records, Some("m3")).expect("before boundary");
+        assert_eq!((usage.input, usage.output), (100, 20));
+
+        // Unknown revert boundary: absent usage, never a stale value.
+        assert!(last_assistant_usage(&records, Some("missing")).is_none());
+
+        // A completed compaction hides everything before it.
+        let with_compaction = vec![
+            usage_record("m1", "assistant", 100, 20),
+            json!({"id": "c1", "role": "compaction", "status": "completed"}),
+            usage_record("m3", "assistant", 200, 40),
+        ];
+        let usage = last_assistant_usage(&with_compaction, None).expect("after compaction");
+        assert_eq!((usage.input, usage.output), (200, 40));
+
+        // Only a *completed* compaction is a boundary; a pending one is ignored.
+        let pending = vec![
+            usage_record("m1", "assistant", 100, 20),
+            json!({"id": "c1", "role": "compaction", "status": "pending"}),
+        ];
+        assert_eq!(last_assistant_usage(&pending, None).map(|u| u.input), Some(100));
+
+        // An assistant record with no stored usage is not eligible.
+        let no_usage = vec![json!({"id": "m1", "role": "assistant"})];
+        assert!(last_assistant_usage(&no_usage, None).is_none());
     }
 
     fn actual_tool_record(parts: Value, body: &str) -> Value {

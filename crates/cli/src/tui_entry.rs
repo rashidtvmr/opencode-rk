@@ -609,6 +609,11 @@ struct LiveSnapshot {
     /// (`target["revert"]`), projected for the transcript revert card.
     #[cfg(feature = "native")]
     session_revert: Option<crate::native_view_chat::RevertCard>,
+    /// SIDE-03: the staged revert boundary message id (`revert.messageID`),
+    /// used by the history-load `lastAssistantWithUsage` selector so usage at or
+    /// after the boundary is excluded (upstream `usage.ts:9-12`).
+    #[cfg(feature = "native")]
+    session_revert_boundary: Option<String>,
 }
 
 /// TAB-10 producer: derive VCS facts for a session's working directory by
@@ -1289,6 +1294,15 @@ fn snapshot_from_listing(
     let session_revert = target
         .get("revert")
         .and_then(crate::native_chat_projection::project_session_revert);
+    // SIDE-03: the revert boundary message id for the usage selector. `None`
+    // when no revert is staged, so the whole history is eligible.
+    #[cfg(feature = "native")]
+    let session_revert_boundary = target
+        .get("revert")
+        .and_then(|revert| revert.get("messageID"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned);
     Ok(LiveSnapshot {
         origin: origin.to_owned(),
         session_id: id,
@@ -1322,6 +1336,8 @@ fn snapshot_from_listing(
         session_vcs,
         #[cfg(feature = "native")]
         session_revert,
+        #[cfg(feature = "native")]
+        session_revert_boundary,
     })
 }
 
@@ -7030,6 +7046,11 @@ fn native_loop(
     let mut worker: Option<crate::native_view::OwnedWorker<native_turn::TurnWorker>> = None;
     let mut compact_worker: Option<NativeCompactWorker> = None;
     let mut pending_submission: Option<crate::native_composer::SubmittedDraft> = None;
+    // SIDE-03: the binding generation whose sidebar usage was last set by a
+    // live `native_turn::Event::Usage`. While it matches the current binding, a
+    // live turn owns the Context row and the history-load selector must not
+    // overwrite it; a new binding (session switch/reload) lets history publish.
+    let mut usage_live_generation: Option<u64> = None;
     // CP-08 bounded busy queue: composer Enter while a turn owns the
     // current binding routes through `plan_submit` Delivery::Queue
     // (upstream `submit("queue")`, `component/prompt/index.tsx:455`,
@@ -8060,6 +8081,10 @@ fn native_loop(
                                 ),
                             ));
                             view.set_usage(input,output,cached,reasoning);
+                            // SIDE-03: this live turn now owns the Context row
+                            // for this binding, so the history-load selector is
+                            // suppressed until the binding changes.
+                            usage_live_generation = Some(binding_generation);
                             // SIDE-03: price this turn's measured usage with the
                             // selected model's catalogue cost (`cost.ts`/`context.tsx`
                             // semantics). `input`/`output` are the inclusive measured
@@ -8978,6 +9003,34 @@ fn native_loop(
         view.set_session_revert(
             live.as_ref().and_then(|snapshot| snapshot.session_revert.clone()),
         );
+        // SIDE-03: when no live turn owns the usage for this binding, derive the
+        // sidebar Context from the loaded history's last eligible assistant
+        // message — honouring the staged revert boundary and the last completed
+        // compaction (`packages/client/src/solid/usage.ts:8-21`) and using the
+        // message's OWN model limit, never the selected UI model
+        // (`util/session.ts:44-63`). An unknown revert boundary or a message
+        // whose model is absent from the catalogue yields no percentage, never
+        // an invented one.
+        if usage_live_generation != Some(binding_generation) {
+            if let Some(snapshot) = live.as_ref() {
+                if let Some(usage) = crate::native_chat_projection::last_assistant_usage(
+                    &snapshot.raw_history,
+                    snapshot.session_revert_boundary.as_deref(),
+                ) {
+                    let limit = usage.provider.as_deref().and_then(|provider| {
+                        usage.model.as_deref().and_then(|model| {
+                            models
+                                .iter()
+                                .find(|entry| entry.provider_id == provider && entry.id == model)
+                                .and_then(|entry| entry.context_window)
+                        })
+                    });
+                    view.set_context_window(limit);
+                    view.set_usage(usage.input, usage.output, usage.cached, usage.reasoning);
+                    view.set_usage_classes(Some(usage.classes()));
+                }
+            }
+        }
 
         // CP-11: the provider-turn fact (`data.session.status`) plus a live
         // monotonic clock feed the running status slot (`index.tsx:1911-1917`).
@@ -14742,7 +14795,7 @@ mod tab_binding_tests {
         let mut completion = crate::native_completion::Completion::default();
         let models = vec![native_setup::Model { id: "child".into(), name: "Child".into(), provider_id: "fixture".into(), context_window: None, free: false, cost: None, variants: Vec::new() }];
         let mut selected = None;
-        let snapshot = LiveSnapshot { origin: "http://127.0.0.1:1".into(), session_id: A.into(), title: "A".into(), state: "idle".into(), updated_at: String::new(), message_count: 0, last_text: None, history: vec![], typed_history: vec![], raw_history: vec![], history_next_before: None, history_children: 0, parent_session: true, parent_session_id: Some(B.into()), directory: None, session_titles: vec![], session_project_labels: vec![], session_vcs: vec![], session_revert: None };
+        let snapshot = LiveSnapshot { origin: "http://127.0.0.1:1".into(), session_id: A.into(), title: "A".into(), state: "idle".into(), updated_at: String::new(), message_count: 0, last_text: None, history: vec![], typed_history: vec![], raw_history: vec![], history_next_before: None, history_children: 0, parent_session: true, parent_session_id: Some(B.into()), directory: None, session_titles: vec![], session_project_labels: vec![], session_vcs: vec![], session_revert: None, session_revert_boundary: None };
         commit_child_route(snapshot, "child draft".into(), 2, 8, 13, Some("fixture/child".into()), &models, &mut selected, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut route, &mut completion);
         assert_eq!(draft, "child draft");
         assert_eq!(cursor, 8);
@@ -15317,6 +15370,7 @@ mod command_consumption_tests {
             session_project_labels: vec![],
             session_vcs: vec![],
             session_revert: None,
+            session_revert_boundary: None,
         });
         let mut history_window = live.as_ref().map(|snapshot| crate::native_chat_projection::NativeHistoryWindow::new(
             &snapshot.raw_history,
@@ -15372,6 +15426,7 @@ mod command_consumption_tests {
             session_project_labels: vec![],
             session_vcs: vec![],
             session_revert: None,
+            session_revert_boundary: None,
         });
         let mut history = None;
         let mut generation = 7;
