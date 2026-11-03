@@ -113,7 +113,9 @@ async fn fallback_manual_compaction_restart_keeps_durable_history_and_bounds_nex
     assert!(summary_request["input"].to_string().contains("old-0"));
     assert!(summary_request["input"].to_string().contains("old-99"));
     assert!(summary_request.to_string().contains("compaction summary") || summary_request.to_string().contains("Summarize"));
-    assert_eq!(sessions.messages(session.id, 200).await.unwrap().len(), 100);
+    // The 100 seeded rows survive verbatim; the route adds exactly one durable
+    // `Compaction` transcript notice.
+    assert_eq!(sessions.messages(session.id, 200).await.unwrap().len(), 101);
     drop(sessions);
     let (reopened, _) = make_session(root.path()).await;
     let app = router(AppState { sessions: reopened.clone(), catalog: Arc::new(Catalog::default()) });
@@ -127,7 +129,8 @@ async fn fallback_manual_compaction_restart_keeps_durable_history_and_bounds_nex
     assert!(input.iter().any(|v| v["content"] == "latest user"));
     assert!(!input.iter().any(|v| v.to_string().contains("old-0")));
     assert!(input.iter().any(|v| v["role"] == "system" && v["content"].as_str().unwrap().contains("FALLBACK_AGENTS_INSTRUCTIONS")));
-    assert_eq!(reopened.messages(session.id, 200).await.unwrap().len(), 102);
+    // 101 rows after the compaction notice + the continuation user/assistant pair.
+    assert_eq!(reopened.messages(session.id, 200).await.unwrap().len(), 103);
 }
 
 #[tokio::test]

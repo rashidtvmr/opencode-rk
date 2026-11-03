@@ -375,6 +375,9 @@ async fn native_checkpoint_selection_is_provider_only_atomic_and_restart_durable
     assert!(tail_request.to_string().contains("NEW_COMPACTION_TAIL"));
     assert!(!has_encrypted_content(&tail_request, opaque.as_str()));
 
+    // The checkpoint boundary is the durable head at compaction time; the
+    // route appends its own `Compaction` notice afterwards, so capture first.
+    let pre_compaction_head = reopened.messages(session.id, 200).await.unwrap().last().unwrap().id;
     let compact_again = restarted_app
         .clone()
         .oneshot(
@@ -390,7 +393,6 @@ async fn native_checkpoint_selection_is_provider_only_atomic_and_restart_durable
     assert_eq!(compact_again.status(), StatusCode::OK);
     let second_compact_request = next_request(&mut rx).await;
     assert!(!has_encrypted_content(&second_compact_request, opaque.as_str()));
-    let current_head = reopened.messages(session.id, 200).await.unwrap().last().unwrap().id;
 
     let replaced_context = restarted_app
         .clone()
@@ -399,7 +401,7 @@ async fn native_checkpoint_selection_is_provider_only_atomic_and_restart_durable
         .unwrap();
     assert_eq!(replaced_context.status(), StatusCode::OK);
     let replaced_context = response_body(replaced_context).await;
-    assert_eq!(replaced_context["checkpoint"]["boundary_message_id"], current_head.to_string());
+    assert_eq!(replaced_context["checkpoint"]["boundary_message_id"], pre_compaction_head.to_string());
     assert_eq!(replaced_context["checkpoint"]["included"], true);
     assert!(!replaced_context.to_string().contains(opaque.as_str()));
 

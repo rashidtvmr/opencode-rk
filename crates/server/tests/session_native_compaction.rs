@@ -271,7 +271,8 @@ async fn native_compaction_survives_restart_and_continues_without_duplicate_hist
     assert!(!input.iter().any(|item| item.to_string().contains("old assistant two")));
 
     let messages = reopened.messages(session_id, 50).await.unwrap();
-    assert_eq!(messages.len(), 6);
+    // four seeded turns + the compaction notice + the restarted user/assistant pair.
+    assert_eq!(messages.len(), 7);
     assert!(!serde_json::to_string(&messages).unwrap().contains("opaque-encrypted-content"));
     for text in ["old user one", "old assistant one", "old user two", "old assistant two", "new user after restart", "continued after native compaction"] {
         assert!(messages.iter().any(|message| serde_json::to_string(&message.body).unwrap().contains(text)), "missing durable text: {text}");
@@ -359,6 +360,15 @@ async fn native_compaction_can_recompact_after_a_nonstreaming_continuation() {
     assert!(first_turn_request["input"].as_array().unwrap().iter().any(|item| item == &typed_call));
     assert!(first_turn_request["input"].as_array().unwrap().iter().any(|item| item == &typed_output));
 
+    // The compaction boundary is the durable head captured BEFORE the
+    // provider call; the route appends its own `Compaction` notice afterwards.
+    let pre_recompact_head = sessions
+        .messages(session.id, 200)
+        .await
+        .unwrap()
+        .last()
+        .unwrap()
+        .id;
     let second = app.clone().oneshot(Request::builder().method("POST").uri(format!("/api/sessions/{}/compact", session.id)).header("content-type","application/json").body(Body::from(json!({"model":"openai/fixture","strategy":"native"}).to_string())).unwrap()).await.unwrap();
     assert_eq!(second.status(), StatusCode::OK);
     let second_compact_request = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await.unwrap().unwrap();
@@ -369,11 +379,12 @@ async fn native_compaction_can_recompact_after_a_nonstreaming_continuation() {
     assert!(!second_compact_request.to_string().contains("old recurrence message 0"));
     assert!(!second_compact_request.to_string().contains("opaque-recur-two"));
     let messages = sessions.messages(session.id, 200).await.unwrap();
-    assert_eq!(messages.len(), 102);
-    let latest = messages.last().unwrap();
-    assert_ne!(latest.id, old_boundary.unwrap());
+    // 100 seeded turns, the first compaction notice, the continuation
+    // user/assistant pair, and the second compaction notice.
+    assert_eq!(messages.len(), 104);
     let checkpoint = sessions.compaction_checkpoint(session.id).await.unwrap().unwrap();
-    assert_eq!(checkpoint.boundary_message_id, latest.id);
+    assert_eq!(checkpoint.boundary_message_id, pre_recompact_head);
+    assert!(messages.iter().any(|message| message.id == pre_recompact_head));
     assert_ne!(checkpoint.boundary_message_id, old_boundary.unwrap());
     assert!(!serde_json::to_string(&messages).unwrap().contains("opaque-recur-one"));
     assert!(!serde_json::to_string(&messages).unwrap().contains("opaque-recur-two"));

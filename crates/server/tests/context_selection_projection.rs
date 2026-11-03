@@ -444,5 +444,7 @@ async fn fallback_summary_excludes_old_history_and_next_turn_keeps_tail() {
     assert!(!input_has_exact(next_input, "OLD_MARKER_0_ASSISTANT"));
     assert!(!input_has_exact(next_input, "OLD_MARKER_1_USER"));
     assert!(!input_has_exact(next_input, "OLD_MARKER_1_ASSISTANT"));
-    assert_eq!(sessions.messages(session.id, 100).await.unwrap().len(), 12);
+    // 8 old markers + RECENT_TAIL + RECENT_REPLY + the compaction notice
+    // + the continuation user/assistant pair.
+    assert_eq!(sessions.messages(session.id, 100).await.unwrap().len(), 13);
 }
