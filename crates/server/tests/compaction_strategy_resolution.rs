@@ -137,6 +137,13 @@ async fn auto_and_omitted_manual_strategy_resolve_to_configured_fallback() {
             sessions: sessions.clone(),
             catalog: Arc::new(Catalog::default()),
         });
+        let pre_compaction_head = sessions
+            .messages(current.id, 20)
+            .await
+            .unwrap()
+            .last()
+            .unwrap()
+            .id;
         let compact = post_json(
             app.clone(),
             format!("/api/sessions/{}/compact", current.id),
@@ -170,13 +177,12 @@ async fn auto_and_omitted_manual_strategy_resolve_to_configured_fallback() {
                 .to_ascii_lowercase()
                 .contains("compaction")
         );
-        let old_last_id = sessions
-            .messages(current.id, 20)
-            .await
-            .unwrap()
-            .last()
-            .unwrap()
-            .id;
+        // `fallback_compaction::compact` captures the durable head as its
+        // boundary (`history_page(id, None, 1)` -> newest) BEFORE the summary
+        // request, and the route then appends a `Compaction` transcript
+        // message (`append_compaction_message`). The expectation must name the
+        // pre-compaction head, not whatever row the notice appended.
+        let old_last_id = pre_compaction_head;
 
         let turn = post_json(
             app,
@@ -207,7 +213,9 @@ async fn auto_and_omitted_manual_strategy_resolve_to_configured_fallback() {
         assert!(checkpoint.window_json.contains("STRATEGY_FALLBACK_SUMMARY"));
         assert_eq!(checkpoint.boundary_message_id, old_last_id);
         let durable = sessions.messages(current.id, 20).await.unwrap();
-        assert_eq!(durable.len(), 6);
+        // four appended turns + the durable `Compaction` notice + the
+        // continuation user/assistant pair.
+        assert_eq!(durable.len(), 7);
         assert!(durable.iter().any(|item| {
             serde_json::to_string(&item.body)
                 .unwrap()
