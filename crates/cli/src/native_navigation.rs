@@ -197,6 +197,61 @@ pub enum WorkState {
     Idle,
 }
 
+/// VCS facts for a tab's working directory, mirroring upstream
+/// `packages/core/src/session/projector.ts` location/VCS projection as consumed
+/// by `session-tabs-model.ts:14-22` (`vcs.branch.current`, `vcs.branch.default`
+/// and the linked-worktree fact). TAB-10.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VcsInfo {
+    /// `vcs.branch.current`: the checked-out branch, when the directory is a
+    /// git repository (detached HEAD yields `None`).
+    pub branch: Option<String>,
+    /// `vcs.branch.default`: the repository default branch, when known.
+    pub default_branch: Option<String>,
+    /// `location.project.directory !== location.project.canonical`: true for a
+    /// linked worktree rather than the repository's primary checkout.
+    pub worktree: bool,
+}
+
+impl VcsInfo {
+    /// Display detail for the tab rail, delegating to the pinned
+    /// `sessionTabDetail` rule (`session-tabs-model.ts:14-22`).
+    #[cfg(feature = "native")]
+    #[must_use]
+    pub fn tab_detail(&self, project: &str) -> String {
+        crate::native_tab_rail::session_tab_detail(
+            project,
+            self.branch.as_deref(),
+            self.default_branch.as_deref(),
+            self.worktree,
+        )
+    }
+
+    /// Parse the checked-out branch from a git `HEAD` file body. A symbolic
+    /// `ref: refs/heads/<name>` yields `<name>`; a detached HEAD (a raw object
+    /// id) yields `None`. Pure, bounded to a single trimmed line.
+    #[must_use]
+    pub fn branch_from_head(head: &str) -> Option<String> {
+        let name = head.trim().strip_prefix("ref: refs/heads/")?;
+        if name.is_empty() || name.chars().any(char::is_control) {
+            return None;
+        }
+        Some(name.to_owned())
+    }
+
+    /// Parse the default branch from a `refs/remotes/origin/HEAD` body
+    /// (`ref: refs/remotes/origin/<name>`). A missing origin or a symref still
+    /// pointing at HEAD yields `None`.
+    #[must_use]
+    pub fn default_branch_from_origin_head(body: &str) -> Option<String> {
+        let name = body.trim().strip_prefix("ref: refs/remotes/origin/")?;
+        if name.is_empty() || name == "HEAD" || name.chars().any(char::is_control) {
+            return None;
+        }
+        Some(name.to_owned())
+    }
+}
+
 /// One open tab with client-local state (draft, scroll and model are per-tab).
 #[derive(Clone, Debug)]
 pub struct Tab {
@@ -206,6 +261,9 @@ pub struct Tab {
     /// Display-only directory fallback from the latest authenticated listing.
     /// Named projects and VCS metadata are not inferred from this value.
     project_label: Option<String>,
+    /// VCS facts for this tab's working directory, replaced only by an
+    /// authenticated listing bind so a stale branch never lingers.
+    vcs: Option<VcsInfo>,
     pub draft: String,
     /// Composer cursor position, retained independently for every session tab.
     pub cursor: usize,
@@ -219,6 +277,7 @@ impl Tab {
             session,
             parent: None,
             project_label: None,
+            vcs: None,
             draft: String::new(),
             cursor: 0,
             scroll: 0,
@@ -899,6 +958,25 @@ impl NavigationState {
             .and_then(|tab| tab.project_label.as_deref())
     }
 
+    /// Replace VCS facts on open tabs only. A session absent from `entries`
+    /// loses its facts, so a stale branch never survives a fresh listing.
+    pub fn replace_vcs_info(&mut self, entries: &[(SessionRef, VcsInfo)]) {
+        for tab in &mut self.tabs {
+            tab.vcs = entries
+                .iter()
+                .find(|(session, _)| *session == tab.session)
+                .map(|(_, info)| info.clone());
+        }
+    }
+
+    /// VCS facts for a tab, or `None` when the tab is unknown or its directory
+    /// is not a git repository.
+    #[must_use]
+    pub fn vcs_info(&self, session: &SessionRef) -> Option<&VcsInfo> {
+        self.tabs.iter().find(|tab| &tab.session == session)
+            .and_then(|tab| tab.vcs.as_ref())
+    }
+
     #[must_use]
     pub fn tab_at(&self, index: usize) -> Option<&Tab> {
         self.tabs.get(index)
@@ -1458,6 +1536,59 @@ mod tests {
 
     fn s(id: &str) -> SessionRef {
         SessionRef(id.to_string())
+    }
+
+    #[cfg(feature = "native")]
+    #[test]
+    fn tab_10_vcs_facts_flow_into_the_tab_detail() {
+        // `session-tabs-model.ts:14-22`: a linked worktree on a branch that
+        // differs from the default shows "<project> ⎇ <branch>"; a plain
+        // checkout never shows the branch.
+        let mut nav = NavigationState::new();
+        nav.open(s("wt"));
+        nav.open(s("plain"));
+        nav.replace_project_labels(&[
+            (s("wt"), Some("proj".into())),
+            (s("plain"), Some("proj".into())),
+        ]);
+        nav.replace_vcs_info(&[
+            (s("wt"), VcsInfo {
+                branch: Some("feat".into()),
+                default_branch: Some("main".into()),
+                worktree: true,
+            }),
+            (s("plain"), VcsInfo {
+                branch: Some("feat".into()),
+                default_branch: Some("main".into()),
+                worktree: false,
+            }),
+        ]);
+        let detail = |nav: &NavigationState, id: &SessionRef| {
+            let project = nav.project_label(id).unwrap_or_default();
+            nav.vcs_info(id).map_or_else(|| project.to_owned(), |info| info.tab_detail(project))
+        };
+        assert_eq!(detail(&nav, &s("wt")), "proj \u{2387} feat");
+        assert_eq!(detail(&nav, &s("plain")), "proj");
+        // A directory that leaves git drops its stale branch.
+        nav.replace_vcs_info(&[]);
+        assert!(nav.vcs_info(&s("wt")).is_none());
+        assert_eq!(detail(&nav, &s("wt")), "proj");
+    }
+
+    #[test]
+    fn tab_10_git_head_parsers_cover_symbolic_and_detached_states() {
+        assert_eq!(VcsInfo::branch_from_head("ref: refs/heads/main\n").as_deref(), Some("main"));
+        assert_eq!(VcsInfo::branch_from_head("ref: refs/heads/feat/x"), Some("feat/x".to_string()));
+        // Detached HEAD is a raw object id, never a branch.
+        assert_eq!(VcsInfo::branch_from_head("0123456789abcdef\n"), None);
+        assert_eq!(VcsInfo::branch_from_head(""), None);
+        assert_eq!(
+            VcsInfo::default_branch_from_origin_head("ref: refs/remotes/origin/main\n").as_deref(),
+            Some("main")
+        );
+        // A symref still pointing at HEAD is not a default branch.
+        assert_eq!(VcsInfo::default_branch_from_origin_head("ref: refs/remotes/origin/HEAD"), None);
+        assert_eq!(VcsInfo::default_branch_from_origin_head("garbage"), None);
     }
 
     #[test]

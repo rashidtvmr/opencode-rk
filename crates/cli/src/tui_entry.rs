@@ -601,6 +601,58 @@ struct LiveSnapshot {
     session_titles: Vec<(String, String)>,
     #[cfg(feature = "native")]
     session_project_labels: Vec<(String, Option<String>)>,
+    /// TAB-10: per-session VCS facts (branch/worktree) derived from each
+    /// listing row's directory, feeding the tab rail detail.
+    #[cfg(feature = "native")]
+    session_vcs: Vec<(String, crate::native_navigation::VcsInfo)>,
+}
+
+/// TAB-10 producer: derive VCS facts for a session's working directory by
+/// reading git's on-disk `HEAD` (branch) and the common dir's
+/// `refs/remotes/origin/HEAD` (default branch), and treating a `.git` file
+/// (linked worktree) as `worktree = true`. Pure std::fs, no subprocess; any
+/// I/O failure yields `None` so an unknown directory never invents a branch.
+#[cfg(feature = "native")]
+fn git_vcs_info(directory: &str) -> Option<crate::native_navigation::VcsInfo> {
+    use crate::native_navigation::VcsInfo;
+    let path = std::path::Path::new(directory);
+    let dot_git = path.join(".git");
+    let (git_dir, worktree) = if dot_git.is_dir() {
+        (dot_git, false)
+    } else if dot_git.is_file() {
+        let body = std::fs::read_to_string(&dot_git).ok()?;
+        let target = body.trim().strip_prefix("gitdir:")?.trim();
+        if target.is_empty() {
+            return None;
+        }
+        let resolved = path.join(target);
+        (resolved, true)
+    } else {
+        return None;
+    };
+    let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
+    let branch = VcsInfo::branch_from_head(&head);
+    // A linked worktree stores its common dir in `<gitdir>/commondir`;
+    // otherwise the git dir is itself the common dir.
+    let common = std::fs::read_to_string(git_dir.join("commondir"))
+        .ok()
+        .map(|body| {
+            let trimmed = body.trim();
+            if trimmed.is_empty() {
+                git_dir.clone()
+            } else {
+                git_dir.join(trimmed)
+            }
+        })
+        .unwrap_or_else(|| git_dir.clone());
+    let default_branch = std::fs::read_to_string(common.join("refs/remotes/origin/HEAD"))
+        .ok()
+        .and_then(|body| VcsInfo::default_branch_from_origin_head(&body));
+    Some(VcsInfo {
+        branch,
+        default_branch,
+        worktree,
+    })
 }
 
 
@@ -1221,6 +1273,12 @@ fn snapshot_from_listing(
         let entry = sessions.iter().find(|candidate| candidate["id"].as_str() == Some(row.id.as_str()));
         (row.id.clone(), session_directory_label(entry.and_then(|item| item.get("directory"))))
     }).collect();
+    #[cfg(feature = "native")]
+    let session_vcs = parsed_rows.iter().filter_map(|row| {
+        let entry = sessions.iter().find(|candidate| candidate["id"].as_str() == Some(row.id.as_str()))?;
+        let directory = entry.get("directory").and_then(|value| value.as_str())?;
+        git_vcs_info(directory).map(|info| (row.id.clone(), info))
+    }).collect();
     Ok(LiveSnapshot {
         origin: origin.to_owned(),
         session_id: id,
@@ -1250,6 +1308,8 @@ fn snapshot_from_listing(
         session_titles: parsed_rows.into_iter().map(|row| (row.id, row.title)).collect(),
         #[cfg(feature = "native")]
         session_project_labels,
+        #[cfg(feature = "native")]
+        session_vcs,
     })
 }
 
@@ -1485,6 +1545,65 @@ fn display_name(p: &PathBuf) -> String {
     p.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| p.to_string_lossy().into_owned())
+}
+
+#[cfg(all(test, feature = "native"))]
+mod tab_10_vcs_producer_tests {
+    use super::*;
+
+    /// The producer reads git's on-disk state instead of invoking git: a plain
+    /// checkout reads `.git/HEAD` and the primary worktree flag stays false.
+    #[test]
+    fn plain_checkout_reads_branch_from_disk() {
+        let root = std::env::temp_dir().join(format!("oc2-tab10-plain-{}", std::process::id()));
+        let git = root.join(".git");
+        std::fs::create_dir_all(git.join("refs/remotes/origin")).unwrap();
+        std::fs::write(git.join("HEAD"), "ref: refs/heads/feat\n").unwrap();
+        std::fs::write(git.join("refs/remotes/origin/HEAD"), "ref: refs/remotes/origin/main\n").unwrap();
+        let info = git_vcs_info(root.to_str().unwrap()).unwrap();
+        assert_eq!(info.branch.as_deref(), Some("feat"));
+        assert_eq!(info.default_branch.as_deref(), Some("main"));
+        assert!(!info.worktree);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A linked worktree has a `.git` *file* pointing at the common git dir
+    /// via `commondir`, so `worktree` is true and the raised detail shows the
+    /// branch (`session-tabs-model.ts:20`).
+    #[test]
+    fn linked_worktree_reads_branch_and_common_default() {
+        let root = std::env::temp_dir().join(format!("oc2-tab10-wt-{}", std::process::id()));
+        let common = root.join("main-git");
+        let working = root.join("wt");
+        std::fs::create_dir_all(common.join("refs/remotes/origin")).unwrap();
+        std::fs::create_dir_all(common.join("worktrees/wt")).unwrap();
+        std::fs::create_dir_all(&working).unwrap();
+        std::fs::write(common.join("refs/remotes/origin/HEAD"), "ref: refs/remotes/origin/main\n").unwrap();
+        std::fs::write(
+            common.join("worktrees/wt/HEAD"),
+            "ref: refs/heads/feature\n",
+        )
+        .unwrap();
+        std::fs::write(common.join("worktrees/wt/commondir"), "../..\n").unwrap();
+        std::fs::write(working.join(".git"), "gitdir: ../main-git/worktrees/wt\n").unwrap();
+        let info = git_vcs_info(working.to_str().unwrap()).unwrap();
+        assert!(info.worktree, "a .git file marks a linked worktree");
+        assert_eq!(info.branch.as_deref(), Some("feature"));
+        assert_eq!(info.default_branch.as_deref(), Some("main"));
+        assert_eq!(info.tab_detail("proj"), "proj \u{2387} feature");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A directory that is not a git repository yields no VCS facts, so the
+    /// tab detail falls back to the project label instead of inventing a branch.
+    #[test]
+    fn non_repository_has_no_vcs_facts() {
+        let root = std::env::temp_dir().join(format!("oc2-tab10-none-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(git_vcs_info(root.to_str().unwrap()).is_none());
+        assert!(git_vcs_info("/oc2/tab10/does/not/exist").is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
 
 #[cfg(test)]
@@ -5400,6 +5519,10 @@ fn seed_navigation_titles(
         (crate::native_navigation::SessionRef(id.clone()), label.clone())
     }).collect();
     navigation.replace_project_labels(&labels);
+    let vcs: Vec<_> = snapshot.session_vcs.iter().map(|(id, info)| {
+        (crate::native_navigation::SessionRef(id.clone()), info.clone())
+    }).collect();
+    navigation.replace_vcs_info(&vcs);
 }
 
 #[cfg(feature = "native")]
@@ -5407,11 +5530,20 @@ fn rail_inputs_for_navigation(
     navigation: &crate::native_navigation::NavigationState,
     tabs: &[crate::native_tabs::TabInput],
 ) -> Vec<crate::native_tab_rail::RailInput> {
-    tabs.iter().map(|tab| crate::native_tab_rail::RailInput {
-        session: tab.session.clone(), title: tab.title.clone(),
-        detail: navigation.project_label(&tab.session).unwrap_or_default().to_owned(), flags: tab.flags,
-        marquee_offset: tab.marquee_offset,
-        unread: tab.unread,
+    tabs.iter().map(|tab| {
+        // TAB-10: the tab detail combines the project label with the session
+        // directory's VCS facts (`session-tabs.tsx:586` -> `sessionTabDetail`).
+        let project = navigation.project_label(&tab.session).unwrap_or_default();
+        let detail = match navigation.vcs_info(&tab.session) {
+            Some(info) => info.tab_detail(project),
+            None => project.to_owned(),
+        };
+        crate::native_tab_rail::RailInput {
+            session: tab.session.clone(), title: tab.title.clone(),
+            detail, flags: tab.flags,
+            marquee_offset: tab.marquee_offset,
+            unread: tab.unread,
+        }
     }).collect()
 }
 
@@ -14325,7 +14457,7 @@ mod tab_binding_tests {
         let mut completion = crate::native_completion::Completion::default();
         let models = vec![native_setup::Model { id: "child".into(), name: "Child".into(), provider_id: "fixture".into(), context_window: None, free: false }];
         let mut selected = None;
-        let snapshot = LiveSnapshot { origin: "http://127.0.0.1:1".into(), session_id: A.into(), title: "A".into(), state: "idle".into(), updated_at: String::new(), message_count: 0, last_text: None, history: vec![], typed_history: vec![], raw_history: vec![], history_next_before: None, history_children: 0, parent_session: true, parent_session_id: Some(B.into()), directory: None, session_titles: vec![], session_project_labels: vec![] };
+        let snapshot = LiveSnapshot { origin: "http://127.0.0.1:1".into(), session_id: A.into(), title: "A".into(), state: "idle".into(), updated_at: String::new(), message_count: 0, last_text: None, history: vec![], typed_history: vec![], raw_history: vec![], history_next_before: None, history_children: 0, parent_session: true, parent_session_id: Some(B.into()), directory: None, session_titles: vec![], session_project_labels: vec![], session_vcs: vec![] };
         commit_child_route(snapshot, "child draft".into(), 2, 8, 13, Some("fixture/child".into()), &models, &mut selected, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut route, &mut completion);
         assert_eq!(draft, "child draft");
         assert_eq!(cursor, 8);
@@ -14896,6 +15028,7 @@ mod command_consumption_tests {
             directory: None,
             session_titles: vec![],
             session_project_labels: vec![],
+            session_vcs: vec![],
         });
         let mut history_window = live.as_ref().map(|snapshot| crate::native_chat_projection::NativeHistoryWindow::new(
             &snapshot.raw_history,
@@ -14949,6 +15082,7 @@ mod command_consumption_tests {
             raw_history: Vec::new(), history_next_before: None, history_children: 0, parent_session: false, parent_session_id: None, directory: None,
             session_titles: vec![],
             session_project_labels: vec![],
+            session_vcs: vec![],
         });
         let mut history = None;
         let mut generation = 7;
