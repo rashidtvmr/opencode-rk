@@ -21,7 +21,8 @@
   "cursor",
   "layout_and_clipping",
   "focus",
-  "semantic_actions"
+  "semantic_actions",
+  "hit_targets"
  ],
  "environment": {
   "COLORTERM": "truecolor",

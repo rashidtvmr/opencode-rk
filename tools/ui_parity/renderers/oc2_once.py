@@ -104,6 +104,7 @@ def main() -> int:
                     "value": None,
                     "source": "once_plain_text_has_no_focus_channel",
                 },
+                "hit_targets": [],
                 "actions": [],
                 "environment": {
                     "adapter": "oc2-once",

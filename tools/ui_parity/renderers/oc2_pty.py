@@ -350,6 +350,11 @@ def capture(request, binary: Path, min_total: float, quiet: float, max_total: fl
                     "value": None,
                     "source": "terminal_has_no_focus_channel",
                 },
+                # PAR-04: the PTY channel exposes no pointer/mouse events, so the
+                # live native app cannot report hit targets here. The key is
+                # emitted (empty) so the transport matches Frame.hit_targets and
+                # the comparator member is exercised by the static renderer.
+                "hit_targets": [],
                 "actions": actions,
                 "environment": {
                     "adapter": "oc2-pty",

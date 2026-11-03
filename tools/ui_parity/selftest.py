@@ -75,6 +75,7 @@ def main() -> int:
                 "layout_and_clipping",
                 "focus",
                 "semantic_actions",
+                "hit_targets",
             ],
             "static_screen": {
                 "default_style": {"fg": "#ffffff", "bg": "#000000"},
@@ -92,6 +93,9 @@ def main() -> int:
                 ],
                 "cursor": {"row": 1, "col": 2, "visible": True},
                 "focus": {"value": "composer", "source": "selftest"},
+                "hit_targets": [
+                    {"x": 4, "y": 2, "action": "tab.select"},
+                ],
                 "actions": [
                     {"seq": 0, "type": "key", "key": "x", "applied": True}
                 ],
@@ -210,6 +214,14 @@ def main() -> int:
             diff_kinds(report),
         )
 
+        result, report = mutated("hit_target_extra")
+        ok("extra hit target fails", result.returncode == 1, result.stdout)
+        ok(
+            "extra hit target reports hit_targets",
+            "hit_targets" in diff_kinds(report),
+            diff_kinds(report),
+        )
+
         # Pin drift must fail unless explicitly allowed.
         expected = harness.load_json(golden_path)
         screen = {
@@ -219,6 +231,7 @@ def main() -> int:
             "theme": expected["theme"],
             "cursor": expected["cursor"],
             "focus": expected["focus"],
+            "hit_targets": expected.get("hit_targets") or [],
             "rows": expected["rows"],
             "actions": expected["actions"],
             "environment": {

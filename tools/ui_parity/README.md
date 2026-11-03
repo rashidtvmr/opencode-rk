@@ -83,11 +83,19 @@ The renderer writes one JSON screen document on stdout:
   "theme": {"name": "opencode", "mode": "dark"},
   "cursor": {"row": 14, "col": 6, "visible": true},
   "focus": {"value": null, "source": "..."},
+  "hit_targets": [{"x": 4, "y": 2, "action": "tab.select"}],
   "rows": [{"text": "Chat ...", "w": 80, "spans": [{"c": 0, "n": 35, "fg": "#fab283", "bg": "#141414", "attrs": ["bold"]}]}],
   "actions": [],
   "environment": {"adapter": "oc2-pty", "product": {"version": "...", "sha256": "..."}}
 }
 ```
+
+`hit_targets` (PAR-04) is the transport for the Rust `Frame.hit_targets`
+(`crates/cli/src/native_capture.rs:142`, canonical form `hit={x},{y},{action}`).
+It is compared only when the fixture lists `hit_targets` in `compare`; targets
+are sorted by `(y, x, action)` so paint order is not a false diff. The PTY
+channel exposes no pointer events, so the live `oc2-pty` adapter emits an empty
+list and the member is exercised by the deterministic `static` renderer.
 
 `rows` must contain exactly `viewport.rows` entries; `w` is the cell width of the
 row. Text may omit trailing default-styled spaces; the comparator pads to `w`.
@@ -116,6 +124,7 @@ renderer, or `--renderer-profile NAME` to select a manifest profile.
   "default_style": {"fg": "#ffffff", "bg": "#000000"},
   "cursor": {"row": 14, "col": 6, "visible": true},
   "focus": {"value": null, "source": "terminal_has_no_focus_channel"},
+  "hit_targets": [],
   "rows": [{"text": "Chat ...", "w": 80, "spans": [{"c": 0, "n": 35, "fg": "#fab283", "bg": "#141414", "attrs": ["bold", "underline"]}]}],
   "actions": []
 }
@@ -127,7 +136,8 @@ frame around 12 KB while remaining readable and diffable.
 ## Comparison and pins
 
 `--check` compares viewport, default style, theme, cursor (when visible), focus,
-action trace and every cell's character/foreground/background/attributes.
+action trace, hit targets (when the fixture lists `hit_targets` in `compare`) and
+every cell's character/foreground/background/attributes.
 `--max-diffs` caps the emitted diff list; the summary always counts all diffs.
 
 Mixed-version captures are rejected: golden pins and the product binary SHA-256

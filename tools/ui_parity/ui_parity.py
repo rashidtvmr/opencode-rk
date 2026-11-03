@@ -126,6 +126,14 @@ def validate_screen(screen, where: str = "screen") -> None:
     for key in ("fg", "bg"):
         if not isinstance(default.get(key), str):
             raise ValueError(f"{where}: default_style.{key} must be a string")
+    for target in screen.get("hit_targets") or []:
+        if not isinstance(target, dict):
+            raise ValueError(f"{where}: hit_target must be an object")
+        for key in ("x", "y"):
+            if not isinstance(target.get(key), int):
+                raise ValueError(f"{where}: hit_target.{key} must be an integer")
+        if not isinstance(target.get("action"), str):
+            raise ValueError(f"{where}: hit_target.action must be a string")
     rows = screen.get("rows")
     if not isinstance(rows, list) or len(rows) != viewport["rows"]:
         raise ValueError(
@@ -191,6 +199,27 @@ def canonical_cursor(cursor):
         "row": cursor.get("row") if visible else None,
         "col": cursor.get("col") if visible else None,
     }
+
+
+def canonical_hit_targets(targets):
+    """Order-insensitive, position+action hit target list (PAR-04).
+
+    Mirrors the Rust `Frame::canonical` `hit={x},{y},{action}` ordering: targets
+    are sorted by (y, x, action) so a paint-order change is not a false diff.
+    """
+    result = []
+    for target in targets or []:
+        if not isinstance(target, dict):
+            continue
+        result.append(
+            {
+                "x": target.get("x"),
+                "y": target.get("y"),
+                "action": target.get("action"),
+            }
+        )
+    result.sort(key=lambda t: (t["y"], t["x"], t["action"]))
+    return result
 
 
 def compact_theme(theme):
@@ -285,6 +314,15 @@ def compare_screens(expected, actual, fixture, pins, options) -> tuple:
         act_cursor = canonical_cursor(actual.get("cursor"))
         if exp_cursor != act_cursor:
             diffs.add("cursor", expected=exp_cursor, actual=act_cursor)
+
+    # PAR-04: hit targets are a first-class compare member, symmetric with the
+    # Rust `Frame::canonical` serialization. Only compared when requested so
+    # existing fixtures that do not set the key stay unchanged.
+    if "hit_targets" in compare:
+        exp_hits = canonical_hit_targets(expected.get("hit_targets"))
+        act_hits = canonical_hit_targets(actual.get("hit_targets"))
+        if exp_hits != act_hits:
+            diffs.add("hit_targets", expected=exp_hits, actual=act_hits)
 
     if "focus" in compare:
         exp_focus = expected.get("focus")
@@ -481,6 +519,7 @@ def golden_from_screen(fixture, screen, pins, profile):
         "theme": screen.get("theme"),
         "cursor": screen.get("cursor"),
         "focus": screen.get("focus"),
+        "hit_targets": screen.get("hit_targets") or [],
         "rows": screen.get("rows"),
         "actions": screen.get("actions") or [],
     }

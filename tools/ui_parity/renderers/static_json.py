@@ -63,6 +63,10 @@ def apply_mutation(screen, mutation):
         screen["actions"] = list(screen.get("actions") or []) + [
             {"seq": 99, "type": "key", "key": "ctrl-p", "applied": True}
         ]
+    elif mutation == "hit_target_extra":
+        screen["hit_targets"] = list(screen.get("hit_targets") or []) + [
+            {"x": 0, "y": 0, "action": "mutation.extra"}
+        ]
     elif mutation == "width_truncate":
         old_cols = screen["viewport"]["cols"]
         new_cols = old_cols - 1
@@ -92,6 +96,7 @@ def main() -> int:
             "cursor_move",
             "focus_change",
             "action_extra",
+            "hit_target_extra",
             "width_truncate",
         ],
     )
@@ -123,6 +128,7 @@ def main() -> int:
         "rows": pad_rows(template.get("rows") or [], cols, rows_count, default_style),
         "cursor": template.get("cursor") or {"row": 0, "col": 0, "visible": True},
         "focus": template.get("focus"),
+        "hit_targets": list(template.get("hit_targets") or []),
         "actions": list(template.get("actions") or []),
         "theme": template.get("theme") or request.get("theme"),
     }
