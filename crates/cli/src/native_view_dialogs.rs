@@ -236,6 +236,7 @@ pub enum DialogError {
     AlreadyOpen,
     NotOpen,
     NoSelection,
+    LockedSelection,
     DisabledChoice,
     NotAnswerable,
     QuestionUnavailable,
@@ -265,6 +266,7 @@ impl DialogError {
             Self::AlreadyOpen => "dialog.already_open",
             Self::NotOpen => "dialog.not_open",
             Self::NoSelection => "dialog.no_selection",
+            Self::LockedSelection => "dialog.locked_selection",
             Self::DisabledChoice => "dialog.disabled_choice",
             Self::NotAnswerable => "dialog.not_answerable",
             Self::QuestionUnavailable => "dialog.question_backend_unavailable",
@@ -423,6 +425,8 @@ struct OpenDialog {
     /// rows, so this is the live input to
     /// [`crate::native_palette::dialog::body_bottom_padding`].
     footer_gap: Option<u16>,
+    /// DIALOG-06..09: live select state; option IDs are original choice indexes.
+    select: Option<crate::native_palette::select::SelectDialog>,
 }
 
 /// Focus-owning dialog overlay state. `Default` is a closed view.
@@ -1060,6 +1064,24 @@ impl DialogView {
         for &i in &request.disabled {
             disabled[i] = true;
         }
+        // DIALOG-06..09: a live select keeps its own filtered model. Every
+        // option id is the ORIGINAL choice index, so a filtered confirm still
+        // answers with the choice the user actually picked and the paint path
+        // can map a visible row back to `dialog.choices`.
+        let select = (request.kind == DialogKind::Select).then(|| {
+            let options = sanitized_choices
+                .iter()
+                .enumerate()
+                .map(|(index, choice)| crate::native_palette::select::SelectOption {
+                    disabled: disabled[index],
+                    ..crate::native_palette::select::SelectOption::new(
+                        index.to_string(),
+                        choice.clone(),
+                    )
+                })
+                .collect();
+            crate::native_palette::select::SelectDialog::new(options)
+        });
         self.dialog = Some(OpenDialog {
             id: request.id,
             session_id: request.session_id,
@@ -1068,6 +1090,7 @@ impl DialogView {
             choices: sanitized_choices,
             disabled,
             permission,
+            select,
             mcp_status: Vec::new(),
             message_lines: request
                 .message
@@ -1150,6 +1173,7 @@ impl DialogView {
             choices,
             disabled: vec![false; servers.len()],
             permission: Vec::new(),
+            select: None,
             mcp_status,
             message_lines,
             error: StaticError::BackendUnavailable,
@@ -1212,6 +1236,7 @@ impl DialogView {
             choices: Vec::new(),
             disabled: Vec::new(),
             permission: Vec::new(),
+            select: None,
             mcp_status: Vec::new(),
             message_lines: message
                 .as_deref()
@@ -1307,11 +1332,33 @@ impl DialogView {
     /// The focused choice's display text, or `None` when closed/unselected.
     /// For [`DialogKind::Mcp`] this is the focused server name
     /// (`dialog-mcp.tsx:81-84` `option.value`).
+    ///
+    /// A live `DialogSelect` owns a filtered model whose highlight can move
+    /// without the caller (`set_filter`, `pointer_move`, a suppressed move
+    /// while locked). The model is therefore the single source of truth for a
+    /// select: this reads it directly instead of the mirrored
+    /// [`DialogView::selection`], so the row that answers can never differ
+    /// from the row the model (and the painted marker) shows.
     #[must_use]
     pub fn focused_choice(&self) -> Option<&str> {
         let dialog = self.dialog.as_ref()?;
-        let index = self.selection?;
+        let index = match dialog.select.as_ref() {
+            Some(_) => Self::select_index(dialog)?,
+            None => self.selection?,
+        };
         dialog.choices.get(index).map(String::as_str)
+    }
+
+    /// The highlighted original choice index reported by the live select
+    /// model, or `None` for a dialog without one. Option ids are the original
+    /// choice indexes (`open_request`), so a filtered highlight still maps to
+    /// the choice the user actually picked.
+    fn select_index(dialog: &OpenDialog) -> Option<usize> {
+        dialog
+            .select
+            .as_ref()
+            .and_then(|select| select.selected_option())
+            .and_then(|option| option.id.parse::<usize>().ok())
     }
 
     /// `dialog.show()` followed by `dialog.set()` (`plugin/api.tsx:334-341`):
@@ -1404,8 +1451,18 @@ impl DialogView {
 
     pub fn select(&mut self, index: usize) -> bool {
         if self.phase != Phase::Open { return false; }
-        let Some(dialog) = self.dialog.as_ref() else { return false; };
+        let Some(dialog) = self.dialog.as_mut() else { return false; };
         if index >= dialog.choices.len() || dialog.disabled[index] { return false; }
+        // A live select owns its own filtered highlight. A pointer click (or a
+        // digit shortcut) must move the model too, otherwise the next Up/Down
+        // steps from the stale model row and lands on an unrelated option.
+        // Because option ids are the original choice indexes, the identity is
+        // recovered exactly, and a row that is not currently visible refuses.
+        let synced = match dialog.select.as_mut() {
+            Some(select) => select.select_id(&index.to_string()),
+            None => true,
+        };
+        if !synced { return false; }
         self.selection = Some(index);
         true
     }
@@ -1413,6 +1470,80 @@ impl DialogView {
     /// Move the selection backward, wrapping and skipping disabled choices.
     pub fn prev(&mut self) {
         self.step(false);
+    }
+
+    /// DIALOG-06: printable input extends the live select filter. The dialog
+    /// selection follows the filtered highlight, so a confirm still answers
+    /// with the ORIGINAL choice index (`answer` reads `self.selection`).
+    pub fn select_push_filter(&mut self, ch: char) -> bool {
+        if self.phase != Phase::Open {
+            return false;
+        }
+        let changed = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.select.as_mut())
+            .is_some_and(|select| select.push_filter(ch));
+        if changed {
+            self.sync_select_selection();
+        }
+        changed
+    }
+
+    /// DIALOG-06: Backspace removes one filter code point, never a partial
+    /// multi-byte scalar.
+    pub fn select_backspace(&mut self) -> bool {
+        if self.phase != Phase::Open {
+            return false;
+        }
+        let changed = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.select.as_mut())
+            .is_some_and(|select| select.pop_filter());
+        if changed {
+            self.sync_select_selection();
+        }
+        changed
+    }
+
+    /// DIALOG-08: Page movement is ten options (`PAGE_STEP`,
+    /// `dialog-select.tsx:1590-1602`).
+    pub fn select_page(&mut self, forward: bool) -> bool {
+        if self.phase != Phase::Open {
+            return false;
+        }
+        let moved = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.select.as_mut())
+            .is_some_and(|select| {
+                if forward {
+                    select.page_down()
+                } else {
+                    select.page_up()
+                }
+            });
+        if moved {
+            self.sync_select_selection();
+        }
+        moved
+    }
+
+    /// Mirror the filtered select's highlighted option back to the dialog
+    /// selection. Option ids are original choice indexes.
+    fn sync_select_selection(&mut self) {
+        let index = self
+            .dialog
+            .as_ref()
+            .and_then(|dialog| dialog.select.as_ref())
+            .and_then(|select| select.selected_option())
+            .and_then(|option| option.id.parse::<usize>().ok());
+        // Assign unconditionally: a filter that matches nothing must clear the
+        // selection. Keeping the previous row would leave `answer()` and
+        // `focused_choice()` pointing at a row the user can no longer see, so
+        // Enter would confirm a hidden choice.
+        self.selection = index;
     }
 
     /// Produce the answer intent for the current selection and enter the
@@ -1432,6 +1563,27 @@ impl DialogView {
             }
             _ => {}
         }
+        // Confirm against the model, not a mirror of it: a live select's
+        // highlight can move without going through `DialogView`, and the
+        // confirmed row must always be the painted one.
+        if self
+            .dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.kind == DialogKind::Select && dialog.select.is_some())
+        {
+            self.sync_select_selection();
+            if self
+                .dialog
+                .as_ref()
+                .and_then(|dialog| dialog.select.as_ref())
+                .is_some_and(|select| select.is_locked())
+            {
+                return Err(DialogError::LockedSelection);
+            }
+        }
+        let Some(dialog) = self.dialog.as_ref() else {
+            return Err(DialogError::NotOpen);
+        };
         let index = self.selection.ok_or(DialogError::NoSelection)?;
         if dialog.disabled.get(index).copied().unwrap_or(true) {
             return Err(DialogError::DisabledChoice);
@@ -1718,7 +1870,22 @@ impl DialogView {
                 }
                 DialogKind::Question => lines.push(line("question — select an answer".to_string(), Role::Description)),
                 DialogKind::Confirm => lines.push(line("confirmation required".to_string(), Role::Description)),
-                DialogKind::Select => lines.push(line("select: use up/down then Enter".to_string(), Role::Description)),
+                DialogKind::Select => {
+                    // DIALOG-06: the live filter is visible above the rows.
+                    let filter = dialog
+                        .select
+                        .as_ref()
+                        .map(|select| select.filter())
+                        .unwrap_or("");
+                    if filter.is_empty() {
+                        lines.push(line(
+                            "select: use up/down then Enter".to_string(),
+                            Role::Description,
+                        ));
+                    } else {
+                        lines.push(line(format!("select: {filter}"), Role::Item));
+                    }
+                }
                 DialogKind::Prompt => {
                     // `dialog-prompt.tsx`: the input row shows the current value;
                     // while busy it is replaced by the spinner line
@@ -1767,9 +1934,35 @@ impl DialogView {
             let capacity = height
                 .saturating_sub(lines.len() + footer_rows + usize::from(roomy))
                 .min(viewport_cap);
-            let start = self.selection.unwrap_or(0).saturating_sub(capacity.saturating_sub(1));
-            for (index, choice) in dialog.choices.iter().enumerate().skip(start).take(capacity) {
-                if lines.len() < height && !dialog.disabled[index] && self.phase == Phase::Open {
+            // DIALOG-06..09: a live select paints only its filtered rows; every
+            // other dialog keeps the original choice order. Option ids are the
+            // original choice indexes, so paint, click hits and confirm agree.
+            let visible: Vec<(usize, &str, bool)> = match dialog.select.as_ref() {
+                Some(select) => select
+                    .filtered()
+                    .into_iter()
+                    .filter_map(|option| {
+                        option
+                            .id
+                            .parse::<usize>()
+                            .ok()
+                            .map(|index| (index, option.title.as_str(), option.disabled))
+                    })
+                    .collect(),
+                None => dialog
+                    .choices
+                    .iter()
+                    .enumerate()
+                    .map(|(index, choice)| (index, choice.as_str(), dialog.disabled[index]))
+                    .collect(),
+            };
+            let selected_pos = visible
+                .iter()
+                .position(|(index, _, _)| Some(*index) == self.selection)
+                .unwrap_or(0);
+            let start = selected_pos.saturating_sub(capacity.saturating_sub(1));
+            for &(index, choice, disabled) in visible.iter().skip(start).take(capacity) {
+                if lines.len() < height && !disabled && self.phase == Phase::Open {
                     hits[lines.len()] = Some(index);
                 }
                 // DIALOG-02: the row's left pad is the tested
@@ -1782,7 +1975,7 @@ impl DialogView {
                 } else {
                     " ".repeat(row_left as usize)
                 };
-                let suffix = if dialog.disabled[index] {
+                let suffix = if disabled {
                     " (disabled)"
                 } else {
                     ""
@@ -1794,10 +1987,26 @@ impl DialogView {
                     let status = dialog.mcp_status.get(index).map(String::as_str).unwrap_or("");
                     format!("{marker}{choice}  {status}")
                 } else {
-                    format!("{marker}{}. {}{suffix}", index + 1, choice)
+                    format!("{marker}{}. {choice}{suffix}", index + 1)
                 };
                 lines.push(line(text,
-                    if self.selection == Some(index) { Role::Selected } else if dialog.disabled[index] { Role::Description } else if dialog.kind == DialogKind::Permission { Role::Action } else { Role::Item }));
+                    if self.selection == Some(index) { Role::Selected } else if disabled { Role::Description } else if dialog.kind == DialogKind::Permission { Role::Action } else { Role::Item }));
+            }
+            // DIALOG-06/09: the select's own empty/no-match view, bounded to
+            // the remaining body rows.
+            if visible.is_empty() {
+                let message = match dialog.select.as_ref().map(|select| select.empty_state()) {
+                    Some(crate::native_palette::select::EmptyState::NoMatch) => {
+                        Some("No results found")
+                    }
+                    Some(crate::native_palette::select::EmptyState::Empty) => {
+                        Some("No items available")
+                    }
+                    _ => None,
+                };
+                if let Some(message) = message.filter(|_| lines.len() < height) {
+                    lines.push(line(message.to_string(), Role::Description));
+                }
             }
             // DIALOG-02: the body box's own bottom padding
             // (`dialog.tsx:159`): `newDesigns() && footer ? (footerGap ?? 1) - 1
@@ -1862,6 +2071,33 @@ impl DialogView {
 
     fn step(&mut self, forward: bool) {
         if self.phase != Phase::Open {
+            return;
+        }
+        // DIALOG-06..08: a select navigates its own FILTERED rows, so Down on
+        // a filtered list skips hidden choices instead of walking them, and
+        // the dialog selection always holds an original choice index.
+        //
+        // The dialog selection is RE-DERIVED from the model after the move
+        // rather than recomputed from the move's own result. `next`/`previous`
+        // report `false` without moving when the model is locked
+        // (`dialog-select.tsx:1590-1602`), and the highlight must then stay
+        // exactly where the painted row shows it; reading the model's current
+        // option is the single source of truth, so a suppressed move can never
+        // leave `self.selection` pointing at a different row than the marker.
+        if self
+            .dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.kind == DialogKind::Select && dialog.select.is_some())
+        {
+            if let Some(select) = self.dialog.as_mut().and_then(|dialog| dialog.select.as_mut()) {
+                if forward {
+                    select.next();
+                } else {
+                    select.previous();
+                }
+            }
+            // Unconditional: an empty filtered list has no selection.
+            self.sync_select_selection();
             return;
         }
         let Some(dialog) = self.dialog.as_ref() else {
@@ -6800,6 +7036,7 @@ mod tests {
             DialogError::ForbiddenChoice,
             DialogError::QuestionUnavailable,
             DialogError::PendingDecision,
+            DialogError::LockedSelection,
         ] {
             assert!(code.code().starts_with("dialog."));
         }
@@ -6807,6 +7044,7 @@ mod tests {
             DialogError::UnknownPermissionChoice.code(),
             "dialog.unknown_permission_choice"
         );
+        assert_eq!(DialogError::LockedSelection.code(), "dialog.locked_selection");
     }
 
     // --- P1 regression: Permission choice identity is authoritative ---
@@ -8096,3 +8334,255 @@ mod modal_integration_tests {
         assert!(!chrome.frame_with(view.modal()).paints(ChromeLayer::Dialog));
     }
 }
+
+/// DIALOG-06..09: the live select surface. Every assertion goes through the
+/// same `DialogView` methods the native loop calls, and option ids are the
+/// ORIGINAL choice indexes.
+#[cfg(test)]
+mod select_live_tests {
+    use super::*;
+
+    fn select_view(choices: &[&str], disabled: &[usize]) -> DialogView {
+        let mut view = DialogView::new();
+        view.open_request(DialogRequest {
+            id: "sel-live".to_string(),
+            session_id: "ses-1".to_string(),
+            kind: DialogKind::Select,
+            title: "Working directory".to_string(),
+            choices: choices.iter().map(|choice| (*choice).to_string()).collect(),
+            message: None,
+            disabled: disabled.to_vec(),
+            error: None,
+        })
+        .expect("select request valid");
+        view
+    }
+
+    #[test]
+    fn dialog06_typing_filters_rows_and_confirm_returns_the_original_index() {
+        let mut view = select_view(&["Copy path", "Open folder", "Workspaces"], &[]);
+        assert_eq!(view.focused_choice(), Some("Copy path"));
+        // Only `Workspaces` survives the query, and the selection follows the
+        // visible row while `answer` still carries original index 2.
+        for ch in "works".chars() {
+            assert!(view.select_push_filter(ch), "filter accepts {ch:?}");
+        }
+        let rows = view.render(56, 12);
+        assert!(
+            rows.iter().any(|row| row.contains("3. Workspaces")),
+            "{rows:?}"
+        );
+        assert!(
+            !rows.iter().any(|row| row.contains("Copy path")
+                || row.contains("Open folder")),
+            "hidden rows are not painted: {rows:?}"
+        );
+        assert!(rows.iter().any(|row| row.contains("select: works")), "{rows:?}");
+        let intent = view.answer().expect("filtered selection is answerable");
+        assert!(
+            matches!(
+                intent,
+                DecisionIntent::Answer {
+                    choice_index: 2,
+                    ref choice,
+                    ..
+                } if choice == "Workspaces"
+            ),
+            "original choice identity, got {intent:?}"
+        );
+    }
+
+    #[test]
+    fn dialog06_backspace_restores_the_full_list_and_identity() {
+        let mut view = select_view(&["Copy path", "Open folder", "Workspaces"], &[]);
+        for ch in "open".chars() {
+            assert!(view.select_push_filter(ch));
+        }
+        assert_eq!(view.focused_choice(), Some("Open folder"));
+        for _ in 0.."open".len() {
+            assert!(view.select_backspace(), "backspace removes one scalar");
+        }
+        assert!(!view.select_backspace(), "empty filter has nothing to remove");
+        assert_eq!(view.focused_choice(), Some("Copy path"));
+        view.next();
+        let intent = view.answer().expect("restored list answerable");
+        assert!(
+            matches!(
+                intent,
+                DecisionIntent::Answer {
+                    choice_index: 1,
+                    ref choice,
+                    ..
+                } if choice == "Open folder"
+            ),
+            "got {intent:?}"
+        );
+    }
+
+    #[test]
+    fn dialog06_disabled_rows_never_enter_the_filtered_navigation() {
+        let mut view = select_view(&["alpha", "beta", "gamma"], &[1]);
+        assert_eq!(view.focused_choice(), Some("alpha"));
+        view.next();
+        assert_eq!(
+            view.focused_choice(),
+            Some("gamma"),
+            "filtered navigation skips the disabled middle row"
+        );
+        view.select_push_filter('g');
+        assert_eq!(view.focused_choice(), Some("gamma"));
+        let intent = view.answer().expect("answerable");
+        assert!(
+            matches!(intent, DecisionIntent::Answer { choice_index: 2, .. }),
+            "got {intent:?}"
+        );
+    }
+
+    #[test]
+    fn dialog08_page_keys_move_ten_rows_and_wrap() {
+        let choices: Vec<String> = (0..25).map(|index| format!("row {index}")).collect();
+        let mut view = DialogView::new();
+        view.open_request(DialogRequest {
+            id: "sel-page".to_string(),
+            session_id: "ses-1".to_string(),
+            kind: DialogKind::Select,
+            title: "Paged".to_string(),
+            choices,
+            message: None,
+            disabled: Vec::new(),
+            error: None,
+        })
+        .expect("valid");
+        assert_eq!(view.focused_choice(), Some("row 0"));
+        assert!(view.select_page(true));
+        assert_eq!(view.focused_choice(), Some("row 10"));
+        assert!(view.select_page(true));
+        assert_eq!(view.focused_choice(), Some("row 20"));
+        assert!(view.select_page(true));
+        assert_eq!(
+            view.focused_choice(),
+            Some("row 0"),
+            "page movement wraps the endpoints"
+        );
+        assert!(view.select_page(false));
+        assert_eq!(
+            view.focused_choice(),
+            Some("row 24"),
+            "page-up wraps the first endpoint to the last row"
+        );
+    }
+
+    #[test]
+    fn dialog09_empty_and_no_match_states_are_painted() {
+        // Every option disabled: the model has no flat rows at all.
+        let mut empty = select_view(&["alpha", "beta"], &[0, 1]);
+        let rows = empty.render(56, 12);
+        assert!(rows.iter().any(|row| row.contains("No items available")), "{rows:?}");
+        assert!(!empty.select_page(true), "nothing to page through");
+
+        // A query that matches nothing paints the distinct no-match view.
+        let mut no_match = select_view(&["alpha", "beta"], &[]);
+        assert!(no_match.select_push_filter('z'));
+        let rows = no_match.render(56, 12);
+        assert!(rows.iter().any(|row| row.contains("No results found")), "{rows:?}");
+        assert!(
+            !rows.iter().any(|row| row.contains("1. alpha")),
+            "no stale row survives: {rows:?}"
+        );
+    }
+
+    /// Regression: a filter that matches nothing must CLEAR the selection.
+    /// Keeping the previous row would let Enter confirm a choice the user can
+    /// no longer see.
+    #[test]
+    fn dialog06_no_match_clears_the_selection_and_cannot_confirm() {
+        let mut view = select_view(&["alpha", "beta"], &[]);
+        assert_eq!(view.focused_choice(), Some("alpha"));
+        assert!(view.select_push_filter('z'));
+        let rows = view.render(56, 12);
+        assert!(rows.iter().any(|row| row.contains("No results found")), "{rows:?}");
+        assert_eq!(
+            view.focused_choice(),
+            None,
+            "no visible row means no focused choice"
+        );
+        // A stale mirror must not resurrect a choice absent from the model.
+        view.selection = Some(0);
+        assert_eq!(view.focused_choice(), None);
+        assert_eq!(view.answer().unwrap_err(), DialogError::NoSelection);
+        // Navigation on an empty list never resurrects a hidden row.
+        view.next();
+        view.prev();
+        assert_eq!(view.focused_choice(), None);
+        assert_eq!(view.answer().unwrap_err(), DialogError::NoSelection);
+        // Removing the query restores a real selection and a real answer.
+        assert!(view.select_backspace());
+        assert_eq!(view.focused_choice(), Some("alpha"));
+        assert!(matches!(
+            view.answer().expect("restored selection answers"),
+            DecisionIntent::Answer { choice_index: 0, .. }
+        ));
+    }
+    /// A locked `DialogSelect` suppresses pointer/navigation and submit
+    /// (`dialog-select.tsx:405-412,464-470,785-801`). The highlight stays on
+    /// the painted row, but answer is refused until the select is unlocked.
+    #[test]
+    fn dialog06_locked_select_ignores_pointer_click_and_keeps_the_painted_row() {
+        let mut view = select_view(&["Copy path", "Open folder", "Workspaces"], &[]);
+        assert_eq!(view.focused_choice(), Some("Copy path"));
+        let painted = view.render(56, 12);
+        view.dialog
+            .as_mut()
+            .and_then(|dialog| dialog.select.as_mut())
+            .expect("select model")
+            .set_locked(true);
+        // A pointer click on a hidden-by-lock row refuses instead of moving
+        // the model behind the painted marker.
+        assert!(!view.select(1), "a locked select refuses a pointer click");
+        assert_eq!(view.focused_choice(), Some("Copy path"));
+        // Down/Up cannot move it either, and a suppressed move must not
+        // desynchronize the mirror from the model.
+        view.next();
+        view.prev();
+        assert_eq!(view.focused_choice(), Some("Copy path"));
+        assert_eq!(view.render(56, 12), painted, "locked row remains painted");
+        assert_eq!(view.answer(), Err(DialogError::LockedSelection));
+        assert!(!view.pending(), "locked select emits no intent or pending state");
+
+        view.dialog
+            .as_mut()
+            .and_then(|dialog| dialog.select.as_mut())
+            .expect("select model")
+            .set_locked(false);
+        assert!(matches!(
+            view.answer().expect("unlocked select answers the painted row"),
+            DecisionIntent::Answer { choice_index: 0, attempt: 1, ref choice, .. }
+                if choice == "Copy path"
+        ));
+        assert!(view.pending());
+    }
+
+    /// `focused_choice` reads the select MODEL, so a mirror that was never
+    /// updated (or is stale) can never make the row that answers differ from
+    /// the row the model holds.
+    #[test]
+    fn dialog06_focused_choice_reads_the_model_not_a_stale_mirror() {
+        let mut view = select_view(&["Copy path", "Open folder", "Workspaces"], &[]);
+        for ch in "works".chars() {
+            assert!(view.select_push_filter(ch));
+        }
+        assert_eq!(view.focused_choice(), Some("Workspaces"));
+        // Simulate a mirror that a path outside `DialogView` left behind.
+        view.selection = Some(0);
+        assert_eq!(
+            view.focused_choice(),
+            Some("Workspaces"),
+            "the model, not the mirror, decides the focused row"
+        );
+        assert!(matches!(
+            view.answer().expect("model row answers"),
+            DecisionIntent::Answer { choice_index: 2, .. }
+        ));
+    }
+}
+

@@ -1570,6 +1570,23 @@ pub mod select {
             }
         }
 
+        /// Move the highlight to the option carrying `id` in the current flat
+        /// list. Returns false when that id is not visible (filtered out or
+        /// disabled) so a pointer click can never arm a hidden row, and when
+        /// the model is `locked`, which suppresses every pointer/navigation
+        /// path (`dialog-select.tsx:785-801`).
+        pub fn select_id(&mut self, id: &str) -> bool {
+            if self.locked {
+                return false;
+            }
+            let flat = self.flat_list();
+            let Some(index) = flat.iter().position(|option| option.id == id) else {
+                return false;
+            };
+            self.select_index(index);
+            true
+        }
+
         /// Move the highlight; `locked` suppresses navigation.
         pub fn move_by(&mut self, delta: isize) -> bool {
             if self.locked {

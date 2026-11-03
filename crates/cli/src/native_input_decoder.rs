@@ -32,6 +32,11 @@ pub(crate) enum InputEvent {
     ArrowDown,
     ArrowLeft,
     ArrowRight,
+    /// CSI 5~ — `DialogSelect` page movement (ten options,
+    /// `ui/dialog-select.tsx:1590-1602`). No shell key binding consumes it.
+    PageUp,
+    /// CSI 6~ — `DialogSelect` page movement.
+    PageDown,
     /// CSI 1;3A — Alt+Up (`session.tab.previous`, `config/keybind.ts:116`).
     /// Decoded separately so modifier chords never become typed text or an
     /// unmodified arrow that a dialog would consume.
@@ -309,11 +314,19 @@ impl TerminalInputDecoder {
                 self.begin_paste(now);
                 return;
             }
-            // Decode only unmodified keyboard arrows. Other CSI reports and
-            // modifier/intermediate forms remain protocol, never typed text.
-            // Alt+Up/Down tab cycling is the only modified arrow that carries
-            // an upstream binding; every other modifier form stays protocol.
-            if matches!(byte, b'A' | b'B')
+            // Page movement (CSI 5~/6~) is the only `~` key the live select
+            // consumes; every other tilde form stays protocol (DIALOG-08).
+            if self.state == State::Csi
+                && byte == b'~'
+                && self.len == 1
+                && matches!(self.sequence[0], b'5' | b'6')
+            {
+                self.emit(if self.sequence[0] == b'5' {
+                    InputEvent::PageUp
+                } else {
+                    InputEvent::PageDown
+                });
+            } else if matches!(byte, b'A' | b'B')
                 && self.state == State::Csi
                 && &self.sequence[..self.len] == b"1;3"
             {
@@ -1139,5 +1152,35 @@ mod cp31_cp36_cp41_input_tests {
                 InputEvent::AltEnter
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod page_key_regressions {
+    use super::*;
+
+    fn decode(bytes: &[u8]) -> Vec<InputEvent> {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        let mut events = Vec::new();
+        for &byte in bytes {
+            decoder.push(byte, now);
+            while let Some(event) = decoder.pop() {
+                events.push(event);
+            }
+        }
+        events
+    }
+
+    #[test]
+    fn dialog08_page_keys_decode_and_other_tilde_keys_stay_protocol() {
+        assert_eq!(
+            decode(b"\x1b[5~\x1b[6~"),
+            vec![InputEvent::PageUp, InputEvent::PageDown]
+        );
+        // Home/Insert/Delete/End and modified forms are not select paging and
+        // must never become typed text or an arrow move.
+        assert!(decode(b"\x1b[1~\x1b[2~\x1b[3~\x1b[4~").is_empty());
+        assert!(decode(b"\x1b[5;2~").is_empty());
     }
 }

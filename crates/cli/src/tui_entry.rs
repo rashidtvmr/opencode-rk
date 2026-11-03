@@ -3895,6 +3895,40 @@ fn dialog_consumes_byte(byte: u8) -> bool {
     byte != 4
 }
 
+/// The live working-directory `DialogSelect` byte handler
+/// (`working-directory-actions.tsx:20-56`). Split out of the loop so a test can
+/// drive the exact dispatch the running CLI uses: printable input extends the
+/// filter, Backspace removes one code point, Ctrl-N/Ctrl-B and the arrows move
+/// the filtered highlight, Enter returns the focused action, Esc/Ctrl-C close.
+///
+/// Returns `(repaint, action)`: `repaint` is true when the key changed visible
+/// dialog state, and `action` is the confirmed footer action, if any.
+#[cfg(feature = "native")]
+fn select_menu_key(
+    view: &mut crate::native_view::NativeView,
+    byte: u8,
+) -> (bool, Option<crate::native_view_status::native_sidebar::FooterAction>) {
+    match byte {
+        14 => {
+            view.dialogs.next();
+            (true, None)
+        }
+        2 => {
+            view.dialogs.prev();
+            (true, None)
+        }
+        // Backspace removes one filter code point.
+        8 | 127 => (view.dialogs.select_backspace(), None),
+        b' '..=b'~' => (view.dialogs.select_push_filter(char::from(byte)), None),
+        13 | 10 => (false, view.working_directory_choice()),
+        27 | 3 => {
+            view.dialogs.close();
+            (true, None)
+        }
+        _ => (false, None),
+    }
+}
+
 /// Enter (CR/LF) closes an open message menu. The option it confirms is
 /// bound by the follow-up effect dispatch; this slice closes only.
 #[cfg(feature = "native")]
@@ -9523,6 +9557,8 @@ fn native_loop(
             native_input_decoder::InputEvent::Paste(text) => ("paste", text.len(), None),
             native_input_decoder::InputEvent::ArrowUp => ("up", 0, None),
             native_input_decoder::InputEvent::ArrowDown => ("down", 0, None),
+            native_input_decoder::InputEvent::PageUp => ("page-up", 0, None),
+            native_input_decoder::InputEvent::PageDown => ("page-down", 0, None),
             native_input_decoder::InputEvent::AltArrowUp => ("alt-up", 0, None),
             native_input_decoder::InputEvent::AltArrowDown => ("alt-down", 0, None),
             // Tab-navigation chords are dispatched to `TabCommand` below; this
@@ -11190,17 +11226,48 @@ fn native_loop(
                 continue;
             }
             direction @ (native_input_decoder::InputEvent::ArrowUp
-            | native_input_decoder::InputEvent::ArrowDown) => {
+            | native_input_decoder::InputEvent::ArrowDown
+            | native_input_decoder::InputEvent::PageUp
+            | native_input_decoder::InputEvent::PageDown) => {
                 utf8.reset();
                 // A decision dialog owns focus before every other overlay.
                 // Route the documented arrow keys to the same selection state
                 // as Ctrl-N/Ctrl-B; navigation never submits a decision.
+                // DIALOG-08: PageUp/PageDown move ten rows inside a live
+                // select and are inert in every other modal, where no shell
+                // binding consumes them.
         if view.dialogs.intercepts_input() {
-                    if direction == native_input_decoder::InputEvent::ArrowUp {
-                        view.dialogs.prev();
-                    } else {
-                        view.dialogs.next();
+                    match &direction {
+                        native_input_decoder::InputEvent::ArrowUp => view.dialogs.prev(),
+                        native_input_decoder::InputEvent::ArrowDown => view.dialogs.next(),
+                        native_input_decoder::InputEvent::PageUp => {
+                            if view.dialogs.open_kind()
+                                != Some(crate::native_view_dialogs::DialogKind::Select)
+                            {
+                                continue;
+                            }
+                            view.dialogs.select_page(false);
+                        }
+                        native_input_decoder::InputEvent::PageDown => {
+                            if view.dialogs.open_kind()
+                                != Some(crate::native_view_dialogs::DialogKind::Select)
+                            {
+                                continue;
+                            }
+                            view.dialogs.select_page(true);
+                        }
+                        _ => continue,
                     }
+                    needs_paint = true;
+                    continue;
+                }
+                if matches!(
+                    &direction,
+                    native_input_decoder::InputEvent::PageUp
+                        | native_input_decoder::InputEvent::PageDown
+                ) {
+                    // No shell page binding: never turn a page key into an
+                    // arrow move in a non-select overlay.
                     continue;
                 }
                 if permission_editor.open {
@@ -11655,21 +11722,20 @@ fn native_loop(
             if view.dialogs.open_kind()
                 == Some(crate::native_view_dialogs::DialogKind::Select)
             {
-                match byte {
-                    14 => view.dialogs.next(),
-                    2 => view.dialogs.prev(),
-                    13 | 10 => {
-                        if let Some(action) = view.working_directory_choice() {
-                            dispatch_working_directory_action(
-                                &mut view,
-                                &mut transcript,
-                                &mut toast,
-                                action,
-                            );
-                        }
-                    }
-                    27 | 3 => view.dialogs.close(),
-                    _ => {}
+                // SIDE-14: the working-directory menu owns every byte while it
+                // is open. `select_menu_key` is the exact routine the live loop
+                // runs, so tests exercise the real dispatch rather than a copy.
+                let (handled, action) = select_menu_key(&mut view, byte);
+                if let Some(action) = action {
+                    dispatch_working_directory_action(
+                        &mut view,
+                        &mut transcript,
+                        &mut toast,
+                        action,
+                    );
+                }
+                if handled {
+                    needs_paint = true;
                 }
                 utf8.reset();
                 continue;
@@ -16190,5 +16256,97 @@ mod middle_close_hit_tests {
             let blocked = !(kind == 0 || kind == 2 || kind == 7);
             assert!(blocked, "kind {kind} must clear tab press state");
         }
+    }
+}
+
+
+/// DIALOG-06/08: the LIVE working-directory `DialogSelect` byte handler.
+/// These tests drive `select_menu_key`, the exact routine `native_loop` runs,
+/// so deleting the live wiring fails them.
+#[cfg(all(test, feature = "native"))]
+mod select_menu_key_tests {
+    use super::*;
+
+    fn open_menu() -> crate::native_view::NativeView {
+        let mut view = crate::native_view::NativeView::new(148, 30);
+        view.set_session_route(true);
+        view.set_sidebar_location(Some("/projects/oc2".into()), Some("main".into()));
+        let _ = view.render("", &[], false, &[]);
+        view.open_working_directory_menu(false, false)
+            .expect("footer menu opens");
+        assert_eq!(view.dialogs.focused_choice(), Some("Copy path"));
+        view
+    }
+
+    #[test]
+    fn dialog06_live_handler_filters_repaints_and_confirms_the_original_action() {
+        use crate::native_view_status::native_sidebar::FooterAction;
+        let mut view = open_menu();
+        for byte in b"open" {
+            let (repaint, action) = select_menu_key(&mut view, *byte);
+            assert!(repaint, "typing {byte} repaints the live frame");
+            assert!(action.is_none(), "typing never confirms");
+        }
+        let rows = view.dialogs.render(56, 12);
+        assert!(rows.iter().any(|row| row.contains("2. Open folder")), "{rows:?}");
+        assert!(!rows.iter().any(|row| row.contains("1. Copy path")), "{rows:?}");
+        let (_, action) = select_menu_key(&mut view, 13);
+        assert_eq!(
+            action,
+            Some(FooterAction::OpenFolder),
+            "Enter returns the original action, not the filtered row index"
+        );
+    }
+
+    #[test]
+    fn dialog06_live_handler_no_match_confirms_nothing_and_backspace_restores() {
+        use crate::native_view_status::native_sidebar::FooterAction;
+        let mut view = open_menu();
+        for byte in b"zzz" {
+            let (repaint, _) = select_menu_key(&mut view, *byte);
+            assert!(repaint, "typing {byte} repaints");
+        }
+        let (_, action) = select_menu_key(&mut view, 13);
+        assert_eq!(action, None, "a hidden row can never be confirmed");
+        assert!(view.dialogs.is_open(), "no match keeps the menu open");
+        for _ in 0..3 {
+            let (repaint, _) = select_menu_key(&mut view, 127);
+            assert!(repaint, "DEL removes one filter code point");
+        }
+        assert_eq!(view.dialogs.focused_choice(), Some("Copy path"));
+        let (_, action) = select_menu_key(&mut view, 10);
+        assert_eq!(action, Some(FooterAction::CopyPath));
+    }
+
+    #[test]
+    fn dialog08_live_handler_moves_rows_and_escape_closes() {
+        let mut view = open_menu();
+        let (repaint, _) = select_menu_key(&mut view, 2);
+        assert!(repaint, "Ctrl-B repaints");
+        assert_eq!(view.dialogs.focused_choice(), Some("Open folder"));
+        let (repaint, _) = select_menu_key(&mut view, 14);
+        assert!(repaint, "Ctrl-N repaints");
+        assert_eq!(view.dialogs.focused_choice(), Some("Copy path"));
+        let (repaint, action) = select_menu_key(&mut view, 27);
+        assert!(repaint, "Esc repaints");
+        assert!(action.is_none());
+        assert!(!view.dialogs.is_open(), "Esc closes the live menu");
+    }
+
+    /// A pointer click must move the MODEL, not just `self.selection`: the next
+    /// Down then steps from the clicked row instead of a stale one.
+    #[test]
+    fn dialog06_pointer_click_keeps_the_model_and_selection_in_step() {
+        use crate::native_view_status::native_sidebar::FooterAction;
+        let mut view = open_menu();
+        assert!(view.dialogs.select(1), "click the second row");
+        assert_eq!(view.dialogs.focused_choice(), Some("Open folder"));
+        view.dialogs.next();
+        assert_eq!(
+            view.working_directory_choice(),
+            Some(FooterAction::CopyPath),
+            "Down after a click steps from the clicked row"
+        );
+        view.dialogs.close();
     }
 }

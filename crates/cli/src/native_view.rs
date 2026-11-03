@@ -409,6 +409,56 @@ mod page_spacing_tests {
         assert!(!view.dialogs.is_open(), "the selection guard opened nothing");
     }
 
+    /// DIALOG-06: the LIVE working-directory `DialogSelect` filters as the
+    /// user types, and Enter still resolves the ORIGINAL action even though
+    /// the visible row list changed. Backspace restores the full list.
+    #[test]
+    fn dialog06_live_footer_menu_filters_and_keeps_the_original_action() {
+        use crate::native_view_status::native_sidebar::FooterAction;
+        let mut view = NativeView::new(148, 30);
+        view.set_session_route(true);
+        view.set_sidebar_location(Some("/projects/oc2".into()), Some("main".into()));
+        let _ = view.render("", &[], false, &[]);
+        let (left, top, _) = view.footer_hit.expect("painted footer hit");
+        assert!(view.footer_click(left, top, false));
+        assert_eq!(view.dialogs.focused_choice(), Some("Copy path"));
+
+        for ch in "open".chars() {
+            assert!(view.dialogs.select_push_filter(ch));
+        }
+        let rows = view.dialogs.render(56, 12);
+        assert!(
+            rows.iter().any(|row| row.contains("2. Open folder")),
+            "the matching row survives: {rows:?}"
+        );
+        assert!(
+            !rows.iter().any(|row| row.contains("1. Copy path")),
+            "the hidden row is not painted: {rows:?}"
+        );
+        assert_eq!(
+            view.working_directory_choice(),
+            Some(FooterAction::OpenFolder),
+            "confirm returns the ORIGINAL action identity"
+        );
+
+        for _ in 0.."open".len() {
+            assert!(view.dialogs.select_backspace());
+        }
+        assert!(view
+            .dialogs
+            .render(56, 12)
+            .iter()
+            .any(|row| row.contains("1. Copy path")));
+        assert_eq!(view.working_directory_choice(), Some(FooterAction::CopyPath));
+        // A query that matches nothing must not leave the previous action
+        // armed: the live footer route would otherwise confirm a hidden row.
+        assert!(view.dialogs.select_push_filter('z'));
+        assert_eq!(view.working_directory_choice(), None);
+        assert!(view.dialogs.select_backspace());
+        assert_eq!(view.working_directory_choice(), Some(FooterAction::CopyPath));
+        view.dialogs.close();
+    }
+
     #[test]
     fn sidebar_span_styles_land_on_the_painted_mcp_row() {
         use crate::native_theme_runtime::Slot;
