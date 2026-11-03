@@ -34,6 +34,15 @@ Two new implementation packages dispatched on the freed lanes: **I3**
 (CP-11/13/14/15/16 rail facts) on `recovery/core`, **I4** (DIALOG-12..15 pickers)
 on `recovery/platform` based at `43050ee0`.
 
+**Update (same day).** F3/SIDE-10 published as `7fff2cbd` (independent review
+APPROVE, server 7/0). F1→`43050ee0`, F3→`7fff2cbd`; docs at `78bb3ae9`. F2
+repaired (locked select never answers + model-only focus) as `056aaadb`, review in
+flight. I3 hit a step cap twice while only doing reconnaissance, so it was split:
+**I3a** (CP-13 + CP-14, commit after each) on `recovery/core`; its full findings
+are preserved in `artifacts/I3.RESULT.md`. **I5** (CP-30/31/32 live composer
+shell/IME/snapshot) on the freed `recovery/runtime`. Recorded verdicts this wave:
+CP-25 `ALREADY_CORRECT`; CP-24/26/27/28/29 `REAL_GAP`; FORM-003..008 `REAL_GAP`.
+
 ## 2026-11-03 — Mandatory persistent-disk feature worktrees
 
 Owner requested worktrees and discouraged temp/RAM-backed implementation storage.
