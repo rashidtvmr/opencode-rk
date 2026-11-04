@@ -15082,9 +15082,9 @@ fn append_legacy_transcript(transcript: &mut Vec<String>, mut line: String) {
 /// PAR-10: live delta admission for one active turn. Wraps exactly one
 /// `StreamAccumulator` (the model in `native_transcript`; upstream
 /// `session/rows.ts:274-292` assembles the same per-message stream).
-/// Positive seqs seed the accumulator from the first observed frame, so the
-/// server's 1-based origin converges instead of buffering forever; seq==0
-/// stays the legacy unsequenced verbatim path.
+/// Positive seqs seed the accumulator from the server's known 1-based origin,
+/// so an out-of-order first frame still converges; seq==0 stays the legacy
+/// unsequenced verbatim path.
 #[derive(Default)]
 struct LiveDeltaStream {
     acc: Option<crate::native_transcript::StreamAccumulator>,
@@ -15111,13 +15111,24 @@ impl LiveDeltaStream {
         }
         let acc = self.acc.get_or_insert_with(|| {
             let mut acc = crate::native_transcript::StreamAccumulator::new(0);
-            acc.seed(seq);
+            // PAR-10: the server emits `assistant_delta` sequences from 1
+            // (`crates/server/src/lib.rs:3181-3186`), so seed the known
+            // origin. Seeding from the first observed frame would drop a
+            // lower seq that arrives first (e.g. 2 before 1).
+            acc.seed(1);
             acc
         });
         let before_seq = acc.next_seq();
-        if acc.push(&crate::native_transcript::TokenDelta::new(0, seq, text))
-            && acc.next_seq() != before_seq
-        {
+        // PAR-10 review: build the delta directly so the live path is not
+        // clamped to `MAX_DELTA_BYTES` (8 KiB). The previous live code
+        // appended the whole delta (`partial.push_str`), and the server bounds
+        // a turn's retained text to 64 KiB, so truncating here loses a suffix.
+        let delta = crate::native_transcript::TokenDelta {
+            stream_id: 0,
+            seq,
+            text: text.to_owned(),
+        };
+        if acc.push(&delta) && acc.next_seq() != before_seq {
             // Ordered progress: publish the assembled text. Pure buffering
             // (gap open) or a dropped duplicate/stale frame publishes nothing.
             Some(acc.text().to_owned())
@@ -15170,6 +15181,33 @@ mod par10_delta_stream {
         // seeding is idempotent and never lowers the bar
         acc.seed(0);
         assert!(!acc.push(&TokenDelta::new(0, 1, "dup")));
+    }
+
+    /// PAR-10 review fixes: the live path must not clamp a delta to the model's
+    /// 8 KiB `MAX_DELTA_BYTES`, must seed the server's known 1-based origin so
+    /// an out-of-order first frame still converges, and must not overflow the
+    /// expectation on a hostile `u64::MAX` sequence.
+    #[test]
+    fn par10_live_delta_is_unclamped_seeds_origin_and_never_overflows() {
+        use crate::native_transcript::{StreamAccumulator, TokenDelta, MAX_DELTA_BYTES};
+
+        // A delta larger than the model clamp survives intact on the live path.
+        let mut live = LiveDeltaStream::default();
+        let big = "x".repeat(MAX_DELTA_BYTES + 4096);
+        let assembled = live.apply(1, &big).expect("first delta publishes");
+        assert_eq!(assembled.len(), big.len(), "live delta must not be truncated");
+
+        // Out-of-order first frame: seq 2 before seq 1 still converges because
+        // the accumulator seeds the known 1-based origin.
+        let mut reordered = LiveDeltaStream::default();
+        assert_eq!(reordered.apply(2, "b"), None, "seq 2 buffers behind the origin");
+        assert_eq!(reordered.apply(1, "a").as_deref(), Some("ab"));
+
+        // A hostile max sequence must not panic on the expectation increment.
+        let mut acc = StreamAccumulator::new(0);
+        acc.seed(u64::MAX);
+        assert!(acc.push(&TokenDelta::new(0, u64::MAX, "z")));
+        assert_eq!(acc.text(), "z");
     }
 }
 

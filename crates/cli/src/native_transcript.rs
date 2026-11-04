@@ -91,11 +91,12 @@ impl StreamAccumulator {
         }
     }
 
-    /// PAR-10: seed the expected next sequence from the first observed
-    /// frame. The server counts deltas from 1 and a late join may observe
-    /// any origin, so without this the first positive frame would sit in
-    /// `pending` forever (the 0-based default never advances). Idempotent
-    /// and never lowers the bar, so stale frames stay stale.
+    /// PAR-10: seed the expected next sequence. The server counts deltas from
+    /// 1 (`crates/server/src/lib.rs:3181-3186`), so the live path seeds that
+    /// known origin rather than the first observed frame — otherwise a frame
+    /// whose seq arrives out of order (2 before 1) would become the baseline
+    /// and the lower frame would be dropped as stale. Idempotent and never
+    /// lowers the bar, so stale frames stay stale.
     pub fn seed(&mut self, first_seq: u64) {
         if self.seeded {
             return;
@@ -117,7 +118,9 @@ impl StreamAccumulator {
         }
         if delta.seq == self.next_seq {
             self.append(&delta.text);
-            self.next_seq += 1;
+            // PAR-10 review: `u64::MAX` is a legal wire sequence, so the
+            // expectation must not overflow when it is the one applied.
+            self.next_seq = self.next_seq.saturating_add(1);
             self.drain_pending();
             return true;
         }
@@ -156,7 +159,7 @@ impl StreamAccumulator {
                 Some(i) => {
                     let (_, chunk) = self.pending.swap_remove(i);
                     self.append(&chunk);
-                    self.next_seq += 1;
+                    self.next_seq = self.next_seq.saturating_add(1);
                 }
                 None => break,
             }
