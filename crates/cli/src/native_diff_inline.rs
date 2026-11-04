@@ -234,6 +234,29 @@ mod tests {
     use super::*;
     use crate::native_diff_view::WireDiagnostic;
 
+    // Upstream patch-diff.tsx:40-44 has no `scroll` prop and disables
+    // chunking; virtualization belongs only to diff-viewer.tsx:1096.
+    #[test]
+    fn diff003_inline_large_added_file_never_virtualizes() {
+        let added_lines = (0..4097).map(|i| format!("+line-{i:04}\n")).collect::<String>();
+        let patch = format!("@@ -0,0 +1,4097 @@\n{added_lines}");
+        let render = || paint_inline_patch(
+            &patch,
+            DiffViewMode::Unified,
+            DiffWrapMode::None,
+            80,
+            INLINE_DIFF_MAX_ROWS,
+        );
+        let first = render();
+        let second = render();
+        assert!(!first.iter().any(|row| matches!(row, InlineDiffRow::DeletedSummary(_))));
+        // The parser's capped result includes its single overflow indicator in
+        // the 4096-row bound, rather than allocating an additional row.
+        assert!(first.len() <= MAX_DIFF_LINES + 1, "cap plus one overflow row");
+        assert_eq!(first.len(), MAX_DIFF_LINES);
+        assert_eq!(first, second, "same width must yield stable row geometry");
+    }
+
     fn add_file(path: &str, patch: &str) -> WirePatchFile {
         WirePatchFile {
             file_type: Some("add".into()),
