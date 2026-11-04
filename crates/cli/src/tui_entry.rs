@@ -4571,6 +4571,40 @@ fn select_menu_key(
     }
 }
 
+/// F002-R3: the permission prompt's key bindings (`permission.tsx:463-485`).
+/// Upstream registers `left,h` / `right,l` ONLY when `keys.length > 1`, so a
+/// single-option prompt is inert; Up/Down and Ctrl-N/Ctrl-B are NOT bound on a
+/// permission prompt. Returns `(handled, needs_paint)`: `handled` is false for
+/// events the prompt does not own, so the caller keeps its normal dispatch.
+/// This is the exact routine `native_loop` runs, so a test drives the real
+/// dispatch rather than a copy.
+#[cfg(feature = "native")]
+fn permission_modal_key(
+    view: &mut crate::native_view::NativeView,
+    event: &native_input_decoder::InputEvent,
+) -> (bool, bool) {
+    if view.dialogs.open_kind() != Some(crate::native_view_dialogs::DialogKind::Permission) {
+        return (false, false);
+    }
+    match event {
+        native_input_decoder::InputEvent::ArrowLeft
+        | native_input_decoder::InputEvent::Byte(b'h') => {
+            (true, view.dialogs.permission_cycle(false))
+        }
+        native_input_decoder::InputEvent::ArrowRight
+        | native_input_decoder::InputEvent::Byte(b'l') => {
+            (true, view.dialogs.permission_cycle(true))
+        }
+        // Up/Down and Ctrl-N/Ctrl-B are NOT bound on a permission prompt
+        // (`permission.tsx:465-485`); consume them so they stay inert.
+        native_input_decoder::InputEvent::ArrowUp
+        | native_input_decoder::InputEvent::ArrowDown
+        | native_input_decoder::InputEvent::Byte(14)
+        | native_input_decoder::InputEvent::Byte(2) => (true, false),
+        _ => (false, false),
+    }
+}
+
 /// Enter (CR/LF) closes an open message menu. The option it confirms is
 /// bound by the follow-up effect dispatch; this slice closes only.
 #[cfg(feature = "native")]
@@ -11201,6 +11235,25 @@ fn native_loop(
                 && matches!(dialog, native_setup::Dialog::None)
                 && import_dialog.as_ref().is_none_or(|import| !import.is_open()),
         );
+        // F002-R3: the permission prompt binds `left,h` / `right,l`
+        // (`permission.tsx:465-485`). Route the arrow and byte halves through
+        // the same `permission_modal_key` gate while the prompt intercepts
+        // input, instead of letting the arrows fall through to the inert-arrow
+        // arm. Scoped to the permission kind so every other modal keeps its
+        // own arrow handling.
+        if view.dialogs.intercepts_input()
+            && view.dialogs.open_kind()
+                == Some(crate::native_view_dialogs::DialogKind::Permission)
+        {
+            let (handled, paint) = permission_modal_key(&mut view, &event);
+            if paint {
+                needs_paint = true;
+            }
+            if handled {
+                utf8.reset();
+                continue;
+            }
+        }
         if !page_open && !help_open && !children_panel.open && !appearance.open
             && !permission_editor.open && !view.dialogs.intercepts_input()
             && !view.command_palette_open() && matches!(dialog, native_setup::Dialog::None)
@@ -12425,6 +12478,10 @@ fn native_loop(
                 // select and are inert in every other modal, where no shell
                 // binding consumes them.
         if view.dialogs.intercepts_input() {
+                    // F002-R3: the permission prompt's own keys — including the
+                    // inert Up/Down — are handled by the `permission_modal_key`
+                    // gate above, which runs first; every other modal keeps the
+                    // shared navigation below.
                     match &direction {
                         native_input_decoder::InputEvent::ArrowUp => view.dialogs.prev(),
                         native_input_decoder::InputEvent::ArrowDown => view.dialogs.next(),
@@ -13014,21 +13071,14 @@ fn native_loop(
                 continue;
             }
             match byte {
-                // FORM-002: `left,h` / `right,l` cycle permission options
-                // (`permission.tsx:463-485`). Scoped to the permission prompt:
-                // other modal kinds bind h/l to nothing upstream.
-                b'h' if view.dialogs.open_kind()
-                    == Some(crate::native_view_dialogs::DialogKind::Permission) =>
-                {
-                    view.dialogs.prev();
-                }
-                b'l' if view.dialogs.open_kind()
-                    == Some(crate::native_view_dialogs::DialogKind::Permission) =>
-                {
-                    view.dialogs.next();
-                }
-                14 => view.dialogs.next(),
-                2 => view.dialogs.prev(),
+                // F002-R3: the permission prompt's `left,h` / `right,l`
+                // cycling and its inert Up/Down + Ctrl-N/Ctrl-B are handled by
+                // the `permission_modal_key` gate above, which runs before this
+                // byte dispatch. Every other modal keeps the shared navigation
+                // (`permission.tsx:465-485` binds h/l only on the permission
+                // prompt, where they cycle rather than step).
+                14 => { view.dialogs.next() }
+                2 => { view.dialogs.prev() }
                 b'1'..=b'9' => { view.dialogs.select(usize::from(byte - b'1')); }
                 13 | 10 => match view.dialogs.answer() {
                     Ok(intent) => dispatch_permission_reply(
@@ -17819,5 +17869,145 @@ mod select_menu_key_tests {
             "Down after a click steps from the clicked row"
         );
         view.dialogs.close();
+    }
+}
+
+/// F002-R3: the LIVE permission-prompt key dispatch. These tests drive
+/// `permission_modal_key`, the exact routine `native_loop` runs before the
+/// shared modal navigation and the byte dispatch, so deleting the live wiring
+/// fails them. Upstream `routes/session/permission.tsx:465-485` binds
+/// `left,h` / `right,l` only when more than one option exists; Up/Down and
+/// Ctrl-N/Ctrl-B are unbound there and must stay inert.
+#[cfg(all(test, feature = "native"))]
+mod permission_modal_key_tests {
+    use super::*;
+    use super::native_input_decoder::InputEvent;
+    use crate::native_view_dialogs::DialogKind;
+
+    /// A two-option permission prompt (`once`, `reject`).
+    fn open_permission() -> crate::native_view::NativeView {
+        let mut view = crate::native_view::NativeView::new(120, 30);
+        view.dialogs
+            .open_permission_with_persistent("req", "ses", "bash", false)
+            .expect("permission prompt opens");
+        assert_eq!(
+            view.dialogs.open_kind(),
+            Some(DialogKind::Permission),
+            "the live view holds an open permission prompt"
+        );
+        view
+    }
+
+    fn focus(view: &crate::native_view::NativeView) -> Option<String> {
+        view.dialogs.focused_choice().map(str::to_owned)
+    }
+
+    #[test]
+    fn f002r3_live_h_l_and_arrows_cycle_the_permission_focus() {
+        for event in [InputEvent::Byte(b'l'), InputEvent::ArrowRight] {
+            let mut view = open_permission();
+            let before = focus(&view);
+            let (handled, paint) = permission_modal_key(&mut view, &event);
+            assert!(handled, "{event:?} is owned by the permission prompt");
+            assert!(paint, "{event:?} repaints after cycling");
+            assert_ne!(focus(&view), before, "{event:?} moves the focus");
+        }
+        for event in [InputEvent::Byte(b'h'), InputEvent::ArrowLeft] {
+            let mut view = open_permission();
+            // Move off the first option so the backward cycle is observable.
+            let _ = permission_modal_key(&mut view, &InputEvent::ArrowRight);
+            let before = focus(&view);
+            let (handled, paint) = permission_modal_key(&mut view, &event);
+            assert!(handled, "{event:?} is owned by the permission prompt");
+            assert!(paint, "{event:?} repaints after cycling");
+            assert_ne!(focus(&view), before, "{event:?} moves the focus");
+        }
+    }
+
+    #[test]
+    fn f002r3_live_up_down_and_ctrl_n_b_are_inert_on_a_permission_prompt() {
+        for event in [
+            InputEvent::ArrowUp,
+            InputEvent::ArrowDown,
+            InputEvent::Byte(14),
+            InputEvent::Byte(2),
+        ] {
+            let mut view = open_permission();
+            let before = focus(&view);
+            let (handled, paint) = permission_modal_key(&mut view, &event);
+            assert!(handled, "{event:?} is still owned by the prompt");
+            assert!(!paint, "{event:?} never repaints the prompt");
+            assert_eq!(focus(&view), before, "{event:?} must not move the focus");
+        }
+    }
+
+    #[test]
+    fn f002r3_live_single_option_is_inert_and_enter_escape_pass_through() {
+        // One option: h/l are owned by the prompt but cannot cycle.
+        let mut view = crate::native_view::NativeView::new(120, 30);
+        view.dialogs
+            .open_request(crate::native_view_dialogs::DialogRequest {
+                id: "req".into(),
+                session_id: "ses".into(),
+                kind: DialogKind::Permission,
+                title: "bash".into(),
+                choices: vec!["Allow once".into()],
+                message: None,
+                disabled: Vec::new(),
+                error: None,
+            })
+            .expect("single-option permission prompt opens");
+        let before = focus(&view);
+        for event in [
+            InputEvent::Byte(b'l'),
+            InputEvent::ArrowRight,
+            InputEvent::Byte(b'h'),
+            InputEvent::ArrowLeft,
+        ] {
+            let (handled, paint) = permission_modal_key(&mut view, &event);
+            assert!(handled, "{event:?} is owned by the permission prompt");
+            assert!(!paint, "{event:?} cannot cycle a single option");
+            assert_eq!(focus(&view), before, "{event:?} must not move the focus");
+        }
+        // Enter/Escape are NOT owned here; the byte dispatch answers them.
+        for event in [InputEvent::Byte(13), InputEvent::Byte(27)] {
+            let (handled, paint) = permission_modal_key(&mut view, &event);
+            assert!(
+                !handled,
+                "{event:?} passes through to the decision dispatch"
+            );
+            assert!(!paint);
+        }
+    }
+
+    #[test]
+    fn f002r3_live_non_permission_modal_keeps_its_own_keys() {
+        let mut view = crate::native_view::NativeView::new(120, 30);
+        view.dialogs
+            .open_request(crate::native_view_dialogs::DialogRequest {
+                id: "sel".into(),
+                session_id: "ses".into(),
+                kind: DialogKind::Select,
+                title: "pick".into(),
+                choices: vec!["one".into(), "two".into()],
+                message: None,
+                disabled: Vec::new(),
+                error: None,
+            })
+            .expect("select opens");
+        for event in [
+            InputEvent::ArrowLeft,
+            InputEvent::ArrowRight,
+            InputEvent::ArrowUp,
+            InputEvent::ArrowDown,
+            InputEvent::Byte(b'h'),
+            InputEvent::Byte(b'l'),
+            InputEvent::Byte(14),
+            InputEvent::Byte(2),
+        ] {
+            let (handled, paint) = permission_modal_key(&mut view, &event);
+            assert!(!handled, "{event:?} is not the permission prompt's key");
+            assert!(!paint);
+        }
     }
 }

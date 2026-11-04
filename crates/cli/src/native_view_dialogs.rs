@@ -1525,6 +1525,34 @@ impl DialogView {
         })
     }
 
+    /// F002-R3: the number of options on an OPEN permission prompt, or `None`
+    /// when the open dialog is not a permission request.
+    ///
+    /// Upstream registers `left,h` / `right,l` only when `keys.length > 1`
+    /// (`routes/session/permission.tsx:465-485`), so the live dispatch needs
+    /// the option count to gate the cycle.
+    #[must_use]
+    pub fn permission_option_count(&self) -> Option<usize> {
+        self.dialog
+            .as_ref()
+            .filter(|dialog| dialog.kind == DialogKind::Permission)
+            .map(|dialog| dialog.choices.len())
+    }
+
+    /// F002-R3: cycle the permission options left/right, exactly the upstream
+    /// guard. A permission prompt with a single option does NOT move
+    /// (`keys.length > 1`, `permission.tsx:465-485`); a non-permission dialog
+    /// never cycles here. Returns whether a repaint is needed.
+    pub fn permission_cycle(&mut self, forward: bool) -> bool {
+        match self.permission_option_count() {
+            Some(count) if count > 1 => {
+                self.step(forward);
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Move the selection forward, wrapping and skipping disabled choices.
     /// Ignored while pending (the decision is already in flight) and when
     /// no choice is enabled (selection stays unset).
@@ -6123,6 +6151,50 @@ mod error_and_crash_tests {
         assert_eq!(screen.message(), UNKNOWN_MESSAGE);
         assert_eq!(screen.stack(), NO_STACK);
         assert_eq!(screen.mode(), CrashMode::Light);
+    }
+}
+
+#[cfg(test)]
+mod f002r3_permission_navigation_tests {
+    use super::DialogView;
+
+    /// F002-R3: upstream registers `left,h` / `right,l` only when
+    /// `keys.length > 1` (`permission.tsx:465-485`). A single-option prompt is
+    /// inert; a two-plus option prompt cycles.
+    #[test]
+    fn f002r3_h_l_cycle_only_when_more_than_one_option() {
+        // 2 options (no `save` rules): `once`, `reject`.
+        let mut single = DialogView::new();
+        single
+            .open_permission_with_persistent("p", "s", "bash", false)
+            .unwrap();
+        assert_eq!(single.permission_option_count(), Some(2));
+        let before = single.focused_choice().map(str::to_owned);
+        assert!(single.permission_cycle(true), "two options cycle forward");
+        assert_ne!(single.focused_choice().map(str::to_owned), before);
+
+        // A one-option permission prompt never moves.
+        let mut one = DialogView::new();
+        one.open_request(super::DialogRequest {
+            id: "p1".into(),
+            session_id: "s".into(),
+            kind: super::DialogKind::Permission,
+            title: "t".into(),
+            choices: vec!["Allow once".into()],
+            message: None,
+            disabled: Vec::new(),
+            error: None,
+        })
+        .unwrap();
+        assert_eq!(one.permission_option_count(), Some(1));
+        let before = one.focused_choice().map(str::to_owned);
+        assert!(!one.permission_cycle(true), "single option is inert");
+        assert_eq!(one.focused_choice().map(str::to_owned), before);
+
+        // A non-permission dialog reports no permission option count.
+        let mut select = DialogView::new();
+        assert_eq!(select.permission_option_count(), None);
+        assert!(!select.permission_cycle(true));
     }
 }
 
