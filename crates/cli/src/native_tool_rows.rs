@@ -68,6 +68,8 @@ pub const MAX_TOOL_ROWS: usize = 64;
 pub const MAX_LOADED_ROWS: usize = 32;
 /// Upper bound on one loaded-file path's characters.
 pub const MAX_LOADED_PATH_CHARS: usize = 512;
+/// Upper bound on primitive argument rows shown for one execute child call.
+pub const MAX_EXECUTE_ARG_ROWS: usize = 32;
 
 const MAX_CELLS: usize = 64 * 1024;
 
@@ -639,8 +641,29 @@ pub fn apply_tool_metadata(mut display: ToolDisplay, metadata_json: &str) -> Too
                         ExecuteCallStatus::Error => ("✗", ChatRowClass::ToolError),
                         _ => ("›", ChatRowClass::ToolResult),
                     };
-                    (format!("{marker} {}", execute_call_summary(call)), class)
+                    let mut rows = vec![(
+                        format!("{marker} {}", execute_call_summary(call)),
+                        class,
+                    )];
+                    if let Some(input) = &call.input {
+                        rows.extend(
+                            input
+                                .iter()
+                                .filter_map(|(key, value)| {
+                                    primitive_value(value).map(|value| {
+                                        (
+                                            format!("  {}: {}", clip(key, MAX_FIELD_BYTES), clip(&value, MAX_FIELD_BYTES)),
+                                            class,
+                                        )
+                                    })
+                                })
+                                .take(MAX_EXECUTE_ARG_ROWS),
+                        );
+                    }
+                    rows
                 })
+                .flatten()
+                .take(MAX_TOOL_ROWS)
                 .collect();
             display.body.splice(0..0, rows);
         }
@@ -1778,6 +1801,36 @@ mod tests {
                 .all(|(row, _)| !row.ends_with("Backgrou") && !row.ends_with(" Backgroun")),
             "no row splits the badge mid-word: {narrow:?}"
         );
+    }
+
+    #[test]
+    fn tool010_execute_argument_rows() {
+        let tool_calls = json!([
+            {
+                "tool": "read",
+                "status": "running",
+                "input": {
+                    "path": "a.rs",
+                    "retries": 2,
+                    "enabled": true,
+                    "options": {"nested": "hidden"}
+                }
+            }
+        ]);
+        let display = apply_tool_metadata(
+            tool_display(80, "execute", "running", "{}", "", false),
+            &json!({"toolCalls": tool_calls}).to_string(),
+        );
+        assert_eq!(
+            display.body,
+            vec![
+                ("› read [enabled=true, path=a.rs, retries=2]".to_owned(), ChatRowClass::ToolResult),
+                ("  enabled: true".to_owned(), ChatRowClass::ToolResult),
+                ("  path: a.rs".to_owned(), ChatRowClass::ToolResult),
+                ("  retries: 2".to_owned(), ChatRowClass::ToolResult),
+            ]
+        );
+        assert!(display.body.iter().all(|(row, _)| !row.contains("nested")));
     }
 
     #[test]
