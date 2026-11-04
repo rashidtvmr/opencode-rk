@@ -2979,16 +2979,16 @@ mod surface_paint_regressions {
         assert!(link.attrs.underline, "thinking keeps link underline");
 
         // The live seam paints the muted foreground, not the syntax color.
-        let syntax = super::markdown_run_color(&markdown, HEADING).unwrap().rgba;
+        let syntax = super::markdown_run_color(&markdown, None, HEADING).unwrap().rgba;
         assert_ne!(syntax, markdown.muted.rgba, "theme distinguishes heading/muted");
-        let painted = super::markdown_run_paint_color(&markdown, HEADING, true)
+        let painted = super::markdown_run_paint_color(&markdown, None, HEADING, true)
             .expect("thinking rows always resolve a foreground");
         assert_eq!(painted, markdown.muted.rgba);
-        let painted_h1 = super::markdown_run_paint_color(&markdown, HEADING | HEADING1, true).unwrap();
+        let painted_h1 = super::markdown_run_paint_color(&markdown, None, HEADING | HEADING1, true).unwrap();
         assert_eq!(painted_h1, markdown.muted.rgba);
         // Non-thinking paint is unchanged: heading rows keep the syntax color.
         assert_eq!(
-            super::markdown_run_paint_color(&markdown, HEADING, false).unwrap(),
+            super::markdown_run_paint_color(&markdown, None, HEADING, false).unwrap(),
             syntax
         );
     }
@@ -3004,7 +3004,7 @@ mod surface_paint_regressions {
         .semantic
         .expect("shipped V2 asset resolves")
         .markdown;
-        let color = |flags| super::markdown_run_color(&markdown, flags).map(|color| color.rgba);
+        let color = |flags| super::markdown_run_color(&markdown, None, flags).map(|color| color.rgba);
         assert_eq!(color(CODE), Some(markdown.code.rgba));
         assert_eq!(color(HEADING), Some(markdown.heading.rgba));
         assert_eq!(color(HEADING | HEADING1), Some(markdown.heading.rgba));
@@ -3019,6 +3019,59 @@ mod surface_paint_regressions {
         assert_eq!(color(0), None);
         assert_eq!(super::run_attributes(HEADING1) & 8, 8, "h1 underlines");
         assert_eq!(super::run_attributes(QUOTE) & 4, 4, "quotes are italic");
+    }
+
+    /// THEME-08: fenced code chunks carry bounded `SYN_*` token flags and the
+    /// live paint resolves them from `theme.semantic.syntax.*`
+    /// (`packages/theme/src/tui/syntax.ts` token colors).
+    #[test]
+    fn theme08_syntax_tokens_paint_live_code_fences() {
+        use crate::markdown_runs::{CODE, CODE_BLOCK, SYN_COMMENT, SYN_KEYWORD, SYN_NUMBER, SYN_STRING};
+        use crate::native_view_chat::{ChatMessage, ChatRole};
+        let semantic = crate::native_theme_runtime::RuntimeTheme::builtin_default(
+            crate::native_theme_runtime::ThemeMode::Dark,
+        )
+        .semantic
+        .expect("shipped V2 asset resolves");
+        let (markdown, syntax) = (&semantic.markdown, &semantic.syntax);
+        let color = |flags| super::markdown_run_color(markdown, Some(syntax), flags).map(|c| c.rgba);
+        assert_eq!(color(CODE | CODE_BLOCK | SYN_KEYWORD), Some(syntax.keyword.rgba));
+        assert_eq!(color(CODE | CODE_BLOCK | SYN_STRING), Some(syntax.string.rgba));
+        assert_eq!(color(CODE | CODE_BLOCK | SYN_NUMBER), Some(syntax.number.rgba));
+        assert_eq!(color(CODE | CODE_BLOCK | SYN_COMMENT), Some(syntax.comment.rgba));
+        assert_eq!(color(CODE | CODE_BLOCK), Some(markdown.code.rgba));
+        assert_ne!(syntax.keyword.rgba, markdown.code.rgba, "token color is distinct");
+
+        // Live producer: the fenced row emits token spans aligned to the row.
+        let mut view = crate::native_view::NativeView::new(120, 40);
+        view.set_session_route(true);
+        let messages = vec![ChatMessage::text(
+            ChatRole::Assistant,
+            "```rust\nlet count = 42; // total\n```",
+        )];
+        let lines = view.render_typed("draft", &messages, false, &[]);
+        let spans = view.chat_markdown_spans().to_vec();
+        let code_row = lines
+            .iter()
+            .position(|line| line.contains("let count"))
+            .expect("fenced row painted");
+        let row = &lines[code_row];
+        let has = |needle: &str, bit: u16| {
+            let at = row.find(needle).expect("needle painted");
+            spans[code_row].iter().any(|span| {
+                span.flags & bit != 0
+                    && span.flags & CODE != 0
+                    && usize::from(span.start) <= at
+                    && usize::from(span.end) >= at + needle.len()
+            })
+        };
+        assert!(has("let", SYN_KEYWORD), "keyword; spans {:?}", spans[code_row]);
+        assert!(has("42", SYN_NUMBER), "number; spans {:?}", spans[code_row]);
+        assert!(has("// total", SYN_COMMENT), "comment; spans {:?}", spans[code_row]);
+        assert!(
+            !spans[code_row].iter().any(|span| span.flags & SYN_STRING != 0),
+            "no fabricated string token; spans {:?}", spans[code_row]
+        );
     }
 
     #[test]
@@ -4588,13 +4641,33 @@ fn run_attributes(flags: u16) -> u32 {
 /// (`packages/theme/src/tui/syntax.ts:46-71`). `None` leaves the row's own
 /// foreground alone.
 #[cfg(feature = "native")]
-fn markdown_run_color(
-    markdown: &crate::native_theme_runtime::MarkdownPalette,
+fn markdown_run_color<'a>(
+    markdown: &'a crate::native_theme_runtime::MarkdownPalette,
+    syntax: Option<&'a crate::native_theme_runtime::SyntaxPalette>,
     flags: u16,
-) -> Option<&crate::native_theme_runtime::HueColor> {
+) -> Option<&'a crate::native_theme_runtime::HueColor> {
     use crate::markdown_runs::{
         BOLD, CODE, HEADING, HEADING1, ITALIC, LINK, LINK_TEXT, LIST, QUOTE, RULE, STRIKE,
+        SYN_COMMENT, SYN_KEYWORD, SYN_MASK, SYN_NUMBER, SYN_STRING,
     };
+    // THEME-08: fenced token runs paint the `syntax.*` token colors when the
+    // frame resolved a semantic palette; without one the code color stays.
+    if let Some(syntax) = syntax {
+        if flags & SYN_MASK != 0 {
+            let color = if flags & SYN_COMMENT != 0 {
+                &syntax.comment
+            } else if flags & SYN_KEYWORD != 0 {
+                &syntax.keyword
+            } else if flags & SYN_STRING != 0 {
+                &syntax.string
+            } else if flags & SYN_NUMBER != 0 {
+                &syntax.number
+            } else {
+                &markdown.code
+            };
+            return Some(color);
+        }
+    }
     if flags & CODE != 0 {
         Some(&markdown.code)
     } else if flags & (HEADING | HEADING1) != 0 {
@@ -4669,6 +4742,7 @@ fn markdown_role_for_flags(flags: u16) -> crate::native_markdown_flow::MarkdownR
 #[cfg(feature = "native")]
 fn markdown_run_paint_color(
     markdown: &crate::native_theme_runtime::MarkdownPalette,
+    syntax: Option<&crate::native_theme_runtime::SyntaxPalette>,
     flags: u16,
     thinking: bool,
 ) -> Option<[u8; 4]> {
@@ -4678,7 +4752,7 @@ fn markdown_run_paint_color(
         let spec = styles.get(markdown_role_for_flags(flags));
         return Some(spec.fg);
     }
-    markdown_run_color(markdown, flags).map(|color| color.rgba)
+    markdown_run_color(markdown, syntax, flags).map(|color| color.rgba)
 }
 
 
@@ -5325,9 +5399,12 @@ fn native_paint(
                                 if x >= u32::from(run_span.start)
                                     && x.saturating_add(u32::from(cells)) <= u32::from(run_span.end)
                                 {
-                                    if let Some(rgba) =
-                                        markdown_run_paint_color(markdown, run_span.flags, thinking)
-                                    {
+                                    if let Some(rgba) = markdown_run_paint_color(
+                                        markdown,
+                                        ctx.semantic.as_ref().map(|semantic| &semantic.syntax),
+                                        run_span.flags,
+                                        thinking,
+                                    ) {
                                         let [r, g, b, a] = rgba;
                                         fg = Rgba::new(r, g, b, a);
                                     }

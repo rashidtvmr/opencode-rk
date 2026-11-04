@@ -1862,8 +1862,27 @@ fn markdown_part_row_spans_mode(
                 let rendered_cells = row_cells(&row);
                 if width > 0 { end = end.min(rendered_cells); }
                 let spans = if end > start {
-                    vec![ChatRunSpan { start: start as u16, end: end as u16,
-                        flags: crate::markdown_runs::CODE | crate::markdown_runs::CODE_BLOCK }]
+                    // THEME-08: each chunk lexes into bounded SYN_* token runs
+                    // so the fence paints keyword/string/number/comment color
+                    // while every run stays a full code-block run otherwise.
+                    let tokens = crate::markdown_runs::code_token_cell_spans(&chunk);
+                    let base = crate::markdown_runs::CODE | crate::markdown_runs::CODE_BLOCK;
+                    if tokens.is_empty() {
+                        vec![ChatRunSpan { start: start as u16, end: end as u16, flags: base }]
+                    } else {
+                        tokens
+                            .into_iter()
+                            .filter_map(|(from, to, flags)| {
+                                let span_start = start.saturating_add(from);
+                                let span_end = start.saturating_add(to).min(end);
+                                (span_start < span_end).then(|| ChatRunSpan {
+                                    start: span_start as u16,
+                                    end: span_end as u16,
+                                    flags: base | flags,
+                                })
+                            })
+                            .collect()
+                    }
                 } else { Vec::new() };
                 out.push((spans, Some(rendered_cells)));
             }

@@ -60,6 +60,109 @@ pub const LIST: u16 = 512;
 pub const RULE: u16 = 1024;
 /// `markup.strikethrough` (muted color).
 pub const STRIKE: u16 = 2048;
+/// Bounded lexical fallback token classes for fenced code. Upstream colors
+/// code through tree-sitter scopes (`generateSyntax`,
+/// `packages/theme/src/tui/syntax.ts`); the native painter keeps a closed
+/// keyword/string/number/comment heuristic instead and never invents scopes.
+pub const SYN_COMMENT: u16 = 4096;
+pub const SYN_KEYWORD: u16 = 8192;
+pub const SYN_STRING: u16 = 16384;
+pub const SYN_NUMBER: u16 = 32768;
+pub const SYN_MASK: u16 = SYN_COMMENT | SYN_KEYWORD | SYN_STRING | SYN_NUMBER;
+
+/// Closed keyword set for the lexical fallback. Matched case-sensitively on
+/// whole identifier words; anything outside stays plain code color.
+const CODE_KEYWORDS: &[&str] = &[
+    "fn", "let", "const", "var", "return", "if", "else", "for", "while", "loop", "match",
+    "struct", "enum", "impl", "pub", "use", "mod", "trait", "where", "def", "class", "import",
+    "from", "function", "await", "async", "true", "false", "null", "nil", "none", "self", "new",
+    "try", "catch", "throw", "except", "yield", "static", "final", "void", "int", "float",
+    "bool", "break", "continue", "lambda", "type", "interface",
+];
+
+/// One bounded lexical pass over a single sanitized code line. Returns
+/// disjoint byte intervals with exactly one `SYN_*` bit each; unlisted bytes
+/// stay plain code. Escapes inside strings are consumed so a quote never ends
+/// a string it belongs to.
+#[must_use]
+pub fn code_token_spans(text: &str) -> Vec<(usize, usize, u16)> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut at = 0usize;
+    while at < text.len() {
+        let byte = bytes[at];
+        let comment = if byte == b'/' && bytes.get(at + 1) == Some(&b'/') {
+            Some(at)
+        } else if byte == b'#' && (at == 0 || bytes[at - 1].is_ascii_whitespace()) {
+            Some(at)
+        } else {
+            None
+        };
+        if let Some(start) = comment {
+            out.push((start, text.len(), SYN_COMMENT));
+            break;
+        }
+        match byte {
+            b'"' | b'\'' | b'`' => {
+                let mut end = at + 1;
+                while end < text.len() {
+                    if bytes[end] == b'\\' {
+                        end += 2;
+                        continue;
+                    }
+                    if bytes[end] == byte {
+                        end += 1;
+                        break;
+                    }
+                    end += 1;
+                }
+                let end = end.min(text.len());
+                out.push((at, end, SYN_STRING));
+                at = end;
+            }
+            b'0'..=b'9' => {
+                let mut end = at;
+                while end < text.len()
+                    && (bytes[end].is_ascii_alphanumeric() || matches!(bytes[end], b'.' | b'_'))
+                {
+                    end += 1;
+                }
+                out.push((at, end, SYN_NUMBER));
+                at = end;
+            }
+            _ if byte == b'_' || byte.is_ascii_alphabetic() || byte >= 0x80 => {
+                let mut end = at;
+                while end < text.len()
+                    && (bytes[end].is_ascii_alphanumeric()
+                        || bytes[end] == b'_'
+                        || bytes[end] >= 0x80)
+                {
+                    end += 1;
+                }
+                if CODE_KEYWORDS.contains(&&text[at..end]) {
+                    out.push((at, end, SYN_KEYWORD));
+                }
+                at = end;
+            }
+            _ => at += 1,
+        }
+    }
+    out
+}
+
+/// [`Self::code_token_spans`] snapped to display-cell offsets on the same
+/// line, so wrapped code chunks can paint token color without splitting a
+/// cluster.
+#[must_use]
+pub fn code_token_cell_spans(text: &str) -> Vec<(usize, usize, u16)> {
+    code_token_spans(text)
+        .into_iter()
+        .map(|(start, end, flags)| {
+            (byte_cell_offset(text, start), byte_cell_offset(text, end), flags)
+        })
+        .filter(|(start, end, _)| start < end)
+        .collect()
+}
 
 /// A style interval on a sanitized source row. `start..end` is the source
 /// interval used by projection; rendered concealment is derived separately.
@@ -661,5 +764,31 @@ mod tests {
         let window = project_row(&row.text, &row.runs, bold.start_cell, 3, 1);
         assert_eq!(window[0].start_cell, 3);
         assert_eq!(window[0].end_cell, 4);
+    }
+
+    /// THEME-08: fenced code lexes into bounded SYN_* token runs with
+    /// cluster-aligned cell offsets.
+    #[test]
+    fn theme08_code_tokens_lex_to_cell_aligned_spans() {
+        let parsed = parse_part(PartKind::Prose, "~~~rust\nlet n = 42; // total\n~~~");
+        let code_row = &parsed.rows[1];
+        let tokens = code_token_spans(&code_row.text);
+        assert_eq!(tokens[0], (0, 3, SYN_KEYWORD), "`let` is a keyword");
+        assert_eq!(
+            tokens.iter().find(|token| token.2 == SYN_NUMBER).map(|token| &code_row.text[token.0..token.1]),
+            Some("42")
+        );
+        let cell_spans = code_token_cell_spans(&code_row.text);
+        assert!(cell_spans
+            .iter()
+            .all(|(start, end, _)| start < end && *end <= cell_width(&code_row.text)));
+        // Strings keep escapes inside the span and comments run to end of line.
+        let mixed = code_token_spans(r#"x = "a\"b" # tail"#);
+        assert_eq!(mixed[0], (4, 10, SYN_STRING), r#"escaped quote stays in "a\"b""#);
+        assert_eq!(mixed[1], (11, 17, SYN_COMMENT), "# comment runs to end of line");
+        // Cell offsets stay cluster-aligned for wide glyphs: the string starts
+        // at cell 2 (after the 2-cell `界`), not byte 3.
+        let wide = code_token_cell_spans("界\"x\"");
+        assert_eq!(wide, vec![(2, 5, SYN_STRING)]);
     }
 }
