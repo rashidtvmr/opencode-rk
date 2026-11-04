@@ -1812,6 +1812,21 @@ impl RuntimeTheme {
         })
     }
 
+    /// THEME-13 live `system` theme: upstream `generateSystem(palette, mode)`
+    /// (`theme/system.ts` -> `SystemThemeState::system_palette`) applied over
+    /// the ten native slots, named `system` (`config.theme = "system"`).
+    #[must_use]
+    pub fn system(palette: Palette, mode: ThemeMode) -> Self {
+        Self {
+            name: "system".to_owned(),
+            mode,
+            requested_mode: mode,
+            palette: palette.clone(),
+            dialog: palette,
+            semantic: None,
+        }
+    }
+
     /// Build a theme from one parsed upstream theme-asset object.
     ///
     /// # Errors

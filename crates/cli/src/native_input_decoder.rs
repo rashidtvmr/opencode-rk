@@ -90,6 +90,11 @@ pub(crate) enum InputEvent {
     /// `FocusGained`, consumed as the `focused` fact of TAB-21
     /// (`context/session-tabs.tsx:94-99`).
     FocusLost,
+    /// OSC 10/11 default-color reply (`ESC ]10;rgb:...` ST/BEL), THEME-13.
+    /// Protocol output from our own terminal-palette query; it is never
+    /// composer input. `index` is the queried color slot (10 foreground,
+    /// 11 background) and `rgb` is the resolved opaque color.
+    OscColorReply { index: u8, rgb: [u8; 4] },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -123,6 +128,33 @@ pub(crate) struct TerminalInputDecoder {
     events: [Option<InputEvent>; MAX_EVENTS],
     head: usize,
     count: usize,
+    /// THEME-13: bounded payload capture for an in-flight OSC 10/11 reply.
+    control_capture: Option<ControlCapture>,
+}
+
+/// Bounded capture of an OSC reply body (`kind;<payload>`). Payloads longer
+/// than [`CONTROL_CAPTURE_MAX`] set `overflow` and never emit.
+#[derive(Debug)]
+struct ControlCapture {
+    kind: u16,
+    kind_done: bool,
+    bytes: [u8; CONTROL_CAPTURE_MAX],
+    len: usize,
+    overflow: bool,
+}
+
+const CONTROL_CAPTURE_MAX: usize = 40;
+
+impl Default for ControlCapture {
+    fn default() -> Self {
+        Self {
+            kind: 0,
+            kind_done: false,
+            bytes: [0; CONTROL_CAPTURE_MAX],
+            len: 0,
+            overflow: false,
+        }
+    }
 }
 
 impl Default for TerminalInputDecoder {
@@ -139,6 +171,7 @@ impl Default for TerminalInputDecoder {
             events: std::array::from_fn(|_| None),
             head: 0,
             count: 0,
+            control_capture: None,
         }
     }
 }
@@ -204,8 +237,19 @@ impl TerminalInputDecoder {
                 abandoned,
             } => {
                 if (bell_terminated && byte == 0x07) || (escape && byte == b'\\') {
+                    let closed = self.control_capture.take();
                     self.reset();
+                    if let Some(capture) = closed {
+                        if !capture.overflow && !abandoned {
+                            if let Some((index, rgb)) =
+                                parse_osc_color_reply(capture.kind, &capture.bytes[..capture.len])
+                            {
+                                self.emit(InputEvent::OscColorReply { index, rgb });
+                            }
+                        }
+                    }
                 } else {
+                    self.capture_control_byte(byte);
                     self.state = State::ControlString {
                         bell_terminated,
                         escape: byte == 0x1b,
@@ -305,6 +349,9 @@ impl TerminalInputDecoder {
         self.deadline = Some(now + ESCAPE_GRACE);
         // Retain no payload. Timing out abandons framing without releasing a
         // late reply tail into the composer. Ctrl-C/Ctrl-D keep exit priority.
+        // THEME-13 exception: OSC frames may be our own 10/11 palette replies,
+        // so a bounded body is captured for the terminator (parse at close).
+        self.control_capture = bell_terminated.then(ControlCapture::default);
     }
 
     fn sequence_byte(&mut self, byte: u8, now: Instant) {
@@ -641,6 +688,40 @@ impl TerminalInputDecoder {
         self.paste_end_len = 0;
         self.paste_deadline = None;
         self.string_deadline = None;
+        self.control_capture = None;
+    }
+
+    /// THEME-13: retain a bounded OSC 10/11 reply body. Any other control
+    /// string, or a body that is not `<digits>;`, drops the capture and keeps
+    /// today's discard-only behaviour.
+    fn capture_control_byte(&mut self, byte: u8) {
+        let Some(capture) = self.control_capture.as_mut() else {
+            return;
+        };
+        if byte == 0x1b {
+            // ST prefix; framing completes on the next byte.
+            return;
+        }
+        if capture.kind_done {
+            if capture.overflow || capture.len == capture.bytes.len() {
+                capture.overflow = true;
+                return;
+            }
+            capture.bytes[capture.len] = byte;
+            capture.len += 1;
+        } else if byte.is_ascii_digit() {
+            capture.kind = capture
+                .kind
+                .saturating_mul(10)
+                .saturating_add(u16::from(byte - b'0'));
+        } else if byte == b';' {
+            capture.kind_done = true;
+            if !matches!(capture.kind, 10 | 11) {
+                self.control_capture = None;
+            }
+        } else {
+            self.control_capture = None;
+        }
     }
 }
 
@@ -800,6 +881,68 @@ fn parse_number(bytes: &[u8]) -> Option<u32> {
             .and_then(|value| value.checked_add((byte - b'0') as u32))?;
     }
     Some(value)
+}
+
+/// THEME-13: one `rgb:h*/h*/h*` (xterm reply) or `#rgb`/`#rrggbb` channel
+/// group, scaled to an opaque 8-bit color.
+fn parse_osc_color_text(text: &str) -> Option<[u8; 4]> {
+    fn component(value: &str) -> Option<u8> {
+        if value.is_empty() || value.len() > 4 || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        let parsed = u32::from_str_radix(value, 16).ok()?;
+        let max = u32::from_str_radix(&"f".repeat(value.len()), 16).ok()?;
+        Some(((parsed * 255 + max / 2) / max) as u8)
+    }
+    // A color payload is a protocol string of ASCII digits and separators.
+    // Reject non-ASCII up front: `str` indexing is by BYTE offset, so slicing a
+    // multibyte char at a fixed index would panic in the live decoder loop
+    // (terminal-driven DoS). No valid reply contains a non-ASCII byte, so this
+    // is behavior-preserving for well-formed input.
+    if !text.is_ascii() {
+        return None;
+    }
+    if let Some(rest) = text.strip_prefix("rgb:") {
+        let mut parts = rest.split('/');
+        let r = component(parts.next()?)?;
+        let g = component(parts.next()?)?;
+        let b = component(parts.next()?)?;
+        if parts.next().is_some() {
+            return None;
+        }
+        return Some([r, g, b, 0xFF]);
+    }
+    if let Some(rest) = text.strip_prefix('#') {
+        return match rest.len() {
+            // #rgb expands each nibble: f -> ff (value * 17).
+            3 => {
+                let r = u8::from_str_radix(&rest[..1], 16).ok()?;
+                let g = u8::from_str_radix(&rest[1..2], 16).ok()?;
+                let b = u8::from_str_radix(&rest[2..3], 16).ok()?;
+                let expand = |value: u8| value * 17;
+                Some([expand(r), expand(g), expand(b), 0xFF])
+            }
+            6 => Some([
+                u8::from_str_radix(&rest[0..2], 16).ok()?,
+                u8::from_str_radix(&rest[2..4], 16).ok()?,
+                u8::from_str_radix(&rest[4..6], 16).ok()?,
+                0xFF,
+            ]),
+            _ => None,
+        };
+    }
+    None
+}
+
+/// THEME-13: a closed OSC 10/11 body (`10;rgb:...`) becomes a palette reply.
+fn parse_osc_color_reply(kind: u16, payload: &[u8]) -> Option<(u8, [u8; 4])> {
+    let index = match kind {
+        10 => 10u8,
+        11 => 11u8,
+        _ => return None,
+    };
+    let text = std::str::from_utf8(payload).ok()?;
+    Some((index, parse_osc_color_text(text)?))
 }
 
 #[cfg(test)]
@@ -1182,5 +1325,82 @@ mod page_key_regressions {
         // must never become typed text or an arrow move.
         assert!(decode(b"\x1b[1~\x1b[2~\x1b[3~\x1b[4~").is_empty());
         assert!(decode(b"\x1b[5;2~").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod theme13_review_r1_non_ascii_osc_color_tests {
+    //! THEME-12/13 review R1: the OSC 10/11 color decoder must never panic on
+    //! a hostile frame. `parse_osc_color_text` slices the `#RRGGBB` payload by
+    //! BYTE offset, so a multibyte character at a slice boundary (for example
+    //! `#a` + U+00E9, whose payload is 3 bytes) used to abort the live input
+    //! loop with `byte index 2 is not a char boundary`. Every malformed payload
+    //! must instead be abandoned (no `OscColorReply`), and valid replies must
+    //! still decode.
+
+    use super::*;
+
+    fn decode(bytes: &[u8]) -> Vec<InputEvent> {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        let mut events = Vec::new();
+        for &byte in bytes {
+            decoder.push(byte, now);
+            while let Some(event) = decoder.pop() {
+                events.push(event);
+            }
+        }
+        events
+    }
+
+    #[test]
+    fn non_ascii_hex_payload_never_panics_and_is_abandoned() {
+        // `ESC ] 10 ; # a é BEL`: payload bytes `23 61 c3 a9` (`#aé`) are valid
+        // UTF-8 but not ASCII, so `rest[1..2]` lands inside the two-byte scalar
+        // and panicked before the ASCII guard.
+        let frame = [27u8, 93, b'1', b'0', b';', b'#', b'a', 0xc3, 0xa9, 7];
+        assert!(
+            decode(&frame).is_empty(),
+            "non-ASCII OSC 10 payload must be abandoned, never decoded or leaked as text"
+        );
+
+        // A six-byte non-ASCII payload takes the `#rrggbb` branch; it must be
+        // rejected by the payload check rather than parsed.
+        let long_non_ascii = [27u8, 93, b'1', b'1', b';', b'#', b'a', b'b', 0xc3, 0xa9, b'X', b'Y', 7];
+        assert!(decode(&long_non_ascii).is_empty());
+
+        // Non-ASCII inside an `rgb:` reply is likewise abandoned.
+        let rgb_non_ascii = [27u8, 93, b'1', b'0', b';', b'r', b'g', b'b', b':', 0xc3, 0xa9, b'/', b'2', b'2', b'/', b'3', b'3', 7];
+        assert!(decode(&rgb_non_ascii).is_empty());
+    }
+
+    #[test]
+    fn overlong_and_malformed_hex_payloads_are_abandoned() {
+        // Seven hex digits: no `#rgb`/`#rrggbb` length matches, so it is None.
+        assert!(decode(b"\x1b]10;#1234567\x07").is_empty());
+        // Five hex digits is not a valid length either.
+        assert!(decode(b"\x1b]10;#12345\x07").is_empty());
+        // A stray slash in the hex body is not a color.
+        assert!(decode(b"\x1b]10;#12/45\x07").is_empty());
+    }
+
+    #[test]
+    fn valid_rgb_reply_still_decodes_after_the_ascii_guard() {
+        // Positive control: the fix must not break the happy path.
+        assert_eq!(
+            decode(b"\x1b]11;rgb:11/22/33\x07"),
+            vec![InputEvent::OscColorReply {
+                index: 11,
+                rgb: [0x11, 0x22, 0x33, 0xFF]
+            }]
+        );
+        // A valid `#rrggbb` payload continues to decode as opaque RGBA.
+        assert_eq!(
+            decode(b"\x1b]10;#0a1b2c\x07"),
+            vec![InputEvent::OscColorReply {
+                index: 10,
+                rgb: [0x0A, 0x1B, 0x2C, 0xFF]
+            }]
+        );
     }
 }

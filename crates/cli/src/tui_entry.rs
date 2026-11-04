@@ -8319,6 +8319,45 @@ fn theme_picker_cancel(
     }
 }
 
+/// THEME-13: the OSC 10/11 default-fg/bg query written after the first paint
+/// (same stdout transport as the OSC 52 clipboard frame).
+#[cfg(feature = "native")]
+fn system_palette_query_frame() -> &'static [u8] {
+    b"\x1b]10;?\x07\x1b]11;?\x07"
+}
+
+/// THEME-13: the seam the main loop calls with every decoded OSC 10/11
+/// reply. A foreground+background pair becomes a [`SystemThemeState`] palette
+/// reply; when the probe resolves, the live `system` theme is rebuilt
+/// (upstream `refreshPalette` -> `generateSystem` -> `setSystemTheme`).
+/// Returns true when the caller must repaint.
+#[cfg(feature = "native")]
+fn system_theme_apply_replies(
+    probe: &mut Option<crate::native_theme_runtime::SystemThemeState>,
+    foreground: Option<[u8; 4]>,
+    background: Option<[u8; 4]>,
+    theme: &mut crate::native_theme_runtime::RuntimeTheme,
+) -> bool {
+    let (Some(foreground), Some(background), Some(probe)) = (foreground, background, probe) else {
+        return false;
+    };
+    match probe.palette_reply(crate::native_theme_runtime::TerminalPalette::new(
+        Some(foreground),
+        Some(background),
+        Vec::new(),
+    )) {
+        crate::native_theme_runtime::ProbeOutcome::Usable
+        | crate::native_theme_runtime::ProbeOutcome::Started => {
+            if let Some(palette) = probe.system_theme() {
+                *theme = crate::native_theme_runtime::RuntimeTheme::system(palette, probe.mode());
+                return true;
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
 #[cfg(feature = "native")]
 fn load_native_theme_with_budget(
     name: &str,
@@ -9245,6 +9284,16 @@ fn native_loop(
     // Theme page is open; movement previews (and persists) the focused row and
     // Esc restores the pre-open selection (`dialog-theme-list.tsx:32-37`).
     let mut theme_pick: Option<crate::native_theme_runtime::ThemePicker> = None;
+    // THEME-13: `theme.mode: "system"` boots on the built-in fallback and
+    // reconciles the live palette from OSC 10/11 replies once the first frame
+    // is out (`context/theme.tsx` onMount/`afterPaint`/`refreshPalette`).
+    let system_theme_active = selected_mode == Some("system")
+        || preferences.theme_mode.as_deref() == Some("system");
+    let mut theme_probe = system_theme_active
+        .then(|| crate::native_theme_runtime::SystemThemeState::cold_start(None, None, theme_mode));
+    let (mut reply_foreground, mut reply_background): (Option<[u8; 4]>, Option<[u8; 4]>) =
+        (None, None);
+    let mut system_probe_painted = false;
     // THEME-14: parse `tui.cursor` once (fail-closed: an invalid object logs a
     // diagnostic and behaves as absent, so the terminal keeps its own cursor).
     let cursor_config = match preferences.cursor.as_ref() {
@@ -11631,6 +11680,19 @@ fn native_loop(
                 "ui.frame",
                 serde_json::json!({"cols":renderer.cols(),"rows":renderer.rows(),"paint_us":paint_started.elapsed().as_micros()}),
             );
+            // THEME-13: once the first frame is out, palette queries may run
+            // (upstream `afterPaint` -> `refreshPalette`); the OSC 10/11 probe
+            // reaches the same stdout transport as the OSC 52 copy frame.
+            if !system_probe_painted {
+                system_probe_painted = true;
+                if let Some(probe) = theme_probe.as_mut() {
+                    if probe.after_paint() == crate::native_theme_runtime::ProbeOutcome::Started {
+                        let mut out = std::io::stdout().lock();
+                        let _ = out.write_all(system_palette_query_frame());
+                        let _ = out.flush();
+                    }
+                }
+            }
         }
         let now = Instant::now();
         input.expire(now);
@@ -11678,6 +11740,24 @@ fn native_loop(
             input.push(byte[0], Instant::now());
         }
         let Some(mut event) = input.pop() else { continue };
+        // THEME-13: terminal OSC 10/11 color replies are protocol, never
+        // composer input; they advance the live `system` palette probe.
+        if let native_input_decoder::InputEvent::OscColorReply { index, rgb } = event {
+            match index {
+                10 => reply_foreground = Some(rgb),
+                11 => reply_background = Some(rgb),
+                _ => {}
+            }
+            if system_theme_apply_replies(
+                &mut theme_probe,
+                reply_foreground,
+                reply_background,
+                &mut theme,
+            ) {
+                needs_paint = true;
+            }
+            continue;
+        }
         // Search owns cancellation until its captured pointer gesture settles.
         // Consume the cancel key before generic Ctrl-C can exit the client.
         if rail_search_press.is_some()
@@ -11736,6 +11816,7 @@ fn native_loop(
             native_input_decoder::InputEvent::Mouse { .. } => ("mouse", 0, None),
             native_input_decoder::InputEvent::FocusGained => ("focus-gained", 0, None),
             native_input_decoder::InputEvent::FocusLost => ("focus-lost", 0, None),
+            native_input_decoder::InputEvent::OscColorReply { .. } => ("palette-reply", 0, None),
         };
         crate::native_debug::event(
             "input.event",
@@ -14233,6 +14314,9 @@ fn native_loop(
             // `InputEvent`.
             native_input_decoder::InputEvent::FocusGained
             | native_input_decoder::InputEvent::FocusLost => continue,
+            // THEME-13: palette replies are consumed right after decode; this
+            // tail arm is defensive (never reached in the live loop).
+            native_input_decoder::InputEvent::OscColorReply { .. } => continue,
         };
         if children_panel.open && !view.dialogs.intercepts_input() && !matches!(byte, 3 | 4) {
             let composing = children_panel.composing;
@@ -19272,6 +19356,73 @@ mod middle_close_hit_tests {
         assert_eq!(strip.hit(add.x + 1, 0), None, "add region is not a session target");
         // Whitespace / overflow paint rows (y beyond 0) return None.
         assert_eq!(strip.hit(0, 5), None, "outside tab row never closes");
+    }
+
+    #[test]
+    fn theme13_decoder_osc_10_11_replies_carry_color_payload() {
+        // THEME-13 live decoder path: OSC 10/11 default-color replies, which
+        // previously degraded into the silent control-string discard, now
+        // surface as protocol events and never reach the composer.
+        let now = Instant::now();
+        let mut dec = TerminalInputDecoder::default();
+        for b in b"\x1b]10;rgb:e8e8/e8e8/e8e8\x1b\\" {
+            dec.push(*b, now);
+        }
+        assert_eq!(
+            dec.pop(),
+            Some(InputEvent::OscColorReply {
+                index: 10,
+                rgb: [0xE8, 0xE8, 0xE8, 0xFF]
+            })
+        );
+        for b in b"\x1b]11;rgb:1a/1a/1a\x07" {
+            dec.push(*b, now);
+        }
+        assert_eq!(
+            dec.pop(),
+            Some(InputEvent::OscColorReply {
+                index: 11,
+                rgb: [0x1A, 0x1A, 0x1A, 0xFF]
+            })
+        );
+        // Unrelated OSC frames (clipboard 52 here) stay discarded.
+        for b in b"\x1b]52;AAAA\x07" {
+            dec.push(*b, now);
+        }
+        assert_eq!(dec.pop(), None);
+    }
+
+    #[test]
+    fn theme13_system_replies_resolve_live_theme_and_infer_mode() {
+        // The seam the main event loop calls: decoded replies feed the probe
+        // and the resolved palette drives the live `system` theme.
+        let mut probe = Some(crate::native_theme_runtime::SystemThemeState::cold_start(
+            None,
+            None,
+            crate::native_theme_runtime::ThemeMode::Dark,
+        ));
+        let mut theme = crate::native_theme_runtime::RuntimeTheme::builtin_default(
+            crate::native_theme_runtime::ThemeMode::Dark,
+        );
+        assert_eq!(theme.name, "opencode");
+        // A single report is not yet a usable palette.
+        assert!(!super::system_theme_apply_replies(
+            &mut probe,
+            Some([0xE8, 0xE8, 0xE8, 0xFF]),
+            None,
+            &mut theme
+        ));
+        assert_eq!(theme.name, "opencode");
+        assert!(super::system_theme_apply_replies(
+            &mut probe,
+            Some([0xE8, 0xE8, 0xE8, 0xFF]),
+            Some([0x1A, 0x1A, 0x1A, 0xFF]),
+            &mut theme
+        ));
+        assert_eq!(theme.name, "system");
+        // The boot probe frame is the OSC 10/11 query over the OSC 52 writer.
+        assert!(super::system_palette_query_frame().starts_with(b"\x1b]10;?"));
+        assert!(super::system_palette_query_frame().ends_with(b"\x1b]11;?\x07"));
     }
 
     #[test]
