@@ -12843,3 +12843,34 @@ are a separate pipeline). Re-scope needed.
 
 Persisted briefs: `artifacts/briefs/BRIEF-MSG-005.md`, `BRIEF-CP-07-09.md`,
 `BRIEF-DIFF-SURFACE.md`, `BRIEF-SYNTAX-HIGHLIGHT.md`.
+
+## Wave-70 — FORM-002 published; 4 lanes saturated + 4 briefs (2026-11-04)
+
+Canonical `main-v2` advanced `fd87ef54` → **`e6dcda6c`** (FORM-002 partial: live
+permission prompt body from `PermissionRequest.resources` + `left,h`/`right,l`
+option cycling). Re-applied from the APPROVED `58686ab6` (delta
+`19f90fbe..58686ab6`, sha256 `309c809c…`) onto `fd87ef54`; content byte-identical;
+clean 3-way apply; full CLI **2243/0** on the exact new SHA. Token-guarded
+fast-forward + push + `git ls-remote` verified.
+
+`51ec2dd2` (core, I5+I3a) re-apply: content byte-identical to the APPROVED delta
+`f63d914a..12c9a96d` (only hunk line numbers differ); full CLI **2246/0**; fresh
+review dispatched (`vyce-combined`); publish on APPROVE.
+
+Hard parallelism fact (re-verified): `config/recovery-mode.json` fixes
+`fixedMutableBranches = [main-v2, recovery/core, recovery/runtime, recovery/ui,
+recovery/platform]` and sets `persistentWorktreeCreation: forbidden` /
+`persistentBranchCreation: forbidden`; a `git worktree add -b recovery/test-scratch`
+is rejected by the reference-transaction hook. So **write parallelism is 4 lanes**;
+the rest of the fleet is read-only (briefs + independent reviews). Each lane now
+carries a 5-7 item grouped package.
+
+Lanes rebased to `e6dcda6c` (runtime/platform) and dispatched:
+- PKG-E core (CP-29/24/08/09/11/28), PKG-F ui (DIALOG-19/18, TOOL-010, MSG-007,
+  DIALOG-16/17), PKG-B runtime (CP-38/37/34, TAB-06, LAY-17), PKG-D platform
+  (MD-005, DIFF-005, THEME-08, MD-007, PAR-09/10/11).
+- 4 next-wave briefs: usage/timing (SIDE-04, MSG-008/009/010, PAR-04);
+  progress/state rescope (STATE-001/003/004, DIALOG-19, TOOL-006); paint/input
+  (THEME-05, FFI-10/07/08/11, PAR-09); agent/diagram (CP-07, MD-008/009/007,
+  DIALOG-16).
+Dispatch ledger: `artifacts/DISPATCH_LEDGER.md`. Prompts: `artifacts/prompts/PKG-{B,D,E,F}.md`.
