@@ -1403,6 +1403,142 @@ pub fn preview_click_index(items: &[PreviewItem], overflow: bool) -> Option<usiz
     Some(0)
 }
 
+/// Index opened by clicking the strip at `offset` cells from its left edge
+/// (`prompt/index.tsx:1712-1766`): each visible cell is `cell_width` wide and
+/// cells are separated by one gap column, so cell `n` occupies
+/// `[n * (cell_width + 1), n * (cell_width + 1) + cell_width)`. A click in the
+/// gap between cells hits no cell and returns `None`, matching upstream's
+/// per-cell `onMouseUp` handlers. The overflow cell (fixed `width={8}`) begins
+/// right after the last visible cell and opens the first hidden image.
+#[must_use]
+pub fn preview_click_index_at(
+    items: &[PreviewItem],
+    overflow: bool,
+    offset: u16,
+    cell_width: u16,
+) -> Option<usize> {
+    if items.is_empty() {
+        return None;
+    }
+    let visible = items.len().min(MAX_VISIBLE_PREVIEWS);
+    let width = usize::from(cell_width.max(1));
+    let stride = width + 1;
+    let offset = usize::from(offset);
+    let cell = offset / stride;
+    if cell < visible {
+        // The one-column gap after a cell belongs to no cell.
+        return (offset % stride < width).then_some(cell);
+    }
+    if overflow {
+        let overflow_start = visible * stride;
+        if offset >= overflow_start && offset < overflow_start + 8 {
+            return Some(visible);
+        }
+    }
+    None
+}
+
+/// Real filesystem reads for the CP-38 paste producer (`LocalFiles` over
+/// `std::fs`; no fabricated content is ever attached).
+struct StdFileSystem;
+
+impl crate::native_image_preview::LocalFiles for StdFileSystem {
+    fn read_text(&self, path: &str, max_bytes: usize) -> Result<String, crate::native_image_preview::AttachmentError> {
+        let bytes = self.read_bytes(path, max_bytes)?;
+        String::from_utf8(bytes).map_err(|_| crate::native_image_preview::AttachmentError::Missing)
+    }
+
+    fn read_bytes(&self, path: &str, max_bytes: usize) -> Result<Vec<u8>, crate::native_image_preview::AttachmentError> {
+        let bytes = std::fs::read(path)
+            .map_err(|_| crate::native_image_preview::AttachmentError::Missing)?;
+        if bytes.len() > max_bytes {
+            return Err(crate::native_image_preview::AttachmentError::TooLarge);
+        }
+        Ok(bytes)
+    }
+
+    fn mime(&self, path: &str) -> Result<String, crate::native_image_preview::AttachmentError> {
+        // `mime_for_extension` only accepts lowercase dotted extensions
+        // (upstream lowercases the recorded extension first); anything else
+        // reports Missing like an unsupported file.
+        let extension = std::path::Path::new(path)
+            .extension()
+            .and_then(|name| name.to_str())
+            .map(|name| format!(".{}", name.to_lowercase()))
+            .ok_or(crate::native_image_preview::AttachmentError::Missing)?;
+        crate::native_image_preview::mime_for_extension(&extension)
+            .map(str::to_owned)
+            .ok_or(crate::native_image_preview::AttachmentError::Missing)
+    }
+}
+
+/// Read one pasted path as a preview cell within `budget` bytes; `None` when
+/// the path is not a readable image or exceeds the remaining budget. Returns
+/// the retained byte count so a multi-path paste can debit a shared budget
+/// (`local-attachment.ts:47-58`).
+fn preview_from_path(path: &str, budget: usize) -> Option<(PreviewItem, usize)> {
+    let attachment = crate::native_image_preview::read_local_attachment_with(
+        &StdFileSystem,
+        path,
+        budget,
+    )?;
+    let bytes = attachment.byte_len();
+    let uri = crate::native_image_preview::data_uri(
+        attachment.mime(),
+        match &attachment {
+            crate::native_image_preview::LocalAttachment::Text { content, .. } => {
+                content.as_bytes()
+            }
+            crate::native_image_preview::LocalAttachment::Binary { content, .. } => content,
+        },
+    );
+    Some((PreviewItem { uri, failed: false }, bytes))
+}
+
+/// CP-38 live producer: extract local file paths from a pasted fragment and
+/// track the readable image attachments as strip cells. Mirrors upstream
+/// `resolvePastedAttachments` (`local-attachment.ts:29-59`): a single pasted
+/// path wins with the full budget; a multi-path paste is read sequentially
+/// under one **shared** 20 MiB budget, and any unreadable, unsupported or
+/// over-budget file aborts the whole resolution, so a partial attachment set
+/// is never presented. A non-path paste yields no cells.
+#[must_use]
+pub fn pasted_image_previews(text: &str) -> Vec<PreviewItem> {
+    let pasted = text.trim();
+    let filepath = normalize_pasted_filepath(pasted, false);
+    if filepath.starts_with("http://") || filepath.starts_with("https://") {
+        return Vec::new();
+    }
+    // A single pasted path wins outright (`local-attachment.ts:34-36`).
+    if let Some((item, _)) = preview_from_path(
+        &filepath,
+        crate::native_image_preview::MAX_LOCAL_ATTACHMENT_BYTES,
+    ) {
+        return vec![item];
+    }
+    let filepaths = parse_pasted_filepaths(pasted, false);
+    if filepaths.len() <= 1 {
+        return Vec::new();
+    }
+    // Multi-path paste: one shared byte budget across every file
+    // (`local-attachment.ts:47-58`). Each retained file debits the remainder,
+    // so the total staged data stays within a single 20 MiB allowance.
+    let mut remaining = crate::native_image_preview::MAX_LOCAL_ATTACHMENT_BYTES;
+    let mut items = Vec::new();
+    for candidate in filepaths {
+        let Some((item, bytes)) = preview_from_path(&candidate, remaining) else {
+            // Upstream aborts the whole multi-path resolution when any
+            // candidate is unreadable, unsupported or over budget
+            // (`local-attachment.ts:47-58`): a partial attachment set is never
+            // presented. Return empty so the paste falls through to text.
+            return Vec::new();
+        };
+        remaining = remaining.saturating_sub(bytes);
+        items.push(item);
+    }
+    items
+}
+
 /// Strip quotes and decode a `file://` URL from a pasted path
 /// (`local-attachment.ts:81-105`).
 #[must_use]
@@ -2383,6 +2519,47 @@ mod attachment_tests {
         assert_eq!(preview_click_index(&items(0), false), None);
     }
 
+    // CP-38: a pointer click resolves the cell under it, not always index 0.
+    // Each visible cell is `cell_width` wide with a one-column gap, so cell `n`
+    // starts at `n * (cell_width + 1)` (`prompt/index.tsx:1712-1766`).
+    #[test]
+    fn cp38_click_offset_selects_the_clicked_cell_and_overflow() {
+        let items = |count: usize| {
+            (0..count)
+                .map(|index| PreviewItem {
+                    uri: format!("data:image/png;base64,{index}"),
+                    failed: false,
+                })
+                .collect::<Vec<_>>()
+        };
+        let width = 16u16; // cell width; stride is 17
+        // Three visible cells, no overflow: each cell resolves to itself and
+        // the one-column gap after each cell hits nothing.
+        let three = items(3);
+        assert_eq!(preview_click_index_at(&three, false, 0, width), Some(0));
+        assert_eq!(preview_click_index_at(&three, false, 15, width), Some(0));
+        assert_eq!(preview_click_index_at(&three, false, 16, width), None, "gap");
+        assert_eq!(preview_click_index_at(&three, false, 17, width), Some(1));
+        assert_eq!(preview_click_index_at(&three, false, 32, width), Some(1));
+        assert_eq!(preview_click_index_at(&three, false, 33, width), None, "gap");
+        assert_eq!(preview_click_index_at(&three, false, 34, width), Some(2));
+        assert_eq!(preview_click_index_at(&three, false, 49, width), Some(2));
+        assert_eq!(preview_click_index_at(&three, false, 50, width), None, "gap");
+        assert_eq!(preview_click_index_at(&three, false, 51, width), None, "past the strip");
+        // Four images: cell 3 is the overflow cell (8 wide, at offset 51) and
+        // opens the first hidden image (index 3), which is what upstream's
+        // `+N more` cell does.
+        let four = items(4);
+        assert_eq!(preview_click_index_at(&four, true, 0, width), Some(0));
+        assert_eq!(preview_click_index_at(&four, true, 34, width), Some(2));
+        assert_eq!(preview_click_index_at(&four, true, 51, width), Some(3));
+        assert_eq!(preview_click_index_at(&four, true, 58, width), Some(3));
+        // Past the overflow cell: no target.
+        assert_eq!(preview_click_index_at(&four, true, 59, width), None);
+        // Nothing tracked: never a target.
+        assert_eq!(preview_click_index_at(&items(0), true, 0, width), None);
+    }
+
     #[test]
     fn cp38_decode_failure_stays_visible_and_unsupported_mimes_are_skipped() {
         let items = vec![
@@ -2476,6 +2653,87 @@ mod attachment_tests {
             name: None,
             mention,
         }
+    }
+
+    #[test]
+    fn cp38_live_paste_tracks_single_image_and_aborts_multi_path_on_failure() {
+        let dir = std::env::temp_dir().join(format!("oc2-cp38-paste-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let png = dir.join("shot.png");
+        std::fs::write(&png, b"\x89PNG\r\n\x1a\nfake-bytes").expect("write png");
+        let png2 = dir.join("shot2.png");
+        std::fs::write(&png2, b"\x89PNG\r\n\x1a\nsecond").expect("write png2");
+        let svg = dir.join("logo.svg");
+        std::fs::write(&svg, "<svg xmlns='http://www.w3.org/2000/svg'/>").expect("write svg");
+        let txt = dir.join("notes.txt");
+        std::fs::write(&txt, "not an image").expect("write txt");
+
+        // A single image path becomes one strip cell.
+        let tracked = pasted_image_previews(png.to_str().expect("utf8 path"));
+        assert_eq!(tracked.len(), 1, "one image path becomes one strip cell");
+        assert!(tracked[0].uri.starts_with("data:image/png;base64,"));
+        assert!(!tracked[0].failed);
+        // A single non-image path resolves to nothing.
+        assert_eq!(
+            pasted_image_previews(txt.to_str().expect("utf8 path")),
+            Vec::<PreviewItem>::new(),
+            "non-image path is not tracked"
+        );
+        let svg_items = pasted_image_previews(svg.to_str().expect("utf8 path"));
+        assert_eq!(svg_items.len(), 1, "svg counts as an image cell");
+        assert!(svg_items[0].uri.starts_with("data:image/svg+xml;base64,"));
+        assert_eq!(pasted_image_previews("plain text"), Vec::<PreviewItem>::new());
+        let missing = dir.join("gone.png");
+        assert_eq!(
+            pasted_image_previews(missing.to_str().expect("utf8 path")),
+            Vec::<PreviewItem>::new(),
+            "unreadable paths never fabricate cells"
+        );
+        // Two images in one paste: both tracked.
+        let two = format!("{} {}", png.display(), png2.display());
+        assert_eq!(pasted_image_previews(&two).len(), 2, "two image paths track two cells");
+        // A multi-path paste containing a non-image aborts the whole
+        // resolution (`local-attachment.ts:47-58`): no partial set.
+        let mixed = format!("{} {}", png.display(), txt.display());
+        assert_eq!(
+            pasted_image_previews(&mixed),
+            Vec::<PreviewItem>::new(),
+            "a failed candidate aborts the multi-path paste"
+        );
+        // A sentence containing a path is not a bare path paste: the leading
+        // words fail to resolve and abort the multi-path branch.
+        let sentence = format!("check this {}", png.display());
+        assert_eq!(
+            pasted_image_previews(&sentence),
+            Vec::<PreviewItem>::new(),
+            "a non-path paste falls through to text"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // CP-38: a multi-path paste shares ONE 20 MiB budget across every file
+    // (`local-attachment.ts:47-58`); a later file that would exceed the
+    // remaining allowance aborts the whole resolution rather than getting a
+    // fresh budget or being silently dropped.
+    #[test]
+    fn cp38_multi_path_paste_shares_one_byte_budget() {
+        let dir = std::env::temp_dir().join(format!("oc2-cp38-budget-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let first = dir.join("a.png");
+        let second = dir.join("b.png");
+        // 12 MiB each: the first fits the 20 MiB budget, leaving 8 MiB, so the
+        // second (12 MiB) exceeds the shared remainder and aborts the paste.
+        // (With independent budgets both would succeed and yield two cells.)
+        let chunk = vec![b'x'; 12 * 1024 * 1024];
+        std::fs::write(&first, &chunk).expect("write a");
+        std::fs::write(&second, &chunk).expect("write b");
+        let pasted = format!("{} {}", first.display(), second.display());
+        assert_eq!(
+            pasted_image_previews(&pasted),
+            Vec::<PreviewItem>::new(),
+            "the second file exceeds the shared remaining budget and aborts the paste"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn mention(text: &str, start: usize) -> Mention {

@@ -172,6 +172,30 @@ impl UiPreferences {
         (selected, diagnostics)
     }
 
+    /// `config.prompt.image_preview` (`config/index.tsx:147`, consumed at
+    /// `component/prompt/index.tsx:1699`). Upstream defaults to `true`; an
+    /// explicit non-boolean is reported as a bounded diagnostic.
+    pub fn prompt_image_preview(cli_path: Option<&Path>, inline: Option<&str>) -> (bool, Vec<String>) {
+        fn apply(text: &str, selected: &mut bool, diagnostics: &mut Vec<String>, label: &str) {
+            if text.len() > MAX_CONFIG_BYTES { diagnostics.push(format!("{label} configuration exceeds size limit")); return; }
+            let clean = match strip_jsonc(text) { Ok(clean) => clean, Err(_) => { diagnostics.push(format!("invalid {label} configuration")); return; } };
+            let value = match serde_json::from_str::<Value>(&clean) {
+                Ok(value) => value,
+                Err(_) => { diagnostics.push(format!("invalid {label} configuration")); return; }
+            };
+            match value.get("prompt").and_then(|prompt| prompt.get("image_preview")) {
+                Some(Value::Bool(enabled)) => *selected = *enabled,
+                Some(_) => diagnostics.push("invalid prompt.image_preview value".to_owned()),
+                None => {}
+            }
+        }
+        let mut selected = true;
+        let mut diagnostics = Vec::new();
+        if let Some(path) = cli_path { let mut budget = crate::native_ui_budget::ReadBudget::default(); match budget.read(path, MAX_CONFIG_BYTES, "CLI config") { Ok(Some(text)) => apply(&text, &mut selected, &mut diagnostics, "disk CLI"), Ok(None) => {}, Err(_) => diagnostics.push("unable to read bounded global CLI configuration".into()) } }
+        if let Some(text) = inline { apply(text, &mut selected, &mut diagnostics, "inline CLI"); }
+        (selected, diagnostics)
+    }
+
     /// `config.diffs.view` (`config/index.tsx:126`). Upstream defaults to
     /// `auto`; disk config applies first and inline config overrides it.
     pub fn diffs_view(
@@ -2061,6 +2085,54 @@ mod session_tps_tests {
             UiPreferences::session_tps(None, Some(&format!(r#"{{"session":{{"tps":"{secret}"}}}}"#)));
         assert!(selected, "invalid value keeps the upstream default");
         assert_eq!(diagnostics, vec!["invalid session.tps value"]);
+        assert!(diagnostics.iter().all(|line| !line.contains(secret)));
+    }
+}
+
+#[cfg(test)]
+mod prompt_image_preview_tests {
+    use super::*;
+
+    #[test]
+    fn cp38_absent_image_preview_keeps_the_upstream_on_default() {
+        // `config/index.tsx:147` + `component/prompt/index.tsx:1699`.
+        assert_eq!(
+            UiPreferences::prompt_image_preview(None, None),
+            (true, Vec::<String>::new())
+        );
+        assert_eq!(
+            UiPreferences::prompt_image_preview(None, Some(r#"{"prompt":{}}"#)),
+            (true, Vec::<String>::new())
+        );
+    }
+
+    #[test]
+    fn cp38_inline_false_overrides_disk_true() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        fs::write(&path, r#"{"prompt":{"image_preview":true}}"#).unwrap();
+        assert_eq!(
+            UiPreferences::prompt_image_preview(Some(&path), None),
+            (true, Vec::<String>::new())
+        );
+        assert_eq!(
+            UiPreferences::prompt_image_preview(
+                Some(&path),
+                Some(r#"{"prompt":{"image_preview":false}}"#)
+            ),
+            (false, Vec::<String>::new())
+        );
+    }
+
+    #[test]
+    fn cp38_non_boolean_is_a_generic_diagnostic_without_content() {
+        let secret = "SECRET_PREVIEW_VALUE";
+        let (selected, diagnostics) = UiPreferences::prompt_image_preview(
+            None,
+            Some(&format!(r#"{{"prompt":{{"image_preview":"{secret}"}}}}"#)),
+        );
+        assert!(selected, "invalid value keeps the upstream default");
+        assert_eq!(diagnostics, vec!["invalid prompt.image_preview value"]);
         assert!(diagnostics.iter().all(|line| !line.contains(secret)));
     }
 }

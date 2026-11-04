@@ -9175,6 +9175,18 @@ fn native_loop(
         append_transcript(&mut transcript, format!("error: {diagnostic}"));
     }
     view.set_tps_enabled(tps_enabled);
+    // CP-38: `prompt.image_preview` gates the composer image preview strip
+    // (`config/index.tsx:147`, `component/prompt/index.tsx:1699`). Defaults
+    // true; the strip is otherwise always painted for tracked cells.
+    let (image_preview_enabled, image_preview_diagnostics) =
+        crate::native_ui_preferences::UiPreferences::prompt_image_preview(
+            cli_path.as_deref(),
+            inline_cli.as_deref(),
+        );
+    for diagnostic in image_preview_diagnostics {
+        append_transcript(&mut transcript, format!("error: {diagnostic}"));
+    }
+    view.set_image_preview_enabled(image_preview_enabled);
     let (diff_view, diff_view_diagnostics) =
         crate::native_ui_preferences::UiPreferences::diffs_view(
             cli_path.as_deref(),
@@ -13056,6 +13068,31 @@ fn native_loop(
                         }
                     }
                 }
+                // CP-38: a left-click release on the composer image preview
+                // strip (or its overflow cell) opens the image-preview page at
+                // the clicked index (`component/prompt/index.tsx:1712-1766`
+                // `onMouseUp` -> `openImagePreview`).
+                if kind == 2 && modifiers == 0
+                    && !page_open
+                    && !view.dialogs.intercepts_input()
+                    && !permission_editor.open
+                    && !appearance.open
+                    && !children_panel.open
+                    && !help_open
+                    && !view.command_palette_open()
+                    && matches!(dialog, native_setup::Dialog::None)
+                    && import_dialog.as_ref().is_none_or(|import| !import.is_open())
+                {
+                    if let Some((left, top, width, height)) = view.preview_strip_hit(&draft) {
+                        if x >= left && x < left.saturating_add(width)
+                            && y >= top && y < top.saturating_add(height)
+                            && view.open_image_preview_page_at(x - left)
+                        {
+                            needs_paint = true;
+                            continue;
+                        }
+                    }
+                }
                 // Tabs were resolved first. Send clicks were normalized before
                 // this mouse match, and the explicit rect guard keeps the two targets disjoint.
                 if !page_open
@@ -13803,6 +13840,16 @@ fn native_loop(
                                     draft.push_str(&text);
                                     draft_cursor = draft.len();
                                 }
+                            }
+                            // CP-38: a pasted local file path that reads as an
+                            // image becomes a composer preview cell
+                            // (`component/prompt/index.tsx:399`; the real
+                            // `local-attachment.ts` read chain). Non-images and
+                            // unreadable paths are skipped, never fabricated.
+                            let tracked = crate::native_paste::pasted_image_previews(&text);
+                            if !tracked.is_empty() {
+                                view.push_preview_items(tracked);
+                                needs_paint = true;
                             }
                         }
                     }
@@ -16181,6 +16228,9 @@ fn native_loop(
                         let captured_submission = crate::native_composer::SubmittedDraft::capture(
                             &mut draft, &mut draft_cursor,
                         );
+                        // CP-38: the sent prompt owns its images; the composer
+                        // strip clears with the draft (`index.tsx:399`).
+                        view.clear_preview_items();
                         completion.sync(&draft);
                         {
                             let result = if let Some(command) = text.strip_prefix('!') {

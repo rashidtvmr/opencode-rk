@@ -227,6 +227,14 @@ pub struct NativeView {
     /// Painted bounds `(x, y, cells)` of the footer live label in frame
     /// coordinates, so the label admits a pointer hit exactly where it drew.
     live_footer_hit: Option<(u16, u16, u16)>,
+    /// CP-38: image cells tracked from the live paste path, painted as the
+    /// composer preview strip (`native_paste::image_preview`).
+    pub(crate) preview_items: Vec<crate::native_paste::PreviewItem>,
+    /// Strip rows painted by the last session render, if any.
+    preview_strip_painted: Option<u16>,
+    /// `session.image_preview` gate (`routes/session/index.tsx:2663`);
+    /// `None`-set default stays true.
+    image_preview_enabled: bool,
     /// Composer auxiliary dock (`routes/session/composer/index.tsx`). Only the
     /// always-mounted Subagents tab is registered: the Shell and Terminals tabs
     /// have no live session facts here, so advertising them would promise keys
@@ -1151,6 +1159,9 @@ impl NativeView {
             live_subagents: 0,
             live_first_child: None,
             live_footer_hit: None,
+            preview_items: Vec::new(),
+            preview_strip_painted: None,
+            image_preview_enabled: true,
             rail_command_shortcut: None,
             rail_agent_shortcut: None,
             rail_interactive: true,
@@ -3049,6 +3060,202 @@ impl NativeView {
 
     // ---------- page action intents (pure state; HTTP stays outside) ----
 
+    // ---------- CP-38: live image preview strip (prompt/index.tsx:399, 1699-1766) ----------
+
+    /// Gate the strip on `session.image_preview` (`routes/session/index.tsx:2663`,
+    /// default true per the brief's upstream citation).
+    pub fn set_image_preview_enabled(&mut self, enabled: bool) {
+        self.image_preview_enabled = enabled;
+        if !enabled {
+            self.preview_strip_painted = None;
+        }
+    }
+
+    /// CP-38: track image attachments discovered on the live paste path,
+    /// bounded so a hostile paste cannot grow the strip unbounded. Overflow
+    /// beyond the model's visible cap paints the `+N more` cell.
+    pub fn push_preview_items(
+        &mut self,
+        items: impl IntoIterator<Item = crate::native_paste::PreviewItem>,
+    ) {
+        const MAX_PREVIEW_ITEMS: usize = 32;
+        for item in items {
+            if self.preview_items.len() >= MAX_PREVIEW_ITEMS {
+                break;
+            }
+            self.preview_items.push(item);
+        }
+    }
+
+    /// CP-38: drop every tracked preview cell (draft cleared / prompt sent).
+    pub fn clear_preview_items(&mut self) {
+        self.preview_items.clear();
+        self.preview_strip_painted = None;
+    }
+
+    /// Strip geometry from the done model; `None` while gated off or empty.
+    fn preview_geometry(&self) -> Option<crate::native_paste::AttachmentPreview> {
+        if !self.image_preview_enabled || self.preview_items.is_empty() {
+            return None;
+        }
+        Some(crate::native_paste::image_preview(
+            self.layout.rows,
+            self.preview_items.len(),
+        ))
+    }
+
+    /// Images for the preview dialog, one per tracked cell.
+    #[must_use]
+    pub fn preview_images(&self) -> Vec<crate::native_image_preview::PreviewImage> {
+        self.preview_items
+            .iter()
+            .map(|item| crate::native_image_preview::PreviewImage::new(item.uri.clone()))
+            .collect()
+    }
+
+    /// Click resolution for the strip or its overflow indicator
+    /// (`native_paste::preview_click_index`): `(initial index, images)`.
+    /// Overflow clicks land on the first hidden image (index 3).
+    #[must_use]
+    pub fn preview_click_target(
+        &self,
+    ) -> Option<(i64, Vec<crate::native_image_preview::PreviewImage>)> {
+        let model = self.preview_geometry()?;
+        let initial = crate::native_paste::preview_click_index(&self.preview_items, model.overflow)?;
+        Some((initial as i64, self.preview_images()))
+    }
+
+    /// Click resolution for a pointer at `offset` cells from the strip's left
+    /// edge (`prompt/index.tsx:1712-1766`): the clicked visible cell opens
+    /// that image; the overflow cell opens the first hidden image. `None` when
+    /// the click lands on a gap or past every cell.
+    #[must_use]
+    pub fn preview_click_target_at(
+        &self,
+        offset: u16,
+    ) -> Option<(i64, Vec<crate::native_image_preview::PreviewImage>)> {
+        let model = self.preview_geometry()?;
+        let initial = crate::native_paste::preview_click_index_at(
+            &self.preview_items,
+            model.overflow,
+            offset,
+            model.width,
+        )?;
+        Some((initial as i64, self.preview_images()))
+    }
+
+    /// Open the image-preview page for the tracked cells. `false` with no
+    /// tracked images (`component/prompt/index.tsx:403-406` no-op).
+    pub fn open_image_preview_page(&mut self) -> bool {
+        // The live loop has not negotiated a terminal image protocol yet; the
+        // dialog still opens with the record (`ImageProtocol::None` renders
+        // the caption/error path instead of pixels).
+        let Some((initial, images)) = self.preview_click_target() else {
+            return false;
+        };
+        self.pages.open_image_preview(
+            images,
+            initial,
+            crate::native_image_preview::ImageProtocol::None,
+        )
+    }
+
+    /// Open the image-preview page for the image at the clicked strip cell
+    /// (`prompt/index.tsx:1712-1766`). `false` when the click misses every
+    /// cell or nothing is tracked.
+    pub fn open_image_preview_page_at(&mut self, offset: u16) -> bool {
+        let Some((initial, images)) = self.preview_click_target_at(offset) else {
+            return false;
+        };
+        self.pages.open_image_preview(
+            images,
+            initial,
+            crate::native_image_preview::ImageProtocol::None,
+        )
+    }
+
+    /// Painted strip hit rect `(left, top, width, height)` in screen cells,
+    /// derived from the composer frame so scroll/tab shifts stay truthful.
+    #[must_use]
+    pub fn preview_strip_hit(&self, draft: &str) -> Option<(u16, u16, u16, u16)> {
+        let count = self.preview_strip_painted?;
+        let (left, top, width, _) = self.composer_region(draft)?;
+        Some((
+            left.saturating_add((width / 2).min(2)),
+            top.saturating_sub(count),
+            width,
+            count,
+        ))
+    }
+
+    /// CP-38 strip rows: one framed cell per visible preview (failed decodes
+    /// keep the upstream `No preview` error cell), a `+N` overflow cell, plus
+    /// the model's trailing padding row. Empty when gated off or untracked.
+    fn preview_strip_block(&self) -> Vec<String> {
+        let Some(model) = self.preview_geometry() else {
+            return Vec::new();
+        };
+        let cells = crate::native_paste::visible_previews(&self.preview_items);
+        let width = usize::from(model.width).max(6);
+        let inner = width - 2;
+        let height = usize::from(model.height).max(3);
+        let mut strip: Vec<String> = Vec::with_capacity(usize::from(model.container_height));
+        for row in 0..height {
+            let mut line = String::new();
+            for (index, preview) in cells.iter().enumerate() {
+                if index > 0 {
+                    line.push(' ');
+                }
+                if row == 0 {
+                    line.push_str(&format!("▛{}▜", "▀".repeat(inner)));
+                } else if row == height - 1 {
+                    line.push_str(&format!("▙{}▟", "▄".repeat(inner)));
+                } else if row == 1 {
+                    let label = if preview.failed {
+                        "No preview".to_owned()
+                    } else {
+                        format!("[Image {}]", index + 1)
+                    };
+                    let label: String = label.chars().take(inner).collect();
+                    let pad = inner - label.chars().count();
+                    line.push_str(&format!(
+                        "▌{}{}{}▐",
+                        " ".repeat(pad / 2),
+                        label,
+                        " ".repeat(pad - pad / 2)
+                    ));
+                } else {
+                    line.push_str(&format!("▌{}▐", " ".repeat(inner)));
+                }
+            }
+            if model.overflow {
+                let hidden = self.preview_items.len() - cells.len();
+                if !line.is_empty() {
+                    line.push(' ');
+                }
+                // Upstream overflow cell: fixed `width={8}`, `+{n} more`
+                // centered (`prompt/index.tsx:1744-1766`).
+                if row == 1 {
+                    let label = format!("+{hidden} more");
+                    let label: String = label.chars().take(8).collect();
+                    let pad = 8usize.saturating_sub(label.chars().count());
+                    line.push_str(&format!(
+                        "{}{}{}",
+                        " ".repeat(pad / 2),
+                        label,
+                        " ".repeat(pad - pad / 2)
+                    ));
+                } else {
+                    line.push_str(&" ".repeat(8));
+                }
+            }
+            strip.push(line);
+        }
+        // The model's `container_height` is `height + 1`: one padding row.
+        strip.push(String::new());
+        strip
+    }
+
     pub fn open_page(&mut self, page: Page) {
         self.pages.open(page);
     }
@@ -3780,6 +3987,16 @@ impl NativeView {
             };
             let revert_height = revert_rows.len();
             let dock_height = dock.as_ref().map_or(0, |block| usize::from(block.height()));
+            // CP-38: the image preview strip is a composer sibling that takes
+            // its rows out of the shared body budget (`prompt/index.tsx:399`,
+            // `:1699-1766`), so the composer keeps its position and the
+            // transcript viewport shrinks by the strip height.
+            let strip = if draft.is_empty() {
+                Vec::new()
+            } else {
+                self.preview_strip_block()
+            };
+            let strip_height = strip.len();
             let body_height = if let Some(permission_height) = permission_height {
                 // The shared shell footer is still a non-prompt sibling.
                 height.saturating_sub(1).saturating_sub(permission_height)
@@ -3788,6 +4005,7 @@ impl NativeView {
                     .saturating_sub(dock_height)
                     .saturating_sub(queue_height)
                     .saturating_sub(revert_height)
+                    .saturating_sub(strip_height)
             };
             let mut body = if let Some(messages) = messages {
                 let (rows, markdown_spans) = if has_permission {
@@ -3956,6 +4174,34 @@ impl NativeView {
                 self.chat_text_bounds.splice(insert..insert, std::iter::repeat_n(None, queue_texts.len()));
                 self.chat_markdown_spans.splice(insert..insert, std::iter::repeat_n(Vec::new(), queue_texts.len()));
                 body.splice(insert..insert, queue_texts);
+            }
+            // CP-38: image preview strip directly above the composer box. The
+            // row budget comes from the model (`native_paste::image_preview`,
+            // upstream `prompt/index.tsx:399` + `:1699-1766`); the strip rides
+            // the composer sibling slot so dock/queue rows stay above it.
+            self.preview_strip_painted = None;
+            if !strip.is_empty() {
+                let insert = body.len().saturating_sub(prompt.height);
+                let class = crate::native_view_chat::ChatRowClass::Metadata;
+                // The legacy (non-typed) render path fills `chat_row_classes`
+                // and `chat_text_bounds` but never `chat_markdown_spans`, so
+                // clamp each parallel splice to its own length instead of the
+                // body offset (which would panic on the empty span vector).
+                let classes_at = insert.min(self.chat_row_classes.len());
+                let bounds_at = insert.min(self.chat_text_bounds.len());
+                let spans_at = insert.min(self.chat_markdown_spans.len());
+                self.chat_row_classes
+                    .splice(classes_at..classes_at, std::iter::repeat_n(class, strip.len()));
+                self.chat_text_bounds
+                    .splice(bounds_at..bounds_at, std::iter::repeat_n(None, strip.len()));
+                self.chat_markdown_spans
+                    .splice(spans_at..spans_at, std::iter::repeat_n(Vec::new(), strip.len()));
+                body.splice(
+                    insert..insert,
+                    strip.iter().map(|row| padded(row, width)).collect::<Vec<_>>(),
+                );
+                self.preview_strip_painted =
+                    u16::try_from(strip.len()).ok();
             }
             // The scrollbar reserves its two cells out of the transcript rows
             // only; the composer and footer keep the full padded width, as in
@@ -5329,6 +5575,146 @@ mod framed_composer_tests {
         assert_eq!(row(top + 1)[left + width - 1], '│');
         assert!(rows[top + 1].contains(draft), "draft inside the border");
         assert!(!rows[top].contains(draft), "border row is not painted over");
+    }
+
+    #[test]
+    fn cp38_composer_strip_reserves_model_rows_and_paints_visible_cells() {
+        let item = |index: usize| crate::native_paste::PreviewItem {
+            uri: format!("data:image/png;base64,{index}"),
+            failed: false,
+        };
+        let mut view = NativeView::new(90, 30);
+        view.set_session_route(true);
+        view.render("draft", &[], false, &[]);
+        // 0 images: nothing reserved, nothing clickable.
+        assert!(view.preview_strip_hit("draft").is_none(), "no strip for zero images");
+        let geometry = crate::native_paste::image_preview(30, 1);
+        view.preview_items = (0..1).map(item).collect();
+        let rows = view.render("draft", &[], false, &[]);
+        let hit = view.preview_strip_hit("draft").expect("strip hit for one image");
+        assert_eq!(
+            usize::from(hit.3),
+            usize::from(geometry.container_height),
+            "reserved row count matches the model"
+        );
+        assert_eq!(
+            usize::from(hit.1 + hit.3),
+            usize::from(view.composer_region("draft").expect("composer").1),
+            "strip sits directly above the composer box"
+        );
+        let painted = rows[hit.1 as usize..(hit.1 + hit.3) as usize].join("\n");
+        assert!(painted.contains("[Image 1]"), "visible cell painted: {painted}");
+        // 3 images: same reserved height, three cells.
+        view.preview_items = (0..3).map(item).collect();
+        let rows = view.render("draft", &[], false, &[]);
+        let hit = view.preview_strip_hit("draft").expect("strip hit for three");
+        assert_eq!(hit.3, crate::native_paste::image_preview(30, 3).container_height);
+        let painted = rows[hit.1 as usize..(hit.1 + hit.3) as usize].join("\n");
+        assert!(painted.contains("[Image 2]"), "third cell painted");
+        assert!(!painted.contains("more"), "no overflow for three images");
+        // 4 images: overflow indicator appears, row count unchanged.
+        view.preview_items = (0..4).map(item).collect();
+        let rows = view.render("draft", &[], false, &[]);
+        let hit = view.preview_strip_hit("draft").expect("strip hit for four");
+        assert_eq!(hit.3, crate::native_paste::image_preview(30, 4).container_height);
+        let painted = rows[hit.1 as usize..(hit.1 + hit.3) as usize].join("\n");
+        assert!(painted.contains("+1 more"), "overflow indicator painted: {painted}");
+        // Gated off: the strip disappears entirely.
+        view.set_image_preview_enabled(false);
+        assert!(view.preview_strip_hit("draft").is_none(), "gate removes the strip");
+        view.set_image_preview_enabled(true);
+        // Failed decodes keep their bounded error cell with the upstream label.
+        view.preview_items = vec![crate::native_paste::PreviewItem {
+            uri: "data:image/png;base64,broken".to_owned(),
+            failed: true,
+        }];
+        let rows = view.render("draft", &[], false, &[]);
+        let hit = view.preview_strip_hit("draft").expect("failed cell stays visible");
+        let painted = rows[hit.1 as usize..(hit.1 + hit.3) as usize].join("\n");
+        assert!(painted.contains("No preview"), "error cell label: {painted}");
+    }
+
+    #[test]
+    fn cp38_click_overflow_opens_third_index_and_plain_click_opens_first() {
+        let item = |index: usize| crate::native_paste::PreviewItem {
+            uri: format!("data:image/png;base64,{index}"),
+            failed: false,
+        };
+        let mut view = NativeView::new(90, 30);
+        view.set_session_route(true);
+        view.preview_items = (0..4).map(item).collect();
+        let (initial, images) = view
+            .preview_click_target()
+            .expect("overflow click resolves a target");
+        assert_eq!(initial, 3, "overflow click lands on the first hidden image");
+        assert_eq!(images.len(), 4, "all tracked images open in the dialog");
+        view.preview_items = (0..2).map(item).collect();
+        let (initial, _) = view.preview_click_target().expect("plain click target");
+        assert_eq!(initial, 0, "plain click opens the first visible image");
+        view.preview_items.clear();
+        assert!(view.preview_click_target().is_none(), "nothing tracked, no target");
+        assert!(!view.open_image_preview_page(), "no-op without images (index.tsx:403-406)");
+    }
+
+    /// CP-38: a pointer click resolves the cell under the cursor, so clicking
+    /// the second or third visible image opens that image, and clicking the
+    /// overflow cell opens the first hidden image (`index.tsx:1712-1766`).
+    #[test]
+    fn cp38_pointer_click_opens_the_cell_under_the_cursor() {
+        let item = |index: usize| crate::native_paste::PreviewItem {
+            uri: format!("data:image/png;base64,{index}"),
+            failed: false,
+        };
+        let mut view = NativeView::new(90, 30);
+        view.set_session_route(true);
+        view.preview_items = (0..4).map(item).collect();
+        let width = view.preview_geometry().expect("geometry").width;
+        let stride = u16::from(width) + 1;
+        // Cell 0, 1, 2 resolve to themselves; the overflow cell (cell 3) opens
+        // the first hidden image (index 3).
+        assert_eq!(view.preview_click_target_at(0).expect("cell 0").0, 0);
+        assert_eq!(view.preview_click_target_at(stride).expect("cell 1").0, 1);
+        assert_eq!(view.preview_click_target_at(stride * 2).expect("cell 2").0, 2);
+        assert_eq!(view.preview_click_target_at(stride * 3).expect("overflow").0, 3);
+        // A click in the one-column gap after a cell hits no cell.
+        assert!(
+            view.preview_click_target_at(stride - 1).is_none(),
+            "gap between cells is not clickable"
+        );
+        // Past every cell: no target.
+        assert!(view.preview_click_target_at(stride * 4).is_none(), "past the strip");
+        // The clicked image opens at the resolved index.
+        assert!(view.open_image_preview_page_at(stride), "opens the clicked image");
+        view.preview_items.clear();
+        assert!(view.preview_click_target_at(0).is_none(), "nothing tracked, no target");
+    }
+
+    /// CP-38 live producer seam: the paste path appends tracked cells through
+    /// `push_preview_items` (bounded) and the send/clear path drops them all
+    /// through `clear_preview_items`.
+    #[test]
+    fn cp38_push_and_clear_preview_items_bound_the_live_tracking() {
+        let item = |index: usize| crate::native_paste::PreviewItem {
+            uri: format!("data:image/png;base64,{index}"),
+            failed: false,
+        };
+        let mut view = NativeView::new(90, 30);
+        view.set_session_route(true);
+        view.push_preview_items((0..2).map(item));
+        assert_eq!(view.preview_items.len(), 2, "appended two cells");
+        // A hostile paste cannot grow the tracked set without bound.
+        view.push_preview_items((0..100).map(item));
+        assert_eq!(view.preview_items.len(), 32, "tracked set is bounded");
+        let rows = view.render("draft", &[], false, &[]);
+        let hit = view.preview_strip_hit("draft").expect("strip paints for tracked cells");
+        let painted = rows[hit.1 as usize..(hit.1 + hit.3) as usize].join("\n");
+        assert!(painted.contains("more"), "overflow cell paints for >3 cells");
+        view.clear_preview_items();
+        assert!(view.preview_items.is_empty(), "clear drops every cell");
+        assert!(
+            view.preview_strip_hit("draft").is_none(),
+            "cleared strip is no longer clickable"
+        );
     }
 
     #[test]
