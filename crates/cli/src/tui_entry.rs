@@ -3804,6 +3804,40 @@ mod dialog19_chrome_paint_tests {
             "connected shell never paints the reconnecting overlay"
         );
     }
+
+    /// DIALOG-19: a shell that starts offline (no `live` snapshot, so
+    /// `set_plugins_ready` is never seeded at boot) must not keep the startup
+    /// hint pending: the loop re-drives plugin readiness every frame through
+    /// the same `chrome_lifecycle_frame` it uses for `set_connection`, so the
+    /// "Loading plugins…" overlay auto-hides instead of stacking with the
+    /// reconnecting backdrop forever (upstream `app.tsx:1378-1402`).
+    #[test]
+    fn dialog19_plugins_ready_hides_startup_when_offline_settles() {
+        let mut chrome = crate::native_modal_layer::ChromeModel::new();
+        chrome.begin(0);
+        // native_loop seeds the offline case exactly like `live.is_none()`:
+        // only the reconnecting fact, never `set_plugins_ready`.
+        chrome.set_connection(0, crate::native_overlay_stack::ConnectionPhase::Reconnecting);
+        // Two loop passes drive the shared lifecycle facts each frame.
+        chrome_lifecycle_frame(&mut chrome, 200, false);
+        chrome_lifecycle_frame(&mut chrome, 1_200, false);
+        // Past the 1000 ms retry grace the last pending reconnecting update
+        // armed (at 1200) and far past the 500 ms startup grace.
+        let frame = chrome.tick(&2_500);
+        assert!(
+            !frame.paints(crate::native_modal_layer::ChromeLayer::Startup),
+            "settled offline shell must not keep the startup hint pending: {:?}",
+            frame.paint
+        );
+        assert!(
+            frame.paints(crate::native_modal_layer::ChromeLayer::Reconnecting),
+            "offline shell still reports the reconnecting backdrop"
+        );
+        assert!(
+            !chrome.startup().visible(),
+            "\"Loading plugins…\" layer auto-hides once readiness settles"
+        );
+    }
 }
 
 #[cfg(all(test, feature = "native"))]
@@ -7663,6 +7697,26 @@ mod native_identity_gate_tests {
     }
 }
 
+/// DIALOG-19: one observed-lifecycle frame for the shared chrome. Re-driven
+/// every loop pass exactly like the upstream effects (`app.tsx:1378-1402`):
+/// the connection fact and the plugin-readiness fact. A live shell is seeded
+/// ready at boot (`set_plugins_ready(0, true)`) and the offline path has no
+/// plugin load in flight, so readiness is settled in either terminal shell
+/// state; re-driving it here keeps a settled offline run from leaving the
+/// `StartupLoading` "Loading plugins…" hint pending forever.
+fn chrome_lifecycle_frame(
+    chrome: &mut crate::native_modal_layer::ChromeModel,
+    now_ms: u64,
+    live: bool,
+) {
+    chrome.set_connection(now_ms, if live {
+        crate::native_overlay_stack::ConnectionPhase::Connected
+    } else {
+        crate::native_overlay_stack::ConnectionPhase::Reconnecting
+    });
+    chrome.set_plugins_ready(now_ms, true);
+}
+
 fn native_loop(
     memory: &[MemoryFile],
     mut live: Option<LiveSnapshot>,
@@ -9596,11 +9650,7 @@ fn native_loop(
         }
         // DIALOG-19: startup/reconnect layers use observed shell lifecycle facts.
         let now_ms = animation_start.now_ms();
-        chrome.set_connection(now_ms, if live.is_some() {
-            crate::native_overlay_stack::ConnectionPhase::Connected
-        } else {
-            crate::native_overlay_stack::ConnectionPhase::Reconnecting
-        });
+        chrome_lifecycle_frame(&mut chrome, now_ms, live.is_some());
         // DIALOG-20: advance the toast's logical clock by the elapsed wall time
         // so a visible toast auto-dismisses after its 5000 ms lifetime
         // (`ui/toast.tsx`), and a repaint is scheduled while one is visible.
