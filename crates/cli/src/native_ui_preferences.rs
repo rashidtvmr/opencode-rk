@@ -296,6 +296,36 @@ impl UiPreferences {
         selected.unwrap_or(false)
     }
 
+    /// DIALOG-16: the number of root `experimental` entries in the CLI config,
+    /// the live source for the experiments picker (`config/index.tsx`). Disk
+    /// config applies first, an inline override second; the last document that
+    /// carries an `experimental` object wins. An absent map counts as zero.
+    pub fn experimental_count(cli_path: Option<&Path>, inline: Option<&str>) -> usize {
+        fn read(text: &str) -> Option<usize> {
+            let value: Value = serde_json::from_str(&strip_jsonc(text).ok()?).ok()?;
+            value
+                .get("experimental")
+                .and_then(Value::as_object)
+                .map(serde_json::Map::len)
+        }
+        let mut selected: Option<usize> = None;
+        if let Some(path) = cli_path {
+            let mut budget = crate::native_ui_budget::ReadBudget::default();
+            if let Ok(Some(text)) = budget.read(path, MAX_CONFIG_BYTES, "CLI config") {
+                if let Some(value) = read(&text) {
+                    selected = Some(value);
+                }
+            }
+        }
+        if let Some(text) = inline.filter(|text| !text.is_empty() && text.len() <= MAX_CONFIG_BYTES)
+        {
+            if let Some(value) = read(text) {
+                selected = Some(value);
+            }
+        }
+        selected.unwrap_or(0)
+    }
+
     /// TAB-04: resolve pinned upstream `tabs.indicators` (`config/index.tsx:199`,
     /// default `"status"` at `:336`; `session-tabs.tsx:525`). Disk config
     /// applies first, an inline override second, and the last document that

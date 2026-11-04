@@ -10,17 +10,30 @@
 
 use crate::native_navigation::TabOrientation;
 
-pub const MAX_ROWS: usize = 2;
+pub const MAX_ROWS: usize = 6;
 pub const MAX_QUERY_CHARS: usize = 128;
 const HEADER_ROWS: usize = 3;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum SettingsAction {
     ApplySidebar(bool),
     ApplyTabs(TabOrientation),
+    /// Numeric rows step/saturate (`dialog-config.tsx:428-435`); the live
+    /// consumer persists and echoes the value.
+    ApplyNumeric {
+        id: &'static str,
+        value: f64,
+    },
+    /// Activating the Experiments row opens the picker
+    /// (`dialog-experiments.tsx`).
+    OpenExperiments,
+    /// A picker toggle acquired the save lock; the consumer applies it and
+    /// releases the lock through [`SettingsDialog::finish_experiments_toggle`]
+    /// (`dialog-experiments.tsx:50-56`).
+    ToggleExperiments,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SettingsRow {
     pub id: &'static str,
     pub category: &'static str,
@@ -35,6 +48,9 @@ pub struct SettingsRow {
     /// Numeric formatter; `Some` when the row is a numeric setting
     /// (`dialog-config.tsx:237,298,330`).
     pub format: Option<ValueFormat>,
+    /// Step/min/max for numeric rows (`dialog-config.tsx:228-235,289-297,
+    /// 321-330`); `None` for enumerated and launcher rows.
+    pub limit: Option<NumericLimit>,
 }
 
 /// Exact numeric formatter selected by a numeric `dialog-config.tsx` row.
@@ -60,6 +76,15 @@ pub struct SettingsDialog {
     /// Mirrors `saving()` in `dialog-config.tsx:427-447`: while a config
     /// update is in flight every further value change is ignored.
     saving: bool,
+    /// `scroll.speed` current value (`dialog-config.tsx:228-236`, default 3).
+    scroll_speed: f64,
+    /// `leader.timeout` current value (`dialog-config.tsx:289-297`, default 2000).
+    leader_timeout: f64,
+    /// `attention.volume` current value (`dialog-config.tsx:321-330`, default 0.4).
+    alert_volume: f64,
+    /// Experiments picker sub-dialog (`dialog-experiments.tsx:30-96`).
+    experiments: ExperimentsDialog,
+    experiments_open: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -79,6 +104,11 @@ impl Default for SettingsDialog {
             tabs: TabOrientation::Horizontal,
             query: String::new(),
             saving: false,
+            scroll_speed: 3.0,
+            leader_timeout: 2000.0,
+            alert_volume: 0.4,
+            experiments: ExperimentsDialog::default(),
+            experiments_open: false,
         }
     }
 }
@@ -96,11 +126,13 @@ impl SettingsDialog {
         self.tabs = tabs;
         self.query.clear();
         self.saving = false;
+        self.experiments_open = false;
     }
 
     pub fn close(&mut self) {
         self.open = false;
         self.query.clear();
+        self.experiments_open = false;
     }
 
     pub const fn is_open(&self) -> bool {
@@ -126,6 +158,7 @@ impl SettingsDialog {
                 values: &["hide", "auto"],
                 labels: &[],
                 format: None,
+                limit: None,
             },
             SettingsRow {
                 id: "tabs.layout",
@@ -136,6 +169,51 @@ impl SettingsDialog {
                 values: &["horizontal", "vertical"],
                 labels: &[],
                 format: None,
+                limit: None,
+            },
+            SettingsRow {
+                id: "scroll.speed",
+                category: "Input",
+                title: "Scroll speed",
+                description: "How far each scroll step moves",
+                keywords: &["scrolling"],
+                values: &[],
+                labels: &[],
+                format: Some(ValueFormat::Fixed2),
+                limit: Some(SCROLL_SPEED),
+            },
+            SettingsRow {
+                id: "leader.timeout",
+                category: "Input",
+                title: "Leader timeout",
+                description: "How long the leader key waits for the next key",
+                keywords: &["leader key", "shortcut timeout"],
+                values: &[],
+                labels: &[],
+                format: Some(ValueFormat::Milliseconds),
+                limit: Some(LEADER_TIMEOUT),
+            },
+            SettingsRow {
+                id: "alert.volume",
+                category: "Alerts",
+                title: "Volume",
+                description: "Volume of alert sounds",
+                keywords: &["sound volume", "audio volume"],
+                values: &[],
+                labels: &[],
+                format: Some(ValueFormat::Percent),
+                limit: Some(ALERT_VOLUME),
+            },
+            SettingsRow {
+                id: "advanced.experiments",
+                category: "Advanced",
+                title: "Experiments",
+                description: "Open the in-flight experiments picker",
+                keywords: &["experimental", "previews"],
+                values: &["open"],
+                labels: &[],
+                format: None,
+                limit: None,
             },
         ]
     }
@@ -193,10 +271,21 @@ impl SettingsDialog {
             let selected = if position == self.selected { ">" } else { " " };
             let current = if index == 0 { "●" } else { " " };
             let value = match index {
-                0 if self.sidebar_hidden => "hide",
-                0 => "auto",
-                _ if self.tabs == TabOrientation::Horizontal => "horizontal",
-                _ => "vertical",
+                0 if self.sidebar_hidden => "hide".to_owned(),
+                0 => "auto".to_owned(),
+                1 => {
+                    if self.tabs == TabOrientation::Horizontal {
+                        "horizontal"
+                    } else {
+                        "vertical"
+                    }
+                    .to_owned()
+                }
+                5 => "open".to_owned(),
+                index => {
+                    let row = &rows[index];
+                    row.display(&self.numeric_string(row.id))
+                }
             };
             lines.push(VisibleLine::Setting {
                 position,
@@ -238,7 +327,8 @@ impl SettingsDialog {
     }
 
     pub fn push_query(&mut self, ch: char) -> bool {
-        if !self.open || ch.is_control() || self.query.chars().count() >= MAX_QUERY_CHARS {
+        // The picker owns the keyboard when open (`dialog-experiments.tsx`).
+        if !self.open || self.experiments_open || ch.is_control() || self.query.chars().count() >= MAX_QUERY_CHARS {
             return false;
         }
         self.query.push(ch);
@@ -248,7 +338,7 @@ impl SettingsDialog {
     }
 
     pub fn backspace(&mut self) -> bool {
-        if !self.open {
+        if !self.open || self.experiments_open {
             return false;
         }
         let changed = self.query.pop().is_some();
@@ -317,20 +407,46 @@ impl SettingsDialog {
         self.cycle(1)
     }
 
-    fn cycle(&self, _direction: i8) -> Option<SettingsAction> {
+    fn cycle(&mut self, direction: i8) -> Option<SettingsAction> {
         // `if (saving()) return` (`dialog-config.tsx:427-428`).
         if !self.open || self.saving {
             return None;
         }
+        // While the picker is open, left/right/enter toggle the focused
+        // experiment (`dialog-experiments.tsx:50-56,86-97`); `begin_toggle`
+        // denies the change while a save is in flight or when empty.
+        if self.experiments_open {
+            return if self.experiments.begin_toggle() {
+                Some(SettingsAction::ToggleExperiments)
+            } else {
+                None
+            };
+        }
         let visible = self.visible_indices();
-        match *visible.get(self.selected)? {
+        let index = *visible.get(self.selected)?;
+        match index {
             0 => Some(SettingsAction::ApplySidebar(!self.sidebar_hidden)),
             1 => Some(SettingsAction::ApplyTabs(if self.tabs == TabOrientation::Horizontal {
                 TabOrientation::Vertical
             } else {
                 TabOrientation::Horizontal
             })),
-            _ => None,
+            _ => {
+                let row = Self::rows()[index];
+                if row.id == "advanced.experiments" {
+                    return Some(SettingsAction::OpenExperiments);
+                }
+                let Some(limit) = row.limit else { return None };
+                let current = self.numeric_value(row.id);
+                // `Math.min(max, Math.max(min, current + direction * step))`
+                // (`dialog-config.tsx:428-435`); a saturated value is a no-op
+                // (`if (next === current) return`, `dialog-config.tsx:430`).
+                let next = limit.next(current, direction);
+                if next == current {
+                    return None;
+                }
+                Some(SettingsAction::ApplyNumeric { id: row.id, value: next })
+            }
         }
     }
 
@@ -340,6 +456,66 @@ impl SettingsDialog {
 
     pub fn applied(&mut self, value: TabOrientation) {
         self.tabs = value;
+    }
+
+    /// Current numeric string fed through [`SettingsRow::display`].
+    fn numeric_string(&self, id: &str) -> String {
+        match id {
+            "scroll.speed" => format!("{}", self.scroll_speed),
+            "leader.timeout" => format!("{}", self.leader_timeout),
+            "alert.volume" => format!("{}", self.alert_volume),
+            _ => String::new(),
+        }
+    }
+
+    fn numeric_value(&self, id: &str) -> f64 {
+        match id {
+            "scroll.speed" => self.scroll_speed,
+            "leader.timeout" => self.leader_timeout,
+            "alert.volume" => self.alert_volume,
+            _ => 0.0,
+        }
+    }
+
+    /// Echo a successful [`SettingsAction::ApplyNumeric`] back into the
+    /// dialog's own state (`tui_entry.rs` live consumer).
+    pub fn applied_numeric(&mut self, id: &str, value: f64) {
+        match id {
+            "scroll.speed" => self.scroll_speed = value,
+            "leader.timeout" => self.leader_timeout = value,
+            "alert.volume" => self.alert_volume = value,
+            _ => {}
+        }
+    }
+
+    /// Live experiment count; the CLI wires the picker to the config
+    /// `experimental` map at startup.
+    pub fn set_experiments(&mut self, count: usize) {
+        self.experiments = ExperimentsDialog::new(count);
+    }
+
+    /// Picker visibility; Escape dismisses it before the dialog
+    /// (`dialog-experiments.tsx`).
+    pub const fn experiments_open(&self) -> bool {
+        self.experiments_open
+    }
+
+    pub const fn experiments_count(&self) -> usize {
+        self.experiments.count()
+    }
+
+    pub fn show_experiments(&mut self) {
+        self.experiments_open = true;
+    }
+
+    pub fn close_experiments(&mut self) {
+        self.experiments_open = false;
+    }
+
+    /// Release the picker's save lock after the consumer applied a
+    /// [`SettingsAction::ToggleExperiments`].
+    pub fn finish_experiments_toggle(&mut self) {
+        self.experiments.finish_toggle();
     }
 
     /// `setSaving(true)` before the config write; concurrent changes are
@@ -361,7 +537,7 @@ impl SettingsDialog {
         self.saving = false;
     }
 
-    pub fn activate(&self) -> Option<SettingsAction> {
+    pub fn activate(&mut self) -> Option<SettingsAction> {
         self.cycle(1)
     }    pub fn hit_row(
         &self,
@@ -370,7 +546,7 @@ impl SettingsDialog {
         width: u16,
         height: usize,
     ) -> Option<&'static str> {
-        if !self.open || usize::from(x) >= usize::from(width) || y >= height {
+        if !self.open || self.experiments_open || usize::from(x) >= usize::from(width) || y >= height {
             return None;
         }
         let visible = self.visible_indices();
@@ -397,6 +573,25 @@ impl SettingsDialog {
     pub fn render(&mut self, width: u16, height: usize) -> Vec<String> {
         if !self.open || width == 0 || height == 0 {
             return Vec::new();
+        }
+        // Picker overlay: `DialogExperiments` is its own dialog
+        // (`dialog-experiments.tsx:58-97`) whose filter row renders only when
+        // experiments exist and whose empty view replaces the list otherwise.
+        if self.experiments_open {
+            let mut out = vec!["Experiments".to_owned()];
+            if let Some(message) = self.experiments.empty_message() {
+                out.push(message.to_owned());
+            } else {
+                out.push("Search experiments:".to_owned());
+                if out.len() < height {
+                    out.push("change  ←/→".to_owned());
+                }
+            }
+            return out
+                .into_iter()
+                .take(height)
+                .map(|line| crate::native_view_layout::fit(&line, width))
+                .collect();
         }
         let visible = self.visible_indices();
         if visible.is_empty() {
@@ -649,10 +844,19 @@ mod tests {
 
     #[test]
     fn only_live_settings_are_exposed() {
-        assert_eq!(SettingsDialog::rows().len(), 2);
-        assert!(SettingsDialog::rows()
-            .iter()
-            .all(|row| ["session.sidebar", "tabs.layout"].contains(&row.id)));
+        let ids = [
+            "session.sidebar",
+            "tabs.layout",
+            "scroll.speed",
+            "leader.timeout",
+            "alert.volume",
+            "advanced.experiments",
+        ];
+        assert_eq!(SettingsDialog::rows().len(), ids.len());
+        let exposed: Vec<_> = SettingsDialog::rows().iter().map(|row| row.id).collect();
+        for id in ids {
+            assert!(exposed.contains(&id));
+        }
     }
 
     #[test]
@@ -774,16 +978,16 @@ mod tests {
         let mut dialog = open();
         dialog.previous();
         let frame = dialog.render(40, 7);
-        let layout = frame.iter().position(|line| line.trim_end().contains("Layout")).unwrap();
-        assert_eq!(dialog.hit_row(0, layout, 40, 7), Some("tabs.layout"));
+        let experiments = frame.iter().position(|line| line.trim_end().contains("Experiments")).unwrap();
+        assert_eq!(dialog.hit_row(0, experiments, 40, 7), Some("advanced.experiments"));
         dialog.next();
         let frame = dialog.render(40, 7);
         let sidebar = frame.iter().position(|line| line.trim_end().contains("Sidebar")).unwrap();
         assert_eq!(dialog.hit_row(0, sidebar, 40, 7), Some("session.sidebar"));
         dialog.previous();
         let frame = dialog.render(40, 7);
-        let layout = frame.iter().position(|line| line.trim_end().contains("Layout")).unwrap();
-        assert_eq!(dialog.hit_row(0, layout, 40, 7), Some("tabs.layout"));
+        let experiments = frame.iter().position(|line| line.trim_end().contains("Experiments")).unwrap();
+        assert_eq!(dialog.hit_row(0, experiments, 40, 7), Some("advanced.experiments"));
         assert!(!dialog.push_query('\n'));
         for _ in 0..MAX_QUERY_CHARS {
             assert!(dialog.push_query('x'));
@@ -846,6 +1050,7 @@ mod tests {
             values: &[],
             labels: &[],
             format: Some(ValueFormat::Fixed2),
+            limit: Some(SCROLL_SPEED),
         };
         assert_eq!(scroll.display("3"), "3.00");
         let leader = SettingsRow {
@@ -898,6 +1103,10 @@ mod tests {
                     let expected: Vec<_> = [
                         ("Sidebar", "session.sidebar"),
                         ("Layout", "tabs.layout"),
+                        ("Scroll speed", "scroll.speed"),
+                        ("Leader timeout", "leader.timeout"),
+                        ("Volume", "alert.volume"),
+                        ("Experiments", "advanced.experiments"),
                     ]
                     .into_iter()
                     .filter_map(|(title, id)| {
@@ -967,5 +1176,110 @@ mod tests {
         assert!(!populated.begin_toggle(), "a save in flight ignores toggles");
         populated.finish_toggle();
         assert!(populated.begin_toggle());
+    }
+
+    // DIALOG-16: the numeric settings rows step and saturate through the LIVE
+    // dialog (`right`/`left`/`activate` -> `ApplyNumeric`), and the value is
+    // echoed back with `applied_numeric`
+    // (dialog-config.tsx:228-235,289-297,321-330,428-435).
+    #[test]
+    fn dialog16_numeric_rows_step_and_saturate_live() {
+        fn numeric(action: Option<SettingsAction>) -> Option<(&'static str, f64)> {
+            match action {
+                Some(SettingsAction::ApplyNumeric { id, value }) => Some((id, value)),
+                _ => None,
+            }
+        }
+
+        let mut dialog = open();
+        // scroll.speed: default 3.0, step 0.25, min 0.25, max 10.
+        assert!(dialog.select_id("scroll.speed"));
+        let (id, value) = numeric(dialog.right()).expect("step right");
+        assert_eq!(id, "scroll.speed");
+        assert!((value - 3.25).abs() < 1e-9, "{value}");
+        dialog.applied_numeric("scroll.speed", 3.25);
+        let (_, value) = numeric(dialog.left()).expect("step left");
+        assert!((value - 3.0).abs() < 1e-9, "{value}");
+        // Saturates at max (10) and min (0.25): a no-op returns None.
+        dialog.applied_numeric("scroll.speed", 10.0);
+        assert_eq!(dialog.right(), None);
+        dialog.applied_numeric("scroll.speed", 0.25);
+        assert_eq!(dialog.left(), None);
+        // `activate` is the Enter/right path.
+        dialog.applied_numeric("scroll.speed", 3.0);
+        assert!(numeric(dialog.activate()).is_some());
+
+        // leader.timeout: default 2000, step 250, min 250, max 10000.
+        assert!(dialog.select_id("leader.timeout"));
+        let (id, value) = numeric(dialog.right()).expect("leader step");
+        assert_eq!(id, "leader.timeout");
+        assert!((value - 2250.0).abs() < 1e-9, "{value}");
+        dialog.applied_numeric("leader.timeout", 10_000.0);
+        assert_eq!(dialog.right(), None);
+        dialog.applied_numeric("leader.timeout", 250.0);
+        assert_eq!(dialog.left(), None);
+
+        // alert.volume: default 0.4, step 0.1, min 0, max 1.
+        assert!(dialog.select_id("alert.volume"));
+        let (id, value) = numeric(dialog.right()).expect("volume step");
+        assert_eq!(id, "alert.volume");
+        assert!((value - 0.5).abs() < 1e-9, "{value}");
+        dialog.applied_numeric("alert.volume", 1.0);
+        assert_eq!(dialog.right(), None);
+        dialog.applied_numeric("alert.volume", 0.0);
+        assert_eq!(dialog.left(), None);
+
+        // The rendered row reflects the accepted value (Percent format).
+        dialog.applied_numeric("alert.volume", 0.4);
+        let frame = dialog.render(48, 20);
+        assert!(frame.iter().any(|line| line.contains("40%")), "{frame:?}");
+        assert!(frame.iter().any(|line| line.contains("Scroll speed")), "{frame:?}");
+    }
+
+    // DIALOG-16: the experiments launcher opens the picker; the picker hides
+    // its filter when empty, shows the empty view otherwise, and gates toggles
+    // on the save lock (dialog-experiments.tsx:50-76).
+    #[test]
+    fn dialog16_experiments_picker_opens_and_toggles_live() {
+        let mut dialog = open();
+        // The launcher row opens the picker and does not step a value.
+        assert!(dialog.select_id("advanced.experiments"));
+        assert_eq!(dialog.right(), Some(SettingsAction::OpenExperiments));
+        assert!(!dialog.experiments_open());
+        dialog.show_experiments();
+        assert!(dialog.experiments_open());
+
+        // Empty picker: no filter row, the empty view replaces the list.
+        dialog.set_experiments(0);
+        let frame = dialog.render(48, 12);
+        assert_eq!(frame[0].trim_end(), "Experiments");
+        assert!(
+            frame.iter().any(|line| line.contains("No experiments available")),
+            "{frame:?}"
+        );
+        assert!(
+            !frame.iter().any(|line| line.contains("Search experiments")),
+            "{frame:?}"
+        );
+        // An empty picker denies the toggle (no lock acquired).
+        assert_eq!(dialog.right(), None);
+
+        // Populated picker: the filter row renders; a toggle acquires the save
+        // lock and the live consumer releases it.
+        dialog.set_experiments(2);
+        let frame = dialog.render(48, 12);
+        assert!(
+            frame.iter().any(|line| line.contains("Search experiments")),
+            "{frame:?}"
+        );
+        assert_eq!(dialog.right(), Some(SettingsAction::ToggleExperiments));
+        assert_eq!(dialog.right(), None, "save lock blocks a second toggle");
+        dialog.finish_experiments_toggle();
+        assert_eq!(dialog.right(), Some(SettingsAction::ToggleExperiments));
+
+        // Escape closes the picker but keeps the settings dialog open.
+        dialog.close_experiments();
+        assert!(!dialog.experiments_open());
+        assert!(dialog.is_open());
     }
 }

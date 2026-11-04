@@ -10721,7 +10721,19 @@ fn native_loop(
         }
         if matches!(dialog, native_setup::Dialog::Settings) {
             let action = match event {
-                native_input_decoder::InputEvent::Escape => { settings_dialog.close(); utf8.reset(); dialog = native_setup::Dialog::None; None }
+                native_input_decoder::InputEvent::Escape => {
+                    // DIALOG-16: the experiments picker is its own dialog; the
+                    // first Escape dismisses it and returns to the settings
+                    // list (`dialog-experiments.tsx`).
+                    if settings_dialog.experiments_open() {
+                        settings_dialog.close_experiments();
+                    } else {
+                        settings_dialog.close();
+                        utf8.reset();
+                        dialog = native_setup::Dialog::None;
+                    }
+                    None
+                }
                 native_input_decoder::InputEvent::ArrowUp => {
                     settings_dialog.previous();
                     None
@@ -10761,6 +10773,24 @@ fn native_loop(
                     crate::native_settings::SettingsAction::ApplySidebar(hidden) => {
                         crate::native_ui_preferences::UiPreferences::persist_sidebar(&state_path, hidden)
                             .map(|()| { view.set_sidebar_hidden(hidden); settings_dialog.applied_sidebar(hidden); })
+                    }
+                    // DIALOG-16: numeric rows step/saturate in the model; the
+                    // live consumer echoes the accepted value back into the
+                    // dialog state and repaints. Persistence has no numeric
+                    // writer yet (`native_ui_preferences` exposes only
+                    // tab-orientation/sidebar), so the value is applied
+                    // in-memory for this session.
+                    crate::native_settings::SettingsAction::ApplyNumeric { id, value } => {
+                        settings_dialog.applied_numeric(id, value);
+                        Ok(())
+                    }
+                    crate::native_settings::SettingsAction::OpenExperiments => {
+                        settings_dialog.show_experiments();
+                        Ok(())
+                    }
+                    crate::native_settings::SettingsAction::ToggleExperiments => {
+                        settings_dialog.finish_experiments_toggle();
+                        Ok(())
                     }
                 };
                 settings_error = result.err();
@@ -13010,6 +13040,7 @@ fn native_loop(
                             }
                             crate::native_command_palette::PaletteAction::Settings(id) => {
                                 settings_dialog.open_with_state(view.sidebar_hidden(), navigation.orientation());
+                                settings_dialog.set_experiments(crate::native_ui_preferences::UiPreferences::experimental_count(cli_path.as_deref(), inline_cli.as_deref()));
                                 settings_dialog.select_id(id);
                                 settings_error = None;
                                 dialog = native_setup::Dialog::Settings;
@@ -14266,6 +14297,7 @@ fn native_loop(
                 }
                 if command == "/settings" {
                     settings_dialog.open_with_state(view.sidebar_hidden(), navigation.orientation());
+                    settings_dialog.set_experiments(crate::native_ui_preferences::UiPreferences::experimental_count(cli_path.as_deref(), inline_cli.as_deref()));
                     settings_error = None;
                     dialog = native_setup::Dialog::Settings;
                     consume_local_command_with_cursor(&mut draft, &mut draft_cursor, command, from_chat_composer);
