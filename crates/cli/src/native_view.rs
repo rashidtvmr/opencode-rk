@@ -1589,9 +1589,20 @@ impl NativeView {
         self.dock_hit.clear();
     }
 
+    /// CP-24: mirror the dock's active tab into the model unconditionally, so
+    /// the mirror tracks the dock on EVERY transition (open, close, tab switch,
+    /// child-status change), independent of `dock_session`.
+    /// (`composer.active("subagents")`, subagents-tab.tsx:73-96;
+    /// keybind.ts:249-252.)
+    fn sync_dock_active(&mut self) {
+        self.dock_tab
+            .set_active(self.dock.is_active(DockTabId::Subagents));
+    }
+
     fn sync_dock_rows(&mut self) {
         let Some(session) = self.dock_session.clone() else {
             self.dock_tab.set_sessions("", "", Vec::new());
+            self.sync_dock_active();
             return;
         };
         let mut sessions = Vec::with_capacity(self.live_child_rows.len() + 1);
@@ -1620,6 +1631,10 @@ impl NativeView {
         }
         self.dock_tab.set_sessions(&session, &session, sessions);
         self.dock_tab.set_viewport(MAX_DOCK_ROWS);
+        // CP-24: mirror the dock's active tab into the model so commands only
+        // dispatch while the Subagents tab owns the dock
+        // (`composer.active("subagents")`, subagents-tab.tsx:73-96).
+        self.sync_dock_active();
     }
 
     /// Whether the auxiliary dock currently owns the slot above the composer.
@@ -1651,6 +1666,13 @@ impl NativeView {
         self.dock.active()
     }
 
+    /// CP-24: the parent session the dock rows are bound to (the composer's
+    /// session), used as the parent for a subagent navigate transition.
+    #[must_use]
+    pub fn dock_session_id(&self) -> Option<&str> {
+        self.dock_session.as_deref()
+    }
+
     /// Upstream `session.child.first` (`routes/session/index.tsx:1391-1398`):
     /// a child session or an already-open store closes, otherwise the dock
     /// opens on the Subagents tab.
@@ -1661,6 +1683,7 @@ impl NativeView {
             self.dock.open(Some(DockTabId::Subagents));
         }
         self.dock_hit.clear();
+        self.sync_dock_active();
     }
 
     /// Composer layer keys (`composer/index.tsx:72-82`). Only called while the
@@ -1670,7 +1693,25 @@ impl NativeView {
         if !matches!(outcome, DockKeyOutcome::Ignored) {
             self.dock_hit.clear();
         }
+        self.sync_dock_active();
         outcome
+    }
+
+    /// CP-24: dispatch a subagents-tab command id through the live dock tab,
+    /// but only while the Subagents tab actually owns the dock
+    /// (`composer.active("subagents")`, subagents-tab.tsx:73-96,142-196).
+    /// Returns `None` when the tab is not active, so the caller can let the
+    /// key fall through to the composer text path.
+    #[must_use]
+    pub fn dock_command(&mut self, id: &str) -> Option<crate::native_children::SubagentAction> {
+        if !self.dock.is_active(DockTabId::Subagents) {
+            return None;
+        }
+        let action = self.dock_tab.command(id);
+        if !matches!(action, crate::native_children::SubagentAction::None) {
+            self.dock_hit.clear();
+        }
+        Some(action)
     }
 
     /// Painted dock pointer targets `(x, y, cells)` in frame coordinates.
@@ -1693,6 +1734,10 @@ impl NativeView {
         }
         self.dock.close();
         self.dock_hit.clear();
+        // CP-24: the dock closed by a hit must re-sync the active-tab mirror
+        // just like the keyboard/command paths, or the tab keeps a stale
+        // selection into the next open.
+        self.sync_dock_active();
         true
     }
 
@@ -2085,6 +2130,9 @@ impl NativeView {
             if !session_route {
                 self.dock.close();
             }
+            // CP-24: re-sync the active-tab mirror on the route transition, so
+            // a close here resets the tab selection like every other path.
+            self.sync_dock_active();
         }
         self.session_route = session_route;
     }
@@ -2180,6 +2228,8 @@ impl NativeView {
         if parent_session {
             self.dock.close();
         }
+        // CP-24: re-sync the active-tab mirror on the parent-session transition.
+        self.sync_dock_active();
         self.parent_session = parent_session;
     }
 
@@ -9011,6 +9061,124 @@ mod composer_dock_tests {
     fn production_dock_registers_the_always_mounted_tabs() {
         let view = view_with(children());
         assert_eq!(view.dock_active_tab(), Some(DockTabId::Subagents));
+    }
+
+    // CP-24: the subagents-tab command ids dispatch through the live dock tab
+    // while the Subagents tab owns the dock, and are refused (None) otherwise,
+    // so no upstream keybinding reaches an inactive tab
+    // (subagents-tab.tsx:73-96,142-196; keybind.ts:249-252).
+    #[test]
+    fn cp24_dock_command_dispatches_only_while_subagents_tab_active() {
+        use crate::native_children::{
+            SubagentAction, SUBAGENT_DOWN_COMMAND, SUBAGENT_SELECT_COMMAND, SUBAGENT_UP_COMMAND,
+        };
+
+        let mut view = view_with(children());
+        // No open dock: every command is refused without mutating the tab.
+        assert_eq!(view.dock_command(SUBAGENT_SELECT_COMMAND), None);
+
+        view.toggle_dock();
+        assert_eq!(view.dock_active_tab(), Some(DockTabId::Subagents));
+
+        // select on the first family row navigates to that session
+        // (`:165-173`).
+        assert_eq!(
+            view.dock_command(SUBAGENT_SELECT_COMMAND),
+            Some(SubagentAction::Navigate(A.to_owned()))
+        );
+        // down then up move the selection and report the new index
+        // (`:142-164`).
+        assert_eq!(
+            view.dock_command(SUBAGENT_DOWN_COMMAND),
+            Some(SubagentAction::Selected(1))
+        );
+        assert_eq!(
+            view.dock_command(SUBAGENT_UP_COMMAND),
+            Some(SubagentAction::Selected(0))
+        );
+    }
+
+    // CP-24 repair: the mirror is re-synced on EVERY dock transition (open,
+    // close, tab switch), so the `composer.active("subagents")` effect re-runs
+    // and the tab selection tracks the dock the way upstream does
+    // (subagents-tab.tsx:73-96; keybind.ts:249-252).
+    #[test]
+    fn cp24_live_active_mirror_tracks_dock_open_close_and_tab_switch() {
+        use crate::native_children::{SubagentAction, SUBAGENT_DOWN_COMMAND, SUBAGENT_SELECT_COMMAND};
+
+        let mut view = view_with(children());
+
+        // (a) Closed dock: every command is refused (dock commands are refused
+        // while the composer layer owns no slot above it).
+        assert_eq!(view.dock_command(SUBAGENT_SELECT_COMMAND), None);
+
+        // (b) Opening the dock re-syncs the mirror onto the current route
+        // session (index 0), so the first `down` lands on index 1.
+        view.toggle_dock();
+        assert_eq!(
+            view.dock_command(SUBAGENT_DOWN_COMMAND),
+            Some(SubagentAction::Selected(1))
+        );
+
+        // Closing re-syncs the mirror (dropping the active selection); the next
+        // open re-syncs to the current row again, so `down` lands on index 1.
+        // A stale mirror would leave the selection at index 1 and `down` would
+        // wrap to index 0.
+        view.toggle_dock(); // close
+        assert_eq!(view.dock_command(SUBAGENT_DOWN_COMMAND), None);
+        view.toggle_dock(); // reopen
+        assert_eq!(
+            view.dock_command(SUBAGENT_DOWN_COMMAND),
+            Some(SubagentAction::Selected(1))
+        );
+
+        // (c) Switching the dock to a non-Subagents tab re-syncs the mirror so
+        // every subagents command is refused again.
+        let _ = view.dock_key(DockKey::Right);
+        assert_eq!(view.dock_command(SUBAGENT_SELECT_COMMAND), None);
+
+        // (d) A pointer close (the right-aligned `esc` affordance) must also
+        // re-sync the mirror: the next open starts from the current row, so
+        // `down` lands on index 1 rather than wrapping from a stale index 1.
+        view.toggle_dock(); // close the non-subagents tab from (c)
+        view.toggle_dock(); // reopen on Subagents
+        assert_eq!(
+            view.dock_command(SUBAGENT_DOWN_COMMAND),
+            Some(SubagentAction::Selected(1))
+        );
+        // `dock_command` consumes the hit rect, so re-render to repaint it.
+        let _ = view.render_typed("draft", &[], false, &[]);
+        let (click_x, click_y, _) = view.dock_hits()[0];
+        assert!(view.dock_click(click_x, click_y));
+        assert!(!view.dock_open());
+        view.toggle_dock(); // reopen
+        assert_eq!(
+            view.dock_command(SUBAGENT_DOWN_COMMAND),
+            Some(SubagentAction::Selected(1)),
+            "a pointer close must reset the mirror"
+        );
+
+        // (e) Leaving the session route closes the dock and re-syncs the mirror.
+        view.set_session_route(false);
+        assert!(!view.dock_open());
+        view.set_session_route(true);
+        view.toggle_dock(); // reopen on Subagents
+        assert_eq!(
+            view.dock_command(SUBAGENT_DOWN_COMMAND),
+            Some(SubagentAction::Selected(1)),
+            "a route close must reset the mirror"
+        );
+
+        // (f) A parent-session transition closes the dock and re-syncs the mirror.
+        view.set_parent_session(true);
+        assert!(!view.dock_open());
+        view.set_parent_session(false);
+        view.toggle_dock(); // reopen on Subagents
+        assert_eq!(
+            view.dock_command(SUBAGENT_DOWN_COMMAND),
+            Some(SubagentAction::Selected(1)),
+            "a parent-session close must reset the mirror"
+        );
     }
 
     // A closed dock is the pre-dock frame cell-for-cell: it publishes no hit

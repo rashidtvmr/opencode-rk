@@ -1073,6 +1073,8 @@ impl Panel {
 #[cfg(feature = "native")]
 pub use composer_subagents::{
     SubagentAction, SubagentEntry, SubagentRow, SubagentSession, SubagentShortcuts, SubagentsTab,
+    SUBAGENT_DOWN_COMMAND, SUBAGENT_INTERRUPT_COMMAND, SUBAGENT_SELECT_COMMAND,
+    SUBAGENT_TOGGLE_COMMAND, SUBAGENT_UP_COMMAND,
 };
 
 #[cfg(feature = "native")]

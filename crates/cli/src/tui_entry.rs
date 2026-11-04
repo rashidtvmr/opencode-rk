@@ -429,6 +429,23 @@ fn shell_entry_allowed(
     !page_query_open && matches!(dialog, native_setup::Dialog::None)
 }
 
+/// CP-29: a printable byte reaches the composer draft only while the prompt
+/// owns focus (`index.tsx:740-750` focus effect) and no setup dialog is
+/// mounted. Modelled on `shell_entry_allowed`; the live insert at
+/// `tui_entry.rs` `draft.insert` is gated on this so a dialog or an open page
+/// can never append into the background draft.
+#[cfg(feature = "native")]
+fn prompt_byte_insert_allowed(
+    focus: &crate::native_composer::PromptFocus,
+    dialog: native_setup::Dialog,
+) -> bool {
+    matches!(dialog, native_setup::Dialog::None)
+        && matches!(
+            focus.target(),
+            crate::native_composer::FocusTarget::Prompt
+        )
+}
+
 #[cfg(all(test, feature = "native"))]
 mod cp30_history_walk_tests {
     use super::history_walk_entry;
@@ -481,6 +498,40 @@ mod cp30_history_walk_tests {
         assert!(!super::shell_entry_allowed(true, Dialog::None));
         assert!(!super::shell_entry_allowed(false, Dialog::Provider));
         assert!(!super::shell_entry_allowed(false, Dialog::Model));
+    }
+
+    /// CP-29: the live composer byte insert respects prompt-focus ownership.
+    /// RED before: `prompt_byte_insert_allowed` did not exist and the live
+    /// `draft.insert` ran whenever the setup dialog was `None`, even while a
+    /// dialog/page owned focus. GREEN after: focus must be `Prompt` and the
+    /// setup dialog `None` (`index.tsx:740-750`).
+    #[test]
+    fn cp29_prompt_byte_insert_gated_on_focus_owner() {
+        use super::native_setup::Dialog;
+        use crate::native_composer::PromptFocus;
+
+        let mut focus = PromptFocus::new();
+        // Fresh prompt owns focus and no dialog is mounted.
+        focus.sync(true, false);
+        assert!(super::prompt_byte_insert_allowed(&focus, Dialog::None));
+
+        // A mounted setup dialog blocks the insert even if focus state says
+        // the prompt is focusable.
+        assert!(!super::prompt_byte_insert_allowed(&focus, Dialog::Provider));
+        assert!(!super::prompt_byte_insert_allowed(&focus, Dialog::Model));
+
+        // A dialog owns focus: never insert into the background prompt.
+        let mut dialog_focus = PromptFocus::new();
+        dialog_focus.sync(true, true);
+        assert!(!super::prompt_byte_insert_allowed(&dialog_focus, Dialog::None));
+
+        // Explicit dialog-stack transition drops prompt focus until close.
+        let mut stacked = PromptFocus::new();
+        stacked.sync(true, false);
+        stacked.open_dialog("settings");
+        assert!(!super::prompt_byte_insert_allowed(&stacked, Dialog::None));
+        assert!(stacked.close_dialog("settings"));
+        assert!(super::prompt_byte_insert_allowed(&stacked, Dialog::None));
     }
 }
 
@@ -7411,6 +7462,13 @@ fn native_loop(
     let mut settings_dialog = crate::native_settings::SettingsDialog::default();
     let mut settings_error: Option<String> = None;
     let mut help_open = false;
+    // CP-29: prompt-focus ownership across dialog mounts and prompt remounts
+    // (`index.tsx:740-770`). Synced each iteration from dialog stack + open
+    // pages/help; mounted dialogs push/close ids to track stack transitions.
+    let mut prompt_focus = crate::native_composer::PromptFocus::new();
+    let mut prompt_focus_dialogs: std::collections::BTreeSet<&'static str> =
+        std::collections::BTreeSet::new();
+    let mut prompt_focus_intercepted = false;
     // Track whether the model catalogue was actually observed (HTTP + parse
     // succeeded): a failed fetch yields `None`, never a fabricated "confirmed
     // unset" model claim (status-v2 `set_model_unknown` path).
@@ -10132,6 +10190,35 @@ fn native_loop(
         // inert, and the permission modal / Help gates above keep
         // precedence over both.
         let page_query_open = view.page().accepts_search();
+        // CP-29: sync prompt focus from the live dialog stack + open overlays
+        // (`index.tsx:740-770`). Dialog-stack transitions push/close ids so the
+        // prompt only reclaims focus after the last dialog closes; a
+        // route/catalog change remounts the background prompt.
+        {
+            let intercepted = view.dialogs.intercepts_input()
+                || help_open
+                || dialog != native_setup::Dialog::None
+                || page_open;
+            if view.dialogs.intercepts_input() != prompt_focus_intercepted {
+                if view.dialogs.intercepts_input() {
+                    prompt_focus.open_dialog("modal");
+                    prompt_focus_dialogs.insert("modal");
+                } else {
+                    prompt_focus.close_dialog("modal");
+                    prompt_focus_dialogs.remove("modal");
+                }
+                prompt_focus_intercepted = view.dialogs.intercepts_input();
+            }
+            if dialog != native_setup::Dialog::None {
+                prompt_focus.open_dialog("setup");
+                prompt_focus_dialogs.insert("setup");
+            } else if prompt_focus_dialogs.contains("setup") {
+                prompt_focus.close_dialog("setup");
+                prompt_focus_dialogs.remove("setup");
+            }
+            prompt_focus.remount();
+            prompt_focus.sync(true, intercepted);
+        }
         // `session.tab.*` shortcuts (`config/keybind.ts:113-118,152-161`),
         // TAB-23 resolved through the config `keybinds` chord table
         // (`TuiKeybind.parse` + `createBindingLookup`, `config/index.tsx:78,
@@ -10378,6 +10465,121 @@ fn native_loop(
                     let _ = view.dock_key(crate::native_dock::DockKey::Right);
                     needs_paint = true;
                     continue;
+                }
+                // CP-24: subagents-tab command dispatch. The keybinds
+                // (`keybind.ts:249-252`) are up/down/return/ctrl+d; only
+                // dispatched while the Subagents tab owns the dock, otherwise
+                // `dock_command` returns None and the key falls through to the
+                // composer text/history path.
+                native_input_decoder::InputEvent::ArrowUp
+                | native_input_decoder::InputEvent::ArrowDown
+                | native_input_decoder::InputEvent::Byte(13 | 10 | 4) => {
+                    let command = match &event {
+                        native_input_decoder::InputEvent::ArrowUp => {
+                            crate::native_children::SUBAGENT_UP_COMMAND
+                        }
+                        native_input_decoder::InputEvent::ArrowDown => {
+                            crate::native_children::SUBAGENT_DOWN_COMMAND
+                        }
+                        native_input_decoder::InputEvent::Byte(4) => {
+                            crate::native_children::SUBAGENT_INTERRUPT_COMMAND
+                        }
+                        _ => crate::native_children::SUBAGENT_SELECT_COMMAND,
+                    };
+                    match view.dock_command(command) {
+                        Some(crate::native_children::SubagentAction::Navigate(child)) => {
+                            let Some(parent) = view.dock_session_id().map(str::to_owned) else {
+                                needs_paint = true;
+                                continue;
+                            };
+                            let result = live
+                                .as_ref()
+                                .ok_or_else(|| "daemon unavailable".to_owned())
+                                .and_then(|parent_snapshot| {
+                                    open_child_transition(
+                                        &mut view,
+                                        &mut transcript,
+                                        &mut navigation,
+                                        &draft,
+                                        draft_cursor,
+                                        &parent_snapshot.origin,
+                                        auth.as_deref(),
+                                        binding_generation,
+                                        &parent,
+                                        &child,
+                                        selected.as_ref().map(|model| model.qualified()),
+                                    )
+                                });
+                            match result {
+                                Ok((
+                                    snapshot,
+                                    restored,
+                                    generation,
+                                    target_cursor,
+                                    target_scroll,
+                                    target_model,
+                                )) => {
+                                    commit_child_route(
+                                        snapshot,
+                                        restored,
+                                        generation,
+                                        target_cursor,
+                                        target_scroll,
+                                        target_model,
+                                        &models,
+                                        &mut selected,
+                                        &mut view,
+                                        &mut live,
+                                        &mut history_window,
+                                        &mut binding_generation,
+                                        &mut draft,
+                                        &mut draft_cursor,
+                                        &mut session_route,
+                                        &mut completion,
+                                    );
+                                }
+                                Err(error) => append_transcript(
+                                    &mut transcript,
+                                    format!("error: child open: {error}"),
+                                ),
+                            }
+                            needs_paint = true;
+                            continue;
+                        }
+                        Some(crate::native_children::SubagentAction::Interrupt(child)) => {
+                            if let Some(snapshot) = live.as_ref() {
+                                let path = format!("/api/session/{child}/interrupt");
+                                if let Err(error) = http_request_with_status(
+                                    &snapshot.origin,
+                                    "POST",
+                                    &path,
+                                    Some("{}"),
+                                    auth.as_deref(),
+                                ) {
+                                    append_transcript(
+                                        &mut transcript,
+                                        format!("error: interrupt subagent: {error}"),
+                                    );
+                                }
+                            }
+                            needs_paint = true;
+                            continue;
+                        }
+                        Some(crate::native_children::SubagentAction::Selected(_)) => {
+                            needs_paint = true;
+                            continue;
+                        }
+                        Some(crate::native_children::SubagentAction::CloseComposer) => {
+                            view.toggle_dock();
+                            needs_paint = true;
+                            continue;
+                        }
+                        Some(crate::native_children::SubagentAction::None) => {
+                            needs_paint = true;
+                            continue;
+                        }
+                        None => {}
+                    }
                 }
                 _ => {}
             }
@@ -14604,7 +14806,7 @@ fn native_loop(
                 } else {
                     if let Some(character) = utf8.push(b) {
                         let width = character.len_utf8();
-                        if matches!(dialog, native_setup::Dialog::None) {
+                        if prompt_byte_insert_allowed(&prompt_focus, dialog) {
                             crate::native_composer::normalize_cursor(&draft, &mut draft_cursor);
                             if draft.len().checked_add(width).is_some_and(|len| len <= MAX_NATIVE_DRAFT_BYTES) {
                                 draft.insert(draft_cursor, character);
