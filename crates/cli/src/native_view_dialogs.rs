@@ -2483,31 +2483,30 @@ impl DialogView {
             // DIALOG-06..09: a live select paints only its filtered rows; every
             // other dialog keeps the original choice order. Option ids are the
             // original choice indexes, so paint, click hits and confirm agree.
-            let visible: Vec<(usize, &str, bool)> = match dialog.select.as_ref() {
+            let flattened = dialog.select.as_ref().is_some_and(|select| select.flatten());
+            let visible: Vec<(usize, &str, bool, Option<&str>)> = match dialog.select.as_ref() {
                 Some(select) => select
                     .filtered()
                     .into_iter()
                     .filter_map(|option| {
-                        option
-                            .id
-                            .parse::<usize>()
-                            .ok()
-                            .map(|index| (index, option.title.as_str(), option.disabled))
+                        option.id.parse::<usize>().ok().map(|index| {
+                            (index, option.title.as_str(), option.disabled, option.row_footer(flattened))
+                        })
                     })
                     .collect(),
                 None => dialog
                     .choices
                     .iter()
                     .enumerate()
-                    .map(|(index, choice)| (index, choice.as_str(), dialog.disabled[index]))
+                    .map(|(index, choice)| (index, choice.as_str(), dialog.disabled[index], None))
                     .collect(),
             };
             let selected_pos = visible
                 .iter()
-                .position(|(index, _, _)| Some(*index) == self.selection)
+                .position(|(index, _, _, _)| Some(*index) == self.selection)
                 .unwrap_or(0);
             let start = selected_pos.saturating_sub(capacity.saturating_sub(1));
-            for &(index, choice, disabled) in visible.iter().skip(start).take(capacity) {
+            for &(index, choice, disabled, row_footer) in visible.iter().skip(start).take(capacity) {
                 if lines.len() < height && !disabled && self.phase == Phase::Open {
                     hits[lines.len()] = Some(index);
                 }
@@ -2548,9 +2547,23 @@ impl DialogView {
                     let status = dialog.mcp_status.get(index).map(String::as_str).unwrap_or("");
                     format!("{marker}{choice}  {status}")
                 } else {
-                    format!("{marker}{}. {choice}{suffix}", index + 1)
+                    let left = format!("{marker}{}. {choice}{suffix}", index + 1);
+                    if let Some(footer) = row_footer {
+                        // Preserve the complete footer and spend any collision on the title.
+                        let footer_width = footer.chars().count();
+                        let gap = if width > footer_width { 1 } else { 0 };
+                        let title_budget = width.saturating_sub(footer_width + gap);
+                        let left = left.chars().take(title_budget).collect::<String>();
+                        let pad = width.saturating_sub(left.chars().count() + footer_width);
+                        format!("{left}{}{footer}", " ".repeat(pad))
+                    } else { left }
                 };
                 lines.push(line(text,
+                    // DIALOG-07: the row's own role is unchanged by the footer
+                    // (the selection highlight must still win). Upstream paints
+                    // the footer in `secondary()` while the title keeps `text()`;
+                    // `Line` carries one role, so the footer inherits the row
+                    // role — a recorded residual (no dialog span channel yet).
                     if self.selection == Some(index) { Role::Selected } else if disabled { Role::Description } else if dialog.kind == DialogKind::Permission { Role::Action } else { Role::Item }));
             }
             // DIALOG-06/09: the select's own empty/no-match view, bounded to
@@ -9658,3 +9671,142 @@ mod tool011_tests {
     }
 }
 
+
+#[cfg(test)]
+mod dialog07_tests {
+    use super::*;
+    use crate::native_palette::select::{SelectDialog, SelectOption};
+
+    /// Open a live `DialogKind::Select` and inject a `SelectDialog` whose
+    /// options carry footers. Option ids are the original choice indexes so
+    /// the render's `id.parse::<usize>()` mapping keeps working.
+    fn select_view(options: Vec<SelectOption>, flat: bool) -> DialogView {
+        let choices: Vec<String> = options.iter().map(|option| option.title.clone()).collect();
+        let mut view = DialogView::new();
+        view.open_request(DialogRequest {
+            id: "d07".to_string(),
+            session_id: "ses-1".to_string(),
+            kind: DialogKind::Select,
+            title: "Pick".to_string(),
+            choices,
+            message: None,
+            disabled: Vec::new(),
+            error: None,
+        })
+        .expect("select request valid");
+        view.dialog.as_mut().unwrap().select = Some(SelectDialog::new(options).with_flat(flat));
+        view
+    }
+
+    /// `dialog-select.tsx:806-809`: a grouped row paints its own `footer`
+    /// right-aligned at the row's right edge, separated from the title by at
+    /// least one space.
+    #[test]
+    fn dialog07_row_footer_paints_right_aligned() {
+        let view = select_view(
+            vec![
+                SelectOption::new("0", "First").with_footer("f0"),
+                SelectOption::new("1", "Second").with_footer("f1"),
+            ],
+            false,
+        );
+        let rows = view.render(40, 12);
+        let row = rows
+            .iter()
+            .find(|row| row.contains("First"))
+            .expect("first row painted");
+        assert!(row.ends_with("f0"), "footer right-aligned: {row:?}");
+        assert_eq!(row.chars().count(), 40, "row fills the content width: {row:?}");
+        assert!(row.contains("First  "), "title then gap then footer: {row:?}");
+    }
+
+    /// While flattened (`flat(true)` + a filter) the footer is
+    /// `searchFooter ?? category ?? footer`; grouped, only `footer` paints.
+    #[test]
+    fn dialog07_flatten_uses_search_footer_then_category() {
+        let mut view = select_view(
+            vec![
+                SelectOption::new("0", "First")
+                    .with_category("Group")
+                    .with_footer("plain")
+                    .with_search_footer("search"),
+                SelectOption::new("1", "Second").with_category("Group"),
+            ],
+            true,
+        );
+        let grouped = view.render(40, 12);
+        let row = grouped
+            .iter()
+            .find(|row| row.contains("First"))
+            .expect("grouped row");
+        assert!(row.ends_with("plain"), "grouped row shows footer: {row:?}");
+
+        assert!(
+            view.dialog
+                .as_mut()
+                .unwrap()
+                .select
+                .as_mut()
+                .unwrap()
+                .set_filter("first"),
+            "filter admitted"
+        );
+        let flattened = view.render(40, 12);
+        let row = flattened
+            .iter()
+            .find(|row| row.contains("First"))
+            .expect("flattened row");
+        assert!(
+            row.ends_with("search"),
+            "flattened footer = searchFooter: {row:?}"
+        );
+
+        // No `searchFooter`: the category is the fallback.
+        let mut view = select_view(
+            vec![
+                SelectOption::new("0", "First").with_category("Group"),
+                SelectOption::new("1", "Second").with_category("Group"),
+            ],
+            true,
+        );
+        assert!(
+            view.dialog
+                .as_mut()
+                .unwrap()
+                .select
+                .as_mut()
+                .unwrap()
+                .set_filter("first")
+        );
+        let rows = view.render(40, 12);
+        let row = rows
+            .iter()
+            .find(|row| row.contains("First"))
+            .expect("flattened row");
+        assert!(
+            row.ends_with("Group"),
+            "flattened footer falls back to category: {row:?}"
+        );
+    }
+
+    /// A title that collides with the footer is truncated; the footer stays
+    /// visible and the row still fills the content width.
+    #[test]
+    fn dialog07_long_title_truncates_and_keeps_footer() {
+        let view = select_view(
+            vec![SelectOption::new("0", "A".repeat(60)).with_footer("tail")],
+            false,
+        );
+        let rows = view.render(30, 12);
+        let row = rows
+            .iter()
+            .find(|row| row.contains("tail"))
+            .expect("footer survives truncation");
+        assert!(row.ends_with("tail"), "footer kept: {row:?}");
+        assert_eq!(row.chars().count(), 30, "row fills the content width: {row:?}");
+        assert!(
+            !row.contains(&"A".repeat(40)),
+            "title truncated to make room: {row:?}"
+        );
+    }
+}
