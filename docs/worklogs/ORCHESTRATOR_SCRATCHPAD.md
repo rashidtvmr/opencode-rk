@@ -12812,3 +12812,34 @@ BLOCKED rather than invented.
 Nothing is accepted until an independent adversarial review of the exact
 candidate SHA, a clean `git apply` onto current `main-v2`, focused tests, the full
 CLI suite, and (where server code is touched) the server suite.
+
+## Wave-69 — DIALOG-12 published; next grouped packages dispatched (2026-11-04)
+
+Canonical `main-v2` advanced `f63d914a` → **`19f90fbe`** (DIALOG-12 frozen-at-open
+model list + detail row), pushed to `git@github.com:rashidtvmr/opencode-rk.git`
+and `git ls-remote`-verified. Publication used the token-guarded fast-forward
+(`OC2_RECOVERY_CANONICAL_TOKEN` sha256 `5d180e06…` == ref-policy
+`canonicalWriteTokenSha256`); changed paths `crates/cli/src/native_setup.rs` +
+`crates/cli/src/tui_entry.rs` are not protected.
+
+Canonical dirty-work resolution: the two dirty files were the delegate's original
+(pre-repair) DIALOG-12 bytes, byte-identical (sha256 `0efbeb31…`) to the preserved
+`artifacts/I6-CANONICAL-DIALOG12.patch`. After publishing `19f90fbe`, the published
+content was written into those two canonical files (plain file write, no
+checkout/reset) and the index synced; `git status` is now clean at `19f90fbe`.
+
+DIALOG-12 history: delegate candidate `14ce47d2` → independent review **NEEDS_FIX**
+(hit-test footer capacity not mirrored; missed re-freeze at the send-requires-model
+open site; invented legacy `(Favorite)` suffix) → repaired → `19f90fbe` →
+independent re-review **APPROVE** (no blocking). Full CLI 2241/0; `--bins dialog12`
+2/0 both bins.
+
+Lanes reset to `19f90fbe`. Dispatched:
+- PKG-A on recovery/ui (F2-DIALOG): FORM-002, DIALOG-19, DIALOG-16/17/18.
+- PKG-B on recovery/runtime (F3-MCP): CP-34, CP-37, CP-38.
+PKG-C (STATE-001/003/004) returned NO code — the items are structurally blocked
+(no live consumer path from tui_entry.rs; `native_progress.rs`/`native_shell.rs`
+are a separate pipeline). Re-scope needed.
+
+Persisted briefs: `artifacts/briefs/BRIEF-MSG-005.md`, `BRIEF-CP-07-09.md`,
+`BRIEF-DIFF-SURFACE.md`, `BRIEF-SYNTAX-HIGHLIGHT.md`.
