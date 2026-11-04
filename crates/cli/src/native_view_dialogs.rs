@@ -143,6 +143,8 @@ pub enum DialogKind {
     /// backend decision. The row text model lives in
     /// `native_tool_rows::ExecuteDialog`.
     Execute,
+    /// Root panic overlay, rendered independently of the active theme.
+    Crash,
     /// SIDE-08: DialogMcp server list (`component/dialog-mcp.tsx`), opened
     /// from a sidebar MCP row click (`feature-plugins/sidebar/mcp.tsx:56-60`
     /// `onMouseUp` -> `dialog.show(<DialogMcp initialServer details />)`). A
@@ -446,6 +448,7 @@ pub struct DialogView {
     /// experiment fact. Defaults to `false` (legacy shell); the composition
     /// root seeds it from the same preference read that selects the theme.
     new_designs: bool,
+    crash_screen: Option<crash::CrashScreen>,
     rejected: bool,
     /// Locally monotonic decision-attempt counter. Never reset on close,
     /// `open_request` or rejected ACK; fails closed on overflow.
@@ -474,6 +477,18 @@ impl Default for DialogView {
 
 /// Replace every control character (C0/C1, including newline and ESC) with
 /// a space, then trim. Single-line fields only — no line can be injected.
+fn bounded_crash_text(text: &str, max_bytes: usize) -> String {
+    let mut result = String::new();
+    for ch in text.chars() {
+        let ch = if ch.is_control() && ch != '\n' && ch != '\t' { ' ' } else { ch };
+        if result.len().saturating_add(ch.len_utf8()) > max_bytes {
+            break;
+        }
+        result.push(ch);
+    }
+    result
+}
+
 fn sanitize_inline(s: &str) -> String {
     s.chars()
         .map(|c| if c.is_control() { ' ' } else { c })
@@ -634,6 +649,7 @@ impl DialogView {
             | Some(DialogKind::Error)
             | Some(DialogKind::Prompt)
             | Some(DialogKind::Execute)
+            | Some(DialogKind::Crash)
             | None => DialogViewportPolicy::ContentBudget,
         }
     }
@@ -647,6 +663,7 @@ impl DialogView {
             selection: None,
             question_capable: false,
             new_designs: false,
+            crash_screen: None,
             rejected: false,
             attempt_counter: 0,
             pending_attempt: 0,
@@ -716,6 +733,13 @@ impl DialogView {
     /// line and the footer gap, never any decision or focus semantics.
     pub fn set_new_designs(&mut self, enabled: bool) {
         self.new_designs = enabled;
+        if let Some(select) = self.dialog.as_mut().and_then(|dialog| dialog.select.as_mut()) {
+            select.set_experiment(if enabled {
+                crate::native_palette::select::SelectExperiment::new_designs()
+            } else {
+                crate::native_palette::select::SelectExperiment::legacy()
+            });
+        }
     }
 
     /// Whether the new-designs shell is active for this view.
@@ -985,6 +1009,59 @@ impl DialogView {
         }
     }
 
+    /// Open the root panic overlay with bounded, sanitized panic details.
+    pub fn open_crash(
+        &mut self,
+        message: Option<&str>,
+        stack: Option<&str>,
+        version: &str,
+        mode: crash::CrashMode,
+        terminal: &str,
+    ) -> Result<(), DialogError> {
+        if self.is_open() {
+            self.close();
+        }
+        let message = message.map(|text| bounded_crash_text(text, 2048));
+        let stack = stack.map(|text| bounded_crash_text(text, 16 * 1024));
+        self.dialog = Some(OpenDialog {
+            id: "crash".to_owned(),
+            session_id: String::new(),
+            kind: DialogKind::Crash,
+            title: crash::HEADLINE.to_owned(),
+            choices: Vec::new(),
+            disabled: Vec::new(),
+            permission: Vec::new(),
+            select: None,
+            mcp_status: Vec::new(),
+            message_lines: Vec::new(),
+            error: StaticError::BackendUnavailable,
+            prompt: None,
+            footer_gap: None,
+        });
+        self.crash_screen = Some(crash::CrashScreen::new(
+            mode,
+            version,
+            message.as_deref(),
+            stack.as_deref(),
+            std::env::consts::OS,
+            terminal,
+        ));
+        self.phase = Phase::Open;
+        self.open_sequence = self.open_sequence.saturating_add(1);
+        self.modal.replace(self.open_sequence, DialogSize::Medium, true, None, self.focus);
+        Ok(())
+    }
+
+    /// Crash model, only while the crash overlay is open.
+    pub fn crash_screen(&self) -> Option<&crash::CrashScreen> {
+        self.crash_screen.as_ref()
+    }
+
+    /// Route a crash key to the upstream crash-screen model.
+    pub fn handle_crash_key(&mut self, key: crash::CrashKey, rows: u16) -> Option<crash::CrashOutcome> {
+        self.crash_screen.as_mut().map(|screen| screen.handle(key, rows))
+    }
+
     /// Validate, sanitize and open a dialog. Refuses to replace a visible
     /// dialog (including one pending) so a focus owner is never silently
     /// swapped out.
@@ -1080,7 +1157,13 @@ impl DialogView {
                     )
                 })
                 .collect();
-            crate::native_palette::select::SelectDialog::new(options)
+            crate::native_palette::select::SelectDialog::new(options).with_experiment(
+                if self.new_designs {
+                    crate::native_palette::select::SelectExperiment::new_designs()
+                } else {
+                    crate::native_palette::select::SelectExperiment::legacy()
+                },
+            )
         });
         self.dialog = Some(OpenDialog {
             id: request.id,
@@ -1556,7 +1639,7 @@ impl DialogView {
         };
         match dialog.kind {
             DialogKind::Error => return Err(DialogError::NotAnswerable),
-            DialogKind::Execute => return Err(DialogError::NotAnswerable),
+            DialogKind::Execute | DialogKind::Crash => return Err(DialogError::NotAnswerable),
             DialogKind::Mcp => return Err(DialogError::NotAnswerable),
             DialogKind::Question if !self.question_capable => {
                 return Err(DialogError::QuestionUnavailable)
@@ -1628,8 +1711,11 @@ impl DialogView {
             },
             DialogKind::Prompt => return Err(DialogError::NotAnswerable),
             DialogKind::Mcp => unreachable!("not answerable"),
-            DialogKind::Execute => unreachable!("answered above"),
-            DialogKind::Error => unreachable!("answered above"),
+            // `Crash` is refused as `NotAnswerable` by the guard above, so it
+            // can never reach the intent construction.
+            DialogKind::Execute | DialogKind::Error | DialogKind::Crash => {
+                unreachable!("answered above")
+            }
         };
         self.pending_attempt = attempt;
         self.phase = Phase::Pending;
@@ -1649,7 +1735,7 @@ impl DialogView {
         match kind {
             DialogKind::Question => return Err(DialogError::QuestionCancelUnsupported),
             DialogKind::Error => return Err(DialogError::NotAnswerable),
-            DialogKind::Execute => return Err(DialogError::NotAnswerable),
+            DialogKind::Execute | DialogKind::Crash => return Err(DialogError::NotAnswerable),
             DialogKind::Mcp => return Err(DialogError::NotAnswerable),
             _ => {}
         }
@@ -1668,7 +1754,11 @@ impl DialogView {
                 attempt,
             },
             DialogKind::Prompt => return Err(DialogError::NotAnswerable),
-            DialogKind::Question | DialogKind::Error | DialogKind::Execute | DialogKind::Mcp => unreachable!("handled above"),
+            DialogKind::Question
+            | DialogKind::Error
+            | DialogKind::Execute
+            | DialogKind::Crash
+            | DialogKind::Mcp => unreachable!("handled above"),
         };
         self.pending_attempt = attempt;
         self.phase = Phase::Pending;
@@ -1872,18 +1962,25 @@ impl DialogView {
                 DialogKind::Confirm => lines.push(line("confirmation required".to_string(), Role::Description)),
                 DialogKind::Select => {
                     // DIALOG-06: the live filter is visible above the rows.
-                    let filter = dialog
-                        .select
-                        .as_ref()
-                        .map(|select| select.filter())
-                        .unwrap_or("");
-                    if filter.is_empty() {
-                        lines.push(line(
-                            "select: use up/down then Enter".to_string(),
-                            Role::Description,
-                        ));
-                    } else {
-                        lines.push(line(format!("select: {filter}"), Role::Item));
+                    let select = dialog.select.as_ref();
+                    let filter = select.map(|select| select.filter()).unwrap_or("");
+                    let search_in_title = select.is_some_and(|select| {
+                        crate::native_palette::select::search_in_title(
+                            select.experiment(),
+                            true,
+                        )
+                    });
+                    if !search_in_title {
+                        if filter.is_empty() {
+                            lines.push(line(
+                                "select: use up/down then Enter".to_string(),
+                                Role::Description,
+                            ));
+                        } else {
+                            lines.push(line(format!("select: {filter}"), Role::Item));
+                        }
+                    } else if !filter.is_empty() {
+                        lines[0] = line(format!("select: {filter}"), Role::Item);
                     }
                 }
                 DialogKind::Prompt => {
@@ -1907,8 +2004,18 @@ impl DialogView {
                     lines.push(line(dialog.error.headline().to_string(), Role::Error));
                     lines.push(line(dialog.error.detail().to_string(), Role::Description));
                 }
+                DialogKind::Crash => {
+                    // The root panic overlay paints its own full-screen,
+                    // theme-independent content (`error-component.tsx`); the
+                    // DialogView fallback still surfaces the bounded headline
+                    // and message so this path is never blank.
+                    if let Some(screen) = self.crash_screen.as_ref() {
+                        lines.push(line(screen.message().to_owned(), Role::Error));
+                        lines.push(line(screen.version_line(), Role::Description));
+                    }
+                }
             }
-            let has_footer = !matches!(dialog.kind, DialogKind::Error)
+            let has_footer = !matches!(dialog.kind, DialogKind::Error | DialogKind::Crash)
                 && !matches!(dialog.kind, DialogKind::Execute)
                 && !(dialog.kind == DialogKind::Question && !self.question_capable);
             let footer_rows = usize::from(has_footer && height > 1);
@@ -1970,7 +2077,22 @@ impl DialogView {
                 // a marked row reserves one cell, an unmarked row three.
                 let marked = self.selection == Some(index);
                 let (row_left, _) = crate::native_palette::dialog::row_padding(marked, self.new_designs);
-                let marker = if marked {
+                let marker = if let Some(select) = dialog.select.as_ref() {
+                    let experiment = select.experiment();
+                    let gutter = crate::native_palette::select::active_gutter(experiment, marked);
+                    let marker = if marked {
+                        crate::native_palette::select::current_marker(experiment)
+                    } else {
+                        " "
+                    };
+                    if experiment.new_markers {
+                        format!("{gutter}{marker} ")
+                    } else if marked {
+                        format!("{}> ", " ".repeat(row_left as usize))
+                    } else {
+                        " ".repeat(row_left as usize)
+                    }
+                } else if marked {
                     format!("{}> ", " ".repeat(row_left as usize))
                 } else {
                     " ".repeat(row_left as usize)
@@ -2039,6 +2161,9 @@ impl DialogView {
                 DialogKind::Question if !self.question_capable => {}
                 DialogKind::Error => {}
                 DialogKind::Execute => {}
+                // The crash overlay owns its own footer (`error-component.tsx`),
+                // so the generic dialog footer is suppressed.
+                DialogKind::Crash => {}
                 _ if height > 1 => {
                     lines.truncate(height - 1);
                     hits[height - 1] = None;
@@ -5902,6 +6027,65 @@ mod error_and_crash_tests {
         let marker = "%0A%E2%80%A6%20%28truncated%29";
         assert!(url.contains(marker), "missing truncation marker");
     }
+
+    /// DIALOG-20: `open_crash` seeds the root overlay model, routes keys into
+    /// it, and never lets the crash overlay reach the decision path.
+    #[test]
+    fn open_crash_seeds_the_overlay_and_routes_keys() {
+        use super::{bounded_crash_text, DialogError, DialogKind, DialogView};
+
+        let mut view = DialogView::new();
+        view.open_crash(Some("boom"), Some("at a\nat b"), "1.2.3", CrashMode::Dark, "vt")
+            .unwrap();
+        assert!(view.is_open());
+        assert_eq!(view.open_kind(), Some(DialogKind::Crash));
+        let screen = view.crash_screen().expect("crash model seeded");
+        assert_eq!(screen.message(), "boom");
+        assert_eq!(screen.stack(), "at a\nat b");
+        assert_eq!(screen.version_line(), "OpenCode 1.2.3");
+        // Keys route into the crash model (copy/restart/quit), not the dialog
+        // decision path.
+        assert_eq!(view.handle_crash_key(CrashKey::Right, 24), Some(CrashOutcome::Moved));
+        assert_eq!(
+            view.handle_crash_key(CrashKey::Enter, 24),
+            Some(CrashOutcome::Run(CrashAction::Restart))
+        );
+        assert_eq!(view.handle_crash_key(CrashKey::CtrlC, 24), Some(CrashOutcome::Exit));
+        // A crash overlay is neither answerable nor cancellable.
+        assert_eq!(view.answer().unwrap_err(), DialogError::NotAnswerable);
+        assert_eq!(view.cancel().unwrap_err(), DialogError::NotAnswerable);
+
+        // The layout fallback surfaces the bounded message and version, and
+        // suppresses the generic dialog footer (the crash module owns it).
+        let rows = view.render(80, 24);
+        assert!(rows.iter().any(|row| row == "boom"), "{rows:?}");
+        assert!(rows.iter().any(|row| row == "OpenCode 1.2.3"), "{rows:?}");
+        assert!(!rows.iter().any(|row| row.contains("Enter")), "{rows:?}");
+
+        // `bounded_crash_text` bounds by bytes and neutralizes control chars
+        // (except newline/tab) without splitting a multi-byte scalar.
+        assert_eq!(bounded_crash_text("a\u{1}b\tc\nd", 64), "a b\tc\nd");
+        assert_eq!(bounded_crash_text("\u{1}\u{2}\u{3}tail", 3), "   ");
+        assert_eq!(bounded_crash_text("ééé", 4), "éé");
+    }
+
+    /// DIALOG-20: the fallback message uses the upstream placeholder when the
+    /// panic payload is absent or empty, and `handle_crash_key` is a no-op
+    /// before the overlay opens.
+    #[test]
+    fn crash_overlay_uses_placeholders_and_is_inert_before_open() {
+        use super::DialogView;
+
+        let mut view = DialogView::new();
+        assert_eq!(view.crash_screen(), None);
+        assert_eq!(view.handle_crash_key(CrashKey::Enter, 24), None);
+
+        view.open_crash(None, Some(""), "9.9.9", CrashMode::Light, "vt").unwrap();
+        let screen = view.crash_screen().expect("crash model seeded");
+        assert_eq!(screen.message(), UNKNOWN_MESSAGE);
+        assert_eq!(screen.stack(), NO_STACK);
+        assert_eq!(screen.mode(), CrashMode::Light);
+    }
 }
 
 #[cfg(test)]
@@ -8356,6 +8540,21 @@ mod select_live_tests {
         })
         .expect("select request valid");
         view
+    }
+
+    #[test]
+    fn dialog09_live_select_reads_experiment_markers_and_preserves_legacy_rows() {
+        let mut legacy = select_view(&["Copy path", "Open folder"], &[]);
+        assert!(legacy
+            .render(56, 12)
+            .iter()
+            .any(|row| row == " > 1. Copy path"));
+
+        let mut designed = select_view(&["Copy path", "Open folder"], &[]);
+        designed.set_new_designs(true);
+        let rows = designed.render(56, 12);
+        assert!(rows.iter().any(|row| row == "┃▪ 1. Copy path"), "{rows:?}");
+        assert!(rows.iter().any(|row| row == "   2. Open folder"), "{rows:?}");
     }
 
     #[test]

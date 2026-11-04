@@ -2310,6 +2310,8 @@ struct PaintCtx {
     vertical_rail: Option<crate::native_tab_rail::RailFrame>,
     compact_tooltip: Option<crate::native_tab_rail::CompactTooltip>,
     context_menu: Option<crate::native_tab_context_menu::MenuFrame>,
+    /// DIALOG-19: startup/reconnect lifecycle overlays composed from live facts.
+    chrome: Vec<crate::native_overlay_stack::OverlayFrame>,
     /// DIALOG-20: the live toast surface for this frame, when one is visible
     /// (`ui/toast.tsx`). Painted last, above every other overlay.
     toast: Option<crate::native_toast::ToastFrame>,
@@ -2821,6 +2823,7 @@ mod surface_paint_regressions {
             vertical_rail: None,
             compact_tooltip: None,
             context_menu: None,
+            chrome: Vec::new(),
             toast: None,
             transcript_scrollbar: None,
             sidebar_scrollbar: None,
@@ -2882,6 +2885,7 @@ mod surface_paint_regressions {
             vertical_rail: None,
             compact_tooltip: None,
             context_menu: None,
+            chrome: Vec::new(),
             toast: None,
             transcript_scrollbar: Some(scrollbar),
             sidebar_scrollbar: None,
@@ -2972,6 +2976,7 @@ mod surface_paint_regressions {
             vertical_rail: None,
             compact_tooltip: None,
             context_menu: None,
+            chrome: Vec::new(),
             toast: None,
             transcript_scrollbar: None,
             sidebar_scrollbar: Some(scrollbar),
@@ -3041,6 +3046,7 @@ mod surface_paint_regressions {
             vertical_rail: None,
             compact_tooltip: Some(tooltip.clone()),
             context_menu: None,
+            chrome: Vec::new(),
             toast: None,
             transcript_scrollbar: None,
             sidebar_scrollbar: None,
@@ -3641,6 +3647,163 @@ fn chat_row_background_at(
     (x >= left && x < right)
         .then(|| chat_row_background(class, root, panel, element, diff))
         .flatten()
+}
+
+#[cfg(all(test, feature = "native"))]
+mod dialog19_chrome_paint_tests {
+    use super::*;
+
+    /// DIALOG-19: a startup lifecycle overlay active in the ticked
+    /// `ChromeFrame` must reach the paint loop: the hint paints above the
+    /// shell and the reconnecting backdrop dims the viewport.
+    #[test]
+    fn dialog19_startup_and_reconnecting_layers_paint_from_ticked_frame() {
+        // A live shell whose plugins are still loading and whose connection
+        // is down: native_loop seeds these facts (`live.is_none()` reports
+        // `Reconnecting`) and ticks the shared chrome clock every frame.
+        let mut chrome = crate::native_modal_layer::ChromeModel::new();
+        chrome.begin(0);
+        chrome.set_connection(0, crate::native_overlay_stack::ConnectionPhase::Reconnecting);
+        // Past the 500 ms startup grace and the 1000 ms reconnecting grace.
+        let fallback_frame = chrome.tick(&1_500);
+        assert!(
+            fallback_frame.paints(crate::native_modal_layer::ChromeLayer::Startup),
+            "startup hint paints after its grace: {:?}",
+            fallback_frame.paint
+        );
+        assert!(
+            fallback_frame.paints(crate::native_modal_layer::ChromeLayer::Reconnecting),
+            "reconnecting paints after its grace: {:?}",
+            fallback_frame.paint
+        );
+        assert!(
+            !fallback_frame.paints(crate::native_modal_layer::ChromeLayer::Toast),
+            "no toast is queued by lifecycle facts alone"
+        );
+
+        // The live composition (native_loop at the PaintCtx build): laid-out
+        // overlay frames derived from the ticked chrome facts.
+        let size = crate::native_overlay_stack::TerminalSize::new(80, 24);
+        let palette = crate::native_theme_runtime::Palette::opencode_dark();
+        let overlay_palette = crate::native_overlay_stack::OverlayPalette::from_palette(
+            &palette,
+            crate::native_theme_runtime::ThemeMode::Dark,
+        );
+        let mut chrome_layers = Vec::new();
+        if fallback_frame.paints(crate::native_modal_layer::ChromeLayer::Startup) {
+            if let Some(frame) = crate::native_overlay_stack::layout_startup(
+                &chrome.startup().text(true),
+                size,
+                &overlay_palette,
+            ) {
+                chrome_layers.push(frame);
+            }
+        }
+        if fallback_frame.paints(crate::native_modal_layer::ChromeLayer::Reconnecting) {
+            if let Some(frame) = crate::native_overlay_stack::layout_reconnecting(
+                false,
+                size,
+                &overlay_palette,
+            ) {
+                chrome_layers.push(frame);
+            }
+        }
+        assert_eq!(chrome_layers.len(), 2, "both lifecycle overlays materialized");
+        assert!(
+            chrome_layers[1].backdrop.is_some(),
+            "reconnecting carries the dim backdrop"
+        );
+        assert!(
+            chrome_layers[0]
+                .rows
+                .iter()
+                .any(|row| row.text().contains("Loading plugins")),
+            "startup row carries the live label"
+        );
+
+        // The frames must survive the full paint loop into rendered cells.
+        let mut view = crate::native_view::NativeView::new(80, 24);
+        view.set_session_route(true);
+        let lines = view.render_typed("draft", &[], true, &[]);
+        let mut renderer = NativeRenderer::create_memory(80, 24).expect("memory renderer");
+        native_paint(
+            &mut renderer,
+            &lines,
+            PaintCtx {
+                palette,
+                dialog: crate::native_theme_runtime::RuntimeTheme::builtin_default(
+                    crate::native_theme_runtime::ThemeMode::Dark,
+                )
+                .dialog,
+                markdown: None,
+                semantic: None,
+                diff: None,
+                presentation: view.presentation(),
+                modal_rows: None,
+                modal: view.modal_presentation(),
+                sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
+                chat_row_classes: view.chat_row_classes().to_vec(),
+                chat_markdown_spans: view.chat_markdown_spans().to_vec(),
+                selection: Vec::new(),
+                appearance: crate::native_box_style::BoxAppearance::default(),
+                modal_box: crate::native_box_style::BoxId::Dialog,
+                loading: None,
+                home: false,
+                rail_prompt: view.session_prompt_rail("draft"),
+                composer: None,
+                completion: None,
+                context_usage_styles: Vec::new(),
+                sidebar_span_styles: Vec::new(),
+                ui_regions: Vec::new(),
+                modal_underlay_rows: Vec::new(),
+                page_panel: None,
+                logo: None,
+                tabs: None,
+                animations: true,
+                title_renaming: None,
+                vertical_rail: None,
+                compact_tooltip: None,
+                context_menu: None,
+                chrome: chrome_layers.clone(),
+                toast: None,
+                transcript_scrollbar: None,
+                sidebar_scrollbar: None,
+                scrollbar_track: Rgba::rgb(12, 12, 12),
+                scrollbar_thumb: Rgba::rgb(72, 72, 72),
+            },
+        )
+        .expect("paint native frame");
+        let snapshot = renderer.snapshot_text().expect("native text snapshot");
+        let rows: Vec<_> = snapshot.lines().collect();
+        assert!(
+            rows.iter().any(|row| row.contains("Loading plugins")),
+            "startup hint painted: {snapshot:?}"
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("Connection lost")
+                    || row.contains("Reconnecting to the server")),
+            "reconnecting copy painted: {snapshot:?}"
+        );
+    }
+
+    /// DIALOG-19: a ready, connected shell paints no lifecycle layers.
+    #[test]
+    fn dialog19_connected_ready_shell_paints_no_lifecycle_layers() {
+        let mut chrome = crate::native_modal_layer::ChromeModel::new();
+        chrome.begin(0);
+        chrome.set_plugins_ready(0, true);
+        chrome.set_connection(0, crate::native_overlay_stack::ConnectionPhase::Connected);
+        let frame = chrome.tick(&2_000);
+        assert!(
+            !frame.paints(crate::native_modal_layer::ChromeLayer::Startup),
+            "ready shell never paints the startup hint"
+        );
+        assert!(
+            !frame.paints(crate::native_modal_layer::ChromeLayer::Reconnecting),
+            "connected shell never paints the reconnecting overlay"
+        );
+    }
 }
 
 #[cfg(all(test, feature = "native"))]
@@ -6103,6 +6266,42 @@ fn native_paint(
             }
         }
     }
+    for frame in ctx.chrome.iter() {
+        // DIALOG-19: startup/reconnect lifecycle overlays sit above the shell
+        // and below the toast (`startup-loading.tsx`, `reconnecting.tsx`).
+        // The backdrop dims the whole viewport first, then each row's runs
+        // tile the surface exactly like the toast painter does.
+        if let Some((backdrop, color)) = frame.backdrop {
+            let bx = u32::from(backdrop.x).min(cols);
+            let by = u32::from(backdrop.y).min(rows);
+            renderer.fill_rect(
+                bx,
+                by,
+                u32::from(backdrop.width).min(cols.saturating_sub(bx)),
+                u32::from(backdrop.height).min(rows.saturating_sub(by)),
+                Rgba::new(color[0], color[1], color[2], color[3]),
+            )?;
+        }
+        for row in &frame.rows {
+            if u32::from(row.y) >= rows {
+                continue;
+            }
+            for run in &row.runs {
+                let rx = u32::from(run.x);
+                if rx >= cols {
+                    continue;
+                }
+                renderer.draw_text_styled(
+                    rx,
+                    u32::from(row.y),
+                    &run.text,
+                    Rgba::new(run.fg[0], run.fg[1], run.fg[2], run.fg[3]),
+                    Some(Rgba::new(run.bg[0], run.bg[1], run.bg[2], run.bg[3])),
+                    run.attributes,
+                )?;
+            }
+        }
+    }
     if let Some(toast) = ctx.toast.as_ref() {
         // DIALOG-20: the toast surface is the topmost overlay
         // (`ui/toast.tsx`). Each `CellRun` is a styled span inside the box.
@@ -7951,6 +8150,16 @@ fn native_loop(
     // is advanced on the animation tick so auto-dismiss is deterministic.
     let mut toast = crate::native_toast::Toast::new();
     let mut toast_now_ms: u64 = 0;
+    let mut chrome = crate::native_modal_layer::ChromeModel::new();
+    // DIALOG-19: the ticked frame each loop iteration paints from.
+    let mut chrome_frame = crate::native_modal_layer::ChromeFrame::default();
+    chrome.begin(0);
+    if live.is_some() {
+        chrome.set_plugins_ready(0, true);
+        chrome.set_connection(0, crate::native_overlay_stack::ConnectionPhase::Connected);
+    } else {
+        chrome.set_connection(0, crate::native_overlay_stack::ConnectionPhase::Reconnecting);
+    }
     let config_paths = native_tui_config_paths().unwrap_or_else(|error| {
         append_transcript(&mut transcript, format!("error: {error}"));
         Vec::new()
@@ -9385,6 +9594,13 @@ fn native_loop(
             animation_tick = next_tick;
             needs_paint = true;
         }
+        // DIALOG-19: startup/reconnect layers use observed shell lifecycle facts.
+        let now_ms = animation_start.now_ms();
+        chrome.set_connection(now_ms, if live.is_some() {
+            crate::native_overlay_stack::ConnectionPhase::Connected
+        } else {
+            crate::native_overlay_stack::ConnectionPhase::Reconnecting
+        });
         // DIALOG-20: advance the toast's logical clock by the elapsed wall time
         // so a visible toast auto-dismisses after its 5000 ms lifetime
         // (`ui/toast.tsx`), and a repaint is scheduled while one is visible.
@@ -9395,6 +9611,9 @@ fn native_loop(
                 toast_now_ms = now_ms;
                 needs_paint = true;
             }
+            // DIALOG-19: the shared chrome clock advances lifecycle overlays
+            // from this frame's same logical timestamp, every loop pass.
+            chrome_frame = chrome.tick(&now_ms);
         }
         // TOOL-002: publish the live spinner frame for busy tool rows. The
         // upstream `<spinner frames interval={80}>` cadence is one frame per
@@ -10091,6 +10310,35 @@ fn native_loop(
                     false,
                 )
             });
+            // DIALOG-19: paint the ticked lifecycle overlays from live shell
+            // facts: the startup hint while plugins load (`startup-loading.tsx`)
+            // and the reconnecting box while the connection is down
+            // (`reconnecting.tsx`, `app.tsx:1378-1402`).
+            let chrome_frames: Vec<crate::native_overlay_stack::OverlayFrame> = {
+                let size = crate::native_overlay_stack::TerminalSize::new(viewport.0, viewport.1);
+                let overlay_palette =
+                    crate::native_overlay_stack::OverlayPalette::from_palette(&theme.palette, theme.mode);
+                let mut frames = Vec::new();
+                if chrome_frame.paints(crate::native_modal_layer::ChromeLayer::Startup) {
+                    if let Some(frame) = crate::native_overlay_stack::layout_startup(
+                        &chrome.startup().text(animations),
+                        size,
+                        &overlay_palette,
+                    ) {
+                        frames.push(frame);
+                    }
+                }
+                if chrome_frame.paints(crate::native_modal_layer::ChromeLayer::Reconnecting) {
+                    if let Some(frame) = crate::native_overlay_stack::layout_reconnecting(
+                        false,
+                        size,
+                        &overlay_palette,
+                    ) {
+                        frames.push(frame);
+                    }
+                }
+                frames
+            };
             native_paint(
                 &mut renderer,
                 &lines,
@@ -10158,6 +10406,7 @@ fn native_loop(
             vertical_rail: frame_rail.clone(),
             compact_tooltip: frame_tooltip,
             toast: toast_frame,
+            chrome: chrome_frames,
             context_menu: message_menu
                 .as_ref()
                 .map(|menu| message_menu_frame(menu, crate::native_tab_context_menu::Viewport { width: viewport.0, height: viewport.1 }))

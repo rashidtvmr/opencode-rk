@@ -1300,6 +1300,10 @@ pub mod select {
             self
         }
 
+        pub fn set_experiment(&mut self, experiment: SelectExperiment) {
+            self.experiment = experiment;
+        }
+
         #[must_use]
         pub fn with_threshold(mut self, threshold: f32) -> Self {
             self.filter_threshold = threshold.clamp(0.0, 1.0);
