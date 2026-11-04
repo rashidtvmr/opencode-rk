@@ -6007,6 +6007,11 @@ struct PendingPermission {
     id: String,
     title: String,
     persistent_allowed: bool,
+    /// FORM-002: the request's own bounded resource body. Upstream paints the
+    /// requested resources inside the permission question
+    /// (`permission.tsx:428-552`); the oc2 payload already carried them
+    /// (`PermissionRequest.resources`) and the client dropped them.
+    message: Option<String>,
     /// TOOL-002: the pending request's bounded tool `callID`. Upstream joins
     /// on `request.source.type === "tool" && request.source.id === part.id`
     /// (`routes/session/index.tsx:2793-2799`); oc2's `PermissionSource`
@@ -6087,6 +6092,27 @@ mod permission_save_eligible_tests {
 }
 
 #[cfg(feature = "native")]
+fn permission_message_from_entry(entry: &serde_json::Value) -> Option<String> {
+    let resources = entry.get("resources")?.as_array()?;
+    let lines: Vec<String> = resources
+        .iter()
+        .filter_map(|value| value.as_str())
+        .filter(|resource| !resource.is_empty())
+        .map(|resource| {
+            resource
+                .chars()
+                .filter(|character| !character.is_control())
+                .take(160)
+                .collect()
+        })
+        .collect();
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}
+
 fn fetch_permission(
     origin: &str,
     session: &str,
@@ -6130,6 +6156,7 @@ fn fetch_permission(
         // is a tool permission (`index.tsx:2793-2799`).
         let permission_call_id = permission_call_id_from_source(entry.get("source"));
         return Ok(Some(PendingPermission {
+            message: permission_message_from_entry(entry),
             id: id.to_owned(),
             title,
             persistent_allowed,
@@ -6137,6 +6164,44 @@ fn fetch_permission(
         }));
     }
     Ok(None)
+}
+
+#[cfg(test)]
+mod form002_tests {
+    use super::*;
+
+    /// FORM-002: the request's own resources become the painted message body;
+    /// the poll previously dropped them (`message: None`).
+    #[test]
+    fn form002_resources_become_the_permission_message_body() {
+        let entry: serde_json::Value = serde_json::from_str(
+            r#"{"id":"p1","action":"bash","resources":["~/secret.txt","~/notes.md"],"save":["deny"],"source":{"type":"tool","messageID":"m1","callID":"c1"}}"#,
+        )
+        .unwrap();
+        let message = permission_message_from_entry(&entry).expect("resources produce message");
+        let mut view = crate::native_view::NativeView::new(100, 32);
+        view.dialogs
+            .open_permission_with_persistent("p1", "session", "bash", true)
+            .unwrap();
+        view.dialogs.prompt_set_message(Some(message));
+        let rows = view.dialogs.render(100, 24).join("\n");
+        assert!(
+            rows.contains("~/secret.txt") && rows.contains("~/notes.md"),
+            "painted permission dialog must show the requested resources:\n{rows}"
+        );
+    }
+
+    /// FORM-002: absent or empty resources paint no message line (never an
+    /// invented placeholder).
+    #[test]
+    fn form002_missing_resources_leave_the_body_empty() {
+        let entry: serde_json::Value =
+            serde_json::from_str(r#"{"id":"p2","action":"bash","resources":[]}"#).unwrap();
+        assert!(permission_message_from_entry(&entry).is_none());
+        let absent: serde_json::Value =
+            serde_json::from_str(r#"{"id":"p3","action":"bash"}"#).unwrap();
+        assert!(permission_message_from_entry(&absent).is_none());
+    }
 }
 
 /// Dispatch one decision intent to the real permission broker reply route
@@ -8652,6 +8717,17 @@ fn native_loop(
                                 pending.title,
                                 pending.persistent_allowed,
                             );
+                            if result.is_ok() {
+                                // FORM-002: paint the request's own resources
+                                // (upstream `permission.tsx:428-552` shows the
+                                // requested resource body inside the question;
+                                // the dialog previously passed `None`). The
+                                // message setter is the generic `message_lines`
+                                // path shared by every dialog kind.
+                                if let Some(message) = pending.message.as_deref() {
+                                    view.dialogs.prompt_set_message(Some(message.to_owned()));
+                                }
+                            }
                             match result {
                                 Ok(()) => {
                                     // PAR-07: permission presentation is a
@@ -11796,6 +11872,19 @@ fn native_loop(
                 continue;
             }
             match byte {
+                // FORM-002: `left,h` / `right,l` cycle permission options
+                // (`permission.tsx:463-485`). Scoped to the permission prompt:
+                // other modal kinds bind h/l to nothing upstream.
+                b'h' if view.dialogs.open_kind()
+                    == Some(crate::native_view_dialogs::DialogKind::Permission) =>
+                {
+                    view.dialogs.prev();
+                }
+                b'l' if view.dialogs.open_kind()
+                    == Some(crate::native_view_dialogs::DialogKind::Permission) =>
+                {
+                    view.dialogs.next();
+                }
                 14 => view.dialogs.next(),
                 2 => view.dialogs.prev(),
                 b'1'..=b'9' => { view.dialogs.select(usize::from(byte - b'1')); }
