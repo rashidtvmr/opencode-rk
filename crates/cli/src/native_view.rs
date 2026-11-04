@@ -207,6 +207,20 @@ pub struct NativeView {
     /// (`index.tsx:1913-1917`). Fed from the live turn clock so the spinner
     /// advances; 0 paints the first frame.
     rail_elapsed_ms: u64,
+    /// CP-13: the live `session.interrupt` arming state
+    /// (`PromptInterruptStatus`, `prompt/index.tsx:500-531`). The runner
+    /// presses it from the live Escape key; the paint reads it to choose the
+    /// armed label + flash colour. Carried into `RailFacts` by the composer
+    /// footer against the same monotonic clock.
+    rail_interrupt: crate::native_status_rail::InterruptArm,
+    /// CP-13: monotonic ms for the arming flash (`index.tsx:117-136`).
+    rail_now_ms: u64,
+    /// CP-14: `VcsInfo.branch` of the live session's directory
+    /// (`prompt/index.tsx` location). `None` hides the branch (unknown dir).
+    rail_branch: Option<String>,
+    /// CP-14: whether the directory checkout is a linked git worktree
+    /// (`VcsInfo.worktree`).
+    rail_worktree: bool,
     /// First running subagent, the navigation target of the footer live
     /// label (`session.child.first`, `routes/session/index.tsx:1391-1398`).
     live_first_child: Option<String>,
@@ -1136,6 +1150,10 @@ impl NativeView {
             rail_interactive: true,
             rail_animations: true,
             rail_elapsed_ms: 0,
+            rail_interrupt: crate::native_status_rail::InterruptArm::default(),
+            rail_now_ms: 0,
+            rail_branch: None,
+            rail_worktree: false,
             queued_prompts: crate::native_view_chat::QueueDock::default(),
             session_revert: None,
             dock: {
@@ -1472,6 +1490,29 @@ impl NativeView {
     pub fn set_rail_status_clock(&mut self, animations: bool, elapsed_ms: u64) {
         self.rail_animations = animations;
         self.rail_elapsed_ms = elapsed_ms;
+    }
+
+    /// CP-13: install the live `session.interrupt` arming state + the
+    /// monotonic clock the flash reads (`prompt/index.tsx:500-531`,
+    /// `:117-136`). Set from the input loop on every frame; the composer
+    /// footer's running status slot owns the paint.
+    pub fn set_rail_interrupt(
+        &mut self,
+        interrupt: crate::native_status_rail::InterruptArm,
+        now_ms: u64,
+    ) {
+        self.rail_interrupt = interrupt;
+        self.rail_now_ms = now_ms;
+    }
+
+    /// CP-14: install the live session directory's branch facts
+    /// (`VcsInfo`). `branch` is `None` when the directory is not a git
+    /// checkout, which hides the branch term; `worktree` marks a linked
+    /// worktree. Fed from the same `git_vcs_info` producer the tab titles
+    /// use.
+    pub fn set_rail_location(&mut self, branch: Option<String>, worktree: bool) {
+        self.rail_branch = branch;
+        self.rail_worktree = worktree;
     }
 
     /// Whether the composer owns input (`useInteractivity`): footer hints read
@@ -1938,11 +1979,26 @@ impl NativeView {
         // (idle directory) and the running/move/pending precedence; the
         // streaming/retry chrome (`PromptSurface::is_busy`) joins the caller's
         // provider-turn fact so the same scanner covers a retry frame.
+        // CP-13: the live interrupt arm feeds the running slot (armed label +
+        // flash) against the monotonic clock.
+        // CP-14: the idle slot is the home-abbreviated directory with the
+        // session's live VCS branch appended (`index.tsx:1636-1643`), and the
+        // hover fact selects base vs muted (`:1947`).
+        let home = std::env::var("HOME").unwrap_or_default();
+        let location = (!self.workspace.is_empty()).then(|| {
+            crate::native_status_rail::location_label(
+                &self.workspace,
+                &home,
+                self.rail_branch.as_deref(),
+            )
+        });
         let facts = crate::native_status_rail::RailFacts {
             running: running || self.prompt_surface.is_busy(),
             animations: self.rail_animations,
             elapsed_ms: self.rail_elapsed_ms,
-            location: (!self.workspace.is_empty()).then_some(self.workspace.as_str()),
+            interrupt: self.rail_interrupt,
+            now_ms: self.rail_now_ms,
+            location: location.as_deref(),
             // Same budget the caller's `footer_directory` fallback used.
             location_width: usize::from(self.layout.cols.saturating_sub(4)),
             ..crate::native_status_rail::RailFacts::new(usize::from(self.layout.cols))
@@ -5895,6 +5951,64 @@ mod footer_layout_tests {
         view.set_prompt_turn(false);
         assert_eq!(view.prompt_turn_phase(), crate::native_composer::TurnPhase::Idle);
         assert_eq!(view.composer_status_text(false).contains("interrupt"), false);
+    }
+
+    #[test]
+    fn cp13_live_interrupt_arm_flips_the_composer_status_label() {
+        // CP-13: the composer footer consumes the LIVE arm the loop installs
+        // (`prompt/index.tsx:500-531`): unarmed while running shows the base
+        // `esc interrupt`, and an armed press flips it to `again to interrupt`.
+        let mut view = NativeView::new(80, 24);
+        view.set_workspace("/selected/project".to_owned());
+        view.set_rail_interrupt(crate::native_status_rail::InterruptArm::default(), 0);
+        let unarmed = view.composer_status_text(true);
+        assert!(unarmed.contains("interrupt"), "{unarmed:?}");
+        assert!(
+            !unarmed.contains("again"),
+            "unarmed running shows the base label: {unarmed:?}"
+        );
+        let mut arm = crate::native_status_rail::InterruptArm::default();
+        assert_eq!(
+            arm.press(0, true, false, true, false, true),
+            crate::native_status_rail::InterruptOutcome::Armed(1)
+        );
+        view.set_rail_interrupt(arm, 0);
+        let armed = view.composer_status_text(true);
+        assert!(
+            armed.contains("again to interrupt"),
+            "an armed press flips the label: {armed:?}"
+        );
+        // The loop expires on the monotonic clock before installing the arm
+        // each frame; past the 5000 ms window the label reverts.
+        arm.expire_at(crate::native_status_rail::INTERRUPT_EXPIRY_MS);
+        view.set_rail_interrupt(arm, crate::native_status_rail::INTERRUPT_EXPIRY_MS);
+        let expired = view.composer_status_text(true);
+        assert!(
+            !expired.contains("again"),
+            "the arm expires after 5000 ms: {expired:?}"
+        );
+    }
+
+    #[test]
+    fn cp14_branch_is_appended_to_the_composer_idle_location() {
+        // CP-14: the idle status slot is the home-abbreviated directory with
+        // the session's live VCS branch appended (`index.tsx:1636-1643`); a
+        // non-git directory hides the branch term.
+        let mut view = NativeView::new(80, 24);
+        view.set_workspace("/selected/project".to_owned());
+        view.set_rail_location(Some("main".to_owned()), false);
+        let with_branch = view.composer_status_text(false);
+        assert!(
+            with_branch.contains("/selected/project:main"),
+            "the branch is appended: {with_branch:?}"
+        );
+        view.set_rail_location(None, false);
+        let without_branch = view.composer_status_text(false);
+        assert!(
+            without_branch.contains("/selected/project")
+                && !without_branch.contains(':'),
+            "no branch hides the term: {without_branch:?}"
+        );
     }
 
     #[test]

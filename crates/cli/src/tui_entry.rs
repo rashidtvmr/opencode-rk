@@ -404,7 +404,7 @@ fn history_walk_entry(
     direction: i8,
     current_text: &str,
     current_cursor: usize,
-) -> Option<(String, usize)> {
+) -> Option<(String, usize, crate::native_paste::PromptMode, Vec<crate::native_paste::PastedText>)> {
     let at_edge = if direction < 0 {
         current_cursor == 0
     } else {
@@ -416,7 +416,17 @@ fn history_walk_entry(
     let entry = history.move_through(direction, current_text)?;
     let text = entry.prompt.text;
     let cursor = if direction < 0 { 0 } else { text.len() };
-    Some((text, cursor))
+    Some((text, cursor, entry.prompt.mode, entry.prompt.parts))
+}
+
+/// The live shell-prefix transition may run only while the chat composer owns
+/// focus; page queries and setup dialogs route printable bytes to themselves.
+#[cfg(feature = "native")]
+fn shell_entry_allowed(
+    page_query_open: bool,
+    dialog: native_setup::Dialog,
+) -> bool {
+    !page_query_open && matches!(dialog, native_setup::Dialog::None)
 }
 
 #[cfg(all(test, feature = "native"))]
@@ -445,11 +455,11 @@ mod cp30_history_walk_tests {
     #[test]
     fn cp30_history_walk_restores_back_and_forward_with_upstream_cursor() {
         let mut history = seeded();
-        let (text, cursor) = history_walk_entry(&mut history, -1, "", 0).unwrap();
-        assert_eq!((text.as_str(), cursor), ("two", 0));
-        let (text, cursor) = history_walk_entry(&mut history, -1, "two", 0).unwrap();
+        let (text, cursor, mode, parts) = history_walk_entry(&mut history, -1, "", 0).unwrap();
+        assert_eq!((text.as_str(), cursor, mode, parts.len()), ("two", 0, crate::native_paste::PromptMode::Normal, 0));
+        let (text, cursor, _, _) = history_walk_entry(&mut history, -1, "two", 0).unwrap();
         assert_eq!((text.as_str(), cursor), ("one", 0));
-        let (text, cursor) = history_walk_entry(&mut history, 1, "one", 3).unwrap();
+        let (text, cursor, _, _) = history_walk_entry(&mut history, 1, "one", 3).unwrap();
         assert_eq!((text.as_str(), cursor), ("two", 3));
     }
 
@@ -462,6 +472,15 @@ mod cp30_history_walk_tests {
         // An edited draft invalidates the walk (`history.tsx:107-108`).
         assert!(history.move_through(-1, "").is_some());
         assert_eq!(history_walk_entry(&mut history, -1, "edited", 0), None);
+    }
+
+    #[test]
+    fn cp30_shell_gate_respects_focus_owner() {
+        use super::native_setup::Dialog;
+        assert!(super::shell_entry_allowed(false, Dialog::None));
+        assert!(!super::shell_entry_allowed(true, Dialog::None));
+        assert!(!super::shell_entry_allowed(false, Dialog::Provider));
+        assert!(!super::shell_entry_allowed(false, Dialog::Model));
     }
 }
 
@@ -713,6 +732,50 @@ fn git_vcs_info(directory: &str) -> Option<crate::native_navigation::VcsInfo> {
         default_branch,
         worktree,
     })
+}
+
+/// CP-14: the composer footer location branch facts
+/// (`prompt/index.tsx` `locationLabel`, `index.tsx:1636-1643`): the
+/// checked-out branch of the live session directory plus the linked-worktree
+/// marker. A non-git directory yields `(None, false)`, which hides the branch
+/// term (the label renders the bare path) rather than inventing one.
+#[cfg(feature = "native")]
+fn rail_location_facts(directory: &str) -> (Option<String>, bool) {
+    match git_vcs_info(directory) {
+        Some(info) => (info.branch, info.worktree),
+        None => (None, false),
+    }
+}
+
+/// CP-13: whether a bare Escape byte belongs to `session.interrupt`
+/// (`prompt/index.tsx:500-531`). The command's keymap layer enables only while
+/// the chat composer owns focus (`input.focused`, `:504`); every sibling owner
+/// (Help, a page query, the appearance/permission overlays, the import dialog,
+/// the children panel, the modal stack, the command palette and any setup
+/// dialog) keeps its precedence. Extracted so the live arm and its test share
+/// one predicate rather than a copy.
+#[cfg(feature = "native")]
+#[allow(clippy::too_many_arguments)]
+fn interrupt_escape_owned(
+    page_chat: bool,
+    help_open: bool,
+    appearance_open: bool,
+    permission_open: bool,
+    import_open: bool,
+    children_open: bool,
+    modal_intercepts: bool,
+    palette_open: bool,
+    dialog_none: bool,
+) -> bool {
+    page_chat
+        && !help_open
+        && !appearance_open
+        && !permission_open
+        && !import_open
+        && !children_open
+        && !modal_intercepts
+        && !palette_open
+        && dialog_none
 }
 
 
@@ -1686,6 +1749,66 @@ mod tab_10_vcs_producer_tests {
         assert!(git_vcs_info(root.to_str().unwrap()).is_none());
         assert!(git_vcs_info("/oc2/tab10/does/not/exist").is_none());
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod cp13_cp14_live_seam_tests {
+    use super::*;
+
+    /// CP-13: the live Escape arm owns the byte only while the chat composer
+    /// owns focus (`prompt/index.tsx:504` `if (!input.focused) return`). Every
+    /// sibling owner (Help, page query, overlays, import dialog, children
+    /// panel, modal stack, command palette, setup dialog) keeps precedence, so
+    /// Escape never gets stolen from them.
+    #[test]
+    fn cp13_live_escape_owns_the_chat_composer_only() {
+        assert!(super::interrupt_escape_owned(
+            true, false, false, false, false, false, false, false, true
+        ));
+        // A non-Chat page owns Escape (its own close handler).
+        assert!(!super::interrupt_escape_owned(
+            false, false, false, false, false, false, false, false, true
+        ));
+        // Each sibling owner individually blocks the interrupt arm.
+        for blocked in 0..7usize {
+            let mut args = [false; 9];
+            args[0] = true;
+            args[8] = true;
+            args[blocked + 1] = true;
+            assert!(
+                !super::interrupt_escape_owned(
+                    args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8],
+                ),
+                "owner {blocked} must keep Escape precedence"
+            );
+        }
+        // A setup dialog (not `None`) blocks it.
+        assert!(!super::interrupt_escape_owned(
+            true, false, false, false, false, false, false, false, false
+        ));
+    }
+
+    /// CP-14: the composer footer's branch facts come from the SAME on-disk
+    /// VCS producer the tab rail uses, so a real git checkout reports its
+    /// branch and a non-repository directory hides the term.
+    #[test]
+    fn cp14_rail_location_facts_read_branch_from_disk() {
+        let root = std::env::temp_dir().join(format!("oc2-cp14-loc-{}", std::process::id()));
+        let git = root.join(".git");
+        std::fs::create_dir_all(&git).unwrap();
+        std::fs::write(git.join("HEAD"), "ref: refs/heads/release\n").unwrap();
+        let (branch, worktree) = rail_location_facts(root.to_str().unwrap());
+        assert_eq!(branch.as_deref(), Some("release"));
+        assert!(!worktree);
+        let _ = std::fs::remove_dir_all(&root);
+
+        let plain = std::env::temp_dir().join(format!("oc2-cp14-plain-{}", std::process::id()));
+        std::fs::create_dir_all(&plain).unwrap();
+        let (branch, worktree) = rail_location_facts(plain.to_str().unwrap());
+        assert_eq!(branch, None, "no repository hides the branch");
+        assert!(!worktree);
+        let _ = std::fs::remove_dir_all(&plain);
     }
 }
 
@@ -5713,9 +5836,14 @@ fn bind_session(
     );
     transcript.reset(snapshot.history.clone(), snapshot.typed_history.clone());
     view.set_parent_session(snapshot.parent_session);
-    view.set_project_directory(
-        snapshot.directory.clone().unwrap_or_else(current_workspace_label),
-    );
+    let route_directory = snapshot
+        .directory
+        .clone()
+        .unwrap_or_else(current_workspace_label);
+    view.set_project_directory(route_directory.clone());
+    let (route_branch, route_worktree) = rail_location_facts(&route_directory);
+    view.set_rail_location(route_branch.clone(), route_worktree);
+    view.set_sidebar_location(Some(route_directory), route_branch);
     if let Err(error) = refresh_session_mcp(view, &snapshot, auth) {
         append_transcript(transcript, format!("error: session mcp unavailable: {error}"));
     }
@@ -7199,7 +7327,12 @@ fn native_loop(
     // current busy flag, transcript or live snapshot.
     let mut worker: Option<crate::native_view::OwnedWorker<native_turn::TurnWorker>> = None;
     let mut compact_worker: Option<NativeCompactWorker> = None;
+    // CP-13: the live `session.interrupt` arm (`prompt/index.tsx:500-531`),
+    // held across frames so the arming window and 0.22 s flash advance on the
+    // monotonic clock rather than resetting each paint.
+    let mut rail_interrupt = crate::native_status_rail::InterruptArm::default();
     let mut pending_submission: Option<crate::native_composer::SubmittedDraft> = None;
+    let mut submit_gate = crate::native_composer::SubmitGate::new();
     // SIDE-03: the binding generation whose sidebar usage was last set by a
     // live `native_turn::Event::Usage`. While it matches the current binding, a
     // live turn owns the Context row and the history-load selector must not
@@ -7591,18 +7724,22 @@ fn native_loop(
         ),
         None => view.set_session(None),
     }
-    view.set_project_directory(
-        live.as_ref()
-            .and_then(|snapshot| snapshot.directory.clone())
-            .unwrap_or_else(current_workspace_label),
-    );
+    let workspace_directory = live
+        .as_ref()
+        .and_then(|snapshot| snapshot.directory.clone())
+        .unwrap_or_else(current_workspace_label);
+    view.set_project_directory(workspace_directory.clone());
+    // CP-14: feed the composer footer's live branch facts from the same
+    // authenticated directory (`prompt/index.tsx` `locationLabel`). The
+    // sidebar footer takes the SAME branch here (it previously hard-coded
+    // `None` for want of a VCS observer; the producer now exists).
+    let (rail_branch, rail_worktree) = rail_location_facts(&workspace_directory);
+    view.set_rail_location(rail_branch.clone(), rail_worktree);
     // Session sidebar footer (`footer.tsx:87-109`): the active session's own
-    // authenticated directory, never the Home workspace fallback. No VCS
-    // observer exists yet, so the branch stays absent (the label renders the
-    // bare path) rather than inventing one.
+    // authenticated directory, never the Home workspace fallback.
     view.set_sidebar_location(
         live.as_ref().and_then(|snapshot| snapshot.directory.clone()),
-        None,
+        rail_branch,
     );
     view.set_parent_session(
         live.as_ref()
@@ -8470,9 +8607,13 @@ fn native_loop(
                                 Some(snapshot.message_count),
                             );
                             view.set_parent_session(snapshot.parent_session);
-                            view.set_project_directory(
-                                snapshot.directory.clone().unwrap_or_else(current_workspace_label),
-                            );
+                            let turn_directory = snapshot
+                                .directory
+                                .clone()
+                                .unwrap_or_else(current_workspace_label);
+                            view.set_project_directory(turn_directory.clone());
+                            let (turn_branch, turn_worktree) = rail_location_facts(&turn_directory);
+                            view.set_rail_location(turn_branch, turn_worktree);
                             if let Err(error) = refresh_session_mcp(&mut view, &snapshot, auth) {
                                 append_transcript(&mut transcript, format!("error: session mcp unavailable: {error}"));
                             }
@@ -9309,6 +9450,13 @@ fn native_loop(
             // settles, so a finished turn never keeps the scanner.
             view.set_prompt_turn(false);
         }
+        // CP-13: the live `session.interrupt` arm (`PromptInterruptStatus`,
+        // `prompt/index.tsx:500-531`). The runner is the Escape arm above; it
+        // expires on the monotonic clock here so the 0.22 s flash and the
+        // 5000 ms window close on their own boundary, even without input.
+        let rail_now_ms = animation_start.now_ms();
+        rail_interrupt.expire_at(rail_now_ms);
+        view.set_rail_interrupt(rail_interrupt, rail_now_ms);
         let rail_elapsed_ms = if busy_now {
             let start = *busy_since.get_or_insert_with(Instant::now);
             start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
@@ -11471,7 +11619,7 @@ fn native_loop(
                             .as_ref()
                             .is_some_and(|snapshot| snapshot.parent_session_id.is_some())
                     {
-                        if let Some((text, cursor)) = history_walk_entry(
+                        if let Some((text, cursor, mode, parts)) = history_walk_entry(
                             &mut prompt_history,
                             if direction == native_input_decoder::InputEvent::ArrowUp {
                                 -1
@@ -11483,6 +11631,11 @@ fn native_loop(
                         ) {
                             draft = text;
                             draft_cursor = cursor;
+                            draft_parts = parts;
+                            if mode == crate::native_paste::PromptMode::Shell && !draft.starts_with('!') {
+                                draft.insert(0, '!');
+                                draft_cursor += 1;
+                            }
                             crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
                             completion.sync(&draft);
                             utf8.reset();
@@ -11682,6 +11835,15 @@ fn native_loop(
             && !permission_editor.open && !view.dialogs.intercepts_input()
             && !view.command_palette_open() && matches!(dialog, native_setup::Dialog::None)
         {
+            if draft.starts_with('!') {
+                draft.drain(..1);
+                draft_cursor = draft_cursor.saturating_sub(1);
+                draft_parts.clear();
+                completion.sync(&draft);
+                utf8.reset();
+                needs_paint = true;
+                continue;
+            }
             if let Some(parent) = live.as_ref().and_then(|snapshot| snapshot.parent_session_id.clone()) {
                 let result = live.as_ref().ok_or_else(|| "daemon unavailable".to_owned()).and_then(|child_snapshot| return_parent_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, &child_snapshot.origin, auth.as_deref(), binding_generation, &parent));
                 match result {
@@ -11798,6 +11960,79 @@ fn native_loop(
             if had_text && !single_cell {
                 needs_paint = true;
                 continue;
+            }
+        }
+        // CP-13: `session.interrupt` (`config/keybind.ts:128` binds Escape;
+        // handler `prompt/index.tsx:500-531`). Runs only while the chat
+        // composer owns input, after the selection and sibling-return Escape
+        // dispositions above, so it is mutually exclusive with every other
+        // Escape owner (a single-cell selection falls through here; a real
+        // multi-cell selection consumed the byte above). The outcome decides
+        // whether Escape is consumed: an arm/interrupt/shell-exit consumes it,
+        // while an `Ignored` press falls through to oc2's ordinary Escape
+        // disposition (draft clear) exactly as when the command is disabled
+        // upstream (`enabled: status() === "running"`).
+        if byte == 27
+            && interrupt_escape_owned(
+                view.page() == crate::native_view_pages::Page::Chat,
+                help_open,
+                appearance.open,
+                permission_editor.open,
+                import_dialog.as_ref().is_some_and(|import| import.is_open()),
+                children_panel.open,
+                view.dialogs.intercepts_input(),
+                view.command_palette_open(),
+                matches!(dialog, native_setup::Dialog::None),
+            )
+        {
+            let shell_mode = draft.starts_with('!');
+            match rail_interrupt.press(
+                rail_now_ms,
+                busy_now,
+                completion.triggered(),
+                true,
+                shell_mode,
+                live.is_some(),
+            ) {
+                crate::native_status_rail::InterruptOutcome::ExitShellMode => {
+                    // `index.tsx:518-520`: shell mode only leaves shell mode,
+                    // preserving the rest of the draft.
+                    draft.drain(..1);
+                    draft_cursor = draft_cursor.saturating_sub(1);
+                    draft_parts.clear();
+                    completion.sync(&draft);
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
+                crate::native_status_rail::InterruptOutcome::Triggered => {
+                    // `index.tsx:523-528`: the second press interrupts the
+                    // live session; the arm already reset to zero.
+                    if let Some(snapshot) = live.as_ref() {
+                        let path = format!("/api/session/{}/interrupt", snapshot.session_id);
+                        if let Err(error) = http_request(&snapshot.origin, "POST", &path, None, auth) {
+                            append_transcript(
+                                &mut transcript,
+                                format!("error: interrupt failed: {error}"),
+                            );
+                        }
+                    }
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
+                crate::native_status_rail::InterruptOutcome::Armed(_) => {
+                    // First press: hold the arm; the running status slot paints
+                    // the armed label + 0.22 s flash from `rail_interrupt`.
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
+                crate::native_status_rail::InterruptOutcome::Ignored(_) => {
+                    // Not running / unfocused / no session: Escape keeps its
+                    // ordinary disposition below (the command is disabled
+                    // upstream in exactly these states).
+                }
             }
         }
         // Modal precedence: a pending permission decision owns input over
@@ -12384,6 +12619,15 @@ fn native_loop(
                     key_input.pop();
                 } else if matches!(dialog, native_setup::Dialog::None) {
                     crate::native_composer::normalize_cursor(&draft, &mut draft_cursor);
+                    if draft.starts_with('!') && draft_cursor == 1 {
+                        draft.remove(0);
+                        draft_cursor = 0;
+                        draft_parts.clear();
+                        completion.sync(&draft);
+                        utf8.reset();
+                        needs_paint = true;
+                        continue;
+                    }
                     if draft_cursor > 0 {
                         let previous = draft[..draft_cursor].char_indices().next_back().map_or(0, |(i, _)| i);
                         draft.drain(previous..draft_cursor);
@@ -12418,6 +12662,7 @@ fn native_loop(
             }
             b'\r' | b'\n'
                 if matches!(crate::native_composer::decide_byte(byte, native_composer_keymap(keymap)), Some(crate::native_composer::KeyAction::Submit)) => {
+                let Some(_submit_permit) = submit_gate.enter() else { continue };
                 crate::native_debug::event(
                     "input.enter",
                     serde_json::json!({"dialog":format!("{dialog:?}"),"page":format!("{:?}",view.page()),"composer_bytes":draft.len(),"model":selected.as_ref().map(|model|model.qualified()),"daemon_attached":live.is_some(),"busy":worker.is_some()}),
@@ -12431,6 +12676,9 @@ fn native_loop(
                     prompt_history.append(crate::native_paste::HistoryEntry {
                         prompt: crate::native_paste::DraftEntry {
                             text: draft.clone(),
+                            mode: if draft.starts_with('!') { crate::native_paste::PromptMode::Shell } else { crate::native_paste::PromptMode::Normal },
+                            parts: draft_parts.clone(),
+                            cursor: draft_cursor,
                             ..Default::default()
                         },
                     });
@@ -13864,6 +14112,13 @@ fn native_loop(
                         // actually starts (admission success).
                         let submit_kind = prompt_submit_kind(&text);
                         let submit_chars = text.chars().count();
+                        // Upstream clears synchronously before admission and
+                        // conditionally restores only an untouched composer
+                        // when worker creation is rejected.
+                        let captured_submission = crate::native_composer::SubmittedDraft::capture(
+                            &mut draft, &mut draft_cursor,
+                        );
+                        completion.sync(&draft);
                         {
                             let result = if let Some(command) = text.strip_prefix('!') {
                                 native_turn::TurnWorker::start_shell(
@@ -13897,10 +14152,7 @@ fn native_loop(
                                     })
                             }
                             .map(|next| {
-                                pending_submission = Some(crate::native_composer::SubmittedDraft::capture(
-                                    &mut draft, &mut draft_cursor,
-                                ));
-                                completion.sync(&draft);
+                                pending_submission = Some(captured_submission.clone());
                                 needs_paint = true;
                                 // Capture the binding identity this
                                 // worker is launched under: events only
@@ -13939,6 +14191,8 @@ fn native_loop(
                                 last_delta_seq = 0;
                             });
                             if let Err(error) = result {
+                                let _ = captured_submission.restore(&mut draft, &mut draft_cursor);
+                                completion.sync(&draft);
                                 if route_was_home {
                                     session_route = false;
                                     view.set_session_route(false);
@@ -14083,6 +14337,18 @@ fn native_loop(
                     continue;
                 }
                 leader_pending = false;
+                if b == b'!'
+                    && draft_cursor == 0
+                    && draft.is_empty()
+                    && shell_entry_allowed(page_query_open, dialog)
+                {
+                    draft.push('!');
+                    draft_cursor = 1;
+                    completion.sync(&draft);
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
                 if page_query_open {
                     // Sessions filter / command buffer: the query is
                     // facade-owned and bounded (char + byte caps); the

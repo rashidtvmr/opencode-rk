@@ -1087,7 +1087,14 @@ impl SubmitGate {
     pub fn finish(&mut self) {
         self.in_flight = false;
     }
+
+    pub fn enter(&mut self) -> Option<SubmitPermit<'_>> {
+        self.try_begin().then_some(SubmitPermit { gate: self })
+    }
 }
+
+pub struct SubmitPermit<'a> { gate: &'a mut SubmitGate }
+impl Drop for SubmitPermit<'_> { fn drop(&mut self) { self.gate.finish(); } }
 
 /// Full composer snapshot taken before the first await of a submission
 /// (`index.tsx:1189-1207`).
