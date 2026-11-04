@@ -1949,15 +1949,30 @@ fn markdown_part_row_spans(
     prefix: &str,
     actual: &[(String, ChatRowClass)],
 ) -> Vec<Vec<ChatRunSpan>> {
-    markdown_part_row_spans_mode(text, width, prefix, actual, crate::markdown_runs::MarkdownMode::Rendered)
+    markdown_part_row_spans_mode(
+        text,
+        width,
+        prefix,
+        actual,
+        crate::markdown_runs::MarkdownMode::Rendered,
+        true,
+    )
 }
 
+/// `code_syntax` gates the bounded lexical tokenizer on fenced rows
+/// (`markdown_runs::code_token_cell_spans`). MD-007: only fences whose
+/// language carries a registered handler are tokenized; unhandled fences keep
+/// the plain `markdown.code` span, mirroring upstream's renderer registration
+/// (`packages/merman/src/plugin.ts:5-14`, `packages/latex/src/plugin.ts:4-13`
+/// register only their own languages, and `Markdown.ts:1171-1186` paints every
+/// other fence as a plain code block with no syntax scopes).
 fn markdown_part_row_spans_mode(
     text: &str,
     width: usize,
     prefix: &str,
     actual: &[(String, ChatRowClass)],
     markdown_mode: crate::markdown_runs::MarkdownMode,
+    code_syntax: bool,
 ) -> Vec<Vec<ChatRunSpan>> {
     let parsed = crate::markdown_runs::parse_part(crate::markdown_runs::PartKind::Prose, text);
     let prefix_cells = row_cells(prefix);
@@ -2000,10 +2015,16 @@ fn markdown_part_row_spans_mode(
                 let rendered_cells = row_cells(&row);
                 if width > 0 { end = end.min(rendered_cells); }
                 let spans = if end > start {
-                    // THEME-08: each chunk lexes into bounded SYN_* token runs
-                    // so the fence paints keyword/string/number/comment color
-                    // while every run stays a full code-block run otherwise.
-                    let tokens = crate::markdown_runs::code_token_cell_spans(&chunk);
+                    // THEME-08 / MD-007: a handled fence lexes each chunk into
+                    // bounded SYN_* token runs so it paints keyword/string/
+                    // number/comment color while every run stays a full
+                    // code-block run otherwise. Unhandled fences pass
+                    // `code_syntax = false` and emit base spans only.
+                    let tokens = if code_syntax {
+                        crate::markdown_runs::code_token_cell_spans(&chunk)
+                    } else {
+                        Vec::new()
+                    };
                     let base = crate::markdown_runs::CODE | crate::markdown_runs::CODE_BLOCK;
                     if tokens.is_empty() {
                         vec![ChatRunSpan { start: start as u16, end: end as u16, flags: base }]
@@ -2517,18 +2538,45 @@ fn paint_plain_code_block(
     class: ChatRowClass,
     raw: &str,
     mode: crate::markdown_runs::MarkdownMode,
+    code_syntax: bool,
     spans: &mut Vec<(usize, Vec<ChatRunSpan>)>,
     start: usize,
 ) {
     let before = rows.len();
     push_markdown_wrapped_mode(rows, width, raw, prefix, class, mode);
     for (offset, row_spans) in
-        markdown_part_row_spans_mode(raw, width, prefix, &rows[before..], mode).into_iter().enumerate()
+        markdown_part_row_spans_mode(raw, width, prefix, &rows[before..], mode, code_syntax)
+            .into_iter()
+            .enumerate()
     {
         if !row_spans.is_empty() {
             spans.push((before - start + offset, row_spans));
         }
     }
+}
+
+/// MD-007: live fence-handler registrations for the flow. The pinned TUI
+/// registers Mermaid and LaTeX renderers only
+/// (`packages/tui/src/plugin/builtins.ts:14-15`); this client has neither a
+/// diagram painter nor a math engine, so the only real handler it can offer is
+/// the bounded lexical code tokenizer (`markdown_runs::code_token_spans`) for
+/// the languages it meaningfully serves. Fences whose info-string language is
+/// not registered stay unhandled and keep the plain code-block fallback,
+/// exactly as upstream paints languages without a registered renderer.
+fn syntax_fence_registry() -> crate::native_markdown_flow::MarkdownPluginRegistry {
+    use crate::native_markdown_flow::MarkdownPluginRegistry;
+    const HANDLED: &[&str] = &[
+        "rust", "rs", "javascript", "js", "jsx", "typescript", "ts", "tsx", "python", "py",
+        "go", "java", "c", "cpp", "c++", "h", "hpp", "sh", "bash", "zsh", "json", "toml",
+        "yaml", "yml", "sql", "html", "css", "kotlin", "swift", "ruby", "rb", "php", "scala",
+        "dart", "lua",
+    ];
+    let mut registry = MarkdownPluginRegistry::new();
+    registry.add_plugin("syntax");
+    for language in HANDLED {
+        registry.set_handler("syntax", language, "syntax.tokens");
+    }
+    registry
 }
 
 /// Route one fenced code block by its info-string language.
@@ -2541,6 +2589,12 @@ fn paint_plain_code_block(
 /// [`crate::native_math::MathLayoutEngine`], so those renderers return their
 /// `Fallback` outcome and the fence paints as the plain code block with its
 /// source preserved — exactly their documented fail-closed contract.
+///
+/// MD-007: `fence_handler` is the live flow's resolved handler id for this
+/// block (from the registry [`push_block_markdown`] binds via
+/// `MarkdownFlow::set_fence_handlers`). The `syntax.tokens` handler routes the
+/// fence through the bounded code tokenizer; every other language falls
+/// through to the fail-closed routing below.
 #[allow(clippy::too_many_arguments)]
 fn paint_fence_block(
     rows: &mut Vec<(String, ChatRowClass)>,
@@ -2552,9 +2606,14 @@ fn paint_fence_block(
     raw: &str,
     source: &str,
     language: Option<&str>,
+    fence_handler: Option<&str>,
     spans: &mut Vec<(usize, Vec<ChatRunSpan>)>,
     start: usize,
 ) {
+    if fence_handler == Some("syntax.tokens") {
+        paint_plain_code_block(rows, width, prefix, class, raw, mode, true, spans, start);
+        return;
+    }
     if let Some(fence) = crate::native_mermaid::MermaidFence::from_code_block(language, source, block_id) {
         let mut renderer = crate::native_mermaid::MermaidRenderer::without_painter(
             crate::native_mermaid::MermaidTheme::dark("oc2-native"),
@@ -2572,7 +2631,7 @@ fn paint_fence_block(
                 debug_assert!(frame.height > 0);
             }
         }
-        paint_plain_code_block(rows, width, prefix, class, raw, mode, spans, start);
+        paint_plain_code_block(rows, width, prefix, class, raw, mode, false, spans, start);
         return;
     }
     if let Some(fence) =
@@ -2589,13 +2648,13 @@ fn paint_fence_block(
                 debug_assert!(frame.layout.height > 0);
             }
         }
-        paint_plain_code_block(rows, width, prefix, class, raw, mode, spans, start);
+        paint_plain_code_block(rows, width, prefix, class, raw, mode, false, spans, start);
         return;
     }
     if is_diff_fence_language(language) && push_diff_fence(rows, width, prefix, source) {
         return;
     }
-    paint_plain_code_block(rows, width, prefix, class, raw, mode, spans, start);
+    paint_plain_code_block(rows, width, prefix, class, raw, mode, false, spans, start);
 }
 
 /// Render one non-user Markdown part as flow blocks. Returns style spans with
@@ -2615,12 +2674,15 @@ fn push_block_markdown(
     // state that spans a newline cannot leak a payload byte into the flow.
     let sanitized = strip_ansi(clip_utf8_prefix_bytes(text, MAX_INPUT_ROW_BYTES));
     let mut flow = MarkdownFlow::new(flow_options(markdown_mode));
+    // MD-007: bind the live handler registry before parsing so every fence
+    // block resolves its real `fence_handler` from the registrations.
+    flow.set_fence_handlers(&syntax_fence_registry());
     flow.set_content(&sanitized);
     let mut spans: Vec<(usize, Vec<ChatRunSpan>)> = Vec::new();
     if flow.blocks().is_empty() {
         // No block structure (empty or whitespace-only part): keep the pinned
         // per-line geometry, including its one empty row.
-        paint_plain_code_block(rows, width, prefix, class, &sanitized, markdown_mode, &mut spans, start);
+        paint_plain_code_block(rows, width, prefix, class, &sanitized, markdown_mode, false, &mut spans, start);
         if input_truncated {
             push_markdown_overflow(rows, width, prefix, class);
         }
@@ -2665,11 +2727,11 @@ fn push_block_markdown(
                 };
                 paint_fence_block(
                     rows, width, prefix, class, markdown_mode, block.id,
-                    raw, &source, lang.as_deref(), &mut spans, start,
+                    raw, &source, lang.as_deref(), block.fence_handler.as_deref(), &mut spans, start,
                 );
             }
             BlockKind::Paragraph => {
-                paint_plain_code_block(rows, width, prefix, class, raw, markdown_mode, &mut spans, start);
+                paint_plain_code_block(rows, width, prefix, class, raw, markdown_mode, false, &mut spans, start);
             }
             BlockKind::Heading(_)
             | BlockKind::List { .. }
@@ -2878,7 +2940,7 @@ fn typed_message_rows_with_prefix_spans_mode(
                 if !display.is_empty() {
                     let before = rows.len();
                     push_markdown_wrapped_mode(&mut rows, width, display, "  ", ChatRowClass::Thinking, markdown_mode);
-                    for (offset, spans) in markdown_part_row_spans_mode(display, width, "  ", &rows[before..], markdown_mode).into_iter().enumerate() {
+                    for (offset, spans) in markdown_part_row_spans_mode(display, width, "  ", &rows[before..], markdown_mode, true).into_iter().enumerate() {
                         if !spans.is_empty() { spans_out.push((before + offset, spans)); }
                     }
                 }
@@ -5638,7 +5700,7 @@ mod tests {
                     assert!(rows.len() > 1, "over-width fixture must wrap");
                 }
                 assert_eq!(rows.iter().map(|(row, _)| row.as_str()).collect::<String>(), text);
-                let spans = markdown_part_row_spans_mode(text, width, "", &rows, mode);
+                let spans = markdown_part_row_spans_mode(text, width, "", &rows, mode, true);
                 for (index, (row, _)) in rows.iter().enumerate() {
                     let cells = crate::native_view_layout::visit_unpadded_cells(row, row.len(), |_, _| {});
                     assert!(cells <= width);
@@ -8205,6 +8267,86 @@ mod footer_v3_consumer_tests {
                 "closing delimiter preserved for {text:?}: {rows:?}"
             );
             assert!(rows.iter().all(|(_, class)| *class == ChatRowClass::AssistantCard));
+        }
+    }
+
+    /// MD-007: the live flow binds the real syntax-handler registry, so a
+    /// `rust` fence resolves `fence_handler` and its code rows paint with the
+    /// bounded tokenizer's SYN_* spans (keyword/number/comment affect painted
+    /// cells), while the fence delimiters survive.
+    #[test]
+    fn md_007_handled_fence_registers_and_token_spans_reach_painted_rows() {
+        use crate::markdown_runs::{SYN_COMMENT, SYN_KEYWORD, SYN_MASK, SYN_NUMBER};
+        use crate::markdown_runs::MarkdownMode;
+        let text = "```rust\nlet n = 42; // total\n```";
+        let mut rows = Vec::new();
+        let spans = push_block_markdown(
+            &mut rows, 60, text, "", ChatRowClass::AssistantCard, MarkdownMode::Rendered,
+        );
+        assert_eq!(rows[0].0, "```rust", "opening delimiter preserved: {rows:?}");
+        assert_eq!(rows.last().map(|(row, _)| row.as_str()), Some("```"), "{rows:?}");
+        let code_row = rows.iter().position(|(row, _)| row.contains("let n = 42")).unwrap();
+        let row_spans = spans
+            .iter()
+            .find(|(offset, _)| *offset == code_row)
+            .map(|(_, row_spans)| row_spans)
+            .expect("code row carries painted spans");
+        assert!(
+            row_spans.iter().any(|span| span.flags & SYN_KEYWORD != 0),
+            "`let` is a keyword: {row_spans:?}"
+        );
+        assert!(
+            row_spans.iter().any(|span| span.flags & SYN_NUMBER != 0),
+            "`42` is a number: {row_spans:?}"
+        );
+        assert!(
+            row_spans.iter().any(|span| span.flags & SYN_COMMENT != 0),
+            "`// total` is a comment: {row_spans:?}"
+        );
+        // Every flag on the row is a token or the base code flag; nothing else.
+        for span in row_spans {
+            let masked = span.flags & SYN_MASK;
+            assert!(
+                masked == 0 || (masked & (masked - 1)) == 0,
+                "one SYN_* bit per token span: {row_spans:?}"
+            );
+        }
+    }
+
+    /// MD-007: a fence whose language has no registered handler (including the
+    /// dedicated `mermaid`/`latex`/`math` renderer languages, and an unknown
+    /// language) keeps the fail-closed plain code block: delimiters and source
+    /// preserved, and no SYN_* syntax spans on the code rows.
+    #[test]
+    fn md_007_unhandled_fence_keeps_plain_code_block_without_syntax_flags() {
+        use crate::markdown_runs::{CODE, CODE_BLOCK, SYN_MASK, MarkdownMode};
+        for text in [
+            "```mermaid\ngraph TD\n```",
+            "```latex\nx^2\n```",
+            "```no-such-lang\nlet n = 42;\n```",
+        ] {
+            let mut rows = Vec::new();
+            let spans = push_block_markdown(
+                &mut rows, 60, text, "", ChatRowClass::AssistantCard, MarkdownMode::Rendered,
+            );
+            assert!(rows.first().is_some_and(|(row, _)| row.starts_with("```")), "{rows:?}");
+            assert!(rows.last().is_some_and(|(row, _)| row == "```"), "{rows:?}");
+            for (offset, row_spans) in &spans {
+                let row_text = &rows[*offset].0;
+                if !row_text.contains("```") && !row_text.trim().is_empty() {
+                    for span in row_spans {
+                        assert_eq!(
+                            span.flags & SYN_MASK, 0,
+                            "unhandled fence paints no syntax tokens ({text:?}, row {row_text:?}): {row_spans:?}"
+                        );
+                        assert_eq!(
+                            span.flags & !(CODE | CODE_BLOCK),
+                            0,
+                            "only the base code span: {row_spans:?}"
+                        );
+                    }
+                }
+            }
         }
     }
 
