@@ -7084,11 +7084,11 @@ fn dispatch_permission_reply(
     intent: crate::native_view_dialogs::DecisionIntent,
 ) {
     use crate::native_view_dialogs::{DecisionIntent, DialogAck};
-    let (reply, scope) = match &intent {
-        DecisionIntent::Approve { .. } => ("once", "once"),
-        DecisionIntent::Reject { .. } => ("reject", "once"),
+    let (reply, scope, message) = match &intent {
+        DecisionIntent::Approve { .. } => ("once", "once", None),
+        DecisionIntent::Reject { message, .. } => ("reject", "once", message.as_deref()),
         DecisionIntent::ScopedPermission {allow,persistent,..} => (
-            if *allow {"always"} else {"reject"}, if *persistent {"always"} else {"session"}),
+            if *allow {"always"} else {"reject"}, if *persistent {"always"} else {"session"}, None),
         DecisionIntent::Answer { .. } | DecisionIntent::Cancel { .. } => {
             append_transcript(
                 transcript,
@@ -7104,7 +7104,9 @@ fn dispatch_permission_reply(
         .ok_or_else(|| "daemon unavailable".to_owned())
         .and_then(|origin| {
             let path = format!("/api/session/{session_id}/permission/{request_id}/reply");
-            let payload = serde_json::json!({ "reply": reply, "scope": scope }).to_string();
+            let payload =
+                crate::native_permissions::permission_reply_payload(reply, scope, message)
+                    .to_string();
             http_request_with_status(origin, "POST", &path, Some(&payload), auth).and_then(
                 |(reply_body, status)| {
                     if permission_reply_accepted(status, &reply_body) {
@@ -9592,6 +9594,11 @@ fn native_loop(
                                 pending.persistent_allowed,
                             );
                             if result.is_ok() {
+                                // F002-R2: a child session opens the nested
+                                // rejection prompt on `reject`; a root session
+                                // replies immediately (`permission.tsx:243-254`).
+                                view.dialogs
+                                    .set_permission_session_has_parent(snapshot.parent_session);
                                 // FORM-002: paint the request's own resources
                                 // (upstream `permission.tsx:428-552` shows the
                                 // requested resource body inside the question;
@@ -11345,6 +11352,102 @@ fn native_loop(
             needs_paint = true;
             continue;
         }
+        // F002-R2: while the nested rejection decision is pending the editor is
+        // inert but still swallows the keys it owns, so they never reach the
+        // permission byte dispatch below (which would otherwise report a
+        // spurious `pending-decision` error).
+        if view.dialogs.reject_stage_retained() && view.dialogs.pending() {
+            match &event {
+                native_input_decoder::InputEvent::Escape
+                | native_input_decoder::InputEvent::Byte(13 | 10 | 3 | 8 | 127)
+                | native_input_decoder::InputEvent::ShiftEnter
+                | native_input_decoder::InputEvent::CtrlJ
+                | native_input_decoder::InputEvent::AltEnter
+                | native_input_decoder::InputEvent::Paste(_) => {
+                    utf8.reset();
+                    continue;
+                }
+                native_input_decoder::InputEvent::Byte(byte) if *byte >= 32 => {
+                    utf8.reset();
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        // F002-R2: the nested rejection-reason editor owns printable input,
+        // Backspace, Enter (confirm) and Escape/Ctrl-C (cancel) while it is
+        // open (`permission.tsx:284-307`). Ctrl-C clears a non-empty reason and
+        // only cancels on a second press (`permission.tsx:288-298`). A pending
+        // decision is inert: the reason editor is not a decision surface.
+        if view.dialogs.reject_stage() && !view.dialogs.pending() {
+            match &event {
+                native_input_decoder::InputEvent::Escape => {
+                    view.dialogs.cancel_reject_stage();
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
+                native_input_decoder::InputEvent::Byte(13 | 10)
+                | native_input_decoder::InputEvent::ShiftEnter
+                | native_input_decoder::InputEvent::CtrlJ
+                | native_input_decoder::InputEvent::AltEnter => {
+                    match view.dialogs.confirm_reject_stage() {
+                        Ok(intent) => dispatch_permission_reply(
+                            &mut view,
+                            &mut transcript,
+                            live.as_ref().map(|snapshot| snapshot.origin.as_str()),
+                            auth,
+                            intent,
+                        ),
+                        Err(error) => append_transcript(
+                            &mut transcript,
+                            format!("error: permission reject: {}", error.code()),
+                        ),
+                    }
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
+                native_input_decoder::InputEvent::Byte(3) => {
+                    // Ctrl-C: clear a non-empty reason, else cancel the stage.
+                    if !view.dialogs.reject_clear_reason() {
+                        view.dialogs.cancel_reject_stage();
+                    }
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
+                native_input_decoder::InputEvent::Byte(8 | 127) => {
+                    view.dialogs.prompt_backspace();
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
+                native_input_decoder::InputEvent::Paste(text) => {
+                    for ch in text.chars() {
+                        if !view.dialogs.prompt_push(ch) {
+                            break;
+                        }
+                    }
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
+                native_input_decoder::InputEvent::Byte(byte) if *byte >= 32 => {
+                    if let Some(ch) = utf8.push(*byte) {
+                        if ch.len_utf8() <= 256 {
+                            view.dialogs.prompt_push(ch);
+                        }
+                    }
+                    needs_paint = true;
+                    continue;
+                }
+                // Ctrl-D and every pointer/arrow event fall through: Ctrl-D
+                // keeps its byte-exit meaning and the byte dispatch owns the
+                // rest.
+                _ => {}
+            }
+        }
         // Rename dialog owns input before every widget below: Escape and
         // Ctrl-C/Ctrl-D cancel only (never exit), Enter submits through the
         // real PATCH route, backspace edits, text is bounded UTF-8.
@@ -12054,8 +12157,13 @@ fn native_loop(
                                 view.dialogs.select(index);
                             } else if view.dialogs.confirm_at_cell_with_metrics(
                                     view.dialog_layout_metrics(modal.content_width), row, col) {
-                                if let Ok(intent) = view.dialogs.answer() {
-                                    dispatch_permission_reply(&mut view, &mut transcript, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, intent);
+                                // F002-R2: a child-session `reject` opens the
+                                // nested reason editor instead of replying
+                                // (`permission.tsx:243-254`).
+                                if !view.dialogs.begin_reject_stage() {
+                                    if let Ok(intent) = view.dialogs.answer() {
+                                        dispatch_permission_reply(&mut view, &mut transcript, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, intent);
+                                    }
                                 }
                             }
                         }
@@ -13080,32 +13188,52 @@ fn native_loop(
                 14 => { view.dialogs.next() }
                 2 => { view.dialogs.prev() }
                 b'1'..=b'9' => { view.dialogs.select(usize::from(byte - b'1')); }
-                13 | 10 => match view.dialogs.answer() {
-                    Ok(intent) => dispatch_permission_reply(
-                        &mut view,
-                        &mut transcript,
-                        live.as_ref().map(|snapshot| snapshot.origin.as_str()),
-                        auth,
-                        intent,
-                    ),
-                    Err(error) => append_transcript(
-                        &mut transcript,
-                        format!("error: permission answer: {}", error.code()),
-                    ),
-                },
-                27 | 3 => match view.dialogs.cancel() {
-                    Ok(intent) => dispatch_permission_reply(
-                        &mut view,
-                        &mut transcript,
-                        live.as_ref().map(|snapshot| snapshot.origin.as_str()),
-                        auth,
-                        intent,
-                    ),
-                    Err(error) => append_transcript(
-                        &mut transcript,
-                        format!("error: permission reject: {}", error.code()),
-                    ),
-                },
+                13 | 10 => {
+                    // F002-R2: a child-session `reject` opens the nested
+                    // rejection-reason editor instead of replying immediately
+                    // (`permission.tsx:243-254`); every other confirmation
+                    // answers as before.
+                    if !view.dialogs.begin_reject_stage() {
+                        match view.dialogs.answer() {
+                            Ok(intent) => dispatch_permission_reply(
+                                &mut view,
+                                &mut transcript,
+                                live.as_ref().map(|snapshot| snapshot.origin.as_str()),
+                                auth,
+                                intent,
+                            ),
+                            Err(error) => append_transcript(
+                                &mut transcript,
+                                format!("error: permission answer: {}", error.code()),
+                            ),
+                        }
+                    }
+                }
+                27 | 3 => {
+                    // F002-R2: Escape first cancels an open rejection stage
+                    // (restoring the permission card); otherwise, for a
+                    // child-session permission it opens the reason editor —
+                    // upstream routes Escape through `onSelect("reject")`
+                    // (`permission.tsx:241,437`). Only when neither applies
+                    // does Escape reject immediately.
+                    if !view.dialogs.cancel_reject_stage()
+                        && !view.dialogs.escape_reject_stage()
+                    {
+                        match view.dialogs.cancel() {
+                            Ok(intent) => dispatch_permission_reply(
+                                &mut view,
+                                &mut transcript,
+                                live.as_ref().map(|snapshot| snapshot.origin.as_str()),
+                                auth,
+                                intent,
+                            ),
+                            Err(error) => append_transcript(
+                                &mut transcript,
+                                format!("error: permission reject: {}", error.code()),
+                            ),
+                        }
+                    }
+                }
                 _ => {}
             }
             utf8.reset();

@@ -116,8 +116,8 @@ pub async fn execute(registry: &McpStatusRegistry, sessions: &opencode_rk_sessio
     let receiver = owner.install_pending(request, intent.clone(), broker).map_err(|_| "permission request unavailable".to_owned())?;
     let _pending = PendingPermissionGuard::new(Arc::clone(owner), request_id);
     let mut cancelled = owner.cancellation_receiver();
-    let reply = tokio::select! { biased; _ = cancelled.changed() => ApprovedPermission { reply: PermissionReply::Cancelled, capability: None }, reply = receiver => reply.unwrap_or(ApprovedPermission { reply: PermissionReply::Cancelled, capability: None }) };
-    let proof = match reply.reply { PermissionReply::Once | PermissionReply::Always => reply.capability.ok_or("permission proof missing")?, PermissionReply::Reject => return Ok(("MCP permission rejected".into(), false)), PermissionReply::Cancelled => return Ok(("MCP call cancelled".into(), false)) };
+    let reply = tokio::select! { biased; _ = cancelled.changed() => ApprovedPermission { reply: PermissionReply::Cancelled, capability: None, message: None }, reply = receiver => reply.unwrap_or(ApprovedPermission { reply: PermissionReply::Cancelled, capability: None, message: None }) };
+    let proof = match reply.reply { PermissionReply::Once | PermissionReply::Always => reply.capability.ok_or("permission proof missing")?, PermissionReply::Reject => return Ok((reply.message.filter(|m| !m.is_empty()).unwrap_or_else(|| "MCP permission rejected".into()), false)), PermissionReply::Cancelled => return Ok(("MCP call cancelled".into(), false)) };
     if owner.is_cancelled() { return Ok(("MCP call cancelled".into(), false)); }
     if !matches!(broker.authorize_with_human_approval(&intent, proof, &session.to_string(), owner.run_id, call_id), Decision::Allow) { return Ok(("MCP permission proof rejected".into(), false)); }
     // Inclusion may change while human approval is pending. Re-resolve the

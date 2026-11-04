@@ -538,6 +538,24 @@ pub struct RejectReply {
     pub message: Option<String>,
 }
 
+/// The exact reply body POSTed to the permission reply route
+/// (`permission.tsx:148-153` sends `reply(reply, message || undefined)`).
+///
+/// The `message` key is present ONLY when a non-empty rejection reason was
+/// supplied; `None` omits it entirely rather than sending `"message":null`.
+#[must_use]
+pub fn permission_reply_payload(
+    reply: &str,
+    scope: &str,
+    message: Option<&str>,
+) -> serde_json::Value {
+    let mut payload = serde_json::json!({ "reply": reply, "scope": scope });
+    if let Some(message) = message.filter(|message| !message.is_empty()) {
+        payload["message"] = serde_json::Value::String(message.to_string());
+    }
+    payload
+}
+
 /// Overlay geometry from `permission.tsx:501-523`. Normal mode is a relative
 /// box capped at 15 rows; fullscreen is absolute with the 2/1 insets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1148,5 +1166,40 @@ mod tests {
         assert!(!editor.persistent);
         assert_eq!(editor.click_action(60,1,52,12),None);
         assert!(!editor.persistent);
+    }
+}
+
+#[cfg(test)]
+mod f002r2_payload_tests {
+    use super::permission_reply_payload;
+
+    /// F002-R2: upstream `permission.tsx:148-153` sends
+    /// `reply(reply, message || undefined)` — the `message` key is present
+    /// ONLY when a non-empty reason was supplied.
+    #[test]
+    fn f002r2_payload_reject_with_message_carries_the_reason() {
+        let payload = permission_reply_payload("reject", "once", Some("do x instead"));
+        assert_eq!(payload["reply"], "reject");
+        assert_eq!(payload["scope"], "once");
+        assert_eq!(payload["message"], "do x instead");
+    }
+
+    #[test]
+    fn f002r2_payload_reject_without_message_omits_the_key() {
+        for message in [None, Some("")] {
+            let payload = permission_reply_payload("reject", "once", message);
+            assert_eq!(payload["reply"], "reject");
+            assert!(
+                payload.get("message").is_none(),
+                "an absent/empty reason must omit the key entirely, got {payload}"
+            );
+            assert!(!payload.to_string().contains("message"));
+        }
+    }
+
+    #[test]
+    fn f002r2_payload_approve_is_the_historical_two_key_body() {
+        let payload = permission_reply_payload("once", "once", None);
+        assert_eq!(payload, serde_json::json!({"reply":"once","scope":"once"}));
     }
 }

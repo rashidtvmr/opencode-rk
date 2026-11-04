@@ -673,7 +673,7 @@ async fn reply_session_permission(
     let scope=body.scope.as_deref().unwrap_or(if body.reply=="always" {"always"} else {"once"});
     let scope=if scope=="turn" {"once"} else {scope};
     if !matches!(scope,"once"|"session"|"always") || body.reply=="once"&&scope!="once" {return Err(ApiFailure::bad_request("invalid permission scope"));}
-    if !owner.reply_scoped(&request_id,allow,scope).map_err(ApiFailure::bad_request)? {return Err(ApiFailure::not_found("permission request not found"));}
+    if !owner.reply_scoped_with_message(&request_id,allow,scope,body.message.as_deref()).map_err(ApiFailure::bad_request)? {return Err(ApiFailure::not_found("permission request not found"));}
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -2367,11 +2367,20 @@ async fn execute_native_tool(
             let mut cancelled = owner.cancellation_receiver();
             let reply = tokio::select! {
                 biased;
-                _=cancelled.changed()=>ApprovedPermission{reply:PermissionReply::Cancelled,capability:None},
-                reply=receiver=>reply.unwrap_or(ApprovedPermission{reply:PermissionReply::Cancelled,capability:None}),
+                _=cancelled.changed()=>ApprovedPermission{reply:PermissionReply::Cancelled,capability:None,message:None},
+                reply=receiver=>reply.unwrap_or(ApprovedPermission{reply:PermissionReply::Cancelled,capability:None,message:None}),
             };
             match reply.reply {
-                PermissionReply::Reject => return failed(format!("{} rejected", call.name), true),
+                PermissionReply::Reject => {
+                    // F002-R2: a non-empty reason is a *correction* -> the
+                    // feedback is the reason and the model continues
+                    // (`packages/core/src/permission.ts:260-283`); an empty
+                    // reason declines and concludes the step.
+                    return match reply.message.filter(|m| !m.is_empty()) {
+                        Some(feedback) => failed(feedback, false),
+                        None => failed(format!("{} rejected", call.name), true),
+                    };
+                }
                 PermissionReply::Cancelled => {
                     return failed(format!("{} cancelled", call.name), true);
                 }
@@ -2839,14 +2848,17 @@ async fn execute_write(
             let mut cancelled = owner.cancellation_receiver();
             let approved = tokio::select! {
                 biased;
-                _ = cancelled.changed() => ApprovedPermission { reply: PermissionReply::Cancelled, capability: None },
-                result = receiver => result.unwrap_or(ApprovedPermission { reply: PermissionReply::Cancelled, capability: None }),
+                _ = cancelled.changed() => ApprovedPermission { reply: PermissionReply::Cancelled, capability: None, message: None },
+                result = receiver => result.unwrap_or(ApprovedPermission { reply: PermissionReply::Cancelled, capability: None, message: None }),
             };
             match approved.reply {
                 PermissionReply::Once | PermissionReply::Always => approved.capability,
                 // Child HITL must return the denied result to its provider;
                 // this never grants the effect. Cancellation still stops.
-                PermissionReply::Reject => return outcome("write rejected".to_owned(), !continue_on_rejection),
+                PermissionReply::Reject => return match approved.message.filter(|m| !m.is_empty()) {
+                    Some(feedback) => outcome(feedback, false),
+                    None => outcome("write rejected".to_owned(), !continue_on_rejection),
+                },
                 PermissionReply::Cancelled => return outcome("write cancelled".to_owned(), true),
             }
         }

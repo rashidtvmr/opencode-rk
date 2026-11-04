@@ -2049,6 +2049,17 @@ pub mod select {
             self.value.pop().is_some()
         }
 
+        /// F002-R2: clear the whole value (Ctrl-C clears a non-empty rejection
+        /// reason before cancelling, `permission.tsx:288-298`). Returns whether
+        /// anything was cleared.
+        pub fn clear(&mut self) -> bool {
+            if self.busy || !self.focused || self.value.is_empty() {
+                return false;
+            }
+            self.value.clear();
+            true
+        }
+
         /// Enter: disabled while busy (`dialog-prompt.tsx:43-46`).
         #[must_use]
         pub fn submit(&self) -> Option<&str> {

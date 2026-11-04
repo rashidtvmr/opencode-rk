@@ -54,6 +54,11 @@ pub enum PermissionReply {
 pub struct ApprovedPermission {
     pub reply: PermissionReply,
     pub capability: Option<HumanApproval>,
+    /// F002-R2: the optional rejection reason (`permission.tsx:148-153`).
+    /// `Some(non-empty)` means the rejection is a *correction*: the broker
+    /// feedback is the reason, so the model continues instead of the step
+    /// concluding (`packages/core/src/permission.ts:260-283`).
+    pub message: Option<String>,
 }
 
 struct PendingPermission {
@@ -180,7 +185,7 @@ impl RunOwner {
             Ok(Some(allow))=>{
                 let capability=if allow {broker.approve_human(&intent,self.session_id.to_string(),self.run_id,request.source.call_id.clone())} else {None};
                 if allow&&capability.is_none() {return Err(Box::new(request));}
-                let _=reply.send(ApprovedPermission {reply:if allow {PermissionReply::Once} else {PermissionReply::Reject},capability});
+                let _=reply.send(ApprovedPermission {reply:if allow {PermissionReply::Once} else {PermissionReply::Reject},capability,message:None});
                 return Ok(receiver);
             }
             Err(_)=>return Err(Box::new(request)),
@@ -230,6 +235,14 @@ impl RunOwner {
     }
 
     pub fn reply_scoped(&self,request_id:&str,allow:bool,scope:&str)->Result<bool,String> {
+        self.reply_scoped_with_message(request_id,allow,scope,None)
+    }
+
+    /// F002-R2: as [`RunOwner::reply_scoped`], but carries the optional
+    /// rejection reason to the awaiting turn (`permission.tsx:148-153` ->
+    /// `packages/core/src/permission.ts:260-283`). A non-empty `message` on a
+    /// `reject` reply is a *correction*: the broker feedback is the reason.
+    pub fn reply_scoped_with_message(&self,request_id:&str,allow:bool,scope:&str,message:Option<&str>)->Result<bool,String> {
         if !matches!(scope,"once"|"session"|"always") {return Err("invalid permission scope".into());}
         let mut pending=self.pending.lock().map_err(|_|"permission unavailable")?;
         let Some(entry)=pending.as_ref().filter(|entry|entry.request.id==request_id) else {return Ok(false);};
@@ -245,7 +258,7 @@ impl RunOwner {
             })?;
         }
         let entry=pending.take().expect("checked pending");
-        Ok(entry.reply.send(ApprovedPermission {reply:if allow {PermissionReply::Once} else {PermissionReply::Reject},capability}).is_ok())
+        Ok(entry.reply.send(ApprovedPermission {reply:if allow {PermissionReply::Once} else {PermissionReply::Reject},capability,message:message.map(str::to_owned)}).is_ok())
     }
 
     fn reply_pending(
@@ -299,6 +312,7 @@ impl RunOwner {
                 let _ = entry.reply.send(ApprovedPermission {
                     reply: PermissionReply::Cancelled,
                     capability: None,
+                    message: None,
                 });
                 return false;
             }
@@ -312,6 +326,7 @@ impl RunOwner {
                 let _ = entry.reply.send(ApprovedPermission {
                     reply: PermissionReply::Cancelled,
                     capability: None,
+                    message: None,
                 });
                 return false;
             }
@@ -329,6 +344,7 @@ impl RunOwner {
             .send(ApprovedPermission {
                 reply: decision,
                 capability,
+                message: None,
             })
             .is_err()
         {
@@ -371,6 +387,7 @@ impl RunOwner {
                 let _ = pending.reply.send(ApprovedPermission {
                     reply: PermissionReply::Cancelled,
                     capability: None,
+                    message: None,
                 });
             }
         }
@@ -415,6 +432,7 @@ impl Drop for PendingPermissionGuard {
                     let _ = entry.reply.send(ApprovedPermission {
                         reply: PermissionReply::Cancelled,
                         capability: None,
+                        message: None,
                     });
                 }
             }
@@ -765,8 +783,8 @@ mod admission_lane_tests {
     mod snapshot_tests {
         use super::hold_admission_test_lock;
         use super::super::{
-            MAX_ACTIVE_CHILD_TURNS, MAX_ACTIVE_TURNS, PermissionRequest, PermissionSource,
-            TurnExecutionPermit, snapshot,
+            MAX_ACTIVE_CHILD_TURNS, MAX_ACTIVE_TURNS, PermissionReply, PermissionRequest,
+            PermissionSource, TurnExecutionPermit, snapshot,
         };
         use opencode_rk_contracts::SessionId;
         use opencode_rk_security::{OperationIntent, PermissionBroker, SecurityPolicy};
@@ -964,6 +982,68 @@ mod admission_lane_tests {
             );
             drop(children);
             drop(roots);
+        }
+
+        /// F002-R2: `reply_scoped_with_message` carries the optional rejection
+        /// reason to the awaiting turn (`permission.tsx:148-153` ->
+        /// `packages/core/src/permission.ts:260-283`). A non-empty reason is a
+        /// correction and must arrive as `Some(reason)`; an absent reason must
+        /// arrive as `None` so the reply stays a plain rejection.
+        #[test]
+        fn reply_scoped_with_message_delivers_the_rejection_reason() {
+            let _lock = hold_admission_test_lock();
+            let permit = TurnExecutionPermit::acquire(fresh()).expect("root capacity");
+            let owner = permit.owner();
+            let (request, intent) = secret_request(owner.session_id);
+            let request_id = request.id.clone();
+            let mut receiver = owner
+                .install_pending_test_only(request, intent, &broker())
+                .expect("fresh owner with an empty pending slot must store the request");
+
+            assert!(
+                owner
+                    .reply_scoped_with_message(
+                        &request_id,
+                        false,
+                        "once",
+                        Some("use cargo instead"),
+                    )
+                    .expect("reject reply succeeds"),
+                "the pending request must be resolved"
+            );
+            let approved = receiver
+                .try_recv()
+                .expect("the reply is delivered synchronously");
+            assert_eq!(approved.reply, PermissionReply::Reject);
+            assert_eq!(approved.message.as_deref(), Some("use cargo instead"));
+
+            owner.finish();
+        }
+
+        #[test]
+        fn reply_scoped_with_message_omits_an_absent_reason() {
+            let _lock = hold_admission_test_lock();
+            let permit = TurnExecutionPermit::acquire(fresh()).expect("root capacity");
+            let owner = permit.owner();
+            let (request, intent) = secret_request(owner.session_id);
+            let request_id = request.id.clone();
+            let mut receiver = owner
+                .install_pending_test_only(request, intent, &broker())
+                .expect("fresh owner with an empty pending slot must store the request");
+
+            assert!(
+                owner
+                    .reply_scoped_with_message(&request_id, false, "once", None)
+                    .expect("reject reply succeeds"),
+                "the pending request must be resolved"
+            );
+            let approved = receiver
+                .try_recv()
+                .expect("the reply is delivered synchronously");
+            assert_eq!(approved.reply, PermissionReply::Reject);
+            assert_eq!(approved.message, None);
+
+            owner.finish();
         }
     }
 }

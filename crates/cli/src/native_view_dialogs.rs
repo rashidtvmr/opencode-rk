@@ -211,6 +211,19 @@ pub struct DialogRequest {
     pub error: Option<StaticError>,
 }
 
+/// F002-R2: the child-session rejection stage
+/// (`permission.tsx:144-155,243-254`). While set, the open
+/// [`DialogKind::Prompt`] is the rejection-reason editor for this permission
+/// request: confirming emits a `reject` reply carrying the typed reason,
+/// cancelling restores the permission options verbatim.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RejectStage {
+    /// The original permission card, restored verbatim on cancel.
+    request: DialogRequest,
+    /// The permission selection to restore (the `reject` row).
+    selection: Option<usize>,
+}
+
 /// Validation / lifecycle failure. Every variant maps to a static code;
 /// no request content ever appears in the error.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -302,11 +315,14 @@ pub enum DecisionIntent {
         attempt: u64,
     },
     /// Permission: explicit denial / cancel — a real permission-broker
-    /// denial (`reject`), never an automatic approval.
+    /// denial (`reject`), never an automatic approval. `message` carries the
+    /// optional rejection reason for a child session's nested stage
+    /// (`permission.tsx:148-153`); `None` for an immediate root reject.
     Reject {
         request_id: String,
         session_id: String,
         attempt: u64,
+        message: Option<String>,
     },
     /// Question / confirm: the selected choice index plus its label, kept
     /// as typed metadata for the existing reply/persistence path (not
@@ -429,6 +445,12 @@ struct OpenDialog {
     footer_gap: Option<u16>,
     /// DIALOG-06..09: live select state; option IDs are original choice indexes.
     select: Option<crate::native_palette::select::SelectDialog>,
+    /// F002-R2: whether the permission request's session is a child
+    /// (`session.parentID`). Gates the nested rejection prompt: a child
+    /// session opens the reason editor, a root session replies immediately
+    /// (`permission.tsx:243-254`). Meaningful only for
+    /// [`DialogKind::Permission`].
+    session_has_parent: bool,
 }
 
 /// Focus-owning dialog overlay state. `Default` is a closed view.
@@ -455,6 +477,11 @@ pub struct DialogView {
     attempt_counter: u64,
     /// Attempt of the in-flight decision; meaningful while pending.
     pending_attempt: u64,
+    /// F002-R2: the child-session rejection stage. While set, the open
+    /// `DialogKind::Prompt` is the rejection-reason editor for this permission
+    /// request (`permission.tsx:144-155,243-254`); confirming it emits a
+    /// `reject` reply carrying the typed reason.
+    reject_stage: Option<RejectStage>,
     /// Dialog stack, focus guard, dismissal order and paint geometry
     /// (`ui/dialog.tsx:306-439`). The stack is the single "is a dialog
     /// visible" authority; `phase` only carries the decision lifecycle.
@@ -667,6 +694,7 @@ impl DialogView {
             rejected: false,
             attempt_counter: 0,
             pending_attempt: 0,
+            reject_stage: None,
             modal: ModalLayer::new(),
             open_sequence: 0,
             focus: ModalFocus::new(0),
@@ -1037,6 +1065,7 @@ impl DialogView {
             error: StaticError::BackendUnavailable,
             prompt: None,
             footer_gap: None,
+            session_has_parent: false,
         });
         self.crash_screen = Some(crash::CrashScreen::new(
             mode,
@@ -1183,6 +1212,7 @@ impl DialogView {
             error: request.error.unwrap_or(StaticError::BackendUnavailable),
             prompt: None,
             footer_gap: None,
+            session_has_parent: false,
         });
         // `DialogSelect` seeds `selected: 0` (`ui/dialog-select.tsx:152`), so
         // the first enabled row is selected on open and the first Down moves
@@ -1262,6 +1292,7 @@ impl DialogView {
             error: StaticError::BackendUnavailable,
             prompt: None,
             footer_gap: None,
+            session_has_parent: false,
         });
         // `DialogSelect` seeds `selected` to the focused row
         // (`dialog-select.tsx:152`, `dialog-mcp.tsx:61` `preserveSelection`).
@@ -1331,6 +1362,7 @@ impl DialogView {
             )),
             // `dialog-prompt.tsx:133` passes `footerGap={2}`.
             footer_gap: Some(2),
+            session_has_parent: false,
         });
         self.selection = None;
         self.rejected = false;
@@ -1553,6 +1585,198 @@ impl DialogView {
         }
     }
 
+    /// F002-R2: mark the open permission request as belonging to a child
+    /// session (`session.parentID`). Only a child session opens the nested
+    /// rejection prompt (`permission.tsx:243-254`); a root session replies
+    /// immediately.
+    pub fn set_permission_session_has_parent(&mut self, has_parent: bool) {
+        if let Some(dialog) = self.dialog.as_mut() {
+            if dialog.kind == DialogKind::Permission {
+                dialog.session_has_parent = has_parent;
+            }
+        }
+    }
+
+    /// F002-R2: true while the nested rejection-reason editor is open and owns
+    /// input. False once the decision is pending (the stage is retained only so
+    /// a rejected ACK can restore the permission card).
+    #[must_use]
+    pub fn reject_stage(&self) -> bool {
+        self.reject_stage.is_some() && self.phase == Phase::Open
+    }
+
+    /// F002-R2: true while the rejection stage is retained, whether the editor
+    /// is open or its decision is pending. The live input loop uses this to
+    /// keep the stage's keys from reaching the permission byte dispatch.
+    #[must_use]
+    pub fn reject_stage_retained(&self) -> bool {
+        self.reject_stage.is_some()
+    }
+
+    /// F002-R2: shared entry into the nested rejection stage. Requires an open
+    /// child-session Permission request; preserves the current selection so a
+    /// cancel restores the card verbatim. Both the `reject`-row path
+    /// ([`Self::begin_reject_stage`]) and the Escape path
+    /// ([`Self::escape_reject_stage`]) route here, matching upstream's single
+    /// `onSelect("reject")` (`permission.tsx:241,437`).
+    fn open_reject_stage(&mut self) -> bool {
+        if self.reject_stage.is_some() || self.phase != Phase::Open {
+            return false;
+        }
+        let Some(dialog) = self.dialog.as_ref() else {
+            return false;
+        };
+        if dialog.kind != DialogKind::Permission || !dialog.session_has_parent {
+            return false;
+        }
+        // Reconstruct the original card so cancel can restore it verbatim.
+        let request = DialogRequest {
+            id: dialog.id.clone(),
+            session_id: dialog.session_id.clone(),
+            kind: DialogKind::Permission,
+            title: dialog.title.clone(),
+            choices: dialog.choices.clone(),
+            message: (!dialog.message_lines.is_empty())
+                .then(|| dialog.message_lines.join("\n")),
+            disabled: dialog
+                .disabled
+                .iter()
+                .enumerate()
+                .filter_map(|(index, disabled)| disabled.then_some(index))
+                .collect(),
+            error: None,
+        };
+        let selection = self.selection;
+        self.reset();
+        // The reason editor reuses the tested `DialogPrompt` text model; its
+        // dialog id is the permission request id so the ACK correlation still
+        // matches (`permission.tsx:284-307`).
+        let opened = self.open_prompt(
+            request.id.clone(),
+            request.session_id.clone(),
+            "Reject permission",
+            "",
+            Some("Tell OpenCode what to do differently".to_owned()),
+        );
+        if opened.is_err() {
+            return false;
+        }
+        if let Some(dialog) = self.dialog.as_mut() {
+            dialog.session_has_parent = true;
+        }
+        self.reject_stage = Some(RejectStage { request, selection });
+        true
+    }
+
+    /// F002-R2: enter the nested rejection stage when the selected permission
+    /// option is `reject` and the request belongs to a child session
+    /// (`permission.tsx:144-155,243-254`). Returns true when the stage was
+    /// entered; the caller must NOT dispatch a reply in that case. A root
+    /// session (or a non-reject selection) returns false so the caller replies
+    /// immediately.
+    pub fn begin_reject_stage(&mut self) -> bool {
+        let Some(dialog) = self.dialog.as_ref() else {
+            return false;
+        };
+        if dialog.kind != DialogKind::Permission || !dialog.session_has_parent {
+            return false;
+        }
+        let Some(index) = self.selection else {
+            return false;
+        };
+        if dialog.permission.get(index).copied() != Some(PermissionChoice::Reject) {
+            return false;
+        }
+        self.open_reject_stage()
+    }
+
+    /// F002-R2: the Escape path. Upstream `escapeKey="reject"` routes Escape
+    /// through the same `onSelect("reject")` as the reject row
+    /// (`permission.tsx:241,437`), so for a child session Escape opens the
+    /// rejection-reason editor regardless of which row is highlighted. Returns
+    /// true when the stage was opened; the caller must NOT dispatch a reply in
+    /// that case (a root session returns false so the caller rejects
+    /// immediately).
+    pub fn escape_reject_stage(&mut self) -> bool {
+        self.open_reject_stage()
+    }
+
+    /// F002-R2: confirm the nested rejection. Emits a `reject` intent carrying
+    /// the typed reason (omitted when empty) and holds the decision pending
+    /// (`permission.tsx:148-153,300-306`).
+    pub fn confirm_reject_stage(&mut self) -> Result<DecisionIntent, DialogError> {
+        // Keep the stage set through the pending decision: a rejected ACK
+        // restores the permission card from it (`ack`). The editor is only
+        // "active" while the dialog is Open, so `reject_stage()` stays false
+        // once the decision is in flight.
+        let Some((request_id, session_id)) = self
+            .reject_stage
+            .as_ref()
+            .map(|stage| (stage.request.id.clone(), stage.request.session_id.clone()))
+        else {
+            return Err(DialogError::NotOpen);
+        };
+        let message = self.prompt_submit().filter(|reason| !reason.is_empty());
+        let attempt = self.next_attempt()?;
+        self.pending_attempt = attempt;
+        self.phase = Phase::Pending;
+        Ok(DecisionIntent::Reject {
+            request_id,
+            session_id,
+            attempt,
+            message,
+        })
+    }
+
+    /// F002-R2: cancel the nested rejection stage, restoring the permission
+    /// card and its selection (`permission.tsx:299-302`). Returns whether a
+    /// stage was actually cancelled.
+    pub fn cancel_reject_stage(&mut self) -> bool {
+        if self.phase != Phase::Open {
+            return false;
+        }
+        let Some(stage) = self.reject_stage.take() else {
+            return false;
+        };
+        self.reset();
+        if self.open_request(stage.request).is_ok() {
+            if let Some(dialog) = self.dialog.as_mut() {
+                dialog.session_has_parent = true;
+            }
+            self.selection = stage.selection;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// F002-R2: the rejection reason currently typed, or `""`.
+    #[must_use]
+    pub fn reject_reason(&self) -> &str {
+        self.prompt_value().unwrap_or("")
+    }
+
+    /// F002-R2: clear a non-empty rejection reason (Ctrl-C,
+    /// `permission.tsx:288-298`). Returns whether anything was cleared.
+    pub fn reject_clear_reason(&mut self) -> bool {
+        if self.reject_stage.is_none() {
+            return false;
+        }
+        if self.prompt_value().is_some_and(|reason| reason.is_empty()) {
+            return false;
+        }
+        self.prompt_clear()
+    }
+
+    /// F002-R2: reset the live prompt's text (Ctrl-C clears a non-empty
+    /// rejection reason, `permission.tsx:288-298`).
+    pub fn prompt_clear(&mut self) -> bool {
+        self.dialog
+            .as_mut()
+            .and_then(|dialog| dialog.prompt.as_mut())
+            .is_some_and(crate::native_palette::select::PromptState::clear)
+    }
+
     /// Move the selection forward, wrapping and skipping disabled choices.
     /// Ignored while pending (the decision is already in flight) and when
     /// no choice is enabled (selection stays unset).
@@ -1724,6 +1948,7 @@ impl DialogView {
                     request_id,
                     session_id,
                     attempt,
+                    message: None,
                 },
                 // Defensive only: `open_request` refuses unmapped labels,
                 // so this arm is unreachable — and even here the outcome
@@ -1775,6 +2000,7 @@ impl DialogView {
                 request_id,
                 session_id,
                 attempt,
+                message: None,
             },
             DialogKind::Confirm | DialogKind::Select => DecisionIntent::Cancel {
                 request_id,
@@ -1820,8 +2046,19 @@ impl DialogView {
             self.reset();
             Ok(AckOutcome::Closed)
         } else {
+            // F002-R2: a rejected ack on the nested rejection editor restores
+            // the permission options so the retry path re-sends the decision
+            // (the reason editor is not itself a decision surface). Every
+            // other kind keeps the historical reopen-in-place behaviour.
+            match self.reject_stage.take() {
+                Some(stage) => {
+                    self.reset();
+                    let _ = self.open_request(stage.request);
+                    self.selection = stage.selection;
+                }
+                None => self.selection = None,
+            }
             self.phase = Phase::Open;
-            self.selection = None;
             self.rejected = true;
             Ok(AckOutcome::Rejected)
         }
@@ -2295,6 +2532,7 @@ impl DialogView {
         self.selection = None;
         self.rejected = false;
         self.pending_attempt = 0;
+        self.reject_stage = None;
     }
 
     fn reconcile_closed_route(&mut self, route: ModalRoute) -> ModalRoute {
@@ -7357,6 +7595,7 @@ mod tests {
                 request_id: "req-1".to_string(),
                 session_id: "ses-1".to_string(),
                 attempt: 1,
+                message: None,
             }
         );
         assert_ne!(
@@ -7517,6 +7756,7 @@ mod tests {
                 request_id: "req-1".to_string(),
                 session_id: "ses-1".to_string(),
                 attempt: 1,
+                message: None,
             }
         );
         assert!(view.pending());
@@ -8892,6 +9132,258 @@ mod select_live_tests {
             view.answer().expect("model row answers"),
             DecisionIntent::Answer { choice_index: 2, .. }
         ));
+    }
+}
+
+/// F002-R2: the child-session rejection stage. Upstream
+/// `routes/session/permission.tsx:144-155,243-254` opens a nested reason editor
+/// ONLY for a child session (`session.parentID`); a root-session reject replies
+/// immediately. Confirming sends `reply("reject", message || undefined)`
+/// (`:148-153`); Escape cancels the stage back to the options (`:299-302`);
+/// Ctrl-C clears a non-empty reason before it cancels (`:288-298`).
+#[cfg(test)]
+mod f002r2_reject_stage_tests {
+    use super::{AckOutcome, DecisionIntent, DialogAck, DialogKind, DialogView};
+
+    /// A child-session permission prompt with the `reject` row selected.
+    fn child_permission() -> DialogView {
+        let mut view = DialogView::new();
+        view.open_permission_with_persistent("req-1", "ses-1", "bash", true)
+            .expect("permission opens");
+        view.set_permission_session_has_parent(true);
+        // The persistent prompt is `[Allow once, Always allow, Reject]`.
+        assert!(view.select(2), "the reject row is selectable");
+        view
+    }
+
+    /// A root-session permission prompt with the `reject` row selected.
+    fn root_permission() -> DialogView {
+        let mut view = DialogView::new();
+        view.open_permission_with_persistent("req-1", "ses-1", "bash", true)
+            .expect("permission opens");
+        assert!(view.select(2));
+        view
+    }
+
+    #[test]
+    fn f002r2_child_reject_opens_the_reason_editor() {
+        let mut view = child_permission();
+        assert!(view.begin_reject_stage(), "child reject opens the stage");
+        assert!(view.reject_stage());
+        assert!(!view.pending(), "no decision is in flight yet");
+        assert_eq!(view.open_kind(), Some(DialogKind::Prompt));
+        assert!(view.intercepts_input(), "the editor owns input");
+    }
+
+    #[test]
+    fn f002r2_root_reject_replies_immediately() {
+        let mut view = root_permission();
+        assert!(!view.begin_reject_stage(), "root reject has no nested stage");
+        assert!(!view.reject_stage());
+        match view.answer().expect("root reject answers") {
+            DecisionIntent::Reject { message, .. } => assert_eq!(message, None),
+            other => panic!("expected reject, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn f002r2_confirm_carries_the_typed_reason() {
+        let mut view = child_permission();
+        assert!(view.begin_reject_stage());
+        for ch in "use cargo".chars() {
+            assert!(view.prompt_push(ch));
+        }
+        match view.confirm_reject_stage().expect("confirm emits intent") {
+            DecisionIntent::Reject {
+                request_id,
+                session_id,
+                message,
+                ..
+            } => {
+                assert_eq!(request_id, "req-1");
+                assert_eq!(session_id, "ses-1");
+                assert_eq!(message.as_deref(), Some("use cargo"));
+            }
+            other => panic!("expected reject, got {other:?}"),
+        }
+        assert!(view.pending());
+        assert!(!view.reject_stage(), "the stage is consumed on confirm");
+    }
+
+    #[test]
+    fn f002r2_confirm_with_empty_reason_omits_the_message() {
+        let mut view = child_permission();
+        assert!(view.begin_reject_stage());
+        match view.confirm_reject_stage().expect("confirm emits intent") {
+            DecisionIntent::Reject { message, .. } => assert_eq!(message, None),
+            other => panic!("expected reject, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn f002r2_cancel_restores_the_permission_card() {
+        let mut view = child_permission();
+        let before = view.render(80, 24);
+        assert!(view.begin_reject_stage());
+        assert!(view.reject_stage());
+        assert!(view.cancel_reject_stage(), "cancel restores the card");
+        assert!(!view.reject_stage());
+        assert_eq!(view.open_kind(), Some(DialogKind::Permission));
+        assert_eq!(view.render(80, 24), before, "the card is restored verbatim");
+        assert!(
+            view.begin_reject_stage(),
+            "a second reject re-enters the editor"
+        );
+    }
+
+    #[test]
+    fn f002r2_ctrl_c_clears_then_cancels() {
+        let mut view = child_permission();
+        assert!(view.begin_reject_stage());
+        assert!(!view.reject_clear_reason(), "nothing to clear yet");
+        assert!(view.prompt_push('x'));
+        assert_eq!(view.reject_reason(), "x");
+        assert!(view.reject_clear_reason(), "clears the reason");
+        assert_eq!(view.reject_reason(), "");
+        assert!(view.reject_stage(), "still in the stage after a clear");
+        assert!(!view.reject_clear_reason(), "nothing left to clear");
+        assert!(view.cancel_reject_stage());
+        assert!(!view.reject_stage());
+    }
+
+    #[test]
+    fn f002r2_accepted_ack_closes_the_editor() {
+        let mut view = child_permission();
+        assert!(view.begin_reject_stage());
+        assert!(view.prompt_push('x'));
+        let intent = view.confirm_reject_stage().unwrap();
+        let ack = DialogAck {
+            request_id: intent.request_id().to_owned(),
+            session_id: intent.session_id().to_owned(),
+            accepted: true,
+            attempt: intent.attempt(),
+        };
+        assert_eq!(view.ack(ack).unwrap(), AckOutcome::Closed);
+        assert!(!view.is_open());
+        assert!(!view.reject_stage());
+    }
+
+    #[test]
+    fn f002r2_rejected_ack_restores_the_permission_options() {
+        let mut view = child_permission();
+        assert!(view.begin_reject_stage());
+        let intent = view.confirm_reject_stage().unwrap();
+        let ack = DialogAck {
+            request_id: intent.request_id().to_owned(),
+            session_id: intent.session_id().to_owned(),
+            accepted: false,
+            attempt: intent.attempt(),
+        };
+        assert_eq!(view.ack(ack).unwrap(), AckOutcome::Rejected);
+        assert_eq!(view.open_kind(), Some(DialogKind::Permission));
+        assert!(!view.reject_stage());
+    }
+
+    #[test]
+    fn f002r2_non_reject_selection_stays_a_plain_answer() {
+        let mut view = DialogView::new();
+        view.open_permission_with_persistent("req-1", "ses-1", "bash", true)
+            .unwrap();
+        view.set_permission_session_has_parent(true);
+        assert!(view.select(0)); // allow once
+        assert!(!view.begin_reject_stage());
+        assert!(matches!(
+            view.answer().unwrap(),
+            DecisionIntent::Approve { .. }
+        ));
+    }
+
+    #[test]
+    fn f002r2_child_always_selection_stays_a_plain_answer() {
+        let mut view = DialogView::new();
+        view.open_permission_with_persistent("req-1", "ses-1", "bash", true)
+            .unwrap();
+        view.set_permission_session_has_parent(true);
+        assert!(view.select(1)); // always allow
+        assert!(!view.begin_reject_stage());
+        assert!(matches!(
+            view.answer().unwrap(),
+            DecisionIntent::ScopedPermission { .. }
+        ));
+    }
+
+    /// Upstream `escapeKey="reject"` routes Escape through the same
+    /// `onSelect("reject")` as the reject row (`permission.tsx:241,437`), so a
+    /// child-session Escape opens the reason editor regardless of which row is
+    /// highlighted.
+    #[test]
+    fn f002r2_escape_on_child_opens_the_editor_regardless_of_highlight() {
+        let mut view = DialogView::new();
+        view.open_permission_with_persistent("req-1", "ses-1", "bash", true)
+            .unwrap();
+        view.set_permission_session_has_parent(true);
+        assert!(view.select(0)); // `allow once` is highlighted, not `reject`
+        assert!(view.escape_reject_stage(), "child Escape opens the stage");
+        assert!(view.reject_stage());
+        assert_eq!(view.open_kind(), Some(DialogKind::Prompt));
+        assert!(!view.pending(), "no decision is in flight yet");
+        assert!(view.intercepts_input(), "the editor owns input");
+    }
+
+    /// A root session has no nested stage, so Escape falls through to the
+    /// immediate reject (`permission.tsx:249-253`).
+    #[test]
+    fn f002r2_escape_on_root_rejects_immediately() {
+        let mut view = root_permission();
+        assert!(
+            !view.escape_reject_stage(),
+            "a root session has no nested stage"
+        );
+        assert!(!view.reject_stage());
+        match view.cancel().expect("root escape rejects") {
+            DecisionIntent::Reject { message, .. } => assert_eq!(message, None),
+            other => panic!("expected reject, got {other:?}"),
+        }
+    }
+
+    /// Escape toggles between the reason editor and the permission card: the
+    /// first Escape opens the editor, the next cancels it back to the card
+    /// (`permission.tsx:152,299-302`), and a third re-opens it.
+    #[test]
+    fn f002r2_escape_toggles_stage_and_card() {
+        let mut view = child_permission();
+        let before = view.render(80, 24);
+        assert!(view.escape_reject_stage(), "escape opens the editor");
+        assert!(view.reject_stage());
+        assert!(view.cancel_reject_stage(), "escape again restores the card");
+        assert!(!view.reject_stage());
+        assert_eq!(view.open_kind(), Some(DialogKind::Permission));
+        assert_eq!(view.render(80, 24), before, "the card is restored verbatim");
+        assert!(
+            view.escape_reject_stage(),
+            "escape re-opens the editor from the card"
+        );
+        assert!(view.reject_stage());
+    }
+
+    /// Once the decision is pending the stage is retained only for ACK
+    /// correlation; Escape can neither re-enter nor cancel it.
+    #[test]
+    fn f002r2_escape_is_inert_once_the_decision_is_pending() {
+        let mut view = child_permission();
+        assert!(view.escape_reject_stage());
+        let _ = view.confirm_reject_stage().expect("confirm emits intent");
+        assert!(view.pending());
+        assert!(!view.escape_reject_stage(), "no re-entry while pending");
+        assert!(!view.cancel_reject_stage(), "no cancel while pending");
+    }
+
+    /// With no permission dialog open, Escape has no stage to open.
+    #[test]
+    fn f002r2_escape_without_a_permission_is_inert() {
+        let mut view = DialogView::new();
+        assert!(!view.escape_reject_stage());
+        assert!(!view.reject_stage());
     }
 }
 
