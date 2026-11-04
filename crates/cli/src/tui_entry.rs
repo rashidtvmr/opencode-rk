@@ -7582,7 +7582,8 @@ fn native_loop(
     // `ChatPart::ToolState { id }` at paint (`index.tsx:2793-2799`).
     let mut pending_permission_calls: Vec<String> = Vec::new();
     let mut partial = String::new();
-    let mut last_delta_seq: u64 = 0;
+    // PAR-10: ordered delta admission; one accumulator per active turn.
+    let mut delta_stream = LiveDeltaStream::default();
     let mut utf8 = NativeUtf8Decoder::default();
     let mut input = native_input_decoder::TerminalInputDecoder::default();
     let mut observed_size = (cols, rows);
@@ -8580,15 +8581,15 @@ fn native_loop(
                             }
                         }
                         native_turn::Event::Delta { text, seq } => {
-                            // PAR-10: apply deltas in order. A sequence of 0
-                            // (older servers) always applies; otherwise only
-                            // strictly increasing seq values append, dropping
-                            // duplicates and stale out-of-order frames.
-                            if seq == 0 || seq > last_delta_seq {
-                                if seq != 0 {
-                                    last_delta_seq = seq;
-                                }
-                                partial.push_str(&text);
+                            // PAR-10: the live stream routes through one
+                            // ordered `StreamAccumulator` per active turn
+                            // (reset on a new turn below). Out-of-order
+                            // frames buffer, duplicates/stale frames drop,
+                            // and the first observed seq seeds the
+                            // accumulator so a 1-based origin converges.
+                            // seq==0 remains the legacy unsequenced path.
+                            if let Some(assembled) = delta_stream.apply(seq, &text) {
+                                partial = assembled;
                                 replace_partial(&mut transcript, &partial);
                             }
                         }
@@ -8684,7 +8685,7 @@ fn native_loop(
                         native_turn::Event::Assistant { text, facts } => {
                             turn_succeeded = true;
                             partial.clear();
-                            last_delta_seq = 0;
+                            delta_stream.reset();
                             remove_partial(&mut transcript);
                             settled = true;
                             transcript.append(
@@ -14372,7 +14373,8 @@ fn native_loop(
                                     ),
                                 );
                                 partial.clear();
-                                last_delta_seq = 0;
+                                // PAR-10: a new turn starts a fresh stream.
+                                delta_stream.reset();
                             });
                             if let Err(error) = result {
                                 let _ = captured_submission.restore(&mut draft, &mut draft_cursor);
@@ -15019,6 +15021,100 @@ fn append_legacy_transcript(transcript: &mut Vec<String>, mut line: String) {
 }
 
 #[cfg(feature = "native")]
+/// PAR-10: live delta admission for one active turn. Wraps exactly one
+/// `StreamAccumulator` (the model in `native_transcript`; upstream
+/// `session/rows.ts:274-292` assembles the same per-message stream).
+/// Positive seqs seed the accumulator from the first observed frame, so the
+/// server's 1-based origin converges instead of buffering forever; seq==0
+/// stays the legacy unsequenced verbatim path.
+#[derive(Default)]
+struct LiveDeltaStream {
+    acc: Option<crate::native_transcript::StreamAccumulator>,
+    legacy: String,
+}
+
+impl LiveDeltaStream {
+    /// A new turn starts a fresh stream.
+    fn reset(&mut self) {
+        self.acc = None;
+        self.legacy.clear();
+    }
+
+    /// Returns the assembled stream text when the frame contributed new
+    /// data (immediately applied, or a buffered gap that just filled);
+    /// `None` when the frame was a duplicate, stale, or pure buffering.
+    fn apply(&mut self, seq: u64, text: &str) -> Option<String> {
+        if seq == 0 {
+            if text.is_empty() {
+                return None;
+            }
+            self.legacy.push_str(text);
+            return Some(self.legacy.clone());
+        }
+        let acc = self.acc.get_or_insert_with(|| {
+            let mut acc = crate::native_transcript::StreamAccumulator::new(0);
+            acc.seed(seq);
+            acc
+        });
+        let before_seq = acc.next_seq();
+        if acc.push(&crate::native_transcript::TokenDelta::new(0, seq, text))
+            && acc.next_seq() != before_seq
+        {
+            // Ordered progress: publish the assembled text. Pure buffering
+            // (gap open) or a dropped duplicate/stale frame publishes nothing.
+            Some(acc.text().to_owned())
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod par10_delta_stream {
+    use super::*;
+
+    #[test]
+    fn par10_buffered_reorder_drop_and_gap_recovery() {
+        use crate::native_transcript::{StreamAccumulator, TokenDelta};
+
+        // Out-of-order delivery buffers; late filler publishes in order.
+        let mut live = LiveDeltaStream::default();
+        assert_eq!(live.apply(1, "a").as_deref(), Some("a"));
+        // Gap: seq 3 arrives before 2 -> buffered, nothing published.
+        assert_eq!(live.apply(3, "c"), None);
+        assert_eq!(live.apply(2, "b").as_deref(), Some("abc"));
+
+        // Duplicates and stale frames are dropped.
+        assert_eq!(live.apply(2, "b"), None);
+        assert_eq!(live.apply(1, "a"), None);
+        // Assembled text is unchanged by dropped frames.
+        assert_eq!(live.legacy, "");
+
+        // A later gap fills the same way; the stream never stalls forever.
+        assert_eq!(live.apply(5, "e"), None);
+        assert_eq!(live.apply(4, "d").as_deref(), Some("abcde"));
+
+        // Reset starts a fresh stream (one accumulator per active turn).
+        live.reset();
+        assert_eq!(live.apply(1, "x").as_deref(), Some("x"));
+
+        // Legacy unsequenced frames (seq 0) apply verbatim, cumulatively.
+        let mut legacy = LiveDeltaStream::default();
+        assert_eq!(legacy.apply(0, "a").as_deref(), Some("a"));
+        assert_eq!(legacy.apply(0, "b").as_deref(), Some("ab"));
+
+        // Model reconciliation: without seeding, a 1-based first frame
+        // would sit pending forever against the 0-based expectation.
+        let mut acc = StreamAccumulator::new(0);
+        acc.seed(1);
+        assert!(acc.push(&TokenDelta::new(0, 1, "one")));
+        assert_eq!(acc.text(), "one");
+        // seeding is idempotent and never lowers the bar
+        acc.seed(0);
+        assert!(!acc.push(&TokenDelta::new(0, 1, "dup")));
+    }
+}
+
 fn replace_partial(transcript: &mut NativeChatHistory, text: &str) {
     transcript.replace_partial(text);
 }

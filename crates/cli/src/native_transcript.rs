@@ -73,6 +73,7 @@ impl ToolState {
 pub struct StreamAccumulator {
     stream_id: u64,
     next_seq: u64,
+    seeded: bool,
     pending: Vec<(u64, String)>,
     text: String,
     dropped_bytes: u64,
@@ -83,9 +84,25 @@ impl StreamAccumulator {
         Self {
             stream_id,
             next_seq: 0,
+            seeded: false,
             pending: Vec::new(),
             text: String::new(),
             dropped_bytes: 0,
+        }
+    }
+
+    /// PAR-10: seed the expected next sequence from the first observed
+    /// frame. The server counts deltas from 1 and a late join may observe
+    /// any origin, so without this the first positive frame would sit in
+    /// `pending` forever (the 0-based default never advances). Idempotent
+    /// and never lowers the bar, so stale frames stay stale.
+    pub fn seed(&mut self, first_seq: u64) {
+        if self.seeded {
+            return;
+        }
+        self.seeded = true;
+        if first_seq > self.next_seq {
+            self.next_seq = first_seq;
         }
     }
 
