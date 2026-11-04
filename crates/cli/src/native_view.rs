@@ -2015,6 +2015,29 @@ impl NativeView {
         }
     }
 
+    /// DIFF-001 review fix: the patch-pane width the diff viewer will have once
+    /// opened, so its open-time split rule is resolved from the viewer's real
+    /// available width (`diff-viewer.tsx:345-353`: `patchPaneWidth >=
+    /// MIN_SPLIT_WIDTH` = 100) rather than the default modal size. The viewer
+    /// opens as [`crate::native_modal_layer::DialogSize::XLarge`]
+    /// (`native_view_dialogs::open_diff_viewer`), so measure that size class
+    /// from the current terminal width; the caller must NOT read
+    /// [`NativeView::modal_presentation`] before opening, which would report
+    /// the Medium default and always resolve Unified.
+    #[must_use]
+    pub fn diff_viewer_patch_width(&self) -> u16 {
+        let size = crate::native_modal_layer::DialogSize::XLarge;
+        let width = self.layout.cols.saturating_sub(2).min(size.width());
+        let padding = u16::from(
+            self.box_appearance
+                .effective(crate::native_box_style::BoxId::Dialog)
+                .padding
+                .min(crate::native_box_style::MAX_PADDING),
+        );
+        let inset = 2u16.saturating_add(padding).min(width);
+        width.saturating_sub(2 * inset)
+    }
+
     /// Panel rect handed to [`DialogView::compose_at`] for this frame.
     ///
     /// `compose_at` derives the body width by re-applying `DialogLayout`'s
@@ -9941,6 +9964,42 @@ mod composer_dock_tests {
         assert_eq!(queue_rows, 3, "rail, summary, rail (index.tsx:2499-2512)");        assert!(
             frame.iter().any(|row| row.contains("1 queued · hello world")),
             "the flattened head prompt is painted: {frame:?}"
+        );
+    }
+}
+
+/// DIFF-001 review fix: the diff viewer's open-time split rule must be
+/// resolved from the width the viewer will actually have (the XLarge size
+/// class), not the default Medium modal width that `modal_presentation()`
+/// reports before any dialog is open.
+#[cfg(test)]
+mod diff_viewer_width_tests {
+    use super::NativeView;
+
+    #[test]
+    fn diff001_live_width_resolves_split_on_a_wide_terminal() {
+        // 120 cols: XLarge panel = min(118, 116) = 116; content = 116 - 4 = 112
+        // >= MIN_SPLIT_WIDTH (100) -> Split.
+        let wide = NativeView::new(120, 30);
+        assert!(
+            wide.diff_viewer_patch_width() >= 100,
+            "wide terminal must reach the split threshold: {}",
+            wide.diff_viewer_patch_width()
+        );
+        // The pre-open default modal is Medium (60), which would always be
+        // below the threshold — the bug this helper fixes.
+        assert!(wide.modal_presentation().content_width < 100);
+    }
+
+    #[test]
+    fn diff001_live_width_stays_unified_on_a_narrow_terminal() {
+        // 80 cols: XLarge panel = min(78, 116) = 78; content = 78 - 4 = 74
+        // < MIN_SPLIT_WIDTH (100) -> Unified.
+        let narrow = NativeView::new(80, 30);
+        assert!(
+            narrow.diff_viewer_patch_width() < 100,
+            "narrow terminal must stay below the split threshold: {}",
+            narrow.diff_viewer_patch_width()
         );
     }
 }

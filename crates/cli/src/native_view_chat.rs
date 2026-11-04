@@ -721,6 +721,29 @@ pub fn execute_dialog_from_part(message: &ChatMessage, tool_index: usize) -> Opt
     None
 }
 
+/// DIFF-001: the diff text a clicked diff row was painted from. All
+/// `ChatPart::Patch` parts concatenate in part order (the live chat click
+/// opens the diff viewer with the row's own diff content,
+/// `index.tsx:3400-3427`); `None` when the message carries no patch part and
+/// the caller falls back to the painted row text.
+#[must_use]
+pub fn diff_text_from_message(message: &ChatMessage) -> Option<String> {
+    let diffs: Vec<&str> = message
+        .parts
+        .iter()
+        .take(MAX_PARTS_PER_MESSAGE)
+        .filter_map(|part| match part {
+            ChatPart::Patch { diff, .. } => Some(diff.as_str()),
+            _ => None,
+        })
+        .collect();
+    if diffs.is_empty() {
+        None
+    } else {
+        Some(diffs.join("\n"))
+    }
+}
+
 /// Role of one typed chat message, exactly as supplied by the caller's real
 /// backend projection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

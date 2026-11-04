@@ -12170,9 +12170,14 @@ fn native_loop(
         // home/end to the ends, c/o copy code/output) and is modal — every
         // other key is swallowed. `home`/`end` have no decoded `InputEvent`
         // yet, so those two scroll commands remain unbound (recorded gap).
+        // DIFF-003: the diff viewer scroll body shares the same arrow/page
+        // handling; its scroll state clamps against the virtualized rows.
         if view.dialogs.intercepts_input()
-            && view.dialogs.open_kind()
-                == Some(crate::native_view_dialogs::DialogKind::Execute)
+            && matches!(
+                view.dialogs.open_kind(),
+                Some(crate::native_view_dialogs::DialogKind::Execute)
+                    | Some(crate::native_view_dialogs::DialogKind::DiffViewer)
+            )
         {
             let modal = view.modal_presentation();
             let width = usize::from(modal.content_width);
@@ -13177,11 +13182,7 @@ fn native_loop(
                             || x >= modal.x.saturating_add(modal.width)
                             || y < modal.y)
                     {
-                        let local_close = matches!(
-                            view.dialogs.open_kind(),
-                            Some(crate::native_view_dialogs::DialogKind::Mcp)
-                                | Some(crate::native_view_dialogs::DialogKind::Select)
-                        );
+                        let local_close = view.dialogs.backdrop_closes_locally();
                         if local_close {
                             view.dialogs.close();
                         } else if let Ok(intent) = view.dialogs.cancel() {
@@ -13475,6 +13476,49 @@ fn native_loop(
                                     let _ = view.dialogs.open_execute(model);
                                     needs_paint = true;
                                     continue;
+                                }
+                            }
+                            // DIFF-001: a clicked diff row opens the live
+                            // patch viewer (`index.tsx:3400-3427` `openDetails`
+                            // -> `DialogDiff`, `feature-plugins/system/
+                            // diff-viewer.tsx`). The row's class names a diff
+                            // line; the owning message's `Patch` parts supply
+                            // the patch text.
+                            if let Some(class) = view.chat_row_classes().get(usize::from(y)) {
+                                if matches!(
+                                    class,
+                                    crate::native_view_chat::ChatRowClass::DiffAdded
+                                        | crate::native_view_chat::ChatRowClass::DiffRemoved
+                                        | crate::native_view_chat::ChatRowClass::DiffContext
+                                        | crate::native_view_chat::ChatRowClass::DiffHunkHeader
+                                ) {
+                                    if let (Some(snapshot), Some(message_id)) =
+                                        (live.as_ref(), view.chat_message_owner_at(usize::from(y)))
+                                    {
+                                        let patch = crate::native_chat_projection::project_history_entries(
+                                            &snapshot.raw_history,
+                                        )
+                                        .into_iter()
+                                        .find(|(id, _)| id == &message_id)
+                                        .and_then(|(_, message)| {
+                                            crate::native_view_chat::diff_text_from_message(&message)
+                                        });
+                                        if let Some(patch) = patch {
+                                            // DIFF-001 review fix: measure the
+                                            // viewer's OWN patch-pane width (the
+                                            // XLarge size class it opens with),
+                                            // not the pre-open default modal
+                                            // width — the latter is the Medium
+                                            // default and would always resolve
+                                            // Unified even on a wide terminal.
+                                            let width =
+                                                usize::from(view.diff_viewer_patch_width());
+                                            if view.dialogs.open_diff_viewer(patch, width).is_ok() {
+                                                needs_paint = true;
+                                                continue;
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             if let (Some(snapshot), Some(message_id)) =

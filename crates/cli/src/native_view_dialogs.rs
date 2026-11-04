@@ -194,6 +194,8 @@ pub enum DialogKind {
     /// Enter surfaces the focused server's toggle identity to the caller and
     /// Esc closes locally; it never pends a permission ack.
     Mcp,
+    /// Dedicated patch viewer, matching `feature-plugins/system/diff-viewer.tsx`.
+    DiffViewer,
 }
 
 /// Static, safe error-card categories. Defined in this file so raw backend
@@ -500,6 +502,11 @@ struct OpenDialog {
     /// painted window; [`DialogView::execute_scroll_state`] clamps the key
     /// handler's next value the way upstream `scroll?.scrollBy` does.
     execute_scroll: usize,
+    /// DIFF-001: the resolved unified/split mode of the open diff viewer,
+    /// fixed once at open time from the same surface/width resolution the
+    /// row was measured against (`diff-viewer.tsx:45,349`); `None` for every
+    /// other kind.
+    diff_mode: Option<crate::native_diff_view::DiffViewMode>,
 }
 
 /// Focus-owning dialog overlay state. `Default` is a closed view.
@@ -726,6 +733,7 @@ impl DialogView {
             | Some(DialogKind::Prompt)
             | Some(DialogKind::Execute)
             | Some(DialogKind::Crash)
+            | Some(DialogKind::DiffViewer)
             | None => DialogViewportPolicy::ContentBudget,
         }
     }
@@ -1117,6 +1125,7 @@ impl DialogView {
             session_has_parent: false,
             execute: None,
             execute_scroll: 0,
+            diff_mode: None,
         });
         self.crash_screen = Some(crash::CrashScreen::new(
             mode,
@@ -1173,7 +1182,7 @@ impl DialogView {
         // `routes/session/dialog-execute.tsx:28` (and the static error card)
         // is a content-only viewer: no choice list, so empty `choices` is
         // valid for `Execute` exactly as for `Error`.
-        if request.kind != DialogKind::Error && request.kind != DialogKind::Execute && request.choices.is_empty() {
+        if request.kind != DialogKind::Error && request.kind != DialogKind::Execute && request.kind != DialogKind::DiffViewer && request.choices.is_empty() {
             return Err(DialogError::NoChoices);
         }
         if request.kind == DialogKind::Error && request.error.is_none() {
@@ -1266,6 +1275,7 @@ impl DialogView {
             session_has_parent: false,
             execute: None,
             execute_scroll: 0,
+            diff_mode: None,
         });
         // `DialogSelect` seeds `selected: 0` (`ui/dialog-select.tsx:152`), so
         // the first enabled row is selected on open and the first Down moves
@@ -1348,6 +1358,7 @@ impl DialogView {
             session_has_parent: false,
             execute: None,
             execute_scroll: 0,
+            diff_mode: None,
         });
         // `DialogSelect` seeds `selected` to the focused row
         // (`dialog-select.tsx:152`, `dialog-mcp.tsx:61` `preserveSelection`).
@@ -1367,6 +1378,46 @@ impl DialogView {
     /// [`DialogView::open_mcp`]: no choices, no backend decision, no footer.
     /// The caller closes it with [`DialogView::close`] and scrolls the body
     /// with [`DialogView::set_execute_scroll`].
+    pub fn open_diff_viewer(&mut self, patch: String, patch_pane_width: usize) -> Result<(), DialogError> {
+        if self.is_open() {
+            return Err(DialogError::AlreadyOpen);
+        }
+        let preference = crate::native_diff_view::DiffViewPreference::Auto;
+        // DIFF-001: keep the resolved mode on the dialog so the live render
+        // arm branches on the stored fact (`diff-viewer.tsx:45,349`: viewer
+        // split rule — never split below 100 columns, split at 100+).
+        let mode = crate::native_diff_view::resolve_view_mode(
+            crate::native_diff_view::DiffSurface::Viewer,
+            preference,
+            patch_pane_width,
+        );
+        self.dialog = Some(OpenDialog {
+            id: "diff-viewer".to_owned(),
+            session_id: String::new(),
+            kind: DialogKind::DiffViewer,
+            title: "Diff viewer".to_owned(),
+            choices: Vec::new(),
+            disabled: Vec::new(),
+            permission: Vec::new(),
+            select: None,
+            mcp_status: Vec::new(),
+            message_lines: patch.lines().map(str::to_owned).collect(),
+            error: StaticError::BackendUnavailable,
+            prompt: None,
+            footer_gap: None,
+            session_has_parent: false,
+            execute: None,
+            execute_scroll: 0,
+            diff_mode: Some(mode),
+        });
+        self.selection = None;
+        self.rejected = false;
+        self.phase = Phase::Open;
+        self.open_sequence = self.open_sequence.saturating_add(1);
+        self.modal.replace(self.open_sequence, DialogSize::XLarge, true, None, self.focus);
+        Ok(())
+    }
+
     pub fn open_execute(
         &mut self,
         model: crate::tui_entry::native_turn::native_tool_rows::ExecuteDialog,
@@ -1391,6 +1442,7 @@ impl DialogView {
             session_has_parent: false,
             execute: Some(model),
             execute_scroll: 0,
+            diff_mode: None,
         });
         self.selection = None;
         self.rejected = false;
@@ -1412,6 +1464,23 @@ impl DialogView {
     #[must_use]
     pub fn execute_scroll_state(&self, width: usize, height: usize) -> (usize, usize) {
         let Some(dialog) = self.dialog.as_ref() else { return (0, 0); };
+        if dialog.kind == DialogKind::DiffViewer {
+            // DIFF-003: the virtualized diff body scrolls in rendered rows;
+            // the chunk window (`visible_chunk_range`) derives from this row
+            // offset, exactly like upstream ScrollBox scrollTop
+            // (`patch-diff.tsx:164-181`). Non-virtualized bodies do not
+            // scroll.
+            let patch = dialog.message_lines.join("\n");
+            let Some(virtual_patch) = crate::native_diff_view::virtual_added_patch(&patch, true) else { return (0, 0); };
+            let viewport = height.saturating_sub(2).max(1);
+            // DIFF-001 review fix: clamp against the real painted row count,
+            // not `chunks * VIRTUAL_CHUNK_LINES` — the final chunk is partial,
+            // so the chunk-product over-counts by up to
+            // `VIRTUAL_CHUNK_LINES - 1` rows and End would scroll into blank
+            // space.
+            let max = virtual_patch.total_rows.saturating_sub(viewport);
+            return (dialog.execute_scroll.min(max), max);
+        }
         if dialog.kind != DialogKind::Execute {
             return (0, 0);
         }
@@ -1430,6 +1499,12 @@ impl DialogView {
         if let Some(dialog) = self.dialog.as_mut() {
             if dialog.kind == DialogKind::Execute {
                 dialog.execute_scroll = offset.min(MAX_EXECUTE_BODY_ROWS.saturating_sub(1));
+            } else if dialog.kind == DialogKind::DiffViewer {
+                // DIFF-003: scroll-aware virtualization — the render arm
+                // derives the chunk window from this row offset
+                // (`patch-diff.tsx:164-181`); the state reader clamps to the
+                // virtualized row count, so no extra cap here.
+                dialog.execute_scroll = offset;
             }
         }
     }
@@ -1460,6 +1535,19 @@ impl DialogView {
     #[must_use]
     pub fn open_kind(&self) -> Option<DialogKind> {
         self.dialog.as_ref().map(|dialog| dialog.kind)
+    }
+
+    /// DIFF-001 review fix: whether the open dialog is a read-only content
+    /// viewer that a backdrop mouse-up closes locally (`ui/dialog.tsx:54-60`)
+    /// instead of emitting a decision intent. The diff viewer joins the MCP
+    /// list and select surfaces here; its `cancel()` is deliberately inert, so
+    /// the backdrop must close it through [`DialogView::close`] like Esc does.
+    #[must_use]
+    pub fn backdrop_closes_locally(&self) -> bool {
+        matches!(
+            self.open_kind(),
+            Some(DialogKind::Mcp) | Some(DialogKind::Select) | Some(DialogKind::DiffViewer)
+        )
     }
 
     /// DIALOG-10: open a live `DialogPrompt` text row (`ui/dialog-prompt.tsx`)
@@ -1513,6 +1601,7 @@ impl DialogView {
             session_has_parent: false,
             execute: None,
             execute_scroll: 0,
+            diff_mode: None,
         });
         self.selection = None;
         self.rejected = false;
@@ -2043,6 +2132,10 @@ impl DialogView {
             DialogKind::Error => return Err(DialogError::NotAnswerable),
             DialogKind::Execute | DialogKind::Crash => return Err(DialogError::NotAnswerable),
             DialogKind::Mcp => return Err(DialogError::NotAnswerable),
+            // DIFF-001 review fix: the diff viewer is a read-only content
+            // surface with no answer intent; refuse before `next_attempt()`
+            // so the `unreachable!` arm below is genuinely unreachable.
+            DialogKind::DiffViewer => return Err(DialogError::NotAnswerable),
             DialogKind::Question if !self.question_capable => {
                 return Err(DialogError::QuestionUnavailable)
             }
@@ -2116,7 +2209,7 @@ impl DialogView {
             DialogKind::Mcp => unreachable!("not answerable"),
             // `Crash` is refused as `NotAnswerable` by the guard above, so it
             // can never reach the intent construction.
-            DialogKind::Execute | DialogKind::Error | DialogKind::Crash => {
+            DialogKind::Execute | DialogKind::Error | DialogKind::Crash | DialogKind::DiffViewer => {
                 unreachable!("answered above")
             }
         };
@@ -2140,6 +2233,10 @@ impl DialogView {
             DialogKind::Error => return Err(DialogError::NotAnswerable),
             DialogKind::Execute | DialogKind::Crash => return Err(DialogError::NotAnswerable),
             DialogKind::Mcp => return Err(DialogError::NotAnswerable),
+            // DIFF-001 review fix: cancel (backdrop mouse-up / Esc) on the
+            // read-only diff viewer must be inert, not fall through to the
+            // `unreachable!` arm. Refuse before `next_attempt()`.
+            DialogKind::DiffViewer => return Err(DialogError::NotAnswerable),
             _ => {}
         }
         let request_id = dialog.id.clone();
@@ -2162,7 +2259,8 @@ impl DialogView {
             | DialogKind::Error
             | DialogKind::Execute
             | DialogKind::Crash
-            | DialogKind::Mcp => unreachable!("handled above"),
+            | DialogKind::Mcp
+            | DialogKind::DiffViewer => unreachable!("handled above"),
         };
         self.pending_attempt = attempt;
         self.phase = Phase::Pending;
@@ -2439,6 +2537,56 @@ impl DialogView {
                     }
                 }
                 DialogKind::Mcp => lines.push(line("select a server · Enter toggle".to_string(), Role::Description)),
+                DialogKind::DiffViewer => {
+                    lines.push(line("diff viewer · Esc to close".to_string(), Role::Description));
+                    let patch = dialog.message_lines.join("\n");
+                    // DIFF-001: branch on the stored open-time mode
+                    // (`diff-viewer.tsx:45,349`): split renders the paired
+                    // side-by-side columns, unified the single gutter column.
+                    match dialog.diff_mode {
+                        Some(crate::native_diff_view::DiffViewMode::Split) => {
+                            let rendered = crate::native_diff_view::paint_rows_split(
+                                &patch,
+                                crate::native_diff_view::MAX_DIFF_LINES,
+                                width,
+                            );
+                            for row in rendered.rows.iter() {
+                                match row {
+                                    crate::native_diff_view::SplitRow::Full(full) => {
+                                        lines.push(line(full.content.clone(), Role::Item));
+                                    }
+                                    crate::native_diff_view::SplitRow::Pair { left, right } => {
+                                        let mut text = String::new();
+                                        for cell in left.iter().chain(right.iter()) {
+                                            if !text.is_empty() {
+                                                text.push(' ');
+                                            }
+                                            text.push(cell.sign);
+                                            text.push(' ');
+                                            text.push_str(&cell.text);
+                                        }
+                                        lines.push(line(text, Role::Item));
+                                    }
+                                }
+                            }
+                        }
+                        _ => {
+                        if let Some(virtual_patch) = crate::native_diff_view::virtual_added_patch(&patch, true) {
+                            let (first, last) = crate::native_diff_view::visible_chunk_range(
+                                virtual_patch.chunks.len(), dialog.execute_scroll, height.saturating_sub(lines.len()).max(1));
+                            for (index, chunk) in virtual_patch.chunks.iter().enumerate() {
+                                if index < first || index > last {
+                                    lines.push(line(format!("… {} lines …", crate::native_diff_view::placeholder_height(chunk)), Role::Description));
+                                } else {
+                                    lines.extend(chunk.lines.iter().cloned().map(|row| line(row, Role::Item)));
+                                }
+                            }
+                        } else {
+                            lines.extend(dialog.message_lines.iter().cloned().map(|row| line(row, Role::Item)));
+                        }
+                        }
+                    }
+                }
                 DialogKind::Error => {
                     lines.push(line(dialog.error.headline().to_string(), Role::Error));
                     lines.push(line(dialog.error.detail().to_string(), Role::Description));
@@ -2462,8 +2610,14 @@ impl DialogView {
             let message_budget = height.saturating_sub(
                 lines.len() + footer_rows + choice_rows + if roomy { 2 } else { 0 },
             );
-            for message in dialog.message_lines.iter().take(message_budget) {
-                lines.push(line(format!("  {message}"), Role::Item));
+            // DIFF-001 review fix: the diff viewer's `message_lines` holds the
+            // patch, already painted by its own render arm above; the generic
+            // two-space-prefixed block would paint the whole patch a second
+            // time. Every other kind still uses this block.
+            if dialog.kind != DialogKind::DiffViewer {
+                for message in dialog.message_lines.iter().take(message_budget) {
+                    lines.push(line(format!("  {message}"), Role::Item));
+                }
             }
             if roomy && !dialog.choices.is_empty() {
                 lines.push(line(String::new(), Role::Description));
@@ -9571,6 +9725,149 @@ mod f002r2_reject_stage_tests {
         let mut view = DialogView::new();
         assert!(!view.escape_reject_stage());
         assert!(!view.reject_stage());
+    }
+}
+
+/// DIFF-001/DIFF-003: the live `DialogDiffViewer` patch viewer
+/// (`feature-plugins/system/diff-viewer.tsx`, `component/patch-diff.tsx`).
+/// These tests pin the open-time split resolution and the scroll-driven
+/// virtualization window through the live render arm.
+#[cfg(test)]
+mod diff_tests {
+    use super::*;
+
+    fn texts(lines: &[crate::native_ui_style::Line]) -> Vec<String> {
+        lines.iter().map(|line| line.text.clone()).collect()
+    }
+
+    /// DIFF-001: `open_diff_viewer` resolves the split rule once at open time
+    /// (`diff-viewer.tsx:45,349`: never split below 100 columns, split from
+    /// 100 up) and the live render arm branches on that stored mode.
+    #[test]
+    fn diff001_viewer_mode_is_resolved_at_open_time_and_drives_the_render() {
+        let patch = "@@ -1,2 +1,2 @@\n ctx\n-old\n+new\n";
+        // Width 99 -> the viewer never splits below 100 columns (unified).
+        let mut narrow = DialogView::new();
+        narrow.open_diff_viewer(patch.to_string(), 99).expect("opens");
+        assert_eq!(narrow.open_kind(), Some(DialogKind::DiffViewer));
+        let narrow_texts = texts(&narrow.render_styled(99, 20));
+        assert!(narrow_texts.iter().any(|t| t == "-old"), "{narrow_texts:?}");
+        assert!(narrow_texts.iter().any(|t| t == "+new"), "{narrow_texts:?}");
+        // Width 100 -> split; the paired columns join with a space and the
+        // unified raw pair is gone.
+        let mut wide = DialogView::new();
+        wide.open_diff_viewer(patch.to_string(), 100).expect("opens");
+        let wide_texts = texts(&wide.render_styled(100, 20));
+        assert!(
+            wide_texts
+                .iter()
+                .any(|t| t.contains("- old") && t.contains("+ new")),
+            "{wide_texts:?}"
+        );
+        assert!(!wide_texts.iter().any(|t| t == "-old"), "{wide_texts:?}");
+    }
+
+    /// DIFF-003: the diff body scrolls in rendered rows and the live render
+    /// arm derives its chunk window from that offset
+    /// (`patch-diff.tsx:164-181`); offscreen chunks collapse to a placeholder.
+    #[test]
+    fn diff003_scroll_moves_the_virtualized_window() {
+        let mut patch = String::from("@@ -0,0 +1,3200 @@\n");
+        for n in 1..=3200 {
+            patch.push_str(&format!("+line{n}\n"));
+        }
+        let mut view = DialogView::new();
+        // Width 80 -> unified, so the virtualized branch is live.
+        view.open_diff_viewer(patch, 80).expect("opens");
+        let (start, max) = view.execute_scroll_state(80, 20);
+        assert_eq!(start, 0);
+        assert!(max > 0, "virtualized body must overflow the viewport");
+        let top = texts(&view.render_styled(80, 20));
+        assert!(top.iter().any(|t| t == "+line1"), "{top:?}");
+        assert!(
+            !top.iter().any(|t| t == "+line1153"),
+            "offscreen chunk hidden: {top:?}"
+        );
+        // Scroll into chunk 10 (rows 1280..1408); the window follows. The
+        // range keeps one chunk of overscan above (`patch-diff.tsx:164-181`),
+        // so the top painted chunk is 9 at this offset.
+        view.set_execute_scroll(1280);
+        assert_eq!(view.execute_scroll_state(80, 20).0, 1280);
+        let scrolled = texts(&view.render_styled(80, 20));
+        assert!(scrolled.iter().any(|t| t == "+line1153"), "{scrolled:?}");
+        assert!(
+            !scrolled.iter().any(|t| t == "+line1"),
+            "top chunk scrolled away: {scrolled:?}"
+        );
+    }
+
+    /// DIFF-001 review fix: the read-only diff viewer has no answer/cancel
+    /// intent. Both must be refused with `NotAnswerable` before any attempt is
+    /// consumed — the backdrop mouse-up cancel (`tui_entry.rs` kind-2 arm) and
+    /// the footer confirm must never reach the `unreachable!` arm.
+    #[test]
+    fn diff002_diffviewer_cancel_and_answer_are_inert() {
+        let patch = "@@ -1,2 +1,2 @@\n ctx\n-old\n+new\n";
+        let mut view = DialogView::new();
+        view.open_diff_viewer(patch.to_string(), 80).expect("opens");
+        assert_eq!(view.open_kind(), Some(DialogKind::DiffViewer));
+        assert_eq!(view.answer().unwrap_err(), DialogError::NotAnswerable);
+        assert_eq!(view.cancel().unwrap_err(), DialogError::NotAnswerable);
+        // Inert: the dialog is still open and no attempt was consumed.
+        assert!(view.is_open());
+    }
+
+    /// DIFF-001 review fix: the patch body is painted once. The generic
+    /// two-space-prefixed `message_lines` block must not re-append the patch
+    /// the DiffViewer arm already rendered.
+    #[test]
+    fn diff002_small_patch_paints_the_body_once() {
+        let patch = "@@ -1,2 +1,2 @@\n ctx\n-old\n+new\n";
+        let mut view = DialogView::new();
+        view.open_diff_viewer(patch.to_string(), 80).expect("opens");
+        let rendered = texts(&view.render_styled(80, 20));
+        let old_rows = rendered.iter().filter(|t| t.trim() == "-old").count();
+        let new_rows = rendered.iter().filter(|t| t.trim() == "+new").count();
+        assert_eq!(old_rows, 1, "patch body painted once: {rendered:?}");
+        assert_eq!(new_rows, 1, "patch body painted once: {rendered:?}");
+    }
+
+    /// DIFF-001 review fix: a backdrop mouse-up closes the read-only diff
+    /// viewer locally (`ui/dialog.tsx:54-60`). Its `cancel()` is inert, so the
+    /// backdrop must take the same local-close path Esc does, not emit a
+    /// decision intent.
+    #[test]
+    fn diff002_backdrop_closes_the_viewer_locally() {
+        let mut view = DialogView::new();
+        assert!(!view.backdrop_closes_locally(), "no dialog -> no local close");
+        view.open_diff_viewer("@@ -1 +1 @@\n-a\n+b\n".to_string(), 80)
+            .expect("opens");
+        assert!(
+            view.backdrop_closes_locally(),
+            "the diff viewer closes locally on a backdrop release"
+        );
+        view.close();
+        assert!(!view.backdrop_closes_locally(), "closed -> no local close");
+    }
+
+    /// DIFF-001 review fix: the scroll maximum is the real painted row count
+    /// minus the viewport, not `chunks * VIRTUAL_CHUNK_LINES - viewport` (the
+    /// final chunk is partial, so the product over-counts).
+    #[test]
+    fn diff003_scroll_max_matches_painted_rows() {
+        let mut patch = String::from("@@ -0,0 +1,3300 @@\n");
+        for n in 1..=3300 {
+            patch.push_str(&format!("+line{n}\n"));
+        }
+        let total_rows = crate::native_diff_view::virtual_added_patch(&patch, true)
+            .expect("virtualized")
+            .total_rows;
+        // The product over-counts: 26 chunks * 128 = 3328 > 3300 rows.
+        assert!(total_rows < 26 * crate::native_diff_view::VIRTUAL_CHUNK_LINES);
+        let mut view = DialogView::new();
+        view.open_diff_viewer(patch, 80).expect("opens");
+        let (_, max) = view.execute_scroll_state(80, 20);
+        assert_eq!(max, total_rows - 18, "clamped to painted rows, not chunks");
     }
 }
 
