@@ -446,6 +446,129 @@ fn prompt_byte_insert_allowed(
         )
 }
 
+#[cfg(feature = "native")]
+fn live_paste_admitted(
+    queue: &mut crate::native_paste::PasteQueue,
+    before: crate::native_paste::PasteTicket,
+    after: crate::native_paste::PasteTicket,
+) -> bool {
+    let (id, request) = queue.enqueue(before);
+    if !queue.is_head(id) {
+        return false;
+    }
+    let admitted = crate::native_paste::paste_admission(&request.before, &after, false, false, false).is_ok();
+    queue.resolve(id);
+    admitted
+}
+
+#[cfg(feature = "native")]
+fn sync_live_draft_stash(
+    stash: &mut crate::native_paste::DraftStash,
+    last_tab: &mut Option<Option<String>>,
+    tab: Option<&str>,
+    text: &mut String,
+    cursor: &mut usize,
+    parts: &mut Vec<crate::native_paste::PastedText>,
+) -> bool {
+    let current_tab = tab.map(str::to_owned);
+    let mut restored = false;
+    if last_tab.as_ref() != Some(&current_tab) {
+        if last_tab.is_some() {
+            let mut mode = if text.starts_with('!') {
+                crate::native_paste::PromptMode::Shell
+            } else {
+                crate::native_paste::PromptMode::Normal
+            };
+            restored = stash.restore(tab, text, cursor, &mut mode, parts);
+            if !restored {
+                *parts = stash
+                    .take(tab)
+                    .filter(|entry| entry.text == *text)
+                    .map_or_else(Vec::new, |entry| entry.parts);
+            }
+        }
+        *last_tab = Some(current_tab);
+    }
+    if text.is_empty() {
+        stash.take(tab);
+    } else {
+        stash.save(
+            tab,
+            crate::native_paste::DraftEntry {
+                text: text.clone(),
+                cursor: *cursor,
+                mode: if text.starts_with('!') {
+                    crate::native_paste::PromptMode::Shell
+                } else {
+                    crate::native_paste::PromptMode::Normal
+                },
+                parts: parts.clone(),
+            },
+        );
+    }
+    restored
+}
+
+#[cfg(all(test, feature = "native"))]
+mod cp34_live_draft_stash_tests {
+    use super::sync_live_draft_stash;
+    use crate::native_paste::{DraftEntry, DraftStash, PastedText, PromptMode};
+
+    #[test]
+    fn cp34_live_tab_switch_restores_folded_draft_parts() {
+        let part = PastedText {
+            text: "full paste".to_owned(),
+            placeholder: "[Pasted ~3 lines]".to_owned(),
+            start: 0,
+            end: 17,
+        };
+        let mut stash = DraftStash::new();
+        stash.save(
+            Some("target"),
+            DraftEntry {
+                text: part.placeholder.clone(),
+                cursor: 17,
+                mode: PromptMode::Normal,
+                parts: vec![part.clone()],
+            },
+        );
+        let mut last_tab = Some(Some("source".to_owned()));
+        let mut text = String::new();
+        let mut cursor = 0;
+        let mut parts = Vec::new();
+
+        assert!(sync_live_draft_stash(
+            &mut stash,
+            &mut last_tab,
+            Some("target"),
+            &mut text,
+            &mut cursor,
+            &mut parts,
+        ));
+        assert_eq!(text, part.placeholder);
+        assert_eq!(cursor, 17);
+        assert_eq!(parts, vec![part]);
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod cp37_live_paste_tests {
+    use super::live_paste_admitted;
+    use crate::native_paste::{PasteQueue, PasteTicket, PromptMode};
+
+    #[test]
+    fn cp37_live_paste_rejects_stale_draft_then_admits_next() {
+        let mut queue = PasteQueue::new();
+        let before = PasteTicket::capture(Some("s"), PromptMode::Normal, "before");
+        let changed = PasteTicket::capture(Some("s"), PromptMode::Normal, "edited");
+        assert!(!live_paste_admitted(&mut queue, before, changed));
+        assert_eq!(queue.pending(), 0);
+        let current = PasteTicket::capture(Some("s"), PromptMode::Normal, "edited");
+        assert!(live_paste_admitted(&mut queue, current.clone(), current));
+        assert_eq!(queue.pending(), 0);
+    }
+}
+
 #[cfg(all(test, feature = "native"))]
 mod cp30_history_walk_tests {
     use super::history_walk_entry;
@@ -7411,6 +7534,8 @@ fn native_loop(
     // multi-line paste folds into a `[Pasted ~N lines]` placeholder and records
     // its range here, so later edits realign instead of appending raw text.
     let mut draft_parts: Vec<crate::native_paste::PastedText> = Vec::new();
+    let mut draft_stash = crate::native_paste::DraftStash::new();
+    let mut last_stashed_tab: Option<Option<String>> = None;
     // Persisted stores live under the same data dir the rest of the TUI uses.
     let state_path = data_dir.join("state/kv.json");
     let tabs_path = data_dir.join("state/tabs.json");
@@ -7646,6 +7771,7 @@ fn native_loop(
     // promote a foreign session's prompt.
     let mut queued_drafts: std::collections::VecDeque<(Option<String>, String)> =
         std::collections::VecDeque::new();
+    let mut paste_queue = crate::native_paste::PasteQueue::new();
     let mut binding_generation: u64 = 0;
     // History pagination is deliberately separate from turn/completion
     // workers: one bounded request at a time, and every result carries the
@@ -8161,6 +8287,15 @@ fn native_loop(
             }
             saved_tabs = tabs_now;
         }
+        let active_tab = live.as_ref().map(|snapshot| snapshot.session_id.as_str());
+        let _ = sync_live_draft_stash(
+            &mut draft_stash,
+            &mut last_stashed_tab,
+            active_tab,
+            &mut draft,
+            &mut draft_cursor,
+            &mut draft_parts,
+        );
         let current_memory_binding = live.as_ref().map(|snapshot| (snapshot.session_id.clone(), binding_generation));
         if memory_binding != current_memory_binding {
             *view.memory_mut() = crate::native_memory::Memory::new();
@@ -12166,40 +12301,38 @@ fn native_loop(
                         }
                     }
                     native_setup::Dialog::None => {
-                        // Cursor-aware insertion through the real paste
-                        // machinery (`index.tsx:1446-1455`). There is NO raw
-                        // pre-check: upstream folds a long/multi-line body into
-                        // a small `[Pasted ~N lines]` placeholder regardless of
-                        // its raw size (`prompt/index.tsx:1462-1474`), so the
-                        // raw-size gate lives in the planner/application where
-                        // it applies to the bytes actually inserted. A planner
-                        // refusal (non-boundary / the inserted bytes exceed the
-                        // budget) falls back to a bounded append.
-                        // CP-36: the fold decision reads the live
-                        // `prompt.paste` config value (`prompt/index.tsx:1463`
-                        // `config.prompt?.paste !== "full"`); only the exact
-                        // value `full` inserts the literal text.
-                        let mode = crate::native_paste::PasteMode::from_config(
-                            preferences.prompt_paste.as_deref(),
+                        // CP-37: serialize live paste admission against the
+                        // composer snapshot before invoking the existing inserter.
+                        let before = crate::native_paste::PasteTicket::capture(
+                            live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
+                            if draft.starts_with('!') { crate::native_paste::PromptMode::Shell } else { crate::native_paste::PromptMode::Normal },
+                            &draft,
                         );
-                        if crate::native_composer::insert_paste_at_cursor(
-                            &mut draft,
-                            &mut draft_cursor,
-                            &mut draft_parts,
-                            &text,
-                            mode,
-                            MAX_NATIVE_DRAFT_BYTES,
-                        )
-                        .is_err()
-                        {
-                            crate::native_composer::normalize_cursor(&draft, &mut draft_cursor);
-                            if draft
-                                .len()
-                                .checked_add(text.len())
-                                .is_some_and(|len| len <= MAX_NATIVE_DRAFT_BYTES)
+                        let after = crate::native_paste::PasteTicket::capture(
+                            live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
+                            if draft.starts_with('!') { crate::native_paste::PromptMode::Shell } else { crate::native_paste::PromptMode::Normal },
+                            &draft,
+                        );
+                        if live_paste_admitted(&mut paste_queue, before, after) {
+                            // Cursor-aware insertion follows upstream pasteInputText.
+                            let mode = crate::native_paste::PasteMode::from_config(
+                                preferences.prompt_paste.as_deref(),
+                            );
+                            if crate::native_composer::insert_paste_at_cursor(
+                                &mut draft,
+                                &mut draft_cursor,
+                                &mut draft_parts,
+                                &text,
+                                mode,
+                                MAX_NATIVE_DRAFT_BYTES,
+                            )
+                            .is_err()
                             {
-                                draft.push_str(&text);
-                                draft_cursor = draft.len();
+                                crate::native_composer::normalize_cursor(&draft, &mut draft_cursor);
+                                if draft.len().checked_add(text.len()).is_some_and(|len| len <= MAX_NATIVE_DRAFT_BYTES) {
+                                    draft.push_str(&text);
+                                    draft_cursor = draft.len();
+                                }
                             }
                         }
                     }
