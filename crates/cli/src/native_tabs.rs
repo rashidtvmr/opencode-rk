@@ -123,6 +123,11 @@ pub struct TabInput {
     /// Empty when the producer did not assign one; `Numbers` then paints the
     /// empty column rather than fabricating a number.
     pub number: String,
+    /// TAB-06: the live `promptPulse` feed (`context/session-tabs.tsx:316-329`).
+    /// Copied from the enqueue pulse map the queue seam feeds; a pulse change
+    /// ignites the number cell exactly like `createNumberIgnition`
+    /// (`component/session-tabs.tsx:213-227`). Zero keeps the idle number.
+    pub prompt_pulse: u64,
 }
 
 impl TabInput {
@@ -140,6 +145,7 @@ impl TabInput {
             marquee_offset: 0,
             indicators: TabIndicators::Status,
             number: String::new(),
+            prompt_pulse: 0,
         }
     }
 
@@ -711,6 +717,10 @@ pub struct TabStrip {
     /// Fade window per visible session row, aligned with `rects` (horizontal
     /// only). `None` means every title cell keeps its solid color.
     pub row_fades: Vec<Option<TitleFade>>,
+    /// TAB-06: per-row `promptPulse` fact, aligned with `row_colors`
+    /// (horizontal only). A nonzero pulse ignites the row's number color in
+    /// `with_row_colors_semantic` (`component/session-tabs.tsx:213-227`).
+    row_prompt_pulse: Vec<u64>,
     /// Palette-free color fact for the promoted Home slot, if painted.
     home_color: Option<TabCellColor>,
 }
@@ -958,6 +968,7 @@ impl TabStrip {
             row_colors: Vec::new(),
             row_flags: Vec::new(),
             row_unread: Vec::new(),
+            row_prompt_pulse: Vec::new(),
             row_fades: Vec::new(),
             home_color: None,
             indicator_cells: 0,
@@ -1068,6 +1079,7 @@ impl TabStrip {
                     out.row_colors.push(color);
                     out.row_flags.push(input.flags);
                     out.row_unread.push(input.unread);
+                    out.row_prompt_pulse.push(input.prompt_pulse);
                 }
                 x_or_y = x_or_y.saturating_add(slot_width);
             }
@@ -1347,9 +1359,24 @@ impl TabStrip {
             .iter()
             .zip(self.row_flags.iter())
             .zip(self.row_unread.iter())
-            .map(|((color, flags), unread)| {
+            .enumerate()
+            .map(|(index, ((color, flags), unread))| {
                 let mut paint =
                     horizontal_session_paint_with_semantics(*color, flags, palette, semantic);
+                // TAB-06: a `promptPulse` change ignites the number cell —
+                // upstream jumps the ignition tween to 0.85 and eases it back
+                // (`component/session-tabs.tsx:213-227,786-792`), tinting the
+                // number toward `theme.text.base`. A terminal strip has no
+                // animation clock, so one nonzero feed paints the ignition
+                // peak; the live feed drains the pulse after the frame.
+                if self.row_prompt_pulse.get(index).copied().unwrap_or(0) > 0 {
+                    use crate::native_theme_runtime::Slot;
+                    paint.number_fg = crate::native_tab_rail::tint(
+                        paint.number_fg,
+                        palette.get(Slot::Text),
+                        0.85,
+                    );
+                }
                 // `TabIndicator` color expression for a non-pending tab prefers
                 // `tabFeedbackColor ?? (runs ? activeNumber : foreground())`, but
                 // its own `unreadColor` memo (`session-tabs.tsx:148-169`) swaps in
@@ -1933,6 +1960,40 @@ pub fn pending_marks_busy(pending: &[PendingKind]) -> bool {
 #[must_use]
 pub fn member_busy(running: bool, pending: &[PendingKind]) -> bool {
     running || pending_marks_busy(pending)
+}
+
+/// TAB-06: merge one tab's live status feed into a strip input
+/// (`context/session-tabs.tsx:143-176` status()). `status` carries the
+/// per-session `promptPulse` from the enqueue map the queue seam feeds;
+/// `pending` lists the session's pending items, of which every non-synthetic
+/// kind marks the tab busy through `member_busy` (`:167-171`) on top of the
+/// daemon running fact `from_navigation` already rolled into `flags.busy`.
+pub fn apply_live_status(
+    input: &mut TabInput,
+    status: Option<&TabStatus>,
+    pending: &[PendingKind],
+) {
+    if let Some(status) = status {
+        input.prompt_pulse = status.prompt_pulse;
+    }
+    input.flags.busy = member_busy(input.flags.busy, pending);
+}
+
+/// TAB-06: the live queue-seam enqueue feed. `context/session-tabs.tsx:334-338`
+/// subscribes to `session.inbox.enqueued` for `user` items, skips the current
+/// route and sessions with no open tab, and bumps that session's pulse.
+/// The native daemon emits no such server event yet, so the oc2 seam is the
+/// local `queued_drafts.push_back` feed in `native_loop`, which calls this.
+pub fn record_enqueue(
+    pulses: &mut std::collections::HashMap<SessionRef, TabStatus>,
+    session: &SessionRef,
+    is_open: bool,
+    is_current: bool,
+) {
+    pulses
+        .entry(session.clone())
+        .or_default()
+        .enqueue_user_prompt(is_open, is_current);
 }
 
 /// `session-tabs.tsx:169-187` TabIndicator `label()` in evaluation order.
@@ -2770,6 +2831,7 @@ mod tests {
             marquee_offset: 0,
             indicators: TabIndicators::Status,
             number: String::new(),
+            prompt_pulse: 0,
         }
     }
 
@@ -2990,6 +3052,7 @@ mod tests {
             marquee_offset: 0,
             indicators: TabIndicators::Status,
             number: String::new(),
+            prompt_pulse: 0,
         };
         let strip = TabStrip::render(&[tab], TabOrientation::Vertical, 6, 1, 0);
         assert_eq!(strip.rects[0].0, SessionRef("busy".into()));
@@ -3927,6 +3990,92 @@ mod tests {
         assert!(member_busy(false, &[PendingKind::User]));
         assert!(member_busy(true, &[]));
         assert!(member_busy(false, &[PendingKind::Synthetic, PendingKind::User]));
+    }
+
+    /// TAB-06 live seam: `context/session-tabs.tsx:334-338` bumps the pulse
+    /// only for a `user` enqueue on another open tab. `record_enqueue` is the
+    /// exact function the oc2 `queued_drafts.push_back` seam calls
+    /// (`tui_entry.rs` `SubmitPlan::Queue`).
+    #[test]
+    fn tab06_live_seam_record_enqueue_matches_upstream_rules() {
+        let target = SessionRef("bg-session".into());
+        let mut pulses = std::collections::HashMap::new();
+
+        // Open, not current: the flash fires.
+        record_enqueue(&mut pulses, &target, true, false);
+        assert_eq!(pulses[&target].prompt_pulse, 1);
+        // Closed tabs never flash.
+        let closed = SessionRef("closed".into());
+        record_enqueue(&mut pulses, &closed, false, false);
+        assert_eq!(pulses[&closed].prompt_pulse, 0);
+        // The current route never flashes.
+        record_enqueue(&mut pulses, &target, true, true);
+        assert_eq!(pulses[&target].prompt_pulse, 1);
+        // Pulses accumulate across enqueues.
+        record_enqueue(&mut pulses, &target, true, false);
+        assert_eq!(pulses[&target].prompt_pulse, 2);
+    }
+
+    /// TAB-06 live path: the queue seam's pulse map fed through
+    /// `apply_live_status` (the `native_loop` feed after `from_navigation`)
+    /// reaches the strip input and ignites the row's number color; draining
+    /// the flash restores the idle color for the next frame.
+    #[test]
+    fn tab06_live_status_feed_ignites_strip_number_then_consumes() {
+        use crate::native_theme_runtime::{Palette, Slot};
+        let palette = Palette::opencode_dark();
+        let idle = input("bg", "background tab");
+        let mut flashing = input("bg", "background tab");
+        crate::native_tabs::apply_live_status(
+            &mut flashing,
+            Some(&TabStatus { prompt_pulse: 1, ..TabStatus::default() }),
+            &[],
+        );
+        assert_eq!(flashing.prompt_pulse, 1, "the pulse feeds the live TabInput");
+        // Pending user items mark the tab busy through `member_busy`.
+        let mut queued = input("bg", "background tab");
+        crate::native_tabs::apply_live_status(
+            &mut queued,
+            None,
+            &[PendingKind::User],
+        );
+        assert!(queued.flags.busy, "a queued user item marks the tab busy");
+
+        let flash_strip = TabStrip::render_with_hover(
+            &[flashing.clone()],
+            TabOrientation::Horizontal,
+            60,
+            1,
+            0,
+            None,
+        )
+        .with_row_colors(&palette);
+        let idle_strip = TabStrip::render_with_hover(
+            &[idle],
+            TabOrientation::Horizontal,
+            60,
+            1,
+            0,
+            None,
+        )
+        .with_row_colors(&palette);
+        let ignited = flash_strip.row_paints[0].number_fg;
+        let steady = idle_strip.row_paints[0].number_fg;
+        assert_ne!(ignited, steady, "a nonzero pulse ignites the number color");
+        let [r, g, b, a] = steady;
+        let [ir, ig, ib, ia] = ignited;
+        // Upstream ignition tints the number toward `theme.text.base`
+        // (`component/session-tabs.tsx:786-792`), so every opaque channel
+        // moves toward text.base, never away.
+        let text = palette.get(Slot::Text);
+        let toward = |steady: u8, ignited: u8, base: u8| -> bool {
+            if steady == base { ignited == base } else {
+                (ignited as i32 - base as i32).abs() < (steady as i32 - base as i32).abs()
+            }
+        };
+        assert!(toward(r, ir, text[0]) && toward(g, ig, text[1]) && toward(b, ib, text[2]),
+            "the ignition tint moves the number toward text.base");
+        assert_eq!(ia, a, "alpha untouched");
     }
 
     #[test]

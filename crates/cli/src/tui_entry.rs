@@ -2292,6 +2292,11 @@ struct PaintCtx {
     composer: Option<(u16, u16, u16, u16)>,
     composer_agent_color: Option<[u8; 4]>,
     completion: Option<crate::native_completion::Panel>,
+    /// THEME-05: per-select-row upstream `ActionState` maps
+    /// (`theme/src/tui/schema.ts:10`, `resolve.ts:168` statefulColor), threaded
+    /// from the live row feed. A row past the list, or an empty list, keeps
+    /// the legacy `native_ui_style::Role` slots.
+    action_states: Vec<std::collections::HashMap<String, bool>>,
     ui_regions: Vec<crate::native_ui_style::Region>,
     context_usage_styles: Vec<(u16, u16, u16, crate::native_theme_runtime::Slot, u32)>,
     /// Absolute `(x, y, cells, slot, attributes)` sidebar spans. The sidebar
@@ -2814,6 +2819,7 @@ mod surface_paint_regressions {
             composer: Some(composer),
             composer_agent_color: None,
             completion: None,
+            action_states: Vec::new(),
             context_usage_styles: view.context_usage_styles().to_vec(),
             sidebar_span_styles: view.sidebar_span_styles().to_vec(),
             ui_regions: view.ui_regions(),
@@ -2877,6 +2883,7 @@ mod surface_paint_regressions {
             composer: None,
             composer_agent_color: None,
             completion: None,
+            action_states: Vec::new(),
             context_usage_styles: view.context_usage_styles().to_vec(),
             sidebar_span_styles: view.sidebar_span_styles().to_vec(),
             ui_regions: view.ui_regions(),
@@ -2969,6 +2976,7 @@ mod surface_paint_regressions {
             composer: None,
             composer_agent_color: None,
             completion: None,
+            action_states: Vec::new(),
             context_usage_styles: view.context_usage_styles().to_vec(),
             sidebar_span_styles: view.sidebar_span_styles().to_vec(),
             ui_regions: view.ui_regions(),
@@ -3040,6 +3048,7 @@ mod surface_paint_regressions {
             composer: None,
             composer_agent_color: None,
             completion: None,
+            action_states: Vec::new(),
             context_usage_styles: view.context_usage_styles().to_vec(),
             sidebar_span_styles: view.sidebar_span_styles().to_vec(),
             ui_regions: view.ui_regions(),
@@ -3761,6 +3770,7 @@ mod dialog19_chrome_paint_tests {
                 composer: None,
                 composer_agent_color: None,
                 completion: None,
+            action_states: Vec::new(),
                 context_usage_styles: Vec::new(),
                 sidebar_span_styles: Vec::new(),
                 ui_regions: Vec::new(),
@@ -5672,6 +5682,30 @@ fn paint_tab_title_faded(
     Ok(())
 }
 
+/// THEME-05: one select row's background. When both the resolved V2 semantic
+/// palette and the row's `ActionStates` map are threaded, the background is
+/// `background.action.primary.state(&states)` (`resolve.ts:168` statefulColor,
+/// first truthy of disabled/pressed/focused/selected/hovered; upstream rows
+/// use the same token at `component/session-tabs.tsx:556,1570,1770` and
+/// `component/devtools-bar.tsx:249,459-461`). Rows without a threaded map —
+/// and renders with no semantic palette — keep the legacy
+/// `native_ui_style::Role` slots, so existing callers never change color.
+#[cfg(feature = "native")]
+fn completion_row_bg(
+    action: Option<&crate::native_theme_runtime::V2StatefulColor>,
+    states: Option<&std::collections::HashMap<String, bool>>,
+    legacy_role_bg: Option<Rgba>,
+    panel: Rgba,
+) -> Rgba {
+    match (action, states) {
+        (Some(action), Some(states)) => {
+            let [r, g, b, a] = action.state(states).rgba;
+            Rgba::new(r, g, b, a)
+        }
+        _ => legacy_role_bg.unwrap_or(panel),
+    }
+}
+
 #[cfg(feature = "native")]
 fn native_paint(
     renderer: &mut NativeRenderer,
@@ -6412,7 +6446,19 @@ fn native_paint(
             let role = if *selected { crate::native_ui_style::Role::Selected }
                 else { crate::native_ui_style::Role::Item };
             let style = crate::native_ui_style::style(role);
-            let bg = style.background.map(|slot| paint_color(ctx.palette, slot)).unwrap_or(panel);
+            // THEME-05: a threaded per-row `ActionStates` map resolves the row
+            // background through the V2 stateful token
+            // `background.action.primary` (`resolve.ts:168` statefulColor,
+            // first truthy of disabled/pressed/focused/selected/hovered);
+            // rows without a map keep the legacy `Role` slots.
+            let bg = completion_row_bg(
+                ctx.semantic
+                    .as_ref()
+                    .map(|semantic| &semantic.background_action_primary),
+                ctx.action_states.get(index),
+                style.background.map(|slot| paint_color(ctx.palette, slot)),
+                panel,
+            );
             renderer.fill_rect(u32::from(completion.x), y, u32::from(completion.width), 1, bg)?;
             renderer.draw_text_styled(
                 u32::from(completion.x), y,
@@ -8956,6 +9002,15 @@ fn native_loop(
     // promote a foreign session's prompt.
     let mut queued_drafts: std::collections::VecDeque<(Option<String>, String)> =
         std::collections::VecDeque::new();
+    // TAB-06: live per-session prompt-flash feed (`context/session-tabs.tsx:
+    // 334-338` `session.inbox.enqueued`). No such server event exists in the
+    // native daemon yet, so the seam is the local queue push below: only a
+    // `user` enqueue for another open tab bumps that tab's pulse, never the
+    // current route (`:355-361`).
+    let mut tab_prompt_pulses: std::collections::HashMap<
+        crate::native_navigation::SessionRef,
+        crate::native_tabs::TabStatus,
+    > = std::collections::HashMap::new();
     let mut paste_queue = crate::native_paste::PasteQueue::new();
     let mut binding_generation: u64 = 0;
     // History pagination is deliberately separate from turn/completion
@@ -11136,6 +11191,26 @@ fn native_loop(
                 None => Vec::new(),
             };
         let mut tab_inputs = TabStrip::from_navigation(&navigation, &tab_attention);
+        // TAB-06: feed the live per-tab status from the enqueue pulse map and
+        // the queued pending items (`context/session-tabs.tsx:143-176`), then
+        // drain the pulses so the ignition tints exactly one frame, like the
+        // upstream jump-to-zero ignition tween (`component/session-tabs.tsx:
+        // 213-227`).
+        for input in &mut tab_inputs {
+            let pending: Vec<crate::native_tabs::PendingKind> = queued_drafts
+                .iter()
+                .filter(|(owner, _)| owner.as_deref() == Some(input.session.0.as_str()))
+                .map(|_| crate::native_tabs::PendingKind::User)
+                .collect();
+            crate::native_tabs::apply_live_status(
+                input,
+                tab_prompt_pulses.get(&input.session),
+                &pending,
+            );
+        }
+        for status in tab_prompt_pulses.values_mut() {
+            status.prompt_pulse = 0;
+        }
         // TAB-04: paint the numeric indicator column when `config.tabs.indicators`
         // is "numbers" (`session-tabs.tsx:525`).
         for input in &mut tab_inputs {
@@ -11582,6 +11657,32 @@ fn native_loop(
                 }
                 frames
             };
+            // THEME-05: thread each live select row's `ActionStates` map so the
+            // row background resolves through the V2 stateful token
+            // `background.action.primary` (`resolve.ts:168` statefulColor,
+            // first truthy of disabled/pressed/focused/selected/hovered;
+            // `component/session-tabs.tsx:556` selects the same token).
+            let completion_panel = if !help_open && modal_rows.is_none()
+                && !children_panel.open && !appearance.open && !permission_editor.open
+                && !live.as_ref().is_some_and(|snapshot| snapshot.parent_session_id.is_some())
+                && matches!(dialog, native_setup::Dialog::None)
+                && view.page() == crate::native_view_pages::Page::Chat {
+                view.composer_region(draft_echo).and_then(|anchor| completion.panel_at(&draft, draft_cursor, anchor))
+            } else { None };
+            let completion_action_states: Vec<std::collections::HashMap<String, bool>> =
+                completion_panel
+                    .as_ref()
+                    .map(|panel| {
+                        panel.rows
+                            .iter()
+                            .map(|(_, selected)| {
+                                let mut states = std::collections::HashMap::new();
+                                states.insert("selected".to_owned(), *selected);
+                                states
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
             native_paint(
                 &mut renderer,
                 &lines,
@@ -11626,13 +11727,8 @@ fn native_loop(
                         theme.semantic.as_ref(),
                         new_designs,
                     ),
-                    completion: if !help_open && modal_rows.is_none()
-                        && !children_panel.open && !appearance.open && !permission_editor.open
-            && !live.as_ref().is_some_and(|snapshot| snapshot.parent_session_id.is_some())
-                        && matches!(dialog, native_setup::Dialog::None)
-                        && view.page() == crate::native_view_pages::Page::Chat {
-                        view.composer_region(draft_echo).and_then(|anchor| completion.panel_at(&draft, draft_cursor, anchor))
-                    } else { None },
+                    completion: completion_panel,
+                    action_states: completion_action_states,
                     ui_regions: if help_open { help_regions.clone() } else { view.ui_regions() },
                     context_usage_styles: if help_open { Vec::new() } else { view.context_usage_styles().to_vec() },
                     sidebar_span_styles: if help_open { Vec::new() } else { view.sidebar_span_styles().to_vec() },
@@ -15598,6 +15694,27 @@ fn native_loop(
                                     live.as_ref().map(|snapshot| snapshot.session_id.clone()),
                                     queued_text,
                                 ));
+                                // TAB-06: feed the enqueue pulse map the way
+                                // `session.inbox.enqueued` feeds upstream
+                                // (`context/session-tabs.tsx:334-338`): user
+                                // items only, open tabs only, never the
+                                // current route.
+                                if let Some(enqueued) =
+                                    live.as_ref().map(|snapshot| snapshot.session_id.clone())
+                                {
+                                    let target = crate::native_navigation::SessionRef(enqueued);
+                                    let is_open =
+                                        navigation.tabs().iter().any(|tab| tab.session == target);
+                                    let is_current = navigation
+                                        .active()
+                                        .is_some_and(|active| active.session == target);
+                                    crate::native_tabs::record_enqueue(
+                                        &mut tab_prompt_pulses,
+                                        &target,
+                                        is_open,
+                                        is_current,
+                                    );
+                                }
                                 // The queued snapshot clears the composer
                                 // (`index.tsx:1172-1174` resetComposer).
                                 crate::native_composer::replace_draft_with_cursor(
@@ -19344,6 +19461,7 @@ mod middle_close_hit_tests {
             marquee_offset: 0,
             indicators: crate::native_tabs::TabIndicators::Status,
             number: String::new(),
+            prompt_pulse: 0,
         }).collect();
         let strip = TabStrip::render_with_hover_and_add(&tabs, TabOrientation::Horizontal, 60, 1, 0, None, true);
         // Some session rects exist.
@@ -19763,5 +19881,78 @@ mod permission_modal_key_tests {
             assert!(!handled, "{event:?} is not the permission prompt's key");
             assert!(!paint);
         }
+    }
+}
+
+/// THEME-05: the live completion-row paint resolves the row background through
+/// the V2 stateful token `background.action.primary` when a per-row
+/// `ActionStates` map is threaded (`resolve.ts:168`), and keeps the legacy
+/// `Role` slot otherwise. This drives `completion_row_bg`, the exact helper the
+/// live `native_paint` completion loop calls.
+mod theme05_live_row_bg_tests {
+    use super::*;
+    use crate::native_theme_runtime::{RuntimeTheme, ThemeMode};
+
+    fn semantic() -> crate::native_theme_runtime::SemanticPalette {
+        RuntimeTheme::builtin_default(ThemeMode::Dark)
+            .semantic
+            .expect("shipped V2 asset resolves")
+    }
+
+    fn states(pairs: &[(&str, bool)]) -> std::collections::HashMap<String, bool> {
+        pairs.iter().map(|(k, v)| ((*k).to_owned(), *v)).collect()
+    }
+
+    #[test]
+    fn theme05_live_completion_row_bg_resolves_stateful_selected_and_hovered() {
+        let semantic = semantic();
+        let action = &semantic.background_action_primary;
+        // Distinct sentinels: if the live path fell back to the legacy slot the
+        // equality against `action.state(..)` would fail.
+        let legacy = Rgba::new(1, 2, 3, 255);
+        let panel = Rgba::new(9, 9, 9, 255);
+
+        // Live mapping shape: the loop builds `{"selected": <row selected>}`.
+        for (selected, label) in [(true, "selected row"), (false, "unselected row")] {
+            let map = states(&[("selected", selected)]);
+            let resolved = completion_row_bg(Some(action), Some(&map), Some(legacy), panel);
+            let expected = action.state(&map).rgba;
+            assert_eq!(
+                resolved,
+                Rgba::new(expected[0], expected[1], expected[2], expected[3]),
+                "{label} resolves through the V2 stateful token"
+            );
+            assert_ne!(resolved, legacy, "{label} never uses the legacy slot when a map is threaded");
+        }
+
+        // Hovered resolves the hovered token (not base, not selected).
+        let hovered = states(&[("hovered", true)]);
+        let resolved_hovered = completion_row_bg(Some(action), Some(&hovered), Some(legacy), panel);
+        assert_eq!(
+            resolved_hovered,
+            { let r = action.state(&hovered).rgba; Rgba::new(r[0], r[1], r[2], r[3]) }
+        );
+
+        // Precedence: selected beats hovered (schema.ts ActionState order).
+        let both = states(&[("selected", true), ("hovered", true)]);
+        assert_eq!(action.active_state(&both), "selected");
+        assert_eq!(
+            completion_row_bg(Some(action), Some(&both), Some(legacy), panel),
+            { let r = action.state(&both).rgba; Rgba::new(r[0], r[1], r[2], r[3]) }
+        );
+    }
+
+    #[test]
+    fn theme05_live_completion_row_bg_falls_back_without_a_state_map() {
+        let semantic = semantic();
+        let action = &semantic.background_action_primary;
+        let legacy = Rgba::new(1, 2, 3, 255);
+        let panel = Rgba::new(9, 9, 9, 255);
+        // No map threaded -> legacy role background.
+        assert_eq!(completion_row_bg(Some(action), None, Some(legacy), panel), legacy);
+        // No legacy role -> panel background.
+        assert_eq!(completion_row_bg(Some(action), None, None, panel), panel);
+        // No semantic palette -> legacy.
+        assert_eq!(completion_row_bg(None, Some(&states(&[("selected", true)])), Some(legacy), panel), legacy);
     }
 }
