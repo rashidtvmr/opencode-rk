@@ -5554,6 +5554,16 @@ pub mod crash {
         Ignored,
     }
 
+    /// Largest index `<= index` that is a UTF-8 char boundary (never splits a
+    /// multi-byte scalar). `index` is clamped to `s.len()`.
+    fn floor_char_boundary(s: &str, index: usize) -> usize {
+        let mut i = index.min(s.len());
+        while i > 0 && !s.is_char_boundary(i) {
+            i -= 1;
+        }
+        i
+    }
+
     /// Crash screen state.
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct CrashScreen {
@@ -5808,14 +5818,18 @@ pub mod crash {
             let mut hi = self.stack.len();
             while lo < hi {
                 let mid = (lo + hi + 1) / 2;
-                let candidate = build(&format!("{}{marker}", &self.stack[..mid]));
+                let boundary = floor_char_boundary(&self.stack, mid);
+                let candidate = build(&format!("{}{marker}", &self.stack[..boundary]));
                 if candidate.len() <= MAX_URL_LENGTH {
                     lo = mid;
                 } else {
                     hi = mid - 1;
                 }
             }
-            build(&format!("{}{marker}", &self.stack[..lo]))
+            build(&format!(
+                "{}{marker}",
+                &self.stack[..floor_char_boundary(&self.stack, lo)]
+            ))
         }
     }
 
@@ -6025,6 +6039,30 @@ mod error_and_crash_tests {
         let url = screen.issue_url();
         assert!(url.len() <= MAX_URL_LENGTH, "{}", url.len());
         let marker = "%0A%E2%80%A6%20%28truncated%29";
+        assert!(url.contains(marker), "missing truncation marker");
+    }
+
+    #[test]
+    fn crash_issue_url_truncates_multibyte_stack_without_panicking() {
+        let multibyte = "日本語".repeat(2_000);
+        let screen = CrashScreen::new(
+            CrashMode::Dark,
+            "1.2.3",
+            Some("boom"),
+            Some(&multibyte),
+            "macos",
+            "vt",
+        );
+        let url = screen.issue_url();
+        assert!(url.len() <= MAX_URL_LENGTH, "{}", url.len());
+        let marker = "%0A%E2%80%A6%20%28truncated%29";
+        assert!(url.contains(marker), "missing truncation marker");
+
+        let emoji = "é".repeat(4_000);
+        let screen =
+            CrashScreen::new(CrashMode::Dark, "1.2.3", Some("boom"), Some(&emoji), "macos", "vt");
+        let url = screen.issue_url();
+        assert!(url.len() <= MAX_URL_LENGTH, "{}", url.len());
         assert!(url.contains(marker), "missing truncation marker");
     }
 
