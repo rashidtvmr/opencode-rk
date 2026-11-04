@@ -136,6 +136,7 @@ pub struct ChatView {
     /// messages whose producer knew no backend id; never fabricated
     /// positionally.
     message_owners: RefCell<Vec<Option<String>>>,
+    tool_owners: RefCell<Vec<Option<usize>>>,
     /// TOOL-008: backend child-session id owning each painted body row of the
     /// last styled render (`frame row -> child sessionID`). A transcript click
     /// on a subtask row navigates into that child
@@ -183,6 +184,7 @@ impl Default for ChatView {
             transcript_first: Cell::new(0),
             transcript_viewport: Cell::new(0),
             message_owners: RefCell::new(Vec::new()),
+            tool_owners: RefCell::new(Vec::new()),
             child_owners: RefCell::new(Vec::new()),
             pending_permission_calls: std::collections::BTreeSet::new(),
             spin_frame: Cell::new(None),
@@ -670,6 +672,32 @@ pub const MAX_MESSAGE_ROWS: usize = MAX_VIEW_ROWS;
 /// Bound in bytes for a rendered inline label (agent/model/tool name/id).
 pub const MAX_LABEL_BYTES: usize = 256;
 
+/// TOOL-011: resolve the `DialogExecute` model for the `tool_index`-th
+/// `ToolState` part of `message`, mirroring the render-side counter exactly
+/// (every `ToolState` part consumes an index; only `ToolKind::Execute` rows
+/// are recorded in the owner map). Returns `None` when the index is out of
+/// range or names a non-execute tool, so a click never opens a dialog for a
+/// row that is not an execute row. No duration is invented: `ChatPart::ToolState`
+/// carries no completion timestamp, so `elapsed_ms` stays `None`
+/// (`dialog-execute.tsx:68-72`).
+#[must_use]
+pub fn execute_dialog_from_part(message: &ChatMessage, tool_index: usize) -> Option<crate::tui_entry::native_turn::native_tool_rows::ExecuteDialog> {
+    use crate::tui_entry::native_turn::native_tool_rows::{ToolKind, execute_dialog, tool_kind};
+    let mut seen = 0usize;
+    for part in message.parts.iter().take(MAX_PARTS_PER_MESSAGE) {
+        if let ChatPart::ToolState { name, status, args, output, is_error, .. } = part {
+            if seen == tool_index {
+                if tool_kind(name) != ToolKind::Execute {
+                    return None;
+                }
+                return Some(execute_dialog(status, args, output, *is_error, None));
+            }
+            seen += 1;
+        }
+    }
+    None
+}
+
 /// Role of one typed chat message, exactly as supplied by the caller's real
 /// backend projection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1093,7 +1121,7 @@ fn boxed_message_rows_spans(
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
     child_out: &mut Vec<(usize, String)>,
 ) -> Vec<StyledChatRow> {
-    boxed_message_rows_spans_mode(width, message, separator, appearance, spans_out, child_out, crate::markdown_runs::MarkdownMode::Rendered, &std::collections::BTreeSet::new(), Some(0), true, crate::native_diff_view::DiffViewPreference::Auto)
+    boxed_message_rows_spans_mode(width, message, separator, appearance, spans_out, child_out, &mut Vec::new(), crate::markdown_runs::MarkdownMode::Rendered, &std::collections::BTreeSet::new(), Some(0), true, crate::native_diff_view::DiffViewPreference::Auto)
 }
 
 fn boxed_message_rows_spans_mode(
@@ -1101,6 +1129,7 @@ fn boxed_message_rows_spans_mode(
     appearance: &crate::native_box_style::BoxAppearance,
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
     child_out: &mut Vec<(usize, String)>,
+    tool_out: &mut Vec<(usize, usize)>,
     markdown_mode: crate::markdown_runs::MarkdownMode,
     pending: &std::collections::BTreeSet<String>,
     spin: Option<u64>,
@@ -1134,16 +1163,18 @@ fn boxed_message_rows_spans_mode(
         && matches!(id,BoxId::User|BoxId::Assistant) {1} else {usize::from(style.padding)};
     // Unstyled fallback: caller facts at the caller's wrap width, carrying
     // their full-row text interval (selected template, never decoration).
-    let plain = |wrap: usize, spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>, child_out: &mut Vec<(usize, String)>| -> Vec<StyledChatRow> {
+    let plain = |wrap: usize, spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>, child_out: &mut Vec<(usize, String)>, tool_out: &mut Vec<(usize, usize)>| -> Vec<StyledChatRow> {
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(wrap.min(width), message, separator, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled, diff_view);
+        let mut typed_tools = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans_mode(wrap.min(width), message, separator, None, &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view);
         let rows: Vec<StyledChatRow> = typed
             .into_iter()
             .map(|(text, class)| (text, class, Some((0, width.min(u16::MAX as usize) as u16))))
             .collect();
         rebase_part_spans(typed_spans, rows.len(), 0, 0, usize::MAX, width, spans_out);
         rebase_part_children(typed_children, rows.len(), 0, child_out);
+        rebase_part_tools(typed_tools, rows.len(), 0, tool_out);
         rows
     };
     // The pinned TUI has two different primitives, not a shared padded card:
@@ -1170,7 +1201,8 @@ fn boxed_message_rows_spans_mode(
         let base = output.len();
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, Some(""), &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled, diff_view);
+        let mut typed_tools = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, Some(""), &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
         {
@@ -1183,6 +1215,7 @@ fn boxed_message_rows_spans_mode(
         }
         rebase_part_spans(typed_spans, taken, base, 3, inner, width, spans_out);
         rebase_part_children(typed_children, taken, base, child_out);
+        rebase_part_tools(typed_tools, taken, base, tool_out);
         if user {
             output.push((padding, ChatRowClass::UserCard, None));
         }
@@ -1192,14 +1225,14 @@ fn boxed_message_rows_spans_mode(
     // path (which would reserve outline rows) and do not synthesize blank
     // border glyphs; retain the ordinary typed message classes and bounds.
     if !style.has_border() {
-        return plain(width, spans_out, child_out);
+        return plain(width, spans_out, child_out, tool_out);
     }
     // A full drawn frame exists ONLY through an explicit Double/Heavy line
     // weight (kept explicit). A radius preset or a Custom radius must never
     // create or widen a frame — changing radius affects existing corners,
     // never activates framing.
     if appearance.full_outline(id) {
-        let Some(frame) = crate::native_box_style::TextFrame::new(style, width, pad) else { return plain(width, spans_out, child_out); };
+        let Some(frame) = crate::native_box_style::TextFrame::new(style, width, pad) else { return plain(width, spans_out, child_out, tool_out); };
         let inner = usize::from(frame.content_width());
         let mut output = Vec::new();
         if separator { output.push((String::new(), ChatRowClass::Separator, None)); }
@@ -1208,7 +1241,8 @@ fn boxed_message_rows_spans_mode(
         let base = output.len();
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled, diff_view);
+        let mut typed_tools = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 + 2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit) {
@@ -1216,6 +1250,7 @@ fn boxed_message_rows_spans_mode(
         }
         rebase_part_spans(typed_spans, taken, base, 1 + pad, inner, width, spans_out);
         rebase_part_children(typed_children, taken, base, child_out);
+        rebase_part_tools(typed_tools, taken, base, tool_out);
         for _ in 0..pad { output.push((frame.blank(), ChatRowClass::Blank, None)); }
         output.push((frame.edge(true), ChatRowClass::Separator, None));
         return output;
@@ -1230,7 +1265,7 @@ fn boxed_message_rows_spans_mode(
         let rail = 1;
         let overhead = rail + pad;
         if width <= overhead + 1 {
-            return plain(width, spans_out, child_out);
+            return plain(width, spans_out, child_out, tool_out);
         }
         let inner = width - overhead;
         let mut output = Vec::new();
@@ -1244,7 +1279,8 @@ fn boxed_message_rows_spans_mode(
         let base = output.len();
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled, diff_view);
+        let mut typed_tools = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
@@ -1265,6 +1301,7 @@ fn boxed_message_rows_spans_mode(
         }
         rebase_part_spans(typed_spans, taken, base, 1 + pad, inner, width, spans_out);
         rebase_part_children(typed_children, taken, base, child_out);
+        rebase_part_tools(typed_tools, taken, base, tool_out);
         for _ in 0..pad {
             output.push((rail_pad.clone(), ChatRowClass::Blank, None));
         }
@@ -1272,7 +1309,7 @@ fn boxed_message_rows_spans_mode(
     }
     if pad > 0 {
         if width <= pad.max(1) {
-            return plain(width, spans_out, child_out);
+            return plain(width, spans_out, child_out, tool_out);
         }
         let inner = width - pad;
         let mut output = Vec::new();
@@ -1285,7 +1322,8 @@ fn boxed_message_rows_spans_mode(
         let base = output.len();
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, markdown_mode, width, pending, spin, tps_enabled, diff_view);
+        let mut typed_tools = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
@@ -1306,12 +1344,13 @@ fn boxed_message_rows_spans_mode(
         }
         rebase_part_spans(typed_spans, taken, base, pad, inner, width, spans_out);
         rebase_part_children(typed_children, taken, base, child_out);
+        rebase_part_tools(typed_tools, taken, base, tool_out);
         for _ in 0..pad {
             output.push((String::new(), ChatRowClass::Blank, None));
         }
         output
     } else {
-        plain(width, spans_out, child_out)
+        plain(width, spans_out, child_out, tool_out)
     }
 }
 
@@ -2099,6 +2138,20 @@ fn rebase_part_children(
     }
 }
 
+/// Rebase per-row tool-part ownership from a source-row interval onto the
+/// boxed output, mirroring [`rebase_part_children`]. `tools` lists
+/// `(source_row, tool_state_index)` for an execute part's own rendered rows
+/// (TOOL-011); a `taken`/`base` offset shift is the only transformation.
+fn rebase_part_tools(
+    tools: Vec<(usize, usize)>, taken: usize, base: usize,
+    sink: &mut Vec<(usize, usize)>,
+) {
+    for (index, tool) in tools {
+        if index >= taken { continue; }
+        sink.push((base + index, tool));
+    }
+}
+
 // ── native_markdown_flow block layout ────────────────────────────────
 //
 // Upstream renders assistant prose through a single Markdown renderable with
@@ -2625,7 +2678,7 @@ fn typed_message_rows_with_prefix_spans(
     child_out: &mut Vec<(usize, String)>,
 ) -> Vec<(String, ChatRowClass)> {
     typed_message_rows_with_prefix_spans_mode(
-        width, message, separator, prefix, spans_out, child_out,
+        width, message, separator, prefix, spans_out, child_out, &mut Vec::new(),
         crate::markdown_runs::MarkdownMode::Rendered,
         width,
         &std::collections::BTreeSet::new(),
@@ -2639,6 +2692,7 @@ fn typed_message_rows_with_prefix_spans_mode(
     width: usize, message: &ChatMessage, separator: bool, prefix: Option<&str>,
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
     child_out: &mut Vec<(usize, String)>,
+    tool_out: &mut Vec<(usize, usize)>,
     markdown_mode: crate::markdown_runs::MarkdownMode,
     terminal_width: usize,
     pending: &std::collections::BTreeSet<String>,
@@ -2661,6 +2715,9 @@ fn typed_message_rows_with_prefix_spans_mode(
             }
         }
     }
+    // TOOL-011: per-message ToolState counter (stable part index for the
+    // execute-dialog opener owner map).
+    let mut tool_state_count = 0usize;
     for part in message.parts.iter().take(MAX_PARTS_PER_MESSAGE) {
         if rows.len() >= MAX_MESSAGE_ROWS {
             break;
@@ -2752,6 +2809,12 @@ fn typed_message_rows_with_prefix_spans_mode(
                 metadata,
                 ..
             } => {
+                // TOOL-011: stable per-message index of this ToolState part;
+                // execute rows map back to it for the dialog opener
+                // (`index.tsx:3400-3414` opens DialogExecute from the
+                // execute specialization).
+                let tool_state_index = tool_state_count;
+                tool_state_count += 1;
                 let mut display = crate::tui_entry::native_turn::native_tool_rows::apply_tool_metadata(
                     crate::tui_entry::native_turn::native_tool_rows::tool_display(width, name, status, args, output, *is_error),
                     metadata,
@@ -2766,7 +2829,15 @@ fn typed_message_rows_with_prefix_spans_mode(
                 if pending.contains(id) {
                     display.mark_permission_pending();
                 }
+                let before = rows.len();
                 append_tool_rows(&mut rows, width, &crate::tui_entry::native_turn::native_tool_rows::rows_for_display_spin(width, &display, spin));
+                if crate::tui_entry::native_turn::native_tool_rows::tool_kind(name)
+                    == crate::tui_entry::native_turn::native_tool_rows::ToolKind::Execute
+                {
+                    for row in before..rows.len() {
+                        tool_out.push((row, tool_state_index));
+                    }
+                }
             }
             ChatPart::File { filename, mime } => {
                 push_wrapped(
@@ -3402,6 +3473,7 @@ impl ChatView {
                 None,
                 &mut Vec::new(),
                 &mut Vec::new(),
+                &mut Vec::new(),
                 self.markdown_mode,
                 width,
                 &self.pending_permission_calls,
@@ -3544,11 +3616,12 @@ impl ChatView {
             .unwrap_or(rows.len());
         let transcript_h = body_h.saturating_sub(1);
         let target = self.scroll.get().saturating_add(transcript_h);
-        let mut reversed: Vec<(StyledChatRow, Vec<ChatRunSpan>, Option<String>, Option<String>)> = Vec::new();
+        let mut reversed: Vec<(StyledChatRow, Vec<ChatRunSpan>, Option<String>, Option<String>, Option<usize>)> = Vec::new();
         if transcript_h > 0 {
             'messages: for (index, message) in messages.iter().enumerate().rev() {
                 let mut message_spans: Vec<(usize, Vec<ChatRunSpan>)> = Vec::new();
                 let mut message_children: Vec<(usize, String)> = Vec::new();
+                let mut message_tools: Vec<(usize, usize)> = Vec::new();
                 let message_rows = boxed_message_rows_spans_mode(
                     width,
                     message,
@@ -3556,6 +3629,7 @@ impl ChatView {
                     appearance,
                     &mut message_spans,
                     &mut message_children,
+                    &mut message_tools,
                     markdown_mode,
                     &self.pending_permission_calls,
                     self.spin_frame.get(),
@@ -3570,9 +3644,15 @@ impl ChatView {
                 for (row, child) in message_children {
                     if row < dense_children.len() { dense_children[row] = Some(child); }
                 }
+                // TOOL-011: stable per-message ToolState index owning each
+                // painted execute row, so a click can open its dialog.
+                let mut dense_tools: Vec<Option<usize>> = vec![None; message_rows.len()];
+                for (row, tool) in message_tools {
+                    if row < dense_tools.len() { dense_tools[row] = Some(tool); }
+                }
                 let owner = message.message_id.clone();
-                for ((row, spans), child) in message_rows.into_iter().zip(dense).zip(dense_children).rev() {
-                    reversed.push((row, spans, owner.clone(), child));
+                for (((row, spans), child), tool) in message_rows.into_iter().zip(dense).zip(dense_children).zip(dense_tools).rev() {
+                    reversed.push((row, spans, owner.clone(), child, tool));
                     if reversed.len() >= target {
                         break 'messages;
                     }
@@ -3600,15 +3680,18 @@ impl ChatView {
         let mut row_spans: Vec<Vec<ChatRunSpan>> = vec![Vec::new(); rows.len()];
         let mut owners: Vec<Option<String>> = vec![None; rows.len()];
         let mut child_owners: Vec<Option<String>> = vec![None; rows.len()];
-        for (index, ((text, class, range), spans, owner, child)) in visible.into_iter().enumerate() {
+        let mut tool_owners: Vec<Option<usize>> = vec![None; rows.len()];
+        for (index, ((text, class, range), spans, owner, child, tool)) in visible.into_iter().enumerate() {
             rows[first + index] = (text, class);
             bounds[first + index] = range;
             row_spans[first + index] = spans;
             owners[first + index] = owner;
             child_owners[first + index] = child;
+            tool_owners[first + index] = tool;
         }
         self.message_owners.replace(owners);
         self.child_owners.replace(child_owners);
+        self.tool_owners.replace(tool_owners);
         let styled: Vec<StyledChatRow> = rows.into_iter()
             .zip(bounds)
             .map(|((text, class), bounds)| (text, class, bounds))
@@ -3682,6 +3765,8 @@ impl ChatView {
                 appearance,
                 &mut spans,
                 &mut children,
+                // Content-height count only: the tool-owner map is not built here.
+                &mut Vec::new(),
                 markdown_mode,
                 // Content-height count only: a row-class swap never changes
                 // the row count, so the pending set is irrelevant here.
@@ -3732,6 +3817,23 @@ impl ChatView {
     #[must_use]
     pub fn child_owner_at(&self, row: usize) -> Option<String> {
         self.child_owners.borrow().get(row).cloned().flatten()
+    }
+
+    /// TOOL-011: stable per-message `ToolState` part index owning each painted
+    /// body row of the last styled render, indexed by frame row. The transcript
+    /// click resolves an execute row to its part and opens the `DialogExecute`
+    /// content viewer (`packages/tui/src/routes/session/index.tsx:3400-3414`).
+    #[must_use]
+    pub fn tool_owners(&self) -> Vec<Option<usize>> {
+        self.tool_owners.borrow().clone()
+    }
+
+    /// Stable `ToolState` part index owning `row`, or `None` when the row owns
+    /// no execute tool part (every non-execute row, and execute rows whose
+    /// producer index was unavailable).
+    #[must_use]
+    pub fn tool_owner_at(&self, row: usize) -> Option<usize> {
+        self.tool_owners.borrow().get(row).copied().flatten()
     }
 
     /// Anchor the last currently visible transcript row to a message and an
@@ -8133,5 +8235,88 @@ mod footer_v3_consumer_tests {
         }
         assert_eq!(surfaces.notices.len(), MAX_SURFACE_NOTICES);
         assert!(surfaces.render_rows(40).len() <= MAX_VIEW_ROWS);
+    }
+}
+
+/// TOOL-011: the execute-dialog opener seam. The render records a stable
+/// per-message `ToolState` part index for every painted execute row
+/// (`index.tsx:3400-3414` `openDetails`), and
+/// [`execute_dialog_from_part`] resolves that index back to the live
+/// `DialogExecute` model.
+#[cfg(test)]
+mod tool011_tests {
+    use super::*;
+
+    fn tool_state(name: &str, args: &str, output: &str) -> ChatPart {
+        ChatPart::ToolState {
+            name: name.to_owned(),
+            id: format!("call-{name}"),
+            status: "completed".to_owned(),
+            args: args.to_owned(),
+            output: output.to_owned(),
+            is_error: false,
+            metadata: String::new(),
+        }
+    }
+
+    /// Parts: Text, bash (ToolState 0), execute (ToolState 1), read
+    /// (ToolState 2). Only the execute part resolves a dialog.
+    fn message() -> ChatMessage {
+        ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![
+                ChatPart::Text("hi".to_owned()),
+                tool_state("bash", "{}", ""),
+                tool_state("execute", r#"{"code":"print(1)"}"#, "1"),
+                tool_state("read", "{}", ""),
+            ],
+            agent: None,
+            model: None,
+            assistant_facts: None,
+            message_id: Some("m1".to_owned()),
+        }
+    }
+
+    #[test]
+    fn tool011_execute_dialog_from_part_resolves_execute_and_rejects_others() {
+        let message = message();
+        let model = execute_dialog_from_part(&message, 1).expect("execute part resolves");
+        assert_eq!(model.code, "print(1)");
+        assert_eq!(model.status, "Completed");
+        // Non-execute parts and out-of-range indices never open a dialog.
+        assert!(execute_dialog_from_part(&message, 0).is_none());
+        assert!(execute_dialog_from_part(&message, 2).is_none());
+        assert!(execute_dialog_from_part(&message, 9).is_none());
+    }
+
+    #[test]
+    fn tool011_owner_map_records_execute_rows_only() {
+        let view = ChatView::new();
+        let messages = vec![message()];
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let _ = view.render_styled(80, 24, "ws", &messages, "", false, &appearance);
+        let owners = view.tool_owners();
+        let recorded: std::collections::BTreeSet<usize> =
+            owners.iter().flatten().copied().collect();
+        assert_eq!(
+            recorded,
+            [1usize].into_iter().collect::<std::collections::BTreeSet<_>>(),
+            "only the execute part index is recorded: {owners:?}"
+        );
+        assert!(owners.iter().any(|owner| *owner == Some(1)));
+    }
+
+    #[test]
+    fn tool011_owner_at_returns_none_for_non_execute_rows() {
+        let view = ChatView::new();
+        let messages = vec![message()];
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let _ = view.render_styled(80, 24, "ws", &messages, "", false, &appearance);
+        // Every recorded row resolves to the execute index; a row with no
+        // owner resolves `None`.
+        for (row, owner) in view.tool_owners().iter().enumerate() {
+            assert_eq!(view.tool_owner_at(row), *owner);
+        }
+        assert_eq!(view.tool_owner_at(usize::MAX), None);
     }
 }

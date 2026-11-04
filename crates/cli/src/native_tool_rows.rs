@@ -1261,6 +1261,74 @@ pub fn execute_dialog_gutter(text: &str, width: usize, digits: usize) -> Vec<Str
     rows
 }
 
+/// TOOL-011 render rows (`dialog-execute.tsx:222-282`): the gutter-numbered
+/// code block, then the shared-gutter JSON output, then the plain
+/// `Warnings:`/`Logs:` tail. One string per physical row; wrapped
+/// continuations carry a blank gutter (`execute_dialog_gutter`); every cell
+/// budget is hard-clamped, `max_rows` bounds the whole body so a hostile
+/// payload cannot grow the dialog unbounded.
+#[must_use]
+pub fn execute_dialog_rows(
+    code: &str,
+    output_json: Option<&str>,
+    output_rest: Option<&str>,
+    width: usize,
+    digits: usize,
+    max_rows: usize,
+) -> Vec<String> {
+    let digits = digits.max(1);
+    let width = width.max(1);
+    // Upstream row width (`dialog-execute.tsx:57-60`): the code budget is the
+    // dialog body minus the gutter column and its separating cell.
+    let code_width = width.saturating_sub(digits + 1).max(1);
+    let mut rows = Vec::new();
+    let mut guttered = |block: &str, rows: &mut Vec<String>| {
+        let mut number = 0usize;
+        for logical in block.split('\n') {
+            number += 1;
+            let physical = wrap_cells(logical, code_width);
+            let physical: Vec<String> =
+                if physical.is_empty() { vec![String::new()] } else { physical };
+            for (offset, row) in physical.iter().enumerate() {
+                if rows.len() >= max_rows {
+                    return;
+                }
+                let gutter = if offset == 0 {
+                    format!("{number:>digits$}")
+                } else {
+                    " ".repeat(digits)
+                };
+                rows.push(format!("{gutter} {row}"));
+            }
+        }
+    };
+    if !code.is_empty() {
+        guttered(code, &mut rows);
+        if rows.len() >= max_rows { return rows; }
+    }
+    if let Some(json) = output_json {
+        if !json.is_empty() {
+            if rows.len() >= max_rows { return rows; }
+            guttered(json, &mut rows);
+        }
+    }
+    if rows.len() >= max_rows { return rows; }
+    if let Some(rest) = output_rest {
+        for logical in rest.split('\n') {
+            if rows.len() >= max_rows {
+                return rows;
+            }
+            for chunk in wrap_cells(logical, width) {
+                if rows.len() >= max_rows {
+                    return rows;
+                }
+                rows.push(chunk);
+            }
+        }
+    }
+    rows
+}
+
 fn line_count(text: Option<&str>) -> usize {
     text.map_or(0, |text| text.split('\n').count())
 }

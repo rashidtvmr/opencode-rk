@@ -1413,6 +1413,22 @@ impl NativeView {
         self.chat.child_owner_at(row)
     }
 
+    /// TOOL-011: stable per-message `ToolState` part index owning each painted
+    /// body row of the last styled transcript render (`frame row -> tool part
+    /// index`). The transcript click resolves an execute row to its part and
+    /// opens the `DialogExecute` content viewer.
+    #[must_use]
+    pub fn chat_tool_owners(&self) -> Vec<Option<usize>> {
+        self.chat.tool_owners()
+    }
+
+    /// Stable `ToolState` part index owning `row`, or `None` when the row owns
+    /// no execute tool part. Empty before the first render of a frame.
+    #[must_use]
+    pub fn chat_tool_owner_at(&self, row: usize) -> Option<usize> {
+        self.chat.tool_owner_at(row)
+    }
+
     pub fn set_prompt_mode(&mut self, shell: bool) {
         self.shell_mode = shell;
     }

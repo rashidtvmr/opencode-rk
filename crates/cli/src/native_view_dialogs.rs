@@ -123,6 +123,46 @@ pub const MAX_MESSAGE_LEN: usize = 2048;
 /// body from flooding the viewport).
 const MAX_BLOCK_LINES: usize = 16;
 
+/// TOOL-011: hard cap on execute dialog body rows (`dialog-execute.tsx` sizes
+/// its scroll box to `maxHeight`; a hostile code/output payload cannot grow
+/// the paint unbounded).
+const MAX_EXECUTE_BODY_ROWS: usize = 400;
+
+/// TOOL-011: the execute dialog's body rows (`dialog-execute.tsx:222-282`):
+/// gutter-numbered code rows and JSON-highlighted output as [`Role::Item`],
+/// the `Warnings:`/`Logs:` tail as [`Role::Description`]. Bounded by
+/// [`MAX_EXECUTE_BODY_ROWS`].
+fn execute_body_rows(
+    width: usize,
+    execute: &crate::tui_entry::native_turn::native_tool_rows::ExecuteDialog,
+) -> Vec<(String, crate::native_ui_style::Role)> {
+    use crate::native_ui_style::Role;
+    let mut rows: Vec<(String, Role)> = crate::tui_entry::native_turn::native_tool_rows::execute_dialog_rows(
+        &execute.code,
+        execute.output_json.as_deref(),
+        None,
+        width,
+        execute.digits,
+        MAX_EXECUTE_BODY_ROWS,
+    )
+    .into_iter()
+    .map(|row| (row, Role::Item))
+    .collect();
+    if let Some(rest) = execute.output_rest.as_deref() {
+        for row in crate::tui_entry::native_turn::native_tool_rows::execute_dialog_rows(
+            "",
+            None,
+            Some(rest),
+            width,
+            1,
+            MAX_EXECUTE_BODY_ROWS.saturating_sub(rows.len()),
+        ) {
+            rows.push((row, Role::Description));
+        }
+    }
+    rows
+}
+
 /// Which overlay is shown. Each kind has its own answer/cancel rules; see
 /// the module docs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -451,6 +491,15 @@ struct OpenDialog {
     /// (`permission.tsx:243-254`). Meaningful only for
     /// [`DialogKind::Permission`].
     session_has_parent: bool,
+    /// TOOL-011: the tested execute dialog model
+    /// (`native_tool_rows::ExecuteDialog`, `dialog-execute.tsx`), present only
+    /// for [`DialogKind::Execute`]; built by [`DialogView::open_execute`]
+    /// from the clicked execute tool part.
+    execute: Option<crate::tui_entry::native_turn::native_tool_rows::ExecuteDialog>,
+    /// TOOL-011: execute body scroll offset (rows). The layout clamps the
+    /// painted window; [`DialogView::execute_scroll_state`] clamps the key
+    /// handler's next value the way upstream `scroll?.scrollBy` does.
+    execute_scroll: usize,
 }
 
 /// Focus-owning dialog overlay state. `Default` is a closed view.
@@ -1066,6 +1115,8 @@ impl DialogView {
             prompt: None,
             footer_gap: None,
             session_has_parent: false,
+            execute: None,
+            execute_scroll: 0,
         });
         self.crash_screen = Some(crash::CrashScreen::new(
             mode,
@@ -1213,6 +1264,8 @@ impl DialogView {
             prompt: None,
             footer_gap: None,
             session_has_parent: false,
+            execute: None,
+            execute_scroll: 0,
         });
         // `DialogSelect` seeds `selected: 0` (`ui/dialog-select.tsx:152`), so
         // the first enabled row is selected on open and the first Down moves
@@ -1293,6 +1346,8 @@ impl DialogView {
             prompt: None,
             footer_gap: None,
             session_has_parent: false,
+            execute: None,
+            execute_scroll: 0,
         });
         // `DialogSelect` seeds `selected` to the focused row
         // (`dialog-select.tsx:152`, `dialog-mcp.tsx:61` `preserveSelection`).
@@ -1304,6 +1359,99 @@ impl DialogView {
         self.modal
             .replace(entry_id, DialogSize::Medium, false, None, self.focus);
         Ok(())
+    }
+
+    /// TOOL-011: open the live execute content viewer
+    /// (`dialog-execute.tsx:28`), opened from an execute tool row click
+    /// (`index.tsx:3400-3414` `openDetails`). Content-only like
+    /// [`DialogView::open_mcp`]: no choices, no backend decision, no footer.
+    /// The caller closes it with [`DialogView::close`] and scrolls the body
+    /// with [`DialogView::set_execute_scroll`].
+    pub fn open_execute(
+        &mut self,
+        model: crate::tui_entry::native_turn::native_tool_rows::ExecuteDialog,
+    ) -> Result<(), DialogError> {
+        if self.is_open() {
+            return Err(DialogError::AlreadyOpen);
+        }
+        self.dialog = Some(OpenDialog {
+            id: "execute".to_owned(),
+            session_id: String::new(),
+            kind: DialogKind::Execute,
+            title: "Execute".to_owned(),
+            choices: Vec::new(),
+            disabled: Vec::new(),
+            permission: Vec::new(),
+            select: None,
+            mcp_status: Vec::new(),
+            message_lines: Vec::new(),
+            error: StaticError::BackendUnavailable,
+            prompt: None,
+            footer_gap: None,
+            session_has_parent: false,
+            execute: Some(model),
+            execute_scroll: 0,
+        });
+        self.selection = None;
+        self.rejected = false;
+        self.phase = Phase::Open;
+        self.open_sequence = self.open_sequence.saturating_add(1);
+        let entry_id = self.open_sequence;
+        // `dialog.setSize("xlarge")` + `setCentered(true)`
+        // (`dialog-execute.tsx:43-45`).
+        self.modal
+            .replace(entry_id, crate::native_modal_layer::DialogSize::XLarge, true, None, self.focus);
+        Ok(())
+    }
+
+    /// TOOL-011: (current scroll offset, maximum scroll offset) of the open
+    /// execute body under `width` x `height` layout cells. `(0, 0)` when no
+    /// execute dialog is open. The key handler clamps its next value against
+    /// `max` exactly like upstream `scroll?.scrollBy`
+    /// (`dialog-execute.tsx:76-89` keymap).
+    #[must_use]
+    pub fn execute_scroll_state(&self, width: usize, height: usize) -> (usize, usize) {
+        let Some(dialog) = self.dialog.as_ref() else { return (0, 0); };
+        if dialog.kind != DialogKind::Execute {
+            return (0, 0);
+        }
+        let Some(execute) = dialog.execute.as_ref() else { return (0, 0); };
+        let total = execute_body_rows(width, execute).len();
+        // Viewport = body rows after the title and status lines.
+        let viewport = height.saturating_sub(2).max(1);
+        let max = total.saturating_sub(viewport);
+        (dialog.execute_scroll.min(max.saturating_add(1)).min(max), max)
+    }
+
+    /// TOOL-011: move the execute body window the way upstream
+    /// `scroll?.scrollBy` does; clamped by the caller against
+    /// [`DialogView::execute_scroll_state`].
+    pub fn set_execute_scroll(&mut self, offset: usize) {
+        if let Some(dialog) = self.dialog.as_mut() {
+            if dialog.kind == DialogKind::Execute {
+                dialog.execute_scroll = offset.min(MAX_EXECUTE_BODY_ROWS.saturating_sub(1));
+            }
+        }
+    }
+
+    /// TOOL-011: the text a copy action writes — `code` selects the code block
+    /// (`c`) and `output` the output block (`o`), mirroring
+    /// `dialog-execute.tsx:96-104`. `None` when no execute dialog is open or
+    /// the requested block is empty (upstream `copy` early-returns on an empty
+    /// value, `:96-99`).
+    #[must_use]
+    pub fn execute_copy_text(&self, code: bool) -> Option<String> {
+        let dialog = self.dialog.as_ref()?;
+        if dialog.kind != DialogKind::Execute {
+            return None;
+        }
+        let execute = dialog.execute.as_ref()?;
+        let text = if code {
+            execute.code.as_str()
+        } else {
+            execute.output.as_deref().unwrap_or("")
+        };
+        (!text.is_empty()).then(|| text.to_owned())
     }
 
     /// The visible dialog's kind, or `None` while closed. Used by the live
@@ -1363,6 +1511,8 @@ impl DialogView {
             // `dialog-prompt.tsx:133` passes `footerGap={2}`.
             footer_gap: Some(2),
             session_has_parent: false,
+            execute: None,
+            execute_scroll: 0,
         });
         self.selection = None;
         self.rejected = false;
@@ -2263,7 +2413,31 @@ impl DialogView {
                         None => lines.push(line("prompt".to_string(), Role::Description)),
                     }
                 }
-                DialogKind::Execute => lines.push(line("execute — code and output".to_string(), Role::Description)),
+                DialogKind::Execute => {
+                    // TOOL-011: the live execute body (`dialog-execute.tsx`):
+                    // the status line, then the gutter-numbered code block,
+                    // then the JSON-highlighted output, then the
+                    // `Warnings:`/`Logs:` tail. Rows are windowed on
+                    // `execute_scroll` inside the remaining body budget
+                    // (upstream scrolls a `ScrollBox`, `dialog-execute.tsx:46`).
+                    match dialog.execute.as_ref() {
+                        Some(execute) => {
+                            lines.push(line(
+                                execute.status.clone(),
+                                if execute.failed { Role::Error } else { Role::Description },
+                            ));
+                            let viewport = height.saturating_sub(lines.len()).max(1);
+                            let body = execute_body_rows(width, execute);
+                            let max = body.len().saturating_sub(viewport);
+                            let start = dialog.execute_scroll.min(max);
+                            let end = start.saturating_add(viewport);
+                            for (row, role) in body.into_iter().take(end).skip(start) {
+                                lines.push(line(row, role));
+                            }
+                        }
+                        None => lines.push(line("execute — code and output".to_string(), Role::Description)),
+                    }
+                }
                 DialogKind::Mcp => lines.push(line("select a server · Enter toggle".to_string(), Role::Description)),
                 DialogKind::Error => {
                     lines.push(line(dialog.error.headline().to_string(), Role::Error));
@@ -9384,6 +9558,103 @@ mod f002r2_reject_stage_tests {
         let mut view = DialogView::new();
         assert!(!view.escape_reject_stage());
         assert!(!view.reject_stage());
+    }
+}
+
+/// TOOL-011: the live `DialogExecute` content viewer
+/// (`packages/tui/src/routes/session/dialog-execute.tsx`). The model is
+/// `native_tool_rows::execute_dialog`; these tests pin the live dialog render,
+/// the scroll window, the copy selection and the content-only contract.
+#[cfg(test)]
+mod tool011_tests {
+    use super::*;
+    use crate::tui_entry::native_turn::native_tool_rows::{ExecuteDialog, execute_dialog};
+
+    fn model() -> ExecuteDialog {
+        execute_dialog(
+            "completed",
+            r#"{"code":"const a = 1\nreturn a"}"#,
+            "{\"ok\":true}\n\nLogs:\nline",
+            false,
+            None,
+        )
+    }
+
+    fn texts(lines: &[crate::native_ui_style::Line]) -> Vec<String> {
+        lines.iter().map(|line| line.text.clone()).collect()
+    }
+
+    /// `dialog-execute.tsx:222-282`: the status line, the gutter-numbered code
+    /// block, the shared-gutter JSON output and the `Warnings:`/`Logs:` tail
+    /// are all painted live.
+    #[test]
+    fn tool011_open_execute_renders_status_code_and_json() {
+        let mut view = DialogView::new();
+        view.open_execute(model()).expect("execute viewer opens");
+        assert_eq!(view.open_kind(), Some(DialogKind::Execute));
+        let texts = texts(&view.render_styled(80, 20));
+        assert!(texts.iter().any(|t| t == "Completed"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "1 const a = 1"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "2 return a"), "{texts:?}");
+        // `GutteredCode` numbers each block from 1 (`dialog-execute.tsx:251`),
+        // so the JSON output restarts at 1 even though `digits` is shared.
+        assert!(texts.iter().any(|t| t == "1 {\"ok\":true}"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "Logs:"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "line"), "{texts:?}");
+    }
+
+    /// The viewer is content-only (`dialog-execute.tsx:28`): no decision
+    /// intent, and Escape closes it locally.
+    #[test]
+    fn tool011_execute_is_content_only_and_closes_locally() {
+        let mut view = DialogView::new();
+        view.open_execute(model()).expect("opens");
+        assert_eq!(view.answer().unwrap_err(), DialogError::NotAnswerable);
+        assert_eq!(view.cancel().unwrap_err(), DialogError::NotAnswerable);
+        assert!(view.is_open());
+        view.close();
+        assert!(!view.is_open());
+        assert_eq!(view.open_kind(), None);
+    }
+
+    /// `dialog-execute.tsx:76-89`: up/down move the body one row and the
+    /// window is clamped to the body length.
+    #[test]
+    fn tool011_scroll_window_moves() {
+        let mut view = DialogView::new();
+        let code: String = (1..=40).map(|n| format!("line{n}")).collect::<Vec<_>>().join("\n");
+        let args = serde_json::json!({ "code": code }).to_string();
+        view.open_execute(execute_dialog("completed", &args, "", false, None))
+            .expect("opens");
+        let (start, max) = view.execute_scroll_state(80, 10);
+        assert_eq!(start, 0);
+        assert!(max > 0, "body must overflow the viewport");
+        let first = texts(&view.render_styled(80, 10));
+        // 40 lines -> `digits = 2`, so the gutter is right-padded: `" 1 line1"`.
+        assert!(first.iter().any(|t| t == " 1 line1"), "{first:?}");
+        view.set_execute_scroll(2);
+        assert_eq!(view.execute_scroll_state(80, 10).0, 2);
+        let scrolled = texts(&view.render_styled(80, 10));
+        assert!(!scrolled.iter().any(|t| t == " 1 line1"), "{scrolled:?}");
+        // Beyond the end clamps to `max`, never past it.
+        view.set_execute_scroll(usize::MAX);
+        assert_eq!(view.execute_scroll_state(80, 10).0, max);
+    }
+
+    /// `dialog-execute.tsx:96-104`: `c` copies the code block and `o` the
+    /// output; an empty block or a closed dialog yields `None`.
+    #[test]
+    fn tool011_copy_text_selects_code_or_output() {
+        let mut view = DialogView::new();
+        view.open_execute(model()).expect("opens");
+        assert_eq!(view.execute_copy_text(true).as_deref(), Some("const a = 1\nreturn a"));
+        assert_eq!(
+            view.execute_copy_text(false).as_deref(),
+            Some("{\"ok\":true}\n\nLogs:\nline")
+        );
+        view.close();
+        assert_eq!(view.execute_copy_text(true), None);
+        assert_eq!(view.execute_copy_text(false), None);
     }
 }
 

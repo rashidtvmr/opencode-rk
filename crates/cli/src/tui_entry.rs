@@ -12061,6 +12061,75 @@ fn native_loop(
                 continue;
             }
         }
+        // TOOL-011: the execute content viewer owns its scroll and copy keys
+        // (`dialog-execute.tsx:76-89`: up/down ±1, pageup/pagedown ±page,
+        // home/end to the ends, c/o copy code/output) and is modal — every
+        // other key is swallowed. `home`/`end` have no decoded `InputEvent`
+        // yet, so those two scroll commands remain unbound (recorded gap).
+        if view.dialogs.intercepts_input()
+            && view.dialogs.open_kind()
+                == Some(crate::native_view_dialogs::DialogKind::Execute)
+        {
+            let modal = view.modal_presentation();
+            let width = usize::from(modal.content_width);
+            let height = view.modal_content_height();
+            match &event {
+                native_input_decoder::InputEvent::ArrowUp => {
+                    let (current, _) = view.dialogs.execute_scroll_state(width, height);
+                    view.dialogs.set_execute_scroll(current.saturating_sub(1));
+                    needs_paint = true;
+                }
+                native_input_decoder::InputEvent::ArrowDown => {
+                    let (current, max) = view.dialogs.execute_scroll_state(width, height);
+                    view.dialogs.set_execute_scroll((current + 1).min(max));
+                    needs_paint = true;
+                }
+                native_input_decoder::InputEvent::PageUp => {
+                    let (current, _) = view.dialogs.execute_scroll_state(width, height);
+                    view.dialogs.set_execute_scroll(current.saturating_sub(height.max(1)));
+                    needs_paint = true;
+                }
+                native_input_decoder::InputEvent::PageDown => {
+                    let (current, max) = view.dialogs.execute_scroll_state(width, height);
+                    view.dialogs.set_execute_scroll((current + height.max(1)).min(max));
+                    needs_paint = true;
+                }
+                native_input_decoder::InputEvent::Escape
+                | native_input_decoder::InputEvent::Byte(3) => {
+                    view.dialogs.close();
+                    needs_paint = true;
+                }
+                native_input_decoder::InputEvent::Byte(b'c') => {
+                    if let Some(code) = view.dialogs.execute_copy_text(true) {
+                        let frame = selection_clipboard_frame(&code);
+                        let mut stdout = std::io::stdout().lock();
+                        stdout.write_all(frame.as_bytes())?;
+                        stdout.flush()?;
+                        toast.show(crate::native_toast::ToastOptions::new(
+                            crate::native_toast::ToastVariant::Info,
+                            "Copied code",
+                        ));
+                    }
+                    needs_paint = true;
+                }
+                native_input_decoder::InputEvent::Byte(b'o') => {
+                    if let Some(output) = view.dialogs.execute_copy_text(false) {
+                        let frame = selection_clipboard_frame(&output);
+                        let mut stdout = std::io::stdout().lock();
+                        stdout.write_all(frame.as_bytes())?;
+                        stdout.flush()?;
+                        toast.show(crate::native_toast::ToastOptions::new(
+                            crate::native_toast::ToastVariant::Info,
+                            "Copied output",
+                        ));
+                    }
+                    needs_paint = true;
+                }
+                _ => {}
+            }
+            utf8.reset();
+            continue;
+        }
         if !page_open && !help_open && !children_panel.open && !appearance.open
             && !permission_editor.open && !view.dialogs.intercepts_input()
             && !view.command_palette_open() && matches!(dialog, native_setup::Dialog::None)
@@ -13243,6 +13312,31 @@ fn native_loop(
                                 }
                                 needs_paint = true;
                                 continue;
+                            }
+                            // TOOL-011: an execute tool row click opens the
+                            // live content viewer (`index.tsx:3400-3414`
+                            // `openDetails` -> `DialogExecute`,
+                            // `dialog-execute.tsx:28`) before the message menu
+                            // resolves. The owner map's tool index names the
+                            // message's `ToolState` part; a non-execute row
+                            // resolves `None` and falls through.
+                            if let (Some(snapshot), Some(tool_index), Some(message_id)) = (
+                                live.as_ref(),
+                                view.chat_tool_owner_at(usize::from(y)),
+                                view.chat_message_owner_at(usize::from(y)),
+                            ) {
+                                let model =
+                                    crate::native_chat_projection::project_history_entries(&snapshot.raw_history)
+                                        .into_iter()
+                                        .find(|(id, _)| id == &message_id)
+                                        .and_then(|(_, message)| {
+                                            crate::native_view_chat::execute_dialog_from_part(&message, tool_index)
+                                        });
+                                if let Some(model) = model {
+                                    let _ = view.dialogs.open_execute(model);
+                                    needs_paint = true;
+                                    continue;
+                                }
                             }
                             if let (Some(snapshot), Some(message_id)) =
                                 (live.as_ref(), view.chat_message_owner_at(usize::from(y)))
