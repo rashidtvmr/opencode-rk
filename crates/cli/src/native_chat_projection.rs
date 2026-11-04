@@ -475,10 +475,18 @@ fn parse_diagnostics(
     path: &str,
     budget: &mut usize,
 ) -> Vec<crate::native_view_chat::PatchDiagnostic> {
-    let items = metadata
+    let diagnostics = metadata
         .and_then(|metadata| metadata.get("diagnostics"))
-        .and_then(|diagnostics| diagnostics.get(path))
-        .and_then(Value::as_array);
+        .and_then(Value::as_object);
+    // Match the diff model's path normalization before projecting diagnostics:
+    // producers may use a different separator or redundant dot segments.
+    let platform = if cfg!(windows) { "win32" } else { "linux" };
+    let target = crate::native_diff_view::normalize_path(path, platform);
+    let items = diagnostics
+        .and_then(|entries| entries.iter().find(|(key, _)| {
+            crate::native_diff_view::normalize_path(key, platform) == target
+        }))
+        .and_then(|(_, value)| value.as_array());
     let Some(items) = items else {
         return Vec::new();
     };
