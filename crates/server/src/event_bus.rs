@@ -1,5 +1,5 @@
 //! Bounded fan-out event bus for the server daemon.
-use opencode_rk_contracts::{MessageId, SessionId};
+use opencode_rk_contracts::{FormId, FormInfo, MessageId, SessionId};
 use std::{
     fmt,
     sync::{
@@ -8,7 +8,7 @@ use std::{
     },
 };
 use tokio::sync::mpsc;
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ServerEvent {
     SessionCreated(SessionId),
     MessageAppended {
@@ -32,6 +32,9 @@ pub enum ServerEvent {
     },
     PermissionRequested(String),
     TodoUpdated { session: SessionId, todos: Vec<opencode_rk_sessions::Todo> },
+    FormCreated { form: FormInfo },
+    FormReplied { id: FormId, session_id: String, answer: std::collections::BTreeMap<String, serde_json::Value> },
+    FormCancelled { id: FormId, session_id: String },
     Shutdown,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,6 +44,9 @@ pub enum EventKind {
     ToolExecuted,
     PermissionRequested,
     TodoUpdated,
+    FormCreated,
+    FormReplied,
+    FormCancelled,
     Shutdown,
 }
 impl ServerEvent {
@@ -52,6 +58,9 @@ impl ServerEvent {
             Self::ToolExecuted { .. } => EventKind::ToolExecuted,
             Self::PermissionRequested(_) => EventKind::PermissionRequested,
             Self::TodoUpdated { .. } => EventKind::TodoUpdated,
+            Self::FormCreated { .. } => EventKind::FormCreated,
+            Self::FormReplied { .. } => EventKind::FormReplied,
+            Self::FormCancelled { .. } => EventKind::FormCancelled,
             Self::Shutdown => EventKind::Shutdown,
         }
     }
@@ -79,7 +88,7 @@ impl std::error::Error for BusError {}
 /// publication identity only — it is **not** a durable replay cursor; a
 /// reconnecting client must resnapshot durable history (no seq-based
 /// side-effect replay is ever performed).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Published {
     /// Stable per-publication identity, identical for every subscriber.
     pub id: u64,
@@ -284,6 +293,12 @@ impl Drop for Subscription {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn form_event_kinds_are_stable() {
+        let form = FormInfo { id: FormId::new("frm_a").unwrap(), session_id: "ses_a".into(), title: "t".into(), metadata: None, fields: vec![] };
+        assert_eq!(ServerEvent::FormCreated { form }.kind(), EventKind::FormCreated);
+        assert_eq!(ServerEvent::FormCancelled { id: FormId::new("frm_a").unwrap(), session_id: "ses_a".into() }.kind(), EventKind::FormCancelled);
+    }
     #[tokio::test]
     async fn publish_and_receive() {
         let bus = EventBus::new(16);

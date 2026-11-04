@@ -431,6 +431,73 @@ impl ApiError {
     }
 }
 
+/// Form identifiers use the upstream `frm_` namespace.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct FormId(String);
+impl FormId {
+    pub fn new(value: impl Into<String>) -> Result<Self, ContractError> {
+        let value = value.into();
+        if !value.starts_with("frm_") || value.len() > 128 || value.chars().any(char::is_control) {
+            return Err(ContractError::InvalidIdentifier { kind: "form", value });
+        }
+        Ok(Self(value))
+    }
+    #[must_use]
+    pub fn generate() -> Self {
+        Self(format!("frm_{}", Uuid::new_v4().simple()))
+    }
+    #[must_use]
+    pub fn as_str(&self) -> &str { &self.0 }
+}
+impl fmt::Display for FormId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { self.0.fmt(f) }
+}
+
+/// User-facing form field, matching the server-produced OpenCode Form.Field schema.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FormField {
+    pub key: String,
+    #[serde(rename = "type")]
+    pub field_type: String,
+    #[serde(flatten)]
+    pub properties: BTreeMap<String, Value>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FormInfo {
+    pub id: FormId,
+    pub session_id: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<BTreeMap<String, Value>>,
+    pub fields: Vec<FormField>,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FormStatus { Pending, Answered, Cancelled }
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FormState {
+    pub status: FormStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<BTreeMap<String, Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FormDetail {
+    #[serde(flatten)]
+    pub form: FormInfo,
+    pub state: FormState,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FormReply { pub answer: BTreeMap<String, Value> }
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct FormCancel { #[serde(default, skip_serializing_if = "Option::is_none")] pub message: Option<String> }
+
 #[derive(Debug, Error, Eq, PartialEq)]
 pub enum ContractError {
     #[error("{field} exceeds {max_bytes} bytes")]
@@ -471,6 +538,21 @@ fn validate_slug(kind: &'static str, value: String) -> Result<String, ContractEr
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn form_contract_round_trip_and_id_validation() {
+        let form = FormInfo {
+            id: FormId::new("frm_example").unwrap(),
+            session_id: "ses_test".into(),
+            title: "Questions".into(),
+            metadata: None,
+            fields: vec![FormField { key: "q0".into(), field_type: "string".into(), properties: BTreeMap::new() }],
+        };
+        let encoded = serde_json::to_string(&form).unwrap();
+        let decoded: FormInfo = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(form, decoded);
+        assert!(FormId::new("invalid").is_err());
+        assert_eq!(serde_json::to_value(FormStatus::Pending).unwrap(), "pending");
+    }
     #[test]
     fn additive_unknown_fields_survive_round_trip() {
         let json = r#"{"schema_version":1,"data":{"native_core":true,"embedded_sqlite":true,"js_compatibility_host":false,"os_sandbox_backend":null,"feature_profile":"lean"},"future_field":{"enabled":true}}"#;

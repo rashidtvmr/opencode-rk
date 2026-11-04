@@ -542,11 +542,15 @@ async fn agentic_loop_e2e_execute_cap_and_policy() {
         .map(|tool| tool["name"].as_str().expect("tool name"))
         .collect();
     advertised.sort_unstable();
+    // `question` is a default internal plugin upstream
+    // (`packages/core/src/plugin/internal.ts:242`, `QuestionTool.Plugin`,
+    // alongside `TodoTool.Plugin` at :247), so the default turn-tool list
+    // advertises it exactly like `todowrite`.
     assert_eq!(
         advertised,
         vec![
-            "bash", "edit", "glob", "grep", "read", "shell", "task", "todowrite", "webfetch",
-            "websearch", "write",
+            "bash", "edit", "glob", "grep", "question", "read", "shell", "task", "todowrite",
+            "webfetch", "websearch", "write",
         ]
     );
     // Round two fed the function call and its real output back.

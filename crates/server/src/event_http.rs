@@ -104,6 +104,9 @@ pub fn wire_event(published: &Published) -> (String, String) {
         // surfaced by type only, keeping the stream free of secret echo.
         ServerEvent::PermissionRequested(_) => ("permission.requested", json!({})),
         ServerEvent::TodoUpdated { session, todos } => ("todo.updated", json!({"session":session,"todos":todos})),
+        ServerEvent::FormCreated { form } => ("form.created", json!({"form":form})),
+        ServerEvent::FormReplied { id, session_id, answer } => ("form.replied", json!({"id":id,"sessionID":session_id,"answer":answer})),
+        ServerEvent::FormCancelled { id, session_id } => ("form.cancelled", json!({"id":id,"sessionID":session_id})),
         ServerEvent::Shutdown => ("server.instance.disposed", json!({})),
     };
     let id = format!("ev-{}", published.id);

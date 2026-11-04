@@ -20,6 +20,7 @@ pub mod auto_compaction;
 mod fallback_compaction;
 mod compaction_settings;
 mod context_http;
+mod form_http;
 pub mod auto_report;
 pub mod auto_window;
 mod browser_resume;
@@ -68,6 +69,7 @@ pub mod rules_globs;
 pub mod rules_loader;
 mod todo_http;
 mod todo_tool;
+mod question_tool;
 mod memory_http;
 pub mod run_owner;
 pub mod runtime_wiring;
@@ -192,6 +194,7 @@ pub fn router_with_events_and_integration(
     // there is no static global. Fresh router ⇒ empty registry ⇒ `{}`.
     let mcp_registry = mcp_http::McpStatusRegistry::new();
     let children = task_children::Children::with_mcp(mcp_registry.clone());
+    let forms = children.forms();
     let app = Router::new()
         .route("/health", get(health))
         .route("/discovery-proof", get(discovery_proof))
@@ -310,11 +313,24 @@ pub fn router_with_events_and_integration(
             "/api/session/{id}/permission/{request_id}/reply",
             post(reply_session_permission),
         )
+        .route(
+            "/api/session/{id}/form",
+            get(form_http::list).post(form_http::create),
+        )
+        .route(
+            "/api/session/{id}/form/{form}",
+            get(form_http::get).delete(form_http::cancel),
+        )
+        .route(
+            "/api/session/{id}/form/{form}/reply",
+            post(form_http::reply),
+        )
         .fallback(web_assets::serve)
         .layer(axum::extract::Extension(integration))
         .layer(axum::extract::Extension(events))
         .layer(axum::extract::Extension(mcp_registry))
         .layer(axum::extract::Extension(children))
+        .layer(axum::extract::Extension(forms))
         .with_state(state);
     match auth {
         Some(credential) => app
@@ -2568,6 +2584,8 @@ struct TurnStreamState {
     owner: Arc<RunOwner>,
     /// Router-owned event bus for durable append publication.
     events: event_bus::EventBus,
+    /// Session form registry shared with the HTTP form routes.
+    forms: form_http::FormService,
     /// Agentic loop state: provider tool schema + step budget + typed history.
     tools: Vec<ResponsesTool>,
     enabled_tools: Vec<String>,
@@ -2678,14 +2696,14 @@ impl StreamTiming {
 /// the available tool set but never grants permissions.
 fn turn_tool_config() -> Vec<String> {
     std::env::var("OPENCODE_RK_TURN_TOOLS")
-        .unwrap_or_else(|_| "bash,shell,read,write,edit,grep,glob,websearch,webfetch,task,todowrite".to_owned())
+        .unwrap_or_else(|_| "bash,shell,read,write,edit,grep,glob,websearch,webfetch,task,todowrite,question".to_owned())
         .split(',')
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .filter(|name| {
             matches!(
                 *name,
-                "bash" | "shell" | "read" | "write" | "edit" | "grep" | "glob" | "websearch" | "webfetch" | "task" | "todowrite"
+                "bash" | "shell" | "read" | "write" | "edit" | "grep" | "glob" | "websearch" | "webfetch" | "task" | "todowrite" | "question"
             )
         })
         .map(str::to_owned)
@@ -3039,6 +3057,7 @@ pub(crate) fn create_turn_stream_with_message(
         .collect();
     if turn_tools.iter().any(|name| name == "task") { tools.push(task_children::schema()); }
     if turn_tools.iter().any(|name| name == "todowrite") { tools.push(todo_tool::schema()); }
+    if turn_tools.iter().any(|name| name == "question") { tools.push(question_tool::schema()); }
     for tool in &mcp_defs {
         tools.push(ResponsesTool::function(tool.name.clone(), tool.description.clone(), tool.input_schema.clone()));
         turn_tools.push(tool.name.clone());
@@ -3078,6 +3097,7 @@ pub(crate) fn create_turn_stream_with_message(
     };
     let provider = provider_result.map_err(provider_failure)?;
 
+    let turn_forms = children.forms();
     let stream = stream::unfold(
         TurnStreamState {
             app: state.clone(),
@@ -3096,6 +3116,7 @@ pub(crate) fn create_turn_stream_with_message(
             _permit: permit,
             owner: Arc::clone(&owner),
             events,
+            forms: turn_forms,
             tools,
             enabled_tools: turn_tools,
             broker,
@@ -3448,6 +3469,12 @@ pub(crate) fn create_turn_stream_with_message(
                                 } else if call.name == "todowrite" {
                                     let outcome = todo_tool::execute(&state.app, &state.events, &state.owner,
                                         &state.broker, state.turn_message_id, &call.call_id, &call.arguments).await;
+                                    stop_after_output = outcome.stop_after_outputs;
+                                    explicit_success = Some(outcome.success);
+                                    outcome.output
+                                } else if call.name == "question" {
+                                    let outcome = question_tool::execute(&state.events, &state.forms,
+                                        &state.owner, &state.broker, state.turn_message_id, &call.call_id, &call.arguments).await;
                                     stop_after_output = outcome.stop_after_outputs;
                                     explicit_success = Some(outcome.success);
                                     outcome.output
@@ -4118,6 +4145,13 @@ impl ApiFailure {
         Self {
             status: StatusCode::NOT_FOUND,
             code: "not_found",
+            message: message.into(),
+        }
+    }
+    fn conflict(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            code: "conflict",
             message: message.into(),
         }
     }

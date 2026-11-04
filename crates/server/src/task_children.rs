@@ -18,11 +18,12 @@ const ADMISSION_BACKOFF_BASE_MS: u64 = 100;
 const MAX_PROVIDER_RETRIES: u32 = 3;
 
 #[derive(Clone)]
-pub(crate) struct Children(Arc<Mutex<BTreeMap<String, Arc<Child>>>>, mcp_http::McpStatusRegistry);
-impl Default for Children { fn default() -> Self { Self(Arc::new(Mutex::new(BTreeMap::new())), mcp_http::McpStatusRegistry::new()) } }
+pub(crate) struct Children(Arc<Mutex<BTreeMap<String, Arc<Child>>>>, mcp_http::McpStatusRegistry, crate::form_http::FormService);
+impl Default for Children { fn default() -> Self { Self(Arc::new(Mutex::new(BTreeMap::new())), mcp_http::McpStatusRegistry::new(), crate::form_http::FormService::default()) } }
 impl Children {
-    pub(crate) fn with_mcp(registry: mcp_http::McpStatusRegistry) -> Self { Self(Arc::new(Mutex::new(BTreeMap::new())), registry) }
+    pub(crate) fn with_mcp(registry: mcp_http::McpStatusRegistry) -> Self { Self(Arc::new(Mutex::new(BTreeMap::new())), registry, crate::form_http::FormService::default()) }
     pub(crate) fn mcp_registry(&self) -> mcp_http::McpStatusRegistry { self.1.clone() }
+    pub(crate) fn forms(&self) -> crate::form_http::FormService { self.2.clone() }
 }
 
 struct Child {
