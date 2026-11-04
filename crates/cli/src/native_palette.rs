@@ -2206,6 +2206,8 @@ pub mod select {
 /// `dialog-stash.tsx:39-85`, `dialog-workspaces.tsx:181-245`,
 /// `dialog-workspace-file-changes.tsx:62-105`.
 pub mod pickers {
+    use super::select::{DrillDown, LateLoadGuard, SelectOption, SelectSnapshot};
+
     /// Model picker ordering and favorite priority
     /// (`dialog-model.tsx:100-202`, `model-options.tsx:7-40`).
     pub type ModelKey = (String, String);
@@ -2694,9 +2696,8 @@ pub mod pickers {
             }
         }
 
-        /// First delete press arms, the second deletes; moving clears
-        /// (`dialog-session-list.tsx:163-170,247-291`). Returns `true` when
-        /// the caller must perform the deletion.
+        /// Standalone picker-model confirmation state. The native live dialog
+        /// does not call this because its server has no session DELETE route.
         pub fn arm_delete(&mut self, id: &str) -> bool {
             if self.to_delete.as_deref() == Some(id) {
                 self.to_delete = None;
@@ -2715,7 +2716,7 @@ pub mod pickers {
             self.to_delete.as_deref() == Some(id)
         }
 
-        /// Armed rows replace their title with the confirmation prompt.
+        /// Model-only rendering helper for a row armed through [`Self::arm_delete`].
         #[must_use]
         pub fn row_title(&self, row: &SessionRow, delete_key: &str) -> String {
             if self.is_armed(&row.id) {
@@ -3393,6 +3394,399 @@ pub mod pickers {
             text.push_str(&file.deletions.to_string());
         }
         text
+    }
+
+    // ------------------------------------------------------------------
+    // DIALOG-13/14/15: live dispatcher state. Each mounts a tested model
+    // into the running dialog loop; the TUI holds one in the open dialog
+    // and drives it from the live key gate (like `select_menu_key`).
+    // ------------------------------------------------------------------
+
+    /// DIALOG-13: the live "sessions" dialog state
+    /// (`dialog-session-list.tsx`). `generation` fences stale fetches so an
+    /// out-of-order response can never overwrite a newer query/scope.
+    #[derive(Clone, Debug)]
+    pub struct SessionsState {
+        pub picker: SessionPicker,
+        /// Locally known sessions (the fallback list the dialog degrades to).
+        pub local: Vec<SessionRow>,
+        /// Visible rows after the latest accepted apply.
+        pub rows: Vec<SessionRow>,
+        /// Monotonic fetch generation; requests carry it, applies check it.
+        pub generation: u64,
+        pub selected: usize,
+    }
+
+    impl SessionsState {
+        #[must_use]
+        pub fn new(scope_cwd: bool, current_directory: &str, today: &str) -> Self {
+            Self {
+                picker: SessionPicker::new(scope_cwd, current_directory, today),
+                local: Vec::new(),
+                rows: Vec::new(),
+                generation: 0,
+                selected: 0,
+            }
+        }
+
+        /// Printable keystroke; `true` = debounce timer must restart.
+        pub fn push_filter(&mut self, ch: char) -> bool {
+            let mut buffer = self.picker.filter().to_owned();
+            buffer.push(ch);
+            self.picker.set_filter(&buffer)
+        }
+
+        /// Backspace; same restart contract as [`Self::push_filter`].
+        pub fn pop_filter(&mut self) -> bool {
+            let mut buffer = self.picker.filter().to_owned();
+            if buffer.pop().is_none() {
+                return false;
+            }
+            self.picker.set_filter(&buffer)
+        }
+
+        /// Debounce elapsed: promote and return the `(generation, query,
+        /// all_projects)` fetch request the caller must issue.
+        #[must_use]
+        pub fn debounce_fired(&mut self) -> (u64, String, bool) {
+            self.picker.debounce_elapsed();
+            self.generation = self.generation.wrapping_add(1);
+            (
+                self.generation,
+                self.picker.debounced().to_owned(),
+                self.picker.all_projects(),
+            )
+        }
+
+        /// A completed fetch response. A stale generation is dropped
+        /// (`dialog-session-list.tsx:102-110` degrades to the local list
+        /// instead, and the visible rows cannot go backwards).
+        pub fn apply_fetch(
+            &mut self,
+            generation: u64,
+            server: Vec<SessionRow>,
+        ) -> bool {
+            if generation != self.generation {
+                return false;
+            }
+            let query = self.picker.debounced().to_owned();
+            let all_projects = self.picker.all_projects();
+            self.rows = self.picker.apply_result(&query, all_projects, false, server, &self.local);
+            self.selected = self.selected.min(self.rows.len().saturating_sub(1));
+            true
+        }
+
+        /// Seed the local fallback rows before the first fetch returns.
+        pub fn seed_local(&mut self, local: Vec<SessionRow>) {
+            self.local = local;
+            if self.rows.is_empty() && !self.picker.all_projects() {
+                self.rows = self.picker.local_rows(&self.local);
+            }
+        }
+
+        /// Move the highlight; model-only armed-delete state is cleared.
+        pub fn move_selection(&mut self, delta: isize) {
+            let len = self.rows.len();
+            if len == 0 {
+                return;
+            }
+            let next = (self.selected as isize + delta).clamp(0, len as isize - 1);
+            self.selected = next as usize;
+            self.picker.on_move();
+        }
+
+        /// Model-only delete confirmation helper; unused by the live dialog.
+        pub fn press_enter(&mut self) -> Option<String> {
+            let row = self.rows.get(self.selected)?.clone();
+            if self.picker.arm_delete(&row.id) {
+                Some(row.id)
+            } else {
+                None
+            }
+        }
+
+        /// Model-only alias for [`Self::press_enter`]; unused by the live dialog.
+        pub fn press_delete(&mut self) -> Option<String> {
+            self.press_enter()
+        }
+
+        /// The armed rows' rendered titles (confirmation prompt replaces the
+        /// title on the armed row).
+        #[must_use]
+        pub fn row_titles(&self, delete_key: &str) -> Vec<String> {
+            self.rows
+                .iter()
+                .map(|row| self.picker.row_title(row, delete_key))
+                .collect()
+        }
+
+        /// Standalone picker-model scope setting. The live dialog does not
+        /// expose this setting because its fetched rows lack directory data.
+        pub fn toggle_scope(&mut self) {
+            self.picker.toggle_scope();
+            self.selected = 0;
+        }
+
+        /// Open the focused session, or `None` if model-only deletion is armed.
+        #[must_use]
+        pub fn open_focused(&self) -> Option<&SessionRow> {
+            self.rows.get(self.selected).filter(|row| !self.picker.is_armed(&row.id))
+        }
+
+        /// The focused row's id, or `None` when the list is empty.
+        #[must_use]
+        pub fn focused_id(&self) -> Option<&str> {
+            self.rows.get(self.selected).map(|row| row.id.as_str())
+        }
+
+        /// `session.rename` applied to the live list: the row title (and the
+        /// local fallback copy) is replaced, so a re-filter or re-open keeps
+        /// the new title. Returns `true` when the id was present.
+        pub fn rename_row(&mut self, id: &str, title: &str) -> bool {
+            let mut found = false;
+            for row in &mut self.rows {
+                if row.id == id {
+                    row.title = title.to_owned();
+                    found = true;
+                }
+            }
+            for row in &mut self.local {
+                if row.id == id {
+                    row.title = title.to_owned();
+                }
+            }
+            found
+        }
+
+        /// Whether the current scope is "all projects"
+        /// (`dialog-session-list.tsx:43-46,217-228`).
+        #[must_use]
+        pub fn all_projects(&self) -> bool {
+            self.picker.all_projects()
+        }
+
+        /// Whether the focused row is armed for deletion.
+        #[must_use]
+        pub fn focused_is_armed(&self) -> bool {
+            self.focused_id()
+                .is_some_and(|id| self.picker.is_armed(id))
+        }
+
+        /// The search-state message (`dialog-session-list.tsx:111-122`).
+        #[must_use]
+        pub fn search_message(&self) -> &'static str {
+            self.picker.search_message()
+        }
+    }
+
+    /// DIALOG-14: the live Worktrees dialog state
+    /// (`dialog-workspaces.tsx`), mounting [`DrillDown`], [`LateLoadGuard`]
+    /// and [`ArmedDelete`]. Filter text and highlighted identity survive
+    /// drill-down/back, and a late load cannot resurrect a removed root.
+    #[derive(Clone, Debug, Default)]
+    pub struct WorkspacesState {
+        pub roots: Vec<WorkspaceRoot>,
+        pub filter: String,
+        pub selected: usize,
+        pub drill: DrillDown,
+        pub guard: LateLoadGuard,
+        pub delete: ArmedDelete,
+        pub loading: bool,
+        pub error: bool,
+        /// Snapshot of the outgoing selection to restore on back.
+        snapshots: Vec<SelectSnapshot>,
+    }
+
+    impl WorkspacesState {
+        pub fn open(current: Option<&str>) -> Self {
+            let mut state = Self::default();
+            state.loading = true;
+            state.rows(current);
+            state
+        }
+
+        /// A completed (or simulated) load; a stale generation is dropped and
+        /// locally removed/relocated identities stay reconciled
+        /// (`dialog-open.tsx:56-84`).
+        /// Returns `true` when rows actually changed.
+        pub fn apply_load(&mut self, generation: u64, directories: Vec<String>, current: Option<&str>) -> bool {
+            let Some(roots) = self.guard.apply(
+                generation,
+                directories
+                    .into_iter()
+                    .map(|directory| crate::native_palette::select::SelectOption {
+                        title: directory.clone(),
+                        ..crate::native_palette::select::SelectOption::new(
+                            directory.clone(),
+                            directory,
+                        )
+                    })
+                    .collect(),
+            ) else {
+                return false;
+            };
+            self.loading = false;
+            self.roots = roots
+                .into_iter()
+                .map(|option| WorkspaceRoot {
+                    directory: option.id,
+                    strategy: None,
+                })
+                .collect();
+            sort_workspace_roots(&mut self.roots, current);
+            self.clamp_selected();
+            true
+        }
+
+        /// Rendered rows: filtered, categorized, armed titles applied
+        /// (`dialog-workspaces.tsx:167-198,366-390`).
+        #[must_use]
+        pub fn rows(&self, current: Option<&str>) -> Vec<WorkspaceRow> {
+            let needle = self.filter.to_lowercase();
+            let delete_key = "enter";
+            self.roots
+                .iter()
+                .filter(|root| needle.is_empty() || root.directory.to_lowercase().contains(&needle))
+                .map(|root| WorkspaceRow {
+                    location: root.directory.clone(),
+                    title: root.directory.clone(),
+                    suffix: None,
+                    category: workspace_category(&root.directory, current),
+                    subdirectory: false,
+                    deleting: self.delete.armed() == Some(root.directory.as_str()),
+                    removing: false,
+                })
+                .map(|mut row| {
+                    if let Some(armed) = row.deleting.then(|| row.title.clone()) {
+                        row.title = format!("Press {delete_key} again to confirm");
+                        let _ = armed;
+                    }
+                    row
+                })
+                .collect()
+        }
+
+        pub fn push_filter(&mut self, ch: char) {
+            self.filter.push(ch);
+            self.clamp_selected();
+        }
+
+        pub fn pop_filter(&mut self) {
+            self.filter.pop();
+            self.clamp_selected();
+        }
+
+        pub fn move_selection(&mut self, delta: isize, visible: usize) {
+            if visible == 0 {
+                return;
+            }
+            self.selected = (self.selected as isize + delta).clamp(0, visible as isize - 1) as usize;
+            self.delete.clear();
+        }
+
+        /// Drill into the focused directory: pushes a snapshot with the
+        /// filter and highlighted identity (`dialog-open.tsx:103-122`).
+        pub fn drill_forward(&mut self, current: Option<&str>) {
+            let visible = self.rows(current);
+            let Some(row) = visible.get(self.selected) else {
+                return;
+            };
+            self.snapshots.push(SelectSnapshot {
+                filter: std::mem::take(&mut self.filter),
+                selected: Some(row.location.clone()),
+            });
+            self.selected = 0;
+        }
+
+        /// Back: restores the snapshot. A deleted identity reconciles to the
+        /// nearest live row instead of resurrecting (`dialog-open.tsx:118-128`).
+        pub fn drill_back(&mut self, current: Option<&str>) -> bool {
+            let Some(snapshot) = self.snapshots.pop() else {
+                return false;
+            };
+            self.filter = snapshot.filter;
+            let rows = self.rows(current);
+            if let Some(selected) = snapshot.selected {
+                if let Some(index) = rows.iter().position(|row| row.location == selected) {
+                    self.selected = index;
+                    return true;
+                }
+            }
+            self.selected = rows.len().saturating_sub(1);
+            true
+        }
+
+        /// Enter: first press arms, second press confirms the delete. Returns
+        /// the removed directory when the caller must remove it.
+        pub fn press_enter(&mut self, current: Option<&str>) -> Option<String> {
+            let row = self.rows(current).get(self.selected)?.clone();
+            if self.delete.press(&row.location) {
+                let directory = row.location.clone();
+                self.guard.remove(&directory);
+                self.roots.retain(|root| root.directory != directory);
+                self.clamp_selected();
+                Some(directory)
+            } else {
+                None
+            }
+        }
+
+        fn clamp_selected(&mut self) {
+            let visible = self
+                .roots
+                .iter()
+                .filter(|root| {
+                    self.filter.is_empty()
+                        || root
+                            .directory
+                            .to_lowercase()
+                            .contains(&self.filter.to_lowercase())
+                })
+                .count();
+            self.selected = self.selected.min(visible.saturating_sub(1));
+        }
+    }
+
+    /// DIALOG-15: the live integration dialog state
+    /// (`dialog-integration.tsx`): the focused MCP server's flow, entered
+    /// from the MCP list when `mcp_enter` yields [`McpEnter::SignIn`].
+    #[derive(Clone, Debug)]
+    pub struct IntegrationState {
+        pub server: String,
+        pub phase: IntegrationPhase,
+    }
+
+    impl IntegrationState {
+        #[must_use]
+        pub fn new(server: &str, methods: usize, accounts: usize) -> Self {
+            Self {
+                server: server.to_owned(),
+                phase: IntegrationPhase::entry(methods, accounts),
+            }
+        }
+
+        /// Enter advances the flow; returns `true` when the flow closed.
+        pub fn press_enter(&mut self, method: ConnectMethod) -> bool {
+            match &mut self.phase {
+                IntegrationPhase::Form => {
+                    self.phase.form_answer(true);
+                }
+                IntegrationPhase::Accounts
+                | IntegrationPhase::Methods
+                | IntegrationPhase::EnvironmentOnly => self.phase.start(method),
+                IntegrationPhase::Progress(_) => {
+                    self.phase = IntegrationPhase::Connected;
+                }
+                IntegrationPhase::Connected => return true,
+                IntegrationPhase::Cancelled | IntegrationPhase::Failed => return true,
+            }
+            self.phase.is_closed()
+        }
+
+        /// Esc cancels; the flow closes.
+        pub fn cancel(&mut self) {
+            self.phase.cancel();
+        }
     }
 }
 

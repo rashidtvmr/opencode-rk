@@ -196,6 +196,13 @@ pub enum DialogKind {
     Mcp,
     /// Dedicated patch viewer, matching `feature-plugins/system/diff-viewer.tsx`.
     DiffViewer,
+    /// DIALOG-13: the live session picker (`dialog-session-list.tsx`), opened
+    /// from the live key loop (Ctrl+S). Its model is the tested
+    /// `native_palette::pickers::SessionsState`: a debounced filter with a
+    /// generation fence and title filtering. Enter opens the focused session;
+    /// Esc closes locally. Directory scoping and deletion are unavailable;
+    /// it never pends a permission ack.
+    Sessions,
 }
 
 /// Static, safe error-card categories. Defined in this file so raw backend
@@ -507,6 +514,11 @@ struct OpenDialog {
     /// row was measured against (`diff-viewer.tsx:45,349`); `None` for every
     /// other kind.
     diff_mode: Option<crate::native_diff_view::DiffViewMode>,
+    /// DIALOG-13: the live session-newest list state
+    /// (`dialog-session-list.tsx`), present only for
+    /// [`DialogKind::Sessions`]. The model is the tested
+    /// `native_palette::pickers::SessionsState`; the live key gate drives it.
+    sessions: Option<crate::native_palette::pickers::SessionsState>,
 }
 
 /// Focus-owning dialog overlay state. `Default` is a closed view.
@@ -726,6 +738,7 @@ impl DialogView {
         match self.dialog.as_ref().map(|dialog| dialog.kind) {
             Some(DialogKind::Select) => DialogViewportPolicy::SelectTerminal,
             Some(DialogKind::Mcp) => DialogViewportPolicy::SelectTerminal,
+            Some(DialogKind::Sessions) => DialogViewportPolicy::SelectTerminal,
             Some(DialogKind::Permission)
             | Some(DialogKind::Question)
             | Some(DialogKind::Confirm)
@@ -1126,6 +1139,7 @@ impl DialogView {
             execute: None,
             execute_scroll: 0,
             diff_mode: None,
+            sessions: None,
         });
         self.crash_screen = Some(crash::CrashScreen::new(
             mode,
@@ -1288,6 +1302,7 @@ impl DialogView {
             execute: None,
             execute_scroll: 0,
             diff_mode: None,
+            sessions: None,
         });
         // `DialogSelect` seeds `selected: 0` (`ui/dialog-select.tsx:152`), so
         // the first enabled row is selected on open and the first Down moves
@@ -1371,6 +1386,7 @@ impl DialogView {
             execute: None,
             execute_scroll: 0,
             diff_mode: None,
+            sessions: None,
         });
         // `DialogSelect` seeds `selected` to the focused row
         // (`dialog-select.tsx:152`, `dialog-mcp.tsx:61` `preserveSelection`).
@@ -1382,6 +1398,206 @@ impl DialogView {
         self.modal
             .replace(entry_id, DialogSize::Medium, false, None, self.focus);
         Ok(())
+    }
+
+    /// DIALOG-13: open the live session picker (`dialog-session-list.tsx`).
+    /// Content-only like [`DialogView::open_mcp`]: it never pends a permission
+    /// ack. The tested [`crate::native_palette::pickers::SessionsState`] is the
+    /// single source of truth for the rows and filter; the
+    /// caller drives it through the `sessions_*` forwarders below and reads the
+    /// painted rows from [`DialogView::render`].
+    ///
+    /// `size` mirrors `dialog.setSize("large")` (`dialog-session-list.tsx:196`);
+    /// it is passed rather than hard-coded so the caller's composition root
+    /// keeps one size authority inside this module.
+    pub fn open_sessions(
+        &mut self,
+        state: crate::native_palette::pickers::SessionsState,
+    ) -> Result<(), DialogError> {
+        if self.is_open() {
+            return Err(DialogError::AlreadyOpen);
+        }
+        let rows = state.rows.len();
+        let titles: Vec<String> = state
+            .row_titles("ctrl+d")
+            .into_iter()
+            .take(MAX_CHOICES)
+            .collect();
+        self.dialog = Some(OpenDialog {
+            id: "sessions".to_owned(),
+            session_id: String::new(),
+            kind: DialogKind::Sessions,
+            title: "Sessions".to_owned(),
+            choices: titles,
+            disabled: vec![false; rows.min(MAX_CHOICES)],
+            permission: Vec::new(),
+            select: None,
+            mcp_status: Vec::new(),
+            message_lines: Vec::new(),
+            error: StaticError::BackendUnavailable,
+            prompt: None,
+            footer_gap: None,
+            session_has_parent: false,
+            execute: None,
+            execute_scroll: 0,
+            diff_mode: None,
+            sessions: Some(state),
+        });
+        self.selection = Some(0);
+        self.rejected = false;
+        self.phase = Phase::Open;
+        self.open_sequence = self.open_sequence.saturating_add(1);
+        let entry_id = self.open_sequence;
+        // `onMount(() => dialog.setSize("large"))`
+        // (`dialog-session-list.tsx:196`).
+        self.modal
+            .replace(entry_id, DialogSize::Large, false, None, self.focus);
+        Ok(())
+    }
+
+    /// DIALOG-13: the live session list state, or `None` when the picker is
+    /// closed. The live key gate mutates it through the `sessions_*`
+    /// forwarders; tests read it to assert the real dispatch landed.
+    #[must_use]
+    pub fn sessions_state(&self) -> Option<&crate::native_palette::pickers::SessionsState> {
+        self.dialog
+            .as_ref()
+            .filter(|dialog| dialog.kind == DialogKind::Sessions)
+            .and_then(|dialog| dialog.sessions.as_ref())
+    }
+
+    /// Rebuild the picker's painted `choices` from its live model after any
+    /// mutation (filter, move, scope, arm, rename), so the rows the user sees
+    /// always match the model that will answer. The `choices`/`disabled` vecs
+    /// are the only row channel `render` reads for a non-select kind.
+    fn sync_sessions_choices(&mut self) {
+        let Some(dialog) = self.dialog.as_mut() else { return };
+        if dialog.kind != DialogKind::Sessions {
+            return;
+        }
+        let Some(state) = dialog.sessions.as_ref() else { return };
+        let titles: Vec<String> = state.row_titles("ctrl+d").into_iter().take(MAX_CHOICES).collect();
+        dialog.choices = titles;
+        dialog.disabled = vec![false; dialog.choices.len()];
+        self.selection = Some(state.selected.min(dialog.choices.len().saturating_sub(1)));
+    }
+
+    /// DIALOG-13: the live filter keystroke. Returns `true` when visible state
+    /// changed (the debounce timer must be (re)started by the caller).
+    pub fn sessions_push_filter(&mut self, ch: char) -> bool {
+        if self.phase != Phase::Open {
+            return false;
+        }
+        let changed = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.sessions.as_mut())
+            .is_some_and(|state| state.push_filter(ch));
+        if changed {
+            self.sync_sessions_choices();
+        }
+        changed
+    }
+
+    /// DIALOG-13: Backspace removes one filter code point.
+    pub fn sessions_backspace(&mut self) -> bool {
+        if self.phase != Phase::Open {
+            return false;
+        }
+        let changed = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.sessions.as_mut())
+            .is_some_and(|state| state.pop_filter());
+        if changed {
+            self.sync_sessions_choices();
+        }
+        changed
+    }
+
+    /// DIALOG-13: move the picker highlight.
+    pub fn sessions_move(&mut self, delta: isize) -> bool {
+        let Some(state) = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.sessions.as_mut())
+        else {
+            return false;
+        };
+        state.move_selection(delta);
+        self.sync_sessions_choices();
+        true
+    }
+
+    /// DIALOG-13: the debounce tick fired. Returns the `(generation, query,
+    /// all_projects)` fetch request the caller must issue, or `None` when the
+    /// picker is closed. A no-op debounce still bumps the generation so a
+    /// stale in-flight result is fenced out.
+    #[must_use]
+    pub fn sessions_debounce_fired(&mut self) -> Option<(u64, String, bool)> {
+        let state = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.sessions.as_mut())?;
+        Some(state.debounce_fired())
+    }
+
+    /// DIALOG-13: apply a completed fetch. A stale generation is dropped
+    /// (`dialog-session-list.tsx:102-110`) and returns `false`; the visible
+    /// rows never go backwards.
+    pub fn sessions_apply_fetch(
+        &mut self,
+        generation: u64,
+        server: Vec<crate::native_palette::pickers::SessionRow>,
+    ) -> bool {
+        let applied = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.sessions.as_mut())
+            .is_some_and(|state| state.apply_fetch(generation, server));
+        if applied {
+            self.sync_sessions_choices();
+        }
+        applied
+    }
+
+    /// DIALOG-13: seed the local fallback rows before the first fetch returns.
+    pub fn sessions_seed_local(&mut self, local: Vec<crate::native_palette::pickers::SessionRow>) {
+        if let Some(state) = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.sessions.as_mut())
+        {
+            state.seed_local(local);
+            self.sync_sessions_choices();
+        }
+    }
+
+    /// DIALOG-13: focused session identity for live actions.
+    #[must_use]
+    pub fn sessions_focused_id(&self) -> Option<String> {
+        self.sessions_state().and_then(|state| state.focused_id().map(str::to_owned))
+    }
+
+    /// DIALOG-13: the focused row when it can be opened (not armed), or `None`.
+    #[must_use]
+    pub fn sessions_open_focused(&self) -> Option<crate::native_palette::pickers::SessionRow> {
+        self.sessions_state().and_then(|state| state.open_focused().cloned())
+    }
+
+    /// DIALOG-13: apply `session.rename` to the live list; the row title (and
+    /// the local fallback copy) is replaced. Returns `true` when the id was
+    /// present.
+    pub fn sessions_rename(&mut self, id: &str, title: &str) -> bool {
+        let renamed = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.sessions.as_mut())
+            .is_some_and(|state| state.rename_row(id, title));
+        if renamed {
+            self.sync_sessions_choices();
+        }
+        renamed
     }
 
     /// TOOL-011: open the live execute content viewer
@@ -1421,6 +1637,7 @@ impl DialogView {
             execute: None,
             execute_scroll: 0,
             diff_mode: Some(mode),
+            sessions: None,
         });
         self.selection = None;
         self.rejected = false;
@@ -1455,6 +1672,7 @@ impl DialogView {
             execute: Some(model),
             execute_scroll: 0,
             diff_mode: None,
+            sessions: None,
         });
         self.selection = None;
         self.rejected = false;
@@ -1614,6 +1832,7 @@ impl DialogView {
             execute: None,
             execute_scroll: 0,
             diff_mode: None,
+            sessions: None,
         });
         self.selection = None;
         self.rejected = false;
@@ -2148,6 +2367,7 @@ impl DialogView {
             // surface with no answer intent; refuse before `next_attempt()`
             // so the `unreachable!` arm below is genuinely unreachable.
             DialogKind::DiffViewer => return Err(DialogError::NotAnswerable),
+            DialogKind::Sessions => return Err(DialogError::NotAnswerable),
             DialogKind::Question if !self.question_capable => {
                 return Err(DialogError::QuestionUnavailable)
             }
@@ -2218,7 +2438,7 @@ impl DialogView {
                 attempt,
             },
             DialogKind::Prompt => return Err(DialogError::NotAnswerable),
-            DialogKind::Mcp => unreachable!("not answerable"),
+            DialogKind::Mcp | DialogKind::Sessions => unreachable!("not answerable"),
             // `Crash` is refused as `NotAnswerable` by the guard above, so it
             // can never reach the intent construction.
             DialogKind::Execute | DialogKind::Error | DialogKind::Crash | DialogKind::DiffViewer => {
@@ -2249,6 +2469,7 @@ impl DialogView {
             // read-only diff viewer must be inert, not fall through to the
             // `unreachable!` arm. Refuse before `next_attempt()`.
             DialogKind::DiffViewer => return Err(DialogError::NotAnswerable),
+            DialogKind::Sessions => return Err(DialogError::NotAnswerable),
             _ => {}
         }
         let request_id = dialog.id.clone();
@@ -2273,6 +2494,7 @@ impl DialogView {
             | DialogKind::Crash
             | DialogKind::Mcp
             | DialogKind::DiffViewer => unreachable!("handled above"),
+            | DialogKind::Sessions => unreachable!("handled above"),
         };
         self.pending_attempt = attempt;
         self.phase = Phase::Pending;
@@ -2599,6 +2821,30 @@ impl DialogView {
                         }
                     }
                 }
+                DialogKind::Sessions => {
+                    // DIALOG-13: the live session picker (`dialog-session-list.tsx`).
+                    // The filter line replaces the hint while typing
+                    // (`searchInTitle`, `:206-209`); fetched rows currently
+                    // support title search only, not directory scope/delete.
+                    match dialog.sessions.as_ref() {
+                        Some(state) => {
+                            let filter = state.picker.filter();
+                            if filter.is_empty() {
+                                lines.push(line(
+                                    "search sessions".to_string(),
+                                    Role::Description,
+                                ));
+                            } else {
+                                lines.push(line(format!("search: {filter}"), Role::Item));
+                            }
+                            lines.push(line("title filter only · directory scope unavailable".to_string(), Role::Description));
+                        }
+                        None => lines.push(line(
+                            "sessions · Enter open".to_string(),
+                            Role::Description,
+                        )),
+                    }
+                }
                 DialogKind::Error => {
                     lines.push(line(dialog.error.headline().to_string(), Role::Error));
                     lines.push(line(dialog.error.detail().to_string(), Role::Description));
@@ -2770,6 +3016,8 @@ impl DialogView {
                 "Decision rejected — ↑/↓ choose · Enter retry · Esc deny"
             } else if dialog.kind == DialogKind::Mcp {
                 "↑↓ choose · Enter toggle · Esc close"
+            } else if dialog.kind == DialogKind::Sessions {
+                "↑↓ choose · Enter open · Esc close"
             } else if dialog.kind == DialogKind::Prompt {
                 "Enter: save · Esc: cancel"
             } else {

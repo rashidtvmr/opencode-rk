@@ -2577,10 +2577,11 @@ mod tab_context_menu_dispatch_tests {
         // every key while the stack is non-empty and binds Escape and Ctrl+C
         // to close the top dialog. Ctrl+D is not bound there, so it keeps its
         // global byte-exit meaning.
-        assert!(dialog_consumes_byte(3), "Ctrl-C closes the dialog, never exits");
-        assert!(dialog_consumes_byte(27), "Escape closes the dialog");
-        assert!(dialog_consumes_byte(b'x'), "printable bytes stay trapped");
-        assert!(!dialog_consumes_byte(4), "Ctrl-D keeps its byte-exit meaning");
+        assert!(dialog_consumes_byte(3, false), "Ctrl-C closes the dialog, never exits");
+        assert!(dialog_consumes_byte(27, false), "Escape closes the dialog");
+        assert!(dialog_consumes_byte(b'x', false), "printable bytes stay trapped");
+        assert!(!dialog_consumes_byte(4, false), "Ctrl-D keeps its global exit meaning outside Sessions");
+        assert!(dialog_consumes_byte(4, true), "Sessions owns Ctrl-D");
     }
 
     #[test]
@@ -4537,12 +4538,12 @@ fn menu_dismisses(event: &native_input_decoder::InputEvent) -> bool {
 /// owns input. Upstream enables the `modal` keymap layer exactly while the
 /// stack is non-empty (`ui/dialog.tsx:320-324`), so every key is trapped; the
 /// layer binds Escape and Ctrl+C to close the top dialog
-/// (`ui/dialog.tsx:345-384`) and does NOT bind Ctrl+D, which therefore keeps
-/// its global byte-exit meaning. The live loop routes Ctrl+C through the same
+/// (`ui/dialog.tsx:345-384`). Ctrl+D is consumed by the Sessions picker only;
+/// elsewhere it keeps its global byte-exit meaning. The live loop routes Ctrl+C through the same
 /// close/reject path as Escape instead of quitting the app.
 #[cfg(feature = "native")]
-fn dialog_consumes_byte(byte: u8) -> bool {
-    byte != 4
+fn dialog_consumes_byte(byte: u8, sessions_open: bool) -> bool {
+    byte != 4 || sessions_open
 }
 
 /// The live working-directory `DialogSelect` byte handler
@@ -4575,6 +4576,60 @@ fn select_menu_key(
             view.dialogs.close();
             (true, None)
         }
+        _ => (false, None),
+    }
+}
+
+#[cfg(feature = "native")]
+enum SessionsKeyAction { Open(String), Rename(String) }
+
+#[cfg(feature = "native")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SessionsDecision { Open, Consume, Exit }
+
+#[cfg(feature = "native")]
+fn sessions_live_decision(byte: u8, sessions_open: bool) -> SessionsDecision {
+    if byte == 4 && !sessions_open { SessionsDecision::Exit }
+    else if byte == b'l' { SessionsDecision::Open }
+    else { SessionsDecision::Consume }
+}
+
+#[cfg(feature = "native")]
+fn sessions_live_dispatch(
+    view: &mut crate::native_view::NativeView,
+    byte: u8,
+) -> (bool, Option<SessionsKeyAction>) {
+    if sessions_live_decision(byte, view.dialogs.open_kind() == Some(crate::native_view_dialogs::DialogKind::Sessions)) == SessionsDecision::Exit {
+        return (false, None);
+    }
+    sessions_menu_key(view, byte)
+}
+
+#[cfg(feature = "native")]
+fn sessions_live_open(view: &mut crate::native_view::NativeView, byte: u8, cwd: &str, rows: Vec<crate::native_palette::pickers::SessionRow>) -> bool {
+    if sessions_live_decision(byte, false) != SessionsDecision::Open { return false; }
+    let mut state = crate::native_palette::pickers::SessionsState::new(true, cwd, "");
+    state.seed_local(rows);
+    view.dialogs.open_sessions(state).is_ok()
+}
+
+#[cfg(feature = "native")]
+fn sessions_menu_key(
+    view: &mut crate::native_view::NativeView,
+    byte: u8,
+) -> (bool, Option<SessionsKeyAction>) {
+    match byte {
+        14 => { view.dialogs.sessions_move(1); (true, None) }
+        2 => { view.dialogs.sessions_move(-1); (true, None) }
+        8 | 127 => (view.dialogs.sessions_backspace(), None),
+        b' '..=b'~' => (view.dialogs.sessions_push_filter(char::from(byte)), None),
+        // Directory filtering is unavailable because fetched PageRows do not
+        // retain the server row's directory field; do not advertise Ctrl+A.
+        1 => (true, None),
+        4 => (true, None),
+        18 => match view.dialogs.sessions_focused_id() { Some(id) => (true, Some(SessionsKeyAction::Rename(id))), None => (true, None) },
+        13 | 10 => match view.dialogs.sessions_open_focused() { Some(row) => (true, Some(SessionsKeyAction::Open(row.id))), None => (true, None) },
+        27 | 3 => { view.dialogs.close(); (true, None) }
         _ => (false, None),
     }
 }
@@ -9364,6 +9419,7 @@ fn native_loop(
     // Upstream leader chord state (`LeaderDefault = "ctrl+x"`, then `b` →
     // `session.sidebar.toggle`): armed only from the chat composer.
     let mut leader_pending = false;
+    let mut sessions_debounce_deadline: Option<u64> = None;
     // TAB-21: focus-aware view acknowledgement for the active session. The
     // driver POSTs `/api/sessions/{id}/view` when the active tab is unread
     // (idle newer than the server-global viewed watermark), with the upstream
@@ -10648,6 +10704,18 @@ fn native_loop(
         // Marquee clock: a cycle whose tab left the rail stops
         // (`session-tabs.tsx:616-618`); otherwise advance on the upstream
         // 600 ms delay / 80 ms cadence.
+        let sessions_now = animation_start.now_ms() as u64;
+        if sessions_debounce_deadline.is_some_and(|deadline| sessions_now >= deadline) {
+            sessions_debounce_deadline = None;
+            if let Some((generation, _, _)) = view.dialogs.sessions_debounce_fired() {
+                if let Some(snapshot) = live.as_ref() {
+                    match session_page_rows(&snapshot.origin, auth, Some(&snapshot.session_id)) {
+                        Ok(rows) => { let server = rows.into_iter().map(|r| crate::native_palette::pickers::SessionRow { id: r.id, title: r.label, parent: false, updated_date: String::new(), pinned: false, directory: String::new() }).collect(); view.dialogs.sessions_apply_fetch(generation, server); needs_paint = true; }
+                        Err(error) => append_transcript(&mut transcript, format!("error: sessions picker: {error}")),
+                    }
+                }
+            }
+        }
         let marquee_now = animation_start.now_ms();
         if let Some(active) = tab_marquee.marquee().active().map(str::to_owned) {
             if !navigation.tabs().iter().any(|tab| tab.session.0 == active) {
@@ -14405,8 +14473,12 @@ fn native_loop(
         // `modal` keymap layer's `ctrl+c` to the same close action as
         // `escape` (`ui/dialog.tsx:364-384`), and the LAY-12 host model
         // asserts the same (`native_host.rs:982`). Ctrl-D (0x04) is not bound
-        // in the modal layer, so it keeps its byte-exit meaning.
-        if view.dialogs.intercepts_input() && dialog_consumes_byte(byte) {
+        // in the modal layer; Sessions consumes Ctrl+D, other contexts retain
+        // the global byte-exit behavior.
+        if view.dialogs.intercepts_input() && dialog_consumes_byte(
+            byte,
+            view.dialogs.open_kind() == Some(crate::native_view_dialogs::DialogKind::Sessions),
+        ) {
             // SIDE-08: the `DialogMcp` server list is a local select, not a
             // backend decision. Enter toggles the focused server through the
             // same `PUT /api/sessions/{id}/mcp/{name}` the sidebar row used
@@ -14460,6 +14532,42 @@ fn native_loop(
                 if handled {
                     needs_paint = true;
                 }
+                utf8.reset();
+                continue;
+            }
+            if view.dialogs.open_kind() == Some(crate::native_view_dialogs::DialogKind::Sessions) {
+                let (handled, action) = sessions_live_dispatch(&mut view, byte);
+                match action {
+                    Some(SessionsKeyAction::Open(id)) => {
+                        let scroll = view.chat_scroll_offset();
+                        match select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, daemon_origin, auth, binding_generation, &crate::native_navigation::SessionRef(id), selected.as_ref().map(|m| m.qualified()), scroll) {
+                            Ok(result) => apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route, &mut compact_worker),
+                            Err(error) => append_transcript(&mut transcript, format!("error: open session: {error}")),
+                        }
+                        view.dialogs.close();
+                    }
+                    Some(SessionsKeyAction::Rename(id)) => {
+                        if let Some(row) = view.dialogs.sessions_state().and_then(|state| state.rows.iter().find(|row| row.id == id).cloned()) {
+                            view.dialogs.close();
+                            if view.dialogs.open_prompt(
+                                "rename",
+                                id.clone(),
+                                crate::native_palette::pickers::RenameSession::DIALOG_TITLE,
+                                &row.title,
+                                Some(crate::native_palette::pickers::RenameSession::PLACEHOLDER.to_owned()),
+                            ).is_ok() {
+                                rename_input = Some(crate::native_navigation::SessionRef(id));
+                            } else {
+                                append_transcript(&mut transcript, "error: unable to open rename prompt".to_owned());
+                            }
+                        }
+                    }
+                    None => {}
+                }
+                if matches!(byte, 8 | 127) || (b' '..=b'~').contains(&byte) {
+                    sessions_debounce_deadline = Some((animation_start.now_ms() as u64).saturating_add(150));
+                }
+                if handled { needs_paint = true; }
                 utf8.reset();
                 continue;
             }
@@ -16696,6 +16804,20 @@ fn native_loop(
                                 history_browsing = false;
                             }
                             Err(error) => append_transcript(&mut transcript, format!("error: new tab: {error}")),
+                        }
+                        needs_paint = true;
+                    } else if sessions_live_decision(b, false) == SessionsDecision::Open {
+                        let cwd = std::env::current_dir().map(|dir| dir.to_string_lossy().into_owned()).unwrap_or_default();
+                        let local = view.session_rows().iter().map(|row| crate::native_palette::pickers::SessionRow { id: row.id.clone(), title: row.title.clone(), parent: false, updated_date: String::new(), pinned: false, directory: cwd.clone() }).collect();
+                        if sessions_live_open(&mut view, b, &cwd, local) {
+                            if let Some((generation, _, _)) = view.dialogs.sessions_debounce_fired() {
+                                if let Some(snapshot) = live.as_ref() {
+                                    match session_page_rows(&snapshot.origin, auth, Some(&snapshot.session_id)) {
+                                        Ok(rows) => { let server = rows.into_iter().map(|r| crate::native_palette::pickers::SessionRow { id: r.id, title: r.label, parent: false, updated_date: String::new(), pinned: false, directory: String::new() }).collect(); view.dialogs.sessions_apply_fetch(generation, server); }
+                                        Err(error) => append_transcript(&mut transcript, format!("error: sessions picker: {error}")),
+                                    }
+                                }
+                            }
                         }
                         needs_paint = true;
                     } else if b == b'b' {
@@ -19196,6 +19318,71 @@ mod middle_close_hit_tests {
     }
 }
 
+
+#[cfg(all(test, feature = "native"))]
+mod dialog13_tests {
+    use super::*;
+    use crate::native_palette::pickers::{SessionRow, SessionsState};
+
+    fn opened() -> crate::native_view::NativeView {
+        let mut view = crate::native_view::NativeView::new(100, 30);
+        let mut state = SessionsState::new(true, "/tmp", "");
+        state.seed_local(vec![
+            SessionRow { id: "a".into(), title: "Alpha".into(), parent: false, updated_date: String::new(), pinned: false, directory: "/tmp".into() },
+            SessionRow { id: "b".into(), title: "Beta".into(), parent: false, updated_date: String::new(), pinned: false, directory: "/tmp".into() },
+        ]);
+        view.dialogs.open_sessions(state).unwrap();
+        view
+    }
+
+    #[test]
+    fn dialog13_gate_moves_and_closes() {
+        let mut view = opened();
+        assert_eq!(view.dialogs.sessions_state().unwrap().selected, 0);
+        assert!(sessions_menu_key(&mut view, 14).0);
+        assert_eq!(view.dialogs.sessions_state().unwrap().selected, 1);
+        assert!(sessions_menu_key(&mut view, 27).0);
+        assert_eq!(view.dialogs.open_kind(), None);
+    }
+
+    #[test]
+    fn dialog13_gate_ctrl_a_does_not_claim_directory_filtering() {
+        let mut view = opened();
+        assert_eq!(sessions_live_dispatch(&mut view, 1).0, true);
+        let rendered = view.dialogs.render(80, 24).join("\n");
+        assert!(!rendered.contains("Ctrl+A"), "unavailable scope toggle must not be advertised");
+    }
+
+    #[test]
+    fn dialog13_gate_enter_opens_focused() {
+        let mut view = opened();
+        assert!(matches!(sessions_menu_key(&mut view, 13).1, Some(SessionsKeyAction::Open(id)) if id == "a"));
+    }
+
+    // These exercise extracted helpers called by native_loop at the opener
+    // (16545-16553) and Sessions intercept (14274); keep those call sites wired.
+    #[test]
+    fn dialog13_live_opener_opens_sessions() {
+        let mut view = crate::native_view::NativeView::new(100, 30);
+        assert!(sessions_live_open(&mut view, b'l', "/tmp", Vec::new()));
+        assert_eq!(view.dialogs.open_kind(), Some(crate::native_view_dialogs::DialogKind::Sessions));
+        assert_eq!(sessions_live_decision(b'x', false), SessionsDecision::Consume);
+    }
+
+    #[test]
+    fn dialog13_live_dispatch_consumes_ctrl_d() {
+        assert_eq!(sessions_live_decision(4, true), SessionsDecision::Consume);
+        assert_eq!(sessions_live_decision(4, false), SessionsDecision::Exit);
+    }
+
+    #[test]
+    fn dialog13_live_dispatch_moves_selection() {
+        let mut view = opened();
+        assert!(view.dialogs.intercepts_input());
+        assert_eq!(sessions_live_dispatch(&mut view, 14).0, true);
+        assert_eq!(view.dialogs.sessions_state().unwrap().selected, 1);
+    }
+}
 
 /// DIALOG-06/08: the LIVE working-directory `DialogSelect` byte handler.
 /// These tests drive `select_menu_key`, the exact routine `native_loop` runs,

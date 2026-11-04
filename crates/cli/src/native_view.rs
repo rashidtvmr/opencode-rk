@@ -2926,6 +2926,10 @@ impl NativeView {
         self.sessions.set_rows(rows, active);
     }
 
+    /// DIALOG-13: canonical session rows, for seeding the live picker fallback.
+    #[must_use]
+    pub fn session_rows(&self) -> &[SessionRow] { self.sessions.rows() }
+
     pub fn set_page_rows(&mut self, rows: Vec<PageRow>) {
         self.pages.set_rows(rows);
     }

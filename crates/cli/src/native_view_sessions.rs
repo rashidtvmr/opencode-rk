@@ -316,6 +316,13 @@ impl SessionView {
         self.rows.len()
     }
 
+    /// The canonical row list, for a consumer that mirrors it into another
+    /// bounded list (the live session picker). Read-only.
+    #[must_use]
+    pub fn rows(&self) -> &[SessionRow] {
+        &self.rows
+    }
+
     pub fn pane_state(&self) -> &SessionPaneState {
         &self.pane
     }
