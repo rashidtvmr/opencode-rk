@@ -2290,6 +2290,7 @@ struct PaintCtx {
     home: bool,
     rail_prompt: bool,
     composer: Option<(u16, u16, u16, u16)>,
+    composer_agent_color: Option<[u8; 4]>,
     completion: Option<crate::native_completion::Panel>,
     ui_regions: Vec<crate::native_ui_style::Region>,
     context_usage_styles: Vec<(u16, u16, u16, crate::native_theme_runtime::Slot, u32)>,
@@ -2810,6 +2811,7 @@ mod surface_paint_regressions {
             home: false,
             rail_prompt: view.session_prompt_rail("draft"),
             composer: Some(composer),
+            composer_agent_color: None,
             completion: None,
             context_usage_styles: view.context_usage_styles().to_vec(),
             sidebar_span_styles: view.sidebar_span_styles().to_vec(),
@@ -2872,6 +2874,7 @@ mod surface_paint_regressions {
             home: false,
             rail_prompt: view.session_prompt_rail("draft"),
             composer: None,
+            composer_agent_color: None,
             completion: None,
             context_usage_styles: view.context_usage_styles().to_vec(),
             sidebar_span_styles: view.sidebar_span_styles().to_vec(),
@@ -2963,6 +2966,7 @@ mod surface_paint_regressions {
             home: false,
             rail_prompt: view.session_prompt_rail("draft"),
             composer: None,
+            composer_agent_color: None,
             completion: None,
             context_usage_styles: view.context_usage_styles().to_vec(),
             sidebar_span_styles: view.sidebar_span_styles().to_vec(),
@@ -3033,6 +3037,7 @@ mod surface_paint_regressions {
             home: false,
             rail_prompt: view.session_prompt_rail(""),
             composer: None,
+            composer_agent_color: None,
             completion: None,
             context_usage_styles: view.context_usage_styles().to_vec(),
             sidebar_span_styles: view.sidebar_span_styles().to_vec(),
@@ -3477,6 +3482,7 @@ fn home_composer_border_cell_style(
     accent: Rgba,
     root: Rgba,
     palette: crate::native_theme_runtime::Palette,
+    agent_color: Option<[u8; 4]>,
 ) -> Option<(Rgba, Rgba)> {
     use crate::native_theme_runtime::Slot;
     if appearance.home_composer_outline() {
@@ -3486,7 +3492,8 @@ fn home_composer_border_cell_style(
         return Some((accent, root));
     }
     if matches!(glyph, "┃" | "╹") {
-        Some((paint_color(palette, Slot::Border), root))
+        let border = agent_color.map_or_else(|| paint_color(palette, Slot::Border), |[r, g, b, a]| Rgba::new(r, g, b, a));
+        Some((border, root))
     } else {
         None
     }
@@ -3751,6 +3758,7 @@ mod dialog19_chrome_paint_tests {
                 home: false,
                 rail_prompt: view.session_prompt_rail("draft"),
                 composer: None,
+                composer_agent_color: None,
                 completion: None,
                 context_usage_styles: Vec::new(),
                 sidebar_span_styles: Vec::new(),
@@ -4155,7 +4163,7 @@ mod rounded_surface_color_tests {
         let root = super::paint_color(palette, Slot::Background);
         for glyph in ["┃", "╹"] {
             let (fg, bg) = home_composer_border_cell_style(
-                &appearance, style, glyph, accent, root, palette,
+                &appearance, style, glyph, accent, root, palette, None,
             )
             .unwrap_or_else(|| panic!("default bordered rail glyph {glyph:?} needs an explicit style"));
             assert_eq!(fg, super::paint_color(palette, Slot::Border),
@@ -4178,7 +4186,7 @@ mod rounded_surface_color_tests {
         let root = Rgba::rgb(10, 10, 10);
         for glyph in ["┃", " ", "draft"] {
             let (fg, bg) = home_composer_border_cell_style(
-                &appearance, style, glyph, accent, root, palette,
+                &appearance, style, glyph, accent, root, palette, None,
             )
             .unwrap_or_else(|| panic!("borderless caret cell {glyph:?} keeps its explicit style"));
             assert_eq!(fg, accent, "{glyph} caret keeps the accent foreground");
@@ -4199,7 +4207,7 @@ mod rounded_surface_color_tests {
         for glyph in ["┃", "╹", "╭", "─"] {
             assert!(
                 home_composer_border_cell_style(
-                    &appearance, style, glyph, Rgba::rgb(1, 2, 3), Rgba::rgb(4, 5, 6), palette,
+                    &appearance, style, glyph, Rgba::rgb(1, 2, 3), Rgba::rgb(4, 5, 6), palette, None,
                 )
                 .is_none(),
                 "{glyph:?} is owned by the framed outline paint"
@@ -4218,7 +4226,7 @@ mod rounded_surface_color_tests {
         for glyph in ["▀", "▄", "x", ""] {
             assert!(
                 home_composer_border_cell_style(
-                    &appearance, style, glyph, Rgba::rgb(1, 2, 3), Rgba::rgb(4, 5, 6), palette,
+                    &appearance, style, glyph, Rgba::rgb(1, 2, 3), Rgba::rgb(4, 5, 6), palette, None,
                 )
                 .is_none(),
                 "{glyph:?} keeps the prior half-block/row paint path"
@@ -5828,6 +5836,7 @@ fn native_paint(
                                     accent,
                                     background,
                                     ctx.palette,
+                                    ctx.composer_agent_color,
                                 ))
                                 .flatten();
                             if let Some((rail_fg, rail_bg)) = rail_style {
@@ -6606,7 +6615,45 @@ fn session_page_rows(
 /// rejects the WHOLE catalogue: the caller keeps the page's previous rows
 /// and reports the error honestly instead of rendering a partial list.
 /// Duplicate ids are equally rejected (single source of truth per name).
-fn agent_catalogue_rows(value: &serde_json::Value) -> Result<Vec<crate::native_view_pages::PageRow>, String> {
+#[cfg(feature = "native")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AgentFactOwned {
+    id: String,
+    hidden: bool,
+    subagent: bool,
+    color: Option<[u8; 4]>,
+}
+
+#[cfg(feature = "native")]
+fn parse_agent_color(value: &serde_json::Value) -> Option<[u8; 4]> {
+    let hex = value.as_str()?;
+    let bytes = hex.as_bytes();
+    if bytes.first() != Some(&b'#') || !matches!(bytes.len(), 4 | 7) {
+        return None;
+    }
+    let nibble = |byte: u8| match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    };
+    let mut color = [0u8; 4];
+    color[3] = 255;
+    if bytes.len() == 4 {
+        for channel in 0..3 {
+            color[channel] = nibble(bytes[channel + 1])?.saturating_mul(17);
+        }
+    } else {
+        for channel in 0..3 {
+            color[channel] = nibble(bytes[channel * 2 + 1])?.saturating_mul(16)
+                + nibble(bytes[channel * 2 + 2])?;
+        }
+    }
+    Some(color)
+}
+
+#[cfg(feature = "native")]
+fn agent_catalogue(value: &serde_json::Value) -> Result<(Vec<crate::native_view_pages::PageRow>, Vec<AgentFactOwned>), String> {
     // Bounded like the @mention loader, which also caps the agents array.
     const MAX_AGENTS: usize = 4096;
     const MAX_ALIASES: usize = 16;
@@ -6624,6 +6671,7 @@ fn agent_catalogue_rows(value: &serde_json::Value) -> Result<Vec<crate::native_v
         return Err(format!("agents listing exceeds {} entries", MAX_AGENTS));
     }
     let mut rows = Vec::with_capacity(agents.len());
+    let mut facts = Vec::with_capacity(agents.len());
     let mut seen = std::collections::HashSet::new();
     for agent in agents {
         let name = agent
@@ -6636,6 +6684,9 @@ fn agent_catalogue_rows(value: &serde_json::Value) -> Result<Vec<crate::native_v
         if !seen.insert(name.to_owned()) {
             return Err(format!("duplicate agent name: {name}"));
         }
+        let hidden = agent.get("hidden").and_then(serde_json::Value::as_bool) == Some(true);
+        let subagent = agent.get("mode").and_then(serde_json::Value::as_str) == Some("subagent");
+        facts.push(AgentFactOwned { id: name.to_owned(), hidden, subagent, color: agent.get("color").and_then(parse_agent_color) });
         let description = match agent.get("description") {
             None | Some(serde_json::Value::Null) => "",
             Some(serde_json::Value::String(text)) => {
@@ -6691,12 +6742,110 @@ fn agent_catalogue_rows(value: &serde_json::Value) -> Result<Vec<crate::native_v
             enabled: true,
         });
     }
-    Ok(rows)
+    Ok((rows, facts))
+}
+
+#[cfg(feature = "native")]
+fn agent_catalogue_rows(value: &serde_json::Value) -> Result<Vec<crate::native_view_pages::PageRow>, String> {
+    agent_catalogue(value).map(|(rows, _)| rows)
+}
+
+#[cfg(feature = "native")]
+fn agent_facts(value: &serde_json::Value) -> Result<Vec<AgentFactOwned>, String> {
+    agent_catalogue(value).map(|(_, facts)| facts)
+}
+
+#[cfg(feature = "native")]
+impl AgentFactOwned {
+    /// Borrow as the prompt-pane [`crate::native_prompt_pane::AgentFact`].
+    fn as_fact(&self) -> crate::native_prompt_pane::AgentFact<'_> {
+        crate::native_prompt_pane::AgentFact {
+            id: &self.id,
+            hidden: self.hidden,
+            subagent: self.subagent,
+            color: self.color,
+        }
+    }
+}
+
+/// CP-09: the selectable main-agent ids in catalogue order
+/// (`context/local.tsx:59-61`).
+#[cfg(feature = "native")]
+fn selectable_agent_ids(facts: &[AgentFactOwned]) -> Vec<String> {
+    let borrowed: Vec<crate::native_prompt_pane::AgentFact<'_>> =
+        facts.iter().map(AgentFactOwned::as_fact).collect();
+    crate::native_prompt_pane::selectable_agents(&borrowed)
+        .into_iter()
+        .map(|agent| agent.id.to_owned())
+        .collect()
+}
+
+/// CP-09: advance the selected main-agent id by one, wrapping
+/// (`local.agent.move(1)`, `app.tsx:974`).
+#[cfg(feature = "native")]
+fn cycle_agent(facts: &[AgentFactOwned], selected: &mut Option<String>) {
+    let ids = selectable_agent_ids(facts);
+    if ids.is_empty() {
+        *selected = None;
+        return;
+    }
+    let current = selected
+        .as_deref()
+        .and_then(|id| ids.iter().position(|candidate| candidate == id));
+    let next = current.map_or(0, |index| (index + 1) % ids.len());
+    *selected = Some(ids[next].clone());
+}
+
+/// CP-09: the composer rail color for the selected agent
+/// (`component/prompt/index.tsx:1591,1656`, `mini/footer.view.tsx:229,766`):
+/// an explicit `agent.color` wins, else the deduped categorical palette at
+/// step 400 under the new-designs experiment, else 200
+/// (`context/local.tsx:77-84,128-135`).
+#[cfg(feature = "native")]
+fn composer_agent_color(
+    facts: &[AgentFactOwned],
+    selected: Option<&str>,
+    semantic: Option<&crate::native_theme_runtime::SemanticPalette>,
+    new_designs: bool,
+) -> Option<[u8; 4]> {
+    let semantic = semantic?;
+    let scales: Vec<[[u8; 4]; 9]> = semantic
+        .categorical
+        .iter()
+        .filter_map(|name| {
+            let scale = semantic.scale(name)?;
+            if scale.len() != 9 {
+                return None;
+            }
+            let mut steps = [[0u8; 4]; 9];
+            for (index, hue) in scale.iter().enumerate() {
+                steps[index] = hue.rgba;
+            }
+            Some(steps)
+        })
+        .collect();
+    // V2 themes publish full hue scales; a legacy theme publishes only the
+    // resolved `.200` categorical colors, which is exactly the step-200 palette.
+    let palette = if scales.is_empty() {
+        let mut palette: Vec<[u8; 4]> = Vec::new();
+        for hue in &semantic.categorical_colors {
+            if !palette.contains(&hue.rgba) {
+                palette.push(hue.rgba);
+            }
+        }
+        palette
+    } else {
+        crate::native_prompt_pane::agent_palette(&scales, new_designs)
+    };
+    let id = selected?;
+    let borrowed: Vec<crate::native_prompt_pane::AgentFact<'_>> =
+        facts.iter().map(AgentFactOwned::as_fact).collect();
+    crate::native_prompt_pane::agent_color(&borrowed, id, &palette)
 }
 
 #[cfg(all(test, feature = "native"))]
 mod agent_catalogue_rows_tests {
-    use super::agent_catalogue_rows;
+    use super::{agent_catalogue, agent_catalogue_rows, parse_agent_color};
 
     #[test]
     fn parses_ten_roles_with_read_only_names_and_custom_aliases() {
@@ -6780,6 +6929,104 @@ mod agent_catalogue_rows_tests {
             {"read_only": true}
         ]});
         assert!(agent_catalogue_rows(&catalogue).is_err());
+    }
+}
+
+/// CP-09: the composer rail color source. Upstream `component/prompt/index.tsx:1591`
+/// (`promptDisplay().agentColor ?? theme.border.base`) and
+/// `mini/footer.view.tsx:229,766` both index the categorical palette by the
+/// selected agent; `context/local.tsx:128-135` lets an explicit `agent.color`
+/// win and otherwise takes `categorical[visibleIndex % len]`.
+#[cfg(all(test, feature = "native"))]
+mod cp09_agent_color_tests {
+    use super::{composer_agent_color, cycle_agent, selectable_agent_ids, AgentFactOwned};
+
+    fn fact(id: &str, hidden: bool, subagent: bool, color: Option<[u8; 4]>) -> AgentFactOwned {
+        AgentFactOwned { id: id.to_owned(), hidden, subagent, color }
+    }
+
+    fn semantic() -> crate::native_theme_runtime::SemanticPalette {
+        crate::native_theme_runtime::RuntimeTheme::builtin_default(
+            crate::native_theme_runtime::ThemeMode::Dark,
+        )
+        .semantic
+        .expect("the builtin V2 theme publishes semantic roles")
+    }
+
+    #[test]
+    fn cp09_selectable_agents_exclude_hidden_and_subagents() {
+        let facts = vec![
+            fact("build", false, false, None),
+            fact("hidden", true, false, None),
+            fact("explore", false, true, None),
+            fact("plan", false, false, None),
+        ];
+        assert_eq!(selectable_agent_ids(&facts), ["build", "plan"]);
+    }
+
+    #[test]
+    fn cp09_cycle_advances_and_wraps() {
+        let facts = vec![
+            fact("build", false, false, None),
+            fact("plan", false, false, None),
+        ];
+        let mut selected = Some("build".to_owned());
+        cycle_agent(&facts, &mut selected);
+        assert_eq!(selected.as_deref(), Some("plan"));
+        cycle_agent(&facts, &mut selected);
+        assert_eq!(selected.as_deref(), Some("build"), "wraps to the first");
+        // An unknown selection restarts at the first selectable agent.
+        selected = Some("ghost".to_owned());
+        cycle_agent(&facts, &mut selected);
+        assert_eq!(selected.as_deref(), Some("build"));
+        // No selectable agents clears the selection.
+        let mut empty = Some("build".to_owned());
+        cycle_agent(&[], &mut empty);
+        assert_eq!(empty, None);
+    }
+
+    #[test]
+    fn cp09_explicit_agent_color_wins() {
+        let facts = vec![fact("build", false, false, Some([1, 2, 3, 255]))];
+        let semantic = semantic();
+        assert_eq!(
+            composer_agent_color(&facts, Some("build"), Some(&semantic), false),
+            Some([1, 2, 3, 255]),
+        );
+    }
+
+    #[test]
+    fn cp09_palette_falls_back_to_categorical_and_tracks_new_designs() {
+        let facts = vec![
+            fact("build", false, false, None),
+            fact("plan", false, false, None),
+        ];
+        let semantic = semantic();
+        let legacy = composer_agent_color(&facts, Some("build"), Some(&semantic), false)
+            .expect("the builtin theme publishes a categorical palette");
+        assert_eq!(legacy, semantic.categorical_colors[0].rgba, "legacy step 200");
+        // New designs keeps the vivid step-400 accent (`context/local.tsx:77-84`).
+        let new = composer_agent_color(&facts, Some("build"), Some(&semantic), true)
+            .expect("new designs still resolve a palette");
+        let expected_400 = semantic
+            .scale(&semantic.categorical[0])
+            .expect("categorical hue scale")[3]
+            .rgba;
+        assert_eq!(new, expected_400);
+        // The second visible agent takes the next palette entry.
+        let second = composer_agent_color(&facts, Some("plan"), Some(&semantic), false)
+            .expect("second agent resolves");
+        assert_eq!(second, semantic.categorical_colors[1].rgba);
+    }
+
+    #[test]
+    fn cp09_missing_selection_or_theme_yields_no_color() {
+        let facts = vec![fact("build", false, false, None)];
+        let semantic = semantic();
+        // No selected id: the caller keeps `Slot::Border`.
+        assert_eq!(composer_agent_color(&facts, None, Some(&semantic), false), None);
+        // No semantic palette: nothing to index.
+        assert_eq!(composer_agent_color(&facts, Some("build"), None, false), None);
     }
 }
 
@@ -8336,6 +8583,22 @@ fn native_loop(
         cli_path.as_deref(),
         inline_cli.as_deref(),
     );
+    // CP-09: the live main-agent catalogue (`/api/commands`) and the selected
+    // agent (`context/local.tsx:59-135`). The composer rail paints the selected
+    // agent's color (`component/prompt/index.tsx:1591`,
+    // `mini/footer.view.tsx:229,766`); `local.agent.current()` defaults to the
+    // first selectable agent and `agent.cycle` advances it (`app.tsx:974`).
+    let mut live_agent_facts: Vec<AgentFactOwned> = live
+        .as_ref()
+        .and_then(|snapshot| {
+            http_request(&snapshot.origin, "GET", "/api/commands", None, auth)
+                .ok()
+                .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).ok())
+        })
+        .and_then(|value| agent_facts(&value).ok())
+        .unwrap_or_default();
+    let mut live_agent_selected: Option<String> =
+        selectable_agent_ids(&live_agent_facts).first().cloned();
     // TAB-04: resolve `config.tabs.indicators` once (default "status"), like the
     // theme/new-designs facts above; the per-frame tab build applies it.
     let tab_indicators = crate::native_ui_preferences::UiPreferences::tab_indicators(
@@ -10468,6 +10731,12 @@ fn native_loop(
                     } else {
                         view.composer_region(draft_echo)
                     },
+                    composer_agent_color: composer_agent_color(
+                        &live_agent_facts,
+                        live_agent_selected.as_deref(),
+                        theme.semantic.as_ref(),
+                        new_designs,
+                    ),
                     completion: if !help_open && modal_rows.is_none()
                         && !children_panel.open && !appearance.open && !permission_editor.open
             && !live.as_ref().is_some_and(|snapshot| snapshot.parent_session_id.is_some())
@@ -10806,6 +11075,25 @@ fn native_loop(
                     }
                 }
             }
+            utf8.reset();
+            needs_paint = true;
+            continue;
+        }
+        // CP-09: `agent.cycle` (shift+tab, `config/keybind.ts:176`) advances the
+        // selected main agent (`local.agent.move(1)`, `app.tsx:974`). Like the
+        // tab chords it only fires while the composer owns focus; dialogs and
+        // pages keep their own key handling.
+        if matches!(&event, native_input_decoder::InputEvent::AgentCycle)
+            && matches!(dialog, native_setup::Dialog::None)
+            && !page_open
+            && !help_open
+            && !view.dialogs.intercepts_input()
+            && !permission_editor.open
+            && !appearance.open
+            && !children_panel.open
+            && !view.command_palette_open()
+        {
+            cycle_agent(&live_agent_facts, &mut live_agent_selected);
             utf8.reset();
             needs_paint = true;
             continue;

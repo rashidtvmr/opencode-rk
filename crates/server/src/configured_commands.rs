@@ -76,6 +76,13 @@ fn jsonc(text: &str) -> Result<String, String> {
     String::from_utf8(result).map_err(|_| "invalid configuration encoding".into())
 }
 
+fn valid_agent_color(color: &str) -> bool {
+    let bytes = color.as_bytes();
+    matches!(bytes.len(), 4 | 7)
+        && bytes.first() == Some(&b'#')
+        && bytes[1..].iter().all(u8::is_ascii_hexdigit)
+}
+
 impl Inventory {
     pub fn mention_agents(&self) -> Vec<Value> {
         let mut agents = self.agents.clone();
@@ -100,10 +107,15 @@ impl Inventory {
                 || agent.get("disable").and_then(Value::as_bool) == Some(true)
                 || agent.get("disabled").and_then(Value::as_bool) == Some(true)
                 || agent.get("mode").and_then(Value::as_str) == Some("primary") { return None; }
-            Some(serde_json::json!({"name":name,"description":agent.get("description").and_then(Value::as_str).unwrap_or("").chars().take(256).collect::<String>(),
-                "read_only":agent.get("read_only").and_then(Value::as_bool).unwrap_or(false)}))
+            let mut advertised = serde_json::json!({"name":name,"description":agent.get("description").and_then(Value::as_str).unwrap_or("").chars().take(256).collect::<String>(),
+                "read_only":agent.get("read_only").and_then(Value::as_bool).unwrap_or(false)});
+            if agent.get("color").and_then(Value::as_str).is_some_and(valid_agent_color) {
+                advertised["color"] = agent["color"].clone();
+            }
+            Some(advertised)
         }).collect()
     }
+
     fn merge(&mut self, document: Value) -> Result<(), String> {
         for field in ["command", "commands"] {
             if let Some(commands) = document.get(field) {
@@ -179,6 +191,22 @@ impl Inventory {
 #[cfg(test)]
 mod mention_catalogue_tests {
     use super::*;
+    #[test]
+    fn cp09_agent_colors_are_validated_and_preserved() {
+        let mut inventory = Inventory::default();
+        for (name, color) in [("red", serde_json::json!("#ff0000")), ("short", serde_json::json!("#f00")),
+            ("word", serde_json::json!("red")), ("bad_hex", serde_json::json!("#gg0000")),
+            ("number", serde_json::json!(7))] {
+            inventory.agents.insert(name.into(), serde_json::json!({"color": color}));
+        }
+        let agents = inventory.mention_agents();
+        assert_eq!(agents.iter().find(|agent| agent["name"] == "red").unwrap()["color"], "#ff0000");
+        assert_eq!(agents.iter().find(|agent| agent["name"] == "short").unwrap()["color"], "#f00");
+        for name in ["word", "bad_hex", "number"] {
+            assert!(agents.iter().find(|agent| agent["name"] == name).unwrap().get("color").is_none());
+        }
+    }
+
     #[test]
     fn agent_suggestions_hide_primary_hidden_and_invalid_names() {
         let mut inventory = Inventory::default();
