@@ -4613,6 +4613,45 @@ fn permission_modal_key(
     }
 }
 
+/// DIALOG-20: the live crash surface maps exactly the ErrorComponent keymap
+/// (`error-component.tsx:66-95`): arrows/tab move, Enter uses the selected
+/// action, `c`/`r`/`q` act directly, Ctrl+C exits. Every other event is still
+/// consumed (the surface is modal), reported as [`crash::CrashOutcome::Ignored`].
+/// The caller handles quit/reset/copy outcomes because they need loop state.
+/// This is the exact routine `native_loop` runs, so a test drives the real
+/// dispatch rather than a copy.
+#[cfg(feature = "native")]
+fn crash_surface_key(
+    view: &mut crate::native_view::NativeView,
+    event: &native_input_decoder::InputEvent,
+    rows: u16,
+) -> Option<crate::native_view_dialogs::crash::CrashOutcome> {
+    use crate::native_view_dialogs::crash::{CrashKey, CrashOutcome};
+    if view.dialogs.open_kind() != Some(crate::native_view_dialogs::DialogKind::Crash) {
+        return None;
+    }
+    let key = match event {
+        native_input_decoder::InputEvent::ArrowLeft => CrashKey::Left,
+        native_input_decoder::InputEvent::ArrowRight => CrashKey::Right,
+        native_input_decoder::InputEvent::ArrowUp => CrashKey::Up,
+        native_input_decoder::InputEvent::ArrowDown => CrashKey::Down,
+        native_input_decoder::InputEvent::PageUp => CrashKey::PageUp,
+        native_input_decoder::InputEvent::PageDown => CrashKey::PageDown,
+        native_input_decoder::InputEvent::TabNext => CrashKey::Tab,
+        native_input_decoder::InputEvent::TabPrevious => CrashKey::ShiftTab,
+        native_input_decoder::InputEvent::Byte(13 | 10) => CrashKey::Enter,
+        native_input_decoder::InputEvent::Byte(3) => CrashKey::CtrlC,
+        native_input_decoder::InputEvent::Byte(byte)
+            if char::from(*byte).is_ascii_alphanumeric() =>
+        {
+            CrashKey::Char(char::from(*byte))
+        }
+        // Unmapped: consumed so no other layer reacts behind the surface.
+        _ => return Some(CrashOutcome::Ignored),
+    };
+    view.dialogs.handle_crash_key(key, rows)
+}
+
 /// Enter (CR/LF) closes an open message menu. The option it confirms is
 /// bound by the follow-up effect dispatch; this slice closes only.
 #[cfg(feature = "native")]
@@ -8518,6 +8557,11 @@ fn native_loop(
     explicit_session_route: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (cols, rows) = native_size();
+    // DIALOG-20: one global panic hook for the whole loop boot. Upstream
+    // wraps the root renderer in a panic-catching boundary at app mount
+    // (`app.tsx:336-339`); a captured panic opens the crash surface on the
+    // next frame instead of dying silently behind the alternate screen.
+    crate::native_view_dialogs::crash::install_panic_hook();
     // FFI-01: verify the artifact this build links against is still the
     // pinned OpenTUI revision before driving its audited ABI. A readable but
     // drifted artifact refuses boot; an unverifiable environment proceeds.
@@ -9350,6 +9394,29 @@ fn native_loop(
         view.set_active_session_id(
             live.as_ref().map_or("", |snapshot| snapshot.session_id.as_str()),
         );
+        // DIALOG-20: a captured panic opens the full-screen crash surface on
+        // the next frame (`app.tsx:467` reports renderer teardown failures
+        // into the same ErrorComponent). The dark palette is upstream's safe
+        // fallback "since the theme context may be the thing that crashed"
+        // (`error-component.tsx:16`).
+        if view.dialogs.crash_screen().is_some()
+            && view.dialogs.open_kind() != Some(crate::native_view_dialogs::DialogKind::Crash)
+        {
+            view.dialogs.close_crash();
+        }
+        if view.dialogs.crash_screen().is_none() {
+            if let Some(message) = crate::native_view_dialogs::crash::take_panic_capture() {
+                let terminal = env::var("TERM").unwrap_or_default();
+                let _ = view.dialogs.open_crash(
+                    Some(&message),
+                    None,
+                    env!("CARGO_PKG_VERSION"),
+                    crate::native_view_dialogs::crash::CrashMode::Dark,
+                    &terminal,
+                );
+                needs_paint = true;
+            }
+        }
         // TAB-21: focus-aware view acknowledgement. When the active session is
         // unread (idle newer than the server-global viewed watermark), POST the
         // observed idle transition so the watermark advances; a failure backs
@@ -12237,6 +12304,48 @@ fn native_loop(
         );
         // F002-R3: the permission prompt binds `left,h` / `right,l`
         // (`permission.tsx:465-485`). Route the arrow and byte halves through
+        // DIALOG-20: the crash surface owns its keys and its outcomes
+        // (`error-component.tsx:66-95`): Ctrl+C/q quit and restore the
+        // terminal, r resets the surface, c copies the issue report, and
+        // everything else is consumed so a crashed loop stays quiescent.
+        if view.dialogs.open_kind() == Some(crate::native_view_dialogs::DialogKind::Crash) {
+            if let Some(outcome) = crash_surface_key(&mut view, &event, renderer.rows().min(u32::from(u16::MAX)) as u16) {
+                use crate::native_view_dialogs::crash::{CrashAction, CrashOutcome};
+                match outcome {
+                    CrashOutcome::Exit | CrashOutcome::Run(CrashAction::Quit) => break,
+                    CrashOutcome::Run(CrashAction::Restart) => {
+                        view.dialogs.close_crash();
+                        needs_paint = true;
+                    }
+                    CrashOutcome::Run(CrashAction::Copy) => {
+                        let report = view
+                            .dialogs
+                            .crash_screen()
+                            .map(|screen| screen.issue_url())
+                            .unwrap_or_default();
+                        let frame = selection_clipboard_frame(&report);
+                        let copied = {
+                            let mut stdout = std::io::stdout().lock();
+                            stdout
+                                .write_all(frame.as_bytes())
+                                .and_then(|()| stdout.flush())
+                                .is_ok()
+                        };
+                        if let Some(screen) = view.dialogs.crash_screen_mut() {
+                            screen.mark_copy(copied);
+                        }
+                        toast.show(crate::native_toast::ToastOptions::new(
+                            crate::native_toast::ToastVariant::Info,
+                            if copied { "Report copied" } else { "Copy failed" },
+                        ));
+                        needs_paint = true;
+                    }
+                    CrashOutcome::Moved | CrashOutcome::Ignored => needs_paint = true,
+                }
+                utf8.reset();
+                continue;
+            }
+        }
         // the same `permission_modal_key` gate while the prompt intercepts
         // input, instead of letting the arrows fall through to the inert-arrow
         // arm. Scoped to the permission kind so every other modal keeps its

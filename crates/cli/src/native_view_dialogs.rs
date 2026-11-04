@@ -1146,9 +1146,21 @@ impl DialogView {
         self.crash_screen.as_ref()
     }
 
+    /// Mutable crash model, for the live copy acknowledgment.
+    pub fn crash_screen_mut(&mut self) -> Option<&mut crash::CrashScreen> {
+        self.crash_screen.as_mut()
+    }
+
     /// Route a crash key to the upstream crash-screen model.
     pub fn handle_crash_key(&mut self, key: crash::CrashKey, rows: u16) -> Option<crash::CrashOutcome> {
         self.crash_screen.as_mut().map(|screen| screen.handle(key, rows))
+    }
+
+    /// Dismiss the live crash surface and clear its model (`r` reset,
+    /// `error-component.tsx:60`), so the next captured panic can reopen it.
+    pub fn close_crash(&mut self) {
+        self.crash_screen = None;
+        self.close();
     }
 
     /// Validate, sanitize and open a dialog. Refuses to replace a visible
@@ -5999,6 +6011,60 @@ pub mod error_details {
 ///   and truncates the stack so the encoded URL stays under 6000 characters,
 ///   appending `\n… (truncated)`.
 pub mod crash {
+    // DIALOG-20: the live panic hook feeds this slot. Installed exactly once
+    // at native-loop boot (`app.tsx:336-339` wraps the root renderer in a
+    // global panic/error boundary); the loop takes the capture and opens the
+    // crash surface through [`crate::native_view_dialogs::DialogView::open_crash`].
+    // The hook must never panic itself: poisoned locks recover their data,
+    // payload extraction never unwraps, and the stored text is bounded.
+    static PANIC_CAPTURE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    static PANIC_HOOK: std::sync::Once = std::sync::Once::new();
+
+    /// Install the process-wide panic capture hook exactly once. The
+    /// previously installed hook still runs so non-TUI panic logging is
+    /// preserved; a `&str`/`String` payload plus the panic location
+    /// (`panic.rs` `Location`) is captured in the bounded model format.
+    pub fn install_panic_hook() {
+        PANIC_HOOK.call_once(|| {
+            let previous = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                let payload = info.payload();
+                let mut message = payload
+                    .downcast_ref::<&str>()
+                    .map(|text| (*text).to_owned())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| UNKNOWN_MESSAGE.to_owned());
+                if let Some(location) = info.location() {
+                    message.push_str(&format!(
+                        " (at {}:{}:{})",
+                        location.file(),
+                        location.line(),
+                        location.column()
+                    ));
+                }
+                let mut slot = PANIC_CAPTURE
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                // First unobserved panic wins; later panics during the same
+                // fatal unwind must not overwrite the surface the operator
+                // is about to see.
+                if slot.is_none() {
+                    *slot = Some(super::bounded_crash_text(&message, 2048));
+                }
+                drop(slot);
+                previous(info);
+            }));
+        });
+    }
+
+    /// Take the most recent captured panic text (message + location), if any.
+    pub fn take_panic_capture() -> Option<String> {
+        let mut slot = PANIC_CAPTURE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        slot.take()
+    }
+
     /// `min(84, max(24, width - 4))` (`error-component.tsx:104`).
     pub const CONTENT_MAX_WIDTH: u16 = 84;
     /// Lower clamp of the content column (`error-component.tsx:104`).
@@ -6730,6 +6796,36 @@ mod error_and_crash_tests {
         assert_eq!(screen.message(), UNKNOWN_MESSAGE);
         assert_eq!(screen.stack(), NO_STACK);
         assert_eq!(screen.mode(), CrashMode::Light);
+    }
+
+    /// DIALOG-20: a live panic is captured once and can seed, render, and
+    /// dismiss the same crash surface used by the native loop.
+    #[test]
+    fn dialog20_live_panic_capture_opens_and_closes_crash_surface() {
+        use super::{crash, DialogKind, DialogView};
+
+        crash::install_panic_hook();
+        // The panic slot is process-global. Drain it before catch_unwind so
+        // this test cannot consume a panic recorded by an earlier test.
+        let _ = crash::take_panic_capture();
+        let result = std::panic::catch_unwind(|| panic!("dialog20 boom"));
+        assert!(result.is_err());
+        let message = crash::take_panic_capture().expect("panic hook captured payload");
+        assert!(message.starts_with("dialog20 boom"), "{message}");
+        assert!(message.contains("native_view_dialogs.rs"), "{message}");
+
+        let mut view = DialogView::new();
+        view.open_crash(Some(&message), None, "1.2.3", CrashMode::Dark, "vt")
+            .unwrap();
+        assert_eq!(view.open_kind(), Some(DialogKind::Crash));
+        assert!(view.render(120, 32).iter().any(|row| row.contains("dialog20 boom")));
+        assert_eq!(
+            view.handle_crash_key(CrashKey::Char('r'), 32),
+            Some(CrashOutcome::Run(CrashAction::Restart))
+        );
+        view.close_crash();
+        assert_eq!(view.open_kind(), None);
+        assert!(view.crash_screen().is_none());
     }
 }
 
