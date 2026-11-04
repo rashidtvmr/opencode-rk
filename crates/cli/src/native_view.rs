@@ -1448,6 +1448,26 @@ impl NativeView {
         self.chat.tool_owner_at(row)
     }
 
+    /// MSG-001/002: `(group id, kind)` owning each painted group-header row of
+    /// the last styled transcript render (`frame row -> group`).
+    #[must_use]
+    pub fn chat_group_owners(&self) -> Vec<Option<(String, crate::native_message_rows::GroupKind)>> {
+        self.chat.group_owners()
+    }
+
+    /// `(group id, kind)` owning `row`, or `None` when the row is not a group
+    /// header. The transcript click toggles that group's disclosure.
+    #[must_use]
+    pub fn chat_group_owner_at(&self, row: usize) -> Option<(String, crate::native_message_rows::GroupKind)> {
+        self.chat.group_owner_at(row)
+    }
+
+    /// Toggle the disclosure of the group whose header is painted at `row`,
+    /// for the active session. `None` when `row` is not a group header.
+    pub fn chat_toggle_group_at(&self, row: usize) -> Option<bool> {
+        self.chat.toggle_group_at(row)
+    }
+
     pub fn set_prompt_mode(&mut self, shell: bool) {
         self.shell_mode = shell;
     }
@@ -3482,6 +3502,12 @@ impl NativeView {
     /// + `:2837-2847`).
     pub fn set_pending_permission_calls(&mut self, calls: &[String]) {
         self.chat.set_pending_permission_calls(calls);
+    }
+
+    /// MSG-002: publish the active session id so the live render keys group
+    /// disclosure per session.
+    pub fn set_active_session_id(&mut self, id: &str) {
+        self.chat.set_active_session_id(id);
     }
 
     pub fn chat_at_scroll_ceiling(&self) -> bool {

@@ -136,6 +136,14 @@ pub struct ChatView {
     /// messages whose producer knew no backend id; never fabricated
     /// positionally.
     message_owners: RefCell<Vec<Option<String>>>,
+    disclosure: RefCell<crate::native_message_rows::DisclosureState>,
+    active_session_id: RefCell<String>,
+    /// MSG-001/002: `(group id, kind)` owning each painted header row of the
+    /// last styled render (`frame row -> group`). A transcript click on a
+    /// group header toggles that group's disclosure for the active session
+    /// (`routes/session/index.tsx:408-426,1471-1483`). `None` for every row
+    /// that is not a group header.
+    group_owners: RefCell<Vec<Option<(String, crate::native_message_rows::GroupKind)>>>,
     tool_owners: RefCell<Vec<Option<usize>>>,
     /// TOOL-008: backend child-session id owning each painted body row of the
     /// last styled render (`frame row -> child sessionID`). A transcript click
@@ -184,6 +192,9 @@ impl Default for ChatView {
             transcript_first: Cell::new(0),
             transcript_viewport: Cell::new(0),
             message_owners: RefCell::new(Vec::new()),
+            disclosure: RefCell::new(crate::native_message_rows::DisclosureState::new()),
+            active_session_id: RefCell::new("live".into()),
+            group_owners: RefCell::new(Vec::new()),
             tool_owners: RefCell::new(Vec::new()),
             child_owners: RefCell::new(Vec::new()),
             pending_permission_calls: std::collections::BTreeSet::new(),
@@ -196,6 +207,14 @@ impl Default for ChatView {
 }
 
 impl ChatView {
+    pub fn set_active_session_id(&self, id: &str) { *self.active_session_id.borrow_mut() = id.to_owned(); }
+
+    pub fn toggle_group(&self, session_id: &str, group_id: &str, kind: crate::native_message_rows::GroupKind) -> bool {
+        let mut state = self.disclosure.borrow_mut();
+        let current = state.group_expanded(session_id, group_id, crate::native_message_rows::Verbosity::Medium, kind);
+        state.set_group_expanded(session_id, group_id, !current);
+        !current
+    }
     pub(crate) fn set_markdown_mode(&mut self, mode: crate::markdown_runs::MarkdownMode) {
         self.markdown_mode = mode;
     }
@@ -520,6 +539,10 @@ impl ChatView {
             for row in rows.into_iter().rev() {
                 rev.push(row);
                 if rev.len() >= target {
+                    // MSG review fix: break the LABELED history walk, not just
+                    // the inner row loop — otherwise the walk keeps cloning
+                    // every older entry and the documented
+                    // "whole history is never cloned" bound is violated.
                     break 'walk;
                 }
             }
@@ -890,6 +913,59 @@ impl ChatMessage {
             (Some(agent), Some(model)) => Some(format!("  agent: {agent}  model: {model}")),
         }
     }
+}
+
+/// MSG-001/002: the live render plan for one message. A single message can
+/// anchor more than one group when its parts span kinds (e.g. reasoning +
+/// exploration), so `headers` is a list; `skip` hides the message's content
+/// rows when a collapsed group fully contains it.
+#[derive(Clone, Debug, Default)]
+struct GroupPlan {
+    headers: Vec<GroupHeader>,
+    skip: bool,
+}
+
+#[derive(Clone, Debug)]
+struct GroupHeader {
+    gid: String,
+    kind: crate::native_message_rows::GroupKind,
+    size: usize,
+    expanded: bool,
+}
+
+/// MSG-001: the part ids a message contributes to the session grouping,
+/// mirroring `native_message_rows::row_message_from_chat` plus the reducer's
+/// `text:N`/`reasoning:N`/`result:N` id derivation. `None` when the message
+/// carries a renderable part the reducer does not project into a group
+/// (`File`, `Subtask`, `Retry`, `Step`, `Compaction`, `Patch`,
+/// `PatchToolRows`): such a message can never be *entirely* inside a group, so
+/// it must keep rendering and a group can never hide it (MSG-001).
+fn message_part_ids(message: &ChatMessage) -> Option<Vec<String>> {
+    if message.role != ChatRole::Assistant {
+        return Some(Vec::new());
+    }
+    let mut out = Vec::new();
+    let mut text_ordinal = 0usize;
+    let mut reasoning_ordinal = 0usize;
+    for (index, part) in message.parts.iter().enumerate() {
+        match part {
+            ChatPart::Text(text) if !text.trim().is_empty() => {
+                out.push(format!("text:{text_ordinal}"));
+                text_ordinal += 1;
+            }
+            ChatPart::Thinking(text) if !text.trim().is_empty() => {
+                out.push(format!("reasoning:{reasoning_ordinal}"));
+                reasoning_ordinal += 1;
+            }
+            ChatPart::ToolState { id, .. } | ChatPart::ToolCall { id, .. } => out.push(id.clone()),
+            ChatPart::ToolResult { .. } => out.push(format!("result:{index}")),
+            // Empty text/thinking render nothing and are dropped by the reducer.
+            ChatPart::Text(_) | ChatPart::Thinking(_) => {}
+            // A renderable part the reducer does not project into a group.
+            _ => return None,
+        }
+    }
+    Some(out)
 }
 
 /// Display class of one rendered frame row. Paint metadata only: the paint
@@ -3463,10 +3539,60 @@ impl ChatView {
         if height == 0 || messages.is_empty() {
             return Vec::new();
         }
+        // Route the live snapshot through the same session grouping reducer
+        // used by the history projection. This is the adapter boundary: the
+        // existing typed part renderer remains responsible for leaf styling.
+        let projected: Vec<_> = messages.iter().enumerate().map(|(i, message)| {
+            let id = message.message_id.clone().unwrap_or_else(|| format!("live-message-{i}"));
+            crate::native_message_rows::row_message_from_chat(&id, message)
+        }).collect();
+        let session_rows = crate::native_message_rows::reduce_session_rows(
+            &projected, crate::native_message_rows::Verbosity::Medium, false);
+        // Translate the reducer's tree to live transcript operations in tree
+        // order. A group owns one header, never one header per referenced part.
+        fn refs(nodes: &[crate::native_message_rows::SessionNode], out: &mut Vec<String>) {
+            for node in nodes { match node {
+                crate::native_message_rows::GroupNode::Entry { entry: crate::native_message_rows::SessionEntry::Part { reference } } => out.push(reference.message_id.clone()),
+                crate::native_message_rows::GroupNode::Entry { entry: crate::native_message_rows::SessionEntry::Message { message_id } } => out.push(message_id.clone()),
+                crate::native_message_rows::GroupNode::Entry { .. } => {},
+                crate::native_message_rows::GroupNode::Group { children, .. } => refs(children, out),
+            }}
+        }
+        let mut ops: Vec<(Option<String>, Vec<String>, Option<crate::native_message_rows::GroupKind>, usize)> = Vec::new();
+        let stable_ids = messages.iter().all(|m| m.message_id.is_some());
+        for row in &session_rows { match row {
+            crate::native_message_rows::SessionRow::Entry(crate::native_message_rows::SessionEntry::Message { message_id }) => ops.push((None, vec![message_id.clone()], None, 1)),
+            crate::native_message_rows::SessionRow::Group(group) => {
+                if !stable_ids { continue; }
+                let mut ids = Vec::new(); refs(&group.children, &mut ids);
+                ids.sort(); ids.dedup();
+                let gid = format!("{}:{}", group.kind.as_str(), ids.join(","));
+                ops.push((Some(gid), ids, Some(group.kind), group.size));
+            }
+            _ => {}
+        }}
+        if !stable_ids {
+            for (i, message) in messages.iter().enumerate() {
+                let id = message.message_id.clone().unwrap_or_else(|| format!("live-message-{i}"));
+                if !ops.iter().any(|(_, ids, _, _)| ids.contains(&id)) { ops.push((None, vec![id], None, 1)); }
+            }
+        }
         let target = self.scroll.get().saturating_add(height);
         let mut rev: Vec<(String, ChatRowClass)> = Vec::with_capacity(target.min(4096));
-        'walk: for (index, message) in messages.iter().enumerate().rev() {
-            let rows = typed_message_rows_with_prefix_spans_mode(
+        let by_id: std::collections::BTreeMap<String, (usize, &ChatMessage)> = messages.iter().enumerate().map(|(i,m)| (m.message_id.clone().unwrap_or_else(|| format!("live-message-{i}")), (i,m))).collect();
+        let mut ordered = Vec::<(usize, &ChatMessage, Option<(String, crate::native_message_rows::GroupKind, usize, bool)>)>::new();
+        for (gid, ids, kind, size) in ops {
+            if let Some((gid, kind)) = gid.zip(kind) {
+                let expanded = self.disclosure.borrow().group_expanded(&self.active_session_id.borrow(), &gid, crate::native_message_rows::Verbosity::Medium, kind);
+                let anchor = ids.first().and_then(|id| by_id.get(id).copied());
+                if let Some((index, message)) = anchor { ordered.push((index, message, Some((gid.clone(), kind, size, expanded)))); }
+                if expanded { for id in ids { if let Some((index,message)) = by_id.get(&id).copied() { ordered.push((index,message,None)); } } }
+            } else { for id in ids { if let Some((index,message)) = by_id.get(&id).copied() { ordered.push((index,message,None)); } } }
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        ordered.retain(|(i,_,header)| header.is_some() || seen.insert(*i));
+        for (index, message, header) in ordered.into_iter().rev() {
+            let mut rows = typed_message_rows_with_prefix_spans_mode(
                 width,
                 message,
                 starts_new_group(index, messages),
@@ -3481,10 +3607,14 @@ impl ChatView {
                 self.tps_enabled(),
                 self.diff_view,
             );
+            if let Some((gid,kind,size,expanded)) = header {
+                if !expanded { rows.clear(); }
+                rows.insert(0, (format!("{} {} · {}", if expanded { "▾" } else { "▸" }, kind.as_str(), size), ChatRowClass::Header));
+            }
             for row in rows.into_iter().rev() {
                 rev.push(row);
                 if rev.len() >= target {
-                    break 'walk;
+                    break;
                 }
             }
         }
@@ -3527,6 +3657,155 @@ impl ChatView {
         markdown_mode: crate::markdown_runs::MarkdownMode,
     ) -> (Vec<StyledChatRow>, Vec<Vec<ChatRunSpan>>) {
         self.render_styled_mode(width, height, workspace, messages, draft, busy, appearance, true, markdown_mode)
+    }
+
+    /// MSG-001/002: per-message render plan for the live styled path. Routes
+    /// the live snapshot through the same session grouping reducer the history
+    /// projection uses (`routes/session/index.tsx:249-250,408-426,1471-1483`).
+    /// A message can anchor more than one group; a collapsed group hides only
+    /// the messages whose every renderable part belongs to it. Messages without
+    /// a stable backend id are never grouped (a group id must be stable across
+    /// renders).
+    fn group_actions(&self, messages: &[ChatMessage]) -> Vec<GroupPlan> {
+        let mut plans: Vec<GroupPlan> = (0..messages.len()).map(|_| GroupPlan::default()).collect();
+        if messages.is_empty() {
+            return plans;
+        }
+        let stable = messages.iter().all(|m| m.message_id.is_some());
+        if !stable {
+            return plans;
+        }
+        let by_id: std::collections::BTreeMap<&str, usize> = messages
+            .iter()
+            .enumerate()
+            .filter_map(|(i, m)| m.message_id.as_deref().map(|id| (id, i)))
+            .collect();
+        let projected: Vec<_> = messages
+            .iter()
+            .enumerate()
+            .map(|(i, m)| {
+                let id = m.message_id.clone().unwrap_or_else(|| format!("live-message-{i}"));
+                crate::native_message_rows::row_message_from_chat(&id, m)
+            })
+            .collect();
+        let mut session_rows = crate::native_message_rows::reduce_session_rows(
+            &projected,
+            crate::native_message_rows::Verbosity::Medium,
+            false,
+        );
+        // MSG-003: partition permission-blocked leaves by full (message, part)
+        // identity. The live pending set is call-id-only, so each call id is
+        // attached to the *latest* message that carries it (a permission is
+        // always for the current call); a reused id in an older message can
+        // therefore never mark the wrong row.
+        let mut pending_refs: Vec<crate::native_message_rows::PartRef> = Vec::new();
+        for call in &self.pending_permission_calls {
+            let latest = messages.iter().enumerate().rev().find_map(|(_, m)| {
+                let mid = m.message_id.as_deref()?;
+                m.parts
+                    .iter()
+                    .any(|part| {
+                        matches!(
+                            part,
+                            ChatPart::ToolCall { id, .. } | ChatPart::ToolState { id, .. } if id == call
+                        )
+                    })
+                    .then(|| crate::native_message_rows::PartRef::new(mid, call.as_str()))
+            });
+            if let Some(reference) = latest {
+                pending_refs.push(reference);
+            }
+        }
+        crate::native_message_rows::partition_pending(&mut session_rows, &pending_refs);
+        let session = self.active_session_id.borrow();
+        for row in &session_rows {
+            let crate::native_message_rows::SessionRow::Group(group) = row else {
+                continue;
+            };
+            let pending_ids: std::collections::BTreeSet<&str> =
+                group.pending.iter().map(|r| r.message_id.as_str()).collect();
+            let message_pending = |index: usize| {
+                messages
+                    .get(index)
+                    .and_then(|m| m.message_id.as_deref())
+                    .is_some_and(|id| pending_ids.contains(id))
+            };
+            let mut ids: Vec<String> = Vec::new();
+            let mut refs: Vec<crate::native_message_rows::PartRef> = Vec::new();
+            fn collect(
+                nodes: &[crate::native_message_rows::SessionNode],
+                ids: &mut Vec<String>,
+                refs: &mut Vec<crate::native_message_rows::PartRef>,
+            ) {
+                for node in nodes {
+                    match node {
+                        crate::native_message_rows::GroupNode::Entry {
+                            entry: crate::native_message_rows::SessionEntry::Part { reference },
+                        } => {
+                            ids.push(reference.message_id.clone());
+                            refs.push(reference.clone());
+                        }
+                        crate::native_message_rows::GroupNode::Entry {
+                            entry: crate::native_message_rows::SessionEntry::Message { message_id },
+                        } => ids.push(message_id.clone()),
+                        crate::native_message_rows::GroupNode::Entry { .. } => {}
+                        crate::native_message_rows::GroupNode::Group { children, .. } => {
+                            collect(children, ids, refs)
+                        }
+                    }
+                }
+            }
+            collect(&group.children, &mut ids, &mut refs);
+            ids.sort();
+            ids.dedup();
+            let gid = format!("{}:{}", group.kind.as_str(), ids.join(","));
+            let expanded = self.disclosure.borrow().group_expanded(
+                &session,
+                &gid,
+                crate::native_message_rows::Verbosity::Medium,
+                group.kind,
+            );
+            let mut indices: Vec<usize> = ids.iter().filter_map(|id| by_id.get(id.as_str()).copied()).collect();
+            indices.sort_unstable();
+            indices.dedup();
+            let Some(anchor) = indices.first().copied() else {
+                continue;
+            };
+            // A message collapses only when EVERY one of its renderable parts
+            // belongs to this group; a message with a standalone part (e.g. a
+            // bash/execute call beside a grouped read, or a File/Subtask part
+            // the reducer does not group) keeps rendering, so a group can never
+            // hide an unrelated row.
+            let fully_grouped = |index: usize| {
+                let Some(message) = messages.get(index) else {
+                    return false;
+                };
+                let mid = message.message_id.clone().unwrap_or_default();
+                let Some(needed) = message_part_ids(message) else {
+                    return false;
+                };
+                !needed.is_empty()
+                    && needed
+                        .iter()
+                        .all(|part_id| refs.iter().any(|r| r.message_id == mid && &r.part_id == part_id))
+            };
+            // A message can anchor more than one group, so every group
+            // contributes its own header.
+            plans[anchor].headers.push(GroupHeader {
+                gid,
+                kind: group.kind,
+                size: group.size,
+                expanded,
+            });
+            if !expanded {
+                for index in indices {
+                    if fully_grouped(index) && !message_pending(index) {
+                        plans[index].skip = true;
+                    }
+                }
+            }
+        }
+        plans
     }
 
     pub fn render_styled_without_prompt(
@@ -3616,45 +3895,67 @@ impl ChatView {
             .unwrap_or(rows.len());
         let transcript_h = body_h.saturating_sub(1);
         let target = self.scroll.get().saturating_add(transcript_h);
-        let mut reversed: Vec<(StyledChatRow, Vec<ChatRunSpan>, Option<String>, Option<String>, Option<usize>)> = Vec::new();
+        // MSG-001/002: per-message render plan from the same session grouping
+        // reducer the history projection uses. A message can anchor more than
+        // one group; a collapsed group hides only the messages whose every
+        // renderable part belongs to it.
+        let plans = self.group_actions(messages);
+        type GroupOwner = Option<(String, crate::native_message_rows::GroupKind)>;
+        let mut reversed: Vec<(StyledChatRow, Vec<ChatRunSpan>, Option<String>, Option<String>, Option<usize>, GroupOwner)> = Vec::new();
         if transcript_h > 0 {
             'messages: for (index, message) in messages.iter().enumerate().rev() {
-                let mut message_spans: Vec<(usize, Vec<ChatRunSpan>)> = Vec::new();
-                let mut message_children: Vec<(usize, String)> = Vec::new();
-                let mut message_tools: Vec<(usize, usize)> = Vec::new();
-                let message_rows = boxed_message_rows_spans_mode(
-                    width,
-                    message,
-                    starts_styled_group(index, messages),
-                    appearance,
-                    &mut message_spans,
-                    &mut message_children,
-                    &mut message_tools,
-                    markdown_mode,
-                    &self.pending_permission_calls,
-                    self.spin_frame.get(),
-                    self.tps_enabled(),
-                    self.diff_view,
-                );
-                let mut dense = vec![Vec::new(); message_rows.len()];
-                for (row, spans) in message_spans {
-                    if row < dense.len() { dense[row] = spans; }
+                let plan = plans.get(index);
+                let skip = plan.is_some_and(|p| p.skip);
+                if !skip {
+                    let mut message_spans: Vec<(usize, Vec<ChatRunSpan>)> = Vec::new();
+                    let mut message_children: Vec<(usize, String)> = Vec::new();
+                    let mut message_tools: Vec<(usize, usize)> = Vec::new();
+                    let message_rows = boxed_message_rows_spans_mode(
+                        width,
+                        message,
+                        starts_styled_group(index, messages),
+                        appearance,
+                        &mut message_spans,
+                        &mut message_children,
+                        &mut message_tools,
+                        markdown_mode,
+                        &self.pending_permission_calls,
+                        self.spin_frame.get(),
+                        self.tps_enabled(),
+                        self.diff_view,
+                    );
+                    let mut dense = vec![Vec::new(); message_rows.len()];
+                    for (row, spans) in message_spans {
+                        if row < dense.len() { dense[row] = spans; }
+                    }
+                    let mut dense_children: Vec<Option<String>> = vec![None; message_rows.len()];
+                    for (row, child) in message_children {
+                        if row < dense_children.len() { dense_children[row] = Some(child); }
+                    }
+                    // TOOL-011: stable per-message ToolState index owning each
+                    // painted execute row, so a click can open its dialog.
+                    let mut dense_tools: Vec<Option<usize>> = vec![None; message_rows.len()];
+                    for (row, tool) in message_tools {
+                        if row < dense_tools.len() { dense_tools[row] = Some(tool); }
+                    }
+                    let owner = message.message_id.clone();
+                    for (((row, spans), child), tool) in message_rows.into_iter().zip(dense).zip(dense_children).zip(dense_tools).rev() {
+                        reversed.push((row, spans, owner.clone(), child, tool, None));
+                        if reversed.len() >= target {
+                            break 'messages;
+                        }
+                    }
                 }
-                let mut dense_children: Vec<Option<String>> = vec![None; message_rows.len()];
-                for (row, child) in message_children {
-                    if row < dense_children.len() { dense_children[row] = Some(child); }
-                }
-                // TOOL-011: stable per-message ToolState index owning each
-                // painted execute row, so a click can open its dialog.
-                let mut dense_tools: Vec<Option<usize>> = vec![None; message_rows.len()];
-                for (row, tool) in message_tools {
-                    if row < dense_tools.len() { dense_tools[row] = Some(tool); }
-                }
-                let owner = message.message_id.clone();
-                for (((row, spans), child), tool) in message_rows.into_iter().zip(dense).zip(dense_children).zip(dense_tools).rev() {
-                    reversed.push((row, spans, owner.clone(), child, tool));
-                    if reversed.len() >= target {
-                        break 'messages;
+                // Headers sit above the message content: pushed after the
+                // content so the final reverse places them first. A message can
+                // anchor more than one group.
+                if let Some(plan) = plan {
+                    for header in plan.headers.iter().rev() {
+                        let text = format!("{} {} · {}", if header.expanded { "▾" } else { "▸" }, header.kind.as_str(), header.size);
+                        reversed.push(((text, ChatRowClass::Header, None), Vec::new(), None, None, None, Some((header.gid.clone(), header.kind))));
+                        if reversed.len() >= target {
+                            break 'messages;
+                        }
                     }
                 }
             }
@@ -3681,17 +3982,20 @@ impl ChatView {
         let mut owners: Vec<Option<String>> = vec![None; rows.len()];
         let mut child_owners: Vec<Option<String>> = vec![None; rows.len()];
         let mut tool_owners: Vec<Option<usize>> = vec![None; rows.len()];
-        for (index, ((text, class, range), spans, owner, child, tool)) in visible.into_iter().enumerate() {
+        let mut group_owners: Vec<Option<(String, crate::native_message_rows::GroupKind)>> = vec![None; rows.len()];
+        for (index, ((text, class, range), spans, owner, child, tool, group)) in visible.into_iter().enumerate() {
             rows[first + index] = (text, class);
             bounds[first + index] = range;
             row_spans[first + index] = spans;
             owners[first + index] = owner;
             child_owners[first + index] = child;
             tool_owners[first + index] = tool;
+            group_owners[first + index] = group;
         }
         self.message_owners.replace(owners);
         self.child_owners.replace(child_owners);
         self.tool_owners.replace(tool_owners);
+        self.group_owners.replace(group_owners);
         let styled: Vec<StyledChatRow> = rows.into_iter()
             .zip(bounds)
             .map(|((text, class), bounds)| (text, class, bounds))
@@ -3834,6 +4138,30 @@ impl ChatView {
     #[must_use]
     pub fn tool_owner_at(&self, row: usize) -> Option<usize> {
         self.tool_owners.borrow().get(row).copied().flatten()
+    }
+
+    /// MSG-001/002: `(group id, kind)` owning each painted header row of the
+    /// last styled render, indexed by frame row.
+    #[must_use]
+    pub fn group_owners(&self) -> Vec<Option<(String, crate::native_message_rows::GroupKind)>> {
+        self.group_owners.borrow().clone()
+    }
+
+    /// `(group id, kind)` owning `row`, or `None` when the row is not a group
+    /// header. A transcript click on a group header toggles its disclosure
+    /// (`routes/session/index.tsx:408-426`).
+    #[must_use]
+    pub fn group_owner_at(&self, row: usize) -> Option<(String, crate::native_message_rows::GroupKind)> {
+        self.group_owners.borrow().get(row).cloned().flatten()
+    }
+
+    /// Toggle the disclosure of the group whose header is painted at `row`,
+    /// for the active session. `None` when `row` is not a group header.
+    #[must_use]
+    pub fn toggle_group_at(&self, row: usize) -> Option<bool> {
+        let (gid, kind) = self.group_owner_at(row)?;
+        let session = self.active_session_id.borrow().clone();
+        Some(self.toggle_group(&session, &gid, kind))
     }
 
     /// Anchor the last currently visible transcript row to a message and an
@@ -5019,6 +5347,150 @@ fn truncate_width(text: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn msg002_live_disclosure_collapses_and_expands_and_persists_per_session() {
+        let view = ChatView::new();
+        assert!(view.toggle_group("s1", "exploration:m1", crate::native_message_rows::GroupKind::Exploration));
+        assert!(!view.toggle_group("s1", "exploration:m1", crate::native_message_rows::GroupKind::Exploration));
+        assert!(view.disclosure.borrow().group_expanded("s1", "exploration:m1", crate::native_message_rows::Verbosity::Medium, crate::native_message_rows::GroupKind::Exploration) == false);
+        assert!(!view.disclosure.borrow().group_expanded("s2", "exploration:m1", crate::native_message_rows::Verbosity::Medium, crate::native_message_rows::GroupKind::Exploration));
+    }
+
+    #[test]
+    fn msg001_live_grouping_emits_one_header_per_group_in_tree_order() {
+        let mut msg = ChatMessage::text(ChatRole::Assistant, "done");
+        msg.message_id = Some("m1".into());
+        msg.parts = vec![ChatPart::ToolCall { name: "read".into(), id: "c1".into() }, ChatPart::ToolResult { name: "read".into(), output: "ok".into(), is_error: false }, ChatPart::Text("done".into())];
+        let view = ChatView::new();
+        let rows = view.render_typed_classified(80, 30, "ws", &[msg], "", false);
+        let headers: Vec<_> = rows.iter().filter(|row| row.1 == ChatRowClass::Header && row.0.contains("exploration")).collect();
+        assert_eq!(headers.len(), 1);
+    }
+
+    #[test]
+    fn msg001_live_styled_path_emits_group_header_with_owner() {
+        // MSG-001 on the LIVE styled path (`render_styled` -> `render_styled_mode`),
+        // not the test-only typed fallback.
+        let mut msg = ChatMessage::text(ChatRole::Assistant, "done");
+        msg.message_id = Some("m1".into());
+        msg.parts = vec![
+            ChatPart::ToolCall { name: "read".into(), id: "c1".into() },
+            ChatPart::ToolResult { name: "read".into(), output: "ok".into(), is_error: false },
+            ChatPart::Text("done".into()),
+        ];
+        let view = ChatView::new();
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let rows = view.render_styled(80, 30, "ws", &[msg], "", false, &appearance);
+        let header_rows: Vec<usize> = rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.1 == ChatRowClass::Header && row.0.contains("exploration"))
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(header_rows.len(), 1, "one exploration header on the live styled path");
+        let owners = view.group_owners();
+        assert!(
+            owners.get(header_rows[0]).and_then(Option::as_ref).is_some(),
+            "the live header row carries a group owner for the click seam"
+        );
+        assert_eq!(owners.len(), rows.len(), "one owner slot per frame row");
+    }
+
+    #[test]
+    fn msg003_live_pending_row_survives_collapsed_group() {
+        // MSG-003 on the live path: a permission-pending tool row stays visible
+        // while its group is collapsed; its clean sibling is hidden.
+        let mut clean = ChatMessage::text(ChatRole::Assistant, "");
+        clean.message_id = Some("m1".into());
+        clean.parts = vec![
+            ChatPart::ToolCall { name: "read".into(), id: "c1".into() },
+            ChatPart::ToolResult { name: "read".into(), output: "clean-sibling".into(), is_error: false },
+        ];
+        let mut pending = ChatMessage::text(ChatRole::Assistant, "");
+        pending.message_id = Some("m2".into());
+        pending.parts = vec![ChatPart::ToolCall { name: "grep".into(), id: "c2".into() }];
+        let mut view = ChatView::new();
+        view.set_pending_permission_calls(&["c2".to_owned()]);
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        // Default medium disclosure for an exploration group is collapsed.
+        let collapsed = view.render_styled(80, 40, "ws", &[clean.clone(), pending.clone()], "", false, &appearance);
+        assert!(
+            collapsed.iter().any(|row| row.0.contains("Searching content")),
+            "the permission-pending tool row survives collapse: {collapsed:?}"
+        );
+        assert!(
+            !collapsed.iter().any(|row| row.0.contains("clean-sibling")),
+            "the clean sibling is hidden while collapsed: {collapsed:?}"
+        );
+        // Expanding the group restores the clean sibling.
+        let (gid, kind) = view
+            .group_owners()
+            .into_iter()
+            .flatten()
+            .next()
+            .expect("live render emits a group header owner");
+        view.toggle_group("live", &gid, kind);
+        let expanded = view.render_styled(80, 40, "ws", &[clean, pending], "", false, &appearance);
+        assert!(
+            expanded.iter().any(|row| row.0.contains("clean-sibling")),
+            "expanding the group restores the clean sibling: {expanded:?}"
+        );
+    }
+
+    #[test]
+    fn msg001_live_message_with_ungrouped_part_never_collapses() {
+        // A message whose parts are not all in one group (here a grouped read
+        // plus a `File` part the reducer does not project) must keep rendering
+        // while the exploration group is collapsed, so the group can never hide
+        // the ungrouped part.
+        let mut grouped = ChatMessage::text(ChatRole::Assistant, "");
+        grouped.message_id = Some("m1".into());
+        grouped.parts = vec![
+            ChatPart::ToolCall { name: "read".into(), id: "c1".into() },
+            ChatPart::ToolResult { name: "read".into(), output: "ok".into(), is_error: false },
+        ];
+        let mut mixed = grouped.clone();
+        mixed.message_id = Some("m2".into());
+        mixed.parts.push(ChatPart::File { filename: "a.png".into(), mime: "image/png".into() });
+        let view = ChatView::new();
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        // Control: the pure grouped message collapses at the medium default.
+        let control = view.render_styled(80, 40, "ws", std::slice::from_ref(&grouped), "", false, &appearance);
+        assert!(
+            !control.iter().any(|row| row.0.contains("Reading file")),
+            "pure grouped message collapses: {control:?}"
+        );
+        // Mixed: the ungrouped File part keeps the whole message visible.
+        let mixed_rows = view.render_styled(80, 40, "ws", std::slice::from_ref(&mixed), "", false, &appearance);
+        assert!(
+            mixed_rows.iter().any(|row| row.0.contains("Reading file")),
+            "mixed message never collapses: {mixed_rows:?}"
+        );
+    }
+
+    #[test]
+    fn msg001_live_message_anchoring_two_groups_emits_two_headers() {
+        // A message whose parts span kinds (reasoning + exploration) anchors two
+        // groups; both headers must paint (a single header slot would drop one).
+        let mut msg = ChatMessage::text(ChatRole::Assistant, "");
+        msg.message_id = Some("m1".into());
+        msg.parts = vec![
+            ChatPart::Thinking("planning".into()),
+            ChatPart::ToolCall { name: "read".into(), id: "c1".into() },
+            ChatPart::ToolResult { name: "read".into(), output: "ok".into(), is_error: false },
+        ];
+        let view = ChatView::new();
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let rows = view.render_styled(80, 40, "ws", &[msg], "", false, &appearance);
+        let headers: Vec<&str> = rows
+            .iter()
+            .filter(|row| row.1 == ChatRowClass::Header)
+            .map(|row| row.0.as_str())
+            .collect();
+        assert!(headers.iter().any(|h| h.contains("reasoning")), "reasoning header: {headers:?}");
+        assert!(headers.iter().any(|h| h.contains("exploration")), "exploration header: {headers:?}");
+    }
 
     #[test]
     fn session_message_menu_resync_refreshes_action_snapshot_without_retargeting() {

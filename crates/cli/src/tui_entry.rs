@@ -9236,6 +9236,9 @@ fn native_loop(
         ),
         None => view.set_session(None),
     }
+    // MSG-002: key live group disclosure by the active session so switching
+    // sessions preserves each session's own saved expansion.
+    view.set_active_session_id(live.as_ref().map_or("", |snapshot| snapshot.session_id.as_str()));
     let workspace_directory = live
         .as_ref()
         .and_then(|snapshot| snapshot.directory.clone())
@@ -9326,6 +9329,13 @@ fn native_loop(
     let mut completion_loaded = false;
     let mut byte = [0u8; 1];
     loop {
+        // MSG-002 review fix: the active session id keys live group
+        // disclosure, and `live` is reassigned inside this loop on a session
+        // switch (child-route commit). Refresh it every frame from the current
+        // snapshot so a later disclosure toggle can never key a stale session.
+        view.set_active_session_id(
+            live.as_ref().map_or("", |snapshot| snapshot.session_id.as_str()),
+        );
         // TAB-21: focus-aware view acknowledgement. When the active session is
         // unread (idle newer than the server-global viewed watermark), POST the
         // observed idle transition so the watermark advances; a failure backs
@@ -13406,6 +13416,16 @@ fn native_loop(
                             has_text_selection,
                             crate::native_message_rows::RowAction::MessageActions,
                         ) {
+                            // MSG-001/002: a group header row click toggles its
+                            // disclosure (`routes/session/index.tsx:408-426`,
+                            // `groupExpanded`/`setGroupExpanded`), before any
+                            // message/tool owner resolves (a header owns no
+                            // message).
+                            if view.chat_group_owner_at(usize::from(y)).is_some() {
+                                let _ = view.chat_toggle_group_at(usize::from(y));
+                                needs_paint = true;
+                                continue;
+                            }
                             // TOOL-008: a subtask row click navigates into its
                             // child session (`index.tsx:3311-3314`, the
                             // `Subagent` `onMouseUp` -> `navigate({type:
