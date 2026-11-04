@@ -1,12 +1,92 @@
 # OpenCode V2 UI parity — consolidated status
 
-- **Canonical line:** `main-v2` @ `43050ee0` (remote verified via `git ls-remote`)
+- **Canonical line:** `main-v2` @ `c2ad1750` (remote verified via `git ls-remote`)
 - **Upstream oracle:** `/Users/mymac/Projects/tmp/opencode` @ `450e7b92412c780a7b5a75226bb8d49aaca24e22`
 - **Checklist:** `docs/ui-parity/opencode-ui-parity-kit/checklist.json` (223 items)
 - **Method:** source inspection of the live Rust path (implementation + a
   production consumer), cross-checked against the pinned upstream component.
   This is **not** captured-golden acceptance: no matched styled-cell/cursor
   captures were produced. Verdicts below are source-backed, not runtime-proven.
+
+## Wave-80 — CP-09 + CP-07 landed (2026-11-04)
+
+Published `c2ad1750` (base `6c713efb`). **CP-09** (live agent-color composer
+rail + `agent.cycle`) is the same checklist requirement as **CP-07**
+("Preserve data-driven agent selection and colors. Custom agent, hidden agent,
+subagent-only agent, explicit color, palette wrap."), so both move to `LANDED`:
+
+- Server `mention_agents()` (`crates/server/src/configured_commands.rs`) now
+  advertises a validated `color` field (`#rgb`/`#rrggbb`).
+- CLI parses `/api/commands` into `AgentFactOwned { id, hidden, subagent, color }`,
+  seeds the selected agent from the first selectable entry, cycles it on the
+  `AgentCycle` (shift+tab) event, and computes the rail color via
+  `composer_agent_color` (explicit `agent.color` else the deduped categorical
+  palette at step 400 new-designs / 200).
+- `home_composer_border_cell_style` paints the selected agent color for the
+  `┃`/`╹` rail glyph, falling back to `Slot::Border`.
+- Upstream: `component/prompt/index.tsx:1555-1560,1587-1591`,
+  `context/local.tsx:59-64,77-84,96-104,112-124,128-135`,
+  `config/keybind.ts:176`, `app.tsx:972-977`, `mini/footer.view.tsx:229-236,766`.
+- 5 new `cp09_*` CLI tests + 1 server test. Independent APPROVE on `cad89dd4`;
+  content-identical re-apply onto `6c713efb`. Focused `cp09` 7/0; full CLI
+  **2297/0**; server 832/0.
+
+In flight (not yet landed): **TOOL-006** background-shell list/output transport,
+**CP-38** live image/attachment preview strip, **MSG-005** live skill/file
+message chips. (F002-R1 and TOOL-011 landed in wave-82.)
+
+## Wave-81 — independent re-verification of the 45 open items (2026-11-04)
+
+An independent read-only audit re-checked the 45 items the summary table listed
+as `BLOCKED`/`REAL_GAP` against the **current** source at `c2ad1750`. The summary
+table was **stale**: seven items are already live and are moved to `LANDED` here.
+
+| Item | Was | Now | Live evidence |
+| --- | --- | --- | --- |
+| `TAB-21` | `BLOCKED` | `LANDED` | live `ViewAcknowledgement` driver `tui_entry.rs:8787-8830` POSTs `/api/sessions/{}/view`; route `server/src/lib.rs:246`; `mark_idle` `server/src/lib.rs:1972,2012,2566,3777`; `sessions/src/lib.rs:657` |
+| `THEME-08` | `BLOCKED` | `LANDED` | `8543e769` live `SYN_*` token paint; `native_view_chat.rs:1868` `code_token_cell_spans`; consumed `tui_entry.rs:5869` `markdown_run_paint_color`; `ctx.semantic` set `:10758` |
+| `DIALOG-06` | `REAL_GAP` | `LANDED` | `4f4a8228`; live `select_menu_key` `tui_entry.rs:4557` (caller `:13454`) drives `select_push_filter`/`select_backspace` `native_view_dialogs.rs:1813-1845` |
+| `DIALOG-08` | `REAL_GAP` | `LANDED` | `select_page` `native_view_dialogs.rs:1847` live-called `tui_entry.rs:12890/12898` (PageUp/PageDown) |
+| `DIALOG-09` | `REAL_GAP` | `LANDED` | `SelectExperiment`/`active_gutter`/`current_marker` consumed live `native_view_dialogs.rs:2347-2349,766-768,1189-1193` |
+| `DIALOG-16` | `BLOCKED` | `LANDED` | `a3f01f69` live numeric settings rows + experiments picker `tui_entry.rs:11104-11171,13559` |
+| `DIALOG-19` | `BLOCKED` | `LANDED` | `62242532` per-frame chrome lifecycle live `tui_entry.rs:3671-3824` (`chrome.tick` `:9970`, `chrome_frame.paints` `:10676`) |
+| `DIFF-005` | `REAL_GAP` | `LANDED` | live `native_chat_projection.rs:478-481` already `normalize_path(path)`/`normalize_path(key)` before the diagnostics lookup |
+| `CP-34` | `REAL_GAP` | `LANDED` | `sync_live_draft_stash` `tui_entry.rs:465` saves/restores `parts`; live `:8853`; test `cp34_live_tab_switch_restores_folded_draft_parts` |
+| `CP-37` | `REAL_GAP` | `LANDED` | `live_paste_admitted` (`PasteQueue`+`paste_admission`) live-called `tui_entry.rs:13098` with live `paste_queue` `:8310` |
+
+**Still missing after the audit (38 items).** The remaining set is dominated by
+items whose faithful, unit-tested model has **no backend producer** (not merely
+an unwired consumer):
+
+- **Harness obligations (not product):** `PAR-02`, `PAR-03`, `PAR-06`, `PAR-09`,
+  `PAR-19`.
+- **Backend producer absent:** `SIDE-05` (external Console API), `MSG-005`
+  (no skill/file part in contracts/storage/server), `TOOL-006` (no
+  `GET /api/shell`), `STATE-003` (no retry deadline on the wire),
+  `MSG-001/002/003` (no `SessionRow`→painter adapter), `DIALOG-13/14/15`
+  (session-picker/drill-down/integration hosts), `DIALOG-17/18`
+  (stash/worktree/diff dialog hosts), `LAY-10/11/13` (plugin-panel/terminal
+  producer), `TAB-06` (per-tab pending transport), `DIALOG-07` (`row_footer`
+  live), `TOOL-011` (execute-dialog live render+opener), `DIFF-001` (viewer
+  half; inline half landed), `DIFF-003` (virtualization).
+- **Substrate/ABI absent:** `MD-007/008/009` (diagram/math/plugin producers),
+  `THEME-13` (OSC palette probe), `THEME-14` (syntax-style bridge ABI),
+  `MEDIA-001` (no image decoder), `FFI-02/03/04/06/07/08/11` (unused bridge
+  surfaces).
+
+**UNCLEAR (3):** `PAR-07` (form submit/validation trace sink not located;
+`DialogKind::Question` surface now exists), `PAR-09` (no harness async-syntax
+landing found), `DIFF-001` (inline half landed; permission/viewer halves
+unwired).
+
+## Wave-82 — TOOL-011 landed (2026-11-04)
+
+| Item | Was | Now | Live evidence |
+| --- | --- | --- | --- |
+| `TOOL-011` | `BLOCKED` | `LANDED` | `5929b143` live `DialogExecute`: click opener `tui_entry.rs:12516-12540` (`chat_tool_owner_at` → `execute_dialog_from_part` → `open_execute`); modal key gate `tui_entry.rs:11264-11325` (Arrow/Page/Esc/Ctrl-C/`c`/`o`); render arm `native_view_dialogs.rs:2416-2441`; model `native_tool_rows.rs:execute_dialog_rows`; upstream `dialog-execute.tsx:222-282`. Published `7765484e`; independent APPROVE (openai-gpt6-luna `ses_e5acc871effeQOdDccM9emFT0b`); post-merge focused 7/0, full CLI 2312/0. Recorded partial: `home`/`end` unbound (no decoded `InputEvent`). |
+
+Counts after wave-82: `ALREADY_CORRECT 145 / REAL_GAP 1 / BLOCKED 36 / LANDED 41`
+(the remaining accurate set is 37).
 
 ## Meaning of the verdicts
 
@@ -120,7 +200,7 @@ with `OC2_TEST_BINARY=$PWD/target/debug/oc2` → **exit 0, 134/134 binaries ok,
 | Item | Was | Now | Evidence |
 | --- | --- | --- | --- |
 | `THEME-09` | `REAL_GAP` | `LANDED` | `7285a322`; see the row above and the landed table |
-| `FFI-10` | `ALREADY_CORRECT` | `REAL_GAP` | `safe_renderer.rs:69` is a same-named **termios** struct, not `terminal_input::TerminalInput`; no CLI module constructs the parser, so paste/kitty event decoding has no live consumer |
+| `FFI-10` | `REAL_GAP` | `ALREADY_CORRECT` | Re-verified 2026-11-04 (independent read-only research): the live loop already consumes typed events via `native_input_decoder::TerminalInputDecoder` (fed `tui_entry.rs:10549-10562`, popped `:10564`) — bracketed-paste atomicity (`native_input_decoder.rs:430-445` → `tui_entry.rs:12635-12741`), kitty/CSI-u keys (`:487-625` → `tui_entry.rs:307-325,10699-10722`), SGR mouse (`:762-787` → `:11455-11504`), focus (`:366-377` → `:10634-10649`) and IME (`:620-623` → `:11428-11435`). The `opentui-bridge/src/terminal_input.rs::TerminalInput` parser is a second, unreferenced parser (dead code, not a parity gap); its bridge-only `CapabilityResponse` model has no live consumer. Residual: no installed-terminal capture. |
 | `PAR-07` | `BLOCKED` | `REAL_GAP` | queue/steer (`tui_entry.rs:12558/12601`), submission (`:13693`) and permission reply (`:6212`) traces are live; the residual is form traces, and the CLI has no form dialog surface |
 
 **Additional rejected patches.** Preserved with status files under
@@ -433,10 +513,10 @@ the wave-44 verdict supersedes it.
 
 | Verdict | Count |
 | --- | --- |
-| `ALREADY_CORRECT` | 144 |
-| `REAL_GAP` | 3 |
-| `BLOCKED` | 45 |
-| `LANDED` (wave-45..67) | 31 |
+| `ALREADY_CORRECT` | 145 |
+| `REAL_GAP` | 1 |
+| `BLOCKED` | 37 |
+| `LANDED` (wave-45..81) | 40 |
 | **Total** | **223** |
 
 ### Landed fixes (wave-45..56) — moved out of `REAL_GAP`/`BLOCKED`
@@ -505,17 +585,21 @@ Selected high-value seams:
 | THEME-08 | `syntax_rules()` (`native_theme_runtime.rs:965`) has zero non-test callers; no tokenizer/highlighter producer and no renderer syntax-style sink (`safe_renderer.rs:906` takes explicit fg/bg/attrs only). |
 | THEME-13 | `SystemThemeState`/`palette_reply` (`native_theme_runtime.rs:2183/2264`) have zero non-test callers; no OSC palette-query emitter and no payload-carrying input event to decode a reply. |
 
-### `BLOCKED` — needs a producer/transport/contract field that does not exist (45)
+### `BLOCKED` / `REAL_GAP` — needs a producer/transport/contract field (38)
 
-`PAR-02, PAR-03, PAR-06, PAR-09, PAR-19,
-TAB-06, TAB-21, SIDE-05,
+Accurate set after the wave-81 re-verification:
+
+`PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-19,
+TAB-06, SIDE-05,
 MSG-001, MSG-002, MSG-003, MSG-005,
 TOOL-006, TOOL-011, DIFF-001, DIFF-003, FFI-02, FFI-03, FFI-04, FFI-06,
-FFI-07, FFI-08, FFI-11, THEME-08, THEME-13,
-THEME-14, CP-07, CP-09,
-DIALOG-06, DIALOG-07, DIALOG-08, DIALOG-09,
-DIALOG-13, DIALOG-14, DIALOG-15, DIALOG-16, DIALOG-17, DIALOG-18,
-DIALOG-19, LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009`.
+FFI-07, FFI-08, FFI-11, THEME-13, THEME-14,
+DIALOG-07, DIALOG-13, DIALOG-14, DIALOG-15, DIALOG-17, DIALOG-18,
+LAY-10, LAY-11, LAY-13, MD-007, MD-008, MD-009, MEDIA-001`.
+(`CP-07`/`CP-09` moved to `LANDED` in wave-80; `TAB-21`, `THEME-08`,
+`DIALOG-06/08/09/16/19`, `DIFF-005`, `CP-34`, `CP-37` moved to `LANDED` in
+wave-81 — see the wave-81 section at the top. `PAR-07`, `PAR-09` and `DIFF-001`
+remain `UNCLEAR` pending a fresh trace check.)
 
 | Item | Exact missing seam |
 | --- | --- |

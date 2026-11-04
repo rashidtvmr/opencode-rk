@@ -12874,3 +12874,303 @@ Lanes rebased to `e6dcda6c` (runtime/platform) and dispatched:
   (THEME-05, FFI-10/07/08/11, PAR-09); agent/diagram (CP-07, MD-008/009/007,
   DIALOG-16).
 Dispatch ledger: `artifacts/DISPATCH_LEDGER.md`. Prompts: `artifacts/prompts/PKG-{B,D,E,F}.md`.
+
+## 2026-11-04 — disk exhaustion repair (user-reported; builds failing)
+
+Symptom: `rustc-LLVM ERROR: IO failure on output stream: No space left on device`;
+`df` showed **2.0G avail / 100%** on `/System/Volumes/Data`. All four lane test
+runs and reviews were failing. User: "clear stale resources, this project is
+occupying most of my storage."
+
+Reclaimed (all regenerable build output / superseded-system artifacts — no
+source, no unmerged work, no user data):
+- canonical `opencode-rk-recovery-20261005/target` = 54G (stale since Oct 31).
+- 4 lane worktree `target/` dirs (W68-CORE/F2-DIALOG/F3-MCP/F1-DIFF) ~12.8G.
+- 24 stale `*/target` dirs across `/Users/mymac/Projects` ~36G (Oct/Sep mtimes).
+- `opencode-rk/.git/recovery-evidence` + `delivery-state` embedded `target/` dirs
+  = 36.3G (kept all text evidence).
+- `opencode-rk/.git/delivery-state/workspaces` = 8.6G (superseded per-job clones,
+  lsof-confirmed unused).
+- Killed 14 stale `oc2` test fixtures (temp `--data-dir`, 1–4 days old); preserved
+  the user daemon `opencode serve --service` (PID 91328).
+
+Result: **117G avail (73%)**. Kept the active shared build cache
+(`.oc2-features-20261103/target`, 12G). `opencode-rk` now 21G; `.oc2-features` 13G.
+
+Note for future waves: per-worktree `target/` dirs reappear when a delegate runs
+`cargo` without `CARGO_TARGET_DIR`; sweep them after each wave.
+
+## 2026-11-04 — wave-76 published, wave-77 dispatched
+
+**wave-76 published to `main-v2`** (each pushed + `ls-remote` verified; canonical
+tree reconciled by plain file copy, clean except this scratchpad):
+
+| SHA | Item | Review |
+| --- | --- | --- |
+| `3217cf0d` | DIFF-005 + MD-005 + THEME-08 + PAR-10 | (prior wave) |
+| `b85e8e20` | PAR-10 repair | APPROVE (vyce-deepseek-v41) |
+| `f9ca2d93` | CP-29 + CP-24 | APPROVE (river) |
+| `2789a84d` | CP-37 + CP-34 | APPROVE (luna-free) |
+| `a9fe6859` | DIALOG-19 + DIALOG-09 + DIALOG-20 (model+DialogView) | APPROVE (vyce-combined) |
+| `fd6160e8` | forms routes + `question` tool (+ duplicate-id repair) | NEEDS_FIX→repair→APPROVE (vyce-combined) |
+
+Key repair: `FormService::create` used `insert(...).is_some()` which *replaced* the
+existing `FormDetail` before returning 400 (clobbering a settled form back to
+`pending` while `waiters` kept the old terminal value). Fixed with `contains_key`
+before any insert; test strengthened to assert the original form survives (fails
+on pre-fix insert). Server suite 831/0.
+
+All four lanes reset to `fd6160e8`, clean. Disk swept to **113G free (74%)**.
+
+**wave-77 dispatched** (all 4 lanes busy, base `fd6160e8`):
+- core `W68-CORE` — PKG-E4 (FORM-002 remainder) on vyce-combined.
+- platform `F1-DIFF` — crash `issue_url` non-char-boundary panic repair (the
+  reviewer-flagged defect: `&self.stack[..mid]`/`[..lo]` slices by raw byte offset)
+  on vyce-deepseek-v41. Brief `artifacts/prompts/BRIEF-CRASH-URL.md`.
+- ui `F2-DIALOG` — DIALOG-16 numeric settings (`NumericLimit::next` dead; live
+  dialog has only 2 rows) + experiments picker, on river. Brief `BRIEF-DIALOG16.md`.
+- runtime `F3-MCP` — TOOL-010 structured-argument rows for `execute` calls, on
+  luna-free. Brief `BRIEF-TOOL010.md`.
+
+Non-blocking follow-ups recorded (do not lose): DIALOG-19 `set_plugins_ready`
+seeded once, never re-driven (Loading-plugins overlay never auto-hides when
+`live.is_none()`); DIALOG-20 live panic hook + full-screen render/actions unwired.
+
+
+## 2026-11-04 — wave-77 candidates verified, under review
+
+All four lanes produced verified candidates (base `fd6160e8`); each full CLI suite
+is 0-failed. Independent reviews dispatched (author != reviewer), one per candidate:
+
+| Lane | Candidate | Item | Focused | Full CLI | Reviewer |
+| --- | --- | --- | --- | --- | --- |
+| platform | `954d5673` | crash `issue_url` char-boundary panic repair | crash 12/0 | 2265/0 | vyce-combined |
+| runtime | `af2d3140` | TOOL-010 execute child argument rows | tool010 1/0 | 2265/0 | river |
+| core | `169c504e` | F002-R3 permission option cycling gate | f002r3 1/0 | 2265/0 | luna-free |
+| ui | `0f9cc7aa` | DIALOG-16 numeric settings + experiments picker | dialog16 2/0 | 2266/0 | vyce-deepseek-v41 |
+
+**Stale shared-target trap (root-caused).** The shared `CARGO_TARGET_DIR` served a
+stale `oc2` test binary across worktrees; `cargo test --no-run` reported "Finished"
+without rebuilding (source mtime < binary mtime). It hid the DIALOG-16 compile
+errors (`NumericLimit: Eq` on `SettingsRow`, `cycle(&self)` mutability) and the
+missing new tests. Fix: `cargo clean --offline -p opencode-rk-cli` then rebuild.
+Apply this whenever a new test name does not appear in the output.
+
+**W68-CORE R2 partials preserved.** The PKG-E4 delegate committed R3 (`02082abb`)
+then hit max steps mid-R2 with a non-compiling tree (undefined `RejectStage`,
+unpatched `DecisionIntent::Reject { message }` sites, unwired
+`dispatch_permission_reply`). Partial diff saved to
+`artifacts/patches/core-f002r2-partial.patch`
+(sha256 `26e50eb4f173d00463a537fa6d8fcbd2f7320d1c46791672e7208c4deeab2a85`); lane
+restored to R3 and R3 published as the core candidate. Next-wave briefs written:
+`BRIEF-F002R2.md` (finish from the patch), `BRIEF-F002R1.md` (presentation
+header+body), `BRIEF-DIALOG19-PLUGINS.md`.
+
+**Orchestrator follow-ups on candidates** (independent review still required on the
+resulting SHA): `954d5673` moved the char-boundary helper above the `CrashScreen`
+doc comment; `169c504e` tidied the F002-R3 test module (split merged `use`, dropped
+dead-code shims). DIALOG-16 was finished by the orchestrator after the delegate hit
+max steps (compile fixes + live consumer + two tests).
+
+
+## 2026-11-04 — wave-77 published; wave-78 dispatched
+
+**Wave-77 published and verified** (fast-forward + `git ls-remote` on the GitHub push
+remote; canonical reconciled by plain file copy + `git add`):
+- `af2d3140` TOOL-010 (runtime), `cf2cf225` crash `issue_url` repair (platform,
+  re-applied from reviewed `954d5673`, content-identical), `a3f01f69` DIALOG-16
+  (ui, re-applied from reviewed `0f9cc7aa`, content-identical).
+- **`main-v2` = `a3f01f69`**; full CLI **2269/0**.
+
+**F002-R3 review returned NEEDS_FIX** (luna-free on `169c504e`):
+1. ArrowLeft/ArrowRight were NOT routed to the permission cycle gate (only `h`/`l`
+   bytes reached `permission_cycle`); the arrow half fell through to the TAB-23 leader
+   arm (which excludes dialogs) and was discarded. Upstream binds `left,h`/`right,l`
+   (`permission.tsx:465-485`).
+2. The test exercised only the model helper (`DialogView::permission_cycle`), not the
+   live key dispatch.
+
+**Orchestrator repair → `bc67e13e`** (core lane, base `fd6160e8`): extracted
+`permission_modal_key(view, event) -> (handled, needs_paint)` as the single live
+routine for the permission prompt's own keys, called at the top of the modal handling
+(`tui_entry.rs:11164`) before the shared arrow navigation and the byte dispatch.
+Handles ArrowLeft/h → cycle(false), ArrowRight/l → cycle(true), and consumes
+Up/Down + Ctrl-N/Ctrl-B as inert (unbound upstream). Removed the now-duplicate
+byte-dispatch `b'h'`/`b'l'` arms and the `14`/`2` guards (now plain `14 => next()`,
+`2 => prev()`), and the redundant Up/Down guard in the arrow arm. Added
+`permission_modal_key_tests` (5 tests) driving the exact live routine: h/l + arrows
+cycle, Up/Down + Ctrl-N/B inert, single-option inert, Enter/Escape pass through, a
+non-permission modal keeps its own keys. Focused `f002r3` **5/0**; full CLI **2269/0**.
+Fresh independent review dispatched (river, `ses_e5b4787ceffemv6ZTZKlnrjr6b`).
+
+**Wave-78 dispatched** (all 4 lanes busy):
+- core `W68-CORE` — F002-R3 repair `bc67e13e`, review running.
+- platform `F1-DIFF` — F002-R2 reject-reason stage + payload + server consume on
+  vyce-deepseek-v41 (`ses_e5b4dacf2ffeseA8PyW5RLjC4c`). The prior vyce-combined run
+  burned its whole budget on reconnaissance and landed nothing; `BRIEF-F002R2.md`
+  rewritten with the exact anchor list + "apply the preserved patch FIRST".
+- ui `F2-DIALOG` — DIALOG-19 plugin-readiness chrome repair `62242532` (focused
+  dialog19 3/0; full 2269/0); review running (vyce-combined,
+  `ses_e5b4dc20dffe7uGr8ha6hq1X8H`).
+- runtime `F3-MCP` — CP-09 agent color producer chain + live consumer on luna-free
+  (`ses_e5b4d9183ffemCkNtAzLMzl41j`). Brief `BRIEF-CP09.md`. The already-tested model
+  (`AgentFact.color`, `agent_palette`, `agent_color`, `prompt_highlight`,
+  `border_highlight`, `user_rail_color`) had ZERO non-test callers; the deliverable is
+  the server `mention_agents()` `color` field + CLI catalogue parse + a reachable live
+  composer/rail consumer.
+
+**SIDE-05 re-scoped as low priority.** Upstream usage limits come from the external
+OpenCode Console API (`packages/core/src/usage-limits.ts`,
+`packages/server/src/handlers/usage.ts`); no in-repo credential/route exists, so a live
+consumer is hard to prove. Moved from "blocked" to the prepared queue.
+
+**Disk:** ~111G free (75%). User daemon preserved.
+
+## Wave-79 (2026-11-04)
+
+**main-v2 = `1a0af96e`** (pushed + ls-remote verified). Canonical reconciled.
+
+**F002-R2 (platform F1-DIFF) — orchestrator-finished, candidate `2610657f` (base
+`a3f01f69`).** The delegate stalled with the implementation mostly written; the
+orchestrator completed it and fixed a real defect: `confirm_reject_stage` consumed the
+`RejectStage`, so a REJECTED ACK could not restore the permission card. Fix: keep the
+stage through the pending decision; `reject_stage()` is now phase-aware (Open only) and
+`reject_stage_retained()` (stage is_some) drives a new pending-swallow block in
+`native_loop` that keeps the stage's keys from reaching the permission byte dispatch
+(which would otherwise emit a spurious `pending-decision` error). Added the server test
+(`reply_scoped_with_message` delivers `Some(reason)` / `None`). Focused `f002r2` 13/0;
+full CLI 2281/0; server 833/0. Patch `artifacts/patches/f002r2-reviewed.patch`
+(sha256 `ea7240c4587f6c9d69e701732cfbbedb8b98d64f675f06e56e3e83181c9b5de0`).
+Fresh independent review dispatched: vyce-combined `ses_e5b2d3a54ffei7S92V9Q3C8JvS`.
+
+**CP-09 (runtime F3-MCP) — re-dispatched.** The first delegate stalled; the partial had
+a duplicated `fn merge` (syntax error) which the orchestrator repaired. Key finding: the
+composer path is NOT observable because `set_composer_agent` has zero live callers
+(that is CP-07), so `composer_agent` is always `None`. The live consumer must be the
+**user-message rail**: the live row carries `agent: Option<String>`
+(`native_message_rows.rs:860,1146`), and `user_rail_color_for_delivery` (`:1972`) has
+zero live callers. Palette source: `SemanticPalette.categorical` names +
+`hues[name]` (nine steps). Re-dispatched to vyce-deepseek-v41
+`ses_e5b1e681dffedMWUDc7z6YBN9W` with `BRIEF-CP09-R2.md` (exact seams + partial).
+Partial preserved at `artifacts/patches/cp09-partial.patch`
+(sha256 `65819079729e403cd4f219543c8e56a7010a0b9121c457b6b0c1ba2ee028d838`).
+
+**Disk:** ~111G free. User daemon preserved.
+
+## Wave-80 (2026-11-04)
+
+**main-v2 = `c2ad1750`** (pushed + ls-remote verified: `6c713efb..c2ad1750`). Canonical
+reconciled (only the two docs dirty).
+
+**CP-09 + CP-07 PUBLISHED as `c2ad1750`.** The composer-rail agent-color feature is the
+same checklist requirement as CP-07 ("data-driven agent selection and colors: custom
+agent, hidden agent, subagent-only agent, explicit color, palette wrap"), so both are
+now `LANDED`. Server `mention_agents()` advertises a validated `color`
+(`#rgb`/`#rrggbb`); CLI parses `/api/commands` into `AgentFactOwned { id, hidden,
+subagent, color }`, seeds the selected agent from the first selectable entry, cycles it
+on `AgentCycle` (shift+tab), and `home_composer_border_cell_style` paints the selected
+agent color for the `┃`/`╹` rail glyph (fallback `Slot::Border`). Independent APPROVE on
+`cad89dd4` (river `ses_e5af94a6cffexDfy5tXRrMef1V`); content-identical re-apply onto
+`6c713efb` (336/336 added+removed lines identical). Focused `cp09` 7/0; full CLI
+**2297/0**; server 832/0. Approved patch `artifacts/patches/cp09-approved.patch`
+(sha256 `bfdfc17f632c171d0c08200db8413c4fa5626b827286be93bf3e2a949e50c1e1`).
+
+**F002-R1 (core W68-CORE) — re-dispatched** (river `ses_e5aef8658ffeK15LRTuwlkZl07`,
+brief `BRIEF-F002R1-R2.md`). First delegate stalled after recon, leaving only a 3-line
+partial (`PendingPermission.permission_tool_part: Option<serde_json::Value>`). Seam
+resolved: the server permission payload (`run_owner.rs:26-45`) carries no tool
+`input`/`metadata`, so `fetch_permission` must resolve the assistant tool part by
+`source.callID` via the session messages, then render
+`permission_presentation(...)` header+body into the dialog `message_lines`
+(`native_view_dialogs.rs:1438` → render `:2291`).
+
+**TOOL-006 (platform F1-DIFF) — re-dispatched** (xkiro-gpt-6-luna
+`ses_e5aef8657ffeHa26wPgZPVO15s`, brief `BRIEF-TOOL006.md`). First delegate stalled after
+recon with no edits. Deliver the minimum live path: server `GET /api/shell` +
+`GET /api/shell/{id}/output` (cursor+limit) backed by a real shell registry, plus a live
+CLI `BackgroundShell` consumer (discover + poll at a non-busy cadence, bounded output).
+
+**MSG-005 (ui F2-DIALOG) — dispatched** (vyce-combined
+`ses_e5af4d304ffeMmVpBCSdUy754p`, brief `BRIEF-MSG005.md`). Live skill/file message
+chips end-to-end (contracts → storage → server → CLI projection → render); no flat
+`Vec<String>` fields.
+
+**Storage reclaim.** Removed regenerable `*.tar` source snapshots and bundled runtimes
+(`js_runtime`/`.rustup`/`.cargo`/`node_modules`) from stale `.git/recovery-evidence` →
+reclaimed ~3 GB (evidence logs/JSON/MD preserved). `.git` 19G → 16G. Shared `target/`
+is 15G; two stray per-lane `target/` dirs (F3-MCP, W68-CORE ~1.7G each) are in use and
+must be swept after their lanes finish.
+
+**Disk:** ~108G free. User daemon preserved.
+
+## Wave-81 (2026-11-04) — audit + next candidates
+
+**Independent audit** (vyce-deepseek-v41 `ses_e5aec7886ffefDQ2gHWagDoGma`) of the 45
+items the summary table listed `BLOCKED`/`REAL_GAP` at `c2ad1750` → **7 already live**:
+`TAB-21`, `THEME-08`, `DIALOG-06/08/09/16/19`. Orchestrator spot-checks confirmed
+`DIFF-005`, `CP-34`, `CP-37` also live. `PARITY_STATUS.md` counts updated to
+`ALREADY_CORRECT 145 / REAL_GAP 1 / BLOCKED 37 / LANDED 40`; the accurate remaining
+set is 38, dominated by items with a tested model but **no backend producer**
+(`MSG-001/002/003/005`, `TOOL-006/011`, `STATE-003`, `DIALOG-07/13/14/15/17/18`,
+`LAY-10/11/13`, `TAB-06`, `SIDE-05`) or a missing substrate/ABI (`MD-007/008/009`,
+`THEME-13/14`, `MEDIA-001`, `FFI-*`), plus harness obligations (`PAR-02/03/06/09/19`).
+
+**F002-R1 committed `d8f69d33`** (base `6c713efb`, one file `tui_entry.rs`, +457/-8).
+Delegate stalled at the commit step; orchestrator committed the exact working-tree
+bytes. Focused `f002r1` **7/0**; full CLI **2299/0**. Patch
+`artifacts/patches/f002r1-candidate.patch` (sha256 `8e3881ef…`), pre-checked to apply
+cleanly onto `c2ad1750` via `git apply --3way`. Under independent review
+(vyce-deepseek-v41 `ses_e5ae8b186ffecocJenO0lQf3oE`).
+
+**Running writers:** TOOL-006 (platform F1-DIFF, xkiro-gpt-6-luna
+`ses_e5aef8657ffeHa26wPgZPVO15s`); TOOL-011 (ui F2-DIALOG, retry on river
+`ses_e5ae3646effetE73KMFSUyrDDP` after the 1st attempt returned no text/edits);
+CP-38 (runtime F3-MCP, xkiro-gpt-6-luna `ses_e5ae5c27affeRZrO6FVwryaaFm`).
+
+**Next candidates prepared:** `BRIEF-DIALOG07.md` (live per-row select footer, CLI-only,
+model `SelectOption::row_footer` at `native_palette.rs:1136` is test-only; live select
+render `native_view_dialogs.rs:2306-2370` drops the `&SelectOption`). `STATE-003`
+re-confirmed backend-blocked: the server never emits a `retry` part (only the CLI
+projection at `native_chat_projection.rs:386` parses one), so the countdown has no
+live deadline producer.
+
+## Wave-82 (2026-11-04) — TOOL-011 published; TOOL-006/CP-38 re-dispatched
+
+**Route change (user directive).** `@xkiro-haiku-5-5`, `@xkiro-gpt-6-luna` and
+`@xkiro-mimo-v2-6-flash` are EMPTY for ~15h from 2026-11-04 — do not dispatch.
+Their in-flight sessions (TOOL-006 `ses_e5aef8657ffeHa26wPgZPVO15s`, CP-38
+`ses_e5ae5c27affeRZrO6FVwryaaFm`) are treated as dead and were re-dispatched.
+Allowed routes now: `@openai-gpt6-luna`, `@vyce-deepseek-v41`,
+`@9router-vyce-deepseek-v4.1-free-combined`, `@9router-river-glm-5-3-flash`,
+`@9router-luna-free`.
+
+**TOOL-011 (live execute content viewer) PUBLISHED.** Two delegate attempts
+failed (vyce-combined silent; river max-steps leaving a dirty non-compiling
+tree); the orchestrator finished the uncommitted bytes. Candidate `5929b143`
+on `recovery/ui` (base `6c713efb`, 5 files, +652/-18). The 2 initially-failing
+`tool011_*` tests were WRONG EXPECTATIONS, not code bugs: upstream
+`GutteredCode` (`dialog-execute.tsx:251`) numbers each block from 1 and
+`digits` (`:56`) is shared, right-padded — so the JSON output row is
+`1 {"ok":true}` and 40 lines give `" 1 line1"`. Fixed; focused **7/0**, full CLI
+**2299/0** on `5929b143`.
+- Independent review (openai-gpt6-luna `ses_e5acc871effeQOdDccM9emFT0b`):
+  **APPROVE** — right-aligned fixed-width gutter keeps content start aligned as
+  upstream; per-block restart + shared digits honoured; body bounded; Home/End
+  unbound is the documented acceptable partial (no decoded `InputEvent`).
+- Published: re-applied `6c713efb..5929b143` onto `d1bc0eb9` via
+  `git apply --3way` (clean); added/removed line multiset IDENTICAL (670 lines)
+  → APPROVE transferred. Committed canonical **`7765484e`**, pushed,
+  `ls-remote` confirmed. Post-merge focused `tool011` on `7765484e` **7/0**;
+  full CLI **2312/0**. Patch `artifacts/patches/tool011-apply.diff`
+  (sha256 `c49f53e8…`). `recovery/ui` reset to `7765484e`.
+
+**main-v2 history:** `…1a0af96e → 6c713efb → c2ad1750 → d1bc0eb9 → 7765484e`.
+
+**Re-dispatched (allowed routes, background):**
+- TOOL-006 (platform F1-DIFF, base `6c713efb`) on `@vyce-deepseek-v41`
+  `ses_e5acbe132ffedi57YtzYtGE35n`.
+- CP-38 (runtime F3-MCP, base `c2ad1750`) on `@9router-river-glm-5-3-flash`
+  `ses_e5acbb42cffe55r67XsZAeIEyQ`.
+
+**Next:** DIALOG-07 (live per-row select footer) to the first free lane;
+MSG-001/002/003 transcript grouping adapter; keep ledger current.
