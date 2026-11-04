@@ -7070,12 +7070,25 @@ struct PendingPermission {
     /// (`permission.tsx:428-552`); the oc2 payload already carried them
     /// (`PermissionRequest.resources`) and the client dropped them.
     message: Option<String>,
+    /// F002-R1: the request's own bounded resources, re-parsed so the live
+    /// presentation has the upstream `resources` view
+    /// (`util/permission.ts:121-128` reads `resources[0]` for path fallbacks
+    /// and paints one `- {item}` line per resource).
+    resources: Vec<String>,
     /// TOOL-002: the pending request's bounded tool `callID`. Upstream joins
     /// on `request.source.type === "tool" && request.source.id === part.id`
     /// (`routes/session/index.tsx:2793-2799`); oc2's `PermissionSource`
     /// serializes the join key as `source.callID`
     /// (`crates/server/src/run_owner.rs:40-45`). `None` for non-tool sources.
     permission_call_id: Option<String>,
+    /// F002-R1: resolved source tool part used for the request presentation.
+    permission_tool_part: Option<serde_json::Value>,
+    /// F002-R1: the request's own `metadata` (`permission.tsx:163`
+    /// `props.request.metadata`), when the payload carries it. oc2's
+    /// `PermissionRequest` currently has no `metadata` field, so this is
+    /// `None` on the live wire; the presentation still reads the field so a
+    /// future producer is honoured instead of hard-coding a dropped value.
+    request_metadata: Option<serde_json::Value>,
 }
 
 #[cfg(feature = "native")]
@@ -7149,6 +7162,218 @@ mod permission_save_eligible_tests {
     }
 }
 
+/// F002-R1: bounded resource list for one pending request: strings only,
+/// control-free, 160 chars and 32 entries max (the same per-item bounds as
+/// [`permission_message_from_entry`]).
+#[cfg(feature = "native")]
+fn permission_resources_from_entry(entry: &serde_json::Value) -> Vec<String> {
+    entry
+        .get("resources")
+        .and_then(serde_json::Value::as_array)
+        .map(|resources| {
+            resources
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .filter(|resource| !resource.is_empty())
+                .map(|resource| {
+                    resource
+                        .chars()
+                        .filter(|character| !character.is_control())
+                        .take(160)
+                        .collect::<String>()
+                })
+                .take(32)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// F002-R1: the request's own `metadata` object (`permission.tsx:163`
+/// `props.request.metadata`), bounded to a small serialized size so a hostile
+/// payload cannot inflate the dialog. Absent or non-object metadata resolves
+/// `None`; the presentation then reads an empty object, matching the current
+/// oc2 wire (whose `PermissionRequest` carries no `metadata`).
+#[cfg(feature = "native")]
+fn permission_request_metadata(entry: &serde_json::Value) -> Option<serde_json::Value> {
+    let metadata = entry.get("metadata")?;
+    if !metadata.is_object() {
+        return None;
+    }
+    if serde_json::to_string(metadata)
+        .map(|text| text.len())
+        .unwrap_or(usize::MAX)
+        > 8_192
+    {
+        return None;
+    }
+    Some(metadata.clone())
+}
+
+/// F002-R1: resolve a pending request's source tool part over the session
+/// transcript. Upstream joins `request.source` to the assistant tool part
+/// inside its reactive store (`permission.tsx:122-130`); oc2 has no
+/// reactive store, so the poll performs one bounded transcript read
+/// (`GET /api/sessions/{id}/messages?limit=200`, the same bounded read the
+/// child history uses). Transport or parse failures resolve `None` and
+/// never block the pending poll.
+#[cfg(feature = "native")]
+fn permission_tool_part_from_messages(
+    origin: &str,
+    session: &str,
+    auth: Option<&str>,
+    call_id: &str,
+) -> Option<serde_json::Value> {
+    if session.is_empty() {
+        return None;
+    }
+    let body = http_request(
+        origin,
+        "GET",
+        &format!("/api/sessions/{session}/messages?limit=200"),
+        None,
+        auth,
+    )
+    .ok()?;
+    let value: serde_json::Value = serde_json::from_str(&body).ok()?;
+    permission_tool_part_from_messages_value(&value, call_id)
+}
+
+/// Pure join used by [`permission_tool_part_from_messages`]: scans the
+/// transcript rows' parts for the request's tool part. oc2's public
+/// transcript emits its tool parts as `{"type":"tool_call","call_id":...,
+/// "arguments":...}` (the `list_messages` projection); the upstream
+/// assistant shape (`part.id`, `state.input`/`state.metadata`) is accepted
+/// for parity. Scanning is capped and the upstream branch skips
+/// still-streaming states (`permission.tsx:128`).
+#[cfg(feature = "native")]
+fn permission_tool_part_from_messages_value(
+    value: &serde_json::Value,
+    call_id: &str,
+) -> Option<serde_json::Value> {
+    const MAX_SCANNED_PARTS: usize = 256;
+    let rows = value
+        .get("messages")
+        .or_else(|| value.get("data"))
+        .and_then(serde_json::Value::as_array)
+        .or_else(|| value.as_array())?;
+    for row in rows {
+        let parts = row
+            .get("parts")
+            .and_then(serde_json::Value::as_array)
+            .or_else(|| {
+                // Upstream transcript rows keep a `content` array; only
+                // assistant messages carry tool parts upstream
+                // (`permission.tsx:124-125`).
+                if row
+                    .get("type")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|kind| kind != "assistant")
+                {
+                    return None;
+                }
+                row.get("content").and_then(serde_json::Value::as_array)
+            });
+        let Some(parts) = parts else { continue };
+        for part in parts.iter().take(MAX_SCANNED_PARTS) {
+            let resolved = permission_tool_part_from_part(part, call_id);
+            if resolved.is_some() {
+                return resolved;
+            }
+        }
+    }
+    None
+}
+
+/// Normalized single-part join (`permission.tsx:126-128`): the oc2
+/// `tool_call` part carries the bounded `arguments` at the top and no
+/// state metadata; the upstream part hides both under `state` and must not
+/// stream. oc2's `pending`/`completed` statuses have no streaming analog,
+/// so both resolve.
+#[cfg(feature = "native")]
+fn permission_tool_part_from_part(
+    part: &serde_json::Value,
+    call_id: &str,
+) -> Option<serde_json::Value> {
+    match part.get("type").and_then(serde_json::Value::as_str) {
+        Some("tool_call") => {
+            if part.get("call_id").and_then(serde_json::Value::as_str) != Some(call_id) {
+                return None;
+            }
+            Some(serde_json::json!({
+                "input": part.get("arguments").cloned().unwrap_or(serde_json::Value::Null),
+                "metadata": serde_json::Value::Null,
+            }))
+        }
+        Some("tool") => {
+            if part.get("id").and_then(serde_json::Value::as_str) != Some(call_id) {
+                return None;
+            }
+            if part.pointer("/state/status").and_then(serde_json::Value::as_str)
+                == Some("streaming")
+            {
+                return None;
+            }
+            Some(serde_json::json!({
+                "input": part.pointer("/state/input").cloned().unwrap_or(serde_json::Value::Null),
+                "metadata": part.pointer("/state/metadata").cloned().unwrap_or(serde_json::Value::Null),
+            }))
+        }
+        _ => None,
+    }
+}
+
+/// F002-R1: the live permission dialog body. With a resolved tool part the
+/// upstream header rows and per-action body are painted into the dialog's
+/// shared `message_lines` (`permission.tsx:196-227`): `△ Permission
+/// required`, then the `icon title` row unless the raw action is `shell`;
+/// the body is the edit diff block for `edit`, the muted `Patterns` block
+/// for `external_directory`, else the presentation lines. Without a
+/// resolved part the helper yields `None` and the caller keeps FORM-002's
+/// bounded resource body — the poll never invents an input. The 16-line
+/// block cap is enforced again by `prompt_set_message`
+/// (`MAX_BLOCK_LINES`).
+#[cfg(feature = "native")]
+fn permission_dialog_message(pending: &PendingPermission) -> Option<String> {
+    let tool_part = pending.permission_tool_part.as_ref()?;
+    let input = tool_part.get("input").unwrap_or(&serde_json::Value::Null);
+    let metadata = tool_part.get("metadata").unwrap_or(&serde_json::Value::Null);
+    let passthrough = |value: &str| value.to_owned();
+    let presentation = crate::native_permissions::permission_presentation(
+        &pending.title,
+        &pending.resources,
+        input,
+        pending
+            .request_metadata
+            .as_ref()
+            .unwrap_or(&serde_json::Value::Null),
+        metadata,
+        &passthrough,
+    );
+    let mut rows = vec!["△ Permission required".to_owned()];
+    if pending.title != "shell" && !presentation.title.is_empty() {
+        rows.push(format!("  {} {}", presentation.icon, presentation.title));
+    }
+    match pending.title.as_str() {
+        "edit" => rows.extend(
+            crate::native_permissions::edit_body_lines(&presentation)
+                .into_iter()
+                .map(|line| line.text),
+        ),
+        "external_directory" => {
+            if !presentation.lines.is_empty() {
+                rows.push("Patterns".to_owned());
+                // `presentation.lines` already carry the upstream `- {item}`
+                // prefix (`native_permissions.rs` external_directory arm,
+                // mirroring `util/permission.ts:127`); appending them verbatim
+                // matches `permission.tsx:172-181`.
+                rows.extend(presentation.lines.iter().cloned());
+            }
+        }
+        _ => rows.extend(presentation.lines.iter().cloned()),
+    }
+    Some(rows.join("\n"))
+}
+
 #[cfg(feature = "native")]
 fn permission_message_from_entry(entry: &serde_json::Value) -> Option<String> {
     let resources = entry.get("resources")?.as_array()?;
@@ -7213,12 +7438,26 @@ fn fetch_permission(
         // TOOL-002: carry the tool-call join key when this request's source
         // is a tool permission (`index.tsx:2793-2799`).
         let permission_call_id = permission_call_id_from_source(entry.get("source"));
+        // F002-R1: with a tool permission still pending, one bounded
+        // transcript read per poll tick clears metadata drift (upstream's
+        // memo re-joins reactively, `permission.tsx:122-130`); a failed read
+        // keeps the part `None` and leaves the poll untouched.
+        let permission_tool_part = permission_call_id
+            .as_deref()
+            .and_then(|call_id| permission_tool_part_from_messages(origin, session, auth, call_id));
+        // F002-R1: the request's own metadata (`permission.tsx:163`), when the
+        // payload carries it. Absent today; read structurally so a producer is
+        // honoured rather than dropped.
+        let request_metadata = permission_request_metadata(entry);
         return Ok(Some(PendingPermission {
             message: permission_message_from_entry(entry),
+            resources: permission_resources_from_entry(entry),
             id: id.to_owned(),
             title,
             persistent_allowed,
             permission_call_id,
+            permission_tool_part,
+            request_metadata,
         }));
     }
     Ok(None)
@@ -7259,6 +7498,274 @@ mod form002_tests {
         let absent: serde_json::Value =
             serde_json::from_str(r#"{"id":"p3","action":"bash"}"#).unwrap();
         assert!(permission_message_from_entry(&absent).is_none());
+    }
+}
+
+/// F002-R1: the pending permission renders the live per-action
+/// `permissionPresentation` header + body resolved from the request's
+/// source tool part (upstream `permission.tsx:122-130,169-227`).
+#[cfg(all(test, feature = "native"))]
+mod f002r1_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn passthrough_format(value: &str) -> String {
+        value.to_owned()
+    }
+
+    fn pending(
+        title: &str,
+        resources: Vec<String>,
+        message: Option<String>,
+        tool_part: Option<serde_json::Value>,
+    ) -> PendingPermission {
+        PendingPermission {
+            id: "p1".to_owned(),
+            title: title.to_owned(),
+            persistent_allowed: false,
+            message,
+            permission_call_id: Some("c1".to_owned()),
+            permission_tool_part: tool_part,
+            resources,
+            request_metadata: None,
+        }
+    }
+
+    /// F002-R1: the request's own `metadata` (upstream `permission.tsx:163`)
+    /// reaches the presentation. oc2's wire has no `metadata` field today, so
+    /// this pins the structural read: a payload that carries `metadata` must
+    /// be honoured, not dropped.
+    #[test]
+    fn f002r1_request_metadata_reaches_presentation() {
+        let mut pending = pending(
+            "webfetch",
+            Vec::new(),
+            None,
+            Some(json!({"input": {}, "metadata": null})),
+        );
+        // Without request metadata the url falls back to the (empty) input.
+        assert_eq!(
+            permission_dialog_message(&pending).as_deref(),
+            Some("△ Permission required\n  % WebFetch "),
+        );
+        // With request metadata the url is resolved from it.
+        pending.request_metadata = Some(json!({"url": "https://example.test/x"}));
+        let message = permission_dialog_message(&pending).expect("resolved part paints");
+        assert!(message.contains("% WebFetch https://example.test/x"), "\n{message}");
+    }
+
+    /// `{action:"edit", input:{path:"a.rs"}, metadata:{files:[{patch:"..."}]}}`
+    /// paints the warning header, the `icon title` row, and the diff lines.
+    #[test]
+    fn f002r1_edit_presentation_paints_header_and_diff_lines() {
+        let pending = pending(
+            "edit",
+            Vec::new(),
+            None,
+            Some(json!({
+                "input": {"path": "a.rs"},
+                "metadata": {"files": [{"patch": "-old line\n+new line"}]},
+            })),
+        );
+        let message = permission_dialog_message(&pending).expect("resolved part paints");
+        assert!(message.contains("△ Permission required"), "\n{message}");
+        assert!(message.contains("→ Edit a.rs"), "\n{message}");
+        assert!(message.contains("-old line"), "\n{message}");
+        assert!(message.contains("+new line"), "\n{message}");
+    }
+
+    /// `{action:"external_directory", resources:["/x/*"]}` paints the muted
+    /// `Patterns` heading plus one `- {resource}` line per resource
+    /// (`permission.tsx:172-181`).
+    #[test]
+    fn f002r1_external_directory_presents_patterns_heading_and_resources() {
+        let pending = pending(
+            "external_directory",
+            vec!["/x/*".to_owned()],
+            None,
+            Some(json!({"input": {}, "metadata": null})),
+        );
+        let message = permission_dialog_message(&pending).expect("resolved part paints");
+        assert!(message.contains("Patterns"), "\n{message}");
+        assert!(message.contains("- /x/*"), "\n{message}");
+    }
+
+    /// `{action:"shell", input:{command:"ls"}}`: the body carries `$ ls` and
+    /// the `icon title` header row is suppressed for shell
+    /// (`permission.tsx:197-207`), even though the presentation still owns
+    /// the `# Shell command` title.
+    #[test]
+    fn f002r1_shell_keeps_command_body_and_drops_tool_title_row() {
+        let presentation = crate::native_permissions::permission_presentation(
+            "shell", &[], &json!({"command": "ls"}), &json!(null), &json!(null),
+            &passthrough_format,
+        );
+        assert_eq!(presentation.icon, "#");
+        assert_eq!(presentation.title, "Shell command");
+        let pending = pending(
+            "shell",
+            Vec::new(),
+            None,
+            Some(json!({"input": {"command": "ls"}, "metadata": null})),
+        );
+        let message = permission_dialog_message(&pending).expect("resolved part paints");
+        assert!(message.starts_with("△ Permission required"), "\n{message}");
+        assert!(message.contains("$ ls"), "\n{message}");
+        assert!(
+            !message.contains("Shell command"),
+            "shell must paint no tool-title header row:\n{message}"
+        );
+    }
+
+    /// FORM-002 fall-through: without a resolved tool part the helper yields
+    /// `None` so the caller keeps the request's own resource body.
+    #[test]
+    fn f002r1_unresolved_tool_part_keeps_form002_resource_body() {
+        let pending = pending("bash", Vec::new(), Some("~/secret.txt".to_owned()), None);
+        assert_eq!(permission_dialog_message(&pending), None);
+    }
+
+    /// Bounded resolution over the transcript: `source.callID` joins the
+    /// oc2 `tool_call` part (`/api/sessions/{id}/messages`), the upstream
+    /// assistant `tool` part shape still joins on `part.id`, streaming
+    /// states are skipped (`permission.tsx:128`), and an unmatched callID
+    /// resolves `None`.
+    #[test]
+    fn f002r1_messages_resolution_joins_call_and_misses_unknown_call() {
+        let messages = json!({
+            "messages": [
+                {"role": "user", "id": "m0"},
+                {"role": "assistant", "id": "m1", "parts": [
+                    {"type": "tool_call", "call_id": "c1", "name": "bash",
+                     "arguments": {"command": "cd /tmp"}, "status": "pending"}
+                ]},
+            ],
+        });
+        let resolved = permission_tool_part_from_messages_value(&messages, "c1")
+            .expect("joins the matching call_id");
+        assert_eq!(resolved["input"]["command"], "cd /tmp");
+        assert_eq!(permission_tool_part_from_messages_value(&messages, "other"), None);
+        assert_eq!(
+            permission_tool_part_from_messages_value(&json!({"messages": []}), "c1"),
+            None
+        );
+        assert_eq!(permission_tool_part_from_messages_value(&json!({}), "c1"), None);
+
+        let upstream = json!({
+            "data": [{"type": "assistant", "content": [
+                {"type": "tool", "id": "c2", "state": {"status": "completed",
+                 "input": {"path": "a.rs"}, "metadata": {"files": []}}}
+            ]}],
+        });
+        let resolved = permission_tool_part_from_messages_value(&upstream, "c2")
+            .expect("joins the upstream assistant tool part");
+        assert_eq!(resolved["input"]["path"], "a.rs");
+        let streaming = json!({
+            "data": [{"type": "assistant", "content": [
+                {"type": "tool", "id": "c2", "state": {"status": "streaming", "input": {}}}
+            ]}],
+        });
+        assert_eq!(permission_tool_part_from_messages_value(&streaming, "c2"), None);
+    }
+
+    use std::{io::{Read, Write}, net::{TcpListener, TcpStream}, time::{Duration, Instant}};
+
+    fn accept(listener: &TcpListener) -> TcpStream {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => return stream,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline, "f002r1 fixture accept deadline");
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("f002r1 fixture accept: {error}"),
+            }
+        }
+    }
+
+    fn read_request(stream: &mut TcpStream) -> String {
+        stream.set_nonblocking(false).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        stream.set_write_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut bytes = Vec::new();
+        loop {
+            let mut chunk = [0; 1024];
+            let read = stream.read(&mut chunk).unwrap();
+            assert!(read > 0, "f002r1 request ended before its body");
+            assert!(bytes.len() + read <= 16 * 1024);
+            bytes.extend_from_slice(&chunk[..read]);
+            if let Some(end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                let headers = std::str::from_utf8(&bytes[..end]).unwrap();
+                let length = headers.lines().find_map(|line| line.to_ascii_lowercase()
+                    .strip_prefix("content-length:").and_then(|value| value.trim().parse::<usize>().ok())).unwrap_or(0);
+                if bytes.len() >= end + 4 + length { return String::from_utf8(bytes).unwrap(); }
+            }
+        }
+    }
+
+    fn respond(stream: &mut TcpStream, body: &str) {
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+        stream.flush().unwrap();
+    }
+
+    /// One bounded permission poll against a live fixture: the permission
+    /// GET runs first, then the bounded messages read carries the resolver.
+    fn fetch_with_fixture(messages_body: String) -> (PendingPermission, String, String) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let token = "ab".repeat(32);
+        let fixture = std::thread::spawn(move || {
+            let mut stream = accept(&listener);
+            let permission_request = read_request(&mut stream);
+            let permission_body = r#"{"data":[{"id":"p1","action":"bash","resources":["~/secret.txt"],"save":["deny"],"source":{"type":"tool","messageID":"m1","callID":"c1"}}]}"#;
+            respond(&mut stream, permission_body);
+            drop(stream);
+            let mut stream = accept(&listener);
+            let messages_request = read_request(&mut stream);
+            respond(&mut stream, &messages_body);
+            drop(stream);
+            (permission_request, messages_request)
+        });
+        let pending = fetch_permission(&origin, "fx-session", Some(&token))
+            .unwrap()
+            .expect("fixture keeps one request pending");
+        let (permission_request, messages_request) = fixture.join().unwrap();
+        (pending, permission_request, messages_request)
+    }
+
+    #[test]
+    fn f002r1_fetch_permission_resolves_source_tool_part_from_messages() {
+        let (pending, permission_request, messages_request) = fetch_with_fixture(
+            r#"{"messages":[{"role":"assistant","parts":[{"type":"tool_call","call_id":"c1","name":"bash","arguments":{"command":"cargo test"},"status":"completed"}]}]}"#.to_owned(),
+        );
+        assert_eq!(pending.permission_call_id.as_deref(), Some("c1"));
+        assert_eq!(
+            pending.permission_tool_part,
+            Some(json!({"input": {"command": "cargo test"}, "metadata": null})),
+        );
+        // FORM-002's resource body survives alongside the resolution (it stays
+        // the fallback whenever the part resolves empty).
+        assert_eq!(pending.message.as_deref(), Some("~/secret.txt"));
+        assert_eq!(pending.resources, vec!["~/secret.txt".to_owned()]);
+        assert!(permission_request.starts_with("GET /api/session/fx-session/permission HTTP/1.1\r\n"));
+        assert!(messages_request.starts_with("GET /api/sessions/fx-session/messages?limit=200 HTTP/1.1\r\n"));
+    }
+
+    #[test]
+    fn f002r1_fetch_permission_leaves_unresolved_call_ids_empty() {
+        let (pending, _permission_request, messages_request) = fetch_with_fixture(
+            r#"{"messages":[{"role":"assistant","parts":[{"type":"tool_call","call_id":"other","name":"bash","arguments":{"command":"cargo test"},"status":"completed"}]}]}"#.to_owned(),
+        );
+        assert_eq!(pending.permission_call_id.as_deref(), Some("c1"));
+        assert_eq!(pending.permission_tool_part, None);
+        assert!(messages_request.starts_with("GET /api/sessions/fx-session/messages?limit=200 HTTP/1.1\r\n"));
     }
 }
 
@@ -9849,6 +10356,12 @@ fn native_loop(
                             needs_paint = true;
                         }
                         if !view.dialogs.is_open() {
+                            // F002-R1: compose the dialog body before the open
+                            // call consumes the pending request: the resolved
+                            // tool part paints the live upstream presentation,
+                            // FORM-002's resource body stays the fallback.
+                            let permission_message = permission_dialog_message(&pending)
+                                .or_else(|| pending.message.clone());
                             let permission_request_id = pending.id.clone();
                             let result = view.dialogs.open_permission_with_persistent(
                                 pending.id,
@@ -9862,14 +10375,13 @@ fn native_loop(
                                 // replies immediately (`permission.tsx:243-254`).
                                 view.dialogs
                                     .set_permission_session_has_parent(snapshot.parent_session);
-                                // FORM-002: paint the request's own resources
-                                // (upstream `permission.tsx:428-552` shows the
-                                // requested resource body inside the question;
-                                // the dialog previously passed `None`). The
-                                // message setter is the generic `message_lines`
-                                // path shared by every dialog kind.
-                                if let Some(message) = pending.message.as_deref() {
-                                    view.dialogs.prompt_set_message(Some(message.to_owned()));
+                                // F002-R1: with a resolved source tool part the
+                                // request paints the live upstream
+                                // presentation — header rows plus per-action
+                                // body (`permission.tsx:196-227`); FORM-002's
+                                // resource body stays the unresolved fallback.
+                                if let Some(message) = permission_message {
+                                    view.dialogs.prompt_set_message(Some(message));
                                 }
                             }
                             match result {
