@@ -243,6 +243,12 @@ pub struct NativeView {
     dock_session: Option<String>,
     /// Retained `/children` rows (running and inactive), in server order.
     live_child_rows: Vec<crate::native_children::live::ChildRow>,
+    /// TOOL-006: live background-shell facts (`GET /api/shell`) the Shell tab
+    /// body reads; held across scans so an expanded/running shell's output
+    /// stays observable.
+    live_shell_rows: Vec<crate::native_shell::ShellEntry>,
+    /// Last non-empty output line per shell id, from the held live shells.
+    live_shell_tails: Vec<(String, String)>,
     /// Painted dock pointer targets `(x, y, cells)` in frame coordinates.
     dock_hit: Vec<(u16, u16, u16)>,
     chat_row_classes: Vec<crate::native_view_chat::ChatRowClass>,
@@ -1165,6 +1171,8 @@ impl NativeView {
             dock_tab: SubagentsTab::new(),
             dock_session: None,
             live_child_rows: Vec::new(),
+            live_shell_rows: Vec::new(),
+            live_shell_tails: Vec::new(),
             dock_hit: Vec::new(),
             chat_row_classes: Vec::new(),
             chat_text_bounds: Vec::new(),
@@ -1605,6 +1613,36 @@ impl NativeView {
         self.dock_hit.clear();
     }
 
+    /// TOOL-006: retain the live background-shell projection. `entries` is the
+    /// daemon's `GET /api/shell` row list; `shells` are the held live shells
+    /// whose accumulated output supplies each row's visible tail line.
+    pub fn set_live_shell_rows(
+        &mut self,
+        entries: Vec<crate::native_shell::ShellEntry>,
+        shells: &[crate::native_shell::BackgroundShell],
+    ) {
+        let tails: Vec<(String, String)> = shells
+            .iter()
+            .filter_map(|shell| {
+                let id = shell.shell_id()?.to_owned();
+                let text = shell.output_text()?;
+                let tail = text.lines().rev().find(|line| !line.trim().is_empty())?.to_owned();
+                Some((id, tail))
+            })
+            .collect();
+        if entries == self.live_shell_rows && tails == self.live_shell_tails {
+            return;
+        }
+        self.live_shell_rows = entries;
+        self.live_shell_tails = tails;
+    }
+
+    /// The retained live background-shell rows (`GET /api/shell` order).
+    #[must_use]
+    pub fn live_shell_rows(&self) -> &[crate::native_shell::ShellEntry] {
+        &self.live_shell_rows
+    }
+
     /// CP-24: mirror the dock's active tab into the model unconditionally, so
     /// the mirror tracks the dock on EVERY transition (open, close, tab switch,
     /// child-status change), independent of `dock_session`.
@@ -1758,10 +1796,38 @@ impl NativeView {
     }
 
     fn dock_block_for(&self, width: u16) -> Option<DockBlock> {
-        if !self.dock.is_active(DockTabId::Subagents) {
-            return None;
-        }
-        let body = {
+        let body = if self.dock.is_active(DockTabId::Shell) {
+            // TOOL-006: the live background-shell rows read by the Shell tab
+            // body; a running shell shows its command, a `running` status cell
+            // and its last output line.
+            let mut rows = Vec::new();
+            for entry in &self.live_shell_rows {
+                let running = entry.is_running();
+                rows.push({
+                    let mut row = DockBodyRow::new(
+                        entry.row_label().to_owned(),
+                        if running { DockStyle::ShellActive } else { DockStyle::ShellBase },
+                        false,
+                    );
+                    if running {
+                        row = row.with_status(DockStatusCell::new("running", DockStyle::ShellActive));
+                    }
+                    row
+                });
+                if running {
+                    if let Some((_, tail)) =
+                        self.live_shell_tails.iter().find(|(id, _)| *id == entry.id)
+                    {
+                        rows.push(DockBodyRow::new(tail.clone(), DockStyle::ShellBase, false));
+                    }
+                }
+            }
+            if rows.is_empty() {
+                DockBody::Empty(crate::native_shell::SHELL_EMPTY_TEXT.to_owned())
+            } else {
+                DockBody::Rows(rows)
+            }
+        } else if self.dock.is_active(DockTabId::Subagents) {
             let rows = self.dock_tab.visible_rows();
             if rows.is_empty() {
                 DockBody::Empty(self.dock_tab.empty_text())
@@ -1782,6 +1848,8 @@ impl NativeView {
                         .collect(),
                 )
             }
+        } else {
+            return None;
         };
         self.dock.block(width, MAX_DOCK_ROWS, &body)
     }

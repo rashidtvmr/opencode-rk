@@ -8795,6 +8795,10 @@ fn native_loop(
     // current busy flag, transcript or live snapshot.
     let mut worker: Option<crate::native_view::OwnedWorker<native_turn::TurnWorker>> = None;
     let mut compact_worker: Option<NativeCompactWorker> = None;
+    let mut shell_scan_at_ms = 0u64;
+    // TOOL-006 live consumer: the collected background shells held across
+    // frames (accumulated output + drain state survive between scans).
+    let mut live_shells = Vec::<crate::native_shell::BackgroundShell>::new();
     // CP-13: the live `session.interrupt` arm (`prompt/index.tsx:500-531`),
     // held across frames so the arming window and 0.22 s flash advance on the
     // monotonic clock rather than resetting each paint.
@@ -9315,6 +9319,84 @@ fn native_loop(
         // observed idle transition so the watermark advances; a failure backs
         // off (250 ms * 2^attempt, capped 5 s; `session-tabs.tsx:242-263`).
         if let Some(snapshot) = live.as_ref() {
+            let shell_now = animation_start.now_ms() as u64;
+            if shell_now >= shell_scan_at_ms {
+                shell_scan_at_ms = shell_now.saturating_add(crate::native_shell::SHELL_POLL_INTERVAL_MS);
+                if let Ok(body) = http_request(&snapshot.origin, "GET", "/api/shell", None, auth) {
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
+                        // TOOL-006: hold the collected shells across frames and
+                        // drive each one through its own cadence state machine
+                        // (`index.tsx:3071-3083`); the daemon list is the
+                        // aliveness truth and drops vanished shells.
+                        if let Ok(found) = crate::native_shell::parse_live_shell_list(&value) {
+                            let ids: std::collections::BTreeSet<&str> =
+                                found.iter().filter_map(|shell| shell.shell_id()).collect();
+                            live_shells.retain(|shell| {
+                                shell.shell_id().map(|id| ids.contains(id)).unwrap_or(true)
+                            });
+                            // A background shell polls only while its output is
+                            // actually shown (`index.tsx:3079`): the Shell dock
+                            // tab being active is the expansion signal, so a
+                            // collapsed shell never polls needlessly.
+                            let shell_expanded = matches!(
+                                view.dock_active_tab(),
+                                Some(crate::native_dock::DockTabId::Shell)
+                            );
+                            for fresh in found {
+                                let Some(id) = fresh.shell_id().map(str::to_owned) else { continue };
+                                let index = live_shells
+                                    .iter()
+                                    .position(|shell| shell.shell_id() == Some(id.as_str()));
+                                let shell = match index {
+                                    Some(index) => live_shells.get_mut(index).unwrap(),
+                                    None => {
+                                        live_shells.push(fresh);
+                                        live_shells.last_mut().unwrap()
+                                    }
+                                };
+                                let status = value["shells"]
+                                    .as_array()
+                                    .and_then(|rows| {
+                                        rows.iter().find(|row| row["id"] == serde_json::json!(id))
+                                    })
+                                    .and_then(|row| row["status"].as_str());
+                                crate::native_shell::live_shell_scan_step(
+                                    shell,
+                                    status,
+                                    shell_now,
+                                    shell_expanded,
+                                    |load| {
+                                        let body = http_request(
+                                            &snapshot.origin,
+                                            "GET",
+                                            &crate::native_shell::live_output_request(load),
+                                            None,
+                                            auth,
+                                        )
+                                        .ok()?;
+                                        let chunk =
+                                            serde_json::from_str::<serde_json::Value>(&body).ok()?;
+                                        let output =
+                                            chunk.get("output")?.as_str()?.to_owned();
+                                        let cursor = chunk.get("cursor")?.as_u64()?;
+                                        Some(crate::native_shell::ShellChunk {
+                                            output,
+                                            cursor,
+                                            size: chunk.get("size")?.as_u64()?,
+                                        })
+                                    },
+                                );
+                            }
+                        }
+                        // The painted seam: the dock's Shell tab reads the
+                        // live rows (command + status + output tail) that this
+                        // scan just advanced.
+                        if let Ok(entries) = crate::native_shell::parse_live_shell_entries(&value) {
+                            view.set_live_shell_rows(entries, &live_shells);
+                        }
+                    }
+                }
+            }
             view_ack.observe(
                 true,
                 snapshot.session_idle_at.map(|ms| ms.max(0) as u64),

@@ -72,6 +72,7 @@ mod todo_tool;
 mod question_tool;
 mod memory_http;
 pub mod run_owner;
+pub mod shell_registry;
 pub mod runtime_wiring;
 pub mod sdk_client;
 pub mod sdk_spawns;
@@ -193,6 +194,7 @@ pub fn router_with_events_and_integration(
     // injected as an `Extension`, so two routers never share entries and
     // there is no static global. Fresh router ⇒ empty registry ⇒ `{}`.
     let mcp_registry = mcp_http::McpStatusRegistry::new();
+    let shells = shell_registry::ShellRegistry::default();
     let children = task_children::Children::with_mcp(mcp_registry.clone());
     let forms = children.forms();
     let app = Router::new()
@@ -238,6 +240,9 @@ pub fn router_with_events_and_integration(
             axum::routing::put(save_provider_auth)
                 .layer(axum::extract::DefaultBodyLimit::max(32 * 1024)),
         )
+        .route("/api/shell", get(list_shells))
+        .route("/api/shell/{id}", get(get_shell))
+        .route("/api/shell/{id}/output", get(get_shell_output))
         .route("/api/sessions", get(list_sessions).post(create_session))
         .route("/api/sessions/live", get(list_live_sessions))
         .route("/api/sessions/{id}", get(get_session).patch(rename_session))
@@ -326,6 +331,7 @@ pub fn router_with_events_and_integration(
             post(form_http::reply),
         )
         .fallback(web_assets::serve)
+        .layer(axum::extract::Extension(shells))
         .layer(axum::extract::Extension(integration))
         .layer(axum::extract::Extension(events))
         .layer(axum::extract::Extension(mcp_registry))
@@ -910,9 +916,38 @@ impl Drop for NativeShellReceiver {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct ShellOutputQuery { cursor: Option<u64>, limit: Option<usize> }
+
+async fn list_shells(
+    Extension(shells): Extension<shell_registry::ShellRegistry>,
+) -> Json<Value> {
+    Json(json!({"shells": shells.list()}))
+}
+
+async fn get_shell(
+    Extension(shells): Extension<shell_registry::ShellRegistry>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiFailure> {
+    shells.get(&id).map(|shell| Json(json!(shell))).map_err(|_| ApiFailure::not_found(format!("Shell command not found: {id}")))
+}
+
+async fn get_shell_output(
+    Extension(shells): Extension<shell_registry::ShellRegistry>,
+    Path(id): Path<String>,
+    Query(query): Query<ShellOutputQuery>,
+) -> Result<Json<Value>, ApiFailure> {
+    let limit = query.limit.unwrap_or(1024 * 1024);
+    if limit == 0 || limit > 1024 * 1024 {
+        return Err(ApiFailure::bad_request("shell output limit must be between 1 and 1048576"));
+    }
+    shells.output(&id, query.cursor.unwrap_or(0), limit).map(|chunk| Json(json!(chunk))).map_err(|_| ApiFailure::not_found(format!("Shell command not found: {id}")))
+}
+
 async fn native_shell_stream(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Extension(shells): Extension<shell_registry::ShellRegistry>,
     Extension(events): Extension<event_bus::EventBus>,
     Json(body): Json<NativeShellBody>,
 ) -> Result<Response, ApiFailure> {
@@ -927,10 +962,17 @@ async fn native_shell_stream(
         return Err(ApiFailure::bad_request("invalid shell command"));
     }
     let cwd = session_workdir(&state.sessions, id, body.workdir.as_deref()).await?;
+    let shell_id = format!("sh-{}", MessageId::new());
+    shells.start(shell_id.clone(), id.to_string(), body.command.clone(), cwd.to_string_lossy().into_owned());
     let broker = PermissionBroker::new(SecurityPolicy::lean_default(cwd.clone()));
+    let sink_registry = shells.clone();
+    let sink_id = shell_id.clone();
     let executor = ToolExecutor::new()
         .with_cwd(cwd.clone())
-        .with_broker(broker.clone());
+        .with_broker(broker.clone())
+        .with_shell_sink(std::sync::Arc::new(move |chunk: &str| {
+            sink_registry.append(&sink_id, chunk);
+        }));
     let user = state
         .sessions
         .append_text(id, MessageRole::User, format!("!{}", body.command))
@@ -986,6 +1028,7 @@ async fn native_shell_stream(
         )
         .await;
         let (output, payload) = native_result_payload(&outcome.output, Some(outcome.success));
+        shells.complete(&shell_id, &output, outcome.success);
         if let Err(error) = state
             .sessions
             .persist_tool_output(round, 0, payload, message_id)

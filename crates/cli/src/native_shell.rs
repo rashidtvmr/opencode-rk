@@ -956,6 +956,11 @@ pub use dock_surface::{
     BackgroundShell, FooterError, FooterRow, FooterSpan, FooterStyle, SessionDock, ShellChunk,
     ShellFooter, ShellLoad, ShellSurface, SurfacePaint,
 };
+#[cfg(feature = "native")]
+pub use dock_surface::{
+    apply_live_shell_output, live_output_request, live_shell_scan_step, parse_live_shell_entries,
+    parse_live_shell_list, SHELL_POLL_INTERVAL_MS,
+};
 
 #[cfg(feature = "native")]
 mod dock_surface {
@@ -1831,6 +1836,114 @@ mod dock_surface {
         pub size: u64,
     }
 
+    /// Parse the daemon's real `GET /api/shell` projection into live shell state.
+    pub fn parse_live_shell_list(value: &serde_json::Value) -> Result<Vec<BackgroundShell>, String> {
+        let rows = value.get("shells").and_then(serde_json::Value::as_array).ok_or("shell list missing shells array")?;
+        rows.iter().map(|row| {
+            let string = |key: &str| row.get(key).and_then(serde_json::Value::as_str).map(str::to_owned);
+            let id = string("id").ok_or("shell list row missing id")?;
+            let status = string("status").ok_or("shell list row missing status")?;
+            let mut shell = BackgroundShell::new(Some(id), string("cwd"), None, status.clone(), true);
+            shell.set_registered(status == "running");
+            Ok(shell)
+        }).collect()
+    }
+
+    /// Append one real `GET /api/shell/{id}/output` JSON response.
+    pub fn apply_live_shell_output(shell: &mut BackgroundShell, value: &serde_json::Value) -> Result<Option<ShellLoad>, String> {
+        let output = value.get("output").and_then(serde_json::Value::as_str).ok_or("shell output missing output")?;
+        let cursor = value.get("cursor").and_then(serde_json::Value::as_u64).ok_or("shell output missing cursor")?;
+        let size = value.get("size").and_then(serde_json::Value::as_u64).ok_or("shell output missing size")?;
+        Ok(shell.apply(Some(ShellChunk { output: output.to_owned(), cursor, size })))
+    }
+
+    /// Parse the daemon's `GET /api/shell` rows for the painted shell dock.
+    pub fn parse_live_shell_entries(value: &serde_json::Value) -> Result<Vec<ShellEntry>, String> {
+        let rows = value.get("shells").and_then(serde_json::Value::as_array).ok_or("shell list missing shells array")?;
+        rows.iter().map(|row| {
+            let string = |key: &str| row.get(key).and_then(serde_json::Value::as_str).map(str::to_owned);
+            Ok(ShellEntry::new(
+                string("id").ok_or("shell list row missing id")?,
+                string("command").unwrap_or_default(),
+                string("status").unwrap_or_else(|| "running".to_owned()),
+            ))
+        }).collect()
+    }
+
+    /// Largest number of output fetches one scan may issue while a drain is
+    /// owed (`index.tsx:3058-3069` loop, bounded here against a stuck daemon).
+    const LIVE_DRAIN_FETCH_BUDGET: usize = 32;
+
+    /// One live-consumer scan for one shell at cadence `now_ms`. Merges the
+    /// daemon's `status` into the held shell, then drives the upstream state
+    /// machine: a collapsed background shell never polls (`index.tsx:3079`),
+    /// an expanded running shell polls about once a second
+    /// (`index.tsx:3081`), and a completion is drained to the tail
+    /// (`index.tsx:3074`). `expanded` is the caller's visibility decision (the
+    /// dock's Shell tab being shown); this scan never expands a shell on its
+    /// own, so a background shell collapses without needless polling. Drain
+    /// follow-up requests are fetched inline up to
+    /// [`LIVE_DRAIN_FETCH_BUDGET`]. Returns the number of output fetches
+    /// issued so tests can assert the cadence.
+    pub fn live_shell_scan_step(
+        shell: &mut BackgroundShell,
+        status: Option<&str>,
+        now_ms: u64,
+        expanded: bool,
+        mut fetch: impl FnMut(&ShellLoad) -> Option<ShellChunk>,
+    ) -> usize {
+        let Some(status) = status else {
+            // Absent from the daemon's list: the shell outlives the registry
+            // only as long as the daemon knows it; stop consuming it.
+            return 0;
+        };
+        let running = status == "running";
+        shell.set_status(status);
+        shell.set_registered(running);
+        if running {
+            // Record the running observation so the later running→completed
+            // edge drains (`index.tsx:3071-3074`), even for a collapsed shell.
+            shell.mark_running();
+        }
+        // `index.tsx:3060-3071`: the mount effect records that the shell ran
+        // (so completion drains), then returns without polling when the shell
+        // is a collapsed background shell. Expansion is the caller's decision.
+        let mut load = if shell.is_expanded() != expanded {
+            shell.set_expanded(expanded, now_ms)
+        } else {
+            None
+        };
+        if load.is_none() {
+            load = if running {
+                shell.poll(now_ms)
+            } else {
+                shell.sync(now_ms)
+            };
+        }
+        if load.is_none() && !running && !shell.initial_load_done() {
+            load = shell.load_output(true);
+        }
+        let mut fetches = 0usize;
+        while let Some(request) = load {
+            if fetches >= LIVE_DRAIN_FETCH_BUDGET {
+                break;
+            }
+            fetches += 1;
+            load = match fetch(&request) {
+                Some(chunk) => shell.apply(Some(chunk)),
+                // `.catch(() => undefined)` keeps the load open for the next
+                // poll (`index.tsx:3047`).
+                None => shell.apply(None),
+            };
+        }
+        fetches
+    }
+
+    /// The exact output request a live fetch must carry.
+    pub fn live_output_request(load: &ShellLoad) -> String {
+        format!("/api/shell/{}/output?cursor={}&limit={}", load.shell_id, load.cursor, load.limit)
+    }
+
     /// Background shell output state (`ShellDisplay`,
     /// `routes/session/index.tsx:2982-3106`).
     ///
@@ -1866,6 +1979,7 @@ mod dock_surface {
         drain_requested: bool,
         current_drain: bool,
         was_running: bool,
+        initial_load_done: bool,
         next_poll_ms: Option<u64>,
     }
 
@@ -1895,6 +2009,7 @@ mod dock_surface {
                 drain_requested: false,
                 current_drain: false,
                 was_running: false,
+                initial_load_done: false,
                 next_poll_ms: None,
             }
         }
@@ -1903,6 +2018,19 @@ mod dock_surface {
         pub fn set_registered(&mut self, registered: bool) {
             self.registered = registered;
         }
+
+        /// Record that this shell was observed running, so the later
+        /// running→completed edge drains its remaining output
+        /// (`index.tsx:3071-3083`).
+        pub fn mark_running(&mut self) {
+            self.was_running = true;
+        }
+
+        #[must_use]
+        pub fn shell_id(&self) -> Option<&str> { self.shell_id.as_deref() }
+
+        /// Start the initial load for an already completed shell.
+        pub fn load_output(&mut self, drain: bool) -> Option<ShellLoad> { self.request(drain) }
 
         /// Session location fallback; ignored once a shell location is known.
         pub fn set_session_location(&mut self, location: Option<String>) {
@@ -1959,6 +2087,14 @@ mod dock_surface {
         #[must_use]
         pub fn is_loading(&self) -> bool {
             self.loading
+        }
+
+        /// Whether any output response has been applied yet. A completed shell
+        /// that we never polled while running still owes one initial load
+        /// (`index.tsx:3071-3083`).
+        #[must_use]
+        pub fn initial_load_done(&self) -> bool {
+            self.initial_load_done
         }
 
         /// Run the mount effect at `now_ms` (`index.tsx:3071-3083`): start or
@@ -2025,6 +2161,7 @@ mod dock_surface {
         /// still owed (`index.tsx:3058-3069`).
         pub fn apply(&mut self, response: Option<ShellChunk>) -> Option<ShellLoad> {
             self.loading = false;
+            self.initial_load_done = true;
             let Some(chunk) = response else {
                 return self.finish_load();
             };
@@ -2443,6 +2580,141 @@ mod dock_surface {
             // A lifecycle overlay outranks the whole bottom stack by z.
             assert!(!surface.set(OverlayKind::Startup, Some(Rect::new(0, 0, 1, 1)), Vec::new()));
         }
+
+        // TOOL-006 live client parser + output application, including the 1 MiB tail cap.
+        #[test]
+        fn tool006_live_consumer_parses_appends_bounds_and_skips_collapsed_poll() {
+            let value = serde_json::json!({"shells":[{"id":"sh-live","cwd":"/original","status":"running"}]});
+            let mut shells = parse_live_shell_list(&value).unwrap();
+            assert_eq!(shells.len(), 1);
+            let shell = &mut shells[0];
+            assert_eq!(shell.sync(0), None);
+            assert_eq!(shell.poll(10_000), None);
+            shell.set_expanded(true, 10_000);
+            let chunk = serde_json::json!({"output":"live","cursor":4,"size":4});
+            assert!(apply_live_shell_output(shell, &chunk).unwrap().is_none());
+            assert_eq!(shell.cursor(), 4);
+
+            let mut bounded = BackgroundShell::new(Some("sh-big".into()), Some("/original".into()), None, "running", true);
+            bounded.set_expanded(true, 0);
+            let huge = "x".repeat(SHELL_DISPLAY_LIMIT + 1);
+            let chunk = serde_json::json!({"output":huge,"cursor":(SHELL_DISPLAY_LIMIT + 1) as u64,"size":(SHELL_DISPLAY_LIMIT + 1) as u64});
+            apply_live_shell_output(&mut bounded, &chunk).unwrap();
+            // Large output is bounded (never larger than the display cap) and
+            // still keeps a substantial tail rather than being dropped.
+            let text = bounded.output_text().unwrap();
+            assert!(text.len() <= SHELL_DISPLAY_LIMIT, "bounded, got {}", text.len());
+            assert!(text.len() >= 64 * 1024, "keeps a large tail, got {}", text.len());
+        }
+
+        // TOOL-006 live consumer cadence: parse a shell list, poll each scan
+        // second while expanded/running, never faster; drain to the tail on
+        // completion (bounded fetch budget); poll a held completed shell never
+        // again.
+        #[test]
+        fn tool006_live_consumer_polls_each_second_and_drains_to_tail() {
+            let list = serde_json::json!({"shells":[{"id":"sh-a","cwd":"/work","command":"long job","status":"running"}]});
+            // The painted dock rows carry the command and status.
+            let entries = parse_live_shell_entries(&list).unwrap();
+            assert_eq!(entries[0].row_label(), "long job");
+            assert!(entries[0].is_running());
+
+            let mut shell = parse_live_shell_list(&list).unwrap().pop().unwrap();
+            let now = 0u64;
+            // The server tail is the only truth: the consumer slices it into
+            // chunks of 4 chars at the cursor rows the requests asked for.
+            let tail = std::cell::RefCell::new(Vec::<u8>::new());
+            let mut fetch = |load: &ShellLoad| -> Option<ShellChunk> {
+                let tail = tail.borrow();
+                let start = usize::try_from(load.cursor).unwrap_or(0).min(tail.len());
+                let end = (start + load.limit).min(tail.len());
+                let output = String::from_utf8_lossy(&tail[start..end]).into_owned();
+                Some(ShellChunk { output, cursor: end as u64, size: tail.len() as u64 })
+            };
+
+            // Scan 1 (t=0): initial load of a running shell (expanded).
+            assert_eq!(live_shell_scan_step(&mut shell, Some("running"), now, true, &mut fetch), 1);
+            // t=100 (busy backlog) and t=900 are less than one cadence second
+            // after the previous poll; the consumer must not fetch.
+            assert_eq!(live_shell_scan_step(&mut shell, Some("running"), 100, true, &mut fetch), 0);
+            assert_eq!(live_shell_scan_step(&mut shell, Some("running"), 900, true, &mut fetch), 0);
+            assert_eq!(live_shell_scan_step(&mut shell, Some("running"), 1_000, true, &mut fetch), 1);
+
+            // More server output arrives mid-run; the next cadence poll
+            // appends it (chunks keep appending).
+            tail.borrow_mut().extend_from_slice(b"one ");
+            assert_eq!(live_shell_scan_step(&mut shell, Some("running"), 2_000, true, &mut fetch), 1);
+            assert_eq!(shell.output_text().as_deref(), Some("one"), "not: {:?}", shell.output_text());
+            assert_eq!(shell.poll(2_500), None, "cadence poll stays once a second");
+            assert_eq!(live_shell_scan_step(&mut shell, Some("running"), 2_600, true, &mut fetch), 0);
+            assert_eq!(live_shell_scan_step(&mut shell, Some("running"), 3_000, true, &mut fetch), 1);
+
+            // Completion: the consumer drains the remainder to the tail in
+            // one scan (multiple inline fetches when the daemon owes more).
+            tail.borrow_mut().extend_from_slice(b"two three");
+            let fetched = live_shell_scan_step(&mut shell, Some("completed"), 4_000, true, &mut fetch);
+            assert!(fetched >= 1, "completion must drain");
+            let text = shell.output_text().unwrap();
+            assert_eq!(text, "one two three");
+            assert_eq!(shell.cursor(), shell.size());
+            assert!(!shell.is_running());
+
+            // Held completed shell: further scans back off entirely.
+            assert_eq!(live_shell_scan_step(&mut shell, Some("completed"), 5_000, true, &mut fetch), 0);
+            assert_eq!(live_shell_scan_step(&mut shell, Some("completed"), 6_000, true, &mut fetch), 0);
+        }
+
+        // TOOL-006: a collapsed background shell never polls while running
+        // (`index.tsx:3079`), and expanding it starts the 1 Hz cadence.
+        #[test]
+        fn tool006_collapsed_background_shell_never_polls_until_expanded() {
+            let list = serde_json::json!({"shells":[{"id":"sh-bg","cwd":"/work","command":"bg","status":"running"}]});
+            let mut shell = parse_live_shell_list(&list).unwrap().pop().unwrap();
+            let tail = std::cell::RefCell::new(b"hello".to_vec());
+            let mut fetch = |load: &ShellLoad| -> Option<ShellChunk> {
+                let tail = tail.borrow();
+                let start = usize::try_from(load.cursor).unwrap_or(0).min(tail.len());
+                let end = (start + load.limit).min(tail.len());
+                Some(ShellChunk {
+                    output: String::from_utf8_lossy(&tail[start..end]).into_owned(),
+                    cursor: end as u64,
+                    size: tail.len() as u64,
+                })
+            };
+            // Collapsed: no fetch at any cadence.
+            assert_eq!(live_shell_scan_step(&mut shell, Some("running"), 0, false, &mut fetch), 0);
+            assert_eq!(live_shell_scan_step(&mut shell, Some("running"), 1_000, false, &mut fetch), 0);
+            assert_eq!(live_shell_scan_step(&mut shell, Some("running"), 2_000, false, &mut fetch), 0);
+            assert_eq!(shell.output_text().as_deref(), Some(""), "collapsed background shell paints nothing");
+            // Expanding fetches immediately, then once a second.
+            assert_eq!(live_shell_scan_step(&mut shell, Some("running"), 3_000, true, &mut fetch), 1);
+            assert_eq!(shell.output_text().as_deref(), Some("hello"));
+            assert_eq!(live_shell_scan_step(&mut shell, Some("running"), 3_500, true, &mut fetch), 0);
+            assert_eq!(live_shell_scan_step(&mut shell, Some("running"), 4_000, true, &mut fetch), 1);
+            // Collapsing again stops polling.
+            assert_eq!(live_shell_scan_step(&mut shell, Some("running"), 5_000, false, &mut fetch), 0);
+            assert_eq!(live_shell_scan_step(&mut shell, Some("running"), 6_000, false, &mut fetch), 0);
+        }
+
+        // TOOL-006: an already completed shell is drained once on its first
+        // scan and never at the 1 Hz cadence afterwards.
+        #[test]
+        fn tool006_live_consumer_drains_held_completed_shell_once() {
+            let mut shell = BackgroundShell::new(Some("sh-c".into()), Some("/work".into()), None, "completed", true);
+            shell.set_registered(false);
+            // A completed background shell is shown expanded once its output is
+            // drained (a collapsed background shell paints nothing).
+            shell.set_expanded(true, 0);
+            let tail = "done";
+            let mut fetch = |load: &ShellLoad| -> Option<ShellChunk> {
+                Some(ShellChunk { output: tail[..load.limit.min(tail.len())].to_owned(), cursor: tail.len() as u64, size: tail.len() as u64 })
+            };
+            assert_eq!(live_shell_scan_step(&mut shell, Some("completed"), 0, true, &mut fetch), 1);
+            assert_eq!(shell.output_text().as_deref(), Some("done"));
+            assert_eq!(live_shell_scan_step(&mut shell, Some("completed"), 1_000, true, &mut fetch), 0);
+            assert_eq!(live_shell_scan_step(&mut shell, Some("completed"), 2_000, true, &mut fetch), 0);
+        }
+
 
         // TOOL-006: a collapsed background shell never polls; expanding polls
         // immediately and then once a second.

@@ -85,6 +85,9 @@ pub struct ToolExecutor {
     cwd: PathBuf,
     broker: Option<PermissionBroker>,
     cancellation: Option<tokio::sync::watch::Receiver<bool>>,
+    /// Live shell output sink threaded into [`ShellTool`] so a running
+    /// command's output is observable before it completes.
+    shell_sink: Option<crate::shell_tool::OutputSink>,
 }
 impl Default for ToolExecutor {
     fn default() -> Self {
@@ -98,6 +101,7 @@ impl ToolExecutor {
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             broker: None,
             cancellation: None,
+            shell_sink: None,
         }
     }
     pub fn with_timeout_config(config: TimeoutConfig) -> Self {
@@ -120,6 +124,11 @@ impl ToolExecutor {
     }
     pub fn with_cancellation(mut self, receiver: tokio::sync::watch::Receiver<bool>) -> Self {
         self.cancellation = Some(receiver);
+        self
+    }
+    /// Builder: live shell output sink threaded into every spawned shell.
+    pub fn with_shell_sink(mut self, sink: crate::shell_tool::OutputSink) -> Self {
+        self.shell_sink = Some(sink);
         self
     }
     pub(crate) fn clone_for_dispatch(&self) -> Self {
@@ -409,6 +418,9 @@ impl ToolExecutor {
             .broker(b.clone())
             .deadline(self.call_timeout(call))
             .human_approved(approval, session_id, run_id, call_id);
+        if let Some(sink) = self.shell_sink.clone() {
+            tool = tool.output_sink(sink);
+        }
         if let Some(receiver) = self.cancellation.clone() {
             tool = tool.cancellation(receiver);
         }
@@ -640,6 +652,9 @@ impl ToolExecutor {
             tool = tool.broker(b.clone())
         };
         tool = tool.deadline(d);
+        if let Some(sink) = self.shell_sink.clone() {
+            tool = tool.output_sink(sink);
+        }
         if let Some(receiver) = self.cancellation.clone() {
             tool = tool.cancellation(receiver);
         }

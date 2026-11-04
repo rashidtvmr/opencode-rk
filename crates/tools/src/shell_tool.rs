@@ -17,6 +17,12 @@ use tokio::time::timeout as tokio_timeout;
 /// Maximum output bytes retained for stdout/stderr (10 MiB).
 const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
 
+/// A live output sink: invoked with each decoded chunk as it is drained from a
+/// running command's stdout/stderr, before the command completes. Used by the
+/// daemon's shell registry so a background shell's output is observable while
+/// it still runs (`routes/session/index.tsx:3040-3058` polls it live).
+pub type OutputSink = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
+
 /// Outcome of a completed shell command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShellResult {
@@ -93,6 +99,8 @@ pub struct ShellTool {
     cancellation: Option<watch::Receiver<bool>>,
     timeout: Option<Duration>,
     human_approval: Option<(HumanApproval, String, u64, String)>,
+    /// Live stdout/stderr sink, invoked per drained chunk before completion.
+    sink: Option<OutputSink>,
 }
 
 impl ShellTool {
@@ -110,6 +118,7 @@ impl ShellTool {
             cancellation: None,
             timeout: None,
             human_approval: None,
+            sink: None,
         }
     }
 
@@ -176,6 +185,13 @@ impl ShellTool {
         call_id: impl Into<String>,
     ) -> Self {
         self.human_approval = Some((approval, session_id.into(), run_id, call_id.into()));
+        self
+    }
+
+    /// Builder: live output sink invoked with each drained stdout/stderr chunk
+    /// while the command still runs.
+    pub fn output_sink(mut self, sink: OutputSink) -> Self {
+        self.sink = Some(sink);
         self
     }
 
@@ -275,6 +291,7 @@ impl ShellTool {
             .timeout
             .unwrap_or_else(|| Duration::from_secs(config.timeout_secs.max(1)));
         let mut cancellation = self.cancellation.take();
+        let sink = self.sink.clone();
         let result = {
             let child = self.child.as_mut().expect("child set");
             let stdout = child.stdout.take();
@@ -282,8 +299,8 @@ impl ShellTool {
             let completion = async {
                 let (status, stdout, stderr) = tokio::join!(
                     child.wait(),
-                    drain_bounded(stdout, limit),
-                    drain_bounded(stderr, limit)
+                    drain_bounded(stdout, limit, sink.clone()),
+                    drain_bounded(stderr, limit, sink.clone())
                 );
                 Ok::<_, ShellError>((status?, stdout, stderr))
             };
@@ -369,7 +386,11 @@ impl ShellTool {
     }
 }
 
-async fn drain_bounded<R: AsyncRead + Unpin>(reader: Option<R>, limit: usize) -> Vec<u8> {
+async fn drain_bounded<R: AsyncRead + Unpin>(
+    reader: Option<R>,
+    limit: usize,
+    sink: Option<OutputSink>,
+) -> Vec<u8> {
     let Some(mut reader) = reader else {
         return Vec::new();
     };
@@ -379,6 +400,9 @@ async fn drain_bounded<R: AsyncRead + Unpin>(reader: Option<R>, limit: usize) ->
         match reader.read(&mut buffer).await {
             Ok(0) | Err(_) => break,
             Ok(length) => {
+                if let Some(sink) = sink.as_ref() {
+                    sink(&String::from_utf8_lossy(&buffer[..length]));
+                }
                 let keep = length.min(limit.saturating_add(1).saturating_sub(retained.len()));
                 retained.extend_from_slice(&buffer[..keep]);
             }
@@ -451,6 +475,39 @@ mod tests {
         let res = tool.execute(cfg(&["sh"])).await.expect("should succeed");
         assert!(res.success);
         assert!(res.stdout.trim().ends_with("foobar"));
+    }
+
+    // TOOL-006: the output sink sees a running command's output before it
+    // completes, so the daemon can serve `/api/shell/{id}/output` live.
+    #[tokio::test]
+    async fn output_sink_sees_output_before_completion() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let sink: OutputSink = std::sync::Arc::new(move |chunk: &str| {
+            let _ = tx.send(chunk.to_owned());
+        });
+        let tool = ShellTool::new(
+            "sh".to_string(),
+            vec![
+                "-c".to_string(),
+                "printf first; sleep 2; printf second".to_string(),
+            ],
+        )
+        .output_sink(sink);
+        let handle = tokio::spawn(async move { tool.execute(cfg(&["sh"])).await });
+        // The first chunk arrives while the command is still sleeping.
+        let first = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("live chunk before completion")
+            .expect("channel open");
+        assert!(first.contains("first"), "got {first:?}");
+        let res = handle.await.unwrap().expect("should succeed");
+        assert!(res.success);
+        assert!(res.stdout.contains("first") && res.stdout.contains("second"));
+        let rest = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("final chunk")
+            .expect("channel open");
+        assert!(rest.contains("second"), "got {rest:?}");
     }
 
     #[tokio::test]
