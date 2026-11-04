@@ -7182,6 +7182,13 @@ fn native_loop(
     // never mutates it, and cancel returns the exact original draft.
     let mut filter_input = String::new();
     let mut model_row: usize = 0;
+    // DIALOG-12: the model dialog's favorites-at-open snapshot
+    // (`dialog-model.tsx:79-81,105`). Refreshed ONLY where the dialog opens;
+    // `dialog_rows_state` orders against it, so favoriting mid-dialog
+    // (`config/keybind.ts:165` ctrl+f) never reorders the list before the
+    // dialog is reopened.
+    let mut model_picker =
+        crate::native_palette::pickers::ModelPickerState::open(&native_setup::favorite_keys());
     // DIALOG-12: post-select flat variant picker (`dialog-model.tsx:25-38` →
     // `dialog-variant.tsx:9-42`). `Some` while the variant list owns the model
     // dialog's focus: the committed model, its option rows and the focused row.
@@ -8091,7 +8098,7 @@ fn native_loop(
                         // the request was in flight or move its focused row.
                         model_row = native_setup::clamp_row(
                             model_row,
-                            native_setup::dialog_rows(&models, &filter_input).len(),
+                            native_setup::dialog_rows_state(&models, &filter_input, &model_picker).len(),
                         );
                     }
                     if selected.is_none() {
@@ -8862,17 +8869,61 @@ fn native_loop(
                 }
                 // Same buffer fix as Provider: filter and echo read the
                 // dialog-local `filter_input`, never the chat draft.
-                let visible = native_setup::dialog_rows(&models, &filter_input);
+                let visible = native_setup::dialog_rows_state(&models, &filter_input, &model_picker);
                 let active = native_setup::clamp_row(model_row, visible.len());
                 let list_start = 4 + usize::from(model_load.is_some()) + usize::from(setup_error.is_some());
-                let capacity = native_setup::picker_capacity(view.modal_content_height(), list_start, 2);
+                // DIALOG-12: new designs reserve one extra footer line for
+                // the selected-model detail row (`model-options.tsx:48-105`).
+                let footer_rows = if new_designs { 3 } else { 2 };
+                let capacity = native_setup::picker_capacity(view.modal_content_height(), list_start, footer_rows);
+                let favorites = native_setup::favorite_keys();
                 panel.extend(native_setup::picker_render_indices(active, visible.len(), capacity).into_iter().filter_map(|index| {
-                    models.get(visible[index]).map(|model| format!(
-                        "{} {} — {}", if index == active { ">" } else { " " }, model.qualified(), model.name
-                    ))
+                    models.get(visible[index]).map(|model| {
+                        // DIALOG-12: trailing slot (`dialog-model.tsx:56-59`
+                        // `trailing()`): new designs mark favorites with `*`
+                        // (FavoriteMarker); legacy rows show only `Free` for a
+                        // free model. Favorites are surfaced by ordering, not
+                        // by invented row text.
+                        let favorite = favorites.iter().any(|(provider, id)| {
+                            provider == &model.provider_id && id == &model.id
+                        });
+                        let suffix = if new_designs {
+                            if favorite { "*" } else { "" }
+                        } else if model.free {
+                            " Free"
+                        } else {
+                            ""
+                        };
+                        format!(
+                            "{} {} — {}{}",
+                            if index == active { ">" } else { " " },
+                            model.qualified(),
+                            model.name,
+                            suffix
+                        )
+                    })
                 }));
                 if visible.is_empty() && model_load.is_none() {
                     panel.push("No matching models".into());
+                }
+                // DIALOG-12: selected-model detail line under new designs
+                // (`model-options.tsx:48-105`): price/Free + context window
+                // (+ `Reasoning` for variant-advertising models). Live
+                // `Model` carries no modality list, so that fact is
+                // honestly omitted.
+                if new_designs {
+                    if let Some(model) = visible.get(active).and_then(|index| models.get(*index)) {
+                        let detail = native_setup::model_detail_row(model);
+                        let amount = detail.amount;
+                        let facts = detail.facts.join(" · ");
+                        let line = match (amount.is_empty(), facts.is_empty()) {
+                            (false, false) => format!("{amount} · {facts}"),
+                            (false, true) => amount,
+                            (true, false) => facts,
+                            (true, true) => String::new(),
+                        };
+                        panel.push(line);
+                    }
                 }
                 panel.push(String::new());
                 panel.push(format!(
@@ -10957,7 +11008,11 @@ fn native_loop(
                     let modal = view.modal_presentation();
                     let Some((_column, content_row)) = modal.content_point(x, y, view.modal_content_height()) else { needs_paint = true; continue; };
                     let (visible_len, list_start, footer_rows) = if dialog == native_setup::Dialog::Model {
-                        (native_setup::dialog_rows(&models, &filter_input).len(), 4 + usize::from(model_load.is_some()) + usize::from(setup_error.is_some()), 2usize)
+                        // DIALOG-12: mirror the render path's footer capacity
+                        // (`new designs` reserve one extra line for the
+                        // selected-model detail row) so the hit-test viewport
+                        // and the painted window agree (`model-options.tsx:48-105`).
+                        (native_setup::dialog_rows_state(&models, &filter_input, &model_picker).len(), 4 + usize::from(model_load.is_some()) + usize::from(setup_error.is_some()), if new_designs { 3usize } else { 2usize })
                     } else {
                         let query = filter_input.trim().to_lowercase();
                         (providers.iter().filter(|row| row.0.to_lowercase().contains(&query) || row.1.to_lowercase().contains(&query)).count(), 4usize, 2 + usize::from(setup_error.is_some()) + usize::from(model_load.is_some()))
@@ -11305,7 +11360,7 @@ fn native_loop(
                     if let Some((_, options, row)) = variant_pick.as_mut() {
                         *row = native_setup::move_row(*row, options.len(), down);
                     } else {
-                        let visible = native_setup::dialog_rows(&models, &filter_input);
+                        let visible = native_setup::dialog_rows_state(&models, &filter_input, &model_picker);
                         model_row = native_setup::move_row(model_row, visible.len(), down);
                     }
                     continue;
@@ -12028,10 +12083,12 @@ fn native_loop(
             // is not mapped here and stays inert by fall-through.
             6 if matches!(dialog, native_setup::Dialog::Model) && variant_pick.is_none() => {
                 // DIALOG-12: ctrl+f toggles favorite for the focused model
-                // (`config/keybind.ts:165` `model.dialog.favorite`). The
-                // favorite order is re-read on the next `dialog_rows` call.
+                // (`config/keybind.ts:165` `model.dialog.favorite`). The list
+                // order stays frozen against the picker's favorites-at-open
+                // snapshot (`dialog-model.tsx:79-81,105`); only the `*` marker
+                // reads the live favorites on the next paint.
                 if let Some(model) =
-                    native_setup::dialog_selected_row(&models, &filter_input, model_row)
+                    native_setup::dialog_selected_row_state(&models, &filter_input, model_row, &model_picker)
                 {
                     match native_setup::toggle_favorite(&model) {
                         Ok(true) => append_transcript(
@@ -12845,6 +12902,10 @@ fn native_loop(
                                     dialog = native_setup::Dialog::Model;
                                     variant_pick = None;
                                     model_row = 0;
+                                    // DIALOG-12: the model dialog just
+                                    // opened; re-freeze the favorites
+                                    // snapshot (`dialog-model.tsx:79-81`).
+                                    model_picker = crate::native_palette::pickers::ModelPickerState::open(&native_setup::favorite_keys());
                                 }
                                 Err(_) => {
                                     setup_error = Some(
@@ -12884,6 +12945,10 @@ fn native_loop(
                                     filter_input.clear();
                                     dialog = native_setup::Dialog::Model;
                                     variant_pick = None;
+                                    // DIALOG-12: the model dialog just
+                                    // opened; re-freeze the favorites
+                                    // snapshot (`dialog-model.tsx:79-81`).
+                                    model_picker = crate::native_palette::pickers::ModelPickerState::open(&native_setup::favorite_keys());
                                 }
                                 Err(_) => append_transcript(
                                     &mut transcript,
@@ -12919,7 +12984,7 @@ fn native_loop(
                             // Enter commits the focused advertised row. Query text is
                             // never itself a model identity.
                             let choice =
-                                native_setup::dialog_selected_row(&models, &filter_input, model_row);
+                                native_setup::dialog_selected_row_state(&models, &filter_input, model_row, &model_picker);
                             if let Some(model) = choice {
                                 match native_setup::save_model(&model) {
                                     Ok(()) => {
@@ -13553,6 +13618,9 @@ fn native_loop(
                     dialog = native_setup::Dialog::Model;
                     variant_pick = None;
                     model_row = 0;
+                    // DIALOG-12: the model dialog just opened; re-freeze the
+                    // favorites snapshot (`dialog-model.tsx:79-81`).
+                    model_picker = crate::native_palette::pickers::ModelPickerState::open(&native_setup::favorite_keys());
                     if provider_id != "openai" && model_load.is_none() {
                         if let Some(snapshot) = live.as_ref() {
                             match native_setup::ModelLoad::start(
@@ -13682,11 +13750,17 @@ fn native_loop(
                             if model_load.is_some() {
                                 append_transcript(&mut transcript, "error: models are still loading; prompt preserved. Press Enter when ready.".into());
                             } else {
-                                dialog = if models.is_empty() {
-                                    native_setup::Dialog::Provider
+                                if models.is_empty() {
+                                    dialog = native_setup::Dialog::Provider;
                                 } else {
-                                    native_setup::Dialog::Model
-                                };
+                                    // DIALOG-12: this open site must also
+                                    // re-freeze the favorites-at-open snapshot
+                                    // (`dialog-model.tsx:79-81,105`), otherwise
+                                    // a stale order leaks across the
+                                    // close/reopen boundary.
+                                    model_picker = crate::native_palette::pickers::ModelPickerState::open(&native_setup::favorite_keys());
+                                    dialog = native_setup::Dialog::Model;
+                                }
                                 filter_input.clear();
                                 model_row = 0;
                                 setup_error = Some(

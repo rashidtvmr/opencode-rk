@@ -172,13 +172,19 @@ fn variant_at(value: &Value, key: &str) -> Option<String> {
 }
 
 /// Live model-dialog rows in `picker_rows` order (favorites, then recents, for
-/// an empty query), reading favorites and recents from persisted state.
+/// an empty query), ordered against the dialog's frozen-at-open favorites
+/// snapshot (`dialog-model.tsx:79-81,105`): favoriting mid-dialog never
+/// reorders the list before the dialog is reopened. Recents stay live.
 /// Non-empty queries fall through to the fuzzy `visible_rows` filter unchanged.
-pub(super) fn dialog_rows(models: &[Model], query: &str) -> Vec<usize> {
-    dialog_rows_with(models, query, &favorite_keys(), &recent_keys())
+pub(super) fn dialog_rows_state(
+    models: &[Model],
+    query: &str,
+    picker: &pickers::ModelPickerState,
+) -> Vec<usize> {
+    picker_rows(models, query, picker, &recent_keys())
 }
 
-/// Pure core mirroring `dialog_rows` with explicit favorites and recents.
+/// Pure core mirroring `dialog_rows_state` with explicit favorites and recents.
 pub(super) fn dialog_rows_with(
     models: &[Model],
     query: &str,
@@ -190,10 +196,17 @@ pub(super) fn dialog_rows_with(
 }
 
 /// Commit mapping: the focused picker index (recents-first) -> the model it
-/// names. The index is resolved against `dialog_rows` order, never against the
-/// raw catalogue, so reordering cannot desync the committed model.
-pub(super) fn dialog_selected_row(models: &[Model], query: &str, row: usize) -> Option<Model> {
-    dialog_selected_row_with(models, query, row, &favorite_keys(), &recent_keys())
+/// names. The index is resolved against the dialog's frozen-at-open picker
+/// order, never against the raw catalogue, so reordering cannot desync the
+/// committed model.
+pub(super) fn dialog_selected_row_state(
+    models: &[Model],
+    query: &str,
+    row: usize,
+    picker: &pickers::ModelPickerState,
+) -> Option<Model> {
+    let rows = dialog_rows_state(models, query, picker);
+    rows.get(clamp_row(row, rows.len())).and_then(|index| models.get(*index)).cloned()
 }
 
 pub(super) fn dialog_selected_row_with(
@@ -205,6 +218,26 @@ pub(super) fn dialog_selected_row_with(
 ) -> Option<Model> {
     let rows = dialog_rows_with(models, query, favorites, recents);
     rows.get(clamp_row(row, rows.len())).and_then(|index| models.get(*index)).cloned()
+}
+
+/// DIALOG-12: the selected-model detail line facts
+/// (`model-options.tsx:48-105`): price or `Free`, input modalities, context
+/// window and `Reasoning` for models advertising variants. The live wire
+/// `Model` carries no input-modality list, so that fact is honestly omitted;
+/// `reasoning` maps from the advertised named variants (upstream
+/// `ModelInfo.variants.length > 0`). No live usage-limits source exists, so
+/// `None` is passed (no amount row).
+#[must_use]
+pub(super) fn model_detail_row(model: &Model) -> pickers::ModelDetailRow {
+    pickers::ModelDetailFacts {
+        free: model.free,
+        input_price_per_million: model.cost.as_ref().map(|cost| cost.input),
+        output_price_per_million: model.cost.as_ref().map(|cost| cost.output),
+        input_modalities: Vec::new(),
+        context_limit: model.context_window.unwrap_or(0),
+        reasoning: !model.variants.is_empty(),
+    }
+    .row(None)
 }
 
 /// The dialog to open after committing a model (`dialog-model.tsx:25-38`):
@@ -722,6 +755,61 @@ mod picker_tests {
         let favorites = vec![("p".to_owned(), "a".to_owned())];
         assert_eq!(dialog_rows_with(&models, "", &favorites, &recents), vec![0, 2, 1]);
         assert_eq!(dialog_selected_row_with(&models, "", 0, &favorites, &recents).unwrap().id, "a");
+    }
+
+    // DIALOG-12: the LIVE model dialog holds ONE `ModelPickerState` refreshed
+    // only at the dialog-open sites, so favoriting mid-dialog
+    // (`config/keybind.ts:165`) must not reorder the list before it reopens
+    // (`dialog-model.tsx:79-81,105`).
+    #[test]
+    fn dialog12_rows_hold_the_frozen_at_open_favorites_snapshot() {
+        let models = vec![
+            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
+            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
+            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
+        ];
+        // Dialog opens while `c` is favorite: order freezes as c, a, b.
+        let at_open = pickers::ModelPickerState::open(&[("p".to_owned(), "c".to_owned())]);
+        assert_eq!(dialog_rows_state(&models, "", &at_open), vec![2, 0, 1]);
+        assert_eq!(dialog_selected_row_state(&models, "", 0, &at_open).unwrap().id, "c");
+        // Mid-dialog ctrl+f moves the favorite to `a`; the held picker must
+        // still order against the open-time snapshot...
+        let mid_dialog_favorites = vec![("p".to_owned(), "a".to_owned())];
+        assert_eq!(dialog_rows_state(&models, "", &at_open), vec![2, 0, 1]);
+        assert_eq!(dialog_selected_row_state(&models, "", 0, &at_open).unwrap().id, "c");
+        // ...while a FRESH open snapshot picks up the new favorite order.
+        let reopened = pickers::ModelPickerState::open(&mid_dialog_favorites);
+        assert_eq!(dialog_rows_state(&models, "", &reopened), vec![0, 1, 2]);
+        assert_eq!(dialog_selected_row_state(&models, "", 0, &reopened).unwrap().id, "a");
+        // Non-empty queries keep the fuzzy filter under both snapshots.
+        assert_eq!(dialog_rows_state(&models, "b", &at_open), vec![1]);
+        assert_eq!(dialog_rows_state(&models, "b", &reopened), vec![1]);
+    }
+
+    // DIALOG-12: the selected-model detail line (`model-options.tsx:48-105`).
+    // Live `Model` has no input modalities (omitted honestly) and no usage
+    // limits (`None` amount override); `Reasoning` maps from advertised
+    // named variants (upstream `ModelInfo.variants.length > 0`).
+    #[test]
+    fn dialog12_detail_row_paints_price_context_and_reasoning() {
+        let priced = Model { id: "x".into(), name: "X".into(), provider_id: "p".into(), context_window: Some(2_000_000), free: false, cost: Some(ModelCost { input: 5.0, output: 10.0 }), variants: vec!["thinking".into()] };
+        let detail = model_detail_row(&priced);
+        assert_eq!(detail.amount, "$5/$10");
+        assert_eq!(detail.facts, vec!["2M".to_owned(), "Reasoning".to_owned()]);
+        let free = Model { id: "y".into(), name: "Y".into(), provider_id: "p".into(), context_window: Some(200_000), free: true, cost: Some(ModelCost { input: 0.0, output: 0.0 }), variants: Vec::new() };
+        let detail = model_detail_row(&free);
+        assert_eq!(detail.amount, "Free");
+        assert_eq!(detail.facts, vec!["200K".to_owned()]);
+        // No cost / no context / no variants: the amount degrades to empty and
+        // the context fact degrades to `tokens(0)` = "0". Upstream `ModelDetail`
+        // always includes `tokens(model.limit.context)` and `.filter(Boolean)`
+        // keeps the non-empty "0", so the fact list is never empty
+        // (`model-options.tsx:64-69,117-121`; `limit.context` is a required
+        // number in `ModelInfo`).
+        let bare = Model { id: "z".into(), name: "Z".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() };
+        let detail = model_detail_row(&bare);
+        assert!(detail.amount.is_empty());
+        assert_eq!(detail.facts, vec!["0".to_owned()]);
     }
 
     #[test]
