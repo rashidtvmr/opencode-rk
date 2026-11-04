@@ -1644,6 +1644,19 @@ mod dock_surface {
             pages.set_footer(&rows)
         }
 
+        /// STATE-004: the delayed hint rows including the `marginTop={1}` gap
+        /// row (`index.tsx:1918`), empty while the hint is hidden. Public so
+        /// the live view can paint them above the prompt box.
+        #[must_use]
+        pub fn hint_rows(&self, width: u16) -> Vec<FooterRow> {
+            let mut rows = Vec::new();
+            if let Some(hint) = self.hint_row(width) {
+                rows.push(FooterRow::default());
+                rows.push(hint);
+            }
+            rows
+        }
+
         fn hint_row(&self, width: u16) -> Option<FooterRow> {
             let spans = self.hint.spans(&self.hint_shortcut)?;
             let mut row = FooterRow::at(FOOTER_TEXT_X);

@@ -215,6 +215,23 @@ pub struct NativeView {
     rail_interrupt: crate::native_status_rail::InterruptArm,
     /// CP-13: monotonic ms for the arming flash (`index.tsx:117-136`).
     rail_now_ms: u64,
+    /// STATE-001/003/004: the live prompt/assistant footer
+    /// (`ShellFooter`, `component/prompt/index.tsx:1899-1967`). Owns the
+    /// 40 ms footer scanner, the retry countdown, the error/free-limit rows,
+    /// the gated token diagnostics and the delayed background hint. Default
+    /// empty, so an idle view paints zero extra rows.
+    state_footer: crate::native_shell::ShellFooter,
+    /// STATE-001: live progress spinner (`native_progress::Spinner`, the
+    /// generic 80 ms `spinner.tsx` clock, distinct from the 40 ms footer
+    /// scanner). Its `advance_visible`/`destroy`/frame-list paths were
+    /// otherwise test-only.
+    progress_spinner: crate::native_progress::Spinner,
+    /// STATE-001 culling fact: a hidden/culled progress spinner neither
+    /// accrues time nor paints a frame.
+    progress_visible: bool,
+    /// STATE-003: monotonic ms of the last live footer advance, used by the
+    /// paint to render the retry countdown against the same clock.
+    footer_now_ms: u64,
     /// CP-14: `VcsInfo.branch` of the live session's directory
     /// (`prompt/index.tsx` location). `None` hides the branch (unknown dir).
     rail_branch: Option<String>,
@@ -1119,6 +1136,10 @@ impl NativeView {
     /// Startup composition for the given kernel geometry.
     pub fn new(cols: u16, rows: u16) -> Self {
         Self {
+            state_footer: crate::native_shell::ShellFooter::new(),
+            progress_spinner: crate::native_progress::Spinner::new(),
+            progress_visible: true,
+            footer_now_ms: 0,
             layout: Layout::new(cols, rows),
             sessions: SessionView::default(),
             chat: ChatView::default(),
@@ -1545,6 +1566,147 @@ impl NativeView {
     pub fn set_rail_status_clock(&mut self, animations: bool, elapsed_ms: u64) {
         self.rail_animations = animations;
         self.rail_elapsed_ms = elapsed_ms;
+    }
+
+    /// STATE-001/003/004: the live assistant/prompt footer
+    /// (`ShellFooter`, `component/prompt/index.tsx:1899-1967`). The same object
+    /// the running loop advances via [`Self::shell_footer_advance`].
+    pub fn shell_footer(&self) -> &crate::native_shell::ShellFooter {
+        &self.state_footer
+    }
+
+    /// STATE-001/003/004: mutable access for the input loop's live feed.
+    pub fn shell_footer_mut(&mut self) -> &mut crate::native_shell::ShellFooter {
+        &mut self.state_footer
+    }
+
+    /// STATE-001/004: advance the live footer clock by one renderer frame.
+    ///
+    /// Drives the 40 ms footer scanner (`Spinner::advance_visible`), which
+    /// neither accrues time nor counts a predecessor while the footer is
+    /// hidden or animations are off, and fires the delayed background hint.
+    /// Also advances the generic 80 ms `progress_spinner` on the same frame so
+    /// its culling/destroy/frame-list paths are reachable from the live view.
+    /// Returns true when a painted footer row changed.
+    pub fn shell_footer_advance(&mut self, frame_id: u64, delta_ms: u64, now_ms: u64) -> bool {
+        self.footer_now_ms = now_ms;
+        let changed = self.state_footer.advance(frame_id, delta_ms, now_ms);
+        let spinner_changed =
+            self.progress_spinner
+                .advance_visible(self.progress_visible, frame_id, delta_ms);
+        changed || spinner_changed
+    }
+
+    /// STATE-001: the live generic progress spinner (`spinner.tsx`, 80 ms).
+    pub fn progress_spinner(&self) -> &crate::native_progress::Spinner {
+        &self.progress_spinner
+    }
+
+    /// STATE-001 culling: a hidden/culled spinner stops accruing time.
+    pub fn set_progress_visible(&mut self, visible: bool) {
+        self.progress_visible = visible;
+    }
+
+    /// STATE-001 destroy: `destroySelf()` stops the timer permanently.
+    pub fn progress_spinner_destroy(&mut self) {
+        self.progress_spinner.destroy();
+    }
+
+    /// STATE-001 frame-list change: an accepted change resets the clock.
+    pub fn progress_spinner_set_frames(
+        &mut self,
+        frames: Vec<String>,
+    ) -> crate::native_progress::FrameListChange {
+        self.progress_spinner.set_frames(frames)
+    }
+
+    /// STATE-001 parent background composition: the spinner defaults to
+    /// `transparent`, so the parent row background shows through unchanged.
+    pub fn progress_spinner_background(
+        &self,
+        parent: crate::native_progress::Rgba,
+    ) -> crate::native_progress::Rgba {
+        crate::native_progress::Background::Transparent.compose(parent)
+    }
+
+    /// STATE-004: the delayed background hint rows painted above the prompt
+    /// box (`index.tsx:1918` `marginTop={1}`), empty while hidden.
+    pub fn footer_hint_rows(&self, width: u16) -> Vec<String> {
+        self.state_footer
+            .hint_rows(width)
+            .into_iter()
+            .map(|row| row.text)
+            .collect()
+    }
+
+    /// STATE-003: the error / retry / token diagnostic rows painted between
+    /// the prompt box and the composer footer row.
+    pub fn footer_diagnostic_rows(&self, now_ms: u64, width: u16) -> Vec<String> {
+        self.state_footer
+            .diagnostic_rows(now_ms, width)
+            .into_iter()
+            .map(|row| row.text)
+            .collect()
+    }
+
+    /// STATE-003: the live error edge, shared by the running loop and tests.
+    ///
+    /// A `cancelled` code is the interruption form (the error line is
+    /// suppressed). A `provider.free-limit` code owns the free-limit notice.
+    /// Any other code is the ordinary `Error:` line. NO retry state is
+    /// synthesized: the Rust server emits no `message.retry`, and a fabricated
+    /// countdown would suppress the real error/free-limit line
+    /// (`native_progress.rs:318-328`). A real retry row appears only when a
+    /// genuine `RetryState` is set through [`Self::shell_footer_mut`].
+    pub fn feed_live_error(&mut self, code: Option<&str>, message: &str, _now_ms: u64) {
+        let code = code.unwrap_or("");
+        let interrupted = code == "cancelled";
+        let free_limit = code.contains("free-limit");
+        self.state_footer.set_retry(None);
+        self.state_footer.set_error(Some(crate::native_shell::FooterError {
+            message: message.to_owned(),
+            interrupted,
+            // No `retryAfterMs` is carried on the live error event, so the
+            // reset instant is unknown; the notice uses its generic first
+            // line rather than a fabricated time.
+            free_limit_reset: None,
+        }));
+        let _ = free_limit;
+    }
+
+    /// STATE-004: feed the live eligible background work with a STABLE start
+    /// time per subject. `running` is `(subject_id, started_ms)`; `started_ms`
+    /// must be the real start of the work (the first frame it was observed
+    /// running), never the current frame clock, otherwise the hint identity
+    /// changes every frame and the 3 s delay resets forever
+    /// (`native_progress.rs:724-738`).
+    pub fn feed_background_work(&mut self, now_ms: u64, running: &[(String, u64)]) {
+        let tools: Vec<crate::native_progress::RunningTool> = running
+            .iter()
+            .map(|(id, started)| {
+                crate::native_progress::RunningTool::new(
+                    "shell",
+                    id.clone(),
+                    "shell",
+                    "running",
+                    *started,
+                )
+            })
+            .collect();
+        self.state_footer.set_background_work(now_ms, &tools);
+    }
+
+    /// STATE-001: paint the live generic progress spinner glyph
+    /// (`spinner.tsx`), so the 80 ms clock is visible, not test-only.
+    #[must_use]
+    pub fn progress_spinner_render(&self) -> String {
+        self.progress_spinner.render(self.rail_animations, None)
+    }
+
+    /// STATE-001: remount the live spinner at a fresh turn (`component/prompt`
+    /// remounts its scanner on a running edge).
+    pub fn reset_progress_spinner(&mut self) {
+        self.progress_spinner = crate::native_progress::Spinner::new();
     }
 
     /// CP-13: install the live `session.interrupt` arming state + the
@@ -4318,6 +4480,38 @@ impl NativeView {
                 // Permission prompt replaces the composer — no composer
                 // metadata / blank separator row beneath it (upstream Switch).
             } else if height >= 4 {
+                // STATE-003/004: the live footer feed. The error/retry/token
+                // diagnostics and the delayed background hint are direct
+                // composer/transcript siblings: diagnostics first, then the
+                // hint above the prompt box (`index.tsx:1918,2035-2048`). Both
+                // are empty on an idle footer, so the pre-existing layout is
+                // unchanged when no progress fact is live.
+                let diag = self.state_footer.diagnostic_rows(self.footer_now_ms, width);
+                let hint = self.state_footer.hint_rows(width);
+                if !diag.is_empty() || !hint.is_empty() {
+                    let insert = body.len().saturating_sub(prompt.height);
+                    // STATE-003 P2: carry each footer row's own style so the
+                    // error/warning rows keep `theme.text.feedback.*` coloring
+                    // instead of collapsing to muted `Metadata`.
+                    let rows: Vec<crate::native_shell::FooterRow> =
+                        diag.into_iter().chain(hint).collect();
+                    let extra: Vec<String> =
+                        rows.iter().map(|row| padded(&row.text, width)).collect();
+                    let classes: Vec<crate::native_view_chat::ChatRowClass> =
+                        rows.iter().map(footer_row_class).collect();
+                    let count = extra.len();
+                    self.chat_row_classes.splice(
+                        insert.min(self.chat_row_classes.len())..insert.min(self.chat_row_classes.len()),
+                        classes,
+                    );
+                    let bounds_at = insert.min(self.chat_text_bounds.len());
+                    self.chat_text_bounds
+                        .splice(bounds_at..bounds_at, std::iter::repeat_n(None, count));
+                    let spans_at = insert.min(self.chat_markdown_spans.len());
+                    self.chat_markdown_spans
+                        .splice(spans_at..spans_at, std::iter::repeat_n(Vec::new(), count));
+                    body.splice(insert..insert, extra);
+                }
                 let (footer, live) = self.composer_footer_row(width, inner_width, prompt.rail, busy);
                 let row = body.len();
                 body.push(padded(&footer, width));
@@ -5269,6 +5463,30 @@ impl NativeView {
 /// prefixes an ellipsis when the backend-confirmed directory exceeds the
 /// reserved left segment. Clusters are collected through the same cell-aware
 /// native layout scanner, so Unicode and combining sequences are never split.
+/// STATE-003 P2: the chat row class a footer diagnostic/hint row paints with,
+/// so the spliced rows keep their `theme.text.feedback.*` foreground. Uses the
+/// row's strongest span style (error > warning > base > muted).
+fn footer_row_class(row: &crate::native_shell::FooterRow) -> crate::native_view_chat::ChatRowClass {
+    use crate::native_shell::FooterStyle;
+    let mut class = crate::native_view_chat::ChatRowClass::Metadata;
+    for span in &row.spans {
+        class = match span.style {
+            FooterStyle::Error => crate::native_view_chat::ChatRowClass::FooterError,
+            FooterStyle::Warning => crate::native_view_chat::ChatRowClass::RetryNotice,
+            FooterStyle::Base => crate::native_view_chat::ChatRowClass::Text,
+            FooterStyle::Muted => class,
+        };
+        if matches!(
+            class,
+            crate::native_view_chat::ChatRowClass::FooterError
+                | crate::native_view_chat::ChatRowClass::RetryNotice
+        ) {
+            break;
+        }
+    }
+    class
+}
+
 fn footer_directory(path: &str, width: u16) -> String {
     if width == 0 {
         return String::new();
@@ -10000,6 +10218,238 @@ mod diff_viewer_width_tests {
             narrow.diff_viewer_patch_width() < 100,
             "narrow terminal must stay below the split threshold: {}",
             narrow.diff_viewer_patch_width()
+        );
+    }
+}
+
+// STATE group (STATE-001/003/004): each test drives the LIVE `NativeView`
+// footer/progress seam that `tui_entry`'s paint block feeds, so the model is
+// reachable from the running TUI, not test-only.
+#[cfg(test)]
+mod state_group_live_tests {
+    use super::NativeView;
+
+    const FOOTER_W: u16 = 80;
+
+    fn footer_status(nv: &NativeView) -> String {
+        nv.shell_footer()
+            .status_rows(FOOTER_W)
+            .last()
+            .map(|row| row.text.clone())
+            .unwrap_or_default()
+    }
+
+    /// STATE-001: the live footer scanner advances on the 40 ms clock across
+    /// consecutive renderer frames, honours animations-off, and culls a hidden
+    /// spinner (no time accrues while hidden). `spinner.tsx:80ms`,
+    /// `spinner-renderable.ts:onUpdate` culling.
+    #[test]
+    fn state001_footer_advance_drives_spinner_and_culling() {
+        let mut nv = NativeView::new(FOOTER_W, 24);
+        nv.shell_footer_mut().set_running(true);
+        nv.shell_footer_mut().set_animations(true);
+        // Frame 0 mounts the scanner at its first frame.
+        assert!(!nv.shell_footer_advance(0, 0, 0));
+        let first = footer_status(&nv);
+        // A culled (hidden) generic progress spinner never accrues time.
+        nv.set_progress_visible(false);
+        nv.shell_footer_advance(0, 0, 0);
+        // Two consecutive 40 ms frames step the footer scanner exactly once.
+        let mut changed = false;
+        for frame in 1..=2u64 {
+            changed |= nv.shell_footer_advance(frame, 40, frame * 40);
+        }
+        assert!(changed, "the 40 ms scanner must step across consecutive frames");
+        assert_ne!(footer_status(&nv), first, "the painted spinner frame changed");
+        // animations-off paints the static marker regardless of the clock.
+        nv.shell_footer_mut().set_animations(false);
+        let off = footer_status(&nv);
+        assert!(off.contains("[⋯]"), "animations-off paints the fallback: {off:?}");
+    }
+
+    /// STATE-001 destroy: `destroySelf()` stops the live generic progress
+    /// timer permanently.
+    #[test]
+    fn state001_destroy_stops_the_live_progress_spinner() {
+        let mut nv = NativeView::new(FOOTER_W, 24);
+        nv.shell_footer_mut().set_running(false);
+        assert!(nv.progress_spinner().repaint_delay_ms().is_some());
+        nv.progress_spinner_destroy();
+        assert!(nv.progress_spinner().is_destroyed());
+        assert!(nv.progress_spinner().repaint_delay_ms().is_none());
+    }
+
+    /// STATE-001 parent background composition: the spinner defaults to
+    /// `transparent`, so the parent row background shows through unchanged.
+    #[test]
+    fn state001_parent_background_shows_through_transparent_spinner() {
+        let nv = NativeView::new(FOOTER_W, 24);
+        let parent = crate::native_progress::Rgba([10, 20, 30, 255]);
+        assert_eq!(nv.progress_spinner_background(parent), parent);
+    }
+
+    /// STATE-003: the live footer diagnostics paint the retry countdown for a
+    /// future deadline, the due form for a past one, and the ordinary error
+    /// line, all through the live `footer_diagnostic_rows` seam.
+    #[test]
+    fn state003_footer_diagnostic_rows_from_retry_and_error() {
+        let mut nv = NativeView::new(FOOTER_W, 24);
+        nv.shell_footer_mut().set_retry(Some(crate::native_progress::RetryState {
+            at_ms: 30_000,
+            attempt: 2,
+            message: "boom".to_owned(),
+        }));
+        let future = nv.footer_diagnostic_rows(0, FOOTER_W);
+        assert!(
+            future.iter().any(|row| row.contains("Retrying in 30s · attempt 2 · boom")),
+            "future deadline countdown: {future:?}"
+        );
+        // A past deadline paints the zero/due form.
+        let past = nv.footer_diagnostic_rows(60_000, FOOTER_W);
+        assert!(
+            past.iter().any(|row| row.contains("Retry due · attempt 2 · boom")),
+            "past deadline form: {past:?}"
+        );
+        // Retry cleared -> the ordinary error line owns the row.
+        nv.shell_footer_mut().set_retry(None);
+        nv.shell_footer_mut().set_error(Some(crate::native_shell::FooterError {
+            message: "connection refused".to_owned(),
+            interrupted: false,
+            free_limit_reset: None,
+        }));
+        let plain = nv.footer_diagnostic_rows(0, FOOTER_W);
+        assert!(
+            plain.iter().any(|row| row.contains("Error: connection refused")),
+            "ordinary error line: {plain:?}"
+        );
+        // Interruption suppresses the error line.
+        nv.shell_footer_mut().set_error(Some(crate::native_shell::FooterError {
+            message: "Step interrupted".to_owned(),
+            interrupted: true,
+            free_limit_reset: None,
+        }));
+        assert!(nv.footer_diagnostic_rows(0, FOOTER_W).is_empty());
+    }
+
+    /// STATE-003 free limit: the live two-line notice replaces `Error:`.
+    #[test]
+    fn state003_free_limit_notice_replaces_the_error_line() {
+        let mut nv = NativeView::new(FOOTER_W, 24);
+        nv.shell_footer_mut().set_error(Some(crate::native_shell::FooterError {
+            message: "free limit".to_owned(),
+            interrupted: false,
+            free_limit_reset: Some("14:00".to_owned()),
+        }));
+        let rows = nv.footer_diagnostic_rows(0, FOOTER_W);
+        assert!(rows.iter().any(|row| row.contains("reset at 14:00")), "{rows:?}");
+        assert!(rows.iter().any(|row| row.contains("/connect") && row.contains("/models")), "{rows:?}");
+    }
+
+    /// STATE-004: the background hint is absent before 3 s, appears once the
+    /// work has been eligible that long, and clears on completion, all through
+    /// the live `footer_hint_rows` seam.
+    #[test]
+    fn state004_footer_hint_rows_after_delay() {
+        let mut nv = NativeView::new(FOOTER_W, 24);
+        nv.shell_footer_mut().set_background_shortcut("ctrl+b");
+        let tool = crate::native_progress::RunningTool::new("m1", "p1", "shell", "running", 0);
+        assert!(nv
+            .shell_footer_mut()
+            .set_background_work(0, std::slice::from_ref(&tool)));
+        // Absent before 3 s.
+        assert!(nv.footer_hint_rows(FOOTER_W).is_empty());
+        nv.shell_footer_advance(0, 0, 2_999);
+        assert!(nv.footer_hint_rows(FOOTER_W).is_empty());
+        // Present at/after 3 s: a margin gap row then the hint row.
+        nv.shell_footer_advance(1, 16, 3_000);
+        let rows = nv.footer_hint_rows(FOOTER_W);
+        assert_eq!(rows.len(), 2, "marginTop gap + hint row: {rows:?}");
+        assert!(rows[0].trim().is_empty(), "margin gap row: {rows:?}");
+        assert!(
+            rows[1].contains("Press ctrl+b to move running work to the background"),
+            "hint row: {rows:?}"
+        );
+        // Completion clears it at once.
+        nv.shell_footer_mut().set_background_work(3_100, &[]);
+        assert!(nv.footer_hint_rows(FOOTER_W).is_empty());
+    }
+
+    /// TEST INTEGRITY: drive the LIVE stable-start feed and assert the RENDERED
+    /// splice. A shell first observed running at t=0 must still be invisible
+    /// at t=2.999s and visible at t=3.1s, with the SAME start time each frame
+    /// (the frame-clock bug reset the identity every frame and never fired).
+    #[test]
+    fn state004_live_feed_stable_start_renders_hint_after_delay() {
+        let mut nv = NativeView::new(FOOTER_W, 24);
+        nv.set_session_route(true);
+        nv.shell_footer_mut().set_background_shortcut("ctrl+b");
+        let started = 0u64;
+        // Two frames before the delay: the identity must be stable.
+        nv.feed_background_work(0, &[("sh-1".to_owned(), started)]);
+        nv.shell_footer_advance(1, 16, 16);
+        nv.feed_background_work(1_000, &[("sh-1".to_owned(), started)]);
+        nv.shell_footer_advance(2, 984, 1_000);
+        let early = nv.render_typed("", &[], true, &[]);
+        assert!(
+            !early.iter().any(|row| row.contains("move running work")),
+            "hint must be absent before 3 s: {early:?}"
+        );
+        // At 3.1 s the same stable-start subject fires the hint and it paints.
+        nv.feed_background_work(3_100, &[("sh-1".to_owned(), started)]);
+        nv.shell_footer_advance(3, 100, 3_100);
+        let late = nv.render_typed("", &[], true, &[]);
+        assert!(
+            late.iter().any(|row| row.contains("Press ctrl+b to move running work to the background")),
+            "hint must render after 3 s: {late:?}"
+        );
+        // Completion clears it from the rendered frame.
+        nv.feed_background_work(3_200, &[]);
+        let done = nv.render_typed("", &[], true, &[]);
+        assert!(
+            !done.iter().any(|row| row.contains("move running work")),
+            "hint must clear on completion: {done:?}"
+        );
+    }
+
+    /// TEST INTEGRITY: an ordinary live error must render the real error line
+    /// and must NOT fabricate a retry countdown that suppresses it.
+    #[test]
+    fn state003_live_error_renders_line_without_fake_retry() {
+        let mut nv = NativeView::new(FOOTER_W, 24);
+        nv.set_session_route(true);
+        nv.feed_live_error(Some("provider.error"), "connection refused", 1_000);
+        let frame = nv.render_typed("", &[], false, &[]);
+        assert!(
+            frame.iter().any(|row| row.contains("Error: connection refused")),
+            "ordinary error line must render: {frame:?}"
+        );
+        assert!(
+            !frame.iter().any(|row| row.contains("Retrying") || row.contains("Retry due")),
+            "no fabricated retry countdown: {frame:?}"
+        );
+        assert!(nv.footer_diagnostic_rows(1_000, FOOTER_W).iter().all(|row| !row.contains("Retry")));
+        // Interruption suppresses the line entirely.
+        nv.feed_live_error(Some("cancelled"), "Step interrupted", 2_000);
+        let cancelled = nv.render_typed("", &[], false, &[]);
+        assert!(
+            !cancelled.iter().any(|row| row.contains("Error:") || row.contains("Retrying")),
+            "interruption suppresses the error and retry rows: {cancelled:?}"
+        );
+    }
+
+    /// TEST INTEGRITY: the live error row keeps the error foreground class, so
+    /// the spliced row is not collapsed to muted `Metadata`.
+    #[test]
+    fn state003_live_error_row_carries_error_class() {
+        let mut nv = NativeView::new(FOOTER_W, 24);
+        nv.set_session_route(true);
+        nv.feed_live_error(Some("provider.error"), "kaboom", 0);
+        let _ = nv.render_typed("", &[], false, &[]);
+        assert!(
+            nv.chat_row_classes
+                .iter()
+                .any(|class| *class == crate::native_view_chat::ChatRowClass::FooterError),
+            "live error row must be classed FooterError (error fg)"
         );
     }
 }

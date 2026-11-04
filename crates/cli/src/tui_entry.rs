@@ -8994,6 +8994,20 @@ fn native_loop(
     let mut permission_editor = crate::native_permissions::Editor::default();
     let animation_start = crate::native_clock::FrameClock::new();
     let mut animation_tick = 0u128;
+    // STATE-001/004: the live footer clock. `footer_frame_id` is the renderer
+    // frame counter and `footer_last_ms` the previous monotonic tick, so the
+    // 40 ms scanner accrues delta only across consecutive frames.
+    let mut footer_frame_id: u64 = 0;
+    let mut footer_last_ms: u64 = 0;
+    // STATE-003: the live retry deadline (`message.retry`). The Rust server
+    // emits no retry event, so this stays `None` unless a REAL retry state
+    // arrives; no countdown is ever fabricated from an ordinary error.
+    let mut footer_retry: Option<crate::native_progress::RetryState> = None;
+    // STATE-004: stable start time per running-shell subject id. Set once when
+    // a shell is first observed running and cleared when it completes, so the
+    // 3 s hint delay counts from the real start, not the frame clock.
+    let mut footer_work_started: std::collections::HashMap<String, u64> =
+        std::collections::HashMap::new();
     // DIALOG-20: the live toast controller (`ui/toast.tsx`). Its logical clock
     // is advanced on the animation tick so auto-dismiss is deterministic.
     let mut toast = crate::native_toast::Toast::new();
@@ -10112,6 +10126,11 @@ fn native_loop(
                             delta_stream.reset();
                             remove_partial(&mut transcript);
                             settled = true;
+                            // STATE-003: a settled turn clears the live footer
+                            // error/retry so the countdown and error rows end.
+                            footer_retry = None;
+                            view.shell_footer_mut().set_error(None);
+                            view.shell_footer_mut().set_retry(None);
                             transcript.append(
                                 format!("assistant: {}", native_transcript::strip_ansi(&text)),
                                 ChatMessage::text(ChatRole::Assistant, text)
@@ -10135,9 +10154,23 @@ fn native_loop(
                             settled = true;
                             let facts =
                                 crate::native_assistant_facts::AssistantFacts::from_error(
-                                    code,
+                                    code.clone(),
                                     error.clone(),
                                 );
+                            // STATE-003: feed the live footer error edge. A
+                            // `cancelled` code is the interruption form (the
+                            // error line is suppressed); a `provider.free-limit`
+                            // code owns the free-limit notice; any other error
+                            // is the ordinary `Error:` line. NO retry is
+                            // fabricated: the server emits no `message.retry`,
+                            // and a countdown would suppress the real line
+                            // (`native_progress.rs:318-328`).
+                            footer_retry = None;
+                            view.feed_live_error(
+                                code.as_deref(),
+                                &error,
+                                animation_start.now_ms(),
+                            );
                             transcript.append(
                                 format!("error: {}", native_transcript::strip_ansi(&error)),
                                 ChatMessage {
@@ -11090,6 +11123,62 @@ fn native_loop(
             0
         };
         view.set_rail_status_clock(animations, rail_elapsed_ms);
+        // STATE-001/003/004: feed the live assistant/prompt footer from the
+        // monotonic clock. The 40 ms scanner advances only across consecutive
+        // frames; a fresh running turn remounts it; animations-off paints the
+        // static marker. The retry countdown + error/token rows come from the
+        // live error edge and the gated diagnostics flag, and the background
+        // hint is armed from the live running shell scan.
+        let footer_now_ms = animation_start.now_ms();
+        footer_frame_id = footer_frame_id.saturating_add(1);
+        let footer_delta_ms = footer_now_ms.saturating_sub(footer_last_ms);
+        footer_last_ms = footer_now_ms;
+        {
+            let footer = view.shell_footer_mut();
+            footer.set_running(busy_now);
+            footer.set_animations(animations);
+            footer.set_retry(footer_retry.clone());
+            // Resolved `session.background` shortcut (`keybind.ts:129` default
+            // `ctrl+b`); same hardcoded-default convention as the rail
+            // shortcuts above. An empty value hides the hint.
+            footer.set_background_shortcut("ctrl+b");
+        }
+        // STATE-004: the eligible work is the live background-shell scan. The
+        // start time is recorded ONCE per subject id, so the hint identity is
+        // stable and its 3 s delay counts from the real start; a completed
+        // shell is dropped so its hint clears at once.
+        {
+            let mut running_ids: Vec<String> = Vec::new();
+            for shell in &live_shells {
+                let Some(id) = shell.shell_id() else { continue };
+                if !shell.is_running() {
+                    continue;
+                }
+                footer_work_started
+                    .entry(id.to_owned())
+                    .or_insert(footer_now_ms);
+                running_ids.push(id.to_owned());
+            }
+            footer_work_started.retain(|id, _| running_ids.iter().any(|live| live == id));
+            let running: Vec<(String, u64)> = running_ids
+                .iter()
+                .filter_map(|id| footer_work_started.get(id).map(|start| (id.clone(), *start)))
+                .collect();
+            view.feed_background_work(footer_now_ms, &running);
+        }
+        // STATE-001: the generic progress spinner is live while a turn runs;
+        // culled (frozen) when idle, destroyed when the worker settles.
+        if busy_now {
+            if view.progress_spinner().is_destroyed() {
+                view.reset_progress_spinner();
+            }
+            view.set_progress_visible(true);
+        }
+        if worker_finished {
+            view.set_progress_visible(false);
+            view.progress_spinner_destroy();
+        }
+        view.shell_footer_advance(footer_frame_id, footer_delta_ms, footer_now_ms);
         // CP-08: the catalogue-load edge (`index.tsx:1551`): while the model
         // reload is in flight the composer retains the memo's previous label.
         view.set_composer_catalog_loading(model_load.is_some());
