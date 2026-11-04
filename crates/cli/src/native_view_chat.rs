@@ -1870,18 +1870,45 @@ fn markdown_part_row_spans_mode(
                     if tokens.is_empty() {
                         vec![ChatRunSpan { start: start as u16, end: end as u16, flags: base }]
                     } else {
-                        tokens
-                            .into_iter()
-                            .filter_map(|(from, to, flags)| {
-                                let span_start = start.saturating_add(from);
-                                let span_end = start.saturating_add(to).min(end);
-                                (span_start < span_end).then(|| ChatRunSpan {
-                                    start: span_start as u16,
+                        // THEME-08: upstream colors the whole fenced block
+                        // `markdown.code` (`packages/theme/src/tui/syntax.ts:63`,
+                        // `rule(["markup.raw", "markup.raw.block"], markdown.code)`)
+                        // and lets token scopes override it. Emit base-flagged
+                        // spans for the gaps between tokens so non-token cells
+                        // (identifiers, operators, spaces) keep the code color
+                        // instead of falling back to the default foreground.
+                        // Coverage is full, sorted and disjoint over
+                        // `[start, end)`.
+                        let mut spans: Vec<ChatRunSpan> = Vec::new();
+                        let mut cursor = start;
+                        for (from, to, flags) in tokens {
+                            let span_start = start.saturating_add(from).min(end);
+                            let span_end = start.saturating_add(to).min(end);
+                            if span_start > cursor {
+                                spans.push(ChatRunSpan {
+                                    start: cursor as u16,
+                                    end: span_start as u16,
+                                    flags: base,
+                                });
+                            }
+                            let token_start = span_start.max(cursor);
+                            if token_start < span_end {
+                                spans.push(ChatRunSpan {
+                                    start: token_start as u16,
                                     end: span_end as u16,
                                     flags: base | flags,
-                                })
-                            })
-                            .collect()
+                                });
+                                cursor = span_end;
+                            }
+                        }
+                        if cursor < end {
+                            spans.push(ChatRunSpan {
+                                start: cursor as u16,
+                                end: end as u16,
+                                flags: base,
+                            });
+                        }
+                        spans
                     }
                 } else { Vec::new() };
                 out.push((spans, Some(rendered_cells)));

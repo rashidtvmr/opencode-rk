@@ -3074,6 +3074,64 @@ mod surface_paint_regressions {
         );
     }
 
+    /// THEME-08 repair: a fenced block keeps the `markdown.code` base paint on
+    /// non-token cells. Upstream colors the whole block
+    /// (`packages/theme/src/tui/syntax.ts:63`,
+    /// `rule(["markup.raw", "markup.raw.block"], markdown.code)`) and lets token
+    /// scopes override it, so the gaps between token runs must be covered
+    /// instead of falling back to the default foreground.
+    #[test]
+    fn theme08_fenced_gaps_keep_code_base_paint() {
+        use crate::markdown_runs::{CODE, CODE_BLOCK, SYN_MASK};
+        use crate::native_view_chat::{ChatMessage, ChatRole};
+        let mut view = crate::native_view::NativeView::new(120, 40);
+        view.set_session_route(true);
+        let messages = vec![ChatMessage::text(
+            ChatRole::Assistant,
+            "```rust\nlet count = 42; // total\n```",
+        )];
+        let lines = view.render_typed("draft", &messages, false, &[]);
+        let spans = view.chat_markdown_spans().to_vec();
+        let code_row = lines
+            .iter()
+            .position(|line| line.contains("let count"))
+            .expect("fenced row painted");
+        let row = &lines[code_row];
+        let row_spans = &spans[code_row];
+        // `count` is an identifier, not a keyword/string/number/comment: it must
+        // still carry the code base flags and no token flag.
+        let at = row.find("count").expect("identifier painted");
+        let identifier = row_spans
+            .iter()
+            .find(|span| usize::from(span.start) <= at && usize::from(span.end) >= at + "count".len())
+            .unwrap_or_else(|| panic!("identifier covered by a span; spans {row_spans:?}"));
+        assert_eq!(
+            identifier.flags & (CODE | CODE_BLOCK),
+            CODE | CODE_BLOCK,
+            "identifier keeps the code base paint; spans {row_spans:?}"
+        );
+        assert_eq!(
+            identifier.flags & SYN_MASK,
+            0,
+            "identifier is not a token; spans {row_spans:?}"
+        );
+        // Full coverage: the fenced row's spans are sorted, disjoint and
+        // contiguous from the first span to the last, so no cell loses the base
+        // paint.
+        let mut covered_until = row_spans
+            .first()
+            .map(|span| usize::from(span.start))
+            .expect("fenced row has spans");
+        for span in row_spans {
+            assert_eq!(
+                usize::from(span.start),
+                covered_until,
+                "no gap in fenced span coverage; spans {row_spans:?}"
+            );
+            covered_until = usize::from(span.end);
+        }
+    }
+
     #[test]
     fn live_theme_loader_resolves_markdown_tokens() {
         use crate::native_theme_runtime::ThemeMode;
