@@ -2956,6 +2956,43 @@ mod surface_paint_regressions {
         );
     }
 
+    /// MD-005: thinking/reasoning rows route markdown runs through
+    /// `MarkdownStyles::thinking` instead of the syntax palette
+    /// (`routes/session/thinking-syntax.ts:3-8`).
+    #[test]
+    fn md005_thinking_rows_route_markdown_runs_through_thinking_style() {
+        use crate::markdown_runs::{HEADING, HEADING1};
+        let markdown = crate::native_theme_runtime::RuntimeTheme::builtin_default(
+            crate::native_theme_runtime::ThemeMode::Dark,
+        )
+        .semantic
+        .expect("shipped V2 asset resolves")
+        .markdown;
+        let thinking = crate::native_markdown_flow::MarkdownStyles::default()
+            .thinking(markdown.muted.rgba);
+        // The model keeps non-color attributes and adopts the muted fg.
+        let heading = thinking.get(crate::native_markdown_flow::MarkdownRole::Heading);
+        assert_eq!(heading.fg, markdown.muted.rgba, "thinking fg is muted");
+        assert!(heading.attrs.bold, "thinking keeps heading bold");
+        let link = thinking.get(crate::native_markdown_flow::MarkdownRole::Link);
+        assert_eq!(link.fg, markdown.muted.rgba);
+        assert!(link.attrs.underline, "thinking keeps link underline");
+
+        // The live seam paints the muted foreground, not the syntax color.
+        let syntax = super::markdown_run_color(&markdown, HEADING).unwrap().rgba;
+        assert_ne!(syntax, markdown.muted.rgba, "theme distinguishes heading/muted");
+        let painted = super::markdown_run_paint_color(&markdown, HEADING, true)
+            .expect("thinking rows always resolve a foreground");
+        assert_eq!(painted, markdown.muted.rgba);
+        let painted_h1 = super::markdown_run_paint_color(&markdown, HEADING | HEADING1, true).unwrap();
+        assert_eq!(painted_h1, markdown.muted.rgba);
+        // Non-thinking paint is unchanged: heading rows keep the syntax color.
+        assert_eq!(
+            super::markdown_run_paint_color(&markdown, HEADING, false).unwrap(),
+            syntax
+        );
+    }
+
     #[test]
     fn markdown_span_flags_map_to_upstream_tokens() {
         use crate::markdown_runs::{
@@ -4583,6 +4620,67 @@ fn markdown_run_color(
     }
 }
 
+/// Map markdown run flags to the style role upstream assigns
+/// (`packages/theme/src/tui/syntax.ts:46-71`); order matches
+/// [`markdown_run_color`].
+#[cfg(feature = "native")]
+fn markdown_role_for_flags(flags: u16) -> crate::native_markdown_flow::MarkdownRole {
+    use crate::markdown_runs::{
+        BOLD, CODE, CODE_BLOCK, HEADING, HEADING1, ITALIC, LINK, LINK_TEXT, LIST, QUOTE, RULE,
+        STRIKE,
+    };
+    use crate::native_markdown_flow::MarkdownRole;
+    if flags & CODE != 0 {
+        if flags & CODE_BLOCK != 0 {
+            MarkdownRole::CodeBlock
+        } else {
+            MarkdownRole::InlineCode
+        }
+    } else if flags & HEADING1 != 0 {
+        MarkdownRole::Heading1
+    } else if flags & HEADING != 0 {
+        MarkdownRole::Heading
+    } else if flags & BOLD != 0 {
+        MarkdownRole::Strong
+    } else if flags & ITALIC != 0 {
+        MarkdownRole::Emphasis
+    } else if flags & LINK_TEXT != 0 {
+        MarkdownRole::LinkLabel
+    } else if flags & LINK != 0 {
+        MarkdownRole::Link
+    } else if flags & QUOTE != 0 {
+        MarkdownRole::BlockQuote
+    } else if flags & RULE != 0 {
+        MarkdownRole::Rule
+    } else if flags & LIST != 0 {
+        MarkdownRole::ListMarker
+    } else if flags & STRIKE != 0 {
+        MarkdownRole::Strikethrough
+    } else {
+        MarkdownRole::Text
+    }
+}
+
+/// Live paint color for one markdown run. Thinking/reasoning rows route
+/// through [`crate::native_markdown_flow::MarkdownStyles::thinking`]
+/// (`routes/session/thinking-syntax.ts:3-8`): every role keeps its
+/// non-color attributes and adopts the muted foreground instead of its
+/// syntax color.
+#[cfg(feature = "native")]
+fn markdown_run_paint_color(
+    markdown: &crate::native_theme_runtime::MarkdownPalette,
+    flags: u16,
+    thinking: bool,
+) -> Option<[u8; 4]> {
+    if thinking {
+        let styles = crate::native_markdown_flow::MarkdownStyles::default()
+            .thinking(markdown.muted.rgba);
+        let spec = styles.get(markdown_role_for_flags(flags));
+        return Some(spec.fg);
+    }
+    markdown_run_color(markdown, flags).map(|color| color.rgba)
+}
+
 
 #[cfg(feature = "native")]
 fn paint_color(
@@ -5215,13 +5313,22 @@ fn native_paint(
                 }
                 if !in_modal {
                     if let Some(markdown) = ctx.markdown.as_ref() {
+                        // MD-005: thinking rows keep the muted reasoning
+                        // foreground; markdown runs route through the thinking
+                        // style rather than syntax colors.
+                        let thinking = matches!(
+                            ctx.chat_row_classes.get(row),
+                            Some(crate::native_view_chat::ChatRowClass::Thinking)
+                        );
                         if let Some(run_spans) = ctx.chat_markdown_spans.get(row) {
                             for run_span in run_spans {
                                 if x >= u32::from(run_span.start)
                                     && x.saturating_add(u32::from(cells)) <= u32::from(run_span.end)
                                 {
-                                    if let Some(color) = markdown_run_color(markdown, run_span.flags) {
-                                        let [r, g, b, a] = color.rgba;
+                                    if let Some(rgba) =
+                                        markdown_run_paint_color(markdown, run_span.flags, thinking)
+                                    {
+                                        let [r, g, b, a] = rgba;
                                         fg = Rgba::new(r, g, b, a);
                                     }
                                     if run_span.flags & crate::markdown_runs::CODE != 0
