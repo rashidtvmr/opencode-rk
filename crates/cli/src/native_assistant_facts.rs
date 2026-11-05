@@ -56,6 +56,17 @@ use serde_json::Value;
 /// (`ApiFailure.code` / `stream_error` code `"cancelled"`).
 pub const CANCELLED_CODE: &str = "cancelled";
 
+/// The typed wire error code the server emits for a provider rate-limit
+/// stream failure (`crates/server/src/lib.rs:4100-4111`, `provider_stream_code`:
+/// `StreamFailed{code:"rate_limit"|"rate_limited"}` normalizes to
+/// `"rate_limited"` on the `/turns/stream` error frame). It classifies the
+/// upstream usage-limit footer notice (`index.tsx:2031-2047`, the
+/// `useLimitNotice` match arm, `component/usage.tsx:249-291`) — the honest
+/// typed-code subset. Upstream's remaining-%/reset-window data comes from the
+/// OpenCode Console API, which this backend has no credential or route for;
+/// only the notice selection is derived, never fabricated counter data.
+pub const USAGE_LIMIT_CODE: &str = "rate_limited";
+
 /// Real execution facts attachable to one assistant [`ChatMessage`]
 /// (`crate::native_view_chat::ChatMessage`). Every field is either populated
 /// from authoritative execution metadata (the live turn stream, the stored
@@ -100,6 +111,13 @@ pub struct AssistantFacts {
     /// the native equivalent of upstream's `"Step interrupted"` suffix
     /// condition. Never derived from message text.
     pub interrupted: bool,
+    /// SIDE-05: true only when the TYPED error transport code was
+    /// [`USAGE_LIMIT_CODE`] — the provider rate-limit code the server already
+    /// emits on stream-error frames (`provider_stream_code`,
+    /// `crates/server/src/lib.rs:4100-4111`). Selects the upstream
+    /// usage-limit notice (`index.tsx:2031-2047`). Never derived from message
+    /// text.
+    pub error_is_usage_limit: bool,
     /// Backend error message for a terminal error frame (`None` for a normal
     /// completion). Display data only: drives the upstream `Error: {message}`
     /// notice row for non-interruption errors and is never pattern-matched.
@@ -129,18 +147,21 @@ impl AssistantFacts {
             duration_ms: None,
             streamed_ms: frame.get("streamed_ms").and_then(Value::as_u64),
             interrupted: false,
+            error_is_usage_limit: false,
             error_message: None,
         }
     }
 
     /// Facts from one terminal transport error. `code` is the TYPED wire error
     /// code (`error` frame `code` or HTTP `ErrorBody.code`); `message` is its
-    /// display text. `interrupted` is `true` only when `code == "cancelled"`.
+    /// display text. `interrupted` is `true` only when `code == "cancelled"`;
+    /// `error_is_usage_limit` is `true` only when `code == "rate_limited"`.
     /// Message text is never inspected: other error paths legitimately contain
-    /// cancellation wording (see module docs).
+    /// cancellation or limit wording (see module docs).
     #[must_use]
     pub fn from_error(code: Option<String>, message: String) -> Self {
         let interrupted = code.as_deref() == Some(CANCELLED_CODE);
+        let error_is_usage_limit = code.as_deref() == Some(USAGE_LIMIT_CODE);
         Self {
             stop_reason: None,
             output_tokens: None,
@@ -148,6 +169,7 @@ impl AssistantFacts {
             duration_ms: None,
             streamed_ms: None,
             interrupted,
+            error_is_usage_limit,
             error_message: Some(message),
         }
     }
@@ -176,6 +198,7 @@ impl AssistantFacts {
             duration_ms: None,
             streamed_ms: execution.get("streamed_ms").and_then(Value::as_u64),
             interrupted: false,
+            error_is_usage_limit: false,
             error_message: None,
         };
         (facts != Self::default()).then_some(facts)
@@ -384,6 +407,7 @@ impl AssistantFooter {
                 facts.streamed_ms,
             ),
             interrupted: facts.interrupted,
+            error_is_usage_limit: facts.error_is_usage_limit,
             error_message: facts.error_message.clone(),
             ..Self::default()
         }
@@ -718,6 +742,41 @@ mod native_assistant_facts_tests {
         let row = full_footer().row(40);
         assert_eq!(row.notice, FooterNotice::None);
         assert_eq!(row.margin_top, 0);
+    }
+
+    #[test]
+    fn side05_typed_code_classifies_usage_limit() {
+        // The typed wire rate-limit code selects the usage-limit notice.
+        let usage = AssistantFacts::from_error(
+            Some(USAGE_LIMIT_CODE.to_owned()),
+            "provider rate limited".to_owned(),
+        );
+        assert!(usage.error_is_usage_limit);
+        assert!(!usage.interrupted);
+        let footer = AssistantFooter::from_facts(&usage);
+        assert!(footer.error_is_usage_limit);
+        assert_eq!(footer.notice(), FooterNotice::UsageLimit);
+
+        // Text alone never classifies: a limit-worded message with no typed
+        // code falls back to the generic error notice.
+        let text_only = AssistantFacts::from_error(None, "usage limit exceeded".to_owned());
+        assert!(!text_only.error_is_usage_limit);
+        assert_eq!(
+            AssistantFooter::from_facts(&text_only).notice(),
+            FooterNotice::Error("usage limit exceeded".to_owned())
+        );
+
+        // An unnormalized provider code is not the typed wire code.
+        let unnormalized =
+            AssistantFacts::from_error(Some("rate_limit".to_owned()), "limited".to_owned());
+        assert!(!unnormalized.error_is_usage_limit);
+
+        // History records never carry a transport error.
+        let history = AssistantFacts::from_history_record(&json!({
+            "execution": {"streamed_ms": 1200}
+        }))
+        .expect("execution facts");
+        assert!(!history.error_is_usage_limit);
     }
 
     #[test]
