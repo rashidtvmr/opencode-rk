@@ -1918,10 +1918,24 @@ impl NativeView {
             .set_active(self.dock.is_active(DockTabId::Subagents));
     }
 
+    /// CP-23: late-bind the live tab models to the composer's footer hints.
+    /// The shell tab has no live selection model in `NativeView` yet, so its
+    /// empty hint list is intentional (and matches upstream when nothing is
+    /// selected) rather than a fabricated output/kill row.
+    fn refresh_dock_hints(&mut self) {
+        self.dock.set_hints(
+            DockTabId::Subagents,
+            self.dock_tab
+                .hints(&crate::native_children::SubagentShortcuts::upstream_defaults()),
+        );
+        self.dock.set_hints(DockTabId::Shell, Vec::new());
+    }
+
     fn sync_dock_rows(&mut self) {
         let Some(session) = self.dock_session.clone() else {
             self.dock_tab.set_sessions("", "", Vec::new());
             self.sync_dock_active();
+            self.refresh_dock_hints();
             return;
         };
         let mut sessions = Vec::with_capacity(self.live_child_rows.len() + 1);
@@ -1954,6 +1968,7 @@ impl NativeView {
         // dispatch while the Subagents tab owns the dock
         // (`composer.active("subagents")`, subagents-tab.tsx:73-96).
         self.sync_dock_active();
+        self.refresh_dock_hints();
     }
 
     /// Whether the auxiliary dock currently owns the slot above the composer.
@@ -2022,6 +2037,7 @@ impl NativeView {
             self.dock_hit.clear();
         }
         self.sync_dock_active();
+        self.refresh_dock_hints();
         outcome
     }
 
@@ -2039,6 +2055,7 @@ impl NativeView {
         if !matches!(action, crate::native_children::SubagentAction::None) {
             self.dock_hit.clear();
         }
+        self.refresh_dock_hints();
         Some(action)
     }
 
@@ -10097,6 +10114,18 @@ mod composer_dock_tests {
     fn production_dock_registers_the_always_mounted_tabs() {
         let view = view_with(children());
         assert_eq!(view.dock_active_tab(), Some(DockTabId::Subagents));
+    }
+
+    #[test]
+    fn cp23_live_dock_receives_tab_hints_through_set_hints() {
+        let mut view = view_with(children());
+        view.toggle_dock();
+        let frame = view.render_typed("draft", &[], false, &[]).join("\n");
+        assert!(
+            frame.contains("interrupt") || frame.contains("show inactive"),
+            "missing Subagents hint: {frame}"
+        );
+        assert!(frame.contains("tabs ←/→"), "missing tab footer hint: {frame}");
     }
 
     // CP-26: the production frame feeds the live `/api/shell` projection into
