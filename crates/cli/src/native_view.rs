@@ -253,10 +253,10 @@ pub struct NativeView {
     /// `session.image_preview` gate (`routes/session/index.tsx:2663`);
     /// `None`-set default stays true.
     image_preview_enabled: bool,
-    /// Composer auxiliary dock (`routes/session/composer/index.tsx`). Only the
-    /// always-mounted Subagents tab is registered: the Shell and Terminals tabs
-    /// have no live session facts here, so advertising them would promise keys
-    /// and rows this page cannot honor.
+    /// Composer auxiliary dock (`routes/session/composer/index.tsx`). The
+    /// always-mounted Subagents and Shell tabs are registered; the guarded
+    /// Terminals tab remains unavailable until a live terminal-list producer is
+    /// wired (see `dock_block_for`).
     dock: ComposerDock,
     /// Active-session queued prompts shown above the composer.
     queued_prompts: crate::native_view_chat::QueueDock,
@@ -2113,6 +2113,11 @@ impl NativeView {
                         .collect(),
                 )
             }
+        } else if self.dock.is_active(DockTabId::Terminals) {
+            // CP-27 residual: the native runtime has no live terminal-list
+            // producer yet. Do not invent rows; keep this tab body absent until
+            // the session route exposes the daemon's terminal records.
+            return None;
         } else {
             return None;
         };
@@ -10075,6 +10080,35 @@ mod composer_dock_tests {
         let view = view_with(children());
         assert_eq!(view.dock_active_tab(), Some(DockTabId::Subagents));
     }
+
+    // CP-26: the production frame feeds the live `/api/shell` projection into
+    // the mounted Shell tab. This is intentionally a rendered-frame assertion
+    // (rather than only inspecting model state), because the pre-wire behavior
+    // retained the list but painted an empty/nonexistent Shell body.
+    #[test]
+    fn cp26_live_dock_shell_tab_lists_live_shells() {
+        let mut view = view_with(children());
+        view.set_live_shell_rows(
+            vec![crate::native_shell::ShellEntry::new(
+                "shell-1",
+                "cargo test --locked",
+                "running",
+            )],
+            &[],
+        );
+        view.toggle_dock();
+        assert_eq!(view.dock_active_tab(), Some(DockTabId::Subagents));
+        assert_eq!(view.dock_key(DockKey::Right), DockKeyOutcome::Switched(DockTabId::Shell));
+
+        let frame = view.render_typed("draft", &[], false, &[]);
+        assert!(
+            frame.iter().any(|row| row.contains("cargo test --locked")),
+            "Shell tab did not render the live shell row: {frame:?}"
+        );
+    }
+
+    // CP-27 residual: no live terminal-list producer exists in the native
+    // session loop, so the guarded Terminals tab is not advertised or painted.
 
     // CP-24: the subagents-tab command ids dispatch through the live dock tab
     // while the Subagents tab owns the dock, and are refused (None) otherwise,
