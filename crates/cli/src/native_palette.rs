@@ -3439,6 +3439,9 @@ pub mod pickers {
         pub local: Vec<SessionRow>,
         /// Visible rows after the latest accepted apply.
         pub rows: Vec<SessionRow>,
+        /// Complete accepted server snapshot, retained so scope changes can
+        /// recompute the view without discarding rows or issuing a fetch.
+        server_rows: Option<Vec<SessionRow>>,
         /// Monotonic fetch generation; requests carry it, applies check it.
         pub generation: u64,
         pub selected: usize,
@@ -3451,6 +3454,7 @@ pub mod pickers {
                 picker: SessionPicker::new(scope_cwd, current_directory, today),
                 local: Vec::new(),
                 rows: Vec::new(),
+                server_rows: None,
                 generation: 0,
                 selected: 0,
             }
@@ -3498,7 +3502,8 @@ pub mod pickers {
             }
             let query = self.picker.debounced().to_owned();
             let all_projects = self.picker.all_projects();
-            self.rows = self.picker.apply_result(&query, all_projects, false, server, &self.local);
+            self.server_rows = Some(server);
+            self.rows = self.picker.apply_result(&query, all_projects, false, self.server_rows.clone().unwrap_or_default(), &self.local);
             self.selected = self.selected.min(self.rows.len().saturating_sub(1));
             true
         }
@@ -3547,11 +3552,20 @@ pub mod pickers {
                 .collect()
         }
 
-        /// Standalone picker-model scope setting. The live dialog does not
-        /// expose this setting because its fetched rows lack directory data.
-        pub fn toggle_scope(&mut self) {
+        /// Toggle scope and recompute the visible view from the complete cached
+        /// server snapshot (or local fallback). No request is pending, so this
+        /// synchronous scope change must not leave the picker in Loading state.
+        pub fn toggle_scope(&mut self) -> bool {
             self.picker.toggle_scope();
+            self.picker.loading = false;
             self.selected = 0;
+            let needle = self.picker.filter().trim().to_lowercase();
+            let source = self.server_rows.as_ref().unwrap_or(&self.local);
+            self.rows = source.iter().filter(|row| !row.parent).filter(|row| {
+                (self.picker.all_projects() || row.directory == self.picker.current_directory)
+                    && (needle.is_empty() || row.title.to_lowercase().contains(&needle))
+            }).cloned().collect();
+            true
         }
 
         /// Open the focused session, or `None` if model-only deletion is armed.

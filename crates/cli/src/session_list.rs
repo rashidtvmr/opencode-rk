@@ -7,11 +7,13 @@ use std::collections::HashSet;
 
 pub const MAX_ROWS: usize = 256;
 pub const MAX_TITLE_BYTES: usize = 512;
+pub const MAX_DIRECTORY_BYTES: usize = 512;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionRow {
     pub id: String,
     pub title: String,
+    pub directory: Option<String>,
 }
 
 fn truncate_utf8(s: &str, max: usize) -> String {
@@ -26,9 +28,18 @@ fn sanitize_title(raw: &str) -> String {
     truncate_utf8(&cleaned, MAX_TITLE_BYTES)
 }
 
+fn sanitize_directory(raw: &str) -> Result<String, String> {
+    if raw.len() > MAX_DIRECTORY_BYTES || raw.chars().any(|c| c.is_control()) {
+        return Err("session directory is invalid".into());
+    }
+    Ok(truncate_utf8(raw, MAX_DIRECTORY_BYTES))
+}
+
 /// Parse and validate the authenticated backend session listing. Raw title
 /// limits and controls are checked before sanitation; invalid entries reject
 /// the complete snapshot rather than being silently normalized or dropped.
+/// Invalid optional directory metadata is gracefully degraded to `None`, so a
+/// malformed path does not reject otherwise usable session rows.
 pub fn parse_rows(value: &Value) -> Result<Vec<SessionRow>, String> {
     let raw: Vec<&Value> = match value {
         Value::Array(items) => items.iter().collect(),
@@ -60,7 +71,11 @@ pub fn parse_rows(value: &Value) -> Result<Vec<SessionRow>, String> {
         if title_raw.chars().any(|c| c.is_control() && c != ' ') {
             return Err(format!("session {id} title contains control characters"));
         }
-        rows.push(SessionRow { id: id.to_owned(), title: sanitize_title(title_raw) });
+        let directory = match obj.get("directory").and_then(Value::as_str) {
+            Some(raw) => sanitize_directory(raw).ok(),
+            None => None,
+        };
+        rows.push(SessionRow { id: id.to_owned(), title: sanitize_title(title_raw), directory });
     }
     Ok(rows)
 }
@@ -81,6 +96,13 @@ mod tests {
         assert!(parse_rows(&json!({"sessions":[{"id":ID,"title":"bad\ncontrol"}]})).is_err());
     }
     #[test]
+    fn invalid_directory_metadata_degrades_to_none() {
+        for directory in ["bad\npath".to_owned(), "x".repeat(MAX_DIRECTORY_BYTES + 1)] {
+            let parsed = parse_rows(&json!({"sessions":[{"id":ID,"title":"ok","directory":directory}]})).unwrap();
+            assert_eq!(parsed[0].directory, None);
+        }
+    }
+    #[test]
     fn rejects_duplicate_active_ids() {
         assert!(parse_rows(&json!({"sessions":[{"id":ID,"title":"a"},{"id":ID,"title":"b"}]})).is_err());
     }
@@ -88,6 +110,15 @@ mod tests {
     fn accepts_blank_title_and_bounded_valid_rows() {
         let rows = parse_rows(&json!({"sessions":[{"id":ID,"title":""},{"id":ID2,"title":"ok"}]})).unwrap();
         assert_eq!(rows[0].title, "");
+        assert_eq!(rows[0].directory, None);
         assert_eq!(rows.len(), 2);
+    }
+
+    #[test]
+    fn propagates_valid_directory_and_rejects_invalid_directory() {
+        let rows = parse_rows(&json!({"sessions":[{"id":ID,"title":"x","directory":"/work/project"}]})).unwrap();
+        assert_eq!(rows[0].directory.as_deref(), Some("/work/project"));
+        let rows = parse_rows(&json!({"sessions":[{"id":ID,"directory":"/work\nproject"}]})).unwrap();
+        assert_eq!(rows[0].directory, None);
     }
 }

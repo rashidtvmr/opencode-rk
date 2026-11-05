@@ -1631,6 +1631,18 @@ impl DialogView {
         changed
     }
 
+    /// Toggle project scope and immediately re-filter rows already held by
+    /// the picker. No network request is implied by this local action.
+    pub fn sessions_toggle_scope(&mut self) -> bool {
+        let changed = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.sessions.as_mut())
+            .is_some_and(|state| state.toggle_scope());
+        if changed { self.sync_sessions_choices(); }
+        changed
+    }
+
     /// DIALOG-13: move the picker highlight.
     pub fn sessions_move(&mut self, delta: isize) -> bool {
         let Some(state) = self
@@ -3673,8 +3685,8 @@ impl DialogView {
                 DialogKind::Sessions => {
                     // DIALOG-13: the live session picker (`dialog-session-list.tsx`).
                     // The filter line replaces the hint while typing
-                    // (`searchInTitle`, `:206-209`); fetched rows currently
-                    // support title search only, not directory scope/delete.
+                    // (`searchInTitle`, `:206-209`); fetched rows support title
+                    // search and directory scope. Delete remains unsupported.
                     match dialog.sessions.as_ref() {
                         Some(state) => {
                             let filter = state.picker.filter();
@@ -3686,7 +3698,8 @@ impl DialogView {
                             } else {
                                 lines.push(line(format!("search: {filter}"), Role::Item));
                             }
-                            lines.push(line("title filter only · directory scope unavailable".to_string(), Role::Description));
+                            let scope = if state.picker.all_projects() { "all projects" } else { "current project" };
+                            lines.push(line(format!("title filter · Ctrl+A: {scope}"), Role::Description));
                         }
                         None => lines.push(line(
                             "sessions · Enter open".to_string(),

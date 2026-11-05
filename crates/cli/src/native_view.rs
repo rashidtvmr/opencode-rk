@@ -934,6 +934,7 @@ mod page_spacing_tests {
                 label: "Example item".into(),
                 detail: "Secondary description".into(),
                 enabled: true,
+                    directory: None,
             }]);
             if page == Page::Memory {
                 view.load_memory(r#"{"sources":[{"path":"/fixture/AGENTS.md","content":"Example instruction","included":true,"reason":null}]}"#).unwrap();
@@ -970,6 +971,7 @@ mod page_spacing_tests {
                     label: format!("Item {i}"),
                     detail: "details".into(),
                     enabled: true,
+                    directory: None,
                 })
                 .collect(),
         );
@@ -7331,12 +7333,14 @@ pub fn initial_page_rows(backend: bool) -> Vec<PageRow> {
             label: "Chat".to_owned(),
             detail: "current transcript".to_owned(),
             enabled: true,
+                    directory: None,
         },
         PageRow {
             id: "status".to_owned(),
             label: "Status".to_owned(),
             detail: "connection / model / session snapshot".to_owned(),
             enabled: true,
+                    directory: None,
         },
         PageRow {
             id: "mcp".to_owned(),
@@ -7347,6 +7351,7 @@ pub fn initial_page_rows(backend: bool) -> Vec<PageRow> {
                 "unavailable: daemon offline".to_owned()
             },
             enabled: backend,
+                    directory: None,
         },
         PageRow {
             id: "models".to_owned(),
@@ -7357,12 +7362,14 @@ pub fn initial_page_rows(backend: bool) -> Vec<PageRow> {
                 "unavailable: daemon offline".to_owned()
             },
             enabled: backend,
+                    directory: None,
         },
         PageRow {
             id: "providers".to_owned(),
             label: "Providers".to_owned(),
             detail: "provider setup via /connect".to_owned(),
             enabled: true,
+                    directory: None,
         },
         PageRow {
             id: "workspaces".to_owned(),
@@ -7373,42 +7380,49 @@ pub fn initial_page_rows(backend: bool) -> Vec<PageRow> {
                 "unavailable: daemon offline".to_owned()
             },
             enabled: backend,
+                    directory: None,
         },
         PageRow {
             id: "agents".to_owned(),
             label: "Agents".to_owned(),
             detail: "unavailable: no backend route in this build".to_owned(),
             enabled: false,
+                    directory: None,
         },
         PageRow {
             id: "theme".to_owned(),
             label: "Theme".to_owned(),
             detail: "unavailable: theme page not wired in this build".to_owned(),
             enabled: false,
+                    directory: None,
         },
         PageRow {
             id: "diff".to_owned(),
             label: "Diff".to_owned(),
             detail: "unavailable: no backend route in this build".to_owned(),
             enabled: false,
+                    directory: None,
         },
         PageRow {
             id: "context".to_owned(),
             label: "Context".to_owned(),
             detail: "local breakdown only; no live turn attached".to_owned(),
             enabled: true,
+                    directory: None,
         },
         PageRow {
             id: "commands".to_owned(),
             label: "Commands".to_owned(),
             detail: "local routes (open with /commands or Ctrl-K)".to_owned(),
             enabled: true,
+                    directory: None,
         },
         PageRow {
             id: "help".to_owned(),
             label: "Help".to_owned(),
             detail: "keybinding reference (submit keymap aware)".to_owned(),
             enabled: true,
+                    directory: None,
         },
     ]
 }
@@ -8018,6 +8032,7 @@ mod tests {
         SessionRow {
             id: id.to_owned(),
             title: format!("title {id}"),
+            directory: None,
         }
     }
 
@@ -8606,12 +8621,14 @@ mod tests {
                 label: "A".to_owned(),
                 detail: "active".to_owned(),
                 enabled: true,
+                    directory: None,
             },
             PageRow {
                 id: "sess-b".to_owned(),
                 label: "B".to_owned(),
                 detail: "".to_owned(),
                 enabled: true,
+                    directory: None,
             },
         ]);
         // Enter intent is a real pending Request for the SELECTED row (the
@@ -8733,12 +8750,14 @@ mod tests {
                 label: "Alpha".to_owned(),
                 detail: String::new(),
                 enabled: true,
+                    directory: None,
             },
             PageRow {
                 id: uuid_b.to_owned(),
                 label: "Beta".to_owned(),
                 detail: "active".to_owned(),
                 enabled: true,
+                    directory: None,
             },
         ]);
         let mut draft = "unsent chat draft".to_owned();
@@ -9028,10 +9047,12 @@ mod tests {
             SessionRow {
                 id: A.to_owned(),
                 title: "Alpha".to_owned(),
+                directory: None,
             },
             SessionRow {
                 id: B.to_owned(),
                 title: "Beta".to_owned(),
+                directory: None,
             },
         ];
         let commit = view
@@ -9103,10 +9124,12 @@ mod tests {
                         SessionRow {
                             id: A.to_owned(),
                             title: "Alpha".to_owned(),
+                            directory: None,
                         },
                         SessionRow {
                             id: B.to_owned(),
                             title: "Beta".to_owned(),
+                            directory: None,
                         },
                     ],
                     0,

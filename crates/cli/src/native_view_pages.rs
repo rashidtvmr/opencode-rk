@@ -436,6 +436,7 @@ pub struct PageRow {
     pub label: String,
     pub detail: String,
     pub enabled: bool,
+    pub directory: Option<String>,
 }
 
 /// Build an enabled row (proposal helper for adapters and tests).
@@ -446,6 +447,7 @@ pub fn row(id: &str, label: &str, detail: &str) -> PageRow {
         label: label.to_owned(),
         detail: detail.to_owned(),
         enabled: true,
+        directory: None,
     }
 }
 
@@ -501,6 +503,7 @@ pub fn command_rows() -> Vec<PageRow> {
             label: if *route == "/import" { "Import settings".to_owned() } else { (*route).to_owned() },
             detail: if *route == "/import" { "rediscover and import settings".to_owned() } else { format!("open the {page} page") },
             enabled: true,
+                    directory: None,
         })
         .collect()
 }
@@ -523,6 +526,7 @@ pub fn provider_rows(entries: &[(bool, &str, &str, &str)]) -> Vec<PageRow> {
                 label: (*name).to_owned(),
                 detail,
                 enabled: *supported,
+                    directory: None,
             }
         })
         .collect()
@@ -538,6 +542,7 @@ pub fn unavailable_rows(reason: &str) -> Vec<PageRow> {
         label: "Unavailable".to_owned(),
         detail: format!("unavailable: {reason}"),
         enabled: false,
+                    directory: None,
     }]
 }
 
@@ -1357,6 +1362,7 @@ mod tests {
             label: label.to_owned(),
             detail: detail.to_owned(),
             enabled,
+            directory: None,
         }
     }
 
@@ -2070,6 +2076,7 @@ mod tests {
             label: "Archived".to_owned(),
             detail: "unavailable: session archived".to_owned(),
             enabled: false,
+                    directory: None,
         }]);
         assert!(matches!(
             state.activate(),

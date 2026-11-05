@@ -32,6 +32,7 @@ const MAX_TITLE_BYTES: usize = 512;
 pub struct SessionRow {
     pub id: String,
     pub title: String,
+    pub directory: Option<String>,
 }
 
 /// Intent action proposed by the view; routed by the caller to real backend routes.
@@ -511,7 +512,7 @@ fn truncate_utf8(s: &str, max: usize) -> String {
 pub fn parse_rows(value: &Value) -> Result<Vec<SessionRow>, String> {
     crate::session_list::parse_rows(value).map(|rows| {
         rows.into_iter()
-            .map(|row| SessionRow { id: row.id, title: row.title })
+            .map(|row| SessionRow { id: row.id, title: row.title, directory: row.directory })
             .collect()
     })
 }
@@ -531,10 +532,12 @@ mod tests {
                 SessionRow {
                     id: VALID_ID.to_string(),
                     title: "alpha".into(),
+                    directory: None,
                 },
                 SessionRow {
                     id: OTHER_ID.to_string(),
                     title: "beta".into(),
+                    directory: None,
                 },
             ],
             None,
@@ -673,6 +676,7 @@ mod tests {
             vec![SessionRow {
                 id: OTHER_ID.to_string(),
                 title: "beta".into(),
+                    directory: None,
             }],
             None,
         );
@@ -698,10 +702,12 @@ mod tests {
                 SessionRow {
                     id: VALID_ID.to_string(),
                     title: "renamed".into(),
+                    directory: None,
                 },
                 SessionRow {
                     id: OTHER_ID.to_string(),
                     title: "beta".into(),
+                    directory: None,
                 },
             ],
             Some(VALID_ID.to_owned()),
@@ -758,6 +764,7 @@ mod tests {
             .map(|i| SessionRow {
                 id: format!("00000000-0000-4000-8000-{:012x}", i),
                 title: format!("row {i}"),
+                    directory: None,
             })
             .collect();
         v.set_rows(rows, None);
@@ -785,8 +792,8 @@ mod tests {
         assert_eq!(v.active_id(), None);
         v.set_rows(
             vec![
-                SessionRow { id: VALID_ID.to_string(), title: "alpha".into() },
-                SessionRow { id: OTHER_ID.to_string(), title: "beta".into() },
+                SessionRow { id: VALID_ID.to_string(), title: "alpha".into(), directory: None },
+                SessionRow { id: OTHER_ID.to_string(), title: "beta".into(), directory: None },
             ],
             None,
         );
@@ -804,6 +811,7 @@ mod tests {
             vec![SessionRow {
                 id: VALID_ID.to_string(),
                 title: "a".into(),
+                    directory: None,
             }],
             None,
         );
@@ -813,10 +821,12 @@ mod tests {
                 SessionRow {
                     id: OTHER_ID.to_string(),
                     title: "b".into(),
+                    directory: None,
                 },
                 SessionRow {
                     id: VALID_ID.to_string(),
                     title: "a".into(),
+                    directory: None,
                 },
             ],
             None,
@@ -882,7 +892,7 @@ mod tests {
     #[test]
     fn blank_title_remains_uninvented_without_metadata() {
         let mut v = SessionView::default();
-        v.set_rows(vec![SessionRow { id: VALID_ID.into(), title: String::new() }], Some(VALID_ID.into()));
+        v.set_rows(vec![SessionRow { id: VALID_ID.into(), title: String::new(), directory: None }], Some(VALID_ID.into()));
         let lines = v.render(40, 3);
         assert!(!lines.iter().any(|line| line.contains("New session")));
         assert_eq!(v.active_id(), Some(VALID_ID));
@@ -908,6 +918,7 @@ mod tests {
             vec![SessionRow {
                 id: VALID_ID.to_string(),
                 title: "alpha".into(),
+                    directory: None,
             }],
             None,
         );
@@ -925,6 +936,7 @@ mod tests {
             vec![SessionRow {
                 id: VALID_ID.to_string(),
                 title: String::new(),
+                    directory: None,
             }],
             None,
         );

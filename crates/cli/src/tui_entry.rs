@@ -4924,9 +4924,7 @@ fn sessions_menu_key(
         2 => { view.dialogs.sessions_move(-1); (true, None) }
         8 | 127 => (view.dialogs.sessions_backspace(), None),
         b' '..=b'~' => (view.dialogs.sessions_push_filter(char::from(byte)), None),
-        // Directory filtering is unavailable because fetched PageRows do not
-        // retain the server row's directory field; do not advertise Ctrl+A.
-        1 => (true, None),
+        1 => (view.dialogs.sessions_toggle_scope(), None),
         4 => (true, None),
         18 => match view.dialogs.sessions_focused_id() { Some(id) => (true, Some(SessionsKeyAction::Rename(id))), None => (true, None) },
         13 | 10 => match view.dialogs.sessions_open_focused() { Some(row) => (true, Some(SessionsKeyAction::Open(row.id))), None => (true, None) },
@@ -7133,6 +7131,7 @@ fn session_page_rows(
                 label: row.title,
                 detail,
                 enabled: true,
+                directory: row.directory,
             }
         })
         .collect())
@@ -7275,6 +7274,7 @@ fn agent_catalogue(value: &serde_json::Value) -> Result<(Vec<crate::native_view_
             label: name.to_owned(),
             detail,
             enabled: true,
+        directory: None,
         });
     }
     Ok((rows, facts))
@@ -7587,6 +7587,7 @@ fn configured_command_rows(value: &serde_json::Value) -> Result<Vec<crate::nativ
             label: invocation,
             detail: command.get("description").and_then(serde_json::Value::as_str).unwrap_or("").to_owned(),
             enabled: true,
+        directory: None,
         });
     }
     Ok(rows)
@@ -11731,7 +11732,7 @@ fn native_loop(
             if let Some((generation, _, _)) = view.dialogs.sessions_debounce_fired() {
                 if let Some(snapshot) = live.as_ref() {
                     match session_page_rows(&snapshot.origin, auth, Some(&snapshot.session_id)) {
-                        Ok(rows) => { let server = rows.into_iter().map(|r| crate::native_palette::pickers::SessionRow { id: r.id, title: r.label, parent: false, updated_date: String::new(), pinned: false, directory: String::new() }).collect(); view.dialogs.sessions_apply_fetch(generation, server); needs_paint = true; }
+                        Ok(rows) => { let server = rows.into_iter().map(|r| crate::native_palette::pickers::SessionRow { id: r.id, title: r.label, parent: false, updated_date: String::new(), pinned: false, directory: r.directory.clone().unwrap_or_default() }).collect(); view.dialogs.sessions_apply_fetch(generation, server); needs_paint = true; }
                         Err(error) => append_transcript(&mut transcript, format!("error: sessions picker: {error}")),
                     }
                 }
@@ -17461,6 +17462,7 @@ fn native_loop(
                                             String::new()
                                         },
                                         enabled: choice.available,
+        directory: None,
                                     }
                                 })
                                 .collect();
@@ -18235,12 +18237,12 @@ fn native_loop(
                         needs_paint = true;
                     } else if sessions_live_decision(b, false) == SessionsDecision::Open {
                         let cwd = std::env::current_dir().map(|dir| dir.to_string_lossy().into_owned()).unwrap_or_default();
-                        let local = view.session_rows().iter().map(|row| crate::native_palette::pickers::SessionRow { id: row.id.clone(), title: row.title.clone(), parent: false, updated_date: String::new(), pinned: false, directory: cwd.clone() }).collect();
+                        let local = view.session_rows().iter().map(|row| crate::native_palette::pickers::SessionRow { id: row.id.clone(), title: row.title.clone(), parent: false, updated_date: String::new(), pinned: false, directory: row.directory.clone().unwrap_or_default() }).collect();
                         if sessions_live_open(&mut view, b, &cwd, local) {
                             if let Some((generation, _, _)) = view.dialogs.sessions_debounce_fired() {
                                 if let Some(snapshot) = live.as_ref() {
                                     match session_page_rows(&snapshot.origin, auth, Some(&snapshot.session_id)) {
-                                        Ok(rows) => { let server = rows.into_iter().map(|r| crate::native_palette::pickers::SessionRow { id: r.id, title: r.label, parent: false, updated_date: String::new(), pinned: false, directory: String::new() }).collect(); view.dialogs.sessions_apply_fetch(generation, server); }
+                                        Ok(rows) => { let server = rows.into_iter().map(|r| crate::native_palette::pickers::SessionRow { id: r.id, title: r.label, parent: false, updated_date: String::new(), pinned: false, directory: r.directory.clone().unwrap_or_default() }).collect(); view.dialogs.sessions_apply_fetch(generation, server); }
                                         Err(error) => append_transcript(&mut transcript, format!("error: sessions picker: {error}")),
                                     }
                                 }
@@ -20858,11 +20860,28 @@ mod dialog13_tests {
     }
 
     #[test]
-    fn dialog13_gate_ctrl_a_does_not_claim_directory_filtering() {
-        let mut view = opened();
+    fn dialog13_gate_ctrl_a_toggles_directory_filtering() {
+        let mut view = crate::native_view::NativeView::new(100, 30);
+        let mut state = SessionsState::new(false, "/tmp", "");
+        state.seed_local(vec![
+            SessionRow { id: "a".into(), title: "Alpha".into(), parent: false, updated_date: String::new(), pinned: false, directory: "/tmp".into() },
+            SessionRow { id: "b".into(), title: "Beta".into(), parent: false, updated_date: String::new(), pinned: false, directory: "/tmp".into() },
+        ]);
+        view.dialogs.open_sessions(state).unwrap();
+        assert!(view.dialogs.sessions_apply_fetch(0, vec![
+            SessionRow { id: "a".into(), title: "Alpha".into(), parent: false, updated_date: String::new(), pinned: false, directory: "/tmp".into() },
+            SessionRow { id: "b".into(), title: "Beta".into(), parent: false, updated_date: String::new(), pinned: false, directory: "/other".into() },
+        ]));
+        assert_eq!(view.dialogs.sessions_state().unwrap().rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
         assert_eq!(sessions_live_dispatch(&mut view, 1).0, true);
+        let state = view.dialogs.sessions_state().unwrap();
+        assert!(!state.rows.is_empty(), "cwd filter must retain matching server row");
+        assert_eq!(state.rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["a"]);
+        assert_ne!(state.picker.search_state(), crate::native_palette::pickers::SessionSearchState::Searching, "scope toggle has no pending fetch");
+        sessions_live_dispatch(&mut view, 1);
+        assert_eq!(view.dialogs.sessions_state().unwrap().rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["a", "b"], "toggling back restores cached server rows");
         let rendered = view.dialogs.render(80, 24).join("\n");
-        assert!(!rendered.contains("Ctrl+A"), "unavailable scope toggle must not be advertised");
+        assert!(rendered.contains("Ctrl+A"), "scope toggle must be advertised");
     }
 
     #[test]
