@@ -1379,7 +1379,6 @@ impl DialogView {
             workspaces: None,
             integration: None,
             form: None,
-            description: None,
         });
         // `DialogSelect` seeds `selected: 0` (`ui/dialog-select.tsx:152`), so
         // the first enabled row is selected on open and the first Down moves
@@ -8545,7 +8544,7 @@ mod tests {
         assert_eq!(legacy_rows[0].text, "Confirm change");
         assert!(
             legacy_rows.iter().all(|line| line.text != "This action changes the project"),
-            "legacy dialog must not paint the description: {legacy_rows:?}"
+            "legacy dialog must not paint the description"
         );
 
         let mut no_description = DialogView::new();
@@ -8932,8 +8931,8 @@ mod tests {
         assert_eq!(
             bad.open_request(DialogRequest {
                 disabled: vec![9],
-                ..permission_request()
                 description: None,
+                ..permission_request()
             }),
             Err(DialogError::InvalidDisabledIndex)
         );
@@ -9086,8 +9085,8 @@ mod tests {
         let mut bounded = DialogView::new();
         let too_many = DialogRequest {
             choices: vec!["x".to_string(); MAX_CHOICES + 1],
-            ..permission_request()
             description: None,
+            ..permission_request()
         };
         assert_eq!(
             bounded.open_request(too_many),
@@ -9095,14 +9094,14 @@ mod tests {
         );
         let long_id = DialogRequest {
             id: "i".repeat(MAX_ID_LEN + 1),
-            ..permission_request()
             description: None,
+            ..permission_request()
         };
         assert_eq!(bounded.open_request(long_id), Err(DialogError::IdTooLong));
         let long_title = DialogRequest {
             title: "t".repeat(MAX_TITLE_LEN + 1),
-            ..permission_request()
             description: None,
+            ..permission_request()
         };
         assert_eq!(
             bounded.open_request(long_title),
@@ -9110,8 +9109,8 @@ mod tests {
         );
         let long_choice = DialogRequest {
             choices: vec!["c".repeat(MAX_CHOICE_LEN + 1)],
-            ..permission_request()
             description: None,
+            ..permission_request()
         };
         assert_eq!(
             bounded.open_request(long_choice),
@@ -9121,8 +9120,8 @@ mod tests {
         for forbidden in ["*", "Always", " always-allow "] {
             let wildcard = DialogRequest {
                 choices: vec!["once".to_string(), forbidden.to_string()],
-                ..permission_request()
                 description: None,
+                ..permission_request()
             };
             assert_eq!(
                 bounded.open_request(wildcard),
@@ -9243,8 +9242,8 @@ mod tests {
         generic
             .open_request(DialogRequest {
                 choices: vec!["allow".to_string(), "reject".to_string()],
-                ..permission_request()
                 description: None,
+                ..permission_request()
             })
             .expect("valid aliases");
         generic.next();
@@ -9261,8 +9260,8 @@ mod tests {
         for unknown in ["do not approve", "not deny", "approve?"] {
             let request = DialogRequest {
                 choices: vec!["approve once".to_string(), unknown.to_string()],
-                ..permission_request()
                 description: None,
+                ..permission_request()
             };
             assert_eq!(
                 view.open_request(request),
@@ -9286,8 +9285,8 @@ mod tests {
         let mut view = DialogView::new();
         view.open_request(DialogRequest {
             disabled: vec![1],
-            ..permission_request()
             description: None,
+            ..permission_request()
         })
         .expect("valid");
         view.next();
@@ -9310,8 +9309,8 @@ mod tests {
         deny_only
             .open_request(DialogRequest {
                 disabled: vec![0],
-                ..permission_request()
                 description: None,
+                ..permission_request()
             })
             .expect("valid");
         deny_only.next();
@@ -9325,8 +9324,8 @@ mod tests {
         none_enabled
             .open_request(DialogRequest {
                 disabled: vec![0, 1],
-                ..permission_request()
                 description: None,
+                ..permission_request()
             })
             .expect("valid");
         none_enabled.next();
@@ -9368,8 +9367,8 @@ mod tests {
         ] {
             let request = DialogRequest {
                 choices: vec!["approve once".to_string(), malicious.to_string()],
-                ..permission_request()
                 description: None,
+                ..permission_request()
             };
             assert_eq!(
                 view.open_request(request),
@@ -9977,8 +9976,8 @@ mod modal_integration_tests {
             message: None,
             disabled: Vec::new(),
             error: None,
+            description: None,
         }
-        description: None,
     }
 
     fn answer_attempt(view: &mut DialogView) -> u64 {
@@ -10027,8 +10026,8 @@ mod modal_integration_tests {
         view.set_focus_target(ModalFocus::new(9));
         let unknown = DialogRequest {
             choices: vec!["do not approve".to_string()],
-            ..request()
             description: None,
+            ..request()
         };
         assert_eq!(
             view.open_request(unknown),
@@ -10036,8 +10035,8 @@ mod modal_integration_tests {
         );
         let too_long = DialogRequest {
             id: "i".repeat(MAX_ID_LEN + 1),
-            ..request()
             description: None,
+            ..request()
         };
         assert_eq!(view.open_request(too_long), Err(DialogError::IdTooLong));
         // `replace()` never ran (`ui/dialog.tsx:396-419`), so nothing was
@@ -10315,8 +10314,8 @@ mod modal_integration_tests {
         let mut view = DialogView::new();
         view.open_request(DialogRequest {
             title: "T".repeat(200),
-            ..request()
             description: None,
+            ..request()
         })
         .expect("valid");
         let frame = view.compose(100, 30, 10).expect("frame");
@@ -10383,8 +10382,8 @@ mod modal_integration_tests {
         let mut pending = DialogView::new();
         let refused = DialogRequest {
             choices: vec!["nope".to_string()],
-            ..request()
             description: None,
+            ..request()
         };
         assert_eq!(
             pending.open_request_sized(refused, DialogSize::Large, true),

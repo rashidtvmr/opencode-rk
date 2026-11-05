@@ -34,6 +34,7 @@ fn open_modal(view: &mut NativeView, title: &str) {
             message: None,
             disabled: Vec::new(),
             error: None,
+            description: None,
         })
         .expect("test modal request is valid");
 }
