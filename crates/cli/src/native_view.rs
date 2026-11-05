@@ -20,7 +20,7 @@ use crate::native_modal_layer::DialogRect;
 use crate::native_view_chat::ChatView;
 use crate::native_tabs::TabReservation;
 use crate::native_view_dialogs::DialogView;
-use crate::native_view_layout::{compose_frame, fit, Layout};
+use crate::native_view_layout::{compose_frame, fit, Layout, RightPane};
 use crate::native_view_pages::{Page, PageRow, PageState};
 use crate::native_view_sessions::{SessionRow, SessionView};
 use crate::native_view_status::StatusView;
@@ -313,6 +313,74 @@ pub struct NativeView {
 #[cfg(test)]
 mod page_spacing_tests {
     use super::*;
+
+    #[test]
+    fn live_render_uses_right_pane_precedence_for_open_dock() {
+        // Live effect, not a helper unit assert: the sidebar must paint while
+        // it owns the right pane and must stop painting the moment the dock
+        // takes the slot, in the SAME live renderer this gate ships in.
+        let mut view = NativeView::new(160, 30);
+        view.set_session_route(true);
+        view.apply_mcp(&serde_json::json!({
+            "status": {"alpha": {"status": "connected"}},
+            "included": {"alpha": true}
+        }))
+        .unwrap();
+        // Dock closed: the sidebar auto-owns the right pane and really paints.
+        assert!(view.sidebar_visible());
+        assert_eq!(
+            crate::native_view_layout::right_pane(
+                view.dock_open(),
+                view.sidebar_open,
+                view.sidebar_visible(),
+                false
+            ),
+            RightPane::Sidebar
+        );
+        let closed = view.render("draft", &[], false, &[]);
+        assert_eq!(closed.len(), 30);
+        assert!(
+            !view.sidebar_span_styles().is_empty(),
+            "sidebar paints while it owns the right pane"
+        );
+        assert_eq!(view.presentation().sidebar_width, 42);
+        // Dock open: the dock owns the right pane and the sidebar must not
+        // paint (no styled spans, no painted scrollbar).
+        view.toggle_dock();
+        assert!(view.dock_open());
+        assert_eq!(
+            crate::native_view_layout::right_pane(
+                view.dock_open(),
+                view.sidebar_open,
+                view.sidebar_visible(),
+                false
+            ),
+            RightPane::Panel
+        );
+        let _open = view.render("draft", &[], false, &[]);
+        assert!(
+            view.sidebar_span_styles().is_empty(),
+            "the dock owns the right pane; the sidebar must not paint spans"
+        );
+        assert!(view.sidebar_scrollbar().is_none());
+    }
+
+    #[test]
+    fn live_binding_transition_rebinds_status_without_fabricated_anchor_store() {
+        // LAY-17 is caller-owned: `NativeView` never holds the transcript
+        // projection, so a binding transition can neither save the outgoing
+        // session's anchor (its rows are gone) nor restore the incoming one
+        // (its projection has not arrived). What must hold here is the real
+        // seam behavior: the status projection rebinds to the new session and
+        // nothing fabricates session-keyed scroll state from thin air.
+        let mut view = NativeView::new(120, 24);
+        const A: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        const B: &str = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        view.set_session_binding(Some(A.to_owned()), None, Some(0));
+        view.set_session_binding(Some(B.to_owned()), None, Some(0));
+        assert_eq!(view.status.session_id(), Some(B));
+        assert!(view.status.session_id() != Some(A));
+    }
     #[test]
     fn mcp_heading_hit_uses_painted_tab_reservation_coordinate() {
         let mut view = NativeView::new(148, 30); view.set_session_route(true);
@@ -2908,6 +2976,13 @@ impl NativeView {
         }
         self.status
             .set_session_binding(session, title, message_count);
+        // A binding transition is the live tab-switch seam, but this view does
+        // NOT own the transcript projection (the caller paints it per frame
+        // from `NativeChatHistory`), so no session-keyed scroll anchor can be
+        // saved or restored here: the outgoing session's mounted anchor rows
+        // are already gone and the incoming projection has not arrived. The
+        // upstream `sessionTabs` store (`context/session-tabs.tsx`) needs a
+        // caller-side seam; see the LAY-17 repair record.
     }
 
     /// Forward the sidebar title's rename-pending facts into the status
@@ -4415,8 +4490,12 @@ impl NativeView {
                     .splice(insert..insert, std::iter::repeat_n(class, dock_rows.len()));
                 self.chat_text_bounds
                     .splice(insert..insert, std::iter::repeat_n(None, dock_rows.len()));
+                // `chat_markdown_spans` is only populated by the typed render
+                // path, so on the plain `render` path it can be shorter than
+                // `body`; clamp exactly like the queue-dock insertion below.
+                let spans_at = insert.min(self.chat_markdown_spans.len());
                 self.chat_markdown_spans
-                    .splice(insert..insert, std::iter::repeat_n(Vec::new(), dock_rows.len()));
+                    .splice(spans_at..spans_at, std::iter::repeat_n(Vec::new(), dock_rows.len()));
                 body.splice(insert..insert, dock_rows);
             }
             // Queue dock is a composer sibling, inserted immediately above the prompt.
@@ -4709,7 +4788,19 @@ impl NativeView {
             }
         }
         let sidebar_region_start = self.ui_regions.len();
-        if let Some(left) = presentation.sidebar_offset {
+        // LAY-11: the live renderer must use the same precedence model as the
+        // session frame, rather than letting the detached shell decide which
+        // right pane wins. The dock is the native panel producer; when it is
+        // open it owns the right-pane slot and suppresses sidebar painting
+        // AND every geometry fact published for it (spans, regions, hits).
+        let right_pane = crate::native_view_layout::right_pane(
+            self.dock_open(),
+            self.sidebar_open,
+            self.sidebar_visible(),
+            false,
+        );
+        let sidebar_painted = right_pane == RightPane::Sidebar;
+        if let Some(left) = presentation.sidebar_offset.filter(|_| sidebar_painted) {
             // Do not publish regions for a frame that failed closed. For a
             // normal unframed pane, the existing local content inset is the
             // two-cell status-panel inset; framed panes use text_area() from
@@ -4821,7 +4912,7 @@ impl NativeView {
             // the body's reserved right padding, spanning only the scrolled
             // body (pinned header/footer sit outside it). The track surface is
             // the sidebar's own raised background, so only the thumb paints.
-            if presentation.sidebar_width > 0 && self.sidebar_wide() {
+            if presentation.sidebar_width > 0 && self.sidebar_wide() && sidebar_painted {
                 let pane_content = 38usize;
                 let bar_column = crate::native_sidebar::PADDING_LEFT
                     + crate::native_sidebar::body_width(pane_content);
@@ -4848,9 +4939,14 @@ impl NativeView {
             }
         }
         let inline = presentation.sidebar_width > 0 && self.sidebar_wide();
+        let sidebar_for_frame = if right_pane == RightPane::Sidebar {
+            sidebar.as_slice()
+        } else {
+            &[]
+        };
         let effective = Layout {
             center_width: width,
-            right_width: if inline {
+            right_width: if inline && right_pane == RightPane::Sidebar {
                 presentation.sidebar_width
             } else {
                 0
@@ -4858,7 +4954,7 @@ impl NativeView {
             rows: height as u16,
             ..self.layout
         };
-        let mut frame = compose_frame(&effective, &[], &center, &sidebar);
+        let mut frame = compose_frame(&effective, &[], &center, sidebar_for_frame);
         if self.tab_reservation.width > 0 || self.tab_reservation.height > 0 {
             let x = usize::from(self.tab_reservation.x_offset());
             let y = usize::from(self.tab_reservation.y_offset());
@@ -4940,7 +5036,7 @@ impl NativeView {
                 });
             }
         }
-        if !inline {
+        if !inline && right_pane == RightPane::Sidebar {
             if let Some(offset) = presentation.sidebar_offset {
                 for (row, line) in sidebar.iter().enumerate().take(frame.len()) {
                     frame[row] = fit(
