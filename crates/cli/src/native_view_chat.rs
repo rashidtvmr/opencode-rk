@@ -3101,6 +3101,10 @@ fn typed_message_rows_with_prefix_spans_mode(
                 // wide terminal pairs the -/+ panes onto one split row, a
                 // narrow one keeps the unified gutter. DIFF-002 facts
                 // (malformed / truncated) come from whichever renderer ran.
+                // Upstream component/patch-diff.tsx:40-44 only chunks when a
+                // `scroll` prop is supplied. Inline transcript producers omit
+                // it; viewer-only virtualization is produced by
+                // feature-plugins/system/diff-viewer.tsx:1096.
                 let theme09_split = matches!(
                     crate::native_diff_view::resolve_view_mode(
                         crate::native_diff_view::DiffSurface::Inline,
@@ -3341,6 +3345,20 @@ mod diff_wiring_v2_regressions {
         assert!(!rows.iter().any(|(row, class)| {
             *class == ChatRowClass::DiffAdded && row.contains("+ new")
         }), "added pane rendered as a separate row: {rows:?}");
+    }
+
+    #[test]
+    fn diff003_inline_live_patch_budget_color_and_geometry_are_stable() {
+        let added = (0..4097).map(|i| format!("+line-{i:04}\n")).collect::<String>();
+        let message = patch_message(format!("@@ -0,0 +1,4097 @@\n{added}"));
+        let render = || ChatView::new().render_typed_classified(80, 12, "ws", &[message.clone()], "", false);
+        let first = render();
+        let second = render();
+        assert_eq!(first, second, "identical inline paints must preserve exact row geometry");
+        assert!(first.iter().any(|(_, class)| *class == ChatRowClass::DiffAdded), "added hunk styling retained");
+        assert!(first.iter().any(|(row, _)| row.contains("truncated")), "overflow status is visible");
+        assert!(!first.iter().any(|(row, _)| row.contains("[...")), "inline transcript must not synthesize virtual placeholders");
+        assert!(first.len() <= MAX_MESSAGE_ROWS, "paint remains under the per-message row budget");
     }
 
     #[test]
