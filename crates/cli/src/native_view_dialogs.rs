@@ -3437,13 +3437,71 @@ impl DialogView {
                     }
                 }
                 DialogKind::Crash => {
-                    // The root panic overlay paints its own full-screen,
-                    // theme-independent content (`error-component.tsx`); the
-                    // DialogView fallback still surfaces the bounded headline
-                    // and message so this path is never blank.
+                    // DIALOG-20: the root panic overlay paints the full
+                    // upstream layout (`error-component.tsx:117-221`) from
+                    // the live model: subtext on tall terminals, the
+                    // ` Error ` panel, the actions row with shortcut keys,
+                    // the stack-trace panel and the footer hint + version.
+                    // The shell's heading row above already carries the
+                    // headline (`open_crash` stores `HEADLINE` as
+                    // the dialog title).
                     if let Some(screen) = self.crash_screen.as_ref() {
+                        // Subtext threshold (`error-component.tsx:122-127`).
+                        if crash::CrashScreen::show_subtext(height as u16) {
+                            lines.push(line(crash::SUBTEXT.to_owned(), Role::Description));
+                        }
+                        // Error message panel (`error-component.tsx:129-141`).
+                        // The message row stays verbatim so capture tests can
+                        // assert the exact payload row.
+                        lines.push(line(" Error ".to_string(), Role::Error));
                         lines.push(line(screen.message().to_owned(), Role::Error));
-                        lines.push(line(screen.version_line(), Role::Description));
+                        // Actions row (`error-component.tsx:143-179`): labels
+                        // with the selected action bracketed, each action's
+                        // shortcut key centered beneath it.
+                        let selected = screen.selected_action();
+                        let mut labels = String::new();
+                        let mut keys = String::new();
+                        for action in crash::CrashAction::all() {
+                            let label = action.label(screen.copy_state());
+                            let label_width = label.chars().count();
+                            let field = if action == selected {
+                                format!("[ {label} ]")
+                            } else {
+                                format!("  {label}  ")
+                            };
+                            if !labels.is_empty() {
+                                labels.push_str("  ");
+                                keys.push_str("  ");
+                            }
+                            keys.push_str(&format!(
+                                "{:^field_width$}",
+                                action.key(),
+                                field_width = field.chars().count()
+                            ));
+                            labels.push_str(&field);
+                        }
+                        lines.push(line(labels, Role::Action));
+                        lines.push(line(keys, Role::Description));
+                        // Stack trace panel (`error-component.tsx:183-202`):
+                        // `stack_window` derives its own viewport from the
+                        // total row height (`stack_viewport`, three-row
+                        // minimum), while the shell budget clips to the
+                        // rows left above the footer reservation.
+                        let footer_rows =
+                            usize::from(crash::CrashScreen::show_footer(height as u16)) * 2;
+                        let stack_budget =
+                            height.saturating_sub(lines.len() + 1 + footer_rows);
+                        lines.push(line(" Stack trace ".to_string(), Role::Description));
+                        for row in screen.stack_window(height as u16).into_iter().take(stack_budget)
+                        {
+                            lines.push(line(row.to_owned(), Role::Description));
+                        }
+                        // Footer (`error-component.tsx:204-216`): copy hint
+                        // then version, only on tall terminals.
+                        if footer_rows == 2 {
+                            lines.push(line(screen.footer_hint().to_owned(), Role::Description));
+                            lines.push(line(screen.version_line(), Role::Description));
+                        }
                     }
                 }
             }
@@ -7670,6 +7728,133 @@ mod error_and_crash_tests {
         view.close_crash();
         assert_eq!(view.open_kind(), None);
         assert!(view.crash_screen().is_none());
+    }
+
+    /// DIALOG-20: the live render arm paints the full upstream layout
+    /// (subtext, ` Error ` panel, actions row with shortcut keys, stack
+    /// panel, footer hint + version) from a controlled payload through
+    /// `render_with_metrics`, the public render API the native loop's modal
+    /// painter uses (`tui_entry.rs`).
+    #[test]
+    fn dialog20_render_paints_full_upstream_layout() {
+        use super::{DialogLayoutMetrics, DialogViewportPolicy, DialogView};
+
+        let stack = (0..40)
+            .map(|frame| format!("frame {frame}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut view = DialogView::new();
+        view.open_crash(Some("boom"), Some(&stack), "1.2.3", CrashMode::Dark, "vt")
+            .unwrap();
+
+        let metrics = DialogLayoutMetrics::new(110, 30, 30, DialogViewportPolicy::ContentBudget);
+        let rows = view.render_with_metrics(metrics);
+        // Headline and subtext (`error-component.tsx:119-123`).
+        assert!(rows.iter().any(|row| row == HEADLINE), "{rows:?}");
+        assert!(rows.iter().any(|row| row == SUBTEXT), "{rows:?}");
+        // Error message panel (`error-component.tsx:129-141`).
+        assert!(rows.iter().any(|row| row == " Error "), "{rows:?}");
+        assert!(rows.iter().any(|row| row == "boom"), "{rows:?}");
+        // Actions row + centered shortcut-key row
+        // (`error-component.tsx:143-179`), first action selected.
+        let labels_index = rows
+            .iter()
+            .position(|row| row.contains("Copy report") && row.contains("Restart") && row.contains("Quit"))
+            .expect("actions row");
+        assert!(rows[labels_index].contains("[ Copy report ]"), "{:?}", rows[labels_index]);
+        let keys: Vec<&str> = rows[labels_index + 1].split_whitespace().collect();
+        assert_eq!(keys, vec!["c", "r", "q"], "{:?}", rows[labels_index + 1]);
+        // Stack panel paints the model's window (`error-component.tsx:183-202`).
+        assert!(rows.iter().any(|row| row == " Stack trace "), "{rows:?}");
+        assert!(rows.iter().any(|row| row == "frame 0"), "{rows:?}");
+        // Footer (`error-component.tsx:204-216`): hint then version; the
+        // generic dialog footer stays suppressed.
+        let hint = view.crash_screen().unwrap().footer_hint();
+        assert!(rows.iter().any(|row| row == hint), "{rows:?}");
+        assert!(rows.iter().any(|row| row == "OpenCode 1.2.3"), "{rows:?}");
+        assert!(!rows.iter().any(|row| row.contains("click here confirm")), "{rows:?}");
+    }
+
+    /// DIALOG-20: the responsive thresholds hide subtext under 18 rows and
+    /// the footer under 20, while the stack panel keeps its three-row
+    /// minimum even on tiny terminals.
+    #[test]
+    fn dialog20_render_respects_subtext_and_footer_thresholds() {
+        use super::{DialogLayoutMetrics, DialogViewportPolicy, DialogView};
+
+        let long_stack = (0..30)
+            .map(|frame| format!("frame {frame}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut view = DialogView::new();
+        view.open_crash(Some("boom"), Some(&long_stack), "1.2.3", CrashMode::Dark, "vt")
+            .unwrap();
+
+        let render = |rows: u16| {
+            view.render_with_metrics(DialogLayoutMetrics::new(90, usize::from(rows), usize::from(rows), DialogViewportPolicy::ContentBudget))
+        };
+        // Short: no subtext, no footer, message + keyed actions still painted.
+        let short = render(12);
+        assert!(!short.iter().any(|row| row == SUBTEXT), "{short:?}");
+        assert!(!short.iter().any(|row| row == "OpenCode 1.2.3"), "{short:?}");
+        assert!(short.iter().any(|row| row == "boom"), "{short:?}");
+        assert!(short.iter().any(|row| row == " Stack trace "), "{short:?}");
+        let stack_rows = short
+            .iter()
+            .skip_while(|row| row.as_str() != " Stack trace ")
+            .skip(1)
+            .filter(|row| row.starts_with("frame "))
+            .count();
+        assert_eq!(stack_rows, 5, "{short:?}");
+        // Medium (18..20): subtext appears, footer still absent.
+        let medium = render(18);
+        assert!(medium.iter().any(|row| row == SUBTEXT), "{medium:?}");
+        assert!(!medium.iter().any(|row| row == "OpenCode 1.2.3"), "{medium:?}");
+        // Tall: footer returns.
+        let tall = render(20);
+        assert!(tall.iter().any(|row| row == "OpenCode 1.2.3"), "{tall:?}");
+    }
+
+    /// DIALOG-20: render reflects live model movement - the bracketed action
+    /// follows selection and the stack window follows scroll offset, the
+    /// same way `handle_crash_key` drives the live overlay
+    /// (`tui_entry.rs` crash routing).
+    #[test]
+    fn dialog20_render_tracks_selection_and_stack_scroll() {
+        use super::{DialogLayoutMetrics, DialogViewportPolicy, DialogView};
+
+        let stack = (0..30)
+            .map(|frame| format!("frame {frame}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut view = DialogView::new();
+        view.open_crash(Some("boom"), Some(&stack), "1.2.3", CrashMode::Dark, "vt")
+            .unwrap();
+        let metrics = DialogLayoutMetrics::new(110, 30, 30, DialogViewportPolicy::ContentBudget);
+
+        // Selection moves the bracket; the shortcut-key row is unchanged.
+        assert_eq!(
+            view.handle_crash_key(CrashKey::Right, 30),
+            Some(CrashOutcome::Moved)
+        );
+        let rows = view.render_with_metrics(metrics);
+        let labels_index = rows
+            .iter()
+            .position(|row| row.contains("Copy report") && row.contains("Restart"))
+            .expect("actions row");
+        assert!(rows[labels_index].contains("[ Restart ]"), "{:?}", rows[labels_index]);
+        assert!(!rows[labels_index].contains("[ Copy report ]"), "{:?}", rows[labels_index]);
+
+        // Scrolling advances the stack window past the first frame
+        // (`error-component.tsx:84-91`, two-panel scrollbox).
+        assert!(rows.iter().any(|row| row == "frame 0"), "{rows:?}");
+        assert_eq!(
+            view.handle_crash_key(CrashKey::Down, 30),
+            Some(CrashOutcome::Moved)
+        );
+        let scrolled = view.render_with_metrics(metrics);
+        assert!(!scrolled.iter().any(|row| row == "frame 0"), "{scrolled:?}");
+        assert!(scrolled.iter().any(|row| row == "frame 1"), "{scrolled:?}");
     }
 }
 
