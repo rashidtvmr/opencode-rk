@@ -2351,6 +2351,10 @@ struct PaintCtx {
     modal: crate::native_view::ModalPresentation,
     sidebar_backdrop_alpha: u8,
     chat_row_classes: Vec<crate::native_view_chat::ChatRowClass>,
+    /// Upstream `UserMessage` hover fact (`routes/session/index.tsx:2390`,
+    /// `:2427`): frame row of the transcript `UserCard` currently under the
+    /// pointer. `None` paints every card `raised.base`.
+    hovered_row: Option<usize>,
     chat_markdown_spans: Vec<Vec<crate::native_view_chat::ChatRunSpan>>,
     selection: Vec<(u32, u32, u32)>,
     appearance: crate::native_box_style::BoxAppearance,
@@ -2879,6 +2883,7 @@ mod surface_paint_regressions {
             modal: view.modal_presentation(),
             sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
             chat_row_classes: view.chat_row_classes().to_vec(),
+            hovered_row: None,
             chat_markdown_spans: view.chat_markdown_spans().to_vec(),
             selection: Vec::new(),
             appearance: crate::native_box_style::BoxAppearance::default(),
@@ -2943,6 +2948,7 @@ mod surface_paint_regressions {
             modal: view.modal_presentation(),
             sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
             chat_row_classes: view.chat_row_classes().to_vec(),
+            hovered_row: None,
             chat_markdown_spans: view.chat_markdown_spans().to_vec(),
             selection: Vec::new(),
             appearance: crate::native_box_style::BoxAppearance::default(),
@@ -3036,6 +3042,7 @@ mod surface_paint_regressions {
             modal: view.modal_presentation(),
             sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
             chat_row_classes: view.chat_row_classes().to_vec(),
+            hovered_row: None,
             chat_markdown_spans: view.chat_markdown_spans().to_vec(),
             selection: Vec::new(),
             appearance: crate::native_box_style::BoxAppearance::default(),
@@ -3108,6 +3115,7 @@ mod surface_paint_regressions {
             modal: view.modal_presentation(),
             sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
             chat_row_classes: view.chat_row_classes().to_vec(),
+            hovered_row: None,
             chat_markdown_spans: view.chat_markdown_spans().to_vec(),
             selection: Vec::new(),
             appearance: crate::native_box_style::BoxAppearance::default(),
@@ -3617,10 +3625,15 @@ fn diff_rgba(semantic: &crate::native_theme_runtime::SemanticPalette) -> DiffRgb
 }
 
 #[cfg(feature = "native")]
-fn chat_row_background(class: Option<&crate::native_view_chat::ChatRowClass>, root: Rgba, panel: Rgba, element: Rgba, diff: Option<&DiffRgba>) -> Option<Rgba> {
+fn chat_row_background(class: Option<&crate::native_view_chat::ChatRowClass>, root: Rgba, panel: Rgba, element: Rgba, diff: Option<&DiffRgba>, is_hovered: bool) -> Option<Rgba> {
     use crate::native_view_chat::ChatRowClass;
     match class {
-        Some(ChatRowClass::UserCard) => Some(panel),
+        // Upstream UserMessage hover deepens the card one step:
+        // `backgroundColor={hover() ? theme.decrease(theme.background.raised.base)
+        // : theme.background.raised.base}` (`routes/session/index.tsx:2427`).
+        // `element` is the resolved raised.high surface, the same
+        // `decrease(raised.base)` step (`native_theme_runtime.rs`).
+        Some(ChatRowClass::UserCard) => Some(if is_hovered { element } else { panel }),
         Some(ChatRowClass::AssistantCard) => Some(root),
         Some(ChatRowClass::SystemCard) => Some(element),
         Some(ChatRowClass::DiffAdded) => Some(diff.map_or(Rgba::new(20, 70, 35, 255), |diff| diff.added_background)),
@@ -3723,6 +3736,7 @@ fn chat_row_background_at(
     class: Option<&crate::native_view_chat::ChatRowClass>,
     presentation: crate::native_view::ViewPresentation, x: u32,
     root: Rgba, panel: Rgba, element: Rgba, diff: Option<&DiffRgba>,
+    is_hovered: bool,
 ) -> Option<Rgba> {
     // Message rows are composed inside the scrollbox's horizontal insets.
     // A row role owns that content surface, never the surrounding root cells,
@@ -3732,7 +3746,7 @@ fn chat_row_background_at(
     let right = u32::from(presentation.main_offset)
         + u32::from(presentation.main_width.saturating_sub(inset));
     (x >= left && x < right)
-        .then(|| chat_row_background(class, root, panel, element, diff))
+        .then(|| chat_row_background(class, root, panel, element, diff, is_hovered))
         .flatten()
 }
 
@@ -3830,6 +3844,7 @@ mod dialog19_chrome_paint_tests {
                 modal: view.modal_presentation(),
                 sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
                 chat_row_classes: view.chat_row_classes().to_vec(),
+                hovered_row: None,
                 chat_markdown_spans: view.chat_markdown_spans().to_vec(),
                 selection: Vec::new(),
                 appearance: crate::native_box_style::BoxAppearance::default(),
@@ -3947,11 +3962,188 @@ mod chat_surface_inset_tests {
             let right = u32::from(presentation.main_offset + presentation.main_width) - 2;
             for x in 0..269 {
                 let actual = chat_row_background_at(Some(&crate::native_view_chat::ChatRowClass::UserCard),
-                    presentation, x, root, panel, element, None);
+                    presentation, x, root, panel, element, None, false);
                 assert_eq!(actual, (x >= left && x < right).then_some(panel),
                     "message surface ownership at x={x} with {orientation:?}");
             }
         }
+    }
+
+    /// Upstream UserMessage hover (`routes/session/index.tsx:2390-2395,2427`):
+    /// the live paint path must differentiate a hovered user card. The exact
+    /// expression the live per-row style pass evaluates paints
+    /// `decrease(background.raised.base)` (the resolved `element` surface) for
+    /// the hovered row and plain `raised.base` otherwise, and the full
+    /// `native_paint` frame loop accepts the fact through `PaintCtx.hovered_row`.
+    #[test]
+    fn user_card_hover_reaches_the_live_paint_path() {
+        use crate::native_tabs::{TabOrientation, TabReservation};
+        use crate::native_view_chat::{ChatMessage, ChatRole};
+        let background = Rgba::rgb(10, 10, 10);
+        let panel = Rgba::rgb(20, 20, 20);
+        let element = Rgba::rgb(30, 30, 30);
+        let mut view = crate::native_view::NativeView::new(120, 40);
+        view.set_session_route(true);
+        view.set_tab_reservation(TabReservation::for_view(TabOrientation::Horizontal, 120, 40));
+        let messages = [ChatMessage::text(ChatRole::User, "hover me")];
+        let frame = view.render_typed("", &messages, false, &[]);
+        let row = frame
+            .iter()
+            .position(|line| line.contains("hover me"))
+            .expect("user card row painted");
+        assert_eq!(
+            view.chat_row_classes()[row],
+            crate::native_view_chat::ChatRowClass::UserCard,
+            "the hover target row is a UserCard"
+        );
+        let presentation = view.presentation();
+        let inset = presentation.main_padding.min(presentation.main_width / 2);
+        let x = u32::from(presentation.main_offset) + u32::from(inset);
+        // Identical call to the live per-row style pass in `native_paint`:
+        let base = chat_row_background_at(
+            view.chat_row_classes().get(row),
+            presentation,
+            x,
+            background,
+            panel,
+            element,
+            None,
+            false,
+        );
+        let hovered = chat_row_background_at(
+            view.chat_row_classes().get(row),
+            presentation,
+            x,
+            background,
+            panel,
+            element,
+            None,
+            true,
+        );
+        assert_eq!(base, Some(panel), "unhovered card keeps raised.base");
+        assert_eq!(
+            hovered,
+            Some(element),
+            "hovered card deepens to decrease(raised.base)"
+        );
+        // The full live frame paint accepts the hover fact through
+        // `PaintCtx.hovered_row` (the loop's only new paint input).
+        let mut renderer = NativeRenderer::create_memory(120, 40).expect("memory renderer");
+        let palette = crate::native_theme_runtime::Palette::opencode_dark();
+        native_paint(
+            &mut renderer,
+            &frame,
+            PaintCtx {
+                palette,
+                dialog: crate::native_theme_runtime::RuntimeTheme::builtin_default(
+                    crate::native_theme_runtime::ThemeMode::Dark,
+                )
+                .dialog,
+                markdown: None,
+                semantic: None,
+                diff: None,
+                presentation,
+                modal_rows: None,
+                modal: view.modal_presentation(),
+                sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
+                chat_row_classes: view.chat_row_classes().to_vec(),
+                hovered_row: Some(row),
+                chat_markdown_spans: view.chat_markdown_spans().to_vec(),
+                selection: Vec::new(),
+                appearance: crate::native_box_style::BoxAppearance::default(),
+                modal_box: crate::native_box_style::BoxId::Dialog,
+                loading: None,
+                home: false,
+                rail_prompt: view.session_prompt_rail(""),
+                composer: None,
+                composer_agent_color: None,
+                completion: None,
+                action_states: Vec::new(),
+                context_usage_styles: Vec::new(),
+                sidebar_span_styles: Vec::new(),
+                ui_regions: Vec::new(),
+                modal_underlay_rows: Vec::new(),
+                page_panel: None,
+                logo: None,
+                tabs: None,
+                animations: true,
+                title_renaming: None,
+                vertical_rail: None,
+                compact_tooltip: None,
+                context_menu: None,
+                chrome: Vec::new(),
+                toast: None,
+                transcript_scrollbar: None,
+                sidebar_scrollbar: None,
+                scrollbar_track: Rgba::rgb(12, 12, 12),
+                scrollbar_thumb: Rgba::rgb(72, 72, 72),
+            },
+        )
+        .expect("paint the hovered frame");
+        let snapshot = renderer.snapshot_text().expect("native text snapshot");
+        assert!(
+            snapshot.contains("hover me"),
+            "hovered frame still paints the card text: {snapshot:?}"
+        );
+    }
+
+    /// The pointer-hover fact must be re-derived against the layout the frame
+    /// actually rendered, not latched on the last mouse move: a transcript
+    /// mutation that shifts the card under a stationary pointer must resolve
+    /// to the new row. `user_card_row_under_pointer` is the single shared
+    /// derivation the live mouse-move arm and the per-frame refresh both use.
+    #[test]
+    fn user_card_row_under_pointer_tracks_the_rendered_layout() {
+        use crate::native_tabs::{TabOrientation, TabReservation};
+        use crate::native_view_chat::{ChatMessage, ChatRole};
+        let mut view = crate::native_view::NativeView::new(120, 40);
+        view.set_session_route(true);
+        view.set_tab_reservation(TabReservation::for_view(TabOrientation::Horizontal, 120, 40));
+        let first = [ChatMessage::text(ChatRole::User, "hover me")];
+        let frame = view.render_typed("", &first, false, &[]);
+        let row = frame
+            .iter()
+            .position(|line| line.contains("hover me"))
+            .expect("user card row painted");
+        let presentation = view.presentation();
+        let inset = presentation.main_padding.min(presentation.main_width / 2);
+        let x = presentation.main_offset + inset;
+        assert_eq!(
+            user_card_row_under_pointer(&view, x, u16::try_from(row).unwrap()),
+            Some(row),
+            "the card under the pointer resolves to its row"
+        );
+        // Off the main column (left of the inset) is never a card hit.
+        assert_eq!(
+            user_card_row_under_pointer(&view, presentation.main_offset, u16::try_from(row).unwrap()),
+            None,
+            "a column outside the card inset does not hover"
+        );
+        // A transcript mutation shifts the card down; the same pointer cell
+        // must now resolve against the new layout, not the stale row.
+        let shifted = [
+            ChatMessage::text(ChatRole::Assistant, "a reply above"),
+            ChatMessage::text(ChatRole::User, "hover me"),
+        ];
+        let frame2 = view.render_typed("", &shifted, false, &[]);
+        let row2 = frame2
+            .iter()
+            .position(|line| line.contains("hover me"))
+            .expect("shifted user card row painted");
+        assert!(
+            row2 > row,
+            "the mutation moved the card down ({row} -> {row2})"
+        );
+        assert_eq!(
+            user_card_row_under_pointer(&view, x, u16::try_from(row2).unwrap()),
+            Some(row2),
+            "the refresh resolves the card at its new row"
+        );
+        assert_ne!(
+            user_card_row_under_pointer(&view, x, u16::try_from(row).unwrap()),
+            Some(row),
+            "the stale row no longer resolves to a card"
+        );
     }
 
     /// THEME-09: a `+`/`-` diff row paints the resolved `theme.semantic.diff`
@@ -3978,12 +4170,12 @@ mod chat_surface_inset_tests {
             context_background: Rgba::new(44, 44, 66, 255),
         };
         assert_eq!(
-            chat_row_background(Some(&crate::native_view_chat::ChatRowClass::DiffAdded), root, panel, element, Some(&diff)),
+            chat_row_background(Some(&crate::native_view_chat::ChatRowClass::DiffAdded), root, panel, element, Some(&diff), false),
             Some(diff.added_background),
             "diff added surface = diff.background.added"
         );
         assert_eq!(
-            chat_row_background(Some(&crate::native_view_chat::ChatRowClass::DiffRemoved), root, panel, element, Some(&diff)),
+            chat_row_background(Some(&crate::native_view_chat::ChatRowClass::DiffRemoved), root, panel, element, Some(&diff), false),
             Some(diff.removed_background),
             "diff removed surface = diff.background.removed"
         );
@@ -4001,7 +4193,7 @@ mod chat_surface_inset_tests {
         // (`theme.diff.text.context` + `theme.diff.background.context`,
         // `theme/src/tui/syntax.ts:81`).
         assert_eq!(
-            chat_row_background(Some(&crate::native_view_chat::ChatRowClass::DiffContext), root, panel, element, Some(&diff)),
+            chat_row_background(Some(&crate::native_view_chat::ChatRowClass::DiffContext), root, panel, element, Some(&diff), false),
             Some(diff.context_background),
             "diff context surface = diff.background.context"
         );
@@ -4014,7 +4206,7 @@ mod chat_surface_inset_tests {
         // over the line-number surface `diff.background.context` (upstream
         // `patch-diff.tsx:79-81`: hunk box bg = lineNumberBg, text fg = hunkFg).
         assert_eq!(
-            chat_row_background(Some(&crate::native_view_chat::ChatRowClass::DiffHunkHeader), root, panel, element, Some(&diff)),
+            chat_row_background(Some(&crate::native_view_chat::ChatRowClass::DiffHunkHeader), root, panel, element, Some(&diff), false),
             Some(diff.context_background),
             "hunk header surface = diff.background.context (lineNumberBg)"
         );
@@ -4025,7 +4217,7 @@ mod chat_surface_inset_tests {
         );
         // Semantic-less theme keeps the historical literal fallback.
         assert_eq!(
-            chat_row_background(Some(&crate::native_view_chat::ChatRowClass::DiffAdded), root, panel, element, None),
+            chat_row_background(Some(&crate::native_view_chat::ChatRowClass::DiffAdded), root, panel, element, None, false),
             Some(Rgba::new(20, 70, 35, 255))
         );
         assert_eq!(
@@ -4207,11 +4399,11 @@ mod footer_v3_painter_tests {
         let panel = Rgba::rgb(20, 20, 20);
         let element = Rgba::rgb(30, 30, 30);
         assert_eq!(
-            chat_row_background(Some(&ChatRowClass::FooterError), root, panel, element, None),
+            chat_row_background(Some(&ChatRowClass::FooterError), root, panel, element, None, false),
             None
         );
         assert_eq!(
-            chat_row_background(Some(&ChatRowClass::AssistantFooter), root, panel, element, None),
+            chat_row_background(Some(&ChatRowClass::AssistantFooter), root, panel, element, None, false),
             None
         );
     }
@@ -5849,6 +6041,31 @@ fn completion_row_bg(
 }
 
 #[cfg(feature = "native")]
+/// Frame row of the transcript `UserCard` under `(x, y)`, or `None` when the
+/// pointer is off the main column or over a non-UserCard row. Shared by the
+/// live mouse-move arm and the per-frame hover refresh so the inset ownership
+/// can never desync (`routes/session/index.tsx:2390` `onMouseOver`).
+fn user_card_row_under_pointer(
+    view: &crate::native_view::NativeView,
+    x: u16,
+    y: u16,
+) -> Option<usize> {
+    let presentation = view.presentation();
+    let inset = presentation.main_padding.min(presentation.main_width / 2);
+    let left = u32::from(presentation.main_offset) + u32::from(inset);
+    let right = u32::from(presentation.main_offset)
+        + u32::from(presentation.main_width.saturating_sub(inset));
+    (u32::from(x) >= left && u32::from(x) < right)
+        .then_some(usize::from(y))
+        .filter(|row| {
+            matches!(
+                view.chat_row_classes().get(*row),
+                Some(crate::native_view_chat::ChatRowClass::UserCard)
+            )
+        })
+}
+
+#[cfg(feature = "native")]
 fn native_paint(
     renderer: &mut NativeRenderer,
     lines: &[String],
@@ -6006,7 +6223,7 @@ fn native_paint(
                         && y >= u32::from(top)
                         && y < u32::from(top) + u32::from(height)
                 });
-                let role_bg = chat_row_background_at(ctx.chat_row_classes.get(row), presentation, x, background, panel, element, ctx.diff.as_ref());
+                let role_bg = chat_row_background_at(ctx.chat_row_classes.get(row), presentation, x, background, panel, element, ctx.diff.as_ref(), ctx.hovered_row == Some(row));
                 let in_page = ctx.page_panel.is_some_and(|(left, top, width, height)| {
                     x >= u32::from(left) && x < u32::from(left + width)
                         && y >= u32::from(top) && y < u32::from(top + height)
@@ -6537,7 +6754,7 @@ fn native_paint(
                 let home_root = (ctx.home || ctx.rail_prompt) && composer.is_some_and(|rect|
                     home_composer_root_cell(&ctx.appearance,
                         ctx.appearance.effective(crate::native_box_style::BoxId::ChatComposer), rect, x, y));
-                let role = chat_row_background_at(ctx.chat_row_classes.get(y as usize), presentation, x, background, panel, element, ctx.diff.as_ref());
+                let role = chat_row_background_at(ctx.chat_row_classes.get(y as usize), presentation, x, background, panel, element, ctx.diff.as_ref(), ctx.hovered_row == Some(y as usize));
                 let mut color = surface_underlay_background(
                     sidebar_cell(presentation, x, y) || ctx.page_panel.is_some_and(contains),
                     role, composer.is_some(), home_root, background, panel, element,
@@ -9648,6 +9865,18 @@ fn native_loop(
     let mut home_press: Option<(crate::native_tabs::TabRect, TabOrientation, bool)> = None;
     let mut tab_home_hovered = false;
     let mut tab_add_hovered = false;
+    // Upstream `UserMessage` hover (`routes/session/index.tsx:2369,2390-2395`):
+    // frame row of the transcript `UserCard` the pointer is over; `None`
+    // off-card. Mirrors one `hover` signal per card along the same
+    // `onMouseOver`/`onMouseOut` transitions the tabs and rail already track.
+    let mut hovered_row: Option<usize> = None;
+    // Last pointer cell seen on a mouse move. Upstream hover is a live
+    // `onMouseOver` fact recomputed against the current layout on every
+    // render, not a pointer-motion-only latch: a scroll, resize or transcript
+    // mutation moves the row under a stationary pointer and must refresh the
+    // hover without a fresh move. Keeping the last cell lets each painted
+    // frame re-derive the hover from the layout it actually rendered.
+    let mut last_pointer: Option<(u16, u16)> = None;
     // Hovered-title marquee clock. Upstream only runs it for the tab under the
     // pointer (`session-tabs.tsx:1650`); offset>0 replaces the rendered title
     // with the wrapping ` · ` window.
@@ -12095,6 +12324,30 @@ fn native_loop(
         // reload is in flight the composer retains the memo's previous label.
         view.set_composer_catalog_loading(model_load.is_some());
 
+        // Refresh the send-button hover from the last pointer cell so a draft
+        // or resize change repaints the button role without a fresh mouse
+        // move. The region role is baked during the render below, so this
+        // must run first; the eligibility is the same composer predicate the
+        // live mouse-move arm and `composer_pointer_event` use, so hover can
+        // never paint `Selected` on a button a left-press would not submit.
+        if let Some((px, py)) = last_pointer {
+            let page_open_now = !matches!(view.page(), crate::native_view_pages::Page::Chat);
+            let eligible = !page_open_now
+                && !help_open
+                && !children_panel.open
+                && !appearance.open
+                && !permission_editor.open
+                && !view.dialogs.intercepts_input()
+                && !view.command_palette_open()
+                && matches!(dialog, native_setup::Dialog::None)
+                && import_dialog.as_ref().is_none_or(|import| !import.is_open());
+            if eligible {
+                view.set_send_pointer(draft_echo, px, py);
+            } else {
+                view.set_send_pointer(draft_echo, 0, 0);
+            }
+        }
+
         let mut lines = if help_open && !dialog_open {
             Vec::new()
         } else {
@@ -12336,6 +12589,12 @@ fn native_loop(
                             .collect()
                     })
                     .unwrap_or_default();
+            // Re-derive the transcript hover from the last pointer cell
+            // against the layout just rendered, so a scroll, resize or
+            // transcript mutation cannot leave a stale highlighted card while
+            // the pointer is stationary (`routes/session/index.tsx:2390`).
+            hovered_row = last_pointer
+                .and_then(|(px, py)| user_card_row_under_pointer(&view, px, py));
             native_paint(
                 &mut renderer,
                 &lines,
@@ -12349,6 +12608,7 @@ fn native_loop(
                     modal: view.modal_presentation(),
                     sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
                     chat_row_classes: view.chat_row_classes().to_vec(),
+                    hovered_row,
                     chat_markdown_spans: view.chat_markdown_spans().to_vec(),
                     selection: selection.spans(),
                     appearance: appearance.style.clone(),
@@ -13848,6 +14108,44 @@ fn native_loop(
                         // `sidebar.footer.location` box). Repaint only on a
                         // real transition.
                         if view.set_footer_hover(x, y) {
+                            needs_paint = true;
+                        }
+                        // Remember the cell so each painted frame can re-derive
+                        // the pointer hover from the layout it renders, not
+                        // only on a fresh move (scroll/resize/mutation).
+                        last_pointer = Some((x, y));
+                        // User-message hover (`routes/session/index.tsx:2390`
+                        // `onMouseOver`): the pointer hover fact belongs to a
+                        // `UserCard` transcript row inside the main column,
+                        // with the same inset ownership as
+                        // `chat_row_background_at`; leaving the card (or any
+                        // non-UserCard row) clears it, exactly like upstream's
+                        // per-card `onMouseOut` (`:2391-2395`).
+                        let row_under_pointer = user_card_row_under_pointer(&view, x, y);
+                        if hovered_row != row_under_pointer {
+                            hovered_row = row_under_pointer;
+                            needs_paint = true;
+                        }
+                        // Send-button hover mirrors upstream's
+                        // `SendButton`-style pointer styling: the setter
+                        // recomputes the hit from the current draft and returns
+                        // a real transition. Gate is the same composer pointer
+                        // eligibility `composer_pointer_event` uses, so hover
+                        // and submit agree on when the button is live.
+                        let send_eligible = !page_open
+                            && !help_open
+                            && !children_panel.open
+                            && !appearance.open
+                            && !permission_editor.open
+                            && !view.dialogs.intercepts_input()
+                            && !view.command_palette_open()
+                            && matches!(dialog, native_setup::Dialog::None)
+                            && import_dialog.as_ref().is_none_or(|import| !import.is_open());
+                        if send_eligible {
+                            if view.set_send_pointer(&draft, x, y) {
+                                needs_paint = true;
+                            }
+                        } else if view.set_send_pointer(&draft, 0, 0) {
                             needs_paint = true;
                         }
                         tab_hovered = if effective_orientation == TabOrientation::Vertical {

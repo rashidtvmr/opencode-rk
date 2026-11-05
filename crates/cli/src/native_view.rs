@@ -7824,6 +7824,67 @@ mod tests {
         }
     }
     #[test]
+    fn send_button_hover_flips_send_region_role_to_selected() {
+        use super::*;
+        let mut view = NativeView::new(120, 40);
+        view.set_session_route(true);
+        view.set_tab_reservation(crate::native_tabs::TabReservation::for_view(
+            crate::native_tabs::TabOrientation::Horizontal,
+            120,
+            40,
+        ));
+        let draft = "hover me";
+        let frame = view.render(draft, &[], false, &[]);
+        assert!(
+            frame.iter().any(|line| line.contains("[Send]")),
+            "the send button renders: {frame:?}"
+        );
+        let (left, row, width) = view.send_button_region(draft).expect("send region");
+        fn region_of<'a>(
+            regions: &'a [crate::native_ui_style::Region],
+            left: u16,
+            row: u16,
+            width: u16,
+            label: &str,
+        ) -> &'a crate::native_ui_style::Region {
+            regions
+                .iter()
+                .find(|region| region.x == left && region.y == row && region.width == width)
+                .unwrap_or_else(|| panic!("send region painted at ({left},{row}): {label}"))
+        }
+        // Pointer parked off the button: the region keeps the plain enabled
+        // slot and the setter reports no transition.
+        assert!(!view.set_send_pointer(draft, 0, 0), "off-button pointer transitions");
+        let base = view.ui_regions();
+        assert_eq!(
+            region_of(&base, left, row, width, "unhovered").role,
+            crate::native_ui_style::Role::Heading,
+            "enabled unhovered send paints the Heading slot"
+        );
+        // Entering the button is a real transition and the next frame paints
+        // the Selected role upstream uses for pointer-over.
+        assert!(view.set_send_pointer(draft, left, row), "entering send must transition");
+        let frame = view.render(draft, &[], false, &[]);
+        assert!(frame.iter().any(|line| line.contains("[Send]")));
+        let hovered = view.ui_regions();
+        assert_eq!(
+            region_of(&hovered, left, row, width, "hovered").role,
+            crate::native_ui_style::Role::Selected,
+        "hovered send paints the Selected slot"
+        );
+        // Re-hovering the same cell is not another transition.
+        assert!(!view.set_send_pointer(draft, left, row), "same-cell re-hover transitions");
+        // Leaving the button transitions and the role flips back.
+        assert!(view.set_send_pointer(draft, left, row.saturating_sub(1)), "leaving send must transition");
+        let frame = view.render(draft, &[], false, &[]);
+        assert!(frame.iter().any(|line| line.contains("[Send]")));
+        let left_region = view.ui_regions();
+        assert_eq!(
+            region_of(&left_region, left, row, width, "left").role,
+            crate::native_ui_style::Role::Heading,
+        );
+    }
+    #[test]
     fn pinned_home_footer_reserves_padding_before_centering() {
         use super::*;
         for (width, height, footer_row, logo_top) in [(120, 40, 38, 14), (269, 59, 57, 24)] {
