@@ -18,6 +18,17 @@ const MAX_FRAME: usize = 1024 * 1024;
 const MAX_TEXT: usize = 64 * 1024;
 const MAX_TOTAL: usize = 256 * 1024;
 
+fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new(); let mut acc = 0u32; let mut bits = 0u8;
+    for c in input.bytes().filter(|b| !b.is_ascii_whitespace()) {
+        if c == b'=' { break; }
+        let v = match c { b'A'..=b'Z' => c-b'A', b'a'..=b'z' => c-b'a'+26, b'0'..=b'9' => c-b'0'+52, b'+' => 62, b'/' => 63, _ => return Err("invalid base64 attachment".into()) };
+        acc = (acc << 6) | u32::from(v); bits += 6;
+        if bits >= 8 { bits -= 8; out.push((acc >> bits) as u8); }
+    }
+    Ok(out)
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Event {
     Usage {input:u64,output:u64,cached:Option<u64>,reasoning:Option<u64>},
@@ -126,14 +137,43 @@ impl TurnWorker {
         auth: &str,
         text: &str,
         model: &str,
+        files: &[String],
+        skills: &[(String, String)],
     ) -> Result<Self, String> {
         Self::start_path(
             origin,
             session,
             auth,
             "/turns/stream",
-            serde_json::json!({"text": text, "model": model, "reasoning_effort": "high"}),
+            serde_json::json!({"text": text, "model": model, "reasoning_effort": "high", "files": files,
+                "skills": skills.iter().map(|(id, name)| serde_json::json!({"id": id, "name": name})).collect::<Vec<_>>() }),
         )
+    }
+
+    /// Upload one data-URI attachment and return the daemon-owned draft id.
+    /// This deliberately uses the same bounded loopback HTTP discipline as the
+    /// native entrypoint, while keeping the TUI submit path synchronous.
+    pub fn upload_attachment(origin: &str, session: &str, auth: &str, uri: &str, name: &str) -> Result<String, String> {
+        if !crate::daemon_client::is_wellformed_token(auth) { return Err("missing validated daemon token".into()); }
+        let (meta, encoded) = uri.strip_prefix("data:").and_then(|v| v.split_once(","))
+            .ok_or("attachment is not a data URI")?;
+        if !meta.ends_with(";base64") { return Err("attachment is not base64 encoded".into()); }
+        let mime = meta.trim_end_matches(";base64");
+        let bytes = decode_base64(encoded)?;
+        let query_name: String = name.bytes().map(|b| match b { b'A'..=b'Z'|b'a'..=b'z'|b'0'..=b'9'|b'-'|b'_'|b'.' => b as char, _ => '_' }).collect();
+        let path = format!("/api/sessions/{session}/attachments?name={query_name}");
+        let authority = origin.strip_prefix("http://").ok_or("native attachments require http loopback")?;
+        let addr = authority.to_socket_addrs().map_err(|_| "invalid daemon origin")?.find(|a| a.ip().is_loopback()).ok_or("native attachments require loopback")?;
+        use std::io::{Read, Write};
+        let mut stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5)).map_err(|e| e.to_string())?;
+        let request = format!("POST {path} HTTP/1.1\r\nHost: {authority}\r\nAuthorization: {}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", crate::daemon_client::authorization_header(auth), bytes.len());
+        stream.write_all(request.as_bytes()).map_err(|e| e.to_string())?;
+        stream.write_all(&bytes).map_err(|e| e.to_string())?;
+        let mut response = Vec::new(); stream.read_to_end(&mut response).map_err(|e| e.to_string())?;
+        let text = String::from_utf8_lossy(&response);
+        if !text.starts_with("HTTP/1.1 2") { return Err(format!("attachment upload failed: {}", text.lines().next().unwrap_or("unknown response"))); }
+        let body = text.split_once("\r\n\r\n").ok_or("malformed attachment response")?.1;
+        serde_json::from_str::<Value>(body).ok().and_then(|v| v.pointer("/attachment/id").and_then(Value::as_str).map(str::to_owned)).ok_or("attachment response missing id".into())
     }
 
     fn start_path(
@@ -550,6 +590,8 @@ mod native_error_tests {
             let submitted: Value = serde_json::from_str(&request[body_start..]).unwrap();
             assert_eq!(submitted["model"], "9router/oc/deepseek-v4.1-flash-free");
             assert_eq!(submitted["text"], "café 世界");
+            assert!(submitted["files"].is_array());
+            assert!(submitted["skills"].is_array());
             socket.write_all(format!("HTTP/1.1 {status} Test\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
         });
         let mut worker = TurnWorker::start(
@@ -558,6 +600,7 @@ mod native_error_tests {
             &"a".repeat(64),
             "café 世界",
             "9router/oc/deepseek-v4.1-flash-free",
+            &[], &[],
         )
         .unwrap();
         let events = tokio::time::timeout(Duration::from_secs(3), async {
@@ -670,6 +713,7 @@ mod native_error_tests {
             &"a".repeat(64),
             "café 世界",
             "9router/oc/deepseek-v4.1-flash-free",
+            &[], &[],
         )
         .unwrap();
         tokio::time::timeout(Duration::from_secs(3), ready_rx)

@@ -17578,10 +17578,28 @@ fn native_loop(
                         );
                         // CP-38: the sent prompt owns its images; the composer
                         // strip clears with the draft (`index.tsx:399`).
-                        view.clear_preview_items();
+                        let staged_previews = std::mem::take(&mut view.preview_items);
+                        let mut file_ids = Vec::new();
+                        let mut attachment_error = None;
+                        if let Some(token) = auth {
+                            for (index, item) in staged_previews.iter().enumerate() {
+                                match native_turn::TurnWorker::upload_attachment(&snapshot.origin, &snapshot.session_id, token, &item.uri, &format!("image-{index}.bin")) {
+                                    Ok(id) => file_ids.push(id),
+                                    Err(error) => { attachment_error = Some(error); break; }
+                                }
+                            }
+                        } else if !staged_previews.is_empty() {
+                            attachment_error = Some("missing daemon token".into());
+                        }
+                        if attachment_error.is_none() { view.clear_preview_items(); }
+                        if attachment_error.is_some() {
+                            view.preview_items = staged_previews.clone();
+                        }
                         completion.sync(&draft);
                         {
-                            let result = if let Some(command) = text.strip_prefix('!') {
+                            let result = if let Some(error) = attachment_error {
+                                Err(error)
+                            } else if let Some(command) = text.strip_prefix('!') {
                                 native_turn::TurnWorker::start_shell(
                                     &snapshot.origin,
                                     &snapshot.session_id,
@@ -17607,9 +17625,11 @@ fn native_loop(
                                                 &snapshot.origin,
                                                 &snapshot.session_id,
                                                 auth.ok_or("missing daemon token")?,
-                                                &text,
-                                                &model.qualified(),
-                                        )
+                                                 &text,
+                                                 &model.qualified(),
+                                                 &file_ids,
+                                                 &[],
+                                         )
                                     })
                             }
                             .map(|next| {
