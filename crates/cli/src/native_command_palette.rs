@@ -239,6 +239,30 @@ impl CommandPalette {
             "System",
             "/settings",
         ));
+        // Upstream prompt stash commands are palette-only (their default
+        // bindings are "none").  Keep the exact command names and Prompt
+        // category; the native loop owns the local client-side store.
+        regular.push(entry(
+            "prompt:prompt.stash",
+            "prompt.stash",
+            "Stash prompt",
+            "Prompt",
+            "/prompt.stash",
+        ));
+        regular.push(entry(
+            "prompt:prompt.stash.pop",
+            "prompt.stash.pop",
+            "Pop stashed prompt",
+            "Prompt",
+            "/prompt.stash.pop",
+        ));
+        regular.push(entry(
+            "prompt:prompt.stash.list",
+            "prompt.stash.list",
+            "List stashed prompts",
+            "Prompt",
+            "/prompt.stash.list",
+        ));
         regular.push(entry(
             "system:help.show",
             "help.show",

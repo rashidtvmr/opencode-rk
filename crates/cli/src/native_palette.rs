@@ -2206,6 +2206,17 @@ pub mod select {
 /// `dialog-stash.tsx:39-85`, `dialog-workspaces.tsx:181-245`,
 /// `dialog-workspace-file-changes.tsx:62-105`.
 pub mod pickers {
+    /// Bridge the client-local prompt stash store into the dialog row model.
+    /// The two types intentionally remain separate: the store preserves full
+    /// draft metadata while the picker only needs text and timestamp.
+    impl From<crate::native_paste::StashEntry> for StashEntry {
+        fn from(entry: crate::native_paste::StashEntry) -> Self {
+            Self {
+                text: entry.prompt.text,
+                timestamp: entry.timestamp as i64,
+            }
+        }
+    }
     use super::select::{DrillDown, LateLoadGuard, SelectOption, SelectSnapshot};
 
     /// Model picker ordering and favorite priority

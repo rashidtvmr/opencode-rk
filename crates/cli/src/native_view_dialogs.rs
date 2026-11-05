@@ -212,6 +212,14 @@ pub enum DialogKind {
     /// Enter deletes after arming and Esc closes locally; it never pends a
     /// permission ack.
     Workspaces,
+    /// DIALOG-17: the explicit prompt-stash dialog (`dialog-stash.tsx`),
+    /// opened from the `prompt.stash.list` palette command. Its rows come
+    /// from the tested `native_palette::pickers::stash_rows` over the live
+    /// `PromptStash` entries: most recent first, `~N lines` footers and a
+    /// two-press `ctrl+d` armed delete. Enter restores the focused entry
+    /// into the composer (removing it from the stash); Esc closes locally.
+    /// Purely client-local: no server route exists.
+    Stash,
     /// DIALOG-15: the focused-server integration sign-in surface
     /// (`dialog-integration.tsx`), opened from `DialogKind::Mcp` Enter when
     /// `mcp_enter` yields `McpEnter::SignIn`. Its model is the tested
@@ -491,6 +499,20 @@ enum Phase {
 }
 
 /// Sanitized, bounds-checked dialog kept while the overlay is visible.
+/// DIALOG-17: live stash-dialog state (`dialog-stash.tsx:29-85`): the
+/// client-local entries, the armed delete and the clock sample that anchors
+/// the relative-time descriptions. `ArmedDelete` is the shared two-press
+/// model keyed by the original entry index.
+#[derive(Clone, Debug)]
+pub struct StashDialogState {
+    pub entries: Vec<crate::native_paste::StashEntry>,
+    pub armed: crate::native_palette::pickers::ArmedDelete,
+    /// `Date.now()` sampled when the dialog opened; the upstream dialog
+    /// re-reads it every render, the native dialog freezes it at open.
+    pub now_ms: i64,
+}
+
+/// Sanitized, bounds-checked dialog kept while the overlay is visible.
 #[derive(Clone, Debug)]
 struct OpenDialog {
     id: String,
@@ -556,6 +578,10 @@ struct OpenDialog {
     /// `native_palette::pickers::WorkspacesState`; the live key gate drives
     /// it exactly like [`DialogKind::Sessions`].
     workspaces: Option<crate::native_palette::pickers::WorkspacesState>,
+    /// DIALOG-17: the live prompt-stash dialog state (`dialog-stash.tsx`),
+    /// present only for [`DialogKind::Stash`]. Rows paint through the tested
+    /// `native_palette::pickers::stash_rows`; the live key gate drives it.
+    stash: Option<StashDialogState>,
     /// DIALOG-15: the integration sign-in surface (`dialog-integration.tsx`),
     /// present only for [`DialogKind::Integration`]. The model is the tested
     /// `native_palette::dialog::IntegrationState`; the live MCP dialog's
@@ -789,6 +815,8 @@ impl DialogView {
             Some(DialogKind::Sessions) => DialogViewportPolicy::SelectTerminal,
             Some(DialogKind::Workspaces) => DialogViewportPolicy::SelectTerminal,
             Some(DialogKind::Integration) => DialogViewportPolicy::SelectTerminal,
+            // DIALOG-17: the stash list uses the same DialogSelect viewport.
+            Some(DialogKind::Stash) => DialogViewportPolicy::SelectTerminal,
             Some(DialogKind::Permission)
             | Some(DialogKind::Question)
             | Some(DialogKind::Confirm)
@@ -1197,6 +1225,7 @@ impl DialogView {
             diff_mode: None,
             sessions: None,
             workspaces: None,
+            stash: None,
             integration: None,
             form: None,
             description: None,
@@ -1377,6 +1406,7 @@ impl DialogView {
             diff_mode: None,
             sessions: None,
             workspaces: None,
+            stash: None,
             integration: None,
             form: None,
         });
@@ -1464,6 +1494,7 @@ impl DialogView {
             diff_mode: None,
             sessions: None,
             workspaces: None,
+            stash: None,
             integration: None,
             form: None,
             description: None,
@@ -1523,6 +1554,7 @@ impl DialogView {
             diff_mode: None,
             sessions: Some(state),
             workspaces: None,
+            stash: None,
             integration: None,
             form: None,
             description: None,
@@ -1720,6 +1752,7 @@ impl DialogView {
             diff_mode: None,
             sessions: None,
             workspaces: Some(state),
+            stash: None,
             integration: None,
             form: None,
             description: None,
@@ -1899,6 +1932,232 @@ impl DialogView {
         applied
     }
 
+    // ---- DIALOG-17: the prompt-stash dialog ----
+
+    /// DIALOG-17: open the stash dialog from the live `PromptStash` list
+    /// (the `prompt.stash.list` run replacing the stack with `DialogStash`,
+    /// `prompt/index.tsx:918-940`). `now_ms` anchors the relative-time
+    /// descriptions the way `Date.now()` does upstream.
+    pub fn open_stash(
+        &mut self,
+        entries: Vec<crate::native_paste::StashEntry>,
+        now_ms: i64,
+    ) -> Result<(), DialogError> {
+        if self.is_open() {
+            return Err(DialogError::AlreadyOpen);
+        }
+        self.dialog = Some(OpenDialog {
+            id: "stash".to_owned(),
+            session_id: String::new(),
+            kind: DialogKind::Stash,
+            title: "Stash".to_owned(),
+            choices: Vec::new(),
+            disabled: Vec::new(),
+            permission: Vec::new(),
+            mcp_status: Vec::new(),
+            message_lines: Vec::new(),
+            error: StaticError::BackendUnavailable,
+            prompt: None,
+            footer_gap: None,
+            select: None,
+            session_has_parent: false,
+            execute: None,
+            execute_scroll: 0,
+            diff_mode: None,
+            sessions: None,
+            workspaces: None,
+            stash: Some(StashDialogState {
+                entries,
+                armed: crate::native_palette::pickers::ArmedDelete::default(),
+                now_ms,
+            }),
+            integration: None,
+            form: None,
+            description: None,
+        });
+        self.selection = None;
+        self.rejected = false;
+        self.phase = Phase::Open;
+        self.open_sequence = self.open_sequence.saturating_add(1);
+        let entry_id = self.open_sequence;
+        self.modal
+            .replace(entry_id, DialogSize::Medium, false, None, self.focus);
+        self.sync_stash_choices();
+        Ok(())
+    }
+
+    /// DIALOG-17: the live stash state, or `None` when the dialog is closed.
+    pub fn stash_state(&self) -> Option<&StashDialogState> {
+        self.dialog
+            .as_ref()
+            .filter(|dialog| dialog.kind == DialogKind::Stash)
+            .and_then(|dialog| dialog.stash.as_ref())
+    }
+
+    /// DIALOG-17: rebuild the painted stash rows from the tested
+    /// `native_palette::pickers::stash_rows` model (`dialog-stash.tsx:37-56`):
+    /// the armed `Press ctrl+d again to confirm` title swap, the
+    /// `~N lines` footers and the upstream `.toReversed()` ordering with the
+    /// original entry index kept as both option id and dialog selection.
+    fn sync_stash_choices(&mut self) {
+        let Some(dialog) = self.dialog.as_mut() else { return };
+        if dialog.kind != DialogKind::Stash {
+            return;
+        }
+        let Some(state) = dialog.stash.as_ref() else { return };
+        let len = state.entries.len();
+        let to_delete = state
+            .armed
+            .armed()
+            .and_then(|armed| armed.parse::<usize>().ok());
+        // Bridge the client-local store entries into the picker row model
+        // (`From<native_paste::StashEntry>`), keeping the two types separate.
+        let bridged: Vec<crate::native_palette::pickers::StashEntry> =
+            state.entries.iter().cloned().map(Into::into).collect();
+        // ponytail: upstream falls back to `Locale.datetime(timestamp)` for
+        // entries older than 7 days; the native dialog has no datetime
+        // renderer yet, so the description is empty there (upgrade to a
+        // native clock format when one lands).
+        let rows = crate::native_palette::pickers::stash_rows(
+            &bridged,
+            to_delete,
+            state.now_ms,
+            "",
+            "ctrl+d",
+        );
+        dialog.choices = rows.iter().map(|row| row.title.clone()).collect();
+        dialog.disabled = vec![false; dialog.choices.len()];
+        dialog.select = Some(
+            crate::native_palette::select::SelectDialog::new(
+                rows.iter()
+                    .map(|row| {
+                        let mut option = crate::native_palette::select::SelectOption::new(
+                            row.value.to_string(),
+                            row.title.clone(),
+                        );
+                        if !row.description.is_empty() {
+                            option = option.with_description(row.description.clone());
+                        }
+                        if let Some(footer) = &row.footer {
+                            option = option.with_footer(footer.clone());
+                        }
+                        option
+                    })
+                    .collect(),
+            ),
+        );
+        let selection = match self.selection {
+            Some(index) if index < len => index,
+            _ => len.saturating_sub(1),
+        };
+        self.selection = Some(selection);
+        // Stash rows are displayed in reverse order, but their option ids are
+        // original entry indexes. Keep the select model's painted highlight
+        // on that same original-index identity.
+        if let Some(select) = dialog.select.as_mut() {
+            let _ = select.select_id(&selection.to_string());
+        }
+    }
+
+    /// DIALOG-17: move the highlight; the upstream `onMove` disarms a
+    /// pending delete (`dialog-stash.tsx:57-60`).
+    pub fn stash_move(&mut self, delta: isize) -> bool {
+        if self.phase != Phase::Open {
+            return false;
+        }
+        let Some(state) = self
+            .dialog
+            .as_mut()
+            .filter(|dialog| dialog.kind == DialogKind::Stash)
+            .and_then(|dialog| dialog.stash.as_mut())
+        else {
+            return false;
+        };
+        let len = state.entries.len();
+        if len == 0 {
+            return false;
+        }
+        state.armed.clear();
+        // The display order is the reversed entry list; selection stays the
+        // original index so painted rows, clicks and restore agree.
+        let selected = match self.selection {
+            Some(index) if index < len => len - 1 - index,
+            _ => 0,
+        };
+        let next = crate::native_palette::select::move_selection(
+            selected,
+            len,
+            delta,
+            crate::native_palette::select::MovePolicy::Wrap,
+        );
+        self.selection = Some(len - 1 - next);
+        if let Some(dialog) = self.dialog.as_mut() {
+            if let Some(select) = dialog.select.as_mut() {
+                let _ = select.select_id(&self.selection.unwrap().to_string());
+            }
+        }
+        true
+    }
+
+    /// DIALOG-17: `stash.delete` two-press (`dialog-stash.tsx:66-78`): the
+    /// first press arms the focused entry, the second removes it. Removing
+    /// the last entry closes the dialog like an emptied upstream list.
+    pub fn stash_delete(&mut self) -> bool {
+        if self.phase != Phase::Open {
+            return false;
+        }
+        let Some(index) = self.selection else { return false };
+        let Some(state) = self
+            .dialog
+            .as_mut()
+            .filter(|dialog| dialog.kind == DialogKind::Stash)
+            .and_then(|dialog| dialog.stash.as_mut())
+        else {
+            return false;
+        };
+        if index >= state.entries.len() {
+            return false;
+        }
+        if state.armed.press(&index.to_string()) {
+            let old_len = state.entries.len();
+            let display = old_len.saturating_sub(1).saturating_sub(index);
+            state.entries.remove(index);
+            state.armed.clear();
+            let new_len = state.entries.len();
+            if new_len == 0 {
+                self.close();
+            } else {
+                // Keep the same visual row focused after the shift.
+                self.selection = Some(new_len.saturating_sub(1).saturating_sub(display));
+                self.sync_stash_choices();
+            }
+        } else {
+            self.sync_stash_choices();
+        }
+        true
+    }
+
+    /// DIALOG-17: Enter restore (`dialog-stash.tsx:62-65`): the focused
+    /// entry is removed from the stash and returned so the loop loads it
+    /// into the composer; upstream then closes the dialog (`dialog.clear()`).
+    pub fn stash_enter(&mut self) -> Option<crate::native_paste::StashEntry> {
+        if self.phase != Phase::Open {
+            return None;
+        }
+        let index = self.selection?;
+        let state = self
+            .dialog
+            .as_mut()
+            .filter(|dialog| dialog.kind == DialogKind::Stash)
+            .and_then(|dialog| dialog.stash.as_mut())?;
+        if index >= state.entries.len() {
+            return None;
+        }
+        let entry = state.entries.remove(index);
+        self.close();
+        Some(entry)
+    }
+
     // ---- DIALOG-15: the integration sign-in surface ----
 
     /// DIALOG-15: open the integration surface for the focused server with
@@ -1939,6 +2198,7 @@ impl DialogView {
             diff_mode: None,
             sessions: None,
             workspaces: None,
+            stash: None,
             integration: Some(state),
             form: None,
             description: None,
@@ -2041,6 +2301,7 @@ impl DialogView {
             diff_mode: None,
             sessions: None,
             workspaces: None,
+            stash: None,
             integration: None,
             form: Some(form),
             description: None,
@@ -2168,6 +2429,7 @@ impl DialogView {
             diff_mode: Some(mode),
             sessions: None,
             workspaces: None,
+            stash: None,
             integration: None,
             form: None,
             description: None,
@@ -2207,6 +2469,7 @@ impl DialogView {
             diff_mode: None,
             sessions: None,
             workspaces: None,
+            stash: None,
             integration: None,
             form: None,
             description: None,
@@ -2371,6 +2634,7 @@ impl DialogView {
             diff_mode: None,
             sessions: None,
             workspaces: None,
+            stash: None,
             integration: None,
             form: None,
             description: None,
@@ -2915,9 +3179,10 @@ impl DialogView {
             // A form is answered through [`DialogView::form_submit`] (the
             // resolved answer map), never the generic choice/answer path.
             DialogKind::Form => return Err(DialogError::NotAnswerable),
-            // DIALOG-14/15: worktrees and sign-in are driven by their own
-            // forwarders (`workspaces_*`/`integration_*`), never this path.
-            DialogKind::Workspaces | DialogKind::Integration => {
+            // DIALOG-14/15/17: worktrees, sign-in and stash are driven by
+            // their own forwarders (`workspaces_*`/`integration_*`/
+            // `stash_*`), never this path.
+            DialogKind::Workspaces | DialogKind::Integration | DialogKind::Stash => {
                 return Err(DialogError::NotAnswerable)
             }
             DialogKind::Question if !self.question_capable => {
@@ -2994,7 +3259,8 @@ impl DialogView {
             | DialogKind::Sessions
             | DialogKind::Form
             | DialogKind::Workspaces
-            | DialogKind::Integration => {
+            | DialogKind::Integration
+            | DialogKind::Stash => {
                 unreachable!("not answerable")
             }
             // `Crash` is refused as `NotAnswerable` by the guard above, so it
@@ -3031,9 +3297,9 @@ impl DialogView {
             // A form cancel is the real form cancel route, dispatched by
             // [`DialogView::form_cancel`], never this generic path.
             DialogKind::Form => return Err(DialogError::NotAnswerable),
-            // DIALOG-14/15: worktrees/sign-in cancel through their own
-            // forwarders, never this generic path.
-            DialogKind::Workspaces | DialogKind::Integration => {
+            // DIALOG-14/15/17: worktrees/sign-in/stash cancel through their
+            // own forwarders, never this generic path.
+            DialogKind::Workspaces | DialogKind::Integration | DialogKind::Stash => {
                 return Err(DialogError::NotAnswerable)
             }
             _ => {}
@@ -3063,7 +3329,8 @@ impl DialogView {
             | DialogKind::Sessions
             | DialogKind::Form
             | DialogKind::Workspaces
-            | DialogKind::Integration => unreachable!("handled above"),
+            | DialogKind::Integration
+            | DialogKind::Stash => unreachable!("handled above"),
         };
         self.pending_attempt = attempt;
         self.phase = Phase::Pending;
@@ -3446,6 +3713,16 @@ impl DialogView {
                         None => lines.push(line("worktrees".to_string(), Role::Description)),
                     }
                 }
+                DialogKind::Stash => {
+                    // DIALOG-17: the live prompt-stash body
+                    // (`dialog-stash.tsx`). Rows paint through the shared
+                    // select loop below (reverse order, right-aligned
+                    // `~N lines` footers); the hint documents the actions.
+                    lines.push(line(
+                        "stash · Enter restore · ctrl+d delete".to_string(),
+                        Role::Description,
+                    ));
+                }
                 DialogKind::Integration => {
                     // DIALOG-15: the live sign-in body
                     // (`dialog-integration.tsx`): server name plus the
@@ -3712,6 +3989,8 @@ impl DialogView {
                 "↑↓ choose · Enter toggle · Esc close"
             } else if dialog.kind == DialogKind::Sessions {
                 "↑↓ choose · Enter open · Esc close"
+            } else if dialog.kind == DialogKind::Stash {
+                "↑↓ choose · Enter restore · ctrl+d delete · Esc close"
             } else if dialog.kind == DialogKind::Prompt {
                 "Enter: save · Esc: cancel"
             } else {

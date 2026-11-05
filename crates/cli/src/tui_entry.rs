@@ -4969,6 +4969,29 @@ fn permission_modal_key(
     }
 }
 
+/// DIALOG-17: arrows and paging on the stash dialog use the same reversed
+/// entry-index model as Ctrl-N/Ctrl-B. Page keys intentionally move one row,
+/// matching the small modal's selection model rather than the generic select
+/// page jump. Returns `(handled, needs_paint)` for the live loop and tests.
+#[cfg(feature = "native")]
+fn stash_modal_key(
+    view: &mut crate::native_view::NativeView,
+    event: &native_input_decoder::InputEvent,
+) -> (bool, bool) {
+    if view.dialogs.open_kind() != Some(crate::native_view_dialogs::DialogKind::Stash) {
+        return (false, false);
+    }
+    let delta = match event {
+        native_input_decoder::InputEvent::ArrowUp
+        | native_input_decoder::InputEvent::PageUp => -1,
+        native_input_decoder::InputEvent::ArrowDown
+        | native_input_decoder::InputEvent::PageDown => 1,
+        _ => return (false, false),
+    };
+    view.dialogs.stash_move(delta);
+    (true, true)
+}
+
 /// DIALOG-20: the live crash surface maps exactly the ErrorComponent keymap
 /// (`error-component.tsx:66-95`): arrows/tab move, Enter uses the selected
 /// action, `c`/`r`/`q` act directly, Ctrl+C exits. Every other event is still
@@ -9518,6 +9541,10 @@ fn native_loop(
     // its range here, so later edits realign instead of appending raw text.
     let mut draft_parts: Vec<crate::native_paste::PastedText> = Vec::new();
     let mut draft_stash = crate::native_paste::DraftStash::new();
+    // Explicit prompt stash is client-local (upstream PromptStashProvider),
+    // distinct from the per-tab draft stash above. Palette/dialog wiring can
+    // consume this owner without introducing a server route.
+    let mut prompt_stash = crate::native_paste::PromptStash::new();
     let mut last_stashed_tab: Option<Option<String>> = None;
     // Persisted stores live under the same data dir the rest of the TUI uses.
     let state_path = data_dir.join("state/kv.json");
@@ -13613,6 +13640,16 @@ fn native_loop(
                 continue;
             }
         }
+        // DIALOG-17: stash navigation must run through its reversed-index
+        // model, before the generic modal direction arm can call `step()`.
+        let (handled, paint) = stash_modal_key(&mut view, &event);
+        if paint {
+            needs_paint = true;
+        }
+        if handled {
+            utf8.reset();
+            continue;
+        }
         // TOOL-011: the execute content viewer owns its scroll and copy keys
         // (`dialog-execute.tsx:76-89`: up/down ±1, pageup/pagedown ±page,
         // home/end to the ends, c/o copy code/output) and is modal — every
@@ -15826,6 +15863,32 @@ fn native_loop(
                 utf8.reset();
                 continue;
             }
+            // DIALOG-17: explicit prompt stash is a fully local modal.  It
+            // owns every byte while open, so no selection key can leak into
+            // the composer or become a provider prompt.
+            if view.dialogs.open_kind() == Some(crate::native_view_dialogs::DialogKind::Stash) {
+                match byte {
+                    14 => { view.dialogs.stash_move(1); needs_paint = true; }
+                    2 => { view.dialogs.stash_move(-1); needs_paint = true; }
+                    4 => { view.dialogs.stash_delete(); needs_paint = true; }
+                    13 | 10 => {
+                        if let Some(entry) = view.dialogs.stash_enter() {
+                            draft = entry.prompt.text;
+                            draft_cursor = entry.prompt.cursor.min(draft.len());
+                            while draft_cursor > 0 && !draft.is_char_boundary(draft_cursor) {
+                                draft_cursor -= 1;
+                            }
+                            draft_parts = entry.prompt.parts;
+                            view.dialogs.close();
+                        }
+                        needs_paint = true;
+                    }
+                    27 | 3 => { view.dialogs.close(); needs_paint = true; }
+                    _ => { /* modal: consume all other input */ }
+                }
+                utf8.reset();
+                continue;
+            }
             match byte {
                 // F002-R3: the permission prompt's `left,h` / `right,l`
                 // cycling and its inert Up/Down + Ctrl-N/Ctrl-B are handled by
@@ -17202,6 +17265,52 @@ fn native_loop(
                     needs_paint = true;
                     continue;
                 }
+                if command == "/prompt.stash" {
+                    let entry = crate::native_paste::DraftEntry {
+                        text: draft.clone(),
+                        cursor: draft_cursor,
+                        mode: if draft.starts_with('!') {
+                            crate::native_paste::PromptMode::Shell
+                        } else {
+                            crate::native_paste::PromptMode::Normal
+                        },
+                        parts: draft_parts.clone(),
+                    };
+                    if entry.is_stashable() {
+                        prompt_stash.push(entry, animation_start.now_ms() as u64);
+                        draft.clear();
+                        draft_cursor = 0;
+                        draft_parts.clear();
+                    }
+                    consume_local_command_with_cursor(&mut draft, &mut draft_cursor, command, from_chat_composer);
+                    needs_paint = true;
+                    utf8.reset();
+                    continue;
+                }
+                if command == "/prompt.stash.pop" {
+                    consume_local_command_with_cursor(&mut draft, &mut draft_cursor, command, from_chat_composer);
+                    if let Some(entry) = prompt_stash.pop() {
+                        draft = entry.prompt.text;
+                        draft_cursor = entry.prompt.cursor.min(draft.len());
+                        while draft_cursor > 0 && !draft.is_char_boundary(draft_cursor) {
+                            draft_cursor -= 1;
+                        }
+                        draft_parts = entry.prompt.parts;
+                    }
+                    needs_paint = true;
+                    utf8.reset();
+                    continue;
+                }
+                if command == "/prompt.stash.list" {
+                    consume_local_command_with_cursor(&mut draft, &mut draft_cursor, command, from_chat_composer);
+                    let now_ms = animation_start.now_ms() as i64;
+                    if let Err(error) = view.dialogs.open_stash(prompt_stash.list().to_vec(), now_ms) {
+                        append_transcript(&mut transcript, format!("error: prompt stash: {error:?}"));
+                    }
+                    needs_paint = true;
+                    utf8.reset();
+                    continue;
+                }
                 if command == "/import" || command == "/settings-import" {
                     let (import_dest, import_result) = if let Some(dest) = opencode_rk_providers::imported_config::own_config_path() {
                         let result = crate::native_import_sources::discover_import(
@@ -18209,7 +18318,7 @@ fn configured_command_input(text: &str) -> Option<(&str, &str)> {
 #[cfg(feature = "native")]
 fn is_recognized_local_command(command: &str) -> bool {
     crate::native_view_pages::Page::from_route(command).is_some()
-        || matches!(command, "/commands" | "/new" | "/compact" | "/compact native" | "/compact fallback" | "/compact auto" | "/sidebar" | "/appearance" | "/subagents" | "/permission" | "/permissions" | "/import" | "/settings-import" | "/settings")
+        || matches!(command, "/commands" | "/new" | "/compact" | "/compact native" | "/compact fallback" | "/compact auto" | "/sidebar" | "/appearance" | "/subagents" | "/permission" | "/permissions" | "/import" | "/settings-import" | "/settings" | "/prompt.stash" | "/prompt.stash.pop" | "/prompt.stash.list")
 }
 
 /// Consume the typed text of a RECOGNIZED local slash command that was
@@ -19810,7 +19919,7 @@ mod command_consumption_tests {
                     || super::native_local_page_route(route).is_some()
                     || matches!(
                         route,
-                        "/help" | "/sessions" | "/new" | "/connect" | "/models" | "/appearance" | "/subagents" | "/import" | "/settings-import" | "/settings"
+                        "/help" | "/sessions" | "/new" | "/connect" | "/models" | "/appearance" | "/subagents" | "/import" | "/settings-import" | "/settings" | "/prompt.stash" | "/prompt.stash.pop" | "/prompt.stash.list"
                     ),
                 "palette action has no local handler: {route}"
             );
@@ -19829,6 +19938,23 @@ mod command_consumption_tests {
         assert_eq!(super::native_local_page_route("/not-a-local-command"), None);
         assert_eq!(super::native_local_page_route("/memory"), Some(crate::native_view_pages::Page::Memory));
         assert!(!super::native_exit_route("/not-a-local-command"));
+    }
+
+    #[test]
+    fn prompt_stash_palette_routes_resolve_to_local_commands() {
+        let mut palette = crate::native_command_palette::CommandPalette::default();
+        palette.open(true);
+        let routes = palette
+            .visible()
+            .into_iter()
+            .filter_map(|entry| match entry.action {
+                crate::native_command_palette::PaletteAction::Route(route)
+                    if route.starts_with("/prompt.stash") => Some(route),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(routes, vec!["/prompt.stash", "/prompt.stash.pop", "/prompt.stash.list"]);
+        assert!(routes.iter().all(|route| super::is_recognized_local_command(route)));
     }
     use super::{consume_local_command, is_recognized_local_command};
 
@@ -21106,6 +21232,74 @@ mod permission_modal_key_tests {
             assert!(!handled, "{event:?} is not the permission prompt's key");
             assert!(!paint);
         }
+    }
+}
+
+/// DIALOG-17: the live stash arrow dispatch must use the same reversed-index
+/// selection model as Ctrl-N/Ctrl-B and keep the painted select highlight
+/// aligned with the entry restored by Enter.
+#[cfg(all(test, feature = "native"))]
+mod stash_modal_key_tests {
+    use super::*;
+    use super::native_input_decoder::InputEvent;
+    use crate::native_paste::{DraftEntry, PromptMode, StashEntry};
+    use crate::native_view_dialogs::DialogKind;
+
+    fn entry(text: &str, timestamp: u64) -> StashEntry {
+        StashEntry {
+            prompt: DraftEntry {
+                text: text.to_owned(),
+                cursor: text.len(),
+                mode: PromptMode::Normal,
+                parts: Vec::new(),
+            },
+            timestamp,
+        }
+    }
+
+    fn open_stash() -> crate::native_view::NativeView {
+        let mut view = crate::native_view::NativeView::new(120, 30);
+        view.dialogs
+            .open_stash(
+                vec![entry("first", 1), entry("middle", 2), entry("last", 3)],
+                4,
+            )
+            .expect("stash opens");
+        assert_eq!(view.dialogs.open_kind(), Some(DialogKind::Stash));
+        view
+    }
+
+    #[test]
+    fn d017_arrow_down_matches_ctrl_n_and_enter_restores_painted_row() {
+        let mut arrow = open_stash();
+        let (handled, paint) = stash_modal_key(&mut arrow, &InputEvent::ArrowDown);
+        assert!(handled && paint);
+        let painted = arrow
+            .dialogs
+            .focused_choice()
+            .expect("arrow leaves a painted focus")
+            .to_owned();
+        let restored = arrow.dialogs.stash_enter().expect("enter restores a row");
+        assert_eq!(restored.prompt.text, "middle");
+        assert!(painted.contains("middle"), "painted row was {painted:?}");
+
+        let mut ctrl_n = open_stash();
+        assert!(ctrl_n.dialogs.stash_move(1));
+        assert_eq!(
+            ctrl_n.dialogs.focused_choice(),
+            Some(painted.as_str()),
+            "Ctrl-N and ArrowDown select the same row"
+        );
+    }
+
+    #[test]
+    fn d017_arrow_move_disarms_pending_delete() {
+        let mut view = open_stash();
+        assert!(view.dialogs.stash_delete(), "first delete press arms");
+        assert!(view.dialogs.stash_state().unwrap().armed.armed().is_some());
+        let (handled, _) = stash_modal_key(&mut view, &InputEvent::ArrowDown);
+        assert!(handled);
+        assert!(view.dialogs.stash_state().unwrap().armed.armed().is_none());
     }
 }
 
