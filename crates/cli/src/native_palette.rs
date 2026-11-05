@@ -2971,6 +2971,22 @@ pub mod pickers {
         pub fn is_closed(&self) -> bool {
             matches!(self, Self::Cancelled | Self::Failed)
         }
+
+        /// DIALOG-15: the status line painted under the dialog title
+        /// (`dialog-integration.tsx`). `None` for phases whose body already
+        /// carries the affordance, so the caller can fall back to "connect".
+        #[must_use]
+        pub fn phase_label(&self) -> Option<&'static str> {
+            match self {
+                Self::EnvironmentOnly => Some("No accounts configured"),
+                Self::Accounts => Some("Choose an account"),
+                Self::Methods => Some("Choose a method"),
+                Self::Form => Some("Enter credentials"),
+                Self::Progress(message) => Some(message),
+                Self::Connected => Some("Connected"),
+                Self::Cancelled | Self::Failed => None,
+            }
+        }
     }
 
     /// Theme list preview (`dialog-theme-list.tsx:14-65`): moving previews,
@@ -3587,6 +3603,9 @@ pub mod pickers {
     pub struct WorkspacesState {
         pub roots: Vec<WorkspaceRoot>,
         pub filter: String,
+        /// The dialog's current working directory, used for the `Current`
+        /// category and sorting; set at open and never mutated by keys.
+        pub current: Option<String>,
         pub selected: usize,
         pub drill: DrillDown,
         pub guard: LateLoadGuard,
@@ -3600,6 +3619,7 @@ pub mod pickers {
     impl WorkspacesState {
         pub fn open(current: Option<&str>) -> Self {
             let mut state = Self::default();
+            state.current = current.map(str::to_owned);
             state.loading = true;
             state.rows(current);
             state

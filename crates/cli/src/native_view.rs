@@ -3094,9 +3094,10 @@ impl NativeView {
         if x < left || x >= left.saturating_add(width) || y != top {
             return false;
         }
-        // `Workspaces` stays unoffered: no live `DialogWorkspaces` route
-        // exists, so the caller cannot move the session (`can_move = false`).
-        self.open_working_directory_menu(selection_active, false).is_ok()
+        // DIALOG-14: the live `DialogWorkspaces` route now exists, so the
+        // footer menu offers `Workspaces` (`can_move = true`,
+        // `working-directory-actions.tsx:16-58`).
+        self.open_working_directory_menu(selection_active, true).is_ok()
     }
 
     /// SIDE-14: the pinned footer's working-directory menu
@@ -3227,6 +3228,50 @@ impl NativeView {
         let name = self.dialogs.focused_choice()?;
         let included = self.status.mcp_included(name)?;
         Some((name.to_owned(), included))
+    }
+
+    /// DIALOG-15: the focused MCP server's Enter outcome
+    /// (`dialog-mcp.tsx:94-108` `select`): an auth-gated server opens the
+    /// integration flow, a failed one shows its error details, everything
+    /// else is inert. Routes through the tested [`mcp_enter`] by projecting
+    /// the live status onto its model. The live `McpStatus` carries no
+    /// `integrationID`, so `needs_auth` is treated as integration-gated
+    /// (upstream's `needs_auth && integrationID` branch); the missing
+    /// sign-in producer is recorded separately.
+    ///
+    /// [`mcp_enter`]: crate::native_palette::pickers::mcp_enter
+    #[must_use]
+    pub fn mcp_dialog_enter(
+        &self,
+    ) -> Option<(String, crate::native_palette::pickers::McpEnter)> {
+        use crate::native_palette::pickers::{mcp_enter, McpEnter, McpStatus as PickerStatus};
+        use crate::native_view_status::McpStatus;
+        if self.dialogs.open_kind() != Some(crate::native_view_dialogs::DialogKind::Mcp) {
+            return None;
+        }
+        let name = self.dialogs.focused_choice()?.to_owned();
+        let projected = match self
+            .status
+            .mcp_entries()
+            .iter()
+            .find(|entry| entry.name == name)
+            .map(|entry| &entry.status)
+        {
+            Some(McpStatus::NeedsAuth) => PickerStatus::NeedsAuth {
+                error: String::new(),
+                integration: Some(String::new()),
+            },
+            Some(McpStatus::Failed { error }) => PickerStatus::Failed {
+                error: error.clone(),
+            },
+            Some(McpStatus::NeedsClientRegistration { error }) => PickerStatus::Failed {
+                error: error.clone(),
+            },
+            Some(McpStatus::Connected) => PickerStatus::Connected,
+            Some(McpStatus::Disabled) | None => PickerStatus::Disabled,
+        };
+        let enter: McpEnter = mcp_enter(&projected);
+        Some((name, enter))
     }
 
     /// SIDE-08: whether the named MCP server's status is `failed`, which is

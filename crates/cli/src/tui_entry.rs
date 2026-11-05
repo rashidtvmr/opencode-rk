@@ -921,6 +921,68 @@ fn rail_location_facts(directory: &str) -> (Option<String>, bool) {
     }
 }
 
+/// DIALOG-14 producer: the local worktree roots for a directory, from git's
+/// on-disk layout only (no subprocess, matching [`git_vcs_info`]). The main
+/// worktree is the common dir's parent; linked worktrees are the
+/// `<common>/worktrees/<name>/gitdir` entries. Any I/O failure yields the
+/// roots found so far, so an unknown directory never invents a root.
+#[cfg(feature = "native")]
+fn local_worktree_roots(directory: &str) -> Vec<crate::native_palette::pickers::WorkspaceRoot> {
+    use crate::native_palette::pickers::WorkspaceRoot;
+    use std::path::{Path, PathBuf};
+    let path = Path::new(directory);
+    let dot_git = path.join(".git");
+    let git_dir: Option<PathBuf> = if dot_git.is_dir() {
+        Some(dot_git)
+    } else if dot_git.is_file() {
+        std::fs::read_to_string(&dot_git)
+            .ok()
+            .and_then(|body| {
+                body.trim()
+                    .strip_prefix("gitdir:")
+                    .map(|target| path.join(target.trim()))
+            })
+    } else {
+        None
+    };
+    let Some(git_dir) = git_dir else {
+        return Vec::new();
+    };
+    let common = std::fs::read_to_string(git_dir.join("commondir"))
+        .ok()
+        .map(|body| {
+            let trimmed = body.trim();
+            if trimmed.is_empty() {
+                git_dir.clone()
+            } else {
+                git_dir.join(trimmed)
+            }
+        })
+        .unwrap_or_else(|| git_dir.clone());
+    let mut roots: Vec<WorkspaceRoot> = Vec::new();
+    if let Some(main) = common.parent() {
+        roots.push(WorkspaceRoot {
+            directory: main.to_string_lossy().into_owned(),
+            strategy: None,
+        });
+    }
+    if let Ok(entries) = std::fs::read_dir(common.join("worktrees")) {
+        for entry in entries.flatten() {
+            if let Ok(body) = std::fs::read_to_string(entry.path().join("gitdir")) {
+                if let Some(dir) = Path::new(body.trim()).parent() {
+                    roots.push(WorkspaceRoot {
+                        directory: dir.to_string_lossy().into_owned(),
+                        strategy: None,
+                    });
+                }
+            }
+        }
+    }
+    roots.sort_by(|a, b| a.directory.cmp(&b.directory));
+    roots.dedup_by(|a, b| a.directory == b.directory);
+    roots
+}
+
 /// CP-13: whether a bare Escape byte belongs to `session.interrupt`
 /// (`prompt/index.tsx:500-531`). The command's keymap layer enables only while
 /// the chat composer owns focus (`input.focused`, `:504`); every sibling owner
@@ -4615,6 +4677,33 @@ fn sessions_live_dispatch(
     sessions_menu_key(view, byte)
 }
 
+/// DIALOG-14: the live `DialogWorkspaces` byte handler
+/// (`dialog-workspaces.tsx`). Split out of the loop so a test drives the exact
+/// dispatch the running CLI uses: printable input extends the filter,
+/// Backspace removes one code point, Ctrl-N/Ctrl-B and the arrows move the
+/// highlight, Enter drills/arms/deletes and Esc drills back or closes locally.
+/// Returns whether the key changed visible dialog state.
+#[cfg(feature = "native")]
+fn workspaces_live_dispatch(view: &mut crate::native_view::NativeView, byte: u8) -> bool {
+    match byte {
+        14 => view.dialogs.workspaces_move(1),
+        2 => view.dialogs.workspaces_move(-1),
+        8 | 127 => view.dialogs.workspaces_backspace(),
+        b' '..=b'~' => view.dialogs.workspaces_push_filter(char::from(byte)),
+        13 | 10 => {
+            view.dialogs.workspaces_enter();
+            true
+        }
+        27 | 3 => {
+            if !view.dialogs.workspaces_drill_back() {
+                view.dialogs.close();
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
 #[cfg(feature = "native")]
 fn sessions_live_open(view: &mut crate::native_view::NativeView, byte: u8, cwd: &str, rows: Vec<crate::native_palette::pickers::SessionRow>) -> bool {
     if sessions_live_decision(byte, false) != SessionsDecision::Open { return false; }
@@ -5114,9 +5203,16 @@ fn dispatch_working_directory_action(
             }
         }
         FooterAction::Workspaces => {
-            // No live `DialogWorkspaces` route exists, so the menu never
-            // offers this entry (`can_move` is false); defensive close only.
+            // DIALOG-14: open the live `DialogWorkspaces` worktree list
+            // (`dialog-workspaces.tsx`). Roots come from local git
+            // enumeration (no server `worktree.list` route exists); the
+            // current directory seeds the `Current` category.
             view.dialogs.close();
+            let mut state =
+                crate::native_palette::pickers::WorkspacesState::open(Some(directory.as_str()));
+            state.roots = local_worktree_roots(&directory);
+            state.loading = false;
+            let _ = view.dialogs.open_workspaces(state);
         }
     }
 }
@@ -15224,7 +15320,27 @@ fn native_loop(
                 match byte {
                     14 => view.dialogs.next(),
                     2 => view.dialogs.prev(),
+                    // DIALOG-15: Enter runs `select` (`dialog-mcp.tsx:94-108`):
+                    // an auth-gated server opens the integration flow, a failed
+                    // one shows its error details, everything else is inert.
                     13 | 10 => {
+                        if let Some((name, enter)) = view.mcp_dialog_enter() {
+                            match enter {
+                                crate::native_palette::pickers::McpEnter::SignIn => {
+                                    view.dialogs.close();
+                                    let _ = view.dialogs.open_integration(&name, 0, 0);
+                                }
+                                crate::native_palette::pickers::McpEnter::ErrorDetails => {
+                                    view.dialogs.close();
+                                    let _ = view.mcp_dialog_open(&name, true);
+                                }
+                                crate::native_palette::pickers::McpEnter::Ignore => {}
+                            }
+                        }
+                    }
+                    // `dialog.mcp.toggle` is bound to space
+                    // (`config/keybind.ts:283`), not Enter.
+                    b' ' => {
                         if let Some((name, included)) = view.mcp_dialog_toggle() {
                             dispatch_mcp_toggle(
                                 &mut view,
@@ -15301,6 +15417,18 @@ fn native_loop(
                     sessions_debounce_deadline = Some((animation_start.now_ms() as u64).saturating_add(150));
                 }
                 if handled { needs_paint = true; }
+                utf8.reset();
+                continue;
+            }
+            // DIALOG-14: the live `DialogWorkspaces` worktree list
+            // (`dialog-workspaces.tsx`). It owns every byte while open:
+            // printable input extends the filter, Backspace removes one code
+            // point, Ctrl-N/Ctrl-B and the arrows move the highlight, Enter
+            // drills/arms/deletes and Esc drills back or closes locally.
+            if view.dialogs.open_kind() == Some(crate::native_view_dialogs::DialogKind::Workspaces) {
+                if workspaces_live_dispatch(&mut view, byte) {
+                    needs_paint = true;
+                }
                 utf8.reset();
                 continue;
             }
@@ -20203,6 +20331,134 @@ mod dialog13_tests {
         assert!(view.dialogs.intercepts_input());
         assert_eq!(sessions_live_dispatch(&mut view, 14).0, true);
         assert_eq!(view.dialogs.sessions_state().unwrap().selected, 1);
+    }
+}
+
+/// DIALOG-14/15: the LIVE worktrees dialog and MCP sign-in surface. These
+/// drive the exact helpers `native_loop` runs, so deleting the live wiring
+/// fails them.
+#[cfg(all(test, feature = "native"))]
+mod dialog14_15_tests {
+    use super::*;
+    use crate::native_palette::pickers::{McpEnter, WorkspaceRoot, WorkspacesState};
+    use crate::native_view_dialogs::DialogKind;
+
+    fn opened_workspaces() -> crate::native_view::NativeView {
+        let mut view = crate::native_view::NativeView::new(100, 30);
+        let mut state = WorkspacesState::open(Some("/w/alpha"));
+        state.roots = vec![
+            WorkspaceRoot { directory: "/w/alpha".into(), strategy: None },
+            WorkspaceRoot { directory: "/w/beta".into(), strategy: None },
+        ];
+        state.loading = false;
+        view.dialogs.open_workspaces(state).unwrap();
+        view
+    }
+
+    #[test]
+    fn dialog14_live_footer_action_opens_workspaces() {
+        let mut view = crate::native_view::NativeView::new(100, 30);
+        view.set_sidebar_location(Some("/tmp/oc2-dialog14-none".into()), None);
+        let mut transcript = NativeChatHistory::default();
+        let mut toast = crate::native_toast::Toast::default();
+        dispatch_working_directory_action(
+            &mut view,
+            &mut transcript,
+            &mut toast,
+            crate::native_view_status::native_sidebar::FooterAction::Workspaces,
+        );
+        assert_eq!(view.dialogs.open_kind(), Some(DialogKind::Workspaces));
+        assert!(view.dialogs.workspaces_state().is_some());
+    }
+
+    #[test]
+    fn dialog14_live_filter_drill_back_and_arm_delete() {
+        let mut view = opened_workspaces();
+        assert_eq!(view.dialogs.open_kind(), Some(DialogKind::Workspaces));
+        // Filter narrows the painted choices to the matching root.
+        assert!(workspaces_live_dispatch(&mut view, b'b'));
+        assert_eq!(view.dialogs.workspaces_state().unwrap().filter, "b");
+        // Drill forward then back preserves the filter and highlighted row.
+        assert!(view.dialogs.workspaces_drill_forward());
+        assert!(view.dialogs.workspaces_drill_back());
+        let state = view.dialogs.workspaces_state().unwrap();
+        assert_eq!(state.filter, "b");
+        assert_eq!(state.selected, 0);
+        // Two-press Enter removes the focused root.
+        assert!(view.dialogs.workspaces_enter().is_none(), "first press arms only");
+        assert_eq!(view.dialogs.workspaces_enter().as_deref(), Some("/w/beta"));
+        assert!(!view
+            .dialogs
+            .workspaces_state()
+            .unwrap()
+            .roots
+            .iter()
+            .any(|root| root.directory == "/w/beta"));
+        // A late re-enumeration cannot resurrect the removed root (generation
+        // 0 is the guard's current generation until a fetch calls `begin`).
+        assert!(view
+            .dialogs
+            .workspaces_apply_load(0, vec!["/w/alpha".into(), "/w/beta".into()]));
+        assert!(!view
+            .dialogs
+            .workspaces_state()
+            .unwrap()
+            .roots
+            .iter()
+            .any(|root| root.directory == "/w/beta"));
+    }
+
+    #[test]
+    fn dialog14_live_esc_drills_back_then_closes() {
+        let mut view = opened_workspaces();
+        assert!(view.dialogs.workspaces_drill_forward());
+        assert!(workspaces_live_dispatch(&mut view, 27));
+        assert_eq!(
+            view.dialogs.open_kind(),
+            Some(DialogKind::Workspaces),
+            "first Esc drills back"
+        );
+        assert!(workspaces_live_dispatch(&mut view, 27));
+        assert_eq!(view.dialogs.open_kind(), None, "second Esc closes");
+    }
+
+    #[test]
+    fn dialog15_mcp_enter_routes_signin_error_and_ignore() {
+        let mut view = crate::native_view::NativeView::new(100, 30);
+        view.apply_mcp(&serde_json::json!({
+            "status": {
+                "auth": {"status": "needs_auth"},
+                "bad": {"status": "failed", "error": "boom"},
+                "ok": {"status": "connected"}
+            },
+            "included": {"auth": true, "bad": true, "ok": true}
+        }))
+        .unwrap();
+        view.mcp_dialog_open("auth", false).unwrap();
+        assert_eq!(view.mcp_dialog_enter().unwrap().1, McpEnter::SignIn);
+        view.dialogs.close();
+        view.mcp_dialog_open("bad", false).unwrap();
+        assert_eq!(view.mcp_dialog_enter().unwrap().1, McpEnter::ErrorDetails);
+        view.dialogs.close();
+        view.mcp_dialog_open("ok", false).unwrap();
+        assert_eq!(view.mcp_dialog_enter().unwrap().1, McpEnter::Ignore);
+    }
+
+    #[test]
+    fn dialog15_live_enter_opens_integration_surface() {
+        let mut view = crate::native_view::NativeView::new(100, 30);
+        view.apply_mcp(&serde_json::json!({
+            "status": {"auth": {"status": "needs_auth"}},
+            "included": {"auth": true}
+        }))
+        .unwrap();
+        view.mcp_dialog_open("auth", false).unwrap();
+        let (name, enter) = view.mcp_dialog_enter().unwrap();
+        assert_eq!(enter, McpEnter::SignIn);
+        view.dialogs.close();
+        view.dialogs.open_integration(&name, 0, 0).unwrap();
+        assert_eq!(view.dialogs.open_kind(), Some(DialogKind::Integration));
+        assert!(view.dialogs.integration_state().is_some());
     }
 }
 

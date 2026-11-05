@@ -203,6 +203,22 @@ pub enum DialogKind {
     /// Esc closes locally. Directory scoping and deletion are unavailable;
     /// it never pends a permission ack.
     Sessions,
+    /// DIALOG-14: the live Worktrees dialog (`dialog-workspaces.tsx`),
+    /// opened from the footer working-directory menu `Workspaces` action.
+    /// Its model is the tested `native_palette::pickers::WorkspacesState`:
+    /// filter + drill-down/back restore, two-press armed delete and a
+    /// `LateLoadGuard` that fences late re-enumeration against deletion.
+    /// Roots come from local git enumeration (no server route exists);
+    /// Enter deletes after arming and Esc closes locally; it never pends a
+    /// permission ack.
+    Workspaces,
+    /// DIALOG-15: the focused-server integration sign-in surface
+    /// (`dialog-integration.tsx`), opened from `DialogKind::Mcp` Enter when
+    /// `mcp_enter` yields `McpEnter::SignIn`. Its model is the tested
+    /// `native_palette::dialog::IntegrationState` left in
+    /// `IntegrationPhase::entry` initial state; the server-side sign-in
+    /// producer is absent, so advancing beyond entry stays unwired.
+    Integration,
     /// FORM-003..FORM-008: the upstream question/form overlay
     /// (`routes/session/form.tsx`). The model is the tested
     /// [`form_overlay::FormPrompt`]; the live session-scoped form poll opens
@@ -525,6 +541,16 @@ struct OpenDialog {
     /// [`DialogKind::Sessions`]. The model is the tested
     /// `native_palette::pickers::SessionsState`; the live key gate drives it.
     sessions: Option<crate::native_palette::pickers::SessionsState>,
+    /// DIALOG-14: the live worktrees dialog state (`dialog-workspaces.tsx`),
+    /// present only for [`DialogKind::Workspaces`]. The model is the tested
+    /// `native_palette::pickers::WorkspacesState`; the live key gate drives
+    /// it exactly like [`DialogKind::Sessions`].
+    workspaces: Option<crate::native_palette::pickers::WorkspacesState>,
+    /// DIALOG-15: the integration sign-in surface (`dialog-integration.tsx`),
+    /// present only for [`DialogKind::Integration`]. The model is the tested
+    /// `native_palette::dialog::IntegrationState`; the live MCP dialog's
+    /// `McpEnter::SignIn` outcome opens it.
+    integration: Option<crate::native_palette::pickers::IntegrationState>,
     /// FORM-003..FORM-008: the live question/form prompt
     /// (`routes/session/form.tsx`), present only for [`DialogKind::Form`]. The
     /// model is the tested [`form_overlay::FormPrompt`]; the live form poll
@@ -751,6 +777,8 @@ impl DialogView {
             Some(DialogKind::Select) => DialogViewportPolicy::SelectTerminal,
             Some(DialogKind::Mcp) => DialogViewportPolicy::SelectTerminal,
             Some(DialogKind::Sessions) => DialogViewportPolicy::SelectTerminal,
+            Some(DialogKind::Workspaces) => DialogViewportPolicy::SelectTerminal,
+            Some(DialogKind::Integration) => DialogViewportPolicy::SelectTerminal,
             Some(DialogKind::Permission)
             | Some(DialogKind::Question)
             | Some(DialogKind::Confirm)
@@ -1158,6 +1186,8 @@ impl DialogView {
             execute_scroll: 0,
             diff_mode: None,
             sessions: None,
+            workspaces: None,
+            integration: None,
             form: None,
         });
         self.crash_screen = Some(crash::CrashScreen::new(
@@ -1322,6 +1352,8 @@ impl DialogView {
             execute_scroll: 0,
             diff_mode: None,
             sessions: None,
+            workspaces: None,
+            integration: None,
             form: None,
         });
         // `DialogSelect` seeds `selected: 0` (`ui/dialog-select.tsx:152`), so
@@ -1407,6 +1439,8 @@ impl DialogView {
             execute_scroll: 0,
             diff_mode: None,
             sessions: None,
+            workspaces: None,
+            integration: None,
             form: None,
         });
         // `DialogSelect` seeds `selected` to the focused row
@@ -1463,6 +1497,8 @@ impl DialogView {
             execute_scroll: 0,
             diff_mode: None,
             sessions: Some(state),
+            workspaces: None,
+            integration: None,
             form: None,
         });
         self.selection = Some(0);
@@ -1622,6 +1658,284 @@ impl DialogView {
         renamed
     }
 
+    // ---- DIALOG-14: the live worktrees dialog ----
+
+    /// DIALOG-14: open the live `DialogWorkspaces` (`dialog-workspaces.tsx`,
+    /// `onMount(() => dialog.setSize("xlarge"))` at `:55`, title at `:328`).
+    /// The tested [`crate::native_palette::pickers::WorkspacesState`] is the
+    /// single source of truth; the caller seeds `state.roots` from local git
+    /// enumeration before calling, then drives it through the
+    /// `workspaces_*` forwarders below while [`DialogView::render`] paints
+    /// from [`Self::sync_workspaces_choices`].
+    pub fn open_workspaces(
+        &mut self,
+        state: crate::native_palette::pickers::WorkspacesState,
+    ) -> Result<(), DialogError> {
+        if self.is_open() {
+            return Err(DialogError::AlreadyOpen);
+        }
+        self.dialog = Some(OpenDialog {
+            id: "workspaces".to_owned(),
+            session_id: String::new(),
+            kind: DialogKind::Workspaces,
+            title: "Worktrees".to_owned(),
+            choices: Vec::new(),
+            disabled: Vec::new(),
+            permission: Vec::new(),
+            select: None,
+            mcp_status: Vec::new(),
+            message_lines: Vec::new(),
+            error: StaticError::BackendUnavailable,
+            prompt: None,
+            footer_gap: None,
+            session_has_parent: false,
+            execute: None,
+            execute_scroll: 0,
+            diff_mode: None,
+            sessions: None,
+            workspaces: Some(state),
+            integration: None,
+            form: None,
+        });
+        self.selection = Some(0);
+        self.rejected = false;
+        self.phase = Phase::Open;
+        self.open_sequence = self.open_sequence.saturating_add(1);
+        let entry_id = self.open_sequence;
+        self.modal
+            .replace(entry_id, DialogSize::XLarge, false, None, self.focus);
+        self.sync_workspaces_choices();
+        Ok(())
+    }
+
+    /// DIALOG-14: the live workspaces state, or `None` when the dialog is
+    /// closed. Tests read it to assert the real dispatch landed.
+    #[must_use]
+    pub fn workspaces_state(&self) -> Option<&crate::native_palette::pickers::WorkspacesState> {
+        self.dialog
+            .as_ref()
+            .filter(|dialog| dialog.kind == DialogKind::Workspaces)
+            .and_then(|dialog| dialog.workspaces.as_ref())
+    }
+
+    /// Rebuild the worktrees painted `choices` from the live model.
+    fn sync_workspaces_choices(&mut self) {
+        let Some(dialog) = self.dialog.as_mut() else { return };
+        if dialog.kind != DialogKind::Workspaces {
+            return;
+        }
+        let Some(state) = dialog.workspaces.as_ref() else { return };
+        let current = state.current.clone();
+        let titles: Vec<String> = state
+            .rows(current.as_deref())
+            .into_iter()
+            .map(|row| row.title)
+            .take(MAX_CHOICES)
+            .collect();
+        dialog.choices = titles;
+        dialog.disabled = vec![false; dialog.choices.len()];
+        self.selection = Some(state.selected.min(dialog.choices.len().saturating_sub(1)));
+    }
+
+    /// DIALOG-14: live filter keystroke.
+    pub fn workspaces_push_filter(&mut self, ch: char) -> bool {
+        if self.phase != Phase::Open {
+            return false;
+        }
+        let changed = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.workspaces.as_mut())
+            .is_some_and(|state| {
+                state.push_filter(ch);
+                true
+            });
+        if changed {
+            self.sync_workspaces_choices();
+        }
+        changed
+    }
+
+    /// DIALOG-14: Backspace removes one filter code point.
+    pub fn workspaces_backspace(&mut self) -> bool {
+        if self.phase != Phase::Open {
+            return false;
+        }
+        let changed = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.workspaces.as_mut())
+            .is_some_and(|state| {
+                state.pop_filter();
+                true
+            });
+        if changed {
+            self.sync_workspaces_choices();
+        }
+        changed
+    }
+
+    /// DIALOG-14: move the highlight.
+    pub fn workspaces_move(&mut self, delta: isize) -> bool {
+        let Some(state) = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.workspaces.as_mut())
+        else {
+            return false;
+        };
+        let visible = state.rows(state.current.as_deref()).len();
+        state.move_selection(delta, visible);
+        self.sync_workspaces_choices();
+        true
+    }
+
+    /// DIALOG-14: drill into the focused root, snapshotting filter and
+    /// selection (`dialog-open.tsx:103-122`).
+    pub fn workspaces_drill_forward(&mut self) -> bool {
+        if self.phase != Phase::Open {
+            return false;
+        }
+        let changed = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.workspaces.as_mut())
+            .is_some_and(|state| {
+                let current = state.current.clone();
+                state.drill_forward(current.as_deref());
+                true
+            });
+        if changed {
+            self.sync_workspaces_choices();
+        }
+        changed
+    }
+
+    /// DIALOG-14: back restores the snapshot; a removed identity reconciles
+    /// to the nearest live row instead of resurrecting
+    /// (`dialog-open.tsx:118-128`).
+    pub fn workspaces_drill_back(&mut self) -> bool {
+        if self.phase != Phase::Open {
+            return false;
+        }
+        let changed = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.workspaces.as_mut())
+            .is_some_and(|state| {
+                let current = state.current.clone();
+                state.drill_back(current.as_deref())
+            });
+        if changed {
+            self.sync_workspaces_choices();
+        }
+        changed
+    }
+
+    /// DIALOG-14: Enter arms, second Enter deletes. Returns the removed
+    /// directory when the caller must drop it from re-enumeration.
+    pub fn workspaces_enter(&mut self) -> Option<String> {
+        if self.phase != Phase::Open {
+            return None;
+        }
+        let removed = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.workspaces.as_mut())
+            .and_then(|state| {
+                let current = state.current.clone();
+                state.press_enter(current.as_deref())
+            });
+        if removed.is_some() {
+            self.sync_workspaces_choices();
+        }
+        removed
+    }
+
+    /// DIALOG-14: apply a late re-enumeration. A removed root stays removed
+    /// and a stale generation is dropped (`LateLoadGuard.apply`).
+    pub fn workspaces_apply_load(&mut self, generation: u64, directories: Vec<String>) -> bool {
+        if self.phase != Phase::Open {
+            return false;
+        }
+        let applied = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.workspaces.as_mut())
+            .is_some_and(|state| {
+                let current = state.current.clone();
+                state.apply_load(generation, directories, current.as_deref())
+            });
+        if applied {
+            self.sync_workspaces_choices();
+        }
+        applied
+    }
+
+    // ---- DIALOG-15: the integration sign-in surface ----
+
+    /// DIALOG-15: open the integration surface for the focused server with
+    /// `IntegrationPhase::entry` initial state (`dialog-integration.tsx`
+    /// replace at `dialog-mcp.tsx:104`). `methods`/`accounts` are the counts
+    /// the (missing) sign-in producer would supply; zero methods meaningfully
+    /// yields `IntegrationPhase::EnvironmentOnly`, matching upstream's
+    /// disabled connect.
+    pub fn open_integration(
+        &mut self,
+        server: &str,
+        methods: usize,
+        accounts: usize,
+    ) -> Result<(), DialogError> {
+        if self.is_open() {
+            return Err(DialogError::AlreadyOpen);
+        }
+        let state = crate::native_palette::pickers::IntegrationState::new(server, methods, accounts);
+        self.dialog = Some(OpenDialog {
+            id: "integration".to_owned(),
+            session_id: String::new(),
+            kind: DialogKind::Integration,
+            title: sanitize_inline(&format!("Sign in: {server}")),
+            choices: vec![],
+            disabled: vec![],
+            permission: Vec::new(),
+            select: None,
+            mcp_status: Vec::new(),
+            message_lines: vec![sanitize_inline(
+                state.phase.phase_label().unwrap_or("connect"),
+            )],
+            error: StaticError::BackendUnavailable,
+            prompt: None,
+            footer_gap: None,
+            session_has_parent: false,
+            execute: None,
+            execute_scroll: 0,
+            diff_mode: None,
+            sessions: None,
+            workspaces: None,
+            integration: Some(state),
+            form: None,
+        });
+        self.selection = None;
+        self.rejected = false;
+        self.phase = Phase::Open;
+        self.open_sequence = self.open_sequence.saturating_add(1);
+        let entry_id = self.open_sequence;
+        self.modal
+            .replace(entry_id, DialogSize::Medium, false, None, self.focus);
+        Ok(())
+    }
+
+    /// DIALOG-15: the live integration state, or `None` when closed.
+    #[must_use]
+    pub fn integration_state(
+        &self,
+    ) -> Option<&crate::native_palette::pickers::IntegrationState> {
+        self.dialog
+            .as_ref()
+            .filter(|dialog| dialog.kind == DialogKind::Integration)
+            .and_then(|dialog| dialog.integration.as_ref())
+    }
+
     // ---- FORM-003..FORM-008: the live question/form overlay ----
 
     /// FORM-003: open the question/form overlay for a session-scoped pending
@@ -1698,6 +2012,8 @@ impl DialogView {
             execute_scroll: 0,
             diff_mode: None,
             sessions: None,
+            workspaces: None,
+            integration: None,
             form: Some(form),
         });
         self.selection = None;
@@ -1822,6 +2138,8 @@ impl DialogView {
             execute_scroll: 0,
             diff_mode: Some(mode),
             sessions: None,
+            workspaces: None,
+            integration: None,
             form: None,
         });
         self.selection = None;
@@ -1858,6 +2176,8 @@ impl DialogView {
             execute_scroll: 0,
             diff_mode: None,
             sessions: None,
+            workspaces: None,
+            integration: None,
             form: None,
         });
         self.selection = None;
@@ -2019,6 +2339,8 @@ impl DialogView {
             execute_scroll: 0,
             diff_mode: None,
             sessions: None,
+            workspaces: None,
+            integration: None,
             form: None,
         });
         self.selection = None;
@@ -2558,6 +2880,11 @@ impl DialogView {
             // A form is answered through [`DialogView::form_submit`] (the
             // resolved answer map), never the generic choice/answer path.
             DialogKind::Form => return Err(DialogError::NotAnswerable),
+            // DIALOG-14/15: worktrees and sign-in are driven by their own
+            // forwarders (`workspaces_*`/`integration_*`), never this path.
+            DialogKind::Workspaces | DialogKind::Integration => {
+                return Err(DialogError::NotAnswerable)
+            }
             DialogKind::Question if !self.question_capable => {
                 return Err(DialogError::QuestionUnavailable)
             }
@@ -2628,7 +2955,11 @@ impl DialogView {
                 attempt,
             },
             DialogKind::Prompt => return Err(DialogError::NotAnswerable),
-            DialogKind::Mcp | DialogKind::Sessions | DialogKind::Form => {
+            DialogKind::Mcp
+            | DialogKind::Sessions
+            | DialogKind::Form
+            | DialogKind::Workspaces
+            | DialogKind::Integration => {
                 unreachable!("not answerable")
             }
             // `Crash` is refused as `NotAnswerable` by the guard above, so it
@@ -2665,6 +2996,11 @@ impl DialogView {
             // A form cancel is the real form cancel route, dispatched by
             // [`DialogView::form_cancel`], never this generic path.
             DialogKind::Form => return Err(DialogError::NotAnswerable),
+            // DIALOG-14/15: worktrees/sign-in cancel through their own
+            // forwarders, never this generic path.
+            DialogKind::Workspaces | DialogKind::Integration => {
+                return Err(DialogError::NotAnswerable)
+            }
             _ => {}
         }
         let request_id = dialog.id.clone();
@@ -2688,9 +3024,11 @@ impl DialogView {
             | DialogKind::Execute
             | DialogKind::Crash
             | DialogKind::Mcp
-            | DialogKind::DiffViewer => unreachable!("handled above"),
-            | DialogKind::Sessions => unreachable!("handled above"),
-            | DialogKind::Form => unreachable!("handled above"),
+            | DialogKind::DiffViewer
+            | DialogKind::Sessions
+            | DialogKind::Form
+            | DialogKind::Workspaces
+            | DialogKind::Integration => unreachable!("handled above"),
         };
         self.pending_attempt = attempt;
         self.phase = Phase::Pending;
@@ -3039,6 +3377,40 @@ impl DialogView {
                             "sessions · Enter open".to_string(),
                             Role::Description,
                         )),
+                    }
+                }
+                DialogKind::Workspaces => {
+                    // DIALOG-14: the live worktrees body
+                    // (`dialog-workspaces.tsx`). Rows come from the tested
+                    // `WorkspacesState`; the filter line replaces the hint
+                    // while typing.
+                    match dialog.workspaces.as_ref() {
+                        Some(state) => {
+                            if state.filter.is_empty() {
+                                lines.push(line(
+                                    "worktrees · Enter open · Del remove".to_string(),
+                                    Role::Description,
+                                ));
+                            } else {
+                                lines.push(line(format!("filter: {}", state.filter), Role::Item));
+                            }
+                        }
+                        None => lines.push(line("worktrees".to_string(), Role::Description)),
+                    }
+                }
+                DialogKind::Integration => {
+                    // DIALOG-15: the live sign-in body
+                    // (`dialog-integration.tsx`): server name plus the
+                    // current phase's status line.
+                    match dialog.integration.as_ref() {
+                        Some(state) => {
+                            lines.push(line(format!("sign in: {}", state.server), Role::Item));
+                            lines.push(line(
+                                state.phase.phase_label().unwrap_or("connect").to_string(),
+                                Role::Description,
+                            ));
+                        }
+                        None => lines.push(line("sign in".to_string(), Role::Description)),
                     }
                 }
                 DialogKind::Error => {
