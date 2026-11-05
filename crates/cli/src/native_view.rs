@@ -263,6 +263,10 @@ pub struct NativeView {
     /// MSG-009: the staged session revert card, rendered in the transcript after
     /// the reverted rows (`index.tsx:2254-2324`). `None` when no revert is staged.
     session_revert: Option<crate::native_view_chat::RevertCard>,
+    /// MSG-009 P1: session the notice surfaces are bound to. Session
+    /// transitions rebind (clearing both notice vecs) so a previous session's
+    /// notices never paint under the new route. `None` while unbound/home.
+    notice_session: Option<String>,
     /// Subagents tab state fed from the observed `/children` listing.
     dock_tab: SubagentsTab,
     /// Session the retained child rows belong to.
@@ -1008,6 +1012,96 @@ mod native_home_feedback_tests {
     }
 }
 
+#[cfg(test)]
+mod msg009_live_notice_tests {
+    use super::*;
+
+    const PARENT: &str = "11111111-1111-1111-1111-111111111111";
+    const CHILD: &str = "22222222-2222-2222-2222-222222222222";
+
+    fn session_frame() -> NativeView {
+        let mut view = NativeView::new(100, 30);
+        view.set_session_route(true);
+        view
+    }
+
+    fn one_message() -> [crate::native_view_chat::ChatMessage; 1] {
+        [crate::native_view_chat::ChatMessage::text(
+            crate::native_view_chat::ChatRole::User,
+            "hello",
+        )]
+    }
+
+    /// MSG-009: an agent switch recorded by the live loop paints the upstream
+    /// switch notice (`SessionSwitchMessageV2`, `index.tsx:2086-2105`) in the
+    /// production typed session frame. The notice bytes are the pinned
+    /// `TranscriptNotice::row` output (three-cell margin, muted class).
+    #[test]
+    fn msg009_live_transcript_notice_renders() {
+        let mut view = session_frame();
+        view.set_live_notices(&[crate::native_view_chat::TranscriptNotice::AgentSwitched {
+            agent: "build".to_owned(),
+            previous: Some("plan".to_owned()),
+        }]);
+        let frame = view.render_typed("draft", &one_message(), false, &[]).join("\n");
+        assert!(
+            frame.contains("Switched agent from Plan to Build"),
+            "live agent-switch notice row missing from the rendered frame:\n{frame}"
+        );
+    }
+
+    /// MSG-009: a completed child in the retained `/children` listing paints
+    /// the upstream synthetic completion notice (`SessionNoticeMessageV2`,
+    /// `index.tsx:2108-2155`): `↳ {actor} finished · {description}`.
+    #[test]
+    fn msg009_live_child_completion_notice_renders() {
+        let mut view = session_frame();
+        let mut status = crate::native_children::live::Status::default();
+        let listing = serde_json::json!({"children": [
+            {"session_id": CHILD, "state": "completed", "agent": "explore",
+             "description": "Search the auth flow"},
+        ]});
+        assert_eq!(status.apply(PARENT, &listing), Ok(true));
+        view.set_live_children_status(&status);
+        let frame = view.render_typed("draft", &one_message(), false, &[]).join("\n");
+        assert!(frame.contains("↳ Explore finished"),
+            "live child-completion notice row missing from the rendered frame:\n{frame}");
+        assert!(frame.contains("Search the auth flow"));
+    }
+
+    /// MSG-009 P1 (review): notices are session-owned. Rebinding the notice
+    /// surface to a new session clears both notice vecs so session A's rows
+    /// never paint under session B's route; rebinding is idempotent.
+    #[test]
+    fn msg009_notices_cleared_on_session_change() {
+        let mut view = session_frame();
+        // Seed both notice surfaces for session A.
+        view.set_live_notices(&[crate::native_view_chat::TranscriptNotice::AgentSwitched {
+            agent: "build".to_owned(),
+            previous: Some("plan".to_owned()),
+        }]);
+        let mut status = crate::native_children::live::Status::default();
+        let listing = serde_json::json!({"children": [
+            {"session_id": CHILD, "state": "completed", "agent": "explore",
+             "description": "Search the auth flow"},
+        ]});
+        assert_eq!(status.apply(PARENT, &listing), Ok(true));
+        view.set_live_children_status(&status);
+        let frame = view.render_typed("draft", &one_message(), false, &[]).join("\n");
+        assert!(frame.contains("Switched agent from Plan to Build"));
+        assert!(frame.contains("↳ Explore finished"));
+
+        // Rebind to session B: the seed clears and neither A row paints.
+        assert!(view.bind_notice_session(Some("session-B")));
+        let frame = view.render_typed("draft", &one_message(), false, &[]).join("\n");
+        assert!(!frame.contains("Switched agent from Plan to Build"));
+        assert!(!frame.contains("↳ Explore finished"));
+
+        // Rebinding to the same session is a no-op.
+        assert!(!view.bind_notice_session(Some("session-B")));
+    }
+}
+
 /// Painted transcript scrollbar for one frame
 /// (`routes/session/index.tsx:1527-1537`): a one-column track on the
 /// transcript's right edge with a thumb sized by viewport/content ratio.
@@ -1266,6 +1360,7 @@ impl NativeView {
             rail_worktree: false,
             queued_prompts: crate::native_view_chat::QueueDock::default(),
             session_revert: None,
+            notice_session: None,
             dock: {
                 // CP-23 (`composer/index.tsx:127-128`): both always-mounted
                 // tabs (Subagents, Shell) are registered in the production
@@ -1864,8 +1959,55 @@ impl NativeView {
         }
         self.dock_session = session;
         self.live_child_rows = status.rows().to_vec();
+        // MSG-009: finished children project the upstream synthetic completion
+        // notice (`SessionNoticeMessageV2`, `index.tsx:2108-2155`). Upstream
+        // appends a one-shot synthetic session message server-side; this
+        // server has none yet, so the notice re-derives from the retained
+        // `/children` rows (named residual: no persisted notice, no click
+        // navigation into the child).
+        self.chat.set_child_notices(
+            status
+                .rows()
+                .iter()
+                .filter(|row| {
+                    matches!(row.state.as_str(), "completed" | "error" | "cancelled")
+                })
+                .map(|row| crate::native_view_chat::ChildCompletionNotice {
+                    source: crate::native_view_chat::ChildCompletionSource::Subagent,
+                    agent: row.agent.clone(),
+                    state: crate::native_view_chat::ChildCompletionState::from_state(Some(
+                        &row.state,
+                    )),
+                    description: row.description.clone().unwrap_or_default(),
+                    child_id: Some(row.session_id.clone()),
+                })
+                .collect(),
+        );
         self.sync_dock_rows();
         self.dock_hit.clear();
+    }
+
+    /// MSG-009: install the live transcript switch notices (agent switches).
+    /// The caller owns the producer state (accumulation, session binding);
+    /// this only replaces the painted set. Location switches have no live
+    /// producer: the oc2 server has no `session.moved` event, so the
+    /// `LocationSwitched` variant stays a named residual.
+    pub fn set_live_notices(&mut self, notices: &[crate::native_view_chat::TranscriptNotice]) {
+        self.chat.set_notices(notices.to_vec());
+    }
+
+    /// MSG-009: rebind the notice surface to the active session. Every session
+    /// transition (tab switch, close, home) must call this so notices from a
+    /// previous session never paint under the new route. Returns true when the
+    /// session changed (notices were cleared).
+    pub fn bind_notice_session(&mut self, session: Option<&str>) -> bool {
+        if self.notice_session.as_deref() == session {
+            return false;
+        }
+        self.notice_session = session.map(str::to_owned);
+        self.chat.set_notices(Vec::new());
+        self.chat.set_child_notices(Vec::new());
+        true
     }
 
     /// Drop the retained child facts (daemon unavailable or listing rejected).
@@ -1874,6 +2016,7 @@ impl NativeView {
         self.dock.close();
         self.dock_session = None;
         self.live_child_rows.clear();
+        self.chat.set_child_notices(Vec::new());
         self.sync_dock_rows();
         self.dock_hit.clear();
     }
@@ -3008,6 +3151,8 @@ impl NativeView {
         self.close_page();
         self.set_session_route(false);
         self.set_session(None);
+        // MSG-009 P1: home shows no session, so its notice surface unbinds.
+        self.bind_notice_session(None);
     }
 
     /// Forward an ACCEPTED authenticated binding (id + title + confirmed

@@ -179,6 +179,19 @@ pub struct ChatView {
     tps_enabled: Option<bool>,
     /// DIFF-001: resolved `config.diffs.view` for inline patches.
     diff_view: crate::native_diff_view::DiffViewPreference,
+    /// MSG-009: live transcript switch notices (agent switches). The live
+    /// loop owns producer state and installs it via
+    /// [`NativeView::set_live_notices`]; renders only read them. A location
+    /// switch has no live producer (the oc2 server has no `session.moved`
+    /// event; upstream appends `location-switched` session messages in
+    /// `message-updater.ts:126-141`), so that variant stays a named residual.
+    notices: Vec<TranscriptNotice>,
+    /// MSG-009: live child-completion notices, derived from the retained
+    /// `/children` rows. Upstream appends a one-shot synthetic session
+    /// message (`message-updater.ts:158-170`); nothing equivalent exists on
+    /// this server yet, so the notice re-derives from the listing each poll
+    /// (named residual: no persisted one-shot notice, no click navigation).
+    child_notices: Vec<ChildCompletionNotice>,
 }
 
 impl Default for ChatView {
@@ -202,12 +215,25 @@ impl Default for ChatView {
             prompt_background: None,
             tps_enabled: None,
             diff_view: crate::native_diff_view::DiffViewPreference::Auto,
+            notices: Vec::new(),
+            child_notices: Vec::new(),
         }
     }
 }
 
 impl ChatView {
     pub fn set_active_session_id(&self, id: &str) { *self.active_session_id.borrow_mut() = id.to_owned(); }
+
+    /// MSG-009: replace the painted live switch notices. The producer (live
+    /// loop) owns the accumulation; renders read only.
+    pub fn set_notices(&mut self, notices: Vec<TranscriptNotice>) {
+        self.notices = notices;
+    }
+
+    /// MSG-009: replace the painted live child-completion notices.
+    pub fn set_child_notices(&mut self, child_notices: Vec<ChildCompletionNotice>) {
+        self.child_notices = child_notices;
+    }
 
     pub fn toggle_group(&self, session_id: &str, group_id: &str, kind: crate::native_message_rows::GroupKind) -> bool {
         let mut state = self.disclosure.borrow_mut();
@@ -4026,6 +4052,20 @@ impl ChatView {
         rows
     }
 
+    /// MSG-009: transcript notice rows in screen order (child completions,
+    /// then switch notices), matching [`TranscriptSurfaces::render_rows`]
+    /// with an empty revert card and queue dock.
+    fn notice_rows(&self, width: usize) -> Vec<(String, ChatRowClass)> {
+        let mut rows = Vec::new();
+        for notice in &self.child_notices {
+            rows.push(notice.row(width));
+        }
+        for notice in &self.notices {
+            rows.push(notice.row(width));
+        }
+        rows
+    }
+
     fn typed_window(
         &self,
         width: usize,
@@ -4114,7 +4154,11 @@ impl ChatView {
                 }
             }
         }
+        // MSG-009: live transcript notices render after the message rows,
+        // before the scroll slice, with the same row helpers the
+        // `TranscriptSurfaces` tests pin.
         rev.reverse();
+        rev.extend(self.notice_rows(width));
         let total = rev.len();
         if total == 0 {
             return Vec::new();
@@ -4457,6 +4501,11 @@ impl ChatView {
             }
         }
         reversed.reverse();
+        // MSG-009: live transcript notices render after the message rows,
+        // before the scroll slice; bytes match the pinned surfaces output.
+        for (text, class) in self.notice_rows(width) {
+            reversed.push(((text, class, None), Vec::new(), None, None, None, None));
+        }
         let effective_scroll = self.scroll.get().min(reversed.len().saturating_sub(transcript_h));
         // Synchronize the stored offset with the current rendered content.
         // Without this, an overscroll remains at MAX_SCROLL_ROWS and every

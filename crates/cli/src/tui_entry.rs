@@ -10189,6 +10189,12 @@ fn native_loop(
         .unwrap_or_default();
     let mut live_agent_selected: Option<String> =
         selectable_agent_ids(&live_agent_facts).first().cloned();
+    // MSG-009: live transcript switch notices, recorded client-side (no
+    // `session.agent.selected`/`session.moved` message exists on this server).
+    // Bounded like `TranscriptSurfaces::push_notice`; bound to the active
+    // session so a session switch starts a clean notice set.
+    let mut live_notices: Vec<crate::native_view_chat::TranscriptNotice> = Vec::new();
+    let mut live_notices_session: Option<String> = None;
     // TAB-04: resolve `config.tabs.indicators` once (default "status"), like the
     // theme/new-designs facts above; the per-frame tab build applies it.
     let tab_indicators = crate::native_ui_preferences::UiPreferences::tab_indicators(
@@ -10959,6 +10965,14 @@ fn native_loop(
                 }
             }
             needs_paint = true;
+        }
+        // MSG-009 P1: rebind the notice surface at the start of the frame's
+        // live block, BEFORE the child poll or agent handler can repopulate
+        // it. A stale session's notices must never paint under the new route;
+        // on change the producer seed resets so the next AgentCycle re-seeds.
+        if view.bind_notice_session(live.as_ref().map(|snapshot| snapshot.session_id.as_str())) {
+            live_notices.clear();
+            live_notices_session = None;
         }
         // Children can only exist for a session whose history delegated, so a
         // session that never called `task` issues no `/children` request (the
@@ -13145,7 +13159,35 @@ fn native_loop(
             && !children_panel.open
             && !view.command_palette_open()
         {
+            // MSG-009: upstream appends an `agent-switched` session message on
+            // `session.agent.selected` (`message-updater.ts:97-114`) and the
+            // transcript paints `SessionSwitchMessageV2` (`index.tsx:2086-2105`).
+            // The oc2 server has no such message, so the live loop records the
+            // client-side switch itself. A location switch has no producer at
+            // all (no `session.moved` event on this server) and stays a named
+            // residual.
+            let previous = live_agent_selected.clone();
             cycle_agent(&live_agent_facts, &mut live_agent_selected);
+            if let (Some(previous), Some(next)) =
+                (previous.as_deref(), live_agent_selected.as_deref())
+            {
+                if previous != next {
+                    let session = live.as_ref().map(|snapshot| snapshot.session_id.clone());
+                    if live_notices_session.as_deref() != session.as_deref() {
+                        live_notices.clear();
+                        live_notices_session = session;
+                    }
+                    if live_notices.len() < crate::native_view_chat::MAX_SURFACE_NOTICES {
+                        live_notices.push(
+                            crate::native_view_chat::TranscriptNotice::AgentSwitched {
+                                agent: next.to_owned(),
+                                previous: Some(previous.to_owned()),
+                            },
+                        );
+                        view.set_live_notices(&live_notices);
+                    }
+                }
+            }
             utf8.reset();
             needs_paint = true;
             continue;
