@@ -8031,6 +8031,11 @@ fn post_form_cancel(origin: &str, session: &str, id: &str, auth: Option<&str>) -
 enum FormKeyAction {
     Submit,
     Cancel,
+    /// PAR-07: Enter on the confirmation/review tab attempted a real submit
+    /// that failed validation. The model sets `error` and keeps the form active
+    /// (`routes/session/form.tsx:513-534`), which is otherwise indistinguishable
+    /// from navigation; the live loop emits a `form.validation` trace for it.
+    Validation,
 }
 
 /// The editor cursor's visual row (`form.tsx:607-617` uses
@@ -8115,6 +8120,12 @@ fn form_live_dispatch(
         | native_input_decoder::InputEvent::PageDown => return (true, None),
         _ => return (false, None),
     };
+    // PAR-07: a confirmation-tab Enter attempts a real submit; when validation
+    // fails the model sets `error` and keeps the form active
+    // (`routes/session/form.tsx:513-534`), which is otherwise indistinguishable
+    // from navigation. Capture the attempt before the key is consumed.
+    let enter_submit_attempt =
+        matches!(key, FormKey::Enter) && view.dialogs.form().is_some_and(|form| form.confirm());
     let handled = view.dialogs.form_handle_key(key);
     if !handled {
         return (false, None);
@@ -8124,6 +8135,9 @@ fn form_live_dispatch(
     }
     if !view.dialogs.form_active() {
         return (true, Some(FormKeyAction::Cancel));
+    }
+    if enter_submit_attempt {
+        return (true, Some(FormKeyAction::Validation));
     }
     (true, None)
 }
@@ -13203,7 +13217,7 @@ fn native_loop(
                     let id = view.dialogs.form().map(|form| form.id().to_owned());
                     let mut posted = false;
                     if let (Some(answer), Some(session), Some(id), Some(snapshot)) =
-                        (answer, session, id, live.as_ref())
+                        (answer, session.clone(), id.clone(), live.as_ref())
                     {
                         if session == snapshot.session_id {
                             match post_form_reply(&snapshot.origin, &session, &id, &answer, auth) {
@@ -13220,11 +13234,28 @@ fn native_loop(
                             );
                         }
                     }
+                    // PAR-07: the submit trace the parity harness observes
+                    // (`audit-implementation.md:150`), mirroring `form.present`.
+                    crate::native_debug::event(
+                        "form.submit",
+                        serde_json::json!({"form_id":id,"session_id":session,"posted":posted}),
+                    );
                     if posted {
                         let _ = view.dialogs.form_dismiss(
                             crate::native_view_dialogs::form_overlay::DismissReason::Resolved,
                         );
                     }
+                    needs_paint = true;
+                }
+                Some(FormKeyAction::Validation) => {
+                    let session = view.dialogs.form_session_id().map(str::to_owned);
+                    let id = view.dialogs.form().map(|form| form.id().to_owned());
+                    let error = view.dialogs.form().map(|form| form.error().to_owned());
+                    // PAR-07: a failed submit is observable, not silent.
+                    crate::native_debug::event(
+                        "form.validation",
+                        serde_json::json!({"form_id":id,"session_id":session,"error":error}),
+                    );
                     needs_paint = true;
                 }
                 Some(FormKeyAction::Cancel) => {
@@ -21148,5 +21179,75 @@ mod form_live_tests {
         assert!(handled);
         assert_eq!(view.dialogs.form().unwrap().answer("p"), Some(&FormValue::Text("b".into())));
         assert_eq!(view.dialogs.form().unwrap().editor_text(), "");
+    }
+
+    /// PAR-07: a confirmation-tab Enter that fails validation is reported as
+    /// `FormKeyAction::Validation` (the live loop emits `form.validation`),
+    /// not silently swallowed as navigation (`routes/session/form.tsx:513-534`).
+    #[test]
+    fn par07_failed_confirm_submit_reports_validation() {
+        let mut view = new_view();
+        open(
+            &mut view,
+            vec![
+                FormField::new("q0", FieldKind::Text)
+                    .titled("Pick A")
+                    .required()
+                    .with_options(vec![FormOption::new("a", "A")]),
+                FormField::new("q1", FieldKind::Text)
+                    .titled("Pick B")
+                    .required()
+                    .with_options(vec![FormOption::new("b", "B")]),
+            ],
+        );
+        // Tab through both fields onto the confirmation/review tab.
+        for _ in 0..2 {
+            let (handled, action) =
+                form_live_dispatch(&mut view, &native_input_decoder::InputEvent::TabNext);
+            assert!(handled, "tab is handled");
+            assert_eq!(action, None, "tab navigation never resolves the form");
+        }
+        assert!(
+            view.dialogs.form().is_some_and(|form| form.confirm()),
+            "the confirmation tab is active"
+        );
+        let (handled, action) =
+            form_live_dispatch(&mut view, &native_input_decoder::InputEvent::Byte(13));
+        assert!(handled, "Enter is handled");
+        assert_eq!(
+            action,
+            Some(FormKeyAction::Validation),
+            "a failed submit reports validation"
+        );
+        assert!(
+            view.dialogs.form().is_some_and(|form| form.resolution().is_none()),
+            "the form stays active and unresolved"
+        );
+        assert!(
+            view.dialogs.form().is_some_and(|form| !form.error().is_empty()),
+            "the model records the validation error"
+        );
+    }
+
+    /// PAR-07: a confirmation-tab Enter that passes validation still reports
+    /// `Submit` — the new arm never shadows the success path.
+    #[test]
+    fn par07_successful_confirm_submit_still_reports_submit() {
+        let mut view = new_view();
+        open(
+            &mut view,
+            vec![
+                FormField::new("q0", FieldKind::Text).titled("Optional A"),
+                FormField::new("q1", FieldKind::Text).titled("Optional B"),
+            ],
+        );
+        for _ in 0..2 {
+            form_live_dispatch(&mut view, &native_input_decoder::InputEvent::TabNext);
+        }
+        assert!(view.dialogs.form().is_some_and(|form| form.confirm()));
+        let (handled, action) =
+            form_live_dispatch(&mut view, &native_input_decoder::InputEvent::Byte(13));
+        assert!(handled);
+        assert_eq!(action, Some(FormKeyAction::Submit));
     }
 }
