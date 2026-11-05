@@ -203,6 +203,12 @@ pub enum DialogKind {
     /// Esc closes locally. Directory scoping and deletion are unavailable;
     /// it never pends a permission ack.
     Sessions,
+    /// FORM-003..FORM-008: the upstream question/form overlay
+    /// (`routes/session/form.tsx`). The model is the tested
+    /// [`form_overlay::FormPrompt`]; the live session-scoped form poll opens
+    /// it, routes keys into it, and dispatches the resolved answer map to
+    /// `POST /api/session/{s}/form/{id}/reply`.
+    Form,
 }
 
 /// Static, safe error-card categories. Defined in this file so raw backend
@@ -519,6 +525,12 @@ struct OpenDialog {
     /// [`DialogKind::Sessions`]. The model is the tested
     /// `native_palette::pickers::SessionsState`; the live key gate drives it.
     sessions: Option<crate::native_palette::pickers::SessionsState>,
+    /// FORM-003..FORM-008: the live question/form prompt
+    /// (`routes/session/form.tsx`), present only for [`DialogKind::Form`]. The
+    /// model is the tested [`form_overlay::FormPrompt`]; the live form poll
+    /// opens it, the key gate routes [`form_overlay::FormKey`] into it, and the
+    /// resolved answer map is POSTed to the form reply route.
+    form: Option<form_overlay::FormPrompt>,
 }
 
 /// Focus-owning dialog overlay state. `Default` is a closed view.
@@ -747,6 +759,7 @@ impl DialogView {
             | Some(DialogKind::Execute)
             | Some(DialogKind::Crash)
             | Some(DialogKind::DiffViewer)
+            | Some(DialogKind::Form)
             | None => DialogViewportPolicy::ContentBudget,
         }
     }
@@ -855,6 +868,11 @@ impl DialogView {
         match self.dialog.as_ref().map(|dialog| dialog.kind) {
             Some(DialogKind::Permission) => Some(DialogKind::Permission),
             Some(DialogKind::Question) => Some(DialogKind::Question),
+            // The form overlay is the question surface upstream:
+            // `form.list(session).length > 0` drives the "?" tab attention
+            // (`context/session-tabs.tsx:163-174`), so an open form reports the
+            // same Question kind as a question dialog.
+            Some(DialogKind::Form) => Some(DialogKind::Question),
             _ => None,
         }
     }
@@ -1140,6 +1158,7 @@ impl DialogView {
             execute_scroll: 0,
             diff_mode: None,
             sessions: None,
+            form: None,
         });
         self.crash_screen = Some(crash::CrashScreen::new(
             mode,
@@ -1303,6 +1322,7 @@ impl DialogView {
             execute_scroll: 0,
             diff_mode: None,
             sessions: None,
+            form: None,
         });
         // `DialogSelect` seeds `selected: 0` (`ui/dialog-select.tsx:152`), so
         // the first enabled row is selected on open and the first Down moves
@@ -1387,6 +1407,7 @@ impl DialogView {
             execute_scroll: 0,
             diff_mode: None,
             sessions: None,
+            form: None,
         });
         // `DialogSelect` seeds `selected` to the focused row
         // (`dialog-select.tsx:152`, `dialog-mcp.tsx:61` `preserveSelection`).
@@ -1442,6 +1463,7 @@ impl DialogView {
             execute_scroll: 0,
             diff_mode: None,
             sessions: Some(state),
+            form: None,
         });
         self.selection = Some(0);
         self.rejected = false;
@@ -1600,6 +1622,168 @@ impl DialogView {
         renamed
     }
 
+    // ---- FORM-003..FORM-008: the live question/form overlay ----
+
+    /// FORM-003: open the question/form overlay for a session-scoped pending
+    /// form (`routes/session/form.tsx:59-1175`). The tested
+    /// [`form_overlay::FormPrompt`] is the single source of truth; the live key
+    /// gate routes [`form_overlay::FormKey`] into it and the resolved answer map
+    /// is dispatched to `POST /api/session/{s}/form/{id}/reply`. Content-only in
+    /// the modal sense like [`DialogView::open_sessions`]: it never pends a
+    /// permission ack.
+    pub fn open_form(
+        &mut self,
+        id: impl Into<String>,
+        session_id: impl Into<String>,
+        title: impl Into<String>,
+        message: Option<String>,
+        fields: Vec<form_overlay::FormField>,
+    ) -> Result<(), DialogError> {
+        self.open_form_prompt(
+            session_id.into(),
+            form_overlay::FormPrompt::new(id, title, message, fields),
+        )
+    }
+
+    /// FORM-008: reopen the overlay from a stashed draft keyed by form id
+    /// (`form.tsx:44-57,77-87`). The draft is consumed by the caller once the
+    /// prompt is mounted.
+    pub fn open_form_restored(
+        &mut self,
+        id: impl Into<String>,
+        session_id: impl Into<String>,
+        title: impl Into<String>,
+        message: Option<String>,
+        fields: Vec<form_overlay::FormField>,
+        draft: form_overlay::FormDraft,
+    ) -> Result<(), DialogError> {
+        self.open_form_prompt(
+            session_id.into(),
+            form_overlay::FormPrompt::restore(id, title, message, fields, draft),
+        )
+    }
+
+    fn open_form_prompt(
+        &mut self,
+        session_id: String,
+        form: form_overlay::FormPrompt,
+    ) -> Result<(), DialogError> {
+        if self.is_open() {
+            return Err(DialogError::AlreadyOpen);
+        }
+        let id = form.id().to_owned();
+        if id.len() > MAX_ID_LEN {
+            return Err(DialogError::IdTooLong);
+        }
+        let title = form.title().to_owned();
+        if title.len() > MAX_TITLE_LEN {
+            return Err(DialogError::TitleTooLong);
+        }
+        self.dialog = Some(OpenDialog {
+            id,
+            session_id,
+            kind: DialogKind::Form,
+            title: sanitize_inline(&title),
+            choices: Vec::new(),
+            disabled: Vec::new(),
+            permission: Vec::new(),
+            select: None,
+            mcp_status: Vec::new(),
+            message_lines: Vec::new(),
+            error: StaticError::BackendUnavailable,
+            prompt: None,
+            footer_gap: None,
+            session_has_parent: false,
+            execute: None,
+            execute_scroll: 0,
+            diff_mode: None,
+            sessions: None,
+            form: Some(form),
+        });
+        self.selection = None;
+        self.rejected = false;
+        self.phase = Phase::Open;
+        self.open_sequence = self.open_sequence.saturating_add(1);
+        let entry_id = self.open_sequence;
+        self.modal
+            .replace(entry_id, DialogSize::Medium, false, None, self.focus);
+        Ok(())
+    }
+
+    /// FORM-003..FORM-008: the live form model, or `None` when no form overlay
+    /// is open.
+    #[must_use]
+    pub fn form(&self) -> Option<&form_overlay::FormPrompt> {
+        self.dialog
+            .as_ref()
+            .filter(|dialog| dialog.kind == DialogKind::Form)
+            .and_then(|dialog| dialog.form.as_ref())
+    }
+
+    fn form_mut(&mut self) -> Option<&mut form_overlay::FormPrompt> {
+        self.dialog
+            .as_mut()
+            .filter(|dialog| dialog.kind == DialogKind::Form)
+            .and_then(|dialog| dialog.form.as_mut())
+    }
+
+    /// The open form's session identity, so the caller can refuse a reply to a
+    /// form that belongs to another session (fail closed).
+    #[must_use]
+    pub fn form_session_id(&self) -> Option<&str> {
+        self.dialog
+            .as_ref()
+            .filter(|dialog| dialog.kind == DialogKind::Form)
+            .map(|dialog| dialog.session_id.as_str())
+    }
+
+    /// FORM-003..FORM-008: route one key into the live form model
+    /// (`routes/session/form.tsx:642-765`). Returns whether the key was
+    /// consumed. An inactive/closed prompt consumes nothing, so transcript keys
+    /// never leak through the overlay (`form.tsx:66,536-553`).
+    pub fn form_handle_key(&mut self, key: form_overlay::FormKey) -> bool {
+        self.form_mut().is_some_and(|form| form.handle_key(key))
+    }
+
+    /// FORM-005: route a paste into the live form (`form.tsx:354-379`). The
+    /// model decides whether the text lands in the custom choice row or the
+    /// editor; while a form is open the overlay owns the paste either way
+    /// (returns whether a live form consumed it).
+    pub fn form_paste(&mut self, text: &str) -> bool {
+        self.form_mut()
+            .map(|form| {
+                let _ = form.paste(text);
+                true
+            })
+            .unwrap_or(false)
+    }
+
+    /// FORM-008: whether the live form still owns focus. When false the caller
+    /// restores composer focus (`FocusTarget`, `form.tsx:211-228`).
+    #[must_use]
+    pub fn form_active(&self) -> bool {
+        self.form().is_some_and(form_overlay::FormPrompt::active)
+    }
+
+    /// FORM-003..FORM-007: resolve the form (`form.tsx:513-534`). `Some` on
+    /// success; the error line is set on the model and stays open otherwise.
+    pub fn form_submit(&mut self) -> Option<std::collections::BTreeMap<String, form_overlay::FormValue>> {
+        self.form_mut().and_then(form_overlay::FormPrompt::submit)
+    }
+
+    /// FORM-008: dismiss the form, returning composer focus plus a draft when
+    /// the reason is terminal/stale/revalidation-failed
+    /// (`routes/session/form.tsx:44-57,211-228`). The overlay closes through the
+    /// modal stack so paint and content never disagree.
+    pub fn form_dismiss(
+        &mut self,
+        reason: form_overlay::DismissReason,
+    ) -> Option<form_overlay::Dismissal> {
+        let dismissal = self.form_mut().map(|form| form.dismiss(reason))?;
+        self.reset();
+        Some(dismissal)
+    }
+
     /// TOOL-011: open the live execute content viewer
     /// (`dialog-execute.tsx:28`), opened from an execute tool row click
     /// (`index.tsx:3400-3414` `openDetails`). Content-only like
@@ -1638,6 +1822,7 @@ impl DialogView {
             execute_scroll: 0,
             diff_mode: Some(mode),
             sessions: None,
+            form: None,
         });
         self.selection = None;
         self.rejected = false;
@@ -1673,6 +1858,7 @@ impl DialogView {
             execute_scroll: 0,
             diff_mode: None,
             sessions: None,
+            form: None,
         });
         self.selection = None;
         self.rejected = false;
@@ -1833,6 +2019,7 @@ impl DialogView {
             execute_scroll: 0,
             diff_mode: None,
             sessions: None,
+            form: None,
         });
         self.selection = None;
         self.rejected = false;
@@ -2368,6 +2555,9 @@ impl DialogView {
             // so the `unreachable!` arm below is genuinely unreachable.
             DialogKind::DiffViewer => return Err(DialogError::NotAnswerable),
             DialogKind::Sessions => return Err(DialogError::NotAnswerable),
+            // A form is answered through [`DialogView::form_submit`] (the
+            // resolved answer map), never the generic choice/answer path.
+            DialogKind::Form => return Err(DialogError::NotAnswerable),
             DialogKind::Question if !self.question_capable => {
                 return Err(DialogError::QuestionUnavailable)
             }
@@ -2438,7 +2628,9 @@ impl DialogView {
                 attempt,
             },
             DialogKind::Prompt => return Err(DialogError::NotAnswerable),
-            DialogKind::Mcp | DialogKind::Sessions => unreachable!("not answerable"),
+            DialogKind::Mcp | DialogKind::Sessions | DialogKind::Form => {
+                unreachable!("not answerable")
+            }
             // `Crash` is refused as `NotAnswerable` by the guard above, so it
             // can never reach the intent construction.
             DialogKind::Execute | DialogKind::Error | DialogKind::Crash | DialogKind::DiffViewer => {
@@ -2470,6 +2662,9 @@ impl DialogView {
             // `unreachable!` arm. Refuse before `next_attempt()`.
             DialogKind::DiffViewer => return Err(DialogError::NotAnswerable),
             DialogKind::Sessions => return Err(DialogError::NotAnswerable),
+            // A form cancel is the real form cancel route, dispatched by
+            // [`DialogView::form_cancel`], never this generic path.
+            DialogKind::Form => return Err(DialogError::NotAnswerable),
             _ => {}
         }
         let request_id = dialog.id.clone();
@@ -2495,6 +2690,7 @@ impl DialogView {
             | DialogKind::Mcp
             | DialogKind::DiffViewer => unreachable!("handled above"),
             | DialogKind::Sessions => unreachable!("handled above"),
+            | DialogKind::Form => unreachable!("handled above"),
         };
         self.pending_attempt = attempt;
         self.phase = Phase::Pending;
@@ -2849,6 +3045,25 @@ impl DialogView {
                     lines.push(line(dialog.error.headline().to_string(), Role::Error));
                     lines.push(line(dialog.error.detail().to_string(), Role::Description));
                 }
+                DialogKind::Form => {
+                    // FORM-003..FORM-008: the live question/form body
+                    // (`routes/session/form.tsx:767-1174`). `FormPrompt::render`
+                    // already produces the exact upstream rows (title, message,
+                    // tab bar/progress, external block, field rows incl. the
+                    // custom row, review rows and footer); the dialog window
+                    // shows them into the remaining body budget.
+                    match dialog.form.as_ref() {
+                        Some(form) => {
+                            for row in form.render(width, height) {
+                                if lines.len() >= height {
+                                    break;
+                                }
+                                lines.push(line(row, Role::Item));
+                            }
+                        }
+                        None => lines.push(line("form".to_string(), Role::Description)),
+                    }
+                }
                 DialogKind::Crash => {
                     // The root panic overlay paints its own full-screen,
                     // theme-independent content (`error-component.tsx`); the
@@ -2862,6 +3077,7 @@ impl DialogView {
             }
             let has_footer = !matches!(dialog.kind, DialogKind::Error | DialogKind::Crash)
                 && !matches!(dialog.kind, DialogKind::Execute)
+                && !matches!(dialog.kind, DialogKind::Form)
                 && !(dialog.kind == DialogKind::Question && !self.question_capable);
             let footer_rows = usize::from(has_footer && height > 1);
             let choice_rows = dialog.choices.len().min(height.saturating_sub(3)).max(1);
@@ -3027,6 +3243,8 @@ impl DialogView {
                 DialogKind::Question if !self.question_capable => {}
                 DialogKind::Error => {}
                 DialogKind::Execute => {}
+                // The form model paints its own footer (`form.tsx:767-1174`).
+                DialogKind::Form => {}
                 // The crash overlay owns its own footer (`error-component.tsx`),
                 // so the generic dialog footer is suppressed.
                 DialogKind::Crash => {}
@@ -3909,6 +4127,12 @@ pub mod form_overlay {
         #[must_use]
         pub fn id(&self) -> &str {
             &self.id
+        }
+
+        /// Form title, shown as the overlay heading (`form.tsx:767-770`).
+        #[must_use]
+        pub fn title(&self) -> &str {
+            &self.title
         }
 
         /// `active = interactivity && keymap mode == form` (`form.tsx:66`).

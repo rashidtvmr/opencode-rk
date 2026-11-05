@@ -7603,6 +7603,376 @@ fn fetch_permission(
     Ok(None)
 }
 
+// ── FORM-003..FORM-008: live question/form overlay ─────────────────────────
+
+/// One pending session form parsed from `GET /api/session/{id}/form`
+/// (`crates/server/src/form_http.rs::list`). The server returns `{"data":[…]}`;
+/// each entry is a `FormInfo` (`crates/contracts/src/lib.rs:469-475`).
+#[cfg(feature = "native")]
+#[derive(Clone, Debug, PartialEq)]
+struct PendingForm {
+    id: String,
+    title: String,
+    message: Option<String>,
+    fields: Vec<crate::native_view_dialogs::form_overlay::FormField>,
+}
+
+/// FORM-003: convert one server `FormField` (`type` + flattened properties,
+/// `crates/contracts/src/lib.rs:456-466`) into the live
+/// `form_overlay::FormField` model. Unknown/absent properties keep their
+/// upstream defaults; an unrecognised `type` is rejected so a malformed
+/// producer never opens a bogus overlay.
+#[cfg(feature = "native")]
+fn form_field_from_contract(
+    field: &serde_json::Value,
+) -> Option<crate::native_view_dialogs::form_overlay::FormField> {
+    use crate::native_view_dialogs::form_overlay::{
+        Condition, FieldKind, FormField, FormOption, FormValue, TextFormat,
+    };
+    let key = field.get("key").and_then(serde_json::Value::as_str)?;
+    if key.is_empty() {
+        return None;
+    }
+    let kind = match field.get("type").and_then(serde_json::Value::as_str)? {
+        "string" => FieldKind::Text,
+        "number" => FieldKind::Number,
+        "integer" => FieldKind::Integer,
+        "boolean" => FieldKind::Boolean,
+        "multiselect" => FieldKind::Multi,
+        "external" => FieldKind::External,
+        _ => return None,
+    };
+    let string = |name: &str| {
+        field
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    };
+    let number = |name: &str| field.get(name).and_then(serde_json::Value::as_f64);
+    let count = |name: &str| {
+        field
+            .get(name)
+            .and_then(serde_json::Value::as_u64)
+            .map(|value| value as usize)
+    };
+    let options = field
+        .get("options")
+        .and_then(serde_json::Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let value = entry.get("value").and_then(serde_json::Value::as_str)?;
+                    let label = entry.get("label").and_then(serde_json::Value::as_str)?;
+                    let description = entry
+                        .get("description")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned);
+                    Some(match description {
+                        Some(description) => FormOption::described(value, label, description),
+                        None => FormOption::new(value, label),
+                    })
+                })
+                .collect::<Vec<_>>()
+        });
+    let default = field.get("default").and_then(|value| match kind {
+        FieldKind::Number | FieldKind::Integer => value.as_f64().map(FormValue::Number),
+        FieldKind::Boolean => value.as_bool().map(FormValue::Bool),
+        FieldKind::Multi => value.as_array().map(|items| {
+            FormValue::List(
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(str::to_owned))
+                    .collect(),
+            )
+        }),
+        _ => value.as_str().map(|text| FormValue::Text(text.to_owned())),
+    });
+    let format = match field.get("format").and_then(serde_json::Value::as_str) {
+        Some("email") => Some(TextFormat::Email),
+        Some("uri") => Some(TextFormat::Uri),
+        Some("date") => Some(TextFormat::Date),
+        Some("date-time") => Some(TextFormat::DateTime),
+        _ => None,
+    };
+    let when = field
+        .get("when")
+        .and_then(serde_json::Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let key = entry.get("key").and_then(serde_json::Value::as_str)?;
+                    let value = match entry.get("value")? {
+                        serde_json::Value::Bool(flag) => FormValue::Bool(*flag),
+                        serde_json::Value::Number(number) => FormValue::Number(number.as_f64()?),
+                        serde_json::Value::String(text) => FormValue::Text(text.clone()),
+                        _ => return None,
+                    };
+                    Some(match entry.get("equal").and_then(serde_json::Value::as_bool) {
+                        Some(false) => Condition::ne(key, value),
+                        _ => Condition::eq(key, value),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Some(FormField {
+        key: key.to_owned(),
+        title: string("title"),
+        kind,
+        description: string("description"),
+        placeholder: string("placeholder"),
+        required: field
+            .get("required")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        default,
+        options,
+        custom: field
+            .get("custom")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        format,
+        pattern: string("pattern"),
+        min_length: count("minLength"),
+        max_length: count("maxLength"),
+        minimum: number("minimum"),
+        maximum: number("maximum"),
+        min_items: count("minItems"),
+        max_items: count("maxItems"),
+        when,
+        url: string("url"),
+    })
+}
+
+/// FORM-003: parse the `GET /api/session/{id}/form` body. The first pending
+/// form wins; a malformed entry is skipped, never invented.
+#[cfg(feature = "native")]
+fn parse_pending_form(body: &str) -> Result<Option<PendingForm>, String> {
+    let value: serde_json::Value = serde_json::from_str(body)
+        .map_err(|error| format!("form list is not valid JSON: {error}"))?;
+    let data = value
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "form list is missing the data array".to_owned())?;
+    for entry in data {
+        let Some(id) = entry.get("id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if id.is_empty() || id.len() > 128 {
+            continue;
+        }
+        let Some(title) = entry.get("title").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(field_values) = entry.get("fields").and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        let fields: Vec<_> = field_values
+            .iter()
+            .filter_map(form_field_from_contract)
+            .collect();
+        // A partially-converted form is dropped whole: never render a subset
+        // of the producer's fields.
+        if fields.is_empty() || fields.len() != field_values.len() {
+            continue;
+        }
+        let message = entry
+            .get("metadata")
+            .and_then(|metadata| metadata.get("message"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
+        return Ok(Some(PendingForm {
+            id: id.to_owned(),
+            title: title.to_owned(),
+            message,
+            fields,
+        }));
+    }
+    Ok(None)
+}
+
+#[cfg(feature = "native")]
+fn fetch_pending_form(
+    origin: &str,
+    session: &str,
+    auth: Option<&str>,
+) -> Result<Option<PendingForm>, String> {
+    let body = http_request(
+        origin,
+        "GET",
+        &format!("/api/session/{session}/form"),
+        None,
+        auth,
+    )?;
+    parse_pending_form(&body)
+}
+
+/// FORM-003..FORM-007: convert a resolved answer map into the server
+/// `FormReply` body (`crates/contracts/src/lib.rs:493`).
+#[cfg(feature = "native")]
+fn form_reply_body(
+    answer: &std::collections::BTreeMap<String, crate::native_view_dialogs::form_overlay::FormValue>,
+) -> String {
+    use crate::native_view_dialogs::form_overlay::FormValue;
+    let mut map = serde_json::Map::new();
+    for (key, value) in answer {
+        let value = match value {
+            FormValue::Text(text) => serde_json::Value::String(text.clone()),
+            FormValue::Number(number) => serde_json::json!(number),
+            FormValue::Bool(flag) => serde_json::Value::Bool(*flag),
+            FormValue::List(items) => serde_json::Value::Array(
+                items.iter().cloned().map(serde_json::Value::String).collect(),
+            ),
+        };
+        map.insert(key.clone(), value);
+    }
+    serde_json::json!({ "answer": map }).to_string()
+}
+
+#[cfg(feature = "native")]
+fn post_form_reply(
+    origin: &str,
+    session: &str,
+    id: &str,
+    answer: &std::collections::BTreeMap<String, crate::native_view_dialogs::form_overlay::FormValue>,
+    auth: Option<&str>,
+) -> Result<(), String> {
+    let body = form_reply_body(answer);
+    let (_body, status) = http_request_with_status(
+        origin,
+        "POST",
+        &format!("/api/session/{session}/form/{id}/reply"),
+        Some(&body),
+        auth,
+    )?;
+    if (200..300).contains(&status) {
+        Ok(())
+    } else {
+        Err(format!("form reply rejected with status {status}"))
+    }
+}
+
+#[cfg(feature = "native")]
+fn post_form_cancel(origin: &str, session: &str, id: &str, auth: Option<&str>) -> Result<(), String> {
+    let (_body, status) = http_request_with_status(
+        origin,
+        "DELETE",
+        &format!("/api/session/{session}/form/{id}"),
+        None,
+        auth,
+    )?;
+    if (200..300).contains(&status) {
+        Ok(())
+    } else {
+        Err(format!("form cancel rejected with status {status}"))
+    }
+}
+
+/// FORM-003..FORM-008: the outcome of routing one key into the live form.
+#[cfg(feature = "native")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FormKeyAction {
+    Submit,
+    Cancel,
+}
+
+/// The editor cursor's visual row (`form.tsx:607-617` uses
+/// `scrollY + visualCursor.visualRow`), computed from the live editor text.
+#[cfg(feature = "native")]
+fn form_cursor_visual_row(view: &crate::native_view::NativeView) -> usize {
+    view.dialogs.form().map_or(0, |form| {
+        let text = form.editor_text();
+        let cursor = form.cursor();
+        text.chars()
+            .take(cursor)
+            .filter(|character| *character == '\n')
+            .count()
+    })
+}
+
+/// FORM-003..FORM-008: map one decoded terminal event to the form key and
+/// route it into the live model (`routes/session/form.tsx:642-765`). Returns
+/// `(handled, action)`; `action` is set when the form resolved or dismissed.
+/// This is the exact routine `native_loop` runs, so tests drive the real
+/// dispatch rather than a copy.
+#[cfg(feature = "native")]
+fn form_live_dispatch(
+    view: &mut crate::native_view::NativeView,
+    event: &native_input_decoder::InputEvent,
+) -> (bool, Option<FormKeyAction>) {
+    use crate::native_view_dialogs::form_overlay::FormKey;
+    // FORM-003 repair (review R1 blocking): while a textual answer is focused
+    // (or the editor is open) space and digits are literal text, not the
+    // toggle/select shortcuts. The model's `space()`/`Digit` arms refuse in
+    // that state (`native_view_dialogs.rs:4377-4383,4840-4843`) and upstream
+    // layers the form keymap off `!editing && !textual()` (`form.tsx:556,638`),
+    // so the dispatcher must send `Char` for those bytes instead of letting
+    // them be dropped. Mirrors `FormPrompt::textual()` (`confirm()` disables
+    // the textual path).
+    let text_input = view.dialogs.form().is_some_and(|form| {
+        form.editing()
+            || (!form.confirm() && form.answer_field().is_some_and(|field| field.is_textual()))
+    });
+    let key = match event {
+        native_input_decoder::InputEvent::Byte(3) => FormKey::CtrlC,
+        native_input_decoder::InputEvent::Byte(b' ') => {
+            if text_input {
+                FormKey::Char(' ')
+            } else {
+                FormKey::Space
+            }
+        }
+        native_input_decoder::InputEvent::Byte(byte @ b'0'..=b'9') => {
+            if text_input {
+                FormKey::Char(char::from(*byte))
+            } else {
+                FormKey::Digit(byte - b'0')
+            }
+        }
+        native_input_decoder::InputEvent::Byte(byte) if byte.is_ascii_graphic() => {
+            FormKey::Char(char::from(*byte))
+        }
+        native_input_decoder::InputEvent::Escape => FormKey::Escape,
+        native_input_decoder::InputEvent::ArrowUp => FormKey::Up {
+            visual_row: form_cursor_visual_row(view),
+        },
+        native_input_decoder::InputEvent::ArrowDown => FormKey::Down,
+        native_input_decoder::InputEvent::ArrowLeft => FormKey::Left,
+        native_input_decoder::InputEvent::ArrowRight => FormKey::Right,
+        native_input_decoder::InputEvent::TabNext | native_input_decoder::InputEvent::Byte(9) => {
+            FormKey::Tab
+        }
+        native_input_decoder::InputEvent::TabPrevious => FormKey::ShiftTab,
+        native_input_decoder::InputEvent::Byte(13) | native_input_decoder::InputEvent::Byte(10) => {
+            FormKey::Enter
+        }
+        native_input_decoder::InputEvent::Paste(text) => {
+            // FORM-005: paste routes into the custom row or the editor exactly
+            // like upstream (`form.tsx:354-379`); the overlay owns it either way.
+            let handled = view.dialogs.form_paste(text);
+            return (handled, None);
+        }
+        // Review scroll has no decoded key yet (recorded gap); consume the
+        // page keys so they never leak to the transcript.
+        native_input_decoder::InputEvent::PageUp
+        | native_input_decoder::InputEvent::PageDown => return (true, None),
+        _ => return (false, None),
+    };
+    let handled = view.dialogs.form_handle_key(key);
+    if !handled {
+        return (false, None);
+    }
+    if view.dialogs.form().and_then(|form| form.resolution()).is_some() {
+        return (true, Some(FormKeyAction::Submit));
+    }
+    if !view.dialogs.form_active() {
+        return (true, Some(FormKeyAction::Cancel));
+    }
+    (true, None)
+}
+
 #[cfg(test)]
 mod form002_tests {
     use super::*;
@@ -9063,6 +9433,14 @@ fn native_loop(
     // TOOL-002: bounded pending-permission tool-call ids joined against
     // `ChatPart::ToolState { id }` at paint (`index.tsx:2793-2799`).
     let mut pending_permission_calls: Vec<String> = Vec::new();
+    // FORM-003..FORM-008: the session-scoped question/form overlay poll and
+    // its consumed-on-take drafts keyed by form id (`form.tsx:44-57,72-73`).
+    let mut last_form_poll = Instant::now();
+    let mut form_error: Option<String> = None;
+    let mut form_drafts: std::collections::HashMap<
+        String,
+        crate::native_view_dialogs::form_overlay::FormDraft,
+    > = std::collections::HashMap::new();
     let mut partial = String::new();
     // PAR-10: ordered delta admission; one accumulator per active turn.
     let mut delta_stream = LiveDeltaStream::default();
@@ -10795,6 +11173,106 @@ fn native_loop(
                         let message = format!("error: permission poll: {error}");
                         if permission_error.as_deref() != Some(message.as_str()) {
                             permission_error = Some(message.clone());
+                            append_transcript(&mut transcript, message);
+                            needs_paint = true;
+                        }
+                    }
+                }
+            }
+        }
+        // FORM-003..FORM-008: bounded session form poll (same authenticated
+        // client, 500ms cadence). Opens the live question/form overlay for the
+        // first pending form; reconciles a form that left the pending list as
+        // a stale dismissal that stashes its draft and restores composer
+        // focus (`routes/session/form.tsx:44-57,211-228`).
+        if !view.dialogs.pending()
+            && (binding_active
+                || view.dialogs.is_open()
+                || (session_route && live.is_some()))
+            && last_form_poll.elapsed() >= Duration::from_millis(500)
+        {
+            last_form_poll = Instant::now();
+            if let Some(snapshot) = live.as_ref() {
+                match fetch_pending_form(&snapshot.origin, &snapshot.session_id, auth) {
+                    Ok(Some(pending)) => {
+                        form_error = None;
+                        let already_open = view.dialogs.open_kind()
+                            == Some(crate::native_view_dialogs::DialogKind::Form)
+                            && view.dialogs.form().map(|form| form.id())
+                                == Some(pending.id.as_str());
+                        if !already_open {
+                            // A different form replaced the open one: dismiss
+                            // the stale overlay (stashing its draft) first.
+                            if view.dialogs.open_kind()
+                                == Some(crate::native_view_dialogs::DialogKind::Form)
+                            {
+                                let stale_id = view.dialogs.form().map(|form| form.id().to_owned());
+                                if let Some(dismissal) = view.dialogs.form_dismiss(
+                                    crate::native_view_dialogs::form_overlay::DismissReason::Stale,
+                                ) {
+                                    if let (Some(id), Some(draft)) = (stale_id, dismissal.draft) {
+                                        form_drafts.insert(id, draft);
+                                    }
+                                    needs_paint = true;
+                                }
+                            }
+                            // Any other open dialog (permission, sessions, …)
+                            // keeps precedence; the form opens once it closes.
+                            if !view.dialogs.is_open() {
+                                let restored = form_drafts.remove(&pending.id);
+                                let result = match restored {
+                                    Some(draft) => view.dialogs.open_form_restored(
+                                        pending.id.clone(),
+                                        snapshot.session_id.clone(),
+                                        pending.title.clone(),
+                                        pending.message.clone(),
+                                        pending.fields.clone(),
+                                        draft,
+                                    ),
+                                    None => view.dialogs.open_form(
+                                        pending.id.clone(),
+                                        snapshot.session_id.clone(),
+                                        pending.title.clone(),
+                                        pending.message.clone(),
+                                        pending.fields.clone(),
+                                    ),
+                                };
+                                match result {
+                                    Ok(()) => {
+                                        crate::native_debug::event(
+                                            "form.present",
+                                            serde_json::json!({"form_id":pending.id,"session_id":snapshot.session_id}),
+                                        );
+                                        needs_paint = true;
+                                    }
+                                    Err(error) => {
+                                        form_error =
+                                            Some(format!("form dialog: {}", error.code()));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        form_error = None;
+                        if view.dialogs.open_kind()
+                            == Some(crate::native_view_dialogs::DialogKind::Form)
+                        {
+                            let id = view.dialogs.form().map(|form| form.id().to_owned());
+                            if let Some(dismissal) = view.dialogs.form_dismiss(
+                                crate::native_view_dialogs::form_overlay::DismissReason::Stale,
+                            ) {
+                                if let (Some(id), Some(draft)) = (id, dismissal.draft) {
+                                    form_drafts.insert(id, draft);
+                                }
+                            }
+                            needs_paint = true;
+                        }
+                    }
+                    Err(error) => {
+                        let message = format!("error: form poll: {error}");
+                        if form_error.as_deref() != Some(message.as_str()) {
+                            form_error = Some(message.clone());
                             append_transcript(&mut transcript, message);
                             needs_paint = true;
                         }
@@ -12547,6 +13025,81 @@ fn native_loop(
                 && matches!(dialog, native_setup::Dialog::None)
                 && import_dialog.as_ref().is_none_or(|import| !import.is_open()),
         );
+        // FORM-003..FORM-008: the question/form overlay owns its keys
+        // (`routes/session/form.tsx:642-765`). Every decoded event routes
+        // through the live form model; a submit posts the resolved answer map
+        // and a cancel posts the cancel route, then composer focus is
+        // restored. Session mismatch fails closed (never replies to another
+        // session's form).
+        if view.dialogs.intercepts_input()
+            && view.dialogs.open_kind() == Some(crate::native_view_dialogs::DialogKind::Form)
+        {
+            let (handled, action) = form_live_dispatch(&mut view, &event);
+            match action {
+                Some(FormKeyAction::Submit) => {
+                    let answer = view.dialogs.form().and_then(|form| form.resolution().cloned());
+                    let session = view.dialogs.form_session_id().map(str::to_owned);
+                    let id = view.dialogs.form().map(|form| form.id().to_owned());
+                    let mut posted = false;
+                    if let (Some(answer), Some(session), Some(id), Some(snapshot)) =
+                        (answer, session, id, live.as_ref())
+                    {
+                        if session == snapshot.session_id {
+                            match post_form_reply(&snapshot.origin, &session, &id, &answer, auth) {
+                                Ok(()) => posted = true,
+                                Err(error) => append_transcript(
+                                    &mut transcript,
+                                    format!("error: form reply: {error}"),
+                                ),
+                            }
+                        } else {
+                            append_transcript(
+                                &mut transcript,
+                                "error: form reply refused: session mismatch".to_owned(),
+                            );
+                        }
+                    }
+                    if posted {
+                        let _ = view.dialogs.form_dismiss(
+                            crate::native_view_dialogs::form_overlay::DismissReason::Resolved,
+                        );
+                    }
+                    needs_paint = true;
+                }
+                Some(FormKeyAction::Cancel) => {
+                    let session = view.dialogs.form_session_id().map(str::to_owned);
+                    let id = view.dialogs.form().map(|form| form.id().to_owned());
+                    if let (Some(session), Some(id), Some(snapshot)) =
+                        (session, id.clone(), live.as_ref())
+                    {
+                        if session == snapshot.session_id {
+                            if let Err(error) =
+                                post_form_cancel(&snapshot.origin, &session, &id, auth)
+                            {
+                                append_transcript(
+                                    &mut transcript,
+                                    format!("error: form cancel: {error}"),
+                                );
+                            }
+                        }
+                    }
+                    if let Some(dismissal) = view.dialogs.form_dismiss(
+                        crate::native_view_dialogs::form_overlay::DismissReason::Cancelled,
+                    ) {
+                        if let (Some(id), Some(draft)) = (id, dismissal.draft) {
+                            form_drafts.insert(id, draft);
+                        }
+                    }
+                    needs_paint = true;
+                }
+                None => {}
+            }
+            if handled {
+                needs_paint = true;
+                utf8.reset();
+                continue;
+            }
+        }
         // F002-R3: the permission prompt binds `left,h` / `right,l`
         // (`permission.tsx:465-485`). Route the arrow and byte halves through
         // DIALOG-20: the crash surface owns its keys and its outcomes
@@ -19954,5 +20507,325 @@ mod theme05_live_row_bg_tests {
         assert_eq!(completion_row_bg(Some(action), None, None, panel), panel);
         // No semantic palette -> legacy.
         assert_eq!(completion_row_bg(None, Some(&states(&[("selected", true)])), Some(legacy), panel), legacy);
+    }
+}
+
+/// FORM-003..FORM-008: the live question/form overlay. Each test drives the
+/// exact routines `native_loop` runs (`parse_pending_form`,
+/// `form_live_dispatch`, `DialogView::open_form`/`form_dismiss`), not a copy.
+#[cfg(all(test, feature = "native"))]
+mod form_live_tests {
+    use super::*;
+    use crate::native_view_dialogs::form_overlay::{
+        DismissReason, FieldKind, FocusTarget, FormField, FormOption, FormValue,
+    };
+
+    fn new_view() -> crate::native_view::NativeView {
+        crate::native_view::NativeView::new(120, 40)
+    }
+
+    fn open(view: &mut crate::native_view::NativeView, fields: Vec<FormField>) {
+        view.dialogs
+            .open_form("frm_live", "ses_live", "Questions", None, fields)
+            .expect("form opens");
+    }
+
+    /// FORM-003: the live poll parser converts the real server `FormField`
+    /// shape (`question_tool.rs:52-70`: `type` + flattened properties) into
+    /// the live model for every supported field type.
+    #[test]
+    fn form003_parse_pending_form_converts_every_field_type_and_property() {
+        let body = r#"{"data":[{"id":"frm_1","sessionId":"ses_1","title":"Questions","fields":[
+            {"key":"q0","type":"string","title":"Name","description":"Your name","required":true,"placeholder":"Ada","minLength":2,"maxLength":40,"pattern":"^.+$","format":"email","default":"a@b.co"},
+            {"key":"q1","type":"number","title":"Age","minimum":0,"maximum":120,"default":7},
+            {"key":"q2","type":"integer","title":"Count"},
+            {"key":"q3","type":"boolean","title":"Agree","default":true},
+            {"key":"q4","type":"multiselect","title":"Tags","custom":true,"minItems":1,"maxItems":3,"options":[{"value":"a","label":"A","description":"first"},{"value":"b","label":"B"}]},
+            {"key":"q5","type":"external","title":"Docs","url":"https://example.com"}
+        ]}]}"#;
+        let pending = parse_pending_form(body).expect("parses").expect("one form");
+        assert_eq!(pending.id, "frm_1");
+        assert_eq!(pending.title, "Questions");
+        assert_eq!(pending.fields.len(), 6);
+        assert_eq!(pending.fields[0].kind, FieldKind::Text);
+        assert_eq!(pending.fields[0].title.as_deref(), Some("Name"));
+        assert_eq!(pending.fields[0].placeholder.as_deref(), Some("Ada"));
+        assert!(pending.fields[0].required);
+        assert_eq!(pending.fields[0].min_length, Some(2));
+        assert_eq!(pending.fields[0].max_length, Some(40));
+        assert_eq!(pending.fields[0].pattern.as_deref(), Some("^.+$"));
+        assert_eq!(
+            pending.fields[0].default,
+            Some(FormValue::Text("a@b.co".into()))
+        );
+        assert_eq!(pending.fields[1].kind, FieldKind::Number);
+        assert_eq!(pending.fields[1].minimum, Some(0.0));
+        assert_eq!(pending.fields[1].default, Some(FormValue::Number(7.0)));
+        assert_eq!(pending.fields[2].kind, FieldKind::Integer);
+        assert_eq!(pending.fields[3].kind, FieldKind::Boolean);
+        assert_eq!(pending.fields[3].default, Some(FormValue::Bool(true)));
+        assert_eq!(pending.fields[4].kind, FieldKind::Multi);
+        assert!(pending.fields[4].custom);
+        assert_eq!(pending.fields[4].min_items, Some(1));
+        assert_eq!(pending.fields[4].options.as_ref().map(Vec::len), Some(2));
+        assert_eq!(
+            pending.fields[4].options.as_ref().unwrap()[0]
+                .description
+                .as_deref(),
+            Some("first")
+        );
+        assert_eq!(pending.fields[5].kind, FieldKind::External);
+        assert_eq!(pending.fields[5].url.as_deref(), Some("https://example.com"));
+        // A malformed entry is skipped, never invented.
+        assert!(parse_pending_form(
+            r#"{"data":[{"id":"frm_x","title":"T","fields":[{"key":"k","type":"bogus"}]}]}"#
+        )
+        .unwrap()
+        .is_none());
+        assert!(parse_pending_form(r#"{"nope":[]}"#).is_err());
+    }
+
+    /// FORM-003: the live key dispatch answers a single-select form end-to-end.
+    #[test]
+    fn form003_live_dispatch_answers_single_select() {
+        let mut view = new_view();
+        open(
+            &mut view,
+            vec![FormField::new("q0", FieldKind::Text)
+                .titled("Pick")
+                .with_options(vec![FormOption::new("a", "A"), FormOption::new("b", "B")])],
+        );
+        let (handled, action) =
+            form_live_dispatch(&mut view, &native_input_decoder::InputEvent::ArrowDown);
+        assert!(handled);
+        assert_eq!(action, None);
+        let (handled, action) =
+            form_live_dispatch(&mut view, &native_input_decoder::InputEvent::Byte(13));
+        assert!(handled);
+        assert_eq!(action, Some(FormKeyAction::Submit));
+        let answer = view
+            .dialogs
+            .form()
+            .and_then(|form| form.resolution().cloned())
+            .expect("resolved");
+        assert_eq!(answer.get("q0"), Some(&FormValue::Text("b".into())));
+    }
+
+    /// FORM-004: the live dialog render passes the dialog content width into
+    /// `FormPrompt::render`, so narrow widths clip every row (tab labels and
+    /// field rows) instead of overflowing.
+    #[test]
+    fn form004_narrow_render_clips_rows_to_width() {
+        let mut view = new_view();
+        open(
+            &mut view,
+            vec![
+                FormField::new("q0", FieldKind::Text)
+                    .titled("A very long first question title that must truncate"),
+                FormField::new("q1", FieldKind::Text)
+                    .titled("Another extremely long question title here too"),
+            ],
+        );
+        let width = 24usize;
+        let rows = view.dialogs.form().unwrap().render(width, 20);
+        assert!(!rows.is_empty());
+        for row in &rows {
+            assert!(
+                crate::native_completion::display_width(row) <= width,
+                "row overflows {width}: {row:?}"
+            );
+        }
+        let painted = view.dialogs.render(width + 8, 24).join("\n");
+        assert!(
+            painted.contains("A very long"),
+            "live dialog paints the form body:\n{painted}"
+        );
+    }
+
+    /// FORM-005: paste routes into the custom choice row for a custom
+    /// single-select and into the editor for a textual field
+    /// (`form.tsx:354-379`).
+    #[test]
+    fn form005_paste_routes_to_custom_row_vs_editor() {
+        let mut view = new_view();
+        open(
+            &mut view,
+            vec![FormField::new("q0", FieldKind::Text)
+                .titled("Pick")
+                .with_options(vec![FormOption::new("a", "A")])
+                .custom()],
+        );
+        assert!(
+            view.dialogs.form_paste("custom answer"),
+            "the overlay owns the paste"
+        );
+        assert_eq!(view.dialogs.form().unwrap().input(), "custom answer");
+
+        let mut view = new_view();
+        open(
+            &mut view,
+            vec![FormField::new("q0", FieldKind::Text).titled("Name")],
+        );
+        assert!(view.dialogs.form_paste("typed"));
+        assert_eq!(view.dialogs.form().unwrap().editor_text(), "typed");
+    }
+
+    /// FORM-006: space toggles a multiselect row but is inert on a
+    /// single-select; an optional empty answer is omitted from the reply map.
+    #[test]
+    fn form006_space_toggles_multiselect_only_and_optional_empty_is_omitted() {
+        let mut view = new_view();
+        open(
+            &mut view,
+            vec![FormField::new("q0", FieldKind::Multi)
+                .titled("Tags")
+                .with_options(vec![FormOption::new("a", "A"), FormOption::new("b", "B")])],
+        );
+        let (handled, _) =
+            form_live_dispatch(&mut view, &native_input_decoder::InputEvent::Byte(b' '));
+        assert!(handled, "space toggles a multiselect row");
+        assert_eq!(
+            view.dialogs.form().unwrap().answer("q0"),
+            Some(&FormValue::List(vec!["a".into()]))
+        );
+
+        let mut view = new_view();
+        open(
+            &mut view,
+            vec![FormField::new("q0", FieldKind::Text)
+                .titled("Pick")
+                .with_options(vec![FormOption::new("a", "A")])],
+        );
+        let (handled, _) =
+            form_live_dispatch(&mut view, &native_input_decoder::InputEvent::Byte(b' '));
+        assert!(!handled, "space never toggles a single-select");
+        assert_eq!(view.dialogs.form().unwrap().answer("q0"), None);
+
+        let mut view = new_view();
+        open(
+            &mut view,
+            vec![FormField::new("q0", FieldKind::Text).titled("Optional")],
+        );
+        let answer = view.dialogs.form_submit().expect("optional empty form submits");
+        assert!(answer.is_empty(), "the optional empty answer is omitted");
+        assert_eq!(form_reply_body(&answer), r#"{"answer":{}}"#);
+    }
+
+    /// FORM-007: opening/copying an external action does not acknowledge it;
+    /// only an explicit Enter acknowledgement lets the form submit.
+    #[test]
+    fn form007_external_action_requires_explicit_acknowledgement() {
+        let mut view = new_view();
+        let mut external = FormField::new("q0", FieldKind::External).titled("Docs");
+        external.url = Some("https://example.com".into());
+        external.description = Some("Read the docs".into());
+        open(&mut view, vec![external]);
+        assert!(
+            view.dialogs.form_submit().is_none(),
+            "an unacknowledged external action blocks submission"
+        );
+        assert!(view.dialogs.form().unwrap().error().contains("acknowledged"));
+        // First Enter opens the link (records readiness, not acknowledgement).
+        form_live_dispatch(&mut view, &native_input_decoder::InputEvent::Byte(13));
+        assert!(view.dialogs.form().unwrap().external_ready("q0"));
+        assert!(
+            view.dialogs.form_submit().is_none(),
+            "opening the link is not an acknowledgement"
+        );
+        // Second Enter records the acknowledgement.
+        form_live_dispatch(&mut view, &native_input_decoder::InputEvent::Byte(13));
+        assert!(
+            view.dialogs.form_submit().is_some(),
+            "explicit acknowledgement lets the form submit"
+        );
+    }
+
+    /// FORM-008: a terminal/stale dismissal stashes the draft and restores
+    /// composer focus; the draft restores the same answer state; a user cancel
+    /// stashes nothing.
+    #[test]
+    fn form008_dismiss_stashes_draft_and_restores_composer_focus() {
+        let mut view = new_view();
+        open(
+            &mut view,
+            vec![FormField::new("q0", FieldKind::Text).titled("Name")],
+        );
+        form_live_dispatch(&mut view, &native_input_decoder::InputEvent::Byte(b'h'));
+        form_live_dispatch(&mut view, &native_input_decoder::InputEvent::Byte(b'i'));
+        assert_eq!(view.dialogs.form().unwrap().editor_text(), "hi");
+
+        let dismissal = view
+            .dialogs
+            .form_dismiss(DismissReason::Stale)
+            .expect("dismissal");
+        assert_eq!(dismissal.focus, FocusTarget::Composer);
+        let draft = dismissal.draft.expect("stale dismissal stashes a draft");
+        assert!(!view.dialogs.is_open(), "the overlay closes and focus returns");
+
+        view.dialogs
+            .open_form_restored(
+                "frm_live",
+                "ses_live",
+                "Questions",
+                None,
+                vec![FormField::new("q0", FieldKind::Text).titled("Name")],
+                draft,
+            )
+            .expect("restore");
+        assert_eq!(view.dialogs.form().unwrap().editor_text(), "hi");
+
+        let cancel = view
+            .dialogs
+            .form_dismiss(DismissReason::Cancelled)
+            .expect("dismissal");
+        assert!(cancel.draft.is_none(), "a user cancel stashes nothing");
+        assert!(!view.dialogs.is_open());
+    }
+
+    /// FORM-003 review R1 repair: while a textual answer is focused, space and
+    /// digits are literal text, not the toggle/select shortcuts. Before the
+    /// repair the dispatch sent `Space`/`Digit`, the model refused both, and
+    /// the byte was dropped — so "42" and "a b" could never be typed.
+    #[test]
+    fn form003_live_dispatch_types_digits_and_space_into_textual_answers() {
+        // A number field is textual (`util/form.ts:36-39`).
+        let mut view = new_view();
+        open(
+            &mut view,
+            vec![FormField::new("n", FieldKind::Number).titled("Age")],
+        );
+        for byte in [b'4', b'2'] {
+            let (handled, action) =
+                form_live_dispatch(&mut view, &native_input_decoder::InputEvent::Byte(byte));
+            assert!(handled, "digit {byte} is consumed");
+            assert_eq!(action, None);
+        }
+        assert_eq!(view.dialogs.form().unwrap().editor_text(), "42");
+
+        // A string field without options is textual; space is a literal space.
+        let mut view = new_view();
+        open(
+            &mut view,
+            vec![FormField::new("s", FieldKind::Text).titled("Name")],
+        );
+        for byte in [b'a', b' ', b'b'] {
+            form_live_dispatch(&mut view, &native_input_decoder::InputEvent::Byte(byte));
+        }
+        assert_eq!(view.dialogs.form().unwrap().editor_text(), "a b");
+
+        // A single-select (string WITH options) keeps the digit shortcut:
+        // digit 2 selects the second row rather than typing "2".
+        let mut view = new_view();
+        open(
+            &mut view,
+            vec![FormField::new("p", FieldKind::Text)
+                .titled("Pick")
+                .with_options(vec![FormOption::new("a", "A"), FormOption::new("b", "B")])],
+        );
+        let (handled, _) =
+            form_live_dispatch(&mut view, &native_input_decoder::InputEvent::Byte(b'2'));
+        assert!(handled);
+        assert_eq!(view.dialogs.form().unwrap().answer("p"), Some(&FormValue::Text("b".into())));
+        assert_eq!(view.dialogs.form().unwrap().editor_text(), "");
     }
 }
