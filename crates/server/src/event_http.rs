@@ -72,6 +72,9 @@ pub const MAX_HTTP_SUBSCRIBERS: usize = 64;
 #[must_use]
 pub fn wire_event(published: &Published) -> (String, String) {
     let (event_type, properties): (&str, Value) = match &published.event {
+        ServerEvent::InboxEnqueued { session, inbox_id, item } => ("session.inbox.enqueued", json!({"inboxID": inbox_id, "sessionID": session, "item": item})),
+        ServerEvent::InboxCancelled { session, inbox_id } => ("session.inbox.cancelled", json!({"inboxID": inbox_id, "sessionID": session})),
+        ServerEvent::InboxDeliveryChanged { session, inbox_id, delivery } => ("session.inbox.delivery.changed", json!({"inboxID": inbox_id, "sessionID": session, "delivery": delivery})),
         ServerEvent::SessionCreated(session) => ("session.created", json!({ "session": session })),
         // Intentional contract upgrade: a legacy `MessageAppended`
         // publication (shared engine `seq: 0`, runtime-wiring replay, SDK

@@ -35,7 +35,7 @@ use opencode_rk_contracts::{
     MAX_INLINE_PAYLOAD_BYTES, MAX_REASONING_SUMMARY_BYTES, MAX_TITLE_BYTES, MessageExecution,
     MessageFile, MessageId, MessageRecord, MessageRole, MessageSkill, PayloadRef, SessionId,
     SessionRevert, SessionState,
-    SessionSummary, Timestamp,
+    SessionSummary, Timestamp, Delivery, InboxItem, InboxTime,
 };
 pub use quota_v2::QuotaV2;
 pub use retention_v2::RetentionV2;
@@ -191,6 +191,23 @@ pub mod session_mcp;
 pub mod session_compaction;
 pub mod session_compaction_settings;
 impl Storage {
+    pub fn enqueue_inbox(&self, session_id: SessionId, kind: &str, payload: serde_json::Value, delivery: Delivery) -> Result<InboxItem, StorageError> {
+        let id = SessionId::new().to_string(); let created = Timestamp::now();
+        let mut c = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let seq: i64 = tx.query_row("SELECT COALESCE(MAX(enqueued_seq),0)+1 FROM session_inbox WHERE session_id=?1", params![session_id.to_string()], |r| r.get(0))?;
+        tx.execute("INSERT INTO session_inbox(id,session_id,type,payload,delivery,enqueued_seq,time_created) VALUES(?1,?2,?3,?4,?5,?6,?7)", params![id, session_id.to_string(), kind, serde_json::to_string(&payload).map_err(|_| rusqlite::Error::InvalidQuery)?, serde_json::to_string(&delivery).map_err(|_| rusqlite::Error::InvalidQuery)?.trim_matches('"'), seq, created.to_string()])?;
+        tx.commit()?;
+        Ok(InboxItem { id, session_id, time: InboxTime { created }, kind: kind.to_owned(), payload, delivery })
+    }
+    pub fn list_inbox(&self, session_id: SessionId) -> Result<Vec<InboxItem>, StorageError> {
+        let c = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let mut s = c.prepare("SELECT id,type,payload,delivery,time_created FROM session_inbox WHERE session_id=?1 ORDER BY enqueued_seq")?;
+        let rows = s.query_map(params![session_id.to_string()], |r| { let d: String=r.get(3)?; Ok(InboxItem { id:r.get(0)?, session_id, kind:r.get(1)?, payload:serde_json::from_str(&r.get::<_,String>(2)?).unwrap_or(serde_json::Value::Null), delivery: if d=="steer" {Delivery::Steer} else {Delivery::Queue}, time:InboxTime {created: parse_timestamp(r.get::<_,String>(4)?)?} }) })?;
+        rows.collect::<Result<Vec<_>,_>>().map_err(StorageError::from)
+    }
+    pub fn cancel_inbox(&self, session_id: SessionId, id: &str) -> Result<bool, StorageError> { let c=self.connection.lock().map_err(|_|StorageError::Poisoned)?; let n=c.execute("DELETE FROM session_inbox WHERE session_id=?1 AND id=?2",params![session_id.to_string(),id])?; Ok(n>0) }
+    pub fn set_inbox_delivery(&self, session_id: SessionId, id: &str, delivery: Delivery) -> Result<bool, StorageError> { let c=self.connection.lock().map_err(|_|StorageError::Poisoned)?; let n=c.execute("UPDATE session_inbox SET delivery=?1 WHERE session_id=?2 AND id=?3",params![serde_json::to_string(&delivery).unwrap().trim_matches('"'),session_id.to_string(),id])?; Ok(n>0) }
     pub fn open(paths: StoragePaths) -> Result<Self, StorageError> {
         fs::create_dir_all(&paths.root)?;
         fs::create_dir_all(&paths.blobs)?;
@@ -1693,6 +1710,7 @@ impl Storage {
             payload TEXT NOT NULL CHECK(length(CAST(payload AS BLOB)) BETWEEN 1 AND 8192),
             PRIMARY KEY(session_id,ordinal)
         );")?;
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS session_inbox(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,type TEXT NOT NULL,payload TEXT NOT NULL,delivery TEXT NOT NULL,enqueued_seq INTEGER NOT NULL,time_created TEXT NOT NULL,UNIQUE(session_id,enqueued_seq));")?;
         connection.execute_batch("CREATE TABLE IF NOT EXISTS schema_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,title TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('active','archived')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,archived_at TEXT,revert TEXT,viewed_at TEXT,idle_at TEXT); CREATE INDEX IF NOT EXISTS sessions_updated_idx ON sessions(updated_at DESC); CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,role TEXT NOT NULL,inline_text TEXT,blob_hash TEXT,byte_len INTEGER NOT NULL CHECK(byte_len>=0),created_at TEXT NOT NULL,files_json TEXT,skills_json TEXT,CHECK((inline_text IS NULL)!=(blob_hash IS NULL))); CREATE INDEX IF NOT EXISTS messages_session_idx ON messages(session_id,created_at,id); CREATE TABLE IF NOT EXISTS message_activity(message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,reasoning_summary TEXT NOT NULL CHECK(length(CAST(reasoning_summary AS BLOB))<=8192)); CREATE TABLE IF NOT EXISTS recent_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,kind TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS recent_events_session_idx ON recent_events(session_id,seq); INSERT INTO schema_meta(key,value) VALUES('schema_version','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value;")?;
         // SIDE-10 revert fact seam (upstream `projector.ts:761-781` keeps the
         // staged revert on the session row): databases created before this

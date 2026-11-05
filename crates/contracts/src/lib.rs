@@ -11,6 +11,26 @@ use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Delivery { Steer, Queue }
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InboxItem {
+    pub id: String,
+    #[serde(rename = "sessionID")]
+    pub session_id: SessionId,
+    pub time: InboxTime,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub payload: Value,
+    pub delivery: Delivery,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InboxTime { pub created: Timestamp }
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InboxInfo { pub data: Vec<InboxItem> }
+
 pub const WIRE_SCHEMA_VERSION: u16 = 1;
 pub const MAX_TITLE_BYTES: usize = 512;
 pub const MAX_ERROR_MESSAGE_BYTES: usize = 8 * 1024;

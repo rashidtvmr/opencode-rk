@@ -109,7 +109,7 @@ use futures_util::{StreamExt, stream};
 use opencode_rk_agents::agent_executor::AgentExecutor;
 use opencode_rk_catalog::{Catalog, CatalogQuery};
 use opencode_rk_contracts::{
-    ArtifactId, ArtifactKind, AttachmentId, FileDiffInfo, FileDiffStatus,
+    ArtifactId, ArtifactKind, AttachmentId, Delivery, FileDiffInfo, FileDiffStatus,
     MAX_DRAFT_ATTACHMENT_BYTES, MessageFile, MessageId, MessageRecord, MessageSkill,
     MessageRole, PayloadRef, SessionId, SessionRevert, Timestamp, WIRE_SCHEMA_VERSION,
 };
@@ -250,6 +250,8 @@ pub fn router_with_events_and_integration(
             get(get_session).patch(rename_session).delete(delete_session),
         )
         .route("/api/sessions/{id}/archive", post(archive_session))
+        .route("/api/sessions/{id}/inbox", get(list_inbox))
+        .route("/api/sessions/{id}/inbox/{inbox_id}", delete(cancel_inbox).patch(set_inbox_delivery))
         .route("/api/sessions/{id}/revert/stage", post(stage_session_revert))
         .route("/api/sessions/{id}/view", post(view_session))
         .route("/api/sessions/{id}/compact", post(compact_session))
@@ -1243,6 +1245,65 @@ async fn archive_session(
         .map_err(ApiFailure::internal)?;
     let session = state.sessions.get(id).await.map_err(ApiFailure::internal)?;
     Ok(Json(json!({"session":session})))
+}
+
+async fn list_inbox(State(state): State<AppState>, Path(id): Path<String>) -> Result<Json<Value>, ApiFailure> {
+    let id = parse_session_id(&id)?;
+    // Upstream `Session.inbox` resolves the session first (`session/session.ts:135`
+    // `yield* get(sessionID)`), so an unknown session is a 404, not an empty list.
+    state.sessions.get(id).await.map_err(session_api_error)?;
+    let data = state.sessions.list_inbox(id).await.map_err(session_api_error)?;
+    Ok(Json(json!({"data": data})))
+}
+
+async fn cancel_inbox(
+    State(state): State<AppState>,
+    Extension(events): Extension<event_bus::EventBus>,
+    Path((id, inbox_id)): Path<(String, String)>,
+) -> Result<StatusCode, ApiFailure> {
+    let id = parse_session_id(&id)?;
+    // Upstream `session.inbox.cancel` (`handlers/session.ts:525-533`) resolves the
+    // session (404 when missing) and swallows `InboxConflictError`, so an unknown
+    // item is still a 204 no-op.
+    state.sessions.get(id).await.map_err(session_api_error)?;
+    // Upstream `projectCancelled` (`inbox.ts:365-382`) only emits
+    // `InboxCancelled` when the row was actually deleted; a repeat/unknown
+    // cancel still returns 204 but publishes nothing.
+    let deleted = state.sessions.cancel_inbox(id, inbox_id.clone()).await.map_err(session_api_error)?;
+    if deleted {
+        let _ = events.publish(event_bus::ServerEvent::InboxCancelled { session: id, inbox_id });
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+struct InboxDeliveryBody { delivery: Delivery }
+
+async fn set_inbox_delivery(
+    State(state): State<AppState>,
+    Extension(events): Extension<event_bus::EventBus>,
+    Path((id, inbox_id)): Path<(String, String)>,
+    Json(body): Json<InboxDeliveryBody>,
+) -> Result<StatusCode, ApiFailure> {
+    let id = parse_session_id(&id)?;
+    // Upstream `Session.steerInbox`/`queueInbox` (`session/session.ts:144-155`) are
+    // unconditional `publishMutation`s: there is no single-steer rule, so changing
+    // delivery is always allowed. `mutatePending` maps a missing row to
+    // `InboxConflictError` → 409, and a missing session to 404.
+    state.sessions.get(id).await.map_err(session_api_error)?;
+    let changed = state.sessions.set_inbox_delivery(id, inbox_id.clone(), body.delivery).await.map_err(session_api_error)?;
+    if !changed {
+        return Err(ApiFailure::conflict(format!("pending input not found: {inbox_id}")));
+    }
+    let _ = events.publish(event_bus::ServerEvent::InboxDeliveryChanged { session: id, inbox_id, delivery: body.delivery });
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn session_api_error(error: SessionError) -> ApiFailure {
+    match error {
+        SessionError::NotFound(id) | SessionError::Storage(opencode_rk_sessions::StorageError::SessionNotFound(id)) => ApiFailure::not_found(format!("session not found: {id}")),
+        other => ApiFailure::internal(other),
+    }
 }
 
 /// DIALOG-13: `DELETE /api/session/:sessionID` (`packages/protocol/src/groups/session.ts:236`

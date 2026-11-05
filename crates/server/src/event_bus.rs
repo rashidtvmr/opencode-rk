@@ -1,5 +1,5 @@
 //! Bounded fan-out event bus for the server daemon.
-use opencode_rk_contracts::{FormId, FormInfo, MessageId, SessionId};
+use opencode_rk_contracts::{Delivery, FormId, FormInfo, InboxItem, MessageId, SessionId};
 use std::{
     fmt,
     sync::{
@@ -10,6 +10,9 @@ use std::{
 use tokio::sync::mpsc;
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServerEvent {
+    InboxEnqueued { session: SessionId, inbox_id: String, item: InboxItem },
+    InboxCancelled { session: SessionId, inbox_id: String },
+    InboxDeliveryChanged { session: SessionId, inbox_id: String, delivery: Delivery },
     SessionCreated(SessionId),
     /// Upstream `SessionEvent.Deleted` (`packages/core/src/session/events.ts`),
     /// published after a session and its dependent rows were removed.
@@ -42,6 +45,9 @@ pub enum ServerEvent {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventKind {
+    InboxEnqueued,
+    InboxCancelled,
+    InboxDeliveryChanged,
     SessionCreated,
     SessionDeleted,
     MessageAppended,
@@ -57,6 +63,9 @@ impl ServerEvent {
     #[must_use]
     pub fn kind(&self) -> EventKind {
         match self {
+            Self::InboxEnqueued { .. } => EventKind::InboxEnqueued,
+            Self::InboxCancelled { .. } => EventKind::InboxCancelled,
+            Self::InboxDeliveryChanged { .. } => EventKind::InboxDeliveryChanged,
             Self::SessionCreated(_) => EventKind::SessionCreated,
             Self::SessionDeleted(_) => EventKind::SessionDeleted,
             Self::MessageAppended { .. } | Self::MessageStored { .. } => EventKind::MessageAppended,

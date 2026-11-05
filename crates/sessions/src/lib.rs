@@ -58,7 +58,7 @@ use chrono::{DateTime, Utc};
 use opencode_rk_contracts::{
     ArtifactDocument, ArtifactId, ArtifactKind, ArtifactSummary, AssistantActivity, AttachmentId,
     DraftAttachment, MAX_REASONING_SUMMARY_BYTES, MAX_TITLE_BYTES, MessageExecution, MessageFile,
-    MessageId, MessageRecord, MessageRole, MessageSkill, PayloadRef, SessionId, SessionRevert,
+    Delivery, InboxItem, MessageId, MessageRecord, MessageRole, MessageSkill, PayloadRef, SessionId, SessionRevert,
     SessionState, SessionSummary, Timestamp,
 };
 use opencode_rk_storage::{CatalogV2, NewMessage, NewSession, Storage, V2Writer};
@@ -421,6 +421,21 @@ impl MessageExecutionInput {
 }
 
 impl SessionService {
+    pub async fn list_inbox(&self, id: SessionId) -> Result<Vec<InboxItem>, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.list_inbox(id)).await.map_err(todo_error)
+    }
+
+    pub async fn cancel_inbox(&self, id: SessionId, inbox_id: String) -> Result<bool, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.cancel_inbox(id, &inbox_id)).await.map_err(todo_error)
+    }
+
+    pub async fn set_inbox_delivery(&self, id: SessionId, inbox_id: String, delivery: Delivery) -> Result<bool, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.set_inbox_delivery(id, &inbox_id, delivery)).await.map_err(todo_error)
+    }
+
     pub async fn memory_exclusions(&self, id: SessionId) -> Result<Vec<String>, SessionError> {
         let storage = Arc::clone(&self.storage);
         run_blocking(move || storage.memory_exclusions(id)).await.map_err(todo_error)
