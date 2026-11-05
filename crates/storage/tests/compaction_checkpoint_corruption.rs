@@ -11,7 +11,7 @@ fn oversized_or_misaccounted_persisted_checkpoint_is_rejected() {
     let now = Timestamp::now();
     storage.create_session(&SessionSummary { id:session, title:"Checkpoint bounds".into(), state:SessionState::Active, created_at:now, updated_at:now, archived_at:None, revert: None, viewed_at: None, idle_at: None}).unwrap();
     let boundary = MessageId::new();
-    storage.append_message(&MessageRecord { id:boundary, session_id:session, role:MessageRole::Assistant, body:PayloadRef::inline("boundary").unwrap(), created_at:now }).unwrap();
+    storage.append_message(&MessageRecord { id:boundary, session_id:session, role:MessageRole::Assistant, body:PayloadRef::inline("boundary").unwrap(), created_at:now, files: Vec::new(), skills: Vec::new()}).unwrap();
     let checkpoint = CompactionCheckpoint { boundary_message_id:boundary, provider_id:"openai".into(), model_id:"fixture".into(), window_json:r#"{"id":"window"}"#.into() };
     storage.save_compaction_checkpoint(session, &checkpoint).unwrap();
     assert_eq!(storage.compaction_checkpoint(session).unwrap(), Some(checkpoint.clone()));

@@ -250,6 +250,8 @@ impl SessionManager {
             role,
             body,
             created_at: opencode_rk_contracts::Timestamp::now(),
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         let mut conn = self.conn.lock().map_err(|_| SessionError::Poisoned)?;
         V2Writer::append_message(
@@ -279,6 +281,8 @@ impl SessionManager {
             role: MessageRole::Assistant,
             body,
             created_at: opencode_rk_contracts::Timestamp::now(),
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         let mut conn = self.conn.lock().map_err(|_| SessionError::Poisoned)?;
         V2Writer::append_message_with_reasoning(

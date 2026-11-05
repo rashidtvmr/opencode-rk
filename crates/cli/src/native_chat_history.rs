@@ -136,6 +136,8 @@ mod tests {
                 model: None,
                 assistant_facts: None,
                 message_id: None,
+                files: Vec::new(),
+                skills: Vec::new(),
             },
         );
         history.notice("note".into());
@@ -223,7 +225,7 @@ impl NativeChatHistory {
                 return;
             }
         }
-        self.append("reasoning".into(),ChatMessage{role:ChatRole::Assistant,parts:vec![ChatPart::Thinking(self.reasoning.clone())],agent:None,model:None,assistant_facts:None,message_id:None});
+        self.append("reasoning".into(),ChatMessage{role:ChatRole::Assistant,parts:vec![ChatPart::Thinking(self.reasoning.clone())],agent:None,model:None,assistant_facts:None,message_id:None,files:Vec::new(),skills:Vec::new()});
         self.reasoning_partial=Some((self.lines.len()-1,self.messages.len()-1));
     }
 

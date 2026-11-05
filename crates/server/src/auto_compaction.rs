@@ -521,6 +521,8 @@ mod background_tests {
             role: MessageRole::Assistant,
             body: opencode_rk_contracts::PayloadRef::inline("a".repeat(41)).unwrap(),
             created_at: Timestamp::now(),
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         let suffix = MessageRecord {
             id: MessageId::new(),
@@ -528,6 +530,8 @@ mod background_tests {
             role: MessageRole::User,
             body: opencode_rk_contracts::PayloadRef::inline("b".repeat(3)).unwrap(),
             created_at: Timestamp::now(),
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         let messages = vec![anchor, suffix];
         let tail_tokens = retained_tail_tokens(&messages, 0);
@@ -554,6 +558,8 @@ mod background_tests {
             role: MessageRole::Assistant,
             body: opencode_rk_contracts::PayloadRef::inline("a".repeat(37)).unwrap(),
             created_at: Timestamp::now(),
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         let suffix = MessageRecord {
             id: MessageId::new(),
@@ -561,6 +567,8 @@ mod background_tests {
             role: MessageRole::User,
             body: opencode_rk_contracts::PayloadRef::inline("b".repeat(3)).unwrap(),
             created_at: Timestamp::now(),
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         let messages = vec![anchor, suffix];
         let tail_tokens = retained_tail_tokens(&messages, 0);

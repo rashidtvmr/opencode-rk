@@ -57,9 +57,9 @@ pub use branch_v2::ForkProvenance;
 use chrono::{DateTime, Utc};
 use opencode_rk_contracts::{
     ArtifactDocument, ArtifactId, ArtifactKind, ArtifactSummary, AssistantActivity, AttachmentId,
-    DraftAttachment, MAX_REASONING_SUMMARY_BYTES, MAX_TITLE_BYTES, MessageExecution, MessageId,
-    MessageRecord, MessageRole, PayloadRef, SessionId, SessionRevert, SessionState,
-    SessionSummary, Timestamp,
+    DraftAttachment, MAX_REASONING_SUMMARY_BYTES, MAX_TITLE_BYTES, MessageExecution, MessageFile,
+    MessageId, MessageRecord, MessageRole, MessageSkill, PayloadRef, SessionId, SessionRevert,
+    SessionState, SessionSummary, Timestamp,
 };
 use opencode_rk_storage::{CatalogV2, NewMessage, NewSession, Storage, V2Writer};
 pub use opencode_rk_storage::StorageError;
@@ -292,6 +292,8 @@ fn decode_message_row(
         role: decode_role(role)?,
         body,
         created_at: decode_ts(created)?,
+        files: Vec::new(),
+        skills: Vec::new(),
     })
 }
 fn decode_inline(bytes: &[u8]) -> Result<PayloadRef, rusqlite::Error> {
@@ -664,8 +666,39 @@ impl SessionService {
         role: MessageRole,
         text: impl Into<String>,
     ) -> Result<MessageRecord, SessionError> {
+        self.append_with_chips(session_id, role, text, Vec::new(), Vec::new())
+            .await
+    }
+    /// MSG-005: append a user prompt together with its message-level chip
+    /// metadata (`Session.Message.User.files`/`.skills`,
+    /// `packages/schema/src/session-message.ts:76-84`). The chips are message
+    /// facts, never transcript parts, and carry no base64 payload. Ordinary
+    /// text appends delegate here with empty chip lists, so one durable path
+    /// owns prompt admission.
+    pub async fn append_user_prompt(
+        &self,
+        session_id: SessionId,
+        text: impl Into<String>,
+        files: Vec<MessageFile>,
+        skills: Vec<MessageSkill>,
+    ) -> Result<MessageRecord, SessionError> {
+        self.append_with_chips(session_id, MessageRole::User, text, files, skills)
+            .await
+    }
+    async fn append_with_chips(
+        &self,
+        session_id: SessionId,
+        role: MessageRole,
+        text: impl Into<String>,
+        files: Vec<MessageFile>,
+        skills: Vec<MessageSkill>,
+    ) -> Result<MessageRecord, SessionError> {
         let text = text.into();
         if let Some(manager) = self.fork_manager_for(session_id).await? {
+            // Format-2 fork children have no message-level chip columns
+            // (`crates/storage/schema/v2/workspace.sql:82-97`, `writer_v2.rs`
+            // `NewMessage`); the text survives, chips are not persisted on this
+            // path (recorded as blocked).
             return run_session_blocking(move || manager.append_fork_text(session_id, role, text))
                 .await;
         }
@@ -676,6 +709,8 @@ impl SessionService {
             role,
             body,
             created_at: Timestamp::now(),
+            files,
+            skills,
         };
         let storage = Arc::clone(&self.storage);
         let candidate = message.clone();
@@ -865,6 +900,8 @@ impl SessionService {
             role: MessageRole::Assistant,
             body,
             created_at: Timestamp::now(),
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         let storage = Arc::clone(&self.storage);
         let candidate = message.clone();
@@ -926,6 +963,8 @@ impl SessionService {
             role,
             body: PayloadRef::blob(hash, byte_len),
             created_at: Timestamp::now(),
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         let storage = Arc::clone(&self.storage);
         let candidate = message.clone();

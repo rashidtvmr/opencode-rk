@@ -262,6 +262,28 @@ impl PayloadRef {
     }
 }
 
+/// MSG-005: one attachment chip on a user card. Upstream `Prompt.FileAttachment`
+/// (`packages/schema/src/prompt.ts:33-38`) carries the name/mime the chip shows;
+/// the record keeps only that metadata plus an optional content hash. Base64/raw
+/// bytes are never persisted here or in the transcript wire.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct MessageFile {
+    pub name: String,
+    pub mime: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>,
+}
+
+/// MSG-005: one skill chip on a user card. Upstream `Prompt.SkillAttachment`
+/// (`packages/schema/src/prompt.ts:64-69`) resolves to `{ id, name }`
+/// (`packages/core/src/session/prompt.ts:57-72`); only those two facts ride the
+/// record.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct MessageSkill {
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MessageRecord {
     pub id: MessageId,
@@ -269,6 +291,14 @@ pub struct MessageRecord {
     pub role: MessageRole,
     pub body: PayloadRef,
     pub created_at: Timestamp,
+    /// MSG-005: message-level attachment chips (`Session.Message.User.files`,
+    /// `packages/schema/src/session-message.ts:76-84`). Chips are message
+    /// facts, not transcript parts. Empty for every non-user or chip-less row.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<MessageFile>,
+    /// MSG-005: message-level skill chips (`Session.Message.User.skills`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<MessageSkill>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

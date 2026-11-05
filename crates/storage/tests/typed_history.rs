@@ -176,6 +176,8 @@ fn append_message(
             role,
             body: PayloadRef::inline(text).expect("inline payload"),
             created_at: Timestamp::now(),
+            files: Vec::new(),
+            skills: Vec::new(),
         })
         .expect("append_message");
     id
@@ -445,6 +447,8 @@ fn legacy_rows_survive_migrated_reopen_byte_identical() {
                     role: MessageRole::Assistant,
                     body: PayloadRef::inline("legacy assistant").unwrap(),
                     created_at: Timestamp::now(),
+                    files: Vec::new(),
+                    skills: Vec::new(),
                 },
                 Some(reasoning),
             )

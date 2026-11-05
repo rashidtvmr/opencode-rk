@@ -893,6 +893,14 @@ pub struct ChatMessage {
     /// live/replayed messages whose producer knew no id; never fabricated
     /// positionally.
     pub message_id: Option<String>,
+    /// MSG-005: message-level file chips (`Session.Message.User.files`).
+    /// Upstream paints one `<span>` accent label + a muted name for each entry
+    /// (`packages/tui/src/routes/session/index.tsx:2453-2470`). Empty for every
+    /// non-user or chip-less message.
+    pub files: Vec<crate::native_message_rows::UserChip>,
+    /// MSG-005: message-level skill chips (`Session.Message.User.skills`,
+    /// `index.tsx:2432-2451`). Painted before the file row.
+    pub skills: Vec<crate::native_message_rows::UserChip>,
 }
 
 impl ChatMessage {
@@ -906,6 +914,8 @@ impl ChatMessage {
             model: None,
             assistant_facts: None,
             message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
         }
     }
 
@@ -1211,6 +1221,148 @@ fn boxed_message_rows(
     boxed_message_rows_spans(width, message, separator, appearance, &mut Vec::new(), &mut Vec::new())
 }
 
+/// MSG-005: chip rows painted under a user card. Skills render first, then
+/// files, matching upstream's two sibling `<Show>` blocks
+/// (`packages/tui/src/routes/session/index.tsx:2432-2472`). Each chip is an
+/// accent label ` " skill " | " dir " | " file " ` followed by a muted
+/// `" {name} "`, laid left-to-right with `gap={1}` and `flexWrap="wrap"` at the
+/// card's inner width; `paddingTop={1}` (when no image strip intervenes) is a
+/// blank card row before each block. Returns the rows plus their absolute
+/// `(row index, spans)` pairs so callers rebase them exactly like a text part.
+fn user_chip_rows(
+    inner: usize,
+    message: &ChatMessage,
+) -> (Vec<(String, ChatRowClass)>, Vec<(usize, Vec<ChatRunSpan>)>) {
+    let mut rows: Vec<(String, ChatRowClass)> = Vec::new();
+    let mut spans: Vec<(usize, Vec<ChatRunSpan>)> = Vec::new();
+    if inner == 0 {
+        return (rows, spans);
+    }
+    let layout = crate::native_message_rows::user_chip_layout();
+    for chips in [&message.skills, &message.files] {
+        if chips.is_empty() {
+            continue;
+        }
+        for _ in 0..layout.top_padding {
+            if rows.len() < MAX_MESSAGE_ROWS {
+                rows.push((String::new(), ChatRowClass::UserCard));
+            }
+        }
+        let mut row = String::new();
+        let mut row_spans: Vec<ChatRunSpan> = Vec::new();
+        let mut cells = 0usize;
+        for chip in chips {
+            let label = crate::native_message_rows::user_chip_label(chip.kind);
+            let accent = format!(" {label} ");
+            let name = format!(" {} ", chip.name);
+            let chip_cells = row_cells(&accent) + row_cells(&name);
+            let gap = usize::from(layout.gap);
+            // Whole-chip wrap: never split one chip across two rows, and never
+            // exceed the card's inner width.
+            if cells > 0 && cells + gap + chip_cells > inner {
+                if rows.len() >= MAX_MESSAGE_ROWS {
+                    break;
+                }
+                let offset = rows.len();
+                rows.push((std::mem::take(&mut row), ChatRowClass::UserCard));
+                if !row_spans.is_empty() {
+                    spans.push((offset, std::mem::take(&mut row_spans)));
+                }
+                cells = 0;
+            } else if cells > 0 {
+                row.push(' ');
+                cells += gap;
+            }
+            let start = cells;
+            row.push_str(&accent);
+            cells += row_cells(&accent);
+            row_spans.push(ChatRunSpan {
+                start: start.min(u16::MAX as usize) as u16,
+                end: start.saturating_add(row_cells(&accent)).min(u16::MAX as usize) as u16,
+                flags: crate::markdown_runs::CHIP_ACCENT,
+            });
+            let name_start = cells;
+            row.push_str(&name);
+            cells += row_cells(&name);
+            row_spans.push(ChatRunSpan {
+                start: name_start.min(u16::MAX as usize) as u16,
+                end: name_start.saturating_add(row_cells(&name)).min(u16::MAX as usize) as u16,
+                flags: crate::markdown_runs::CHIP_NAME,
+            });
+        }
+        if !row.is_empty() && rows.len() < MAX_MESSAGE_ROWS {
+            let offset = rows.len();
+            rows.push((row, ChatRowClass::UserCard));
+            if !row_spans.is_empty() {
+                spans.push((offset, row_spans));
+            }
+        }
+    }
+    (rows, spans)
+}
+
+/// MSG-005: plain-text fallback for the chip block when the message renders
+/// without a styled user surface. One row, one space-joined chip list, no
+/// accent/muted split (the plain path has no run spans).
+fn user_chip_fallback(message: &ChatMessage) -> Option<String> {
+    if message.files.is_empty() && message.skills.is_empty() {
+        return None;
+    }
+    let mut parts: Vec<String> = Vec::new();
+    for chip in &message.skills {
+        parts.push(format!(" {} {} ", crate::native_message_rows::user_chip_label(chip.kind), chip.name));
+    }
+    for chip in &message.files {
+        parts.push(format!(" {} {} ", crate::native_message_rows::user_chip_label(chip.kind), chip.name));
+    }
+    Some(parts.join(" "))
+}
+
+/// MSG-005: append a user card's styled chip rows to a card output, rebasing
+/// the chip spans exactly like a text part. `left` is the card's content inset
+/// (the rail plus padding) and `inner` the card's inner width; the caller has
+/// already prefixed each row with that inset, so the span rebase matches.
+fn append_user_chips(
+    output: &mut Vec<StyledChatRow>,
+    spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
+    inner: usize,
+    left: usize,
+    width: usize,
+    prefix: &str,
+    message: &ChatMessage,
+) {
+    if message.role != ChatRole::User {
+        return;
+    }
+    let (chip_rows, chip_spans) = user_chip_rows(inner, message);
+    if chip_rows.is_empty() {
+        return;
+    }
+    let base = output.len();
+    let mut taken = 0usize;
+    for (text, class) in chip_rows {
+        if output.len() >= MAX_MESSAGE_ROWS {
+            break;
+        }
+        output.push((
+            format!("{prefix}{text}"),
+            class,
+            Some((
+                left.min(u16::MAX as usize) as u16,
+                inner.min(u16::MAX as usize) as u16,
+            )),
+        ));
+        taken += 1;
+    }
+    rebase_part_spans(chip_spans, taken, base, left, inner, width, spans_out);
+}
+
+/// MSG-005: the plain-path chip row. The unstyled fallback has no run spans, so
+/// one space-joined row carries every chip under the user card class.
+fn user_chip_fallback_row(message: &ChatMessage) -> Option<StyledChatRow> {
+    user_chip_fallback(message).map(|text| (text, ChatRowClass::UserCard, None))
+}
+
 /// Preserve the boxed rows while carrying source-derived Markdown intervals.
 fn boxed_message_rows_spans(
     width: usize,
@@ -1267,13 +1419,20 @@ fn boxed_message_rows_spans_mode(
         let mut typed_children = Vec::new();
         let mut typed_tools = Vec::new();
         let typed = typed_message_rows_with_prefix_spans_mode(wrap.min(width), message, separator, None, &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view);
-        let rows: Vec<StyledChatRow> = typed
+        let mut rows: Vec<StyledChatRow> = typed
             .into_iter()
             .map(|(text, class)| (text, class, Some((0, width.min(u16::MAX as usize) as u16))))
             .collect();
         rebase_part_spans(typed_spans, rows.len(), 0, 0, usize::MAX, width, spans_out);
         rebase_part_children(typed_children, rows.len(), 0, child_out);
         rebase_part_tools(typed_tools, rows.len(), 0, tool_out);
+        // MSG-005: the unstyled fallback still carries the user card's chips,
+        // as one plain row (no accent/muted run spans on this path).
+        if rows.len() < MAX_MESSAGE_ROWS {
+            if let Some(chip_row) = user_chip_fallback_row(message) {
+                rows.push(chip_row);
+            }
+        }
         rows
     };
     // The pinned TUI has two different primitives, not a shared padded card:
@@ -1315,6 +1474,7 @@ fn boxed_message_rows_spans_mode(
         rebase_part_spans(typed_spans, taken, base, 3, inner, width, spans_out);
         rebase_part_children(typed_children, taken, base, child_out);
         rebase_part_tools(typed_tools, taken, base, tool_out);
+        append_user_chips(&mut output, spans_out, inner, 3, width, "┃  ", message);
         if user {
             output.push((padding, ChatRowClass::UserCard, None));
         }
@@ -1350,6 +1510,13 @@ fn boxed_message_rows_spans_mode(
         rebase_part_spans(typed_spans, taken, base, 1 + pad, inner, width, spans_out);
         rebase_part_children(typed_children, taken, base, child_out);
         rebase_part_tools(typed_tools, taken, base, tool_out);
+        // MSG-005: the drawn-frame path keeps the chips as one plain row inside
+        // the frame (no accent/muted run spans on this path).
+        if let Some((chip_text, chip_class, _)) = user_chip_fallback_row(message) {
+            if output.len() + 1 + pad < MAX_MESSAGE_ROWS {
+                output.push((frame.row(&chip_text), chip_class, Some(((1 + pad) as u16, inner as u16))));
+            }
+        }
         for _ in 0..pad { output.push((frame.blank(), ChatRowClass::Blank, None)); }
         output.push((frame.edge(true), ChatRowClass::Separator, None));
         return output;
@@ -1401,6 +1568,15 @@ fn boxed_message_rows_spans_mode(
         rebase_part_spans(typed_spans, taken, base, 1 + pad, inner, width, spans_out);
         rebase_part_children(typed_children, taken, base, child_out);
         rebase_part_tools(typed_tools, taken, base, tool_out);
+        append_user_chips(
+            &mut output,
+            spans_out,
+            inner,
+            1 + pad,
+            width,
+            &format!("{USER_RAIL}{}", " ".repeat(pad)),
+            message,
+        );
         for _ in 0..pad {
             output.push((rail_pad.clone(), ChatRowClass::Blank, None));
         }
@@ -1934,7 +2110,7 @@ fn push_code_wrapped(
 pub struct ChatRunSpan {
     pub start: u16,
     pub end: u16,
-    pub flags: u16,
+    pub flags: u32,
 }
 
 fn row_cells(text: &str) -> usize {
@@ -2212,7 +2388,7 @@ fn project_pairs(
             pair_at += 1;
         }
         if mapped != cluster_chars || mapped == 0 { return; }
-        let mut flags = 0u16;
+        let mut flags = 0u32;
         for run in runs.iter().take(crate::markdown_runs::MAX_RUNS_PER_ROW) {
             if run.start <= source_start && run.end >= source_end { flags |= run.flags; }
         }
@@ -2313,7 +2489,7 @@ fn flow_options(mode: crate::markdown_runs::MarkdownMode) -> crate::native_markd
 /// onto the transcript's style bits. Roles whose upstream styling is a color
 /// only (list markers, rules, quotes, strikethrough) carry no bit here; the
 /// paint layer owns those colors.
-fn flow_role_flags(role: crate::native_markdown_flow::MarkdownRole) -> u16 {
+fn flow_role_flags(role: crate::native_markdown_flow::MarkdownRole) -> u32 {
     use crate::markdown_runs::{
         BOLD, CODE, CODE_BLOCK, HEADING, HEADING1, ITALIC, LINK, LINK_TEXT, LIST, QUOTE, RULE,
         STRIKE,
@@ -2343,7 +2519,7 @@ struct FlowRowChunk {
     spans: Vec<ChatRunSpan>,
 }
 
-fn push_chunk_spans(spans: &mut Vec<ChatRunSpan>, start: usize, end: usize, flags: u16) {
+fn push_chunk_spans(spans: &mut Vec<ChatRunSpan>, start: usize, end: usize, flags: u32) {
     if start >= end || flags == 0 {
         return;
     }
@@ -2369,7 +2545,7 @@ fn push_chunk_spans(spans: &mut Vec<ChatRunSpan>, start: usize, end: usize, flag
 fn wrap_flow_row(row: &crate::native_markdown_flow::FlowRow, content_width: usize) -> Vec<FlowRowChunk> {
     use crate::native_markdown_flow::cells;
     let mut text = String::new();
-    let mut styled: Vec<(usize, usize, u16)> = Vec::new();
+    let mut styled: Vec<(usize, usize, u32)> = Vec::new();
     let mut cell = 0usize;
     for span in &row.spans {
         let start = cell;
@@ -2408,7 +2584,7 @@ fn wrap_flow_row(row: &crate::native_markdown_flow::FlowRow, content_width: usiz
     let mut row_start = 0usize;
     let mut spans: Vec<ChatRunSpan> = Vec::new();
     let mut retire = |chunks: &mut Vec<FlowRowChunk>, current: &mut String, used: &mut usize,
-                      row_start: &mut usize, spans: &mut Vec<ChatRunSpan>, styled: &[(usize, usize, u16)]| {
+                      row_start: &mut usize, spans: &mut Vec<ChatRunSpan>, styled: &[(usize, usize, u32)]| {
         for (start, end, flags) in styled {
             let start = (*start).max(*row_start);
             let end = (*end).min(*row_start + *used);
@@ -3307,7 +3483,7 @@ mod diff_wiring_v2_regressions {
     use super::*;
 
     fn patch_message(diff: String) -> ChatMessage {
-        ChatMessage { role: ChatRole::Assistant, parts: vec![ChatPart::Patch { path: "many.rs".into(), diff, diagnostics: Vec::new() }], agent: None, model: None, assistant_facts: None, message_id: None }
+        ChatMessage { role: ChatRole::Assistant, parts: vec![ChatPart::Patch { path: "many.rs".into(), diff, diagnostics: Vec::new() }], agent: None, model: None, assistant_facts: None, message_id: None, files: Vec::new(), skills: Vec::new()}
     }
 
     #[test]
@@ -3409,6 +3585,8 @@ mod diff_wiring_v2_regressions {
             model: None,
             assistant_facts: None,
             message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         let rows = typed_message_rows(100, &message("completed", true, false, Some((120, 30))), false);
         assert!(
@@ -3474,6 +3652,8 @@ mod diff_wiring_v2_regressions {
             model: None,
             assistant_facts: None,
             message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         let rows = typed_message_rows(100, &message, false);
         let diag = rows.iter().position(|(row, _)| row.contains("Error [2:3] boom")).expect("diagnostic row");
@@ -5607,6 +5787,8 @@ mod tests {
             model: None,
             assistant_facts: None,
             message_id: Some("m1".into()),
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         let mut menu = SessionMessageMenu::Actions(MessageActionMenu::new());
         if let SessionMessageMenu::Actions(actions) = &mut menu {
@@ -5705,6 +5887,61 @@ mod tests {
         );
         assert!(user_rows.iter().any(|(row, _, _)| row.contains("**literal** `code`")));
         assert!(user_spans.iter().flatten().all(|span| span.flags & (crate::markdown_runs::BOLD | crate::markdown_runs::CODE) == 0));
+    }
+
+    /// MSG-005: a user card with skill/file chips renders one accent label +
+    /// muted name per chip through the LIVE styled path, and the chip rows
+    /// carry the `CHIP_ACCENT`/`CHIP_NAME` run spans the painter consumes
+    /// (`routes/session/index.tsx:2432-2472`).
+    #[test]
+    fn msg005_user_card_renders_skill_and_file_chips_with_accent_and_muted_spans() {
+        use crate::native_message_rows::UserChip;
+        let mut message = ChatMessage::text(ChatRole::User, "look at these");
+        message.skills = vec![UserChip::skill("commit")];
+        message.files = vec![
+            UserChip::file("text/x-rust", "main.rs"),
+            UserChip::file("application/x-directory", "src"),
+        ];
+        let (rows, spans) = ChatView::new().render_styled_with_spans(
+            48,
+            16,
+            "ws",
+            &[message],
+            "",
+            false,
+            &crate::native_box_style::BoxAppearance::default(),
+        );
+        let chip_row = |label: &str, name: &str| {
+            rows.iter()
+                .position(|(row, _, _)| row.contains(label) && row.contains(name))
+                .unwrap_or_else(|| panic!("chip row {label} {name}: {:?}", rows.iter().map(|(r, _, _)| r.as_str()).collect::<Vec<_>>()))
+        };
+        let skill_row = chip_row("skill", "commit");
+        assert!(
+            spans[skill_row].iter().any(|span| span.flags & crate::markdown_runs::CHIP_ACCENT != 0),
+            "skill label carries the accent span"
+        );
+        assert!(
+            spans[skill_row].iter().any(|span| span.flags & crate::markdown_runs::CHIP_NAME != 0),
+            "skill name carries the muted span"
+        );
+        let file_row = chip_row("file", "main.rs");
+        assert!(spans[file_row].iter().any(|span| span.flags & crate::markdown_runs::CHIP_ACCENT != 0));
+        assert!(spans[file_row].iter().any(|span| span.flags & crate::markdown_runs::CHIP_NAME != 0));
+        let dir_row = chip_row("dir", "src");
+        assert!(spans[dir_row].iter().any(|span| span.flags & crate::markdown_runs::CHIP_ACCENT != 0));
+        // A chip-less user card renders no chip rows.
+        let (plain_rows, plain_spans) = ChatView::new().render_styled_with_spans(
+            48,
+            16,
+            "ws",
+            &[ChatMessage::text(ChatRole::User, "plain")],
+            "",
+            false,
+            &crate::native_box_style::BoxAppearance::default(),
+        );
+        assert!(plain_rows.iter().all(|(row, _, _)| !row.contains("skill") && !row.contains("file")));
+        assert!(plain_spans.iter().flatten().all(|span| span.flags & crate::markdown_runs::CHIP_MASK == 0));
     }
 
     #[test]
@@ -5987,6 +6224,8 @@ mod tests {
                 model: None,
                 assistant_facts: None,
                 message_id: None,
+                files: Vec::new(),
+                skills: Vec::new(),
             },
         ];
         let appearance = |radius: u8| {
@@ -6865,6 +7104,8 @@ mod tests {
             model: None,
             assistant_facts: None,
             message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         let rows = ChatView::new().render_typed_classified(48, 6, "ws", &[message], "", false);
         assert!(rows.iter().any(|(row, class)| {
@@ -6879,6 +7120,8 @@ mod tests {
             model: None,
             assistant_facts: None,
             message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         let rows =
             ChatView::new().render_typed_classified(48, 6, "ws", &[only_placeholder], "", false);
@@ -6973,6 +7216,8 @@ mod tests {
             model: None,
             assistant_facts: None,
             message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         let rows = ChatView::new().render_typed_classified(60, 8, "ws", &[message], "", false);
         assert!(rows.iter().any(|(row, class)| {
@@ -6996,6 +7241,8 @@ mod tests {
             model: None,
             assistant_facts: None,
             message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         let rows = ChatView::new().render_typed_classified(60, 6, "ws", &[message], "", false);
         assert!(rows.iter().any(|(row, class)| {
@@ -7015,6 +7262,8 @@ mod tests {
                 model: None,
                 assistant_facts: None,
                 message_id: None,
+                files: Vec::new(),
+                skills: Vec::new(),
             },
             ChatMessage {
                 role: ChatRole::Assistant,
@@ -7043,6 +7292,8 @@ mod tests {
                 model: Some("provider/model-1".to_owned()),
                 assistant_facts: None,
                 message_id: None,
+                files: Vec::new(),
+                skills: Vec::new(),
             },
         ];
         let rows = view.render_typed_classified(72, 20, "ws", &messages, "", false);
@@ -7119,6 +7370,8 @@ mod tests {
             model: None,
             assistant_facts: None,
             message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
         }];
         let width = 60usize;
         let rows = view.render_typed_classified(width, 24, "ws", &messages, "", false);
@@ -7188,6 +7441,8 @@ mod tests {
             model: None,
             assistant_facts: None,
             message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
         }];
         let rows = view.render_typed_classified(80, 20, "ws", &messages, "", false);
         // Read: label + the metadata-driven `↳ Loaded` row.
@@ -7232,6 +7487,8 @@ mod tests {
             model: None,
             assistant_facts: None,
             message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
         }];
         let rows = view.render_typed_classified(50, MAX_VIEW_ROWS, "ws", &messages, "", false);
         assert!(rows.len() <= MAX_VIEW_ROWS, "frame row cap");
@@ -8929,6 +9186,8 @@ mod tool011_tests {
             model: None,
             assistant_facts: None,
             message_id: Some("m1".to_owned()),
+            files: Vec::new(),
+            skills: Vec::new(),
         }
     }
 

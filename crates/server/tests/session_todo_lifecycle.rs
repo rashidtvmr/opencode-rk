@@ -93,6 +93,8 @@ async fn append_todowrite(
                     role: MessageRole::Tool,
                     body: PayloadRef::inline("[todowrite] pending").unwrap(),
                     created_at: Timestamp::now(),
+                    files: Vec::new(),
+                    skills: Vec::new(),
                 },
             }],
         )

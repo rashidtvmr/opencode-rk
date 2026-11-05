@@ -18,7 +18,7 @@ async fn retry_guard_sees_admissions_after_display_history_first_page() {
     let turn = sessions.append_text(session.id,MessageRole::User,"later turn").await.unwrap();
     let round = ToolRound { round_id:"later-round".into(),session_id:session.id,turn_message_id:turn.id,round_ordinal:0,expected_pairs:1 };
     sessions.admit_tool_round(round,vec![ToolCallAdmission { call_id:"later-call".into(),name:"read".into(),arguments:"{\"path\":\"probe.txt\"}".into(),
-        message:MessageRecord { id:MessageId::new(),session_id:session.id,role:MessageRole::Tool,body:PayloadRef::inline("pending").unwrap(),created_at:Timestamp::now() } }]).await.unwrap();
+        message:MessageRecord { id:MessageId::new(),session_id:session.id,role:MessageRole::Tool,body:PayloadRef::inline("pending").unwrap(),created_at:Timestamp::now(), files: Vec::new(), skills: Vec::new()} }]).await.unwrap();
     assert!(sessions.display_tool_history(session.id,1).await.unwrap().is_empty(),"display pagination must not be used as a replay authority");
     assert!(sessions.has_tool_admissions(session.id).await.unwrap(),"pending later-turn admissions must forbid blind retry");
 }

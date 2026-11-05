@@ -1938,6 +1938,30 @@ pub enum UserChipKind {
     Directory,
 }
 
+/// MSG-005: one user-card chip (accent label + muted name). Upstream paints
+/// `" skill " | " dir " | " file "` in the accent bucket and `" {name} "` in
+/// the muted/raised surface (`packages/tui/src/routes/session/index.tsx:2432-2472`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UserChip {
+    pub kind: UserChipKind,
+    pub name: String,
+}
+
+impl UserChip {
+    /// Build a skill chip (`index.tsx:2438`).
+    #[must_use]
+    pub fn skill(name: impl Into<String>) -> Self {
+        Self { kind: UserChipKind::Skill, name: name.into() }
+    }
+
+    /// Build a file/directory chip; the mime alone selects the label
+    /// (`index.tsx:2457`).
+    #[must_use]
+    pub fn file(mime: &str, name: impl Into<String>) -> Self {
+        Self { kind: user_file_chip_kind(mime), name: name.into() }
+    }
+}
+
 #[must_use]
 pub fn user_file_chip_kind(mime: &str) -> UserChipKind {
     if mime == "application/x-directory" {

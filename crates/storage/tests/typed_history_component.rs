@@ -40,6 +40,8 @@ fn message(session_id: SessionId, role: MessageRole, text: &str) -> MessageRecor
         role,
         body: PayloadRef::inline(text).unwrap(),
         created_at: Timestamp::now(),
+        files: Vec::new(),
+        skills: Vec::new(),
     }
 }
 

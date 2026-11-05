@@ -110,7 +110,7 @@ use opencode_rk_agents::agent_executor::AgentExecutor;
 use opencode_rk_catalog::{Catalog, CatalogQuery};
 use opencode_rk_contracts::{
     ArtifactId, ArtifactKind, AttachmentId, FileDiffInfo, FileDiffStatus,
-    MAX_DRAFT_ATTACHMENT_BYTES, MessageId, MessageRecord,
+    MAX_DRAFT_ATTACHMENT_BYTES, MessageFile, MessageId, MessageRecord, MessageSkill,
     MessageRole, PayloadRef, SessionId, SessionRevert, Timestamp, WIRE_SCHEMA_VERSION,
 };
 use opencode_rk_providers::custom_provider::{self, CustomProviderConfig};
@@ -1002,6 +1002,8 @@ async fn native_shell_stream(
                     role: MessageRole::Tool,
                     body: PayloadRef::inline("[bash] pending").map_err(ApiFailure::internal)?,
                     created_at: Timestamp::now(),
+                    files: Vec::new(),
+                    skills: Vec::new(),
                 },
             }],
         )
@@ -1953,6 +1955,15 @@ async fn get_fork_provenance(
     }))})))
 }
 
+/// MSG-005: one skill chip reference on a create-turn request. Upstream
+/// `Prompt.SkillAttachment` (`packages/schema/src/prompt.ts:62-69`) carries
+/// `{id, name}`; only those two facts ride the record.
+#[derive(Clone, Debug, Deserialize)]
+struct CreateTurnSkill {
+    id: String,
+    name: String,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 struct CreateTurnBody {
     text: String,
@@ -1960,12 +1971,66 @@ struct CreateTurnBody {
     #[serde(default)]
     reasoning_effort: String,
     workdir: Option<String>,
+    /// MSG-005: draft-attachment ids staged in the composer, resolved to
+    /// message-level file chips (`Session.Message.User.files`). An unknown id
+    /// is a client error, never a fabricated chip.
+    #[serde(default)]
+    files: Vec<String>,
+    /// MSG-005: skill chips (`Session.Message.User.skills`).
+    #[serde(default)]
+    skills: Vec<CreateTurnSkill>,
     #[serde(skip)]
     agent_prompt: Option<String>,
     #[serde(skip)]
     read_only: bool,
     #[serde(skip)]
     replay_requires_no_tools: bool,
+}
+
+/// MSG-005: resolve a create-turn request's chip references into the
+/// message-level chips stored with the user prompt. File ids must name a
+/// durable draft attachment on this session (`draft_attachments`); skills are
+/// deduped by id (`packages/core/src/session/prompt.ts`). An unknown attachment
+/// id is a client error, never a fabricated chip.
+async fn resolve_turn_chips(
+    state: &AppState,
+    id: SessionId,
+    body: &CreateTurnBody,
+) -> Result<(Vec<MessageFile>, Vec<MessageSkill>), ApiFailure> {
+    let mut files: Vec<MessageFile> = Vec::new();
+    if !body.files.is_empty() {
+        let attachments = state
+            .sessions
+            .draft_attachments(id)
+            .await
+            .map_err(ApiFailure::internal)?;
+        for raw in &body.files {
+            let attachment_id = parse_attachment_id(raw)?;
+            let attachment = attachments
+                .iter()
+                .find(|attachment| attachment.id == attachment_id)
+                .ok_or_else(|| ApiFailure::bad_request("unknown attachment id"))?;
+            files.push(MessageFile {
+                name: attachment.name.clone(),
+                mime: attachment.mime.clone(),
+                hash: Some(attachment.hash.clone()),
+            });
+        }
+    }
+    let mut skills: Vec<MessageSkill> = Vec::new();
+    for skill in &body.skills {
+        if skill.id.is_empty() || skill.name.is_empty() {
+            continue;
+        }
+        if skills.iter().any(|existing| existing.id == skill.id) {
+            continue;
+        }
+        skills.push(MessageSkill {
+            id: skill.id.clone(),
+            name: skill.name.clone(),
+        });
+    }
+    Ok((files, skills))
 }
 
 fn background_request_context(body: &CreateTurnBody) -> auto_compaction::BackgroundRequestContext { auto_compaction::request_context(body.agent_prompt.as_deref(), &body.reasoning_effort) }
@@ -2240,7 +2305,8 @@ async fn run_configured_command(
         || builtin_agents::resolve(agent_name).is_some_and(|role| role.read_only);
     let agent_prompt = Some(format!("Agent: {agent_name}\n{prompt}"));
     create_turn_stream(State(state), Path(raw_id), Extension(events), Extension(children), Json(CreateTurnBody {
-        text, model, reasoning_effort, workdir: None, agent_prompt, read_only, replay_requires_no_tools:false,
+        text, model, reasoning_effort, workdir: None, files: Vec::new(), skills: Vec::new(),
+        agent_prompt, read_only, replay_requires_no_tools:false,
     })).await
 }
 
@@ -2539,9 +2605,10 @@ async fn create_turn(
     let provider = responses_client(provider_id).await.map_err(provider_failure)?;
     let request_context = auto_compaction::request_context(None, &body.reasoning_effort);
     auto_compaction::before_user_append(&state.sessions, &provider, &owner, id, provider_id, model_id, &request_context, &body.text).await?;
+    let (turn_files, turn_skills) = resolve_turn_chips(&state, id, &body).await?;
     let user_message = state
         .sessions
-        .append_text(id, MessageRole::User, body.text)
+        .append_user_prompt(id, body.text, turn_files, turn_skills)
         .await
         .map_err(ApiFailure::internal)?;
     // Durable user append -> publish persisted identity (shared id allocated
@@ -3066,7 +3133,8 @@ pub(crate) fn create_turn_stream_with_message(
         }
         message
     } else {
-        let message = state.sessions.append_text(id, MessageRole::User, body.text).await.map_err(ApiFailure::internal)?;
+        let (turn_files, turn_skills) = resolve_turn_chips(&state, id, &body).await?;
+        let message = state.sessions.append_user_prompt(id, body.text, turn_files, turn_skills).await.map_err(ApiFailure::internal)?;
         let _ = events.publish(event_bus::ServerEvent::MessageStored { session: id, message_id: message.id });
         message
     };
@@ -3439,6 +3507,8 @@ pub(crate) fn create_turn_stream_with_message(
                                         role: MessageRole::Tool,
                                         body,
                                         created_at: Timestamp::now(),
+                                        files: Vec::new(),
+                                        skills: Vec::new(),
                                     },
                                 })
                             })

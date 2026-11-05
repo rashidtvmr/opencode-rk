@@ -39,36 +39,44 @@ pub enum RunKind {
     Link,
 }
 
-pub const BOLD: u16 = 1;
-pub const ITALIC: u16 = 2;
-pub const CODE: u16 = 4;
-pub const LINK: u16 = 8;
+pub const BOLD: u32 = 1;
+pub const ITALIC: u32 = 2;
+pub const CODE: u32 = 4;
+pub const LINK: u32 = 8;
 /// Inline raw code receives upstream base background; fenced/block code does not.
-pub const CODE_BLOCK: u16 = 16;
+pub const CODE_BLOCK: u32 = 16;
 // Color-only roles (`generateSyntax`, `packages/theme/src/tui/syntax.ts:46-71`)
 // need their own bits because the painter owns the token color, not the text.
 /// `markup.heading.*` (heading color; `HEADING1` also underlines).
-pub const HEADING: u16 = 32;
-pub const HEADING1: u16 = 64;
+pub const HEADING: u32 = 32;
+pub const HEADING1: u32 = 64;
 /// `markup.link.label` (linkText color, distinct from the link itself).
-pub const LINK_TEXT: u16 = 128;
+pub const LINK_TEXT: u32 = 128;
 /// `markup.quote` (blockQuote color, italic).
-pub const QUOTE: u16 = 256;
+pub const QUOTE: u32 = 256;
 /// `markup.list` (listItem color for the marker).
-pub const LIST: u16 = 512;
+pub const LIST: u32 = 512;
 /// Rule/table glyphs (horizontalRule color).
-pub const RULE: u16 = 1024;
+pub const RULE: u32 = 1024;
 /// `markup.strikethrough` (muted color).
-pub const STRIKE: u16 = 2048;
+pub const STRIKE: u32 = 2048;
 /// Bounded lexical fallback token classes for fenced code. Upstream colors
 /// code through tree-sitter scopes (`generateSyntax`,
 /// `packages/theme/src/tui/syntax.ts`); the native painter keeps a closed
 /// keyword/string/number/comment heuristic instead and never invents scopes.
-pub const SYN_COMMENT: u16 = 4096;
-pub const SYN_KEYWORD: u16 = 8192;
-pub const SYN_STRING: u16 = 16384;
-pub const SYN_NUMBER: u16 = 32768;
-pub const SYN_MASK: u16 = SYN_COMMENT | SYN_KEYWORD | SYN_STRING | SYN_NUMBER;
+pub const SYN_COMMENT: u32 = 4096;
+pub const SYN_KEYWORD: u32 = 8192;
+pub const SYN_STRING: u32 = 16384;
+pub const SYN_NUMBER: u32 = 32768;
+pub const SYN_MASK: u32 = SYN_COMMENT | SYN_KEYWORD | SYN_STRING | SYN_NUMBER;
+/// MSG-005: the accent-filled label box of a user message chip
+/// (`component/prompt/index.tsx` skill/file chips). Painted with the accent
+/// background and the panel foreground.
+pub const CHIP_ACCENT: u32 = 1 << 16;
+/// MSG-005: the muted chip name following the label box.
+pub const CHIP_NAME: u32 = 1 << 17;
+/// MSG-005: every chip run flag.
+pub const CHIP_MASK: u32 = CHIP_ACCENT | CHIP_NAME;
 
 /// Closed keyword set for the lexical fallback. Matched case-sensitively on
 /// whole identifier words; anything outside stays plain code color.
@@ -85,7 +93,7 @@ const CODE_KEYWORDS: &[&str] = &[
 /// stay plain code. Escapes inside strings are consumed so a quote never ends
 /// a string it belongs to.
 #[must_use]
-pub fn code_token_spans(text: &str) -> Vec<(usize, usize, u16)> {
+pub fn code_token_spans(text: &str) -> Vec<(usize, usize, u32)> {
     let bytes = text.as_bytes();
     let mut out = Vec::new();
     let mut at = 0usize;
@@ -154,7 +162,7 @@ pub fn code_token_spans(text: &str) -> Vec<(usize, usize, u16)> {
 /// line, so wrapped code chunks can paint token color without splitting a
 /// cluster.
 #[must_use]
-pub fn code_token_cell_spans(text: &str) -> Vec<(usize, usize, u16)> {
+pub fn code_token_cell_spans(text: &str) -> Vec<(usize, usize, u32)> {
     code_token_spans(text)
         .into_iter()
         .map(|(start, end, flags)| {
@@ -179,7 +187,7 @@ pub struct MarkdownRun {
     /// even when [`Self::url`] is `None`.
     pub url_span: Option<(usize, usize)>,
     /// Combined OpenTUI TextAttributes-compatible flags.
-    pub flags: u16,
+    pub flags: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -507,7 +515,7 @@ fn scan_inline(
     text: &str,
     start: usize,
     end: usize,
-    parent: u16,
+    parent: u32,
     bounds: &[usize],
     out: &mut Vec<MarkdownRun>,
 ) {
@@ -596,7 +604,7 @@ fn push_run(
     start: usize,
     end: usize,
     kind: RunKind,
-    flags: u16,
+    flags: u32,
     url: Option<String>,
     url_span: Option<(usize, usize)>,
     bounds: &[usize],

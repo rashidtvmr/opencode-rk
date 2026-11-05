@@ -16,7 +16,7 @@ fn session(storage: &Storage) -> SessionId {
 }
 
 fn message(storage: &Storage, session_id: SessionId, role: MessageRole, text: &str) -> MessageRecord {
-    let message = MessageRecord { id:MessageId::new(), session_id, role, body:PayloadRef::inline(text).unwrap(), created_at:durable_now() };
+    let message = MessageRecord { id:MessageId::new(), session_id, role, body:PayloadRef::inline(text).unwrap(), created_at:durable_now(), files: Vec::new(), skills: Vec::new() };
     storage.append_message(&message).unwrap();
     message
 }
@@ -26,7 +26,7 @@ fn pair(storage: &Storage, session_id: SessionId, turn: MessageId, round: &str, 
     storage.append_tool_pair(&round, 0, &ToolPair {
         call_id:call.into(), name:"fixture.tool".into(), input:PayloadRef::inline("{}").unwrap(),
         output:PayloadRef::inline("tail result").unwrap(),
-        message:MessageRecord { id:MessageId::new(), session_id, role:MessageRole::Tool, body:PayloadRef::inline("tool display").unwrap(), created_at:Timestamp::now() },
+        message:MessageRecord { id:MessageId::new(), session_id, role:MessageRole::Tool, body:PayloadRef::inline("tool display").unwrap(), created_at:Timestamp::now(), files: Vec::new(), skills: Vec::new()},
     }).unwrap();
 }
 

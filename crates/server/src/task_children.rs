@@ -596,6 +596,9 @@ async fn generation(state: AppState, children: Children, events: event_bus::Even
     let generation = child.generation.load(Ordering::Acquire).max(1);
     let body = CreateTurnBody {
         text:prompt, model:child.model.clone(), reasoning_effort:"high".into(), workdir:Some(child.workdir.clone()),
+        // MSG-005: child sessions are format-2 forks whose transcript has no
+        // message-level chip columns, so a child turn carries no chips.
+        files:Vec::new(), skills:Vec::new(),
         agent_prompt:Some(child.agent_prompt.clone()), read_only:child.read_only,
         replay_requires_no_tools:replay,
     };

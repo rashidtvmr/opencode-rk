@@ -33,7 +33,8 @@ use opencode_rk_contracts::{
     MAX_ARTIFACT_VERSIONS, MAX_ARTIFACTS_PER_SESSION, MAX_ATTACHMENT_MIME_BYTES,
     MAX_ATTACHMENT_NAME_BYTES, MAX_DRAFT_ATTACHMENT_BYTES, MAX_DRAFT_ATTACHMENTS,
     MAX_INLINE_PAYLOAD_BYTES, MAX_REASONING_SUMMARY_BYTES, MAX_TITLE_BYTES, MessageExecution,
-    MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, SessionRevert, SessionState,
+    MessageFile, MessageId, MessageRecord, MessageRole, MessageSkill, PayloadRef, SessionId,
+    SessionRevert, SessionState,
     SessionSummary, Timestamp,
 };
 pub use quota_v2::QuotaV2;
@@ -837,6 +838,8 @@ impl Storage {
                 role,
                 body,
                 created_at: parse_timestamp(created)?,
+                files: Vec::new(),
+                skills: Vec::new(),
             }));
         }
         drop(messages);
@@ -1123,7 +1126,9 @@ impl Storage {
         }
         let mut connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute("INSERT INTO messages (id,session_id,role,inline_text,blob_hash,byte_len,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7)",params![message.id.to_string(),message.session_id.to_string(),encode_role(message.role),inline_text,blob_hash,byte_len as i64,message.created_at.to_string()])?;
+        let files_json = encode_chips_json(&message.files)?;
+        let skills_json = encode_chips_json(&message.skills)?;
+        tx.execute("INSERT INTO messages (id,session_id,role,inline_text,blob_hash,byte_len,created_at,files_json,skills_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",params![message.id.to_string(),message.session_id.to_string(),encode_role(message.role),inline_text,blob_hash,byte_len as i64,message.created_at.to_string(),files_json,skills_json])?;
         if let Some(summary) = reasoning_summary.filter(|summary| !summary.is_empty()) {
             tx.execute(
                 "INSERT INTO message_activity (message_id,reasoning_summary) VALUES (?1,?2)",
@@ -1363,7 +1368,7 @@ impl Storage {
         let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
         connection
             .query_row(
-                "SELECT id,session_id,role,inline_text,blob_hash,byte_len,created_at
+                "SELECT id,session_id,role,inline_text,blob_hash,byte_len,created_at,files_json,skills_json
                  FROM messages WHERE session_id=?1 AND id=?2",
                 params![session_id.to_string(), message_id.to_string()],
                 decode_message,
@@ -1540,7 +1545,7 @@ impl Storage {
     ) -> Result<Vec<MessageRecord>, StorageError> {
         let limit = limit.clamp(1, 1_000) as i64;
         let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
-        let mut statement=connection.prepare("SELECT id,session_id,role,inline_text,blob_hash,byte_len,created_at FROM messages WHERE session_id=?1 ORDER BY rowid ASC LIMIT ?2")?;
+        let mut statement=connection.prepare("SELECT id,session_id,role,inline_text,blob_hash,byte_len,created_at,files_json,skills_json FROM messages WHERE session_id=?1 ORDER BY rowid ASC LIMIT ?2")?;
         let rows = statement.query_map(params![session_id.to_string(), limit], decode_message)?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StorageError::from)
@@ -1566,7 +1571,7 @@ impl Storage {
             None => i64::MAX,
         };
         let mut statement = connection.prepare(
-            "SELECT id,session_id,role,inline_text,blob_hash,byte_len,created_at
+            "SELECT id,session_id,role,inline_text,blob_hash,byte_len,created_at,files_json,skills_json
              FROM messages WHERE session_id=?1 AND rowid<?2
              ORDER BY rowid DESC LIMIT ?3",
         )?;
@@ -1670,7 +1675,7 @@ impl Storage {
             payload TEXT NOT NULL CHECK(length(CAST(payload AS BLOB)) BETWEEN 1 AND 8192),
             PRIMARY KEY(session_id,ordinal)
         );")?;
-        connection.execute_batch("CREATE TABLE IF NOT EXISTS schema_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,title TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('active','archived')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,archived_at TEXT,revert TEXT,viewed_at TEXT,idle_at TEXT); CREATE INDEX IF NOT EXISTS sessions_updated_idx ON sessions(updated_at DESC); CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,role TEXT NOT NULL,inline_text TEXT,blob_hash TEXT,byte_len INTEGER NOT NULL CHECK(byte_len>=0),created_at TEXT NOT NULL,CHECK((inline_text IS NULL)!=(blob_hash IS NULL))); CREATE INDEX IF NOT EXISTS messages_session_idx ON messages(session_id,created_at,id); CREATE TABLE IF NOT EXISTS message_activity(message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,reasoning_summary TEXT NOT NULL CHECK(length(CAST(reasoning_summary AS BLOB))<=8192)); CREATE TABLE IF NOT EXISTS recent_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,kind TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS recent_events_session_idx ON recent_events(session_id,seq); INSERT INTO schema_meta(key,value) VALUES('schema_version','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value;")?;
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS schema_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,title TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('active','archived')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,archived_at TEXT,revert TEXT,viewed_at TEXT,idle_at TEXT); CREATE INDEX IF NOT EXISTS sessions_updated_idx ON sessions(updated_at DESC); CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,role TEXT NOT NULL,inline_text TEXT,blob_hash TEXT,byte_len INTEGER NOT NULL CHECK(byte_len>=0),created_at TEXT NOT NULL,files_json TEXT,skills_json TEXT,CHECK((inline_text IS NULL)!=(blob_hash IS NULL))); CREATE INDEX IF NOT EXISTS messages_session_idx ON messages(session_id,created_at,id); CREATE TABLE IF NOT EXISTS message_activity(message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,reasoning_summary TEXT NOT NULL CHECK(length(CAST(reasoning_summary AS BLOB))<=8192)); CREATE TABLE IF NOT EXISTS recent_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,kind TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS recent_events_session_idx ON recent_events(session_id,seq); INSERT INTO schema_meta(key,value) VALUES('schema_version','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value;")?;
         // SIDE-10 revert fact seam (upstream `projector.ts:761-781` keeps the
         // staged revert on the session row): databases created before this
         // column existed gain it idempotently; fresh databases get it above.
@@ -1703,6 +1708,27 @@ impl Storage {
         )?;
         if has_idle_column == 0 {
             connection.execute_batch("ALTER TABLE sessions ADD COLUMN idle_at TEXT;")?;
+        }
+        // MSG-005 user-card chip seam (upstream `Session.Message.User.files`/
+        // `.skills`, `session-message.ts:76-84`): databases created before the
+        // chip columns existed gain them idempotently; fresh databases get them
+        // in the CREATE above. Both are bounded JSON arrays of name/mime (files)
+        // and id/name (skills); no base64 payload is ever stored here.
+        let has_files_column: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name='files_json'",
+            [],
+            |row| row.get(0),
+        )?;
+        if has_files_column == 0 {
+            connection.execute_batch("ALTER TABLE messages ADD COLUMN files_json TEXT;")?;
+        }
+        let has_skills_column: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name='skills_json'",
+            [],
+            |row| row.get(0),
+        )?;
+        if has_skills_column == 0 {
+            connection.execute_batch("ALTER TABLE messages ADD COLUMN skills_json TEXT;")?;
         }
         connection.execute_batch(
             "CREATE TABLE IF NOT EXISTS draft_attachments(
@@ -2194,6 +2220,29 @@ fn encode_revert(revert: Option<&SessionRevert>) -> Result<Option<String>, Stora
         .transpose()
         .map_err(|_| StorageError::Sqlite(rusqlite::Error::InvalidQuery))
 }
+/// MSG-005: serialize user-card chip metadata to the bounded JSON column.
+/// An empty list stores SQL NULL (the chip-less default); only name/mime and
+/// id/name metadata is written, never base64 payload bytes.
+fn encode_chips_json<T: serde::Serialize>(chips: &[T]) -> Result<Option<String>, StorageError> {
+    if chips.is_empty() {
+        return Ok(None);
+    }
+    serde_json::to_string(chips)
+        .map(Some)
+        .map_err(|_| StorageError::Sqlite(rusqlite::Error::InvalidQuery))
+}
+/// MSG-005: decode a chip JSON column back to the typed list. A NULL or empty
+/// column is the chip-less default; malformed JSON is a durable-corruption
+/// error rather than a silent empty list.
+fn decode_chips_json<T: serde::de::DeserializeOwned>(
+    json: Option<String>,
+) -> Result<Vec<T>, rusqlite::Error> {
+    match json {
+        None => Ok(Vec::new()),
+        Some(text) if text.is_empty() => Ok(Vec::new()),
+        Some(text) => serde_json::from_str(&text).map_err(|_| rusqlite::Error::InvalidQuery),
+    }
+}
 fn decode_session(row: &rusqlite::Row<'_>) -> Result<SessionSummary, rusqlite::Error> {
     let archived: Option<String> = row.get(5)?;
     let revert_json: Option<String> = row.get(6)?;
@@ -2234,6 +2283,8 @@ fn decode_message(row: &rusqlite::Row<'_>) -> Result<MessageRecord, rusqlite::Er
         role: decode_role(&row.get::<_, String>(2)?)?,
         body,
         created_at: parse_timestamp(row.get(6)?)?,
+        files: decode_chips_json(row.get(7)?)?,
+        skills: decode_chips_json(row.get(8)?)?,
     })
 }
 #[cfg(test)]
@@ -2294,6 +2345,8 @@ mod tests {
                 text: text.to_owned(),
             },
             created_at: now(),
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         storage
             .append_message(&record(MessageRole::User, "hello"))
@@ -2411,6 +2464,8 @@ mod tests {
                 text: "x".repeat(MAX_INLINE_PAYLOAD_BYTES + 1),
             },
             created_at: Timestamp::now(),
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         assert!(matches!(
             storage.append_message(&message),
@@ -2457,6 +2512,8 @@ mod tests {
             role: MessageRole::User,
             body: PayloadRef::inline("do work").unwrap(),
             created_at: Timestamp::now(),
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         storage.append_message(&user).unwrap();
         let store_todowrite = |ordinal: u32, arguments: &str, session: &SessionSummary| {
@@ -2473,6 +2530,8 @@ mod tests {
                 role: MessageRole::Tool,
                 body: PayloadRef::inline("[todowrite] pending").unwrap(),
                 created_at: Timestamp::now(),
+                files: Vec::new(),
+                skills: Vec::new(),
             };
             storage
                 .admit_tool_round(

@@ -39,6 +39,8 @@ fn message(session_id: SessionId, role: MessageRole, body: PayloadRef) -> Messag
         role,
         body,
         created_at: Timestamp::now(),
+        files: Vec::new(),
+        skills: Vec::new(),
     }
 }
 

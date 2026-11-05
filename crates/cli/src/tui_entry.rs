@@ -2088,6 +2088,8 @@ mod footer_gate_tests {
                 args: String::new(), output: String::new(), is_error: false, metadata: String::new(),
             }],
             agent: None, model: None, assistant_facts: None, message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         // Reloaded history projects the call and its result instead of a
         // `ToolState`, and a finished turn leaves only those.
@@ -2098,6 +2100,8 @@ mod footer_gate_tests {
                 ChatPart::ToolResult { name: name.into(), output: "{}".into(), is_error: false },
             ],
             agent: None, model: None, assistant_facts: None, message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         let subtask = ChatMessage {
             role: ChatRole::Assistant,
@@ -2106,6 +2110,8 @@ mod footer_gate_tests {
                 session_id: "child-1".into(),
             }],
             agent: None, model: None, assistant_facts: None, message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         assert!(!transcript_has_delegation(&[]));
         assert!(!transcript_has_delegation(&[ChatMessage::text(ChatRole::User, "hello")]));
@@ -2141,6 +2147,8 @@ mod footer_gate_tests {
                 args: String::new(), output: String::new(), is_error: false, metadata: String::new(),
             }],
             agent: None, model: None, assistant_facts: None, message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
         }];
         assert!(should_poll_children(0, 0, &live));
     }
@@ -3313,7 +3321,7 @@ mod surface_paint_regressions {
             .position(|line| line.contains("let count"))
             .expect("fenced row painted");
         let row = &lines[code_row];
-        let has = |needle: &str, bit: u16| {
+        let has = |needle: &str, bit: u32| {
             let at = row.find(needle).expect("needle painted");
             spans[code_row].iter().any(|span| {
                 span.flags & bit != 0
@@ -4157,6 +4165,8 @@ mod footer_v3_painter_tests {
             model: None,
             assistant_facts: None,
             message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
         };
         let messages = vec![message];
         let mut view = ChatView::default();
@@ -5293,16 +5303,17 @@ fn modal_row_fg(line: &str, heading: bool, palette: crate::native_theme_runtime:
     }
 }
 
-fn run_attributes(flags: u16) -> u32 {
+fn run_attributes(flags: u32) -> u32 {
     use crate::markdown_runs::{
-        BOLD, HEADING, HEADING1, ITALIC, LINK, LINK_TEXT, QUOTE,
+        BOLD, CHIP_ACCENT, HEADING, HEADING1, ITALIC, LINK, LINK_TEXT, QUOTE,
     };
     // Pinned OpenTUI attributes: BOLD=1, ITALIC=4, UNDERLINE=8, matching
     // `generateSyntax` (`packages/theme/src/tui/syntax.ts:46-71`): headings and
     // strong are bold, headings of level 1 underline, emphasis and quotes are
-    // italic, and links underline.
+    // italic, and links underline. MSG-005 chip labels are bold
+    // (`routes/session/index.tsx:2436-2441`).
     let mut attributes = 0;
-    if flags & (BOLD | HEADING | HEADING1) != 0 { attributes |= 1; }
+    if flags & (BOLD | HEADING | HEADING1 | CHIP_ACCENT) != 0 { attributes |= 1; }
     if flags & (ITALIC | QUOTE) != 0 { attributes |= 4; }
     if flags & (LINK | LINK_TEXT | HEADING1) != 0 { attributes |= 8; }
     attributes
@@ -5315,7 +5326,7 @@ fn run_attributes(flags: u16) -> u32 {
 fn markdown_run_color<'a>(
     markdown: &'a crate::native_theme_runtime::MarkdownPalette,
     syntax: Option<&'a crate::native_theme_runtime::SyntaxPalette>,
-    flags: u16,
+    flags: u32,
 ) -> Option<&'a crate::native_theme_runtime::HueColor> {
     use crate::markdown_runs::{
         BOLD, CODE, HEADING, HEADING1, ITALIC, LINK, LINK_TEXT, LIST, QUOTE, RULE, STRIKE,
@@ -5368,7 +5379,7 @@ fn markdown_run_color<'a>(
 /// (`packages/theme/src/tui/syntax.ts:46-71`); order matches
 /// [`markdown_run_color`].
 #[cfg(feature = "native")]
-fn markdown_role_for_flags(flags: u16) -> crate::native_markdown_flow::MarkdownRole {
+fn markdown_role_for_flags(flags: u32) -> crate::native_markdown_flow::MarkdownRole {
     use crate::markdown_runs::{
         BOLD, CODE, CODE_BLOCK, HEADING, HEADING1, ITALIC, LINK, LINK_TEXT, LIST, QUOTE, RULE,
         STRIKE,
@@ -5414,7 +5425,7 @@ fn markdown_role_for_flags(flags: u16) -> crate::native_markdown_flow::MarkdownR
 fn markdown_run_paint_color(
     markdown: &crate::native_theme_runtime::MarkdownPalette,
     syntax: Option<&crate::native_theme_runtime::SyntaxPalette>,
-    flags: u16,
+    flags: u32,
     thinking: bool,
 ) -> Option<[u8; 4]> {
     if thinking {
@@ -5466,6 +5477,41 @@ mod sidebar_paint_geometry_tests {
         assert!(super::sidebar_cell(narrow, 99, 10));
         assert!(!super::sidebar_cell(narrow, 100, 10));
         assert!(!super::sidebar_cell(wide, 105, 10));
+    }
+}
+
+/// MSG-005: user-card chip runs are a bold accent label and a muted name, and
+/// neither resolves a markdown foreground — the live paint loop assigns the
+/// chip surface before the markdown color path
+/// (`packages/tui/src/routes/session/index.tsx:2432-2472`).
+#[cfg(all(test, feature = "native"))]
+mod msg005_chip_paint_tests {
+    use crate::markdown_runs::{CHIP_ACCENT, CHIP_NAME};
+
+    #[test]
+    fn chip_label_runs_are_bold_and_own_their_surface() {
+        // The accent label is bold (`index.tsx:2436-2441`); the muted name is
+        // not.
+        assert_eq!(
+            super::run_attributes(CHIP_ACCENT) & 1,
+            1,
+            "accent label is bold"
+        );
+        assert_eq!(
+            super::run_attributes(CHIP_NAME) & 1,
+            0,
+            "muted name is not bold"
+        );
+        // Neither chip flag resolves a markdown foreground; the live paint loop
+        // assigns the chip surface first.
+        let markdown = crate::native_theme_runtime::RuntimeTheme::builtin_default(
+            crate::native_theme_runtime::ThemeMode::Dark,
+        )
+        .semantic
+        .expect("shipped V2 asset resolves")
+        .markdown;
+        assert!(super::markdown_run_color(&markdown, None, CHIP_ACCENT).is_none());
+        assert!(super::markdown_run_color(&markdown, None, CHIP_NAME).is_none());
     }
 }
 
@@ -6095,7 +6141,20 @@ fn native_paint(
                                 if x >= u32::from(run_span.start)
                                     && x.saturating_add(u32::from(cells)) <= u32::from(run_span.end)
                                 {
-                                    if let Some(rgba) = markdown_run_paint_color(
+                                    // MSG-005: user-card chip runs own their
+                                    // surface. The accent label box paints the
+                                    // accent hue behind the raised-base
+                                    // foreground (`routes/session/index.tsx:2436-2441`);
+                                    // the muted name paints the decreased raised
+                                    // base behind the muted foreground
+                                    // (`:2445-2447`).
+                                    if run_span.flags & crate::markdown_runs::CHIP_ACCENT != 0 {
+                                        bg = accent;
+                                        fg = panel;
+                                    } else if run_span.flags & crate::markdown_runs::CHIP_NAME != 0 {
+                                        bg = background;
+                                        fg = muted;
+                                    } else if let Some(rgba) = markdown_run_paint_color(
                                         markdown,
                                         ctx.semantic.as_ref().map(|semantic| &semantic.syntax),
                                         run_span.flags,
@@ -10784,6 +10843,8 @@ fn native_loop(
                                     model: None,
                                     assistant_facts: None,
                                     message_id: None,
+                                    files: Vec::new(),
+                                    skills: Vec::new(),
                                 },
                             );
                         }
@@ -10811,6 +10872,8 @@ fn native_loop(
                                     model: None,
                                     assistant_facts: None,
                                     message_id: None,
+                                    files: Vec::new(),
+                                    skills: Vec::new(),
                                 },
                             );
                             if name == "todowrite" {
@@ -10885,6 +10948,8 @@ fn native_loop(
                                     model: None,
                                     assistant_facts: Some(facts),
                                     message_id: None,
+                                    files: Vec::new(),
+                                    skills: Vec::new(),
                                 },
                             );
                         }

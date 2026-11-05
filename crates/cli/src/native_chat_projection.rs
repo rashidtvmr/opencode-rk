@@ -734,7 +734,55 @@ pub fn project_message(message: &Value) -> Option<ChatMessage> {
         // Stable backend id; the menu keys its dialog by this id
         // (`routes/session/index.tsx:2403-2422`). Never fabricated.
         message_id: opt_string(message, "id"),
+        files: project_file_chips(message),
+        skills: project_skill_chips(message),
     })
+}
+
+/// MSG-005: project `message.files` into user-card file chips. The wire entry
+/// is `{name, mime, hash?}` (`packages/schema/src/prompt.ts:44-52`,
+/// `session-message.ts:76-84`); the mime selects the `dir`/`file` label and a
+/// malformed entry is dropped rather than fabricated.
+fn project_file_chips(message: &Value) -> Vec<crate::native_message_rows::UserChip> {
+    message
+        .get("files")
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let name = entry.get("name").and_then(Value::as_str)?;
+                    if name.is_empty() {
+                        return None;
+                    }
+                    let mime = entry.get("mime").and_then(Value::as_str).unwrap_or("");
+                    Some(crate::native_message_rows::UserChip::file(mime, name))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// MSG-005: project `message.skills` into user-card skill chips. The recorded
+/// facts are `{id, name}` (`packages/schema/src/prompt.ts:62-69`); an entry
+/// without a rendered name is dropped, never guessed from the id.
+fn project_skill_chips(message: &Value) -> Vec<crate::native_message_rows::UserChip> {
+    message
+        .get("skills")
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let name = entry.get("name").and_then(Value::as_str)?;
+                    if name.is_empty() {
+                        return None;
+                    }
+                    Some(crate::native_message_rows::UserChip::skill(name))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Project one stored record and fill the assistant turn duration from the

@@ -15,7 +15,9 @@ fn session(storage: &Storage, title: &str) -> SessionId {
 }
 fn message(session_id: SessionId, role: MessageRole, text: &str) -> MessageRecord {
     MessageRecord { id: MessageId::new(), session_id, role,
-        body: PayloadRef::inline(text).unwrap(), created_at: Timestamp::now() }
+        body: PayloadRef::inline(text).unwrap(), created_at: Timestamp::now(),
+        files: Vec::new(),
+        skills: Vec::new() }
 }
 
 struct Fixture {

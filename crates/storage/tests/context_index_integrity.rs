@@ -26,6 +26,8 @@ fn user_message(session_id: SessionId) -> MessageRecord {
         id: MessageId::new(), session_id, role: MessageRole::User,
         body: PayloadRef::inline("index fixture message").unwrap(),
         created_at: Timestamp::now(),
+        files: Vec::new(),
+        skills: Vec::new(),
     }
 }
 

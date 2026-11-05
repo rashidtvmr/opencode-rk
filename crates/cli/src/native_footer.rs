@@ -264,6 +264,8 @@ mod native_footer_tests {
             model: model.map(str::to_owned),
             assistant_facts: Some(facts),
             message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
         }
     }
 
