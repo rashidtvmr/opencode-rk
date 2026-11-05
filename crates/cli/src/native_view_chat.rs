@@ -3647,6 +3647,7 @@ fn typed_message_rows_with_prefix_spans_mode(
 #[cfg(test)]
 mod diff_wiring_v2_regressions {
     use super::*;
+    use crate::native_diff_view::DiffViewPreference;
 
     fn patch_message(diff: String) -> ChatMessage {
         ChatMessage { role: ChatRole::Assistant, parts: vec![ChatPart::Patch { path: "many.rs".into(), diff, diagnostics: Vec::new() }], agent: None, model: None, assistant_facts: None, message_id: None, files: Vec::new(), skills: Vec::new()}
@@ -3657,6 +3658,9 @@ mod diff_wiring_v2_regressions {
         use crate::native_diff_view::{resolve_view_mode, DiffSurface, DiffViewMode, DiffViewPreference};
         assert_eq!(resolve_view_mode(DiffSurface::Inline, DiffViewPreference::Auto, 120), DiffViewMode::Unified);
         assert_eq!(resolve_view_mode(DiffSurface::Inline, DiffViewPreference::Auto, 121), DiffViewMode::Split);
+        assert_eq!(resolve_view_mode(DiffSurface::Viewer, DiffViewPreference::Unified, 200), DiffViewMode::Unified);
+        assert_eq!(resolve_view_mode(DiffSurface::Viewer, DiffViewPreference::Split, 50), DiffViewMode::Unified);
+        assert_eq!(resolve_view_mode(DiffSurface::Viewer, DiffViewPreference::Auto, 100), DiffViewMode::Split);
         for width in [120, 121] {
             assert_eq!(resolve_view_mode(DiffSurface::Inline, DiffViewPreference::Split, width), DiffViewMode::Split);
             assert_eq!(resolve_view_mode(DiffSurface::Inline, DiffViewPreference::Unified, width), DiffViewMode::Unified);
@@ -3666,6 +3670,49 @@ mod diff_wiring_v2_regressions {
         let mut unified_view = ChatView::new();
         unified_view.set_diff_view(DiffViewPreference::Unified);
         assert_eq!(auto, unified_view.render_typed_classified(120, 8, "ws", &[message], "", false));
+    }
+
+    #[test]
+    fn diff001_native_view_preference_reaches_open_viewer() {
+        let mut view = crate::native_view::NativeView::new(120, 40);
+        let patch = "@@ -1,1 +1,1 @@\n-old\n+new\n".to_owned();
+        // Discriminating case: a stored `Unified` preference at a width that
+        // would otherwise split. Before the fix `open_diff_viewer` hardcoded
+        // `Auto`, so this rendered PAIRED rows even though the user asked for
+        // unified. `Split`/`Auto` are indistinguishable on the Viewer surface,
+        // so only `Unified` here can detect a mis-threaded preference.
+        view.set_diff_view(DiffViewPreference::Unified);
+        view.dialogs
+            .open_diff_viewer(patch.clone(), 100, view.diff_view_preference())
+            .expect("opens wide viewer");
+        let unified_wide = view.dialogs.render_styled(100, 20);
+        assert!(
+            unified_wide.iter().any(|line| line.text == "-old"),
+            "stored Unified must render a separate -old row at width 100"
+        );
+        assert!(
+            unified_wide.iter().any(|line| line.text == "+new"),
+            "stored Unified must render a separate +new row at width 100"
+        );
+        assert!(
+            !unified_wide
+                .iter()
+                .any(|line| line.text.contains("- old") && line.text.contains("+ new")),
+            "stored Unified must not pair rows even when the width allows splitting"
+        );
+        view.dialogs.close();
+        // Stored `Split` at the same width renders paired rows.
+        view.set_diff_view(DiffViewPreference::Split);
+        view.dialogs
+            .open_diff_viewer(patch, 100, view.diff_view_preference())
+            .expect("opens wide viewer");
+        let split_wide = view.dialogs.render_styled(100, 20);
+        assert!(
+            split_wide
+                .iter()
+                .any(|line| line.text.contains("- old") && line.text.contains("+ new")),
+            "stored Split must pair rows at width 100"
+        );
     }
 
     #[test]

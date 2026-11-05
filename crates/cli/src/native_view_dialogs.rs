@@ -2408,11 +2408,10 @@ impl DialogView {
     /// [`DialogView::open_mcp`]: no choices, no backend decision, no footer.
     /// The caller closes it with [`DialogView::close`] and scrolls the body
     /// with [`DialogView::set_execute_scroll`].
-    pub fn open_diff_viewer(&mut self, patch: String, patch_pane_width: usize) -> Result<(), DialogError> {
+    pub fn open_diff_viewer(&mut self, patch: String, patch_pane_width: usize, preference: crate::native_diff_view::DiffViewPreference) -> Result<(), DialogError> {
         if self.is_open() {
             return Err(DialogError::AlreadyOpen);
         }
-        let preference = crate::native_diff_view::DiffViewPreference::Auto;
         // DIFF-001: keep the resolved mode on the dialog so the live render
         // arm branches on the stored fact (`diff-viewer.tsx:45,349`: viewer
         // split rule — never split below 100 columns, split at 100+).
@@ -11293,7 +11292,7 @@ mod diff_tests {
         let patch = "@@ -1,2 +1,2 @@\n ctx\n-old\n+new\n";
         // Width 99 -> the viewer never splits below 100 columns (unified).
         let mut narrow = DialogView::new();
-        narrow.open_diff_viewer(patch.to_string(), 99).expect("opens");
+        narrow.open_diff_viewer(patch.to_string(), 99, crate::native_diff_view::DiffViewPreference::Auto).expect("opens");
         assert_eq!(narrow.open_kind(), Some(DialogKind::DiffViewer));
         let narrow_texts = texts(&narrow.render_styled(99, 20));
         assert!(narrow_texts.iter().any(|t| t == "-old"), "{narrow_texts:?}");
@@ -11301,7 +11300,7 @@ mod diff_tests {
         // Width 100 -> split; the paired columns join with a space and the
         // unified raw pair is gone.
         let mut wide = DialogView::new();
-        wide.open_diff_viewer(patch.to_string(), 100).expect("opens");
+        wide.open_diff_viewer(patch.to_string(), 100, crate::native_diff_view::DiffViewPreference::Auto).expect("opens");
         let wide_texts = texts(&wide.render_styled(100, 20));
         assert!(
             wide_texts
@@ -11323,7 +11322,7 @@ mod diff_tests {
         }
         let mut view = DialogView::new();
         // Width 80 -> unified, so the virtualized branch is live.
-        view.open_diff_viewer(patch, 80).expect("opens");
+        view.open_diff_viewer(patch, 80, crate::native_diff_view::DiffViewPreference::Auto).expect("opens");
         let (start, max) = view.execute_scroll_state(80, 20);
         assert_eq!(start, 0);
         assert!(max > 0, "virtualized body must overflow the viewport");
@@ -11354,7 +11353,7 @@ mod diff_tests {
     fn diff002_diffviewer_cancel_and_answer_are_inert() {
         let patch = "@@ -1,2 +1,2 @@\n ctx\n-old\n+new\n";
         let mut view = DialogView::new();
-        view.open_diff_viewer(patch.to_string(), 80).expect("opens");
+        view.open_diff_viewer(patch.to_string(), 80, crate::native_diff_view::DiffViewPreference::Auto).expect("opens");
         assert_eq!(view.open_kind(), Some(DialogKind::DiffViewer));
         assert_eq!(view.answer().unwrap_err(), DialogError::NotAnswerable);
         assert_eq!(view.cancel().unwrap_err(), DialogError::NotAnswerable);
@@ -11369,7 +11368,7 @@ mod diff_tests {
     fn diff002_small_patch_paints_the_body_once() {
         let patch = "@@ -1,2 +1,2 @@\n ctx\n-old\n+new\n";
         let mut view = DialogView::new();
-        view.open_diff_viewer(patch.to_string(), 80).expect("opens");
+        view.open_diff_viewer(patch.to_string(), 80, crate::native_diff_view::DiffViewPreference::Auto).expect("opens");
         let rendered = texts(&view.render_styled(80, 20));
         let old_rows = rendered.iter().filter(|t| t.trim() == "-old").count();
         let new_rows = rendered.iter().filter(|t| t.trim() == "+new").count();
@@ -11385,7 +11384,7 @@ mod diff_tests {
     fn diff002_backdrop_closes_the_viewer_locally() {
         let mut view = DialogView::new();
         assert!(!view.backdrop_closes_locally(), "no dialog -> no local close");
-        view.open_diff_viewer("@@ -1 +1 @@\n-a\n+b\n".to_string(), 80)
+        view.open_diff_viewer("@@ -1 +1 @@\n-a\n+b\n".to_string(), 80, crate::native_diff_view::DiffViewPreference::Auto)
             .expect("opens");
         assert!(
             view.backdrop_closes_locally(),
@@ -11410,7 +11409,7 @@ mod diff_tests {
         // The product over-counts: 26 chunks * 128 = 3328 > 3300 rows.
         assert!(total_rows < 26 * crate::native_diff_view::VIRTUAL_CHUNK_LINES);
         let mut view = DialogView::new();
-        view.open_diff_viewer(patch, 80).expect("opens");
+        view.open_diff_viewer(patch, 80, crate::native_diff_view::DiffViewPreference::Auto).expect("opens");
         let (_, max) = view.execute_scroll_state(80, 20);
         assert_eq!(max, total_rows - 18, "clamped to painted rows, not chunks");
     }

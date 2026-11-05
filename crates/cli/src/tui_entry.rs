@@ -15059,7 +15059,7 @@ fn native_loop(
                                             // Unified even on a wide terminal.
                                             let width =
                                                 usize::from(view.diff_viewer_patch_width());
-                                            if view.dialogs.open_diff_viewer(patch, width).is_ok() {
+                                            if view.dialogs.open_diff_viewer(patch, width, view.diff_view_preference()).is_ok() {
                                                 needs_paint = true;
                                                 continue;
                                             }

@@ -94,6 +94,7 @@ pub struct NativeView {
     layout: Layout,
     sessions: SessionView,
     chat: ChatView,
+    diff_view_preference: crate::native_diff_view::DiffViewPreference,
     pages: PageState,
     memory: crate::native_memory::Memory,
     compaction: crate::native_compaction_settings::CompactionSettingsView,
@@ -1213,6 +1214,7 @@ impl NativeView {
             layout: Layout::new(cols, rows),
             sessions: SessionView::default(),
             chat: ChatView::default(),
+            diff_view_preference: crate::native_diff_view::DiffViewPreference::Auto,
             pages: PageState::default(),
             memory: crate::native_memory::Memory::new(),
             compaction: crate::native_compaction_settings::CompactionSettingsView::new(),
@@ -2559,7 +2561,13 @@ impl NativeView {
     }
 
     pub fn set_diff_view(&mut self, preference: crate::native_diff_view::DiffViewPreference) {
+        self.diff_view_preference = preference;
         self.chat.set_diff_view(preference);
+    }
+
+    #[must_use]
+    pub fn diff_view_preference(&self) -> crate::native_diff_view::DiffViewPreference {
+        self.diff_view_preference
     }
 
     /// Scrollbar painted by the last render, if the bar is shown and the
