@@ -282,14 +282,38 @@ impl ForkV2 {
         Ok(())
     }
 
-    /// Delete a whole session and its dependent rows via ON DELETE CASCADE.
+    /// Delete a session and fork descendants, plus dependent rows via ON DELETE CASCADE.
     /// Shared payloads survive because the fork's message_parts keep RESTRICT
     /// references; payload rows are never cascade-deleted.
     pub fn delete_session_tree(
         connection: &mut Connection,
         session_pk: i64,
     ) -> Result<(), StorageError> {
-        connection.execute("DELETE FROM sessions WHERE pk=?1", params![session_pk])?;
+        let transaction = connection.transaction()?;
+        let mut pending = vec![session_pk];
+        let mut seen = std::collections::HashSet::new();
+        let mut postorder = Vec::new();
+        while let Some(pk) = pending.pop() {
+            if !seen.insert(pk) {
+                continue;
+            }
+            let id: Option<Vec<u8>> = transaction
+                .query_row("SELECT id FROM sessions WHERE pk=?1", params![pk], |row| row.get(0))
+                .optional()?;
+            let Some(id) = id else { continue };
+            postorder.push(pk);
+            let mut statement = transaction.prepare(
+                "SELECT pk FROM sessions WHERE fork_parent_id=?1 ORDER BY pk",
+            )?;
+            let children = statement
+                .query_map(params![id], |row| row.get::<_, i64>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            pending.extend(children);
+        }
+        for pk in postorder.into_iter().rev() {
+            transaction.execute("DELETE FROM sessions WHERE pk=?1", params![pk])?;
+        }
+        transaction.commit()?;
         Ok(())
     }
 }
@@ -579,6 +603,29 @@ mod tests {
                 .unwrap();
             assert_eq!(n, 1);
         }
+    }
+
+    #[test]
+    fn delete_session_tree_removes_fork_descendants() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = workspace(&dir.path().join("w.db"));
+        let parent = SessionId::new();
+        let parent_pk = create_parent(&mut conn, parent);
+        let child_pk = ForkV2::fork_session(
+            &mut conn,
+            parent.as_uuid().as_bytes(),
+            0,
+            SessionId::new(),
+            "child",
+            200,
+        )
+        .unwrap();
+
+        ForkV2::delete_session_tree(&mut conn, parent_pk).unwrap();
+        let remaining: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions WHERE pk=?1", params![child_pk], |row| row.get(0))
+            .unwrap();
+        assert_eq!(remaining, 0);
     }
 
     #[test]

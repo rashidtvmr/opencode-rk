@@ -1728,6 +1728,27 @@ impl DialogView {
         renamed
     }
 
+    /// Remove a successfully deleted session from every live picker snapshot.
+    pub fn sessions_remove(&mut self, id: &str) -> bool {
+        let removed = {
+            let Some(state) = self
+                .dialog
+                .as_mut()
+                .filter(|dialog| dialog.kind == DialogKind::Sessions)
+                .and_then(|dialog| dialog.sessions.as_mut())
+            else {
+                return false;
+            };
+            let old_len = state.rows.len();
+            state.rows.retain(|row| row.id != id);
+            state.local.retain(|row| row.id != id);
+            state.selected = state.selected.min(state.rows.len().saturating_sub(1));
+            state.rows.len() != old_len
+        };
+        self.sync_sessions_choices();
+        removed
+    }
+
     // ---- DIALOG-14: the live worktrees dialog ----
 
     /// DIALOG-14: open the live `DialogWorkspaces` (`dialog-workspaces.tsx`,

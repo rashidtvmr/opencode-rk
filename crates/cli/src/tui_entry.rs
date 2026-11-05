@@ -4855,7 +4855,7 @@ fn select_menu_key(
 }
 
 #[cfg(feature = "native")]
-enum SessionsKeyAction { Open(String), Rename(String) }
+enum SessionsKeyAction { Open(String), Rename(String), Delete(String) }
 
 #[cfg(feature = "native")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4925,7 +4925,7 @@ fn sessions_menu_key(
         8 | 127 => (view.dialogs.sessions_backspace(), None),
         b' '..=b'~' => (view.dialogs.sessions_push_filter(char::from(byte)), None),
         1 => (view.dialogs.sessions_toggle_scope(), None),
-        4 => (true, None),
+        4 => match view.dialogs.sessions_focused_id() { Some(id) => (true, Some(SessionsKeyAction::Delete(id))), None => (true, None) },
         18 => match view.dialogs.sessions_focused_id() { Some(id) => (true, Some(SessionsKeyAction::Rename(id))), None => (true, None) },
         13 | 10 => match view.dialogs.sessions_open_focused() { Some(row) => (true, Some(SessionsKeyAction::Open(row.id))), None => (true, None) },
         27 | 3 => { view.dialogs.close(); (true, None) }
@@ -15865,6 +15865,24 @@ fn native_loop(
                             }
                         }
                     }
+                    Some(SessionsKeyAction::Delete(id)) => {
+                        let deletion = daemon_origin
+                            .ok_or_else(|| "daemon unavailable".to_owned())
+                            .and_then(|origin| http_request(origin, "DELETE", &format!("/api/sessions/{id}"), None, auth));
+                        match deletion {
+                            Ok(_) => {
+                                view.dialogs.sessions_remove(&id);
+                                if navigation.tabs().iter().any(|tab| tab.session.0 == id) {
+                                    let scroll = view.chat_scroll_offset();
+                                    match close_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, daemon_origin, auth, binding_generation, &crate::native_navigation::SessionRef(id), selected.as_ref().map(|m| m.qualified()), scroll) {
+                                        Ok(result) => apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route, &mut compact_worker),
+                                        Err(error) => append_transcript(&mut transcript, format!("error: close deleted session tab: {error}")),
+                                    }
+                                }
+                            }
+                            Err(error) => append_transcript(&mut transcript, format!("error: delete session: {error}")),
+                        }
+                    }
                     None => {}
                 }
                 if matches!(byte, 8 | 127) || (b' '..=b'~').contains(&byte) {
@@ -20904,6 +20922,18 @@ mod dialog13_tests {
     fn dialog13_live_dispatch_consumes_ctrl_d() {
         assert_eq!(sessions_live_decision(4, true), SessionsDecision::Consume);
         assert_eq!(sessions_live_decision(4, false), SessionsDecision::Exit);
+    }
+
+    #[test]
+    fn dialog13_live_ctrl_d_deletes_focused_session() {
+        let mut view = opened();
+        assert!(matches!(sessions_menu_key(&mut view, 4).1, Some(SessionsKeyAction::Delete(id)) if id == "a"));
+
+        let mut empty = crate::native_view::NativeView::new(100, 30);
+        empty.dialogs.open_sessions(SessionsState::new(true, "/tmp", "")).unwrap();
+        let (handled, action) = sessions_menu_key(&mut empty, 4);
+        assert!(handled);
+        assert!(action.is_none());
     }
 
     #[test]
