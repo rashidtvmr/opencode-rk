@@ -1,5 +1,38 @@
 # Orchestrator scratchpad
 
+## 2026-11-05 — wave-86: DIALOG-14/15 + DIFF-003 landed
+
+Canonical `main-v2` advanced `73765e77 -> 8d1cab14 -> ba04acbe` (pushed +
+`ls-remote` verified against `git@github.com:rashidtvmr/opencode-rk.git`).
+
+- `8d1cab14` — **DIALOG-14/15** live worktrees dialog + MCP sign-in surface
+  (lane `recovery/ui`, candidate `916be496`, base `15194acd`). Published by
+  3-way apply; one conflict in the shared `OpenDialog`/`DialogKind` arms was
+  resolved by keeping BOTH the published `DiffViewer` surface and the new
+  `Workspaces`/`Integration` arms. Independent APPROVE (river-glm
+  `ses_e5677d862ffeU25MnrDgZPTa28`); 5 focused tests pass on the integrated SHA.
+- `ba04acbe` — **DIFF-003** inline patch budget/color/geometry regression test
+  (lane `recovery/platform`, candidate `20f120c9`, 36-line patch, applies clean).
+  Independent APPROVE (vyce-deepseek-v41 `ses_e567608f7ffeiPzvz5FJtrLHS9`);
+  2 focused tests pass on the integrated SHA.
+
+Full CLI suite on `ba04acbe`: **2385 passed / 0 failed** (baseline `73765e77`
+= 2379; +5 DIALOG-14/15 +1 DIFF-003).
+
+**PAR-19 is BLOCKED** with an accurate seam: the mount-budget model
+(`row_weight`/`rows_before`/`rows_after`) operates on `SessionRow` (session
+tree); the live chat transcript uses `ChatMessage` with no such producer, and
+the renderer already bounds per-frame work by walking from the tail. A prior
+subagent's naive message-count pre-slice failed its own test and was reverted
+(`a8b18c98`).
+
+**In flight:** MSG-005 owner (lane `W68-CORE`/`recovery/core`, base `c92a3405`,
+scaffold dirty; vyce-combined `ses_e56775d71ffe5DQX7yICv9Xbwm`); DIALOG-20
+render fidelity (lane `F3-MCP`/`recovery/runtime`, base `a0789fd1`; luna-free
+`ses_e5690ec6effdDRVu8vUVPum1AI`).
+
+Routes: `@openai-gpt6-luna` and `@9router-luna-free` are 429-limited.
+
 ## 2026-11-03 (latest) — wave-68 three landings; all 223 verdicts in
 
 Canonical `main-v2` = `a54fc522` (pushed, `ls-remote`-verified). Wave-68 ladder:

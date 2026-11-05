@@ -1,12 +1,33 @@
 # OpenCode V2 UI parity — consolidated status
 
-- **Canonical line:** `main-v2` @ `c2ad1750` (remote verified via `git ls-remote`)
+- **Canonical line:** `main-v2` @ `ba04acbe` (remote verified via `git ls-remote`)
 - **Upstream oracle:** `/Users/mymac/Projects/tmp/opencode` @ `450e7b92412c780a7b5a75226bb8d49aaca24e22`
 - **Checklist:** `docs/ui-parity/opencode-ui-parity-kit/checklist.json` (223 items)
 - **Method:** source inspection of the live Rust path (implementation + a
   production consumer), cross-checked against the pinned upstream component.
   This is **not** captured-golden acceptance: no matched styled-cell/cursor
   captures were produced. Verdicts below are source-backed, not runtime-proven.
+
+## Wave-83 — DIALOG-14/15 + DIFF-003 landed (2026-11-05)
+
+Canonical `main-v2` advanced `73765e77 -> ba04acbe` (pushed + `ls-remote`
+verified). Full CLI suite on the integrated SHA: **2385 passed / 0 failed**
+(`73765e77` was 2379).
+
+| Item | Was | Now | Live evidence |
+| --- | --- | --- | --- |
+| `DIALOG-14` | `REAL_GAP` | `LANDED` | `8d1cab14` live `DialogWorkspaces`: `FooterAction::Workspaces` opens it (`tui_entry.rs`), roots from on-disk git enumeration `local_worktree_roots`, footer menu un-gated (`native_view.rs` `can_move = true`), live key dispatch `workspaces_live_dispatch` (filter/backspace, move, Enter drill/arm/delete, Esc drill-back/close), `LateLoadGuard` blocks resurrection. 3 focused tests. Independent APPROVE (river-glm `ses_e5677d862ffeU25MnrDgZPTa28`). |
+| `DIALOG-15` | `REAL_GAP` | `LANDED` | `8d1cab14` live MCP Enter routes through the tested `mcp_enter` (`native_view.rs` `mcp_dialog_enter`): `needs_auth` opens the live `IntegrationState` surface, `failed` shows error details, else inert; toggle moved to space (`config/keybind.ts:283`). 2 focused tests. Seam: live `McpStatus` has no `integrationID`, so `needs_auth` is treated as integration-gated; no server-side sign-in producer exists. |
+| `DIFF-003` | `BLOCKED` | `LANDED` (inline half) | `ba04acbe` `diff003_inline_live_patch_budget_color_and_geometry_are_stable` exercises the live `ChatPart::Patch` arm: 4097-line added file yields only real diff rows up to `MAX_DIFF_LINES` + the `[diff truncated]` row; hunk coloring intact; stable geometry. Independent APPROVE (vyce-deepseek-v41 `ses_e567608f7ffeiPzvz5FJtrLHS9`). Split-mode half remains unwired (see wave-81/`DIFF-001`). |
+
+**Still accurate after this wave:** `MSG-008` TPS end-to-end is `REAL_GAP`
+(producer emits no streamed stamp; `MessageExecution` has no timing field —
+see the wave-81 row); `STATE-001/003/004` remain `REAL_GAP` (their models are
+test-only, no live producer); `PAR-19` is **BLOCKED** with an accurate seam —
+the mount-budget model (`row_weight`/`rows_before`/`rows_after`) operates on
+`SessionRow` (session tree), while the live chat transcript uses `ChatMessage`
+with no such producer, and the renderer already bounds per-frame work by
+walking from the tail. `MSG-005` (skill/file message chips) is in flight.
 
 ## Wave-80 — CP-09 + CP-07 landed (2026-11-04)
 
