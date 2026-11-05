@@ -192,6 +192,17 @@ pub struct ChatView {
     /// this server yet, so the notice re-derives from the listing each poll
     /// (named residual: no persisted one-shot notice, no click navigation).
     child_notices: Vec<ChildCompletionNotice>,
+    /// PAR-19: live-transcript mount cursor — the projected-op index of the
+    /// oldest mounted row (upstream `hiddenRows`,
+    /// `routes/session/index.tsx:425-432`). `usize::MAX` means no window is
+    /// mounted yet; the next render seeds it with
+    /// [`crate::native_message_rows::rows_before`] over
+    /// [`crate::native_message_rows::TRANSCRIPT_TAIL_ROWS`]. Appends leave
+    /// the cursor fixed and extend the tail; a render whose scrolled window
+    /// overruns the mounted span admits one
+    /// [`crate::native_message_rows::TRANSCRIPT_BACKFILL_CHUNK`]-weighted
+    /// page of older rows (`index.tsx:465-485`).
+    transcript_mounting: Cell<usize>,
 }
 
 impl Default for ChatView {
@@ -217,6 +228,7 @@ impl Default for ChatView {
             diff_view: crate::native_diff_view::DiffViewPreference::Auto,
             notices: Vec::new(),
             child_notices: Vec::new(),
+            transcript_mounting: Cell::new(usize::MAX),
         }
     }
 }
@@ -4167,49 +4179,114 @@ impl ChatView {
             }
         }
         let target = self.scroll.get().saturating_add(height);
+        // PAR-19 transcript half: mount budgets are weighted by rendered
+        // entries, not raw rows (`routes/session/mount-budget.ts:7-22`).
+        // Weights align 1:1 with `ops`; the expanded predicate ignores the
+        // model's own `group_id()` derivation (a different id format than the
+        // live typed gid) and keys on each op's `"{kind}:{ids.join(",")}"`
+        // gid — the same disclosure lookup the render loop below uses.
+        let weights: Vec<usize> = ops.iter().map(|(gid, ids, kind, size)| match gid {
+            Some(gid) => crate::native_message_rows::row_weight(
+                &crate::native_message_rows::SessionRow::Group(
+                    crate::native_message_rows::SessionGroup {
+                        kind: kind.expect("group op carries kind"),
+                        children: (0..(*size).max(ids.len()).max(1)).map(|_| {
+                            crate::native_message_rows::SessionNode::Entry {
+                                entry: crate::native_message_rows::SessionEntry::Message {
+                                    message_id: ids.first().cloned().unwrap_or_default(),
+                                },
+                            }
+                        }).collect(),
+                        size: *size,
+                        completed: false,
+                        pending: Vec::new(),
+                    },
+                ),
+                |_, expanded_kind| self.disclosure.borrow().group_expanded(
+                    &self.active_session_id.borrow(),
+                    gid,
+                    crate::native_message_rows::Verbosity::Medium,
+                    expanded_kind,
+                ),
+                |_| true,
+            ),
+            None => crate::native_message_rows::row_weight(
+                &crate::native_message_rows::SessionRow::Entry(
+                    crate::native_message_rows::SessionEntry::Message {
+                        message_id: ids.first().cloned().unwrap_or_default(),
+                    },
+                ),
+                |_, _| false,
+                |_| true,
+            ),
+        }).collect();
+        // Tail-first mounting (`index.tsx:425-432`): the first render mounts
+        // only the newest `TRANSCRIPT_TAIL_ROWS` weighted entries; a render
+        // whose scrolled window overruns the mounted span admits one
+        // `TRANSCRIPT_BACKFILL_CHUNK`-weighted page of older rows per pass
+        // (`index.tsx:465-485`), looping only until the scrolled window is
+        // covered so a bounded `scroll_up` plus one render still exposes the
+        // oldest pane exactly as before. Residual: the Rust model's expanded
+        // weight omits upstream's header `+1` in the child sum, so expanded
+        // groups undercount by one rendered header each.
+        let seed = crate::native_message_rows::rows_before(
+            &weights, ops.len(), crate::native_message_rows::TRANSCRIPT_TAIL_ROWS);
+        let mut mounting = match self.transcript_mounting.get() {
+            usize::MAX => seed,
+            cursor => cursor.min(ops.len()),
+        };
         let mut rev: Vec<(String, ChatRowClass)> = Vec::with_capacity(target.min(4096));
         let by_id: std::collections::BTreeMap<String, (usize, &ChatMessage)> = messages.iter().enumerate().map(|(i,m)| (m.message_id.clone().unwrap_or_else(|| format!("live-message-{i}")), (i,m))).collect();
-        let mut ordered = Vec::<(usize, &ChatMessage, Option<(String, crate::native_message_rows::GroupKind, usize, bool)>)>::new();
-        for (gid, ids, kind, size) in ops {
-            if let Some((gid, kind)) = gid.zip(kind) {
-                let expanded = self.disclosure.borrow().group_expanded(&self.active_session_id.borrow(), &gid, crate::native_message_rows::Verbosity::Medium, kind);
-                let anchor = ids.first().and_then(|id| by_id.get(id).copied());
-                if let Some((index, message)) = anchor { ordered.push((index, message, Some((gid.clone(), kind, size, expanded)))); }
-                if expanded { for id in ids { if let Some((index,message)) = by_id.get(&id).copied() { ordered.push((index,message,None)); } } }
-            } else { for id in ids { if let Some((index,message)) = by_id.get(&id).copied() { ordered.push((index,message,None)); } } }
-        }
-        let mut seen = std::collections::BTreeSet::new();
-        ordered.retain(|(i,_,header)| header.is_some() || seen.insert(*i));
-        for (index, message, header) in ordered.into_iter().rev() {
-            let mut rows = typed_message_rows_with_prefix_spans_mode(
-                width,
-                message,
-                starts_new_group(index, messages),
-                None,
-                &mut Vec::new(),
-                &mut Vec::new(),
-                &mut Vec::new(),
-                self.markdown_mode,
-                width,
-                &self.pending_permission_calls,
-                self.spin_frame.get(),
-                self.tps_enabled(),
-                self.diff_view,
-            );
-            if let Some((gid,kind,size,expanded)) = header {
-                if !expanded { rows.clear(); }
-                rows.insert(0, (format!("{} {} · {}", if expanded { "▾" } else { "▸" }, kind.as_str(), size), ChatRowClass::Header));
+        loop {
+            rev.clear();
+            let mut ordered = Vec::<(usize, &ChatMessage, Option<(String, crate::native_message_rows::GroupKind, usize, bool)>)>::new();
+            for (gid, ids, kind, size) in ops[mounting..].iter() {
+                if let Some((gid, kind)) = gid.as_ref().zip(kind.as_ref()) {
+                    let expanded = self.disclosure.borrow().group_expanded(&self.active_session_id.borrow(), gid, crate::native_message_rows::Verbosity::Medium, *kind);
+                    let anchor = ids.first().and_then(|id| by_id.get(id).copied());
+                    if let Some((index, message)) = anchor { ordered.push((index, message, Some((gid.clone(), *kind, *size, expanded)))); }
+                    if expanded { for id in ids { if let Some((index,message)) = by_id.get(id).copied() { ordered.push((index,message,None)); } } }
+                } else { for id in ids { if let Some((index,message)) = by_id.get(id).copied() { ordered.push((index,message,None)); } } }
             }
-            for row in rows.into_iter().rev() {
-                rev.push(row);
-                if rev.len() >= target {
-                    break;
+            let mut seen = std::collections::BTreeSet::new();
+            ordered.retain(|(i,_,header)| header.is_some() || seen.insert(*i));
+            for (index, message, header) in ordered.into_iter().rev() {
+                let mut rows = typed_message_rows_with_prefix_spans_mode(
+                    width,
+                    message,
+                    starts_new_group(index, messages),
+                    None,
+                    &mut Vec::new(),
+                    &mut Vec::new(),
+                    &mut Vec::new(),
+                    self.markdown_mode,
+                    width,
+                    &self.pending_permission_calls,
+                    self.spin_frame.get(),
+                    self.tps_enabled(),
+                    self.diff_view,
+                );
+                if let Some((gid,kind,size,expanded)) = header {
+                    if !expanded { rows.clear(); }
+                    rows.insert(0, (format!("{} {} · {}", if expanded { "▾" } else { "▸" }, kind.as_str(), size), ChatRowClass::Header));
+                }
+                for row in rows.into_iter().rev() {
+                    rev.push(row);
+                    if rev.len() >= target {
+                        break;
+                    }
                 }
             }
+            if rev.len() >= target || mounting == 0 {
+                break;
+            }
+            mounting = crate::native_message_rows::rows_before(
+                &weights, mounting, crate::native_message_rows::TRANSCRIPT_BACKFILL_CHUNK);
         }
         // MSG-009: live transcript notices render after the message rows,
         // before the scroll slice, with the same row helpers the
         // `TranscriptSurfaces` tests pin.
+        self.transcript_mounting.set(mounting);
         rev.reverse();
         rev.extend(self.notice_rows(width));
         let total = rev.len();
@@ -4493,10 +4570,81 @@ impl ChatView {
         // one group; a collapsed group hides only the messages whose every
         // renderable part belongs to it.
         let plans = self.group_actions(messages);
+        // PAR-19 transcript half: mount budgets are weighted by rendered
+        // entries, not raw rows (`routes/session/mount-budget.ts:7-22`).
+        // Weights align 1:1 with `messages` using the exact grouping and
+        // expansion state `plans` paints with: a visible plain message costs
+        // one entry, a group header costs its `row_weight` (collapsed 1,
+        // expanded children), and a message fully hidden by a collapsed
+        // group paints nothing, so it weighs 0.
+        let weights: Vec<usize> = (0..messages.len()).map(|index| {
+            let plan = plans.get(index);
+            let headers = plan.map(|p| p.headers.as_slice()).unwrap_or(&[]);
+            let skip = plan.is_some_and(|p| p.skip);
+            if headers.is_empty() {
+                if skip { return 0; }
+                return crate::native_message_rows::row_weight(
+                    &crate::native_message_rows::SessionRow::Entry(
+                        crate::native_message_rows::SessionEntry::Message {
+                            message_id: messages[index]
+                                .message_id
+                                .clone()
+                                .unwrap_or_else(|| format!("live-message-{index}")),
+                        },
+                    ),
+                    |_, _| false,
+                    |_| true,
+                );
+            }
+            headers.iter().map(|header| {
+                crate::native_message_rows::row_weight(
+                    &crate::native_message_rows::SessionRow::Group(
+                        crate::native_message_rows::SessionGroup {
+                            kind: header.kind,
+                            children: (0..header.size.max(1)).map(|_| {
+                                crate::native_message_rows::SessionNode::Entry {
+                                    entry: crate::native_message_rows::SessionEntry::Message {
+                                        message_id: messages[index]
+                                            .message_id
+                                            .clone()
+                                            .unwrap_or_else(|| format!("live-message-{index}")),
+                                    },
+                                }
+                            }).collect(),
+                            size: header.size,
+                            completed: false,
+                            pending: Vec::new(),
+                        },
+                    ),
+                    |_, _| header.expanded,
+                    |_| true,
+                )
+            }).sum::<usize>()
+        }).collect();
+        // Tail-first mounting (`index.tsx:425-432`): the first render mounts
+        // only the newest `TRANSCRIPT_TAIL_ROWS` weighted entries; a render
+        // whose scrolled window overruns the mounted span admits one
+        // `TRANSCRIPT_BACKFILL_CHUNK`-weighted page of older messages per
+        // pass (`index.tsx:465-485`), looping only until the scrolled window
+        // is covered so a bounded `scroll_up` plus one render still exposes
+        // the oldest pane exactly as before. Appends leave the cursor fixed
+        // and extend the tail.
+        // Residual: the Rust model's expanded weight omits upstream's header
+        // `+1` in the child sum, and hidden members weigh 0 because they
+        // paint nothing.
+        let seed = crate::native_message_rows::rows_before(
+            &weights, messages.len(), crate::native_message_rows::TRANSCRIPT_TAIL_ROWS);
+        let mut mounting = match self.transcript_mounting.get() {
+            usize::MAX => seed,
+            cursor => cursor.min(messages.len()),
+        };
         type GroupOwner = Option<(String, crate::native_message_rows::GroupKind)>;
         let mut reversed: Vec<(StyledChatRow, Vec<ChatRunSpan>, Option<String>, Option<String>, Option<usize>, GroupOwner)> = Vec::new();
+        loop {
+            reversed.clear();
         if transcript_h > 0 {
-            'messages: for (index, message) in messages.iter().enumerate().rev() {
+            'messages: for (offset, message) in messages[mounting..].iter().enumerate().rev() {
+                let index = offset + mounting;
                 let plan = plans.get(index);
                 let skip = plan.is_some_and(|p| p.skip);
                 if !skip {
@@ -4553,6 +4701,13 @@ impl ChatView {
                 }
             }
         }
+            if reversed.len() >= target || mounting == 0 {
+                break;
+            }
+            mounting = crate::native_message_rows::rows_before(
+                &weights, mounting, crate::native_message_rows::TRANSCRIPT_BACKFILL_CHUNK);
+        }
+        self.transcript_mounting.set(mounting);
         reversed.reverse();
         // MSG-009: live transcript notices render after the message rows,
         // before the scroll slice; bytes match the pinned surfaces output.
@@ -7822,6 +7977,82 @@ mod tests {
         let messages = vec![ChatMessage::text(ChatRole::User, "y".repeat(1024 * 1024))];
         let rows = view.render_typed(40, 8, "ws", &messages, "", false);
         assert_eq!(rows.len(), 8, "huge single part still renders one frame");
+    }
+
+    /// PAR-19: the live styled transcript (the `render_styled_with_spans`
+    /// producer behind `NativeView::render_content`) mounts by weighted
+    /// entries, not raw rows (`routes/session/mount-budget.ts`,
+    /// `index.tsx:425-432,465-485`). 90 expanded exploration groups over 180
+    /// weighted entries exceed both budgets, yet the first render mounts
+    /// exactly [`crate::native_message_rows::TRANSCRIPT_TAIL_ROWS`] (40)
+    /// weighted entries and one scroll-up step admits exactly one
+    /// [`crate::native_message_rows::TRANSCRIPT_BACKFILL_CHUNK`] (60).
+    #[test]
+    fn par19_transcript_mounts_bounded_weighted_rows() {
+        const UNITS: usize = 90;
+        let mut msgs = Vec::new();
+        for i in 0..UNITS {
+            let mut tool = ChatMessage::text(ChatRole::Assistant, "");
+            tool.message_id = Some(format!("m{i}"));
+            tool.parts = vec![
+                ChatPart::ToolCall { name: "read".into(), id: format!("c{i}a") },
+                ChatPart::ToolResult { name: "read".into(), output: "ok".into(), is_error: false },
+            ];
+            msgs.push(tool);
+            let mut user = ChatMessage::text(ChatRole::User, &format!("u{i}"));
+            user.message_id = Some(format!("um{i}"));
+            msgs.push(user);
+        }
+        let mut view = ChatView::new();
+        // All 90 groups expanded: each exploration group costs its (2)
+        // visible children, each user entry 1, so message weights are [2, 1]
+        // repeating over the projected row list.
+        for i in 0..UNITS {
+            view.disclosure.borrow_mut().set_group_expanded("live", &format!("exploration:m{i}"), true);
+        }
+        // `ops` layout is `[group_i, user_i]` repeating: op `2i` is the
+        // expanded group (weight 2), op `2i + 1` its user entry (weight 1).
+        let weight_from = |mounting: usize| -> usize {
+            (mounting..2 * UNITS).map(|op| if op % 2 == 0 { 2 } else { 1 }).sum()
+        };
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let (rows, _) = view.render_styled_with_spans_mode(80, 10, "ws", &msgs, "", false, &appearance, view.markdown_mode);
+        assert!(!rows.is_empty());
+        let initial = view.transcript_mounting.get();
+        assert_eq!(initial, 153, "frozen initial live mount cursor");
+        assert_eq!(weight_from(initial), crate::native_message_rows::TRANSCRIPT_TAIL_ROWS, "initial live window spends exactly the tail budget");
+        assert!(rows.iter().any(|row| row.0.contains("u89")), "tail view shows the newest units: {rows:?}");
+        // Restored styled-path coverage: the bounded mount renders the exact
+        // frozen frame geometry and provably omits the oldest unmounted
+        // fixture row (`u0`) until backfill admits it.
+        assert_eq!(rows.len(), 10, "frozen styled frame geometry");
+        assert!(
+            !rows.iter().any(|row| row.0.trim_end().ends_with("u0")),
+            "the oldest fixture row stays unmounted on the initial tail mount: {rows:?}"
+        );
+
+        // One scroll-up step: the window demand lies past the mounted span's
+        // rendered lines but well inside one chunk's coverage, so exactly one
+        // weighted page is admitted.
+        view.scroll_up(192);
+        let (scrolled, _) = view.render_styled_with_spans_mode(80, 10, "ws", &msgs, "", false, &appearance, view.markdown_mode);
+        let after = view.transcript_mounting.get();
+        assert_eq!(after, 113, "frozen chunk boundary");
+        let grown = weight_from(after) - weight_from(initial);
+        assert_eq!(grown, crate::native_message_rows::TRANSCRIPT_BACKFILL_CHUNK, "one scroll-up step admits exactly one weighted chunk");
+        assert!(!scrolled.iter().any(|row| row.0.contains("u89")), "older pane replaces the tail view: {scrolled:?}");
+
+        // The omitted older content is real: admitting backfill pages (a
+        // bounded scroll_up whose window demand runs past the mounted span)
+        // exposes the oldest pane exactly as the typed path does, and only
+        // then does the previously unmounted fixture row appear.
+        view.scroll_up(MAX_SCROLL_ROWS);
+        let (oldest, _) = view.render_styled_with_spans_mode(80, 24, "ws", &msgs, "", false, &appearance, view.markdown_mode);
+        assert_eq!(view.transcript_mounting.get(), 0, "backfill admits down to the oldest pane");
+        assert!(
+            oldest.iter().any(|row| row.0.trim_end().ends_with("u0")),
+            "the oldest fixture row appears only once backfill admits it: {oldest:?}"
+        );
     }
 
     /// Tail following, overscroll, and the sticky-bottom composer keep the
