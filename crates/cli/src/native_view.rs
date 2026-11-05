@@ -2134,7 +2134,7 @@ impl NativeView {
         } else {
             self.dialog_size.stack()
         };
-        let width = center_cols.saturating_sub(2).min(size.width());
+        let width = crate::native_modal_layer::dialog_panel_width(size, center_cols);
         let box_id = if self.command_palette.is_open() {
             crate::native_box_style::BoxId::Menu
         } else {
@@ -2155,7 +2155,7 @@ impl NativeView {
         // or top tab strip exists, the modal panel overlays them (per upstream
         // absolute positioning); the panel coordinate must not receive the
         // reservation offset added again.
-        let x = center_cols.saturating_sub(width) / 2;
+        let x = crate::native_modal_layer::dialog_panel_x(size, center_cols);
         let inset = 2u16.saturating_add(padding).min(width);
         ModalPresentation {
             x,
@@ -3145,6 +3145,7 @@ impl NativeView {
                 message: None,
                 disabled: Vec::new(),
                 error: None,
+                description: None,
             })
     }
 
@@ -9414,6 +9415,7 @@ mod dialog_stack_composition_tests {
             message: None,
             disabled: Vec::new(),
             error: None,
+            description: None,
         }
     }
 
@@ -9463,6 +9465,33 @@ mod dialog_stack_composition_tests {
             view.modal_presentation().width,
             116,
             "overlay preset survives the dialog store reset"
+        );
+    }
+
+    /// DIALOG-01: the live modal geometry must be the `native_modal_layer`
+    /// helper output (`dialogWidth(size)` capped by
+    /// `maxWidth={dimensions().width - 2}` and the backdrop's
+    /// `alignItems="center"`, `ui/dialog.tsx:30-34,63,80-81`), not a locally
+    /// re-derived copy of the same formulas.
+    #[test]
+    fn modal_presentation_matches_dialog_panel_helpers() {
+        let mut view = NativeView::new(120, 32);
+        view.set_session_route(true);
+        view.dialogs
+            .open_permission("req-x", "ses-x", "run fixture command")
+            .expect("open permission");
+        let size = view.dialogs.dialog_size();
+        let center_cols = view.layout.cols;
+        let modal = view.modal_presentation();
+        assert_eq!(
+            modal.width,
+            crate::native_modal_layer::dialog_panel_width(size, center_cols),
+            "live width is dialog_panel_width"
+        );
+        assert_eq!(
+            modal.x,
+            crate::native_modal_layer::dialog_panel_x(size, center_cols),
+            "live x is dialog_panel_x"
         );
     }
 

@@ -20732,6 +20732,7 @@ mod permission_modal_key_tests {
                 message: None,
                 disabled: Vec::new(),
                 error: None,
+                description: None,
             })
             .expect("single-option permission prompt opens");
         let before = focus(&view);
@@ -20770,6 +20771,7 @@ mod permission_modal_key_tests {
                 message: None,
                 disabled: Vec::new(),
                 error: None,
+                description: None,
             })
             .expect("select opens");
         for event in [

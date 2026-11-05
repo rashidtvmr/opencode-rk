@@ -368,14 +368,18 @@ impl FilePatch {
                 RowKind::Added => None,
                 _ => {
                     state.old_seen += 1;
-                    Some(hunk.old_start + state.old_seen - 1)
+                    // Saturating like the legacy classifier: a crafted
+                    // `@@ -4294967295,… @@` near `u32::MAX` must not panic
+                    // under overflow-checks and must match the legacy paint
+                    // numbers byte-for-byte (FFI-08).
+                    Some(hunk.old_start.saturating_add(state.old_seen - 1))
                 }
             };
             let new_line = match kind {
                 RowKind::Removed => None,
                 _ => {
                     state.new_seen += 1;
-                    Some(hunk.new_start + state.new_seen - 1)
+                    Some(hunk.new_start.saturating_add(state.new_seen - 1))
                 }
             };
             rows.push(DiffRow {
@@ -1548,6 +1552,27 @@ mod tests {
     fn byte_and_row_caps_fail_closed() {
         let huge = "x".repeat(MAX_PATCH_BYTES + 1);
         assert_eq!(FilePatch::parse(&huge).unwrap_err(), DiffError::TooLarge);
+    }
+
+    #[test]
+    fn crafted_max_start_saturates_instead_of_panicking() {
+        // FFI-08 review: `old_start + old_seen - 1` in plain u32 overflowed on
+        // `@@ -4294967295,…` plus two consumed rows. The saturating form
+        // matches the legacy classifier (`saturating_add` per consumed row).
+        let patch = FilePatch::parse(
+            "--- a/x\n+++ b/x\n@@ -4294967295,2 +1,2 @@\n a\n b\n",
+        )
+        .expect("parse must not panic at u32 bounds");
+        assert_eq!(
+            patch
+                .rows()
+                .iter()
+                .map(|row| (row.old_line(), row.new_line()))
+                .collect::<Vec<_>>(),
+            [(Some(u32::MAX), Some(1)), (Some(u32::MAX), Some(2))]
+        );
+        assert_eq!(patch.hunks()[0].last_lines(), (u32::MAX, 2));
+        assert_eq!(patch.max_line_number(), u32::MAX);
     }
 
     #[test]

@@ -117,7 +117,7 @@ pub fn paint_rows(patch: &str, max_rows: usize) -> PaintResult {
 
 #[must_use]
 pub fn paint_rows_with_gutter(patch: &str, max_rows: usize) -> PaintResult {
-    let classified = classify_patch(patch);
+    let classified = classification_for_paint(patch);
     let total_input_lines = classified.lines.len();
     let (padding, digits) = gutter_width(&classified.lines, 0);
     let mut rows = Vec::with_capacity(classified.lines.len().min(max_rows));
@@ -152,7 +152,7 @@ pub fn paint_rows_with_gutter(patch: &str, max_rows: usize) -> PaintResult {
 /// this function so continuation rows retain style metadata and blank gutters.
 #[must_use]
 pub fn paint_rows_with_gutter_wrapped(patch: &str, max_rows: usize, width: usize) -> PaintResult {
-    let classified = classify_patch(patch);
+    let classified = classification_for_paint(patch);
     let (_, digits) = gutter_width(&classified.lines, 0);
     let gutter_len = 1usize.saturating_add(digits.saturating_mul(2)).saturating_add(3);
     let content_width = width.saturating_sub(gutter_len).max(1);
@@ -374,6 +374,190 @@ fn split_diff_lines(s: &str) -> Vec<&str> {
         .filter(|l| !l.is_empty() || !ends_with_newline)
         .map(|l| l.strip_suffix('\r').unwrap_or(l))
         .collect()
+}
+
+/// FFI-08: which classifier produced the paint classification for a patch.
+///
+/// `Bridge` means `opentui_bridge::diff::FilePatch::parse` upstream
+/// (`packages/core/src/renderables/Diff.ts:1-120`) classified the hunk rows;
+/// `Local` means the tolerant legacy classifier below did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiffClassifierSource {
+    Bridge,
+    Local,
+}
+
+/// FFI-08 consumer entry: the classification actually used by the inline
+/// gutter/split paint pipeline. Patches the upstream parser accepts are
+/// classified by the bridge producer; anything it rejects (byte cap,
+/// `\ No newline` markers, bare/inter-hunk body lines, count drift, hunk
+/// overflow) keeps the byte-identical legacy classification.
+#[must_use]
+pub fn classify_patch_for_paint(patch: &str) -> ClassifiedPatch {
+    bridge_classified(patch).unwrap_or_else(|| classify_patch(patch))
+}
+
+/// Which source `classify_patch_for_paint` selects (test observe seam).
+#[must_use]
+pub fn classifier_source(patch: &str) -> DiffClassifierSource {
+    if bridge_classified(patch).is_some() {
+        DiffClassifierSource::Bridge
+    } else {
+        DiffClassifierSource::Local
+    }
+}
+
+#[must_use]
+fn classification_for_paint(patch: &str) -> ClassifiedPatch {
+    classify_patch_for_paint(patch)
+}
+
+/// Bridge-backed classification: returns `None` whenever the upstream
+/// `FilePatch::parse` producer cannot classify the patch under the exact
+/// legacy contract, keeping paint output byte-identical to
+/// `classify_patch`.
+fn bridge_classified(patch: &str) -> Option<ClassifiedPatch> {
+    use opencode_rk_opentui_bridge::diff::{FilePatch, RowKind};
+
+    let bytes = patch.as_bytes();
+    // Legacy byte cap and `\ No newline` markers (folded into the previous
+    // row by the bridge producer, emitted as their own paint row locally)
+    // keep the legacy classifier.
+    if bytes.len() > MAX_DIFF_PATCH_BYTES || bytes.contains(&b'\\') {
+        return None;
+    }
+    let hunk_starts = find_hunk_starts(patch);
+    // No hunks means the legacy prefix-only path; > MAX_HUNKS means the
+    // legacy `truncated` flag must be set by the legacy loop itself.
+    if hunk_starts.is_empty() || hunk_starts.len() > MAX_HUNKS {
+        return None;
+    }
+
+    // Every body/inter-hunk line after the first hunk start must carry a
+    // unified marker (' ', '+', '-' or be empty). The legacy classifier
+    // paints bare body lines as `Blank` rows without consuming line
+    // numbers; the bridge producer folds them into `Context`, so such
+    // patches stay local.
+    for (hunk_idx, &start) in hunk_starts.iter().enumerate() {
+        let end = hunk_starts.get(hunk_idx + 1).copied().unwrap_or(patch.len());
+        let region = &patch[start..end];
+        let (header, body) = match region.split_once('\n') {
+            Some((header, body)) => (header, body),
+            None => (region, ""),
+        };
+        // The legacy classifier keeps the trailing `\r` on hunk-header rows
+        // (`header_line = &hunk_text[..header_end]`), while the bridge
+        // producer strips it, so a CRLF header would diverge (FFI-08).
+        if header.ends_with('\r') {
+            return None;
+        }
+        for line in body.split('\n') {
+            let line = line.strip_suffix('\r').unwrap_or(line);
+            // Inter-hunk `--- `/`+++ ` separators of a multi-file patch are
+            // `FileHeader` rows for the legacy classifier; the bridge
+            // producer would swallow them as path headers and drop the two
+            // painted rows, so they stay local (FFI-08).
+            if line.starts_with("---") || line.starts_with("+++") {
+                return None;
+            }
+            match line.as_bytes().first() {
+                None | Some(b' ') | Some(b'+') | Some(b'-') => {}
+                _ => return None,
+            }
+        }
+    }
+
+    // Feed the producer only the hunk region: the `---`/`+++` preamble stays
+    // in the locally classified prefix exactly like `classify_patch`.
+    let parsed = FilePatch::parse(&patch[hunk_starts[0]..]).ok()?;
+
+    // Upstream strictness plus a declared-count check: the bridge producer
+    // does not reject count drift, but legacy flags it `malformed`, so any
+    // drift falls back.
+    for hunk in parsed.hunks() {
+        let mut old_seen = 0u32;
+        let mut new_seen = 0u32;
+        for row in &parsed.rows()[hunk.first_row()..hunk.end_row()] {
+            if row.kind() != RowKind::Added {
+                old_seen += 1;
+            }
+            if row.kind() != RowKind::Removed {
+                new_seen += 1;
+            }
+        }
+        if old_seen != hunk.old_count() || new_seen != hunk.new_count() {
+            return None;
+        }
+    }
+
+    let prefix_end = hunk_starts[0];
+    let mut lines: Vec<DiffLine> = Vec::with_capacity(parsed.rows().len() + hunk_starts.len());
+    for raw in patch[..prefix_end].split('\n').filter(|l| !l.is_empty()) {
+        lines.push(DiffLine {
+            role: classify_prefix_line(raw),
+            content: raw.to_string(),
+            old_line: None,
+            new_line: None,
+            hunk_index: 0,
+            line_index: lines.len(),
+        });
+    }
+    let mut pushed_hunks = 0usize;
+    let mut body_ordinal = 1usize;
+    let mut push_hunk_header = |lines: &mut Vec<DiffLine>, hunk_header: &str, hunk_index: usize| {
+        lines.push(DiffLine {
+            role: DiffLineRole::HunkHeader,
+            content: hunk_header.to_string(),
+            old_line: None,
+            new_line: None,
+            hunk_index,
+            line_index: lines.len(),
+        });
+    };
+    for row in parsed.rows() {
+        let hunk_index = usize::from(row.hunk());
+        while pushed_hunks <= hunk_index {
+            push_hunk_header(
+                &mut lines,
+                parsed.hunks()[pushed_hunks].header(),
+                pushed_hunks,
+            );
+            pushed_hunks += 1;
+            body_ordinal = 1;
+        }
+        let role = match row.kind() {
+            RowKind::Context => DiffLineRole::Context,
+            RowKind::Added => DiffLineRole::Added,
+            RowKind::Removed => DiffLineRole::Removed,
+        };
+        lines.push(DiffLine {
+            role,
+            content: row.text().to_string(),
+            old_line: row.old_line(),
+            new_line: row.new_line(),
+            hunk_index,
+            line_index: body_ordinal,
+        });
+        body_ordinal += 1;
+    }
+    // Trailing hunks that declare zero rows still paint their header band.
+    while pushed_hunks < parsed.hunks().len() {
+        push_hunk_header(
+            &mut lines,
+            parsed.hunks()[pushed_hunks].header(),
+            pushed_hunks,
+        );
+        pushed_hunks += 1;
+    }
+    if lines.len() > MAX_DIFF_LINES {
+        return None; // legacy truncation contract stays with classify_patch
+    }
+    Some(ClassifiedPatch {
+        lines,
+        truncated: false,
+        malformed: false,
+        consumed_bytes: bytes.len(),
+    })
 }
 
 fn classify_prefix_line(line: &str) -> DiffLineRole {
@@ -742,7 +926,7 @@ fn split_cell(line: &DiffLine) -> SplitCell {
 /// position, exactly like a unified hunk read column-wise.
 #[must_use]
 pub fn paint_rows_split(patch: &str, max_rows: usize, pane_width: usize) -> SplitPaintResult {
-    let classified = classify_patch(patch);
+    let classified = classification_for_paint(patch);
     let inner = pane_width.saturating_sub(1);
     // DIFF-001: upstream `buildSplitView` gives each split side width="50%"
     // of the diff content box (@opentui/core 0.4.5 index.node.js:6056-6057)
@@ -2207,5 +2391,182 @@ index abc123..def456 100644
         // Saturates when the viewport top sits above this root instead of
         // wrapping around usize (`usize::MAX`).
         assert_eq!(relative_scroll_top(3, 12, 0), 0, "viewport above root saturates");
+    }
+}
+
+#[cfg(test)]
+mod ffi08_tests {
+    use super::*;
+
+    // Representative two-hunk unified patch: the bridge producer
+    // (`opentui_bridge::diff::FilePatch::parse`, upstream Diff.ts) classifies
+    // it and the result is byte-identical to the legacy classifier.
+    const TWO_HUNKS: &str = concat!(
+        "--- a/src/main.rs\n",
+        "+++ b/src/main.rs\n",
+        "@@ -1,3 +1,3 @@ fn main() {\n",
+        " a\n",
+        "-b\n",
+        "+c\n",
+        " e\n",
+        "@@ -10,3 +11,3 @@\n",
+        " x\n",
+        "-y\n",
+        "+z\n",
+        " w\n",
+    );
+
+    #[test]
+    fn ffi08_bridge_classifier_drives_inline_paint_classification() {
+        // Fail-before: the pre-FFI-08 paint path used only classify_patch.
+        // Pass-after: the paint classifiers select the bridge producer and
+        // its classification is identical for patches the producer accepts.
+        assert_eq!(classifier_source(TWO_HUNKS), DiffClassifierSource::Bridge);
+        assert_eq!(
+            classify_patch_for_paint(TWO_HUNKS),
+            classify_patch(TWO_HUNKS),
+            "bridge classification equals legacy on accepted patches"
+        );
+        // The live paint pipeline consumes the classification (paired split
+        // gutters and unified gutters render all four change rows).
+        let unified = paint_rows_with_gutter(TWO_HUNKS, 64);
+        assert_eq!(unified.rows.len(), 12, "prefix 2 + hunk headers 2 + body 8");
+        assert_eq!(unified.malformed, false);
+        let split = paint_rows_split(TWO_HUNKS, 64, 80);
+        assert!(split.rows.iter().any(|row| matches!(row, SplitRow::Pair { left: Some(_), right: Some(_) })));
+        assert_eq!(split.left_width, 40);
+    }
+
+    #[test]
+    fn ffi08_git_preamble_and_fallbacks_keep_legacy_contract() {
+        // git preamble: bridge classifies, prefix rows stay byte-identical.
+        let git = concat!(
+            "diff --git a/f b/f\n",
+            "new file mode 100644\n",
+            "--- /dev/null\n",
+            "+++ b/f\n",
+            "@@ -0,0 +1,2 @@\n",
+            "+one\n",
+            "+two\n",
+        );
+        assert_eq!(classifier_source(git), DiffClassifierSource::Bridge);
+        assert_eq!(
+            classify_patch_for_paint(git),
+            classify_patch(git),
+            "git preamble prefix rows are preserved"
+        );
+        // `\ No newline` markers fold inside the bridge producer, so the
+        // legacy marker row stays local.
+        let no_newline = "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n\\ No newline at end of file\n";
+        assert_eq!(classifier_source(no_newline), DiffClassifierSource::Local);
+        assert_eq!(classify_patch_for_paint(no_newline), classify_patch(no_newline));
+        // Count drift is `malformed` locally, never silently reclassified.
+        let drift = "--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n-a\n+b\n";
+        assert_eq!(classifier_source(drift), DiffClassifierSource::Local);
+        assert!(classify_patch_for_paint(drift).malformed);
+        // Bare body lines keep the legacy Blank paint row.
+        let bare = "--- a/x\n+++ b/x\n@@ -1,1 +1,1 @@\n a\nplain\n";
+        assert_eq!(classifier_source(bare), DiffClassifierSource::Local);
+        assert_eq!(classify_patch_for_paint(bare), classify_patch(bare));
+        // Inline consumer entry paints through the selected classification.
+        let rows = crate::native_diff_inline::paint_inline_patch(
+            TWO_HUNKS,
+            DiffViewMode::Unified,
+            DiffWrapMode::None,
+            80,
+            MAX_DIFF_LINES,
+        );
+        assert_eq!(rows.len(), 12);
+    }
+
+    #[test]
+    fn ffi08_inter_hunk_file_headers_fall_back_to_legacy() {
+        // Multi-file patch: the `--- `/`+++ ` separators between hunks are
+        // `FileHeader` paint rows for the legacy classifier. The bridge
+        // producer would consume them as path headers and drop the two rows,
+        // so the precheck must fall back to legacy (FFI-08 review, HIGH).
+        let two_files = concat!(
+            "--- a/src/a.rs\n",
+            "+++ b/src/a.rs\n",
+            "@@ -1,2 +1,2 @@\n",
+            " a\n",
+            "-b\n",
+            "+c\n",
+            "--- a/src/b.rs\n",
+            "+++ b/src/b.rs\n",
+            "@@ -5,1 +5,1 @@\n",
+            "-x\n",
+            "+y\n",
+        );
+        assert_eq!(classifier_source(two_files), DiffClassifierSource::Local);
+        assert_eq!(
+            classify_patch_for_paint(two_files),
+            classify_patch(two_files),
+            "inter-hunk ---/+++ rows must stay byte-identical to legacy"
+        );
+        let classified = classify_patch_for_paint(two_files);
+        let headers = classified
+            .lines
+            .iter()
+            .filter(|line| line.role == DiffLineRole::FileHeader)
+            .count();
+        assert_eq!(headers, 4, "two file pairs, all four rows painted");
+        // A lone hunk body line `---verbose` (removed text starting with `--`)
+        // is equally ambiguous: legacy classification, never the bridge.
+        let noisy = "--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n-a\n---verbose\n+b\n+done\n";
+        assert_eq!(classifier_source(noisy), DiffClassifierSource::Local);
+        assert_eq!(classify_patch_for_paint(noisy), classify_patch(noisy));
+    }
+
+    #[test]
+    fn ffi08_u32_overflow_probe_stays_local_without_panic() {
+        // FFI-08 review, MEDIUM: a crafted `@@ -4294967295,2 +1,1 @@` plus
+        // two consumed rows overflowed plain `old_start + old_seen - 1`.
+        // The bridge producer now saturates (no panic, matching legacy) and
+        // the declared-count check still rejects the mismatched counts.
+        let probe = "--- a/x\n+++ b/x\n@@ -4294967295,2 +1,1 @@\n a\n b\n";
+        // Direct producer probe on the count-matching variant (the producer
+        // itself rejects count drift): must not panic, saturates at u32::MAX.
+        let region = "@@ -4294967295,2 +1,2 @@\n a\n b\n";
+        let parsed = opencode_rk_opentui_bridge::diff::FilePatch::parse(region)
+            .expect("producer parse must not panic at u32 bounds");
+        assert_eq!(parsed.hunks()[0].old_start(), u32::MAX);
+        assert_eq!(parsed.rows()[1].old_line(), Some(u32::MAX));
+        // Consumer: count drift keeps the (malformed) legacy classification.
+        assert_eq!(classifier_source(probe), DiffClassifierSource::Local);
+        assert!(classify_patch_for_paint(probe).malformed);
+        assert_eq!(classify_patch_for_paint(probe), classify_patch(probe));
+        // With matching declared counts the saturated numbers are accepted
+        // AND byte-identical to the legacy saturating paint numbers.
+        let saturated = "--- a/x\n+++ b/x\n@@ -4294967295,2 +1,2 @@\n a\n b\n";
+        assert_eq!(
+            classifier_source(saturated),
+            DiffClassifierSource::Bridge,
+            "saturating parity keeps exact-count patches on the bridge"
+        );
+        assert_eq!(
+            classify_patch_for_paint(saturated),
+            classify_patch(saturated),
+            "u32-saturated line numbers match legacy paint byte-for-byte"
+        );
+    }
+
+    #[test]
+    fn ffi08_crlf_hunk_headers_fall_back_to_legacy() {
+        // FFI-08 review, LOW: the legacy classifier keeps the trailing `\r`
+        // on hunk-header rows; the bridge producer strips it. A CRLF header
+        // would change the painted header text, so it stays local.
+        let crlf = "--- a/x\r\n+++ b/x\r\n@@ -1,1 +1,1 @@ sec\r\n-a\r\n+b\r\n";
+        assert_eq!(classifier_source(crlf), DiffClassifierSource::Local);
+        assert_eq!(
+            classify_patch_for_paint(crlf),
+            classify_patch(crlf),
+            "CRLF hunk headers stay byte-identical to legacy"
+        );
+        // The gate is header-scoped: CRLF only in body lines keeps the
+        // bridge producer, which strips `\r` exactly like legacy content.
+        let body_crlf = "--- a/x\n+++ b/x\n@@ -1,1 +1,1 @@\n-a\r\n+b\r\n";
+        assert_eq!(classifier_source(body_crlf), DiffClassifierSource::Bridge);
+        assert_eq!(classify_patch_for_paint(body_crlf), classify_patch(body_crlf));
     }
 }

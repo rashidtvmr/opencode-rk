@@ -278,6 +278,12 @@ pub struct DialogRequest {
     pub title: String,
     pub choices: Vec<String>,
     pub message: Option<String>,
+    /// DIALOG-02: the caller's optional description line under the dialog
+    /// title (`ui/dialog.tsx:102-133`, header props `description?`). Shown
+    /// only under the new-designs experiment, like upstream's
+    /// `<Show when={newDesigns() && props.description}>`. Bounded with the
+    /// same cap as `message` and sanitized to a single line at open.
+    pub description: Option<String>,
     pub disabled: Vec<usize>,
     pub error: Option<StaticError>,
 }
@@ -501,6 +507,10 @@ struct OpenDialog {
     /// `dialog-mcp.tsx:24-37`), empty otherwise.
     mcp_status: Vec<String>,
     message_lines: Vec<String>,
+    /// DIALOG-02: the caller's optional description line under the title
+    /// (header props `description?`, `ui/dialog.tsx:102-133`). Painted only
+    /// under the new-designs experiment, like upstream's `Show when=`.
+    description: Option<String>,
     error: StaticError,
     /// DIALOG-10: live `DialogPrompt` text state (`ui/dialog-prompt.tsx`),
     /// present only for [`DialogKind::Prompt`]. The model is the tested
@@ -1189,6 +1199,7 @@ impl DialogView {
             workspaces: None,
             integration: None,
             form: None,
+            description: None,
         });
         self.crash_screen = Some(crash::CrashScreen::new(
             mode,
@@ -1243,6 +1254,16 @@ impl DialogView {
             .message
             .as_ref()
             .is_some_and(|m| m.len() > MAX_MESSAGE_LEN)
+        {
+            return Err(DialogError::MessageTooLong);
+        }
+        // DIALOG-02: the description carries the same bound as `message`
+        // (it is the same shape of free caller text, painted as one faint
+        // line); reuse the variant so the error surface stays closed.
+        if request
+            .description
+            .as_ref()
+            .is_some_and(|d| d.len() > MAX_MESSAGE_LEN)
         {
             return Err(DialogError::MessageTooLong);
         }
@@ -1344,6 +1365,9 @@ impl DialogView {
                 .as_deref()
                 .map(sanitize_block)
                 .unwrap_or_default(),
+            // DIALOG-02: single-line faint text under the title; inline
+            // sanitization (no block/control leak, `ui/dialog.tsx:129`).
+            description: request.description.as_deref().map(sanitize_inline),
             error: request.error.unwrap_or(StaticError::BackendUnavailable),
             prompt: None,
             footer_gap: None,
@@ -1355,6 +1379,7 @@ impl DialogView {
             workspaces: None,
             integration: None,
             form: None,
+            description: None,
         });
         // `DialogSelect` seeds `selected: 0` (`ui/dialog-select.tsx:152`), so
         // the first enabled row is selected on open and the first Down moves
@@ -1442,6 +1467,7 @@ impl DialogView {
             workspaces: None,
             integration: None,
             form: None,
+            description: None,
         });
         // `DialogSelect` seeds `selected` to the focused row
         // (`dialog-select.tsx:152`, `dialog-mcp.tsx:61` `preserveSelection`).
@@ -1500,6 +1526,7 @@ impl DialogView {
             workspaces: None,
             integration: None,
             form: None,
+            description: None,
         });
         self.selection = Some(0);
         self.rejected = false;
@@ -1696,6 +1723,7 @@ impl DialogView {
             workspaces: Some(state),
             integration: None,
             form: None,
+            description: None,
         });
         self.selection = Some(0);
         self.rejected = false;
@@ -1914,6 +1942,7 @@ impl DialogView {
             workspaces: None,
             integration: Some(state),
             form: None,
+            description: None,
         });
         self.selection = None;
         self.rejected = false;
@@ -2015,6 +2044,7 @@ impl DialogView {
             workspaces: None,
             integration: None,
             form: Some(form),
+            description: None,
         });
         self.selection = None;
         self.rejected = false;
@@ -2141,6 +2171,7 @@ impl DialogView {
             workspaces: None,
             integration: None,
             form: None,
+            description: None,
         });
         self.selection = None;
         self.rejected = false;
@@ -2179,6 +2210,7 @@ impl DialogView {
             workspaces: None,
             integration: None,
             form: None,
+            description: None,
         });
         self.selection = None;
         self.rejected = false;
@@ -2342,6 +2374,7 @@ impl DialogView {
             workspaces: None,
             integration: None,
             form: None,
+            description: None,
         });
         self.selection = None;
         self.rejected = false;
@@ -2502,6 +2535,7 @@ impl DialogView {
             message: None,
             disabled: Vec::new(),
             error: None,
+            description: None,
         })
     }
 
@@ -2533,6 +2567,7 @@ impl DialogView {
             message: None,
             disabled: Vec::new(),
             error: None,
+            description: None,
         })
     }
 
@@ -2624,6 +2659,7 @@ impl DialogView {
                 .filter_map(|(index, disabled)| disabled.then_some(index))
                 .collect(),
             error: None,
+            description: None,
         };
         let selection = self.selection;
         self.reset();
@@ -3230,7 +3266,20 @@ impl DialogView {
             ));
             let roomy = height >= dialog.choices.len() + 7;
             if roomy {
-                lines.push(line(String::new(), Role::Description));
+                // DIALOG-02 (`ui/dialog.tsx:105-119`): the new-designs shell
+                // paints the dialog's `description` as a faint line directly
+                // under the title (`<Show when={newDesigns() && props.description}>`,
+                // `fg={theme.text.faint}`); the legacy shell never shows one.
+                // The row occupies the same slot as the legacy spacer, so the
+                // footer position is unchanged whether or not text is present.
+                if self.new_designs && dialog.description.is_some() {
+                    lines.push(line(
+                        dialog.description.clone().unwrap_or_default(),
+                        Role::Description,
+                    ));
+                } else {
+                    lines.push(line(String::new(), Role::Description));
+                }
             }
             match dialog.kind {
                 DialogKind::Permission => {
@@ -7888,6 +7937,7 @@ mod f002r3_permission_navigation_tests {
             message: None,
             disabled: Vec::new(),
             error: None,
+            description: None,
         })
         .unwrap();
         assert_eq!(one.permission_option_count(), Some(1));
@@ -8242,6 +8292,7 @@ mod scoped_input_tests {
             title: "Confirm".into(),
             choices: vec!["界 e\u{301}".into(), "last".into()], message: None,
             disabled: Vec::new(), error: None,
+            description: None,
         }).unwrap();
         let width = 22;
         let height = 12;
@@ -8266,6 +8317,7 @@ mod scoped_input_tests {
             title: "Permission".into(),
             choices: vec!["界 e\u{301}".into(), "Deny once".into()], message: None,
             disabled: Vec::new(), error: None,
+            description: None,
         });
         assert_eq!(result, Err(DialogError::UnknownPermissionChoice));
         assert!(!dialog.is_open());
@@ -8294,6 +8346,7 @@ mod scoped_input_tests {
             id: "wide".into(), session_id: "s".into(), kind: DialogKind::Confirm,
             title: "Confirm".into(), choices: vec!["界".into()], message: None,
             disabled: Vec::new(), error: None,
+            description: None,
         }).unwrap();
         // Prefix consumes three cells; the two-cell glyph cannot fit in the
         // one-cell remainder at width four, so no padding cell is clickable.
@@ -8309,6 +8362,7 @@ mod scoped_input_tests {
             id: "r".into(), session_id: "s".into(), kind: DialogKind::Confirm,
             title: "Choose".into(), choices: (0..20).map(|i| format!("choice-{i}")).collect(),
             message: None, disabled: Vec::new(), error: None,
+            description: None,
         }).unwrap();
         assert_eq!(dialog.production_viewport_policy(), DialogViewportPolicy::ContentBudget);
         let metrics = DialogLayoutMetrics::select(60, 13, 24);
@@ -8426,6 +8480,7 @@ mod tests {
             message: None,
             disabled: Vec::new(),
             error: None,
+            description: None,
         }).unwrap();
         assert!(!legacy.new_designs());
         let legacy_rows = legacy.render_styled(56, 12);
@@ -8445,6 +8500,7 @@ mod tests {
             message: None,
             disabled: Vec::new(),
             error: None,
+            description: None,
         }).unwrap();
         assert!(designed.new_designs());
         let designed_rows = designed.render_styled(56, 12);
@@ -8455,6 +8511,51 @@ mod tests {
         let mut perm = open_permission();
         perm.set_new_designs(true);
         assert_eq!(perm.render_styled(56, 12)[0].role, crate::native_ui_style::Role::Warning);
+    }
+
+    #[test]
+    fn dialog02_live_render_paints_description_only_for_new_designs() {
+        // DIALOG-02: exercise the production request/layout/render path, not
+        // only the palette helper. Upstream `ui/dialog.tsx:105-119` shows the
+        // description directly below the title only when both the experiment
+        // and the caller-provided description are present.
+        let request = || DialogRequest {
+            id: "d02-description".to_string(),
+            session_id: "ses-1".to_string(),
+            kind: DialogKind::Confirm,
+            title: "Confirm change".to_string(),
+            choices: vec!["yes".to_string(), "no".to_string()],
+            message: None,
+            disabled: Vec::new(),
+            error: None,
+            description: Some("This action changes the project".to_string()),
+        };
+
+        let mut designed = DialogView::new();
+        designed.set_new_designs(true);
+        designed.open_request(request()).unwrap();
+        let designed_rows = designed.render_styled(56, 12);
+        assert_eq!(designed_rows[0].text, "Confirm change");
+        assert_eq!(designed_rows[1].text, "This action changes the project");
+        assert_eq!(designed_rows[1].role, crate::native_ui_style::Role::Description);
+
+        let mut legacy = DialogView::new();
+        legacy.open_request(request()).unwrap();
+        let legacy_rows = legacy.render_styled(56, 12);
+        assert_eq!(legacy_rows[0].text, "Confirm change");
+        assert!(
+            legacy_rows.iter().all(|line| line.text != "This action changes the project"),
+            "legacy dialog must not paint the description: {legacy_rows:?}"
+        );
+
+        let mut no_description = DialogView::new();
+        no_description.set_new_designs(true);
+        let mut without_description = request();
+        without_description.description = None;
+        no_description.open_request(without_description).unwrap();
+        let rows = no_description.render_styled(56, 12);
+        assert!(rows.iter().all(|line| line.text != "This action changes the project"));
+        assert_eq!(rows[1].text, "");
     }
 
     #[test]
@@ -8599,6 +8700,7 @@ mod tests {
             message: Some("diff body".to_string()),
             disabled: Vec::new(),
             error: None,
+            description: None,
         }
     }
 
@@ -8623,6 +8725,7 @@ mod tests {
             message: Some("print(1)\n\n1".to_string()),
             disabled: Vec::new(),
             error: None,
+            description: None,
         })
         .expect("execute viewer opens without choices");
         assert!(view.is_open());
@@ -8647,6 +8750,7 @@ mod tests {
             message: None,
             disabled: Vec::new(),
             error: None,
+            description: None,
         })
         .expect("select request valid");
         assert!(view.is_open());
@@ -8773,6 +8877,7 @@ mod tests {
                 message: None,
                 disabled: Vec::new(),
                 error: None,
+                description: None,
             })
             .expect("valid question");
         assert_eq!(
@@ -8795,6 +8900,7 @@ mod tests {
             message: Some("-a\n+b".to_string()),
             disabled: vec![1],
             error: None,
+            description: None,
         })
         .expect("valid confirm");
         // Fresh dialog: no selection, so no answer.
@@ -8827,6 +8933,7 @@ mod tests {
             bad.open_request(DialogRequest {
                 disabled: vec![9],
                 ..permission_request()
+                description: None,
             }),
             Err(DialogError::InvalidDisabledIndex)
         );
@@ -8853,6 +8960,7 @@ mod tests {
             message: Some("line1\r\u{7}bell\u{0}nul\nline2\u{1b}[2J".to_string()),
             disabled: Vec::new(),
             error: None,
+            description: None,
         })
         .expect("valid");
         let lines = view.render(120, 40);
@@ -8906,6 +9014,7 @@ mod tests {
             message: None,
             disabled: Vec::new(),
             error: None,
+            description: None,
         })
         .expect("valid question");
         let lines = view.render(80, 40);
@@ -8944,6 +9053,7 @@ mod tests {
                 message: None,
                 disabled: Vec::new(),
                 error: None,
+                description: None,
             }),
             Err(DialogError::MissingError)
         );
@@ -8956,6 +9066,7 @@ mod tests {
             message: None,
             disabled: Vec::new(),
             error: Some(StaticError::UnknownSideEffects),
+            description: None,
         })
         .expect("valid error card");
         let lines = view.render(80, 40);
@@ -8976,6 +9087,7 @@ mod tests {
         let too_many = DialogRequest {
             choices: vec!["x".to_string(); MAX_CHOICES + 1],
             ..permission_request()
+            description: None,
         };
         assert_eq!(
             bounded.open_request(too_many),
@@ -8984,11 +9096,13 @@ mod tests {
         let long_id = DialogRequest {
             id: "i".repeat(MAX_ID_LEN + 1),
             ..permission_request()
+            description: None,
         };
         assert_eq!(bounded.open_request(long_id), Err(DialogError::IdTooLong));
         let long_title = DialogRequest {
             title: "t".repeat(MAX_TITLE_LEN + 1),
             ..permission_request()
+            description: None,
         };
         assert_eq!(
             bounded.open_request(long_title),
@@ -8997,6 +9111,7 @@ mod tests {
         let long_choice = DialogRequest {
             choices: vec!["c".repeat(MAX_CHOICE_LEN + 1)],
             ..permission_request()
+            description: None,
         };
         assert_eq!(
             bounded.open_request(long_choice),
@@ -9007,6 +9122,7 @@ mod tests {
             let wildcard = DialogRequest {
                 choices: vec!["once".to_string(), forbidden.to_string()],
                 ..permission_request()
+                description: None,
             };
             assert_eq!(
                 bounded.open_request(wildcard),
@@ -9128,6 +9244,7 @@ mod tests {
             .open_request(DialogRequest {
                 choices: vec!["allow".to_string(), "reject".to_string()],
                 ..permission_request()
+                description: None,
             })
             .expect("valid aliases");
         generic.next();
@@ -9145,6 +9262,7 @@ mod tests {
             let request = DialogRequest {
                 choices: vec!["approve once".to_string(), unknown.to_string()],
                 ..permission_request()
+                description: None,
             };
             assert_eq!(
                 view.open_request(request),
@@ -9169,6 +9287,7 @@ mod tests {
         view.open_request(DialogRequest {
             disabled: vec![1],
             ..permission_request()
+            description: None,
         })
         .expect("valid");
         view.next();
@@ -9192,6 +9311,7 @@ mod tests {
             .open_request(DialogRequest {
                 disabled: vec![0],
                 ..permission_request()
+                description: None,
             })
             .expect("valid");
         deny_only.next();
@@ -9206,6 +9326,7 @@ mod tests {
             .open_request(DialogRequest {
                 disabled: vec![0, 1],
                 ..permission_request()
+                description: None,
             })
             .expect("valid");
         none_enabled.next();
@@ -9248,6 +9369,7 @@ mod tests {
             let request = DialogRequest {
                 choices: vec!["approve once".to_string(), malicious.to_string()],
                 ..permission_request()
+                description: None,
             };
             assert_eq!(
                 view.open_request(request),
@@ -9856,6 +9978,7 @@ mod modal_integration_tests {
             disabled: Vec::new(),
             error: None,
         }
+        description: None,
     }
 
     fn answer_attempt(view: &mut DialogView) -> u64 {
@@ -9905,6 +10028,7 @@ mod modal_integration_tests {
         let unknown = DialogRequest {
             choices: vec!["do not approve".to_string()],
             ..request()
+            description: None,
         };
         assert_eq!(
             view.open_request(unknown),
@@ -9913,6 +10037,7 @@ mod modal_integration_tests {
         let too_long = DialogRequest {
             id: "i".repeat(MAX_ID_LEN + 1),
             ..request()
+            description: None,
         };
         assert_eq!(view.open_request(too_long), Err(DialogError::IdTooLong));
         // `replace()` never ran (`ui/dialog.tsx:396-419`), so nothing was
@@ -10191,6 +10316,7 @@ mod modal_integration_tests {
         view.open_request(DialogRequest {
             title: "T".repeat(200),
             ..request()
+            description: None,
         })
         .expect("valid");
         let frame = view.compose(100, 30, 10).expect("frame");
@@ -10258,6 +10384,7 @@ mod modal_integration_tests {
         let refused = DialogRequest {
             choices: vec!["nope".to_string()],
             ..request()
+            description: None,
         };
         assert_eq!(
             pending.open_request_sized(refused, DialogSize::Large, true),
@@ -10353,6 +10480,7 @@ mod select_live_tests {
             message: None,
             disabled: disabled.to_vec(),
             error: None,
+            description: None,
         })
         .expect("select request valid");
         view
@@ -10466,6 +10594,7 @@ mod select_live_tests {
             message: None,
             disabled: Vec::new(),
             error: None,
+            description: None,
         })
         .expect("valid");
         assert_eq!(view.focused_choice(), Some("row 0"));
@@ -11114,6 +11243,7 @@ mod dialog07_tests {
             message: None,
             disabled: Vec::new(),
             error: None,
+            description: None,
         })
         .expect("select request valid");
         view.dialog.as_mut().unwrap().select = Some(SelectDialog::new(options).with_flat(flat));

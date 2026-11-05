@@ -66,6 +66,11 @@
 #![allow(dead_code)]
 
 use crate::native_view_layout::visit_unpadded_cells;
+// FFI-06: `MarkdownDoc` is the block-identity producer consumed by
+// `MarkdownFlow::rebuild` so streaming updates keep cross-stream stable ids.
+use opencode_rk_opentui_bridge::markdown::{
+    Block as DocBlock, BlockKind as DocBlockKind, MarkdownDoc as BridgeMarkdownDoc,
+};
 
 /// Bounded Markdown input; longer content is clipped on a char boundary and
 /// flagged through [`MarkdownFlow::truncated`].
@@ -407,6 +412,10 @@ pub enum BlockBody {
 pub struct MarkdownBlock {
     /// Stable identity: top-level position, matching upstream block state.
     pub id: usize,
+    /// Cross-stream stable identity produced by
+    /// `opentui_bridge::markdown::MarkdownDoc` (FFI-06). `None` when the doc
+    /// producer was rejected for this block (fail closed).
+    pub doc_id: Option<u64>,
     pub kind: BlockKind,
     /// Token raw byte range in the flow content.
     pub source_start: usize,
@@ -607,6 +616,9 @@ pub struct MarkdownFlow {
     blocks: Vec<MarkdownBlock>,
     tokens: Vec<RawToken>,
     fence_handlers: Vec<(String, String)>,
+    /// FFI-06 producer: current document identity state.
+    doc: BridgeMarkdownDoc,
+    doc_revision: u64,
     renderer_epoch: u64,
     reused_tokens: usize,
     truncated: bool,
@@ -623,6 +635,8 @@ impl MarkdownFlow {
             blocks: Vec::new(),
             tokens: Vec::new(),
             fence_handlers: Vec::new(),
+            doc: BridgeMarkdownDoc::new(),
+            doc_revision: 0,
             renderer_epoch: 0,
             reused_tokens: 0,
             truncated: false,
@@ -673,6 +687,14 @@ impl MarkdownFlow {
     #[must_use]
     pub fn renderer_epoch(&self) -> u64 {
         self.renderer_epoch
+    }
+
+    /// Revision of the FFI-06 identity producer
+    /// (`opentui_bridge::markdown::MarkdownDoc`); bumps on every accepted
+    /// content update, resets to 0 when the producer rejected the source.
+    #[must_use]
+    pub fn doc_revision(&self) -> u64 {
+        self.doc_revision
     }
 
     /// Bind the effective plugin registry. A different effective map clears and
@@ -1007,6 +1029,14 @@ impl MarkdownFlow {
     }
 
     fn rebuild(&mut self) {
+        // FFI-06: the bridge document is the block-identity producer. A rejected
+        // source fails closed to an empty producer (ids become `None`).
+        if self.doc.set_source(&self.content).is_err() {
+            self.doc = BridgeMarkdownDoc::new();
+        }
+        self.doc_revision = self.doc.revision();
+        let doc_blocks = self.doc.blocks();
+        let mut doc_used = vec![false; doc_blocks.len()];
         let previous: Vec<(&'static str, String)> =
             self.blocks.iter().map(|block| (block_key(&block.kind), block.source_raw.clone())).collect();
         let tokens = tokenize(&self.content);
@@ -1041,7 +1071,8 @@ impl MarkdownFlow {
             let preserved = previous
                 .get(blocks.len())
                 .is_some_and(|(kind, raw)| *kind == token_key(token.kind) && *raw == token.raw);
-            blocks.push(self.build_block(blocks.len(), token, margin_top, preserved));
+            let doc_id = match_doc_id(doc_blocks, &mut doc_used, token);
+            blocks.push(self.build_block(blocks.len(), token, margin_top, preserved, doc_id));
             previous_kind = Some(token.kind);
             previous_raw.clone_from(&token.raw);
             gap.clear();
@@ -1050,7 +1081,14 @@ impl MarkdownFlow {
         self.blocks = blocks;
     }
 
-    fn build_block(&self, id: usize, token: &RawToken, margin_top: usize, preserved: bool) -> MarkdownBlock {
+    fn build_block(
+        &self,
+        id: usize,
+        token: &RawToken,
+        margin_top: usize,
+        preserved: bool,
+        doc_id: Option<u64>,
+    ) -> MarkdownBlock {
         let conceal = self.options.conceal;
         let hyperlinks = self.options.hyperlinks;
         let (kind, body) = match token.kind {
@@ -1111,6 +1149,7 @@ impl MarkdownFlow {
         };
         MarkdownBlock {
             id,
+            doc_id,
             kind,
             source_start: token.start,
             source_end: token.start + token.raw.len(),
@@ -1128,6 +1167,67 @@ impl MarkdownFlow {
             .find(|(key, _)| key == language)
             .map(|(_, handler)| handler.clone())
     }
+}
+
+/// Normalize a raw segment the way `parse_blocks` stores block raw text:
+/// per-line `trim_end`, blank lines dropped, joined with a single newline.
+fn doc_norm(raw: &str) -> String {
+    raw.split('\n')
+        .map(str::trim_end)
+        .filter(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// First non-blank line, normalized as `parse_blocks` stores a single-line
+/// block raw (`trim_end`); used as the list-item anchor (one doc block per
+/// item line).
+fn doc_anchor(raw: &str) -> String {
+    raw.split('\n')
+        .map(str::trim_end)
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// Token kind -> producer block kind compatibility (FFI-06 alignment).
+fn doc_block_matches(token: RawKind, doc: &DocBlockKind) -> bool {
+    matches!(
+        (token, doc),
+        (RawKind::Paragraph, DocBlockKind::Paragraph)
+            | (RawKind::Heading, DocBlockKind::Heading(_))
+            | (RawKind::Code, DocBlockKind::Code { .. })
+            | (RawKind::List, DocBlockKind::ListItem { .. })
+            | (RawKind::Quote, DocBlockKind::Quote)
+            | (RawKind::Rule, DocBlockKind::Rule)
+            | (RawKind::Table, DocBlockKind::Table)
+    )
+}
+
+/// Pair one flow token with the first unused producer block that carries the
+/// same normalized raw text and kind; returns the producer's stable id.
+/// First-use order makes the assignment monotone, matching the producer's
+/// never-resurrect-ids contract. Unmatched tokens stay `None` (fail closed).
+fn match_doc_id(doc_blocks: &[DocBlock], used: &mut [bool], token: &RawToken) -> Option<u64> {
+    let key = if token.kind == RawKind::List {
+        doc_anchor(&token.raw)
+    } else {
+        doc_norm(&token.raw)
+    };
+    if key.is_empty() {
+        return None;
+    }
+    for (index, block) in doc_blocks.iter().enumerate() {
+        if used[index]
+            || block.raw() != key
+            || !doc_block_matches(token.kind, block.kind())
+        {
+            continue;
+        }
+        used[index] = true;
+        return Some(block.id());
+    }
+    None
 }
 
 fn block_key(kind: &BlockKind) -> &'static str {
@@ -2561,6 +2661,35 @@ mod tests {
         assert_eq!(prose.title, None);
         assert_eq!(crate::medown::reasoning_body("[REDACTED]"), None);
         assert_eq!(crate::medown::reasoning_content("[REDACTED]  [REDACTED]"), "");
+    }
+
+    /// FFI-06. The bridge `MarkdownDoc` is the block-identity producer: unchanged
+    /// prefix blocks keep their ids across streaming appends, replaced blocks get
+    /// fresh monotonic ids; positional `id` semantics continue in parallel.
+    #[test]
+    fn ffi06_bridge_doc_is_block_identity_producer() {
+        let mut flow = MarkdownFlow::new(MarkdownOptions { streaming: true, ..MarkdownOptions::default() });
+        flow.push_chunk("# Head\n\npara one\n\n```rust\nfn a() {");
+        let ids: Vec<Option<u64>> = flow.blocks().iter().map(|block| block.doc_id).collect();
+        assert_eq!(ids, vec![Some(0), Some(1), Some(2)]);
+        assert_eq!(flow.doc_revision(), 1);
+
+        // Closing the fence and appending keeps the unchanged prefix ids and
+        // allocates fresh monotonic ids for the changed tail.
+        flow.push_chunk(" }\n```\n\npara two");
+        let ids: Vec<Option<u64>> = flow.blocks().iter().map(|block| block.doc_id).collect();
+        assert_eq!(ids, vec![Some(0), Some(1), Some(3), Some(4)]);
+        assert_eq!(flow.doc_revision(), 2);
+
+        // A replaced block gets a strictly larger producer id than any earlier
+        // content (ids are never reused), proving the bridge producer (not the
+        // positional index) drives the identity.
+        flow.set_content("Head2\n\npara one");
+        let positions: Vec<usize> = flow.blocks().iter().map(|block| block.id).collect();
+        let ids: Vec<Option<u64>> = flow.blocks().iter().map(|block| block.doc_id).collect();
+        assert_eq!(positions, vec![0, 1]);
+        assert_eq!(ids, vec![Some(5), Some(6)]);
+        assert_eq!(flow.doc_revision(), 3);
     }
 
     /// MD-007. Upstream: `packages/tui/src/plugin/markdown.ts:8-17` (last-wins
