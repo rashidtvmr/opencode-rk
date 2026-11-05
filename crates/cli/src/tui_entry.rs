@@ -7868,8 +7868,16 @@ fn permission_tool_part_from_part(
 /// bounded resource body — the poll never invents an input. The 16-line
 /// block cap is enforced again by `prompt_set_message`
 /// (`MAX_BLOCK_LINES`).
+///
+/// DIFF-001: the edit body receives the live terminal width and the
+/// stored diff-view preference so a diff-able payload paints through the
+/// shared `build_permission_diff` pipeline (`permission.tsx:42-76`).
 #[cfg(feature = "native")]
-fn permission_dialog_message(pending: &PendingPermission) -> Option<String> {
+fn permission_dialog_message(
+    pending: &PendingPermission,
+    terminal_width: usize,
+    diff_preference: crate::native_diff_view::DiffViewPreference,
+) -> Option<String> {
     let tool_part = pending.permission_tool_part.as_ref()?;
     let input = tool_part.get("input").unwrap_or(&serde_json::Value::Null);
     let metadata = tool_part.get("metadata").unwrap_or(&serde_json::Value::Null);
@@ -7890,11 +7898,27 @@ fn permission_dialog_message(pending: &PendingPermission) -> Option<String> {
         rows.push(format!("  {} {}", presentation.icon, presentation.title));
     }
     match pending.title.as_str() {
-        "edit" => rows.extend(
-            crate::native_permissions::edit_body_lines(&presentation)
-                .into_iter()
-                .map(|line| line.text),
-        ),
+        // DIFF-001: with a diff-able payload the body paints through the
+        // shared PaintDiff pipeline (unified/split by terminal width, word
+        // wrap) exactly as `EditBody` (`permission.tsx:42-76,168-170`); the
+        // diff-less fallbacks (raw patch muted, "No diff provided") keep the
+        // plain-text path.
+        "edit" => {
+            match presentation.diff.as_deref().filter(|diff| !diff.is_empty()) {
+                Some(diff) => rows.extend(
+                    crate::native_diff_inline::permission_diff_message_lines(
+                        diff,
+                        terminal_width,
+                        diff_preference,
+                    ),
+                ),
+                None => rows.extend(
+                    crate::native_permissions::edit_body_lines(&presentation)
+                        .into_iter()
+                        .map(|line| line.text),
+                ),
+            }
+        }
         "external_directory" => {
             if !presentation.lines.is_empty() {
                 rows.push("Patterns".to_owned());
@@ -8465,12 +8489,13 @@ mod f002r1_tests {
         );
         // Without request metadata the url falls back to the (empty) input.
         assert_eq!(
-            permission_dialog_message(&pending).as_deref(),
+            permission_dialog_message(&pending, 100, crate::native_diff_view::DiffViewPreference::Auto).as_deref(),
             Some("△ Permission required\n  % WebFetch "),
         );
         // With request metadata the url is resolved from it.
         pending.request_metadata = Some(json!({"url": "https://example.test/x"}));
-        let message = permission_dialog_message(&pending).expect("resolved part paints");
+        let message = permission_dialog_message(&pending, 100, crate::native_diff_view::DiffViewPreference::Auto)
+            .expect("resolved part paints");
         assert!(message.contains("% WebFetch https://example.test/x"), "\n{message}");
     }
 
@@ -8487,11 +8512,48 @@ mod f002r1_tests {
                 "metadata": {"files": [{"patch": "-old line\n+new line"}]},
             })),
         );
-        let message = permission_dialog_message(&pending).expect("resolved part paints");
+        let message = permission_dialog_message(&pending, 100, crate::native_diff_view::DiffViewPreference::Auto)
+            .expect("resolved part paints");
         assert!(message.contains("△ Permission required"), "\n{message}");
         assert!(message.contains("→ Edit a.rs"), "\n{message}");
         assert!(message.contains("-old line"), "\n{message}");
         assert!(message.contains("+new line"), "\n{message}");
+    }
+
+    /// DIFF-001 (permission half): the live permission dialog body paints a
+    /// diff-able request through the shared `build_permission_diff` pipeline
+    /// (`permission.tsx:42-76` `EditBody` → `PatchDiff`): unified rows carry
+    /// the line-number gutter upstream shows, and the whole body flows
+    /// through `open_permission_with_persistent` + `prompt_set_message` +
+    /// `render` like the production call site. Falsifiable: the pre-fix body
+    /// painted only the raw diff text and never produced gutter bytes.
+    #[test]
+    fn diff001_live_permission_body_paints_the_inline_diff() {
+        let pending = pending(
+            "edit",
+            Vec::new(),
+            None,
+            Some(json!({
+                "input": {"path": "a.rs"},
+                "metadata": {"files": [{"patch": "@@ -1,1 +1,1 @@\n-old line\n+new line"}]},
+            })),
+        );
+        let message = permission_dialog_message(&pending, 100, crate::native_diff_view::DiffViewPreference::Auto)
+            .expect("resolved part paints");
+        let mut view = crate::native_view::NativeView::new(100, 32);
+        view.dialogs
+            .open_permission_with_persistent("p1", "session", "edit", false)
+            .unwrap();
+        view.dialogs.prompt_set_message(Some(message));
+        let rows = view.dialogs.render(100, 24).join("\n");
+        // Painted rows carry the PatchDiff line-number gutter: the removed
+        // row shows old 1, the added row shows new 1 (upstream
+        // `showLineNumbers`, `permission.tsx:61`). The raw pre-fix body
+        // painted only `-old line` / `+new line` and can never contain these
+        // gutter bytes.
+        assert!(rows.contains("  1   -old line"), "\n{rows}");
+        assert!(rows.contains("  1 +new line"), "\n{rows}");
+        assert!(rows.contains("  @@ -1,1 +1,1 @@"), "\n{rows}");
     }
 
     /// `{action:"external_directory", resources:["/x/*"]}` paints the muted
@@ -8505,7 +8567,8 @@ mod f002r1_tests {
             None,
             Some(json!({"input": {}, "metadata": null})),
         );
-        let message = permission_dialog_message(&pending).expect("resolved part paints");
+        let message = permission_dialog_message(&pending, 100, crate::native_diff_view::DiffViewPreference::Auto)
+            .expect("resolved part paints");
         assert!(message.contains("Patterns"), "\n{message}");
         assert!(message.contains("- /x/*"), "\n{message}");
     }
@@ -8528,7 +8591,8 @@ mod f002r1_tests {
             None,
             Some(json!({"input": {"command": "ls"}, "metadata": null})),
         );
-        let message = permission_dialog_message(&pending).expect("resolved part paints");
+        let message = permission_dialog_message(&pending, 100, crate::native_diff_view::DiffViewPreference::Auto)
+            .expect("resolved part paints");
         assert!(message.starts_with("△ Permission required"), "\n{message}");
         assert!(message.contains("$ ls"), "\n{message}");
         assert!(
@@ -8542,7 +8606,10 @@ mod f002r1_tests {
     #[test]
     fn f002r1_unresolved_tool_part_keeps_form002_resource_body() {
         let pending = pending("bash", Vec::new(), Some("~/secret.txt".to_owned()), None);
-        assert_eq!(permission_dialog_message(&pending), None);
+        assert_eq!(
+            permission_dialog_message(&pending, 100, crate::native_diff_view::DiffViewPreference::Auto),
+            None,
+        );
     }
 
     /// Bounded resolution over the transcript: `source.callID` joins the
@@ -11542,8 +11609,12 @@ fn native_loop(
                             // call consumes the pending request: the resolved
                             // tool part paints the live upstream presentation,
                             // FORM-002's resource body stays the fallback.
-                            let permission_message = permission_dialog_message(&pending)
-                                .or_else(|| pending.message.clone());
+                            let permission_message = permission_dialog_message(
+                                &pending,
+                                usize::from(view.presentation().cols),
+                                view.diff_view_preference(),
+                            )
+                            .or_else(|| pending.message.clone());
                             let permission_request_id = pending.id.clone();
                             let result = view.dialogs.open_permission_with_persistent(
                                 pending.id,

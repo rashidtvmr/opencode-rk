@@ -205,6 +205,41 @@ pub fn build_permission_diff(
     )
 }
 
+/// Live consumer: materializes the permission diff rows as one message line
+/// per painted row. Unified rows keep their painted text (gutter, sign and
+/// content already composed by the paint pipeline); split rows join each
+/// cell as `sign text` exactly like the diff-viewer split arm
+/// (`native_view_dialogs.rs` DiffViewer arm, `permission.tsx:55-74`).
+#[must_use]
+pub fn permission_diff_message_lines(
+    diff: &str,
+    terminal_width: usize,
+    preference: DiffViewPreference,
+) -> Vec<String> {
+    build_permission_diff(diff, terminal_width, preference)
+        .into_iter()
+        .map(|row| match row {
+            InlineDiffRow::Unified(painted) => painted.text,
+            InlineDiffRow::Split(split) => match split {
+                SplitRow::Full(line) => line.content,
+                SplitRow::Pair { left, right } => {
+                    let mut text = String::new();
+                    for cell in left.into_iter().chain(right.into_iter()) {
+                        if !text.is_empty() {
+                            text.push(' ');
+                        }
+                        text.push(cell.sign);
+                        text.push(' ');
+                        text.push_str(&cell.text);
+                    }
+                    text
+                }
+            },
+            InlineDiffRow::DeletedSummary(text) => text,
+        })
+        .collect()
+}
+
 /// `index.tsx:3588-3606`: when no file patch survives parsing but applied
 /// resources do, render only their path rows — never invented diff content.
 #[must_use]
