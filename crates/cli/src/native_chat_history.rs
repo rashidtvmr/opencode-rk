@@ -191,7 +191,9 @@ fn message_bytes(message: &ChatMessage) -> usize {
                 output,
                 ..
             } => name.len() + id.len() + status.len() + args.len() + output.len(),
-            ChatPart::File { filename, mime } => filename.len() + mime.len(),
+            ChatPart::File { filename, mime, uri, data } => {
+                filename.len() + mime.len() + uri.as_deref().map_or(0, str::len) + data.as_deref().map_or(0, str::len)
+            }
             ChatPart::Subtask {
                 agent, description, ..
             } => agent.len() + description.len(),
@@ -289,9 +291,11 @@ impl NativeChatHistory {
                     *args = bounded(args);
                     *output = bounded(output);
                 }
-                ChatPart::File { filename, mime } => {
+                ChatPart::File { filename, mime, uri, data } => {
                     *filename = bounded(filename);
                     *mime = bounded(mime);
+                    *uri = uri.as_deref().map(bounded);
+                    *data = data.as_deref().map(bounded);
                 }
                 ChatPart::Subtask {
                     agent, description, ..

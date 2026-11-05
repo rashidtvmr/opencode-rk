@@ -3638,6 +3638,42 @@ impl NativeView {
             .collect()
     }
 
+    /// MEDIA-001: the tracked composer attachments as prompt files, so the
+    /// live strip consumes the shared `image_attachments` gallery model instead
+    /// of re-deriving cell labels. Single tracked `uri` plus a synthesized
+    /// display name; no decoded payload is claimed. The `[Image N]` mention is
+    /// assigned in [`Self::gallery_images`] *after* the helper's filter, so a
+    /// filtered-out non-image never leaves a gap in the painted numbering.
+    #[must_use]
+    fn prompt_files(&self) -> Vec<crate::native_image_preview::PromptFile> {
+        self.preview_items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| crate::native_image_preview::PromptFile {
+                uri: item.uri.clone(),
+                name: Some(format!("image-{index}")),
+                description: None,
+                mention: None,
+            })
+            .collect()
+    }
+
+    /// MEDIA-001 live gallery: the tracked attachments filtered/deduped by the
+    /// shared `image_attachments` helper (`prompt/index.tsx:397`). Its length is
+    /// the strip's real cell count; each `mention` is the painted name label,
+    /// numbered `[Image N]` over the surviving cells only.
+    #[must_use]
+    pub fn gallery_images(&self) -> Vec<crate::native_image_preview::PreviewImage> {
+        crate::native_image_preview::image_attachments(&self.prompt_files())
+            .into_iter()
+            .enumerate()
+            .map(|(index, mut image)| {
+                image.mention = Some(format!("[Image {}]", index + 1));
+                image
+            })
+            .collect()
+    }
+
     /// Click resolution for the strip or its overflow indicator
     /// (`native_paste::preview_click_index`): `(initial index, images)`.
     /// Overflow clicks land on the first hidden image (index 3).
@@ -3720,6 +3756,11 @@ impl NativeView {
         let Some(model) = self.preview_geometry() else {
             return Vec::new();
         };
+        // MEDIA-001: the live strip consumes the shared `image_attachments`
+        // gallery model (`prompt/index.tsx:397`) instead of re-deriving cell
+        // labels inline. Each image's `mention` is the painted cell name; a
+        // failed decode still keeps the upstream `No preview` error cell.
+        let gallery = self.gallery_images();
         let cells = crate::native_paste::visible_previews(&self.preview_items);
         let width = usize::from(model.width).max(6);
         let inner = width - 2;
@@ -3739,7 +3780,15 @@ impl NativeView {
                     let label = if preview.failed {
                         "No preview".to_owned()
                     } else {
-                        format!("[Image {}]", index + 1)
+                        // MEDIA-001: the cell's name comes from the shared
+                        // gallery model entry for this tracked uri; a tracked
+                        // uri the helper filtered out (non-image) keeps the
+                        // positional label so the strip never regresses.
+                        gallery
+                            .iter()
+                            .find(|image| image.uri == preview.uri)
+                            .and_then(|image| image.mention.clone())
+                            .unwrap_or_else(|| format!("[Image {}]", index + 1))
                     };
                     let label: String = label.chars().take(inner).collect();
                     let pad = inner - label.chars().count();
@@ -6193,6 +6242,42 @@ mod framed_composer_tests {
         assert_eq!(row(top + 1)[left + width - 1], '│');
         assert!(rows[top + 1].contains(draft), "draft inside the border");
         assert!(!rows[top].contains(draft), "border row is not painted over");
+    }
+
+    #[test]
+    fn media001_live_gallery_lists_attached_image_names() {
+        // MEDIA-001: the live strip consumes the shared `image_attachments`
+        // gallery model. Two tracked image data URIs (plus one non-image uri
+        // that the helper must filter out) yield exactly the two image cells,
+        // each labelled by its synthesized `[Image N]` mention. This fails
+        // before the wiring: the strip painted labels inline and never called
+        // `image_attachments`, so `gallery_images` did not exist.
+        let mut view = NativeView::new(90, 30);
+        view.set_session_route(true);
+        view.preview_items = vec![
+            crate::native_paste::PreviewItem {
+                uri: "data:image/png;base64,AAAA".to_owned(),
+                failed: false,
+            },
+            crate::native_paste::PreviewItem {
+                uri: "data:application/pdf;base64,BBBB".to_owned(),
+                failed: false,
+            },
+            crate::native_paste::PreviewItem {
+                uri: "data:image/png;base64,CCCC".to_owned(),
+                failed: false,
+            },
+        ];
+        let gallery = view.gallery_images();
+        assert_eq!(gallery.len(), 2, "only the two image data URIs are gallery cells");
+        assert_eq!(gallery[0].mention.as_deref(), Some("[Image 1]"));
+        assert_eq!(gallery[1].mention.as_deref(), Some("[Image 2]"));
+        assert!(gallery[0].uri.starts_with("data:image/png"));
+        let rows = view.render("draft", &[], false, &[]);
+        let hit = view.preview_strip_hit("draft").expect("strip paints for tracked cells");
+        let painted = rows[hit.1 as usize..(hit.1 + hit.3) as usize].join("\n");
+        assert!(painted.contains("[Image 1]"), "first cell name painted: {painted}");
+        assert!(painted.contains("[Image 2]"), "second cell name painted: {painted}");
     }
 
     #[test]

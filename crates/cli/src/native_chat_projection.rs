@@ -368,11 +368,32 @@ fn hydrated_parts(message: &Value, budget: &mut usize) -> Vec<ChatPart> {
             }
             "text" => output.push(ChatPart::Text(take(text("text"), budget))),
             "reasoning" => output.push(ChatPart::Thinking(take(text("text"), budget))),
-            "file" => output.push(ChatPart::File {
-                filename: take(part.get("filename").or_else(|| part.get("path"))
-                    .and_then(Value::as_str).unwrap_or(""), budget),
-                mime: take(text("mime"), budget),
-            }),
+            "file" => {
+                // MEDIA-001: carry the part's real attachment `uri`/`data` when
+                // the producer emitted one, without changing the existing
+                // `filename`/`mime` shape. Upstream `SessionV1.FilePart` carries
+                // `url` (and attachment data); a data-URI image either embeds it
+                // in `url` or as a separate `data` field. Absent facts stay
+                // `None`, never fabricated.
+                let uri = part
+                    .get("uri")
+                    .or_else(|| part.get("url"))
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .map(|value| take(value, budget));
+                let data = part
+                    .get("data")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .map(|value| take(value, budget));
+                output.push(ChatPart::File {
+                    filename: take(part.get("filename").or_else(|| part.get("path"))
+                        .and_then(Value::as_str).unwrap_or(""), budget),
+                    mime: take(text("mime"), budget),
+                    uri,
+                    data,
+                });
+            }
             "subtask" | "task" => output.push(ChatPart::Subtask {
                 agent: take(text("agent"), budget), description: take(text("description"), budget),
                 background: part.get("background").and_then(Value::as_bool).unwrap_or(false),
@@ -1514,6 +1535,72 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn media001_live_file_part_projects_uri_and_renders_name() {
+        // MEDIA-001 (gallery half): a live `file` message part carrying a real
+        // attachment `uri`/`data` projects both onto `ChatPart::File` without
+        // disturbing the existing `filename`/`mime` shape. This fails before
+        // the variant gained `uri`/`data` (the fields did not exist).
+        let message = json!({
+            "role": "user",
+            "parts": [{
+                "type": "file",
+                "filename": "shot.png",
+                "mime": "image/png",
+                "url": "data:image/png;base64,AQID",
+                "data": "AQID"
+            }]
+        });
+        let projected = project_message(&message).expect("file part projects");
+        match &projected.parts[0] {
+            ChatPart::File { filename, mime, uri, data } => {
+                assert_eq!(filename, "shot.png");
+                assert_eq!(mime, "image/png");
+                assert_eq!(uri.as_deref(), Some("data:image/png;base64,AQID"));
+                assert_eq!(data.as_deref(), Some("AQID"));
+            }
+            other => panic!("expected a File part, got {other:?}"),
+        }
+        // Absent facts stay `None`; never fabricated.
+        let bare = project_message(&json!({
+            "role": "user",
+            "parts": [{"type": "file", "filename": "a.bin", "mime": "application/octet-stream"}]
+        }))
+        .expect("bare file part projects");
+        match &bare.parts[0] {
+            ChatPart::File { uri, data, .. } => {
+                assert!(uri.is_none(), "no uri invented");
+                assert!(data.is_none(), "no data invented");
+            }
+            other => panic!("expected a File part, got {other:?}"),
+        }
+        // The render arm paints the projected name/placeholder: an image part
+        // with a projected payload gets the `[image]` marker, a bare part does
+        // not, and both keep the `[file] {name} ({mime})` label.
+        let view = crate::native_view_chat::ChatView::new();
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let rows = view.render_styled(
+            90,
+            40,
+            "ws",
+            std::slice::from_ref(&projected),
+            "",
+            false,
+            &appearance,
+        );
+        let painted = rows.iter().map(|row| row.0.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            painted.contains("[image] [file] shot.png (image/png)"),
+            "image attachment paints the name with the marker: {painted}"
+        );
+        let bare_rows = view.render_styled(90, 40, "ws", std::slice::from_ref(&bare), "", false, &appearance);
+        let bare_painted = bare_rows.iter().map(|row| row.0.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            bare_painted.contains("[file] a.bin (application/octet-stream)") && !bare_painted.contains("[image]"),
+            "bare file part keeps the plain label: {bare_painted}"
+        );
+    }
+
+    #[test]
     fn project_session_revert_reads_count_and_files_and_rejects_non_objects() {
         // MSG-009: the wire `Session.Revert` (server-computed count + files)
         // projects into the render-ready card.
@@ -2318,7 +2405,9 @@ mod tests {
                     output,
                     ..
                 } => name.len() + id.len() + status.len() + args.len() + output.len(),
-                ChatPart::File { filename, mime } => filename.len() + mime.len(),
+                ChatPart::File { filename, mime, uri, data } => {
+                    filename.len() + mime.len() + uri.as_deref().map_or(0, str::len) + data.as_deref().map_or(0, str::len)
+                }
                 ChatPart::Subtask {
                     agent, description, ..
                 } => agent.len() + description.len(),

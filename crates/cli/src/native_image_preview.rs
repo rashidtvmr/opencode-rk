@@ -1161,6 +1161,47 @@ pub fn inline_tool_images(contents: &[ToolContent]) -> Vec<PreviewImage> {
         .collect()
 }
 
+/// MEDIA-001 live bridge: map a `ToolState` part's bounded `metadata` JSON to
+/// the tool gallery model. Upstream reads `state.content`
+/// (`util/tool-display.ts:59` `toolDisplayContent`, consumed by
+/// `inlineToolImages` at `routes/session/index.tsx:2721-2726`); this port
+/// carries no separate content field, so a `content` array on the real tool
+/// metadata object is projected to [`ToolContent`] and filtered by
+/// [`inline_tool_images`]. Empty or malformed metadata yields no images; nothing
+/// is fabricated.
+#[must_use]
+pub fn inline_tool_images_from_metadata(metadata: &str) -> Vec<PreviewImage> {
+    if metadata.is_empty() {
+        return Vec::new();
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(metadata) else {
+        return Vec::new();
+    };
+    let Some(items) = value.get("content").and_then(serde_json::Value::as_array) else {
+        return Vec::new();
+    };
+    let contents: Vec<ToolContent> = items
+        .iter()
+        .map(|item| ToolContent {
+            kind: item
+                .get("type")
+                .or_else(|| item.get("kind"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+            mime: item
+                .get("mime")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+            uri: item
+                .get("uri")
+                .or_else(|| item.get("url"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+        })
+        .collect();
+    inline_tool_images(&contents)
+}
+
 /// `prompt/attachment.ts:14-18`
 #[must_use]
 pub fn attachment_kind(uri: &str) -> Option<&'static str> {

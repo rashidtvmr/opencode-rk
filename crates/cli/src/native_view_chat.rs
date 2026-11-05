@@ -828,6 +828,13 @@ pub enum ChatPart {
     File {
         filename: String,
         mime: String,
+        /// MEDIA-001: the attachment's real `uri` from the part metadata
+        /// (upstream `SessionV1.FilePart.url`), when the producer carried one.
+        /// `None` when absent; never fabricated.
+        uri: Option<String>,
+        /// MEDIA-001: the attachment's inline `data` payload from the part
+        /// metadata, when present. `None` when absent; never fabricated.
+        data: Option<String>,
     },
     Subtask {
         agent: String,
@@ -3367,12 +3374,58 @@ fn typed_message_rows_with_prefix_spans_mode(
                         tool_out.push((row, tool_state_index));
                     }
                 }
+                // MEDIA-001 tool gallery: upstream paints `SessionImages` from
+                // the tool part's inline image content
+                // (`routes/session/index.tsx:2656-2726`). This port carries the
+                // content on the part's real `metadata`; the gallery paints the
+                // name/placeholder rows only (decoding is not landable here).
+                let gallery = crate::native_image_preview::inline_tool_images_from_metadata(metadata);
+                if !gallery.is_empty() {
+                    let summary = gallery
+                        .iter()
+                        .take(crate::native_image_preview::GALLERY_VISIBLE_LIMIT)
+                        .enumerate()
+                        .map(|(index, _)| format!("[Image {}]", index + 1))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let overflow = gallery
+                        .len()
+                        .saturating_sub(crate::native_image_preview::GALLERY_VISIBLE_LIMIT);
+                    let suffix = if overflow > 0 {
+                        format!(" +{overflow} more")
+                    } else {
+                        String::new()
+                    };
+                    push_wrapped(
+                        &mut rows,
+                        width,
+                        &format!("  [images] {summary}{suffix}"),
+                        "  ",
+                        ChatRowClass::Metadata,
+                    );
+                }
             }
-            ChatPart::File { filename, mime } => {
+            ChatPart::File {
+                filename,
+                mime,
+                uri,
+                data,
+            } => {
+                // MEDIA-001: the name/placeholder half of the gallery. Decoding
+                // is not landable here, so an image attachment paints its name
+                // plus an explicit `[image]` placeholder derived only from the
+                // projected `mime`/`uri`/`data` facts; a non-image or a part
+                // with no payload keeps the existing `[file]` label.
+                let is_image = mime.starts_with("image/")
+                    || uri
+                        .as_deref()
+                        .is_some_and(|uri| uri.starts_with("data:image/"));
+                let has_payload = uri.is_some() || data.is_some();
+                let marker = if is_image && has_payload { "[image] " } else { "" };
                 push_wrapped(
                     &mut rows,
                     width,
-                    &format!("[file] {filename} ({mime})"),
+                    &format!("{marker}[file] {filename} ({mime})"),
                     "  ",
                     ChatRowClass::Metadata,
                 );
@@ -5997,7 +6050,7 @@ mod tests {
         ];
         let mut mixed = grouped.clone();
         mixed.message_id = Some("m2".into());
-        mixed.parts.push(ChatPart::File { filename: "a.png".into(), mime: "image/png".into() });
+        mixed.parts.push(ChatPart::File { filename: "a.png".into(), mime: "image/png".into(), uri: None, data: None });
         let view = ChatView::new();
         let appearance = crate::native_box_style::BoxAppearance::default();
         // Control: the pure grouped message collapses at the medium default.
@@ -9583,5 +9636,114 @@ mod tool011_tests {
             assert_eq!(view.tool_owner_at(row), *owner);
         }
         assert_eq!(view.tool_owner_at(usize::MAX), None);
+    }
+
+    #[test]
+    fn media001_live_tool_gallery_lists_inline_image_names() {
+        // MEDIA-001 tool gallery: a live `ToolState` part whose real `metadata`
+        // carries an inline image `content` array paints the `[images]` gallery
+        // rows (upstream `routes/session/index.tsx:2656-2726`). This fails
+        // before the wiring: the render arm never consulted `metadata` for a
+        // tool gallery, so no `[images]` row appeared.
+        let metadata = serde_json::json!({
+            "content": [
+                {"type": "file", "mime": "image/png", "uri": "data:image/png;base64,AAAA"},
+                {"type": "text", "text": "ignored"},
+                {"type": "file", "mime": "image/png", "uri": "data:image/png;base64,BBBB"},
+                {"type": "file", "mime": "image/png", "uri": "data:image/png;base64,CCCC"}
+            ]
+        })
+        .to_string();
+        let messages = vec![ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![ChatPart::ToolState {
+                name: "read".to_owned(),
+                id: "c1".to_owned(),
+                status: "completed".to_owned(),
+                args: "{}".to_owned(),
+                output: "ok".to_owned(),
+                is_error: false,
+                metadata,
+            }],
+            agent: None,
+            model: None,
+            assistant_facts: None,
+            message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
+        }];
+        let view = ChatView::new();
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let rows = view.render_styled(90, 40, "ws", &messages, "", false, &appearance);
+        let painted = rows
+            .iter()
+            .map(|row| row.0.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(painted.contains("[images]"), "tool gallery header painted: {painted}");
+        // Three image contents, three visible cells, no overflow (limit is 3).
+        assert!(painted.contains("[Image 1]"), "first cell: {painted}");
+        assert!(painted.contains("[Image 3]"), "third cell: {painted}");
+        assert!(!painted.contains("more"), "no overflow for exactly three: {painted}");
+    }
+
+    #[test]
+    fn media001_tool_gallery_overflow_and_no_metadata() {
+        // Four image contents: three visible cells plus a `+1 more` overflow.
+        let metadata = serde_json::json!({
+            "content": [
+                {"type": "file", "mime": "image/png", "uri": "data:image/png;base64,A"},
+                {"type": "file", "mime": "image/png", "uri": "data:image/png;base64,B"},
+                {"type": "file", "mime": "image/png", "uri": "data:image/png;base64,C"},
+                {"type": "file", "mime": "image/png", "uri": "data:image/png;base64,D"}
+            ]
+        })
+        .to_string();
+        let gallery = crate::native_image_preview::inline_tool_images_from_metadata(&metadata);
+        assert_eq!(gallery.len(), 4, "only the four file image contents are cells");
+        let tool_message = |metadata: String| ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![ChatPart::ToolState {
+                name: "read".to_owned(),
+                id: "c1".to_owned(),
+                status: "completed".to_owned(),
+                args: "{}".to_owned(),
+                output: "ok".to_owned(),
+                is_error: false,
+                metadata,
+            }],
+            agent: None,
+            model: None,
+            assistant_facts: None,
+            message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
+        };
+        // The overflow PAINTING path: drive the four-image ToolState through
+        // the production `NativeView::render_typed` frame (the same live path
+        // the other `media001_*` tests use) and assert the painted bytes. Four
+        // images exceed `GALLERY_VISIBLE_LIMIT` (3), so the arm paints three
+        // `[Image k]` cells plus the exact `+1 more` overflow suffix. This
+        // fails before the fix: the test never rendered the four-image case, so
+        // the overflow paint path could regress while this test stayed green.
+        let mut view = crate::native_view::NativeView::new(90, 40);
+        view.set_session_route(true);
+        let rendered = view.render_typed("", &[tool_message(metadata)], false, &[]);
+        let painted = rendered.join("\n");
+        assert!(painted.contains("[images]"), "tool gallery header painted: {painted}");
+        assert!(painted.contains("[Image 1]"), "first visible cell: {painted}");
+        assert!(painted.contains("[Image 2]"), "second visible cell: {painted}");
+        assert!(painted.contains("[Image 3]"), "third visible cell: {painted}");
+        assert!(
+            painted.contains("+1 more"),
+            "exact overflow bytes painted for 4 images (>3 visible): {painted}"
+        );
+        // A tool part with no metadata paints no gallery rows through the same
+        // production path.
+        let mut bare = crate::native_view::NativeView::new(90, 40);
+        bare.set_session_route(true);
+        let bare_rendered = bare.render_typed("", &[tool_message(String::new())], false, &[]);
+        let bare_painted = bare_rendered.join("\n");
+        assert!(!bare_painted.contains("[images]"), "no gallery without metadata: {bare_painted}");
     }
 }
