@@ -8,14 +8,11 @@
 //! plain code block, last-good/partial recovery, a render-output cache keyed by
 //! `(source, width, theme)` and the row/cell footprint of the resulting block.
 //!
-//! It deliberately does **not** model Mermaid grammar or drawing. There is no
-//! flowchart/gantt/gitGraph/sequence/state/timeline parser, no layout engine,
-//! no grid/styled-cell output and no RGBA palette resolution. Diagram glyphs
-//! and diagram correctness are therefore explicitly NOT implemented and NOT
-//! claimed; a [`DiagramPainter`] supplied by the caller owns the actual
-//! rendering. Without a painter every fence falls back to the plain code block
-//! (fail-closed), which is also what upstream does whenever the diagram cannot
-//! be produced.
+//! It deliberately does **not** model a full Mermaid grammar. Flowchart
+//! detection/layout/paint is implemented by [`CellDiagramPainter`] below; the
+//! remaining kinds fail closed. Without any painter every fence falls back to
+//! the plain code block (fail-closed), which is also what upstream does
+//! whenever the diagram cannot be produced.
 //!
 //! Evidence pins (OpenCode pin `450e7b92412c780a7b5a75226bb8d49aaca24e22`)
 //! --------------------------------------------------------------------
@@ -454,6 +451,346 @@ impl DiagramPainter for NoDiagramPainter {
     }
 }
 
+// ── OC2 live painter: flowchart cells ─────────────────────────────────
+
+/// OC2's live [`DiagramPainter`] for the native transcript. The renderer owns
+/// the fence lifecycle (detection, cache, recovery); this painter owns the
+/// glyphs: it lays a detected flowchart out on a bounded ASCII rail grid.
+/// Any other detected kind fails closed with
+/// [`MermaidFailure::UnsupportedSyntax`], so its fence keeps the plain code
+/// block (upstream `markdown.ts:289-318`).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CellDiagramPainter;
+
+impl DiagramPainter for CellDiagramPainter {
+    fn paint(&self, request: &DiagramRequest<'_>) -> Result<DiagramFrameSize, MermaidFailure> {
+        let rows = layout_diagram(request)?;
+        Ok(DiagramFrameSize {
+            width: rows.iter().map(|row| row.chars().count()).max().unwrap_or(0),
+            height: rows.len(),
+        })
+    }
+}
+
+impl CellDiagramPainter {
+    /// Glyph rows of the same deterministic layout [`DiagramPainter::paint`]
+    /// sized. The live view calls this after a `Rendered` frame and paints
+    /// one row per line, replacing the fence code block entirely.
+    #[must_use]
+    pub fn cells(&self, request: &DiagramRequest<'_>) -> Option<Vec<String>> {
+        layout_diagram(request).ok()
+    }
+}
+
+#[derive(Clone, Debug)]
+struct FlowNode {
+    id: String,
+    label: String,
+    level: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct FlowEdge {
+    from: usize,
+    to: usize,
+}
+
+fn flow_failure(line: usize) -> MermaidFailure {
+    MermaidFailure::UnsupportedSyntax { line }
+}
+
+/// Header line: `flowchart` or `graph`, optionally with one of the five
+/// direction tokens (`flowchart/parser.ts:17,277-279`).
+fn parse_flow_header(line: &str) -> Option<()> {
+    let mut tokens = line.split_whitespace();
+    match tokens.next()? {
+        "flowchart" | "graph" => {}
+        _ => return None,
+    }
+    match tokens.next() {
+        None => Some(()),
+        Some("TD" | "TB" | "BT" | "LR" | "RL") if tokens.next().is_none() => Some(()),
+        _ => None,
+    }
+}
+
+/// Node statement: `ID`, `ID[label]`, `ID{label}` or `ID(label)`
+/// (`flowchart/parser.ts` node shapes). Unclosed wrappers and trailing junk
+/// fail closed with the 1-based line number (`diagnostics.ts:9-18`).
+fn parse_flow_node(text: &str, line: usize) -> Result<(String, String), MermaidFailure> {
+    let text = text.trim();
+    let id_len: usize = text
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .map(char::len_utf8)
+        .sum();
+    if id_len == 0 {
+        return Err(flow_failure(line));
+    }
+    let id = text[..id_len].to_owned();
+    let rest = &text[id_len..];
+    let label = match rest.chars().next() {
+        None => id.clone(),
+        Some(open @ ('[' | '{' | '(')) => {
+            let close = match open {
+                '[' => ']',
+                '{' => '}',
+                _ => ')',
+            };
+            let body = rest
+                .strip_prefix(open)
+                .and_then(|inner| inner.strip_suffix(close))
+                .ok_or_else(|| flow_failure(line))?;
+            let body = body.trim();
+            if body.is_empty() {
+                id.clone()
+            } else {
+                body.to_owned()
+            }
+        }
+        Some(_) => return Err(flow_failure(line)),
+    };
+    Ok((id, label))
+}
+
+/// Exclusive end of an arrow starting at `start`, or `None`. Accepts `-->`,
+/// `==>`, `-.->`, `->`, longer dash/equal/dot runs ending in `>` and open
+/// links of three or more dashes (`---`).
+fn arrow_end_at(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut end = start;
+    let mut dashes = 0usize;
+    let mut dots = 0usize;
+    while let Some(&byte) = bytes.get(end) {
+        match byte {
+            b'-' => dashes += 1,
+            b'.' => dots += 1,
+            b'=' => {}
+            _ => break,
+        }
+        end += 1;
+    }
+    if dashes + dots == 0 {
+        return None;
+    }
+    if bytes.get(end) == Some(&b'>') {
+        return Some(end + 1);
+    }
+    if dots == 0 && dashes >= 3 {
+        return Some(end);
+    }
+    None
+}
+
+/// One statement line: either a chain `A[Label] --> B{Label}` or a bare
+/// `ID[Label]` definition. Everything else fails closed.
+fn parse_flow_statement(
+    line: &str,
+    number: usize,
+    nodes: &mut Vec<FlowNode>,
+    edges: &mut Vec<FlowEdge>,
+) -> Result<(), MermaidFailure> {
+    let bytes = line.as_bytes();
+    let mut segments: Vec<(String, String)> = Vec::new();
+    let mut segment_start = 0usize;
+    let mut scan = 0usize;
+    while scan < bytes.len() {
+        if let Some(end) = arrow_end_at(bytes, scan) {
+            let text = &line[segment_start..scan];
+            let text = text.trim_matches(['-', '.', '=', ' ']);
+            segments.push(parse_flow_node(text, number)?);
+            scan = end;
+            segment_start = end;
+        } else {
+            scan += 1;
+        }
+    }
+    let text = &line[segment_start..];
+    let text = text.trim_matches(['-', '.', '=', ' ']);
+    segments.push(parse_flow_node(text, number)?);
+
+    if let [single] = segments.as_slice() {
+        flow_node_index(nodes, single.0.clone(), single.1.clone());
+    } else {
+        for window in segments.windows(2) {
+            let from = flow_node_index(nodes, window[0].0.clone(), window[0].1.clone());
+            let to = flow_node_index(nodes, window[1].0.clone(), window[1].1.clone());
+            if from != to {
+                edges.push(FlowEdge { from, to });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// First-seen node index for `id`; a later wrapped definition upgrades a bare
+/// id's label.
+fn flow_node_index(nodes: &mut Vec<FlowNode>, id: String, label: String) -> usize {
+    if let Some(existing) = nodes.iter().position(|node| node.id == id) {
+        if nodes[existing].label == nodes[existing].id && label != id {
+            nodes[existing].label = label;
+        }
+        existing
+    } else {
+        nodes.push(FlowNode { id: id.clone(), label, level: 0 });
+        nodes.len() - 1
+    }
+}
+
+/// Longest-path level assignment; cycles are clamped so the fixpoint
+/// terminates within a bounded pass count.
+fn assign_flow_levels(nodes: &mut [FlowNode], edges: &[FlowEdge]) {
+    let cap = nodes.len().min(512);
+    let passes = nodes.len().min(256).max(1);
+    for _ in 0..passes {
+        let mut changed = false;
+        for edge in edges {
+            if edge.from == edge.to {
+                continue;
+            }
+            let next = (nodes[edge.from].level + 1).min(cap);
+            if next > nodes[edge.to].level {
+                nodes[edge.to].level = next;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
+/// ponytail: single longest-path rail layout with straight connector rails,
+/// not a dagre clone; multi-level edges drop their intermediate rails and
+/// label cell widths are char-counted. Add real routing only when upstream
+/// geometry parity demands it.
+fn compose_flow(nodes: &[FlowNode], edges: &[FlowEdge], width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let gap = 2usize;
+    let max_level = nodes.iter().map(|node| node.level).max().unwrap_or(0);
+
+    // Phase 1: box runs and box centers per level. Cells are bounded by the
+    // layout width, so a box that no longer fits is dropped.
+    let mut level_boxes: Vec<Vec<(usize, usize, String)>> = Vec::with_capacity(max_level + 1);
+    let mut level_centers: Vec<Vec<Option<usize>>> = Vec::with_capacity(max_level + 1);
+    for level in 0..=max_level {
+        let members: Vec<usize> = nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| node.level == level)
+            .map(|(index, _)| index)
+            .collect();
+        let mut centers = vec![None; nodes.len()];
+        let mut boxes: Vec<(usize, usize, String)> = Vec::new();
+        if !members.is_empty() {
+            let count = members.len();
+            let available = width.saturating_sub(gap * (count - 1));
+            let label_limit = (available / count).saturating_sub(4).max(1);
+            let mut x = 0usize;
+            for index in members.iter().copied() {
+                let label = clip_label(&nodes[index].label, label_limit);
+                let box_width = label.chars().count() + 4;
+                if x + box_width > width {
+                    break;
+                }
+                centers[index] = Some(x + box_width / 2);
+                boxes.push((x, box_width, label));
+                x += box_width + gap;
+            }
+        }
+        level_boxes.push(boxes);
+        level_centers.push(centers);
+    }
+
+    // Phase 2: emit one box line pair per level with connector rails between.
+    let mut rows: Vec<String> = Vec::with_capacity(max_level * 3 + 2);
+    for level in 0..=max_level {
+        let boxes = &level_boxes[level];
+        let mut top = vec![' '; width];
+        let mut body = vec![' '; width];
+        for (start, box_width, label) in boxes.iter() {
+            let end = (*start + *box_width).min(width);
+            if end - start < 2 {
+                continue;
+            }
+            top[*start] = '+';
+            top[end - 1] = '+';
+            for fill in *start + 1..end - 1 {
+                top[fill] = '-';
+            }
+            body[*start] = '|';
+            body[end - 1] = '|';
+            let inner = end - *start - 2;
+            let text: Vec<char> = clip_label(label, inner).chars().collect();
+            let left = inner.saturating_sub(text.len()) / 2;
+            for (offset, glyph) in text.into_iter().enumerate() {
+                body[*start + 1 + left + offset] = glyph;
+            }
+        }
+        rows.push(buffer_to_row(top));
+        rows.push(buffer_to_row(body));
+        if level == max_level {
+            break;
+        }
+        let centers = &level_centers[level];
+        let next_centers = &level_centers[level + 1];
+        let mut rail = vec![' '; width];
+        for edge in edges {
+            if nodes[edge.from].level == level {
+                if let Some(center) = centers[edge.from] {
+                    rail[center.min(width - 1)] = '|';
+                }
+            }
+            if nodes[edge.from].level == level && nodes[edge.to].level == level + 1 {
+                if let Some(center) = next_centers[edge.to] {
+                    rail[center.min(width - 1)] = 'v';
+                }
+            }
+        }
+        rows.push(buffer_to_row(rail));
+    }
+    rows
+}
+
+fn clip_label(label: &str, limit: usize) -> String {
+    label.chars().take(limit).collect()
+}
+
+fn buffer_to_row(buffer: Vec<char>) -> String {
+    let row: String = buffer.into_iter().collect();
+    row.trim_end().to_owned()
+}
+
+/// Lay `request.source` out as diagram rows. `None`-producing failures carry
+/// the 1-based offending line; a header-only fence yields no rows so the
+/// renderer falls back to the code block (`markdown.ts:307`).
+fn layout_diagram(request: &DiagramRequest<'_>) -> Result<Vec<String>, MermaidFailure> {
+    if request.kind != MermaidDiagramKind::Flowchart {
+        return Err(flow_failure(1));
+    }
+    let mut nodes: Vec<FlowNode> = Vec::new();
+    let mut edges: Vec<FlowEdge> = Vec::new();
+    let mut header_seen = false;
+    for (index, raw_line) in request.source.split('\n').enumerate() {
+        let number = index + 1;
+        let trimmed = raw_line.trim_end_matches('\r').trim();
+        // Blank lines and comments are skipped (`core/mermaid.ts:19-25`).
+        if trimmed.is_empty() || trimmed.starts_with("%%") {
+            continue;
+        }
+        if !header_seen {
+            parse_flow_header(trimmed).ok_or_else(|| flow_failure(number))?;
+            header_seen = true;
+            continue;
+        }
+        parse_flow_statement(trimmed, number, &mut nodes, &mut edges)?;
+    }
+    if nodes.is_empty() {
+        return Ok(Vec::new());
+    }
+    assign_flow_levels(&mut nodes, &edges);
+    Ok(compose_flow(&nodes, &edges, request.width))
+}
+
 // ── Outcome ───────────────────────────────────────────────────────────
 
 /// Rendered diagram footprint.
@@ -680,6 +1017,13 @@ impl<P: DiagramPainter> MermaidRenderer<P> {
     #[must_use]
     pub fn theme(&self) -> &MermaidTheme {
         &self.theme
+    }
+
+    /// The configured painter. The live view reads glyph cells from it after
+    /// a `Rendered` frame ([`CellDiagramPainter::cells`]).
+    #[must_use]
+    pub fn painter(&self) -> &P {
+        &self.painter
     }
 
     /// Changing the theme changes the cache key; retained last-good frames are

@@ -2864,9 +2864,11 @@ fn push_math_run(
 
 /// MD-007: live fence-handler registrations for the flow. The pinned TUI
 /// registers Mermaid and LaTeX renderers only
-/// (`packages/tui/src/plugin/builtins.ts:14-15`); this client has neither a
-/// diagram painter nor a math engine, so the only real handler it can offer is
-/// the bounded lexical code tokenizer (`markdown_runs::code_token_spans`) for
+/// (`packages/tui/src/plugin/builtins.ts:14-15`); the Mermaid fence keeps its
+/// dedicated route in [`paint_fence_block`] via the live
+/// [`crate::native_mermaid::CellDiagramPainter`], the math engine stays
+/// absent, and the only fence-handler registration offered here is the
+/// bounded lexical code tokenizer (`markdown_runs::code_token_spans`) for
 /// the languages it meaningfully serves. Fences whose info-string language is
 /// not registered stay unhandled and keep the plain code-block fallback,
 /// exactly as upstream paints languages without a registered renderer.
@@ -2891,13 +2893,13 @@ fn syntax_fence_registry() -> crate::native_markdown_flow::MarkdownPluginRegistr
 /// Mermaid (`packages/tui/src/plugin/builtins.ts:15,29`,
 /// `packages/merman/src/plugin.ts:5-14`) and LaTeX
 /// (`packages/tui/src/plugin/builtins.ts:14,30`,
-/// `packages/latex/src/plugin.ts:7-12`) own dedicated renderers upstream. This
-/// client configures no [`crate::native_mermaid::DiagramPainter`], so Mermaid
-/// returns its `Fallback` outcome and the fence paints as the plain code block
-/// with its source preserved — exactly its documented fail-closed contract.
-/// MD-009 supplies a real [`crate::native_math::MathLayoutEngine`], so a
-/// `latex`/`math` fence renders its laid-out formula through
-/// [`paint_math_frame`] instead.
+/// `packages/latex/src/plugin.ts:7-12`) own dedicated renderers upstream.
+/// Mermaid is wired through [`crate::native_mermaid::CellDiagramPainter`]:
+/// a rendered flowchart replaces the code block (`markdown.ts:66-75`), while
+/// any fail-closed outcome (other kinds, bounds, syntax) keeps the preserved
+/// source. MD-009 supplies a real [`crate::native_math::MathLayoutEngine`], so
+/// a `latex`/`math`/`tex` fence renders its laid-out formula through
+/// [`paint_math_frame`]; any `Fallback` outcome keeps the preserved source.
 ///
 /// MD-007: `fence_handler` is the live flow's resolved handler id for this
 /// block (from the registry [`push_block_markdown`] binds via
@@ -2924,20 +2926,43 @@ fn paint_fence_block(
         return;
     }
     if let Some(fence) = crate::native_mermaid::MermaidFence::from_code_block(language, source, block_id) {
-        let mut renderer = crate::native_mermaid::MermaidRenderer::without_painter(
+        // Upstream registers a real Mermaid renderer
+        // (`packages/tui/src/plugin/builtins.ts:15,29`,
+        // `packages/merman/src/plugin.ts:5-14`); this client supplies the
+        // live `CellDiagramPainter`, so a rendered flowchart REPLACES the
+        // code block exactly like upstream
+        // (`packages/merman/src/markdown.ts:66-75,283-287`).
+        let mut renderer = crate::native_mermaid::MermaidRenderer::new(
+            crate::native_mermaid::CellDiagramPainter,
             crate::native_mermaid::MermaidTheme::dark("oc2-native"),
         );
         match renderer.render(&fence, width) {
-            crate::native_mermaid::MermaidOutcome::Fallback(fallback) => {
-                // One row per preserved source line is the plain code-block
-                // contract (`Markdown.ts:1171-1186`).
-                debug_assert_eq!(fallback.source, fence.source);
+            crate::native_mermaid::MermaidOutcome::Fallback(_fallback) => {
+                // Fail-closed: detection, bounds or syntax rejected the
+                // diagram, so keep the preserved-source code block.
             }
             crate::native_mermaid::MermaidOutcome::Rendered(frame) => {
-                // Unreachable without a painter; a frame carries geometry but
-                // no glyph cells, so keep the code block rather than invent a
-                // diagram.
-                debug_assert!(frame.height > 0);
+                let request = crate::native_mermaid::DiagramRequest {
+                    kind: frame.kind,
+                    source: &fence.source,
+                    width: renderer.effective_width(width),
+                    theme: renderer.theme(),
+                };
+                if let Some(diagram) = renderer.painter().cells(&request) {
+                    // `marginTop: 1` (`markdown.ts:74`), then one row per
+                    // diagram line; the fence delimiters and raw source are
+                    // gone entirely.
+                    if rows.len() < MAX_MESSAGE_ROWS {
+                        rows.push((truncate_row(prefix, width), class));
+                    }
+                    for line in diagram {
+                        if rows.len() >= MAX_MESSAGE_ROWS {
+                            break;
+                        }
+                        rows.push((truncate_row(&format!("{prefix}{line}"), width), class));
+                    }
+                    return;
+                }
             }
         }
         paint_plain_code_block(rows, width, prefix, class, raw, mode, false, spans, start);
@@ -8664,10 +8689,12 @@ mod footer_v3_consumer_tests {
     #[test]
     fn mermaid_fence_fails_closed_to_the_plain_code_block() {
         use crate::markdown_runs::MarkdownMode;
-        // The native client configures no diagram painter, so the Mermaid
-        // renderer returns its fail-closed fallback and the fence keeps the
-        // plain code block with its source preserved.
-        let text = "```mermaid\ngraph TD\n  A --> B\n```";
+        // MD-008 supersession: a parseable flowchart now paints live
+        // (see `md_008_live_mermaid_fence_paints_flowchart_over_code_block`,
+        // upstream `packages/merman/src/markdown.ts:283-287`), so the
+        // fail-closed Mermaid case is a fence that still cannot produce a
+        // canvas (header only): delimiters and source survive.
+        let text = "```mermaid\ngraph TD\n```";
         let mut rows = Vec::new();
         push_block_markdown(
             &mut rows, 60, text, "", ChatRowClass::AssistantCard, MarkdownMode::Rendered,
@@ -8808,6 +8835,49 @@ mod footer_v3_consumer_tests {
                 }
             }
         }
+    }
+
+    /// MD-008: the live `push_block_markdown` Mermaid path registers the real
+    /// cell painter, so a rendered flowchart replaces its code block exactly
+    /// like upstream (`packages/merman/src/markdown.ts:66-75,283-287`): no
+    /// fence delimiters, no source leak, painted node labels instead.
+    #[test]
+    fn md_008_live_mermaid_fence_paints_flowchart_over_code_block() {
+        use crate::markdown_runs::MarkdownMode;
+        let text = "```mermaid\nflowchart TD\nA[Start] --> B{Ok?}\nB --> C[End]\n```";
+        let mut rows = Vec::new();
+        push_block_markdown(
+            &mut rows, 80, text, "", ChatRowClass::AssistantCard, MarkdownMode::Rendered,
+        );
+        let painted: Vec<&str> = rows.iter().map(|(row, _)| row.as_str()).collect();
+        assert!(
+            !painted.iter().any(|row| row.contains("```")),
+            "fence delimiters leaked: {painted:?}"
+        );
+        assert!(
+            !painted.iter().any(|row| row.contains("flowchart TD")),
+            "diagram header leaked: {painted:?}"
+        );
+        assert!(
+            !painted.iter().any(|row| row.contains("-->")),
+            "raw source edge leaked: {painted:?}"
+        );
+        // `marginTop: 1` (`markdown.ts:74`), then the painted diagram.
+        assert_eq!(painted.first(), Some(&""), "marginTop blank row first: {painted:?}");
+        // Three levels of node boxes (2 rows each) with rails in between.
+        assert_eq!(rows.len(), 1 + 2 * 3 + 2, "margin + boxes + rails: {painted:?}");
+        for label in ["Start", "Ok?", "End"] {
+            assert!(
+                painted.iter().any(|row| row.contains(label)),
+                "node label {label:?} painted: {painted:?}"
+            );
+        }
+        assert!(
+            rows.iter().all(|(row, class)| {
+                *class == ChatRowClass::AssistantCard && row.chars().count() <= 80
+            }),
+            "diagram rows respect width and class: {rows:?}"
+        );
     }
 
     #[test]
