@@ -51,6 +51,10 @@ pub(crate) enum InputEvent {
     PageUp,
     /// CSI 6~ — `DialogSelect` page movement.
     PageDown,
+    /// Home (`CSI H` or `CSI 1~`) — jump to the start of a content viewer.
+    Home,
+    /// End (`CSI F` or `CSI 4~`) — jump to the end of a content viewer.
+    End,
     /// CSI 1;3A — Alt+Up (`session.tab.previous`, `config/keybind.ts:116`).
     /// Decoded separately so modifier chords never become typed text or an
     /// unmodified arrow that a dialog would consume.
@@ -380,12 +384,22 @@ impl TerminalInputDecoder {
             if self.state == State::Csi
                 && byte == b'~'
                 && self.len == 1
-                && matches!(self.sequence[0], b'5' | b'6')
+                && matches!(self.sequence[0], b'1' | b'4' | b'5' | b'6')
             {
-                self.emit(if self.sequence[0] == b'5' {
-                    InputEvent::PageUp
+                self.emit(match self.sequence[0] {
+                    b'1' => InputEvent::Home,
+                    b'4' => InputEvent::End,
+                    b'5' => InputEvent::PageUp,
+                    _ => InputEvent::PageDown,
+                });
+            } else if self.state == State::Csi
+                && self.len == 0
+                && matches!(byte, b'H' | b'F')
+            {
+                self.emit(if byte == b'H' {
+                    InputEvent::Home
                 } else {
-                    InputEvent::PageDown
+                    InputEvent::End
                 });
             } else if matches!(byte, b'A' | b'B')
                 && self.state == State::Csi
@@ -1335,9 +1349,13 @@ mod page_key_regressions {
             decode(b"\x1b[5~\x1b[6~"),
             vec![InputEvent::PageUp, InputEvent::PageDown]
         );
-        // Home/Insert/Delete/End and modified forms are not select paging and
-        // must never become typed text or an arrow move.
-        assert!(decode(b"\x1b[1~\x1b[2~\x1b[3~\x1b[4~").is_empty());
+        assert_eq!(
+            decode(b"\x1b[H\x1b[1~\x1b[F\x1b[4~"),
+            vec![InputEvent::Home, InputEvent::Home, InputEvent::End, InputEvent::End]
+        );
+        // Insert/Delete and modified forms are not select paging and must
+        // never become typed text or an arrow move.
+        assert!(decode(b"\x1b[2~\x1b[3~\x1b[5;2~").is_empty());
         assert!(decode(b"\x1b[5;2~").is_empty());
     }
 }

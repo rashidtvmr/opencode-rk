@@ -11516,6 +11516,27 @@ mod tool011_tests {
         assert_eq!(view.execute_scroll_state(80, 10).0, max);
     }
 
+    #[test]
+    fn tool011_home_end_jump_execute_scroll() {
+        let mut view = DialogView::new();
+        let code: String = (1..=40).map(|n| format!("line{n}")).collect::<Vec<_>>().join("\n");
+        let args = serde_json::json!({ "code": code }).to_string();
+        view.open_execute(execute_dialog("completed", &args, "", false, None))
+            .expect("opens");
+        let (start, max) = view.execute_scroll_state(80, 10);
+        assert_eq!(start, 0);
+        assert!(max > 0);
+
+        // These are the exact state transitions used by the Home/End arms in
+        // the execute/diff viewer key handler.
+        view.set_execute_scroll(2);
+        view.set_execute_scroll(0);
+        assert_eq!(view.execute_scroll_state(80, 10).0, 0);
+        let (_, max) = view.execute_scroll_state(80, 10);
+        view.set_execute_scroll(max);
+        assert_eq!(view.execute_scroll_state(80, 10).0, max);
+    }
+
     /// `dialog-execute.tsx:96-104`: `c` copies the code block and `o` the
     /// output; an empty block or a closed dialog yields `None`.
     #[test]

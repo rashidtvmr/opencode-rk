@@ -12944,6 +12944,8 @@ fn native_loop(
             native_input_decoder::InputEvent::ArrowDown => ("down", 0, None),
             native_input_decoder::InputEvent::PageUp => ("page-up", 0, None),
             native_input_decoder::InputEvent::PageDown => ("page-down", 0, None),
+            native_input_decoder::InputEvent::Home => ("home", 0, None),
+            native_input_decoder::InputEvent::End => ("end", 0, None),
             native_input_decoder::InputEvent::AltArrowUp => ("alt-up", 0, None),
             native_input_decoder::InputEvent::AltArrowDown => ("alt-down", 0, None),
             // Tab-navigation chords are dispatched to `TabCommand` below; this
@@ -13804,8 +13806,7 @@ fn native_loop(
         // TOOL-011: the execute content viewer owns its scroll and copy keys
         // (`dialog-execute.tsx:76-89`: up/down ±1, pageup/pagedown ±page,
         // home/end to the ends, c/o copy code/output) and is modal — every
-        // other key is swallowed. `home`/`end` have no decoded `InputEvent`
-        // yet, so those two scroll commands remain unbound (recorded gap).
+        // other key is swallowed.
         // DIFF-003: the diff viewer scroll body shares the same arrow/page
         // handling; its scroll state clamps against the virtualized rows.
         if view.dialogs.intercepts_input()
@@ -13837,6 +13838,15 @@ fn native_loop(
                 native_input_decoder::InputEvent::PageDown => {
                     let (current, max) = view.dialogs.execute_scroll_state(width, height);
                     view.dialogs.set_execute_scroll((current + height.max(1)).min(max));
+                    needs_paint = true;
+                }
+                native_input_decoder::InputEvent::Home => {
+                    view.dialogs.set_execute_scroll(0);
+                    needs_paint = true;
+                }
+                native_input_decoder::InputEvent::End => {
+                    let (_, max) = view.dialogs.execute_scroll_state(width, height);
+                    view.dialogs.set_execute_scroll(max);
                     needs_paint = true;
                 }
                 native_input_decoder::InputEvent::Escape
@@ -15620,6 +15630,8 @@ fn native_loop(
             // horizontal arrows inert rather than converting them to bytes.
             native_input_decoder::InputEvent::ArrowLeft
             | native_input_decoder::InputEvent::ArrowRight
+            | native_input_decoder::InputEvent::Home
+            | native_input_decoder::InputEvent::End
             | native_input_decoder::InputEvent::AltArrowUp
             | native_input_decoder::InputEvent::AltArrowDown => continue,
             // Tab-navigation chords were already dispatched to `TabCommand`
