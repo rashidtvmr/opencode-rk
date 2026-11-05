@@ -1027,6 +1027,24 @@ impl Storage {
         }
         Ok(())
     }
+    /// Delete the session row for upstream `Session.remove`
+    /// (`packages/core/src/session.ts:374` → `HttpApiEndpoint.delete
+    /// "session.remove"`, `packages/protocol/src/groups/session.ts:236`).
+    /// Session-dependent tables with a foreign key are removed by SQLite's
+    /// cascade. `artifacts.session_id` intentionally has no session foreign
+    /// key, so delete those rows explicitly (which cascades to artifact_versions)
+    /// in the same transaction. Returns `true` when a row was removed.
+    pub fn delete_session(&self, id: SessionId) -> Result<bool, StorageError> {
+        let mut connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let transaction = connection.transaction()?;
+        transaction.execute("DELETE FROM artifacts WHERE session_id=?1", params![id.to_string()])?;
+        let changed = transaction.execute(
+            "DELETE FROM sessions WHERE id=?1",
+            params![id.to_string()],
+        )?;
+        transaction.commit()?;
+        Ok(changed > 0)
+    }
     /// Stage or clear the session's revert fact. Mirrors upstream
     /// `RevertEvent.Staged`/`RevertEvent.Cleared`
     /// (`packages/core/src/session/projector.ts:761-781`): write `revert` and

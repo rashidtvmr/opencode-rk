@@ -107,6 +107,12 @@ pub fn wire_event(published: &Published) -> (String, String) {
         ServerEvent::FormCreated { form } => ("form.created", json!({"form":form})),
         ServerEvent::FormReplied { id, session_id, answer } => ("form.replied", json!({"id":id,"sessionID":session_id,"answer":answer})),
         ServerEvent::FormCancelled { id, session_id } => ("form.cancelled", json!({"id":id,"sessionID":session_id})),
+        // DIALOG-13: upstream `SessionEvent.Deleted` (`session-event.ts:182`
+        // `type: "session.deleted"`, payload `{ sessionID }`); the TUI drops
+        // the row and navigates home (`app.tsx:1364-1370`).
+        ServerEvent::SessionDeleted(session_id) => {
+            ("session.deleted", json!({ "sessionID": session_id }))
+        }
         ServerEvent::Shutdown => ("server.instance.disposed", json!({})),
     };
     let id = format!("ev-{}", published.id);

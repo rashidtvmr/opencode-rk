@@ -165,6 +165,24 @@ impl SessionManager {
         }
         Ok(())
     }
+    /// Delete a fork workspace session and its dependent rows via the schema's
+    /// `ON DELETE CASCADE` (`fork_v2::ForkV2::delete_session_tree`). Returns
+    /// `true` when the row existed.
+    pub fn delete_session(&self, id: SessionId) -> Result<bool, SessionError> {
+        let mut conn = self.conn.lock().map_err(|_| SessionError::Poisoned)?;
+        let pk: Option<i64> = conn
+            .query_row(
+                "SELECT pk FROM sessions WHERE id=?1",
+                params![id.as_uuid().as_bytes().as_slice()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(pk) = pk else {
+            return Ok(false);
+        };
+        opencode_rk_storage::fork_v2::ForkV2::delete_session_tree(&mut conn, pk)?;
+        Ok(true)
+    }
     pub fn append_message(
         &self,
         session: SessionId,
@@ -601,6 +619,28 @@ impl SessionService {
         let storage = Arc::clone(&self.storage);
         run_blocking(move || storage.archive_session(id, Timestamp::now())).await?;
         Ok(())
+    }
+    /// Delete a session entirely (upstream `Session.remove`,
+    /// `packages/core/src/session.ts:374`): fork-owned sessions delete through
+    /// the branch workspace manager, others through storage, which cascades
+    /// every dependent row inside the schema's `DELETE FROM sessions`
+    /// statement. Missing ids map to [`SessionError::NotFound`].
+    pub async fn delete(&self, id: SessionId) -> Result<(), SessionError> {
+        if let Some(manager) = self.fork_manager_for(id).await? {
+            let removed = run_session_blocking(move || manager.delete_session(id)).await?;
+            return if removed {
+                Ok(())
+            } else {
+                Err(SessionError::NotFound(id))
+            };
+        }
+        let storage = Arc::clone(&self.storage);
+        let removed = run_blocking(move || storage.delete_session(id)).await?;
+        if removed {
+            Ok(())
+        } else {
+            Err(SessionError::NotFound(id))
+        }
     }
     /// Stage or clear the session's revert boundary fact. Mirrors the persisted
     /// half of upstream `SessionRevert.stage`

@@ -245,7 +245,10 @@ pub fn router_with_events_and_integration(
         .route("/api/shell/{id}/output", get(get_shell_output))
         .route("/api/sessions", get(list_sessions).post(create_session))
         .route("/api/sessions/live", get(list_live_sessions))
-        .route("/api/sessions/{id}", get(get_session).patch(rename_session))
+        .route(
+            "/api/sessions/{id}",
+            get(get_session).patch(rename_session).delete(delete_session),
+        )
         .route("/api/sessions/{id}/archive", post(archive_session))
         .route("/api/sessions/{id}/revert/stage", post(stage_session_revert))
         .route("/api/sessions/{id}/view", post(view_session))
@@ -1240,6 +1243,27 @@ async fn archive_session(
         .map_err(ApiFailure::internal)?;
     let session = state.sessions.get(id).await.map_err(ApiFailure::internal)?;
     Ok(Json(json!({"session":session})))
+}
+
+/// DIALOG-13: `DELETE /api/session/:sessionID` (`packages/protocol/src/groups/session.ts:236`
+/// `session.remove`, success `NoContent`). Mirrors upstream `Session.remove`
+/// (`packages/core/src/session.ts:374`): the storage/service delete removes the
+/// session and its dependent rows (the schema declares `ON DELETE CASCADE` from
+/// every child table to `sessions`, and `PRAGMA foreign_keys=ON` is set per
+/// connection), then the `SessionDeleted` event is published on the bus.
+/// Unknown ids return 404 (`SessionNotFoundError`).
+async fn delete_session(
+    State(state): State<AppState>,
+    Extension(events): Extension<event_bus::EventBus>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiFailure> {
+    let id = parse_session_id(&id)?;
+    state.sessions.delete(id).await.map_err(|error| match error {
+        SessionError::NotFound(_) => ApiFailure::not_found(format!("session not found: {id}")),
+        other => ApiFailure::internal(other),
+    })?;
+    let _ = events.publish(event_bus::ServerEvent::SessionDeleted(id));
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Debug, Deserialize)]

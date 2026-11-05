@@ -11,6 +11,9 @@ use tokio::sync::mpsc;
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServerEvent {
     SessionCreated(SessionId),
+    /// Upstream `SessionEvent.Deleted` (`packages/core/src/session/events.ts`),
+    /// published after a session and its dependent rows were removed.
+    SessionDeleted(SessionId),
     MessageAppended {
         session: SessionId,
         seq: u64,
@@ -40,6 +43,7 @@ pub enum ServerEvent {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventKind {
     SessionCreated,
+    SessionDeleted,
     MessageAppended,
     ToolExecuted,
     PermissionRequested,
@@ -54,6 +58,7 @@ impl ServerEvent {
     pub fn kind(&self) -> EventKind {
         match self {
             Self::SessionCreated(_) => EventKind::SessionCreated,
+            Self::SessionDeleted(_) => EventKind::SessionDeleted,
             Self::MessageAppended { .. } | Self::MessageStored { .. } => EventKind::MessageAppended,
             Self::ToolExecuted { .. } => EventKind::ToolExecuted,
             Self::PermissionRequested(_) => EventKind::PermissionRequested,
