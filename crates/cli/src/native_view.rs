@@ -4423,8 +4423,12 @@ impl NativeView {
                     .splice(insert..insert, revert_classes);
                 self.chat_text_bounds
                     .splice(insert..insert, std::iter::repeat_n(None, revert_texts.len()));
+                // `chat_markdown_spans` is only populated by the typed render
+                // path, so clamp the splice to its own length like the CP-38
+                // strip and footer insertions below.
+                let spans_at = insert.min(self.chat_markdown_spans.len());
                 self.chat_markdown_spans
-                    .splice(insert..insert, std::iter::repeat_n(Vec::new(), revert_texts.len()));
+                    .splice(spans_at..spans_at, std::iter::repeat_n(Vec::new(), revert_texts.len()));
                 body.splice(insert..insert, revert_texts);
             }
             // Dock rows sit in the slot directly above the composer, exactly
@@ -4492,7 +4496,8 @@ impl NativeView {
                     .splice(insert..insert, std::iter::repeat_n(None, dock_rows.len()));
                 // `chat_markdown_spans` is only populated by the typed render
                 // path, so on the plain `render` path it can be shorter than
-                // `body`; clamp exactly like the queue-dock insertion below.
+                // `body`; clamp exactly like the CP-38 strip and footer
+                // insertions below.
                 let spans_at = insert.min(self.chat_markdown_spans.len());
                 self.chat_markdown_spans
                     .splice(spans_at..spans_at, std::iter::repeat_n(Vec::new(), dock_rows.len()));
@@ -4512,7 +4517,12 @@ impl NativeView {
                 }
                 self.chat_row_classes.splice(insert..insert, queue_classes);
                 self.chat_text_bounds.splice(insert..insert, std::iter::repeat_n(None, queue_texts.len()));
-                self.chat_markdown_spans.splice(insert..insert, std::iter::repeat_n(Vec::new(), queue_texts.len()));
+                // Clamp the spans splice exactly like the CP-38 strip and
+                // footer insertions below: `chat_markdown_spans` stays empty on
+                // the plain `render` path, so `insert..insert` would panic.
+                let spans_at = insert.min(self.chat_markdown_spans.len());
+                self.chat_markdown_spans
+                    .splice(spans_at..spans_at, std::iter::repeat_n(Vec::new(), queue_texts.len()));
                 body.splice(insert..insert, queue_texts);
             }
             // CP-38: image preview strip directly above the composer box. The
@@ -10417,6 +10427,67 @@ mod composer_dock_tests {
         assert_eq!(queue_rows, 3, "rail, summary, rail (index.tsx:2499-2512)");        assert!(
             frame.iter().any(|row| row.contains("1 queued · hello world")),
             "the flattened head prompt is painted: {frame:?}"
+        );
+    }
+}
+
+/// Legacy-render splice safety: `chat_markdown_spans` is only populated by the
+/// typed render path, so on the plain `render()` path it stays empty while
+/// `body` grows. The queue-dock and MSG-009 revert insertions must clamp their
+/// splice index (`insert.min(len)`, exactly like the CP-38 strip and footer
+/// insertions) so a non-empty queue/revert with `insert > 0` cannot panic on
+/// `splice(insert..insert, ..)` past the empty span vector.
+#[cfg(test)]
+mod legacy_render_splice_clamp_tests {
+    use super::NativeView;
+    use crate::native_view_chat::{QueuedPrompt, RevertCard, RevertFileChange, RevertFileStatus};
+
+    #[test]
+    fn plain_render_with_a_queue_does_not_panic_on_empty_markdown_spans() {
+        let mut view = NativeView::new(120, 40);
+        view.set_session_route(true);
+        view.set_model(Some("fixture-model".into()));
+        view.set_queued_prompts([QueuedPrompt {
+            id: "queued-0".to_string(),
+            text: "hello".to_string(),
+        }]);
+        // A non-empty transcript makes `insert = body.len() - prompt.height`
+        // exceed zero while `chat_markdown_spans` stays empty after its clear.
+        let frame = view.render("draft", &["transcript line".to_string()], false, &[]);
+        assert!(
+            view.chat_markdown_spans().iter().all(Vec::is_empty),
+            "the plain render path never populates typed markdown spans"
+        );
+        // The queue rows really reached the splice (no vacuous pass).
+        assert!(
+            frame.iter().any(|row| row.contains("queued")),
+            "the queue summary is painted on the plain render path: {frame:?}"
+        );
+    }
+
+    #[test]
+    fn plain_render_with_a_revert_card_does_not_panic_on_empty_markdown_spans() {
+        let mut view = NativeView::new(120, 40);
+        view.set_session_route(true);
+        view.set_model(Some("fixture-model".into()));
+        view.set_session_revert(Some(RevertCard::new(
+            2,
+            [RevertFileChange {
+                file: "src/a.rs".to_owned(),
+                status: RevertFileStatus::Modified,
+                additions: 3,
+                deletions: 1,
+            }],
+        )));
+        let frame = view.render("draft", &["transcript line".to_string()], false, &[]);
+        assert!(
+            view.chat_markdown_spans().iter().all(Vec::is_empty),
+            "the plain render path never populates typed markdown spans"
+        );
+        // The revert card really reached the splice (no vacuous pass).
+        assert!(
+            frame.iter().any(|row| row.contains("messages reverted")),
+            "the revert card is painted on the plain render path: {frame:?}"
         );
     }
 }
