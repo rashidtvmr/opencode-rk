@@ -3634,6 +3634,7 @@ fn chat_row_background(class: Option<&crate::native_view_chat::ChatRowClass>, ro
         // `element` is the resolved raised.high surface, the same
         // `decrease(raised.base)` step (`native_theme_runtime.rs`).
         Some(ChatRowClass::UserCard) => Some(if is_hovered { element } else { panel }),
+        Some(ChatRowClass::QueueDock) => Some(panel),
         Some(ChatRowClass::AssistantCard) => Some(root),
         Some(ChatRowClass::SystemCard) => Some(element),
         Some(ChatRowClass::DiffAdded) => Some(diff.map_or(Rgba::new(20, 70, 35, 255), |diff| diff.added_background)),
@@ -13291,22 +13292,36 @@ fn native_loop(
         {
             match &event {
                 native_input_decoder::InputEvent::Escape => {
-                    let _ = view.dock_key(crate::native_dock::DockKey::Escape);
+                    let result = view.dock_key(crate::native_dock::DockKey::Escape, live.as_ref().and_then(|s| s.parent_session_id.as_deref()));
+                    if let crate::native_dock::DockKeyOutcome::NavigateToParent(id) = result {
+                        let target = crate::native_navigation::SessionRef(id);
+                        let scroll = view.chat_scroll_offset();
+                        if let Ok(result) = select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, daemon_origin, auth, binding_generation, &target, selected.as_ref().map(|m| m.qualified()), scroll) {
+                            apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route, &mut compact_worker);
+                        }
+                    }
                     needs_paint = true;
                     continue;
                 }
                 native_input_decoder::InputEvent::Byte(3) => {
-                    let _ = view.dock_key(crate::native_dock::DockKey::CtrlC);
+                    let result = view.dock_key(crate::native_dock::DockKey::CtrlC, live.as_ref().and_then(|s| s.parent_session_id.as_deref()));
+                    if let crate::native_dock::DockKeyOutcome::NavigateToParent(id) = result {
+                        let target = crate::native_navigation::SessionRef(id);
+                        let scroll = view.chat_scroll_offset();
+                        if let Ok(result) = select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, daemon_origin, auth, binding_generation, &target, selected.as_ref().map(|m| m.qualified()), scroll) {
+                            apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route, &mut compact_worker);
+                        }
+                    }
                     needs_paint = true;
                     continue;
                 }
                 native_input_decoder::InputEvent::ArrowLeft => {
-                    let _ = view.dock_key(crate::native_dock::DockKey::Left);
+                    let _ = view.dock_key(crate::native_dock::DockKey::Left, None);
                     needs_paint = true;
                     continue;
                 }
                 native_input_decoder::InputEvent::ArrowRight => {
-                    let _ = view.dock_key(crate::native_dock::DockKey::Right);
+                    let _ = view.dock_key(crate::native_dock::DockKey::Right, None);
                     needs_paint = true;
                     continue;
                 }

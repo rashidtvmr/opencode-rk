@@ -487,7 +487,7 @@ pub enum DockKey {
 }
 
 /// Result of pressing a composer-layer key.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DockKeyOutcome {
     /// Nothing happened (composer closed, or a single tab cannot wrap).
     Ignored,
@@ -495,6 +495,7 @@ pub enum DockKeyOutcome {
     Switched(DockTabId),
     /// `onClose` ran (`index.tsx:42-44,79-80`).
     Closed,
+    NavigateToParent(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

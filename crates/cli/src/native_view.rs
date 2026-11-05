@@ -1968,6 +1968,9 @@ impl NativeView {
         prompts: impl IntoIterator<Item = crate::native_view_chat::QueuedPrompt>,
     ) {
         self.queued_prompts = crate::native_view_chat::QueueDock::new(prompts);
+        self.dock.set_queued(
+            self.queued_prompts.prompts().iter().map(|prompt| prompt.text.clone()).collect(),
+        );
     }
 
     /// MSG-009: set (or clear) the staged session revert card. The card renders
@@ -2007,8 +2010,14 @@ impl NativeView {
 
     /// Composer layer keys (`composer/index.tsx:72-82`). Only called while the
     /// dock is open, so composer text input is never stolen.
-    pub fn dock_key(&mut self, key: DockKey) -> DockKeyOutcome {
+    pub fn dock_key(&mut self, key: DockKey, parent: Option<&str>) -> DockKeyOutcome {
         let outcome = self.dock.key(key);
+        let outcome = if outcome == DockKeyOutcome::Closed {
+            match crate::native_status_rail::composer_close(parent) {
+                crate::native_status_rail::ComposerClose::NavigateToParent(id) => DockKeyOutcome::NavigateToParent(id.to_owned()),
+                crate::native_status_rail::ComposerClose::Close => DockKeyOutcome::Closed,
+            }
+        } else { outcome };
         if !matches!(outcome, DockKeyOutcome::Ignored) {
             self.dock_hit.clear();
         }
@@ -2668,21 +2677,30 @@ impl NativeView {
         if height >= 4 { height - 2 } else { height }
     }
 
-    /// CP-01: the live session composer slot, resolved by the single authority
-    /// `native_prompt_pane::prompt_slot` (`routes/session/index.tsx:1591-1660`).
+    /// CP-22: resolve the live session composer slot through the shared
+    /// `native_status_rail::bottom_slot` precedence authority.
     /// `composer_open` is the auxiliary composer/dock; a child session with no
     /// forms also takes the auxiliary slot; `form_pending` is the global form
     /// count. Upstream has no session-route location-missing or disabled fact
     /// reaching this view, so those two inputs stay false (honest-capability).
     fn session_prompt_slot(&self, permission_pending: bool) -> crate::native_prompt_pane::PromptSlot {
-        crate::native_prompt_pane::prompt_slot(
-            self.dock.visible(),
-            self.parent_session && self.global_forms == 0,
-            permission_pending,
-            self.global_forms > 0,
-            false,
-            false,
-        )
+        use crate::native_prompt_pane::PromptSlot;
+        let facts = crate::native_status_rail::BottomFacts {
+            composer_open: self.dock.visible(),
+            child_session: self.parent_session,
+            forms: self.global_forms,
+            permissions: usize::from(permission_pending),
+            location_missing: false,
+            enabled: true,
+        };
+        match crate::native_status_rail::bottom_slot(&facts) {
+            crate::native_status_rail::BottomSlot::Composer => PromptSlot::AuxiliaryComposer,
+            crate::native_status_rail::BottomSlot::Permission => PromptSlot::Permission,
+            crate::native_status_rail::BottomSlot::Form => PromptSlot::Form,
+            crate::native_status_rail::BottomSlot::LocationMissing => PromptSlot::LocationMissing,
+            crate::native_status_rail::BottomSlot::Prompt => PromptSlot::Prompt,
+            crate::native_status_rail::BottomSlot::Empty => PromptSlot::Hidden,
+        }
     }
 
     /// Rows the auxiliary dock currently consumes above the composer.
@@ -4319,7 +4337,7 @@ impl NativeView {
             } else {
                 self.dock_block_for(width.saturating_sub(4))
             };
-            let queue_rows = if has_permission {
+            let queue_rows = if has_permission || !self.dock.queue_visible() {
                 Vec::new()
             } else {
                 self.queued_prompts.render_rows(width.saturating_sub(4) as usize)
@@ -10098,7 +10116,10 @@ mod composer_dock_tests {
         );
         view.toggle_dock();
         assert_eq!(view.dock_active_tab(), Some(DockTabId::Subagents));
-        assert_eq!(view.dock_key(DockKey::Right), DockKeyOutcome::Switched(DockTabId::Shell));
+        assert_eq!(
+            view.dock_key(DockKey::Right, None),
+            DockKeyOutcome::Switched(DockTabId::Shell)
+        );
 
         let frame = view.render_typed("draft", &[], false, &[]);
         assert!(
@@ -10181,7 +10202,7 @@ mod composer_dock_tests {
 
         // (c) Switching the dock to a non-Subagents tab re-syncs the mirror so
         // every subagents command is refused again.
-        let _ = view.dock_key(DockKey::Right);
+        let _ = view.dock_key(DockKey::Right, None);
         assert_eq!(view.dock_command(SUBAGENT_SELECT_COMMAND), None);
 
         // (d) A pointer close (the right-aligned `esc` affordance) must also
@@ -10417,7 +10438,7 @@ mod composer_dock_tests {
 
         view.toggle_dock();
         let _ = view.render_typed("draft", &[], false, &[]);
-        assert_eq!(view.dock_key(DockKey::Escape), DockKeyOutcome::Closed);
+        assert_eq!(view.dock_key(DockKey::Escape, None), DockKeyOutcome::Closed);
         assert!(!view.dock_open());
         assert!(view.dock_hits().is_empty());
     }
