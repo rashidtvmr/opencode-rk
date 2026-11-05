@@ -10138,6 +10138,14 @@ fn native_loop(
             crate::native_theme_runtime::RuntimeTheme::builtin_default(theme_mode)
         }
     };
+    // THEME-14: keep the resolved syntax table owned by the live render loop.
+    // A theme replacement can arrive between frames, but the old value must
+    // remain retained until the frame which observed it has been painted.
+    // This is the bounded Rust equivalent of upstream's renderer.idle()
+    // retention; the native bridge has no SyntaxStyle handle or idle callback.
+    let mut syntax_style_arena: crate::native_theme_runtime::SyntaxStyleArena<
+        Vec<crate::native_theme_runtime::SyntaxRule>,
+    > = crate::native_theme_runtime::SyntaxStyleArena::new();
     // THEME-12: the live theme picker's preview/cancel state. `Some` while the
     // Theme page is open; movement previews (and persists) the focused row and
     // Esc restores the pre-open selection (`dialog-theme-list.tsx:32-37`).
@@ -12375,6 +12383,18 @@ fn native_loop(
             }
         }
 
+        let syntax_rules = theme
+            .semantic
+            .as_ref()
+            .map(crate::native_theme_runtime::SemanticPalette::syntax_rules)
+            .unwrap_or_default();
+        if syntax_style_arena.current() != Some(&syntax_rules) {
+            syntax_style_arena.install(syntax_rules);
+        }
+        // The returned rows and the subsequent native_paint call are one live
+        // renderer frame. Replacements while this frame is in flight retain
+        // the previous syntax table until the matching end_frame below.
+        syntax_style_arena.begin_frame();
         let mut lines = if help_open && !dialog_open {
             Vec::new()
         } else {
@@ -12622,7 +12642,7 @@ fn native_loop(
             // the pointer is stationary (`routes/session/index.tsx:2390`).
             hovered_row = last_pointer
                 .and_then(|(px, py)| user_card_row_under_pointer(&view, px, py));
-            native_paint(
+            let paint_result = native_paint(
                 &mut renderer,
                 &lines,
                 PaintCtx {
@@ -12708,7 +12728,8 @@ fn native_loop(
                 .unwrap_or_else(|| paint_color(theme.palette, crate::native_theme_runtime::Slot::BackgroundPanel)),
             scrollbar_thumb: paint_color(theme.palette, crate::native_theme_runtime::Slot::Border),
                 },
-            )?;
+            );
+            paint_result?;
             rendered_tabs = Some(frame_tabs);
             rendered_rail = frame_rail;
             needs_paint = false;
@@ -12730,6 +12751,7 @@ fn native_loop(
                 }
             }
         }
+        let _released_syntax_styles = syntax_style_arena.end_frame();
         let now = Instant::now();
         input.expire(now);
         let worker_deadline =

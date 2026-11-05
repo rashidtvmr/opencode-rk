@@ -4136,6 +4136,23 @@ fn theme14_syntax_replacement_is_retained_until_renderer_idle() {
     assert_eq!(Rc::strong_count(&handle), 1);
 }
 
+#[test]
+fn theme14_live_streaming_replacement_retains_style_until_frame_end() {
+    use std::rc::Rc;
+    let style_a = Rc::new("style-a");
+    let style_b = Rc::new("style-b");
+    let mut arena = SyntaxStyleArena::new();
+    arena.install(Rc::clone(&style_a));
+    arena.begin_frame();
+    arena.install(Rc::clone(&style_b));
+    assert_eq!(arena.retained_count(), 1, "A remains live during the frame");
+    assert_eq!(Rc::strong_count(&style_a), 2, "external + retained A");
+    assert_eq!(arena.end_frame(), 1, "the last frame releases exactly A");
+    assert_eq!(arena.retained_count(), 0);
+    assert_eq!(Rc::strong_count(&style_a), 1, "only the external A reference remains");
+    assert_eq!(arena.current(), Some(&style_b));
+}
+
 // ── THEME-15: cursor shape/blink/default/disabled/focus ──────────────────
 
 #[test]
