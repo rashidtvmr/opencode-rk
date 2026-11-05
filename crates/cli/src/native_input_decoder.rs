@@ -13,6 +13,20 @@
 //! normalized (`\r\n`/`\r` to `\n`) before any text reaches the composer, the
 //! Return family stays distinct so the submit keymap decides, and IME/Kitty
 //! scalars are decoded as complete UTF-8 units rather than byte offsets.
+//!
+//! FFI-11: the shared input subset is cross-checked against the native
+//! bridge's stdin adapter (`opentui-bridge/src/terminal_input.rs`) by feeding
+//! identical byte frames to both (`mod ffi11_*`). Keep local, proved
+//! equivalent: this decoder stays the sole composer feed because it is the
+//! one that intentionally diverges where the bridge over-delivers —
+//! (1) invalid-UTF8 and >32 KiB paste frames fail closed here (rejected
+//! whole, never reaching the composer), while the bridge hands through
+//! lossy-replaced/truncated bytes;
+//! (2) OSC 10/11 replies surface here as an `OscColorReply { index, rgb }`
+//! payload (THEME-13), while the bridge keeps only `Opaque { code }`;
+//! (3) deadline/abandoned-paste states (escape grace, paste-frame and
+//! control-string timeouts, recovery via a quiet ESC) exist only here, so a
+//! stalled terminal frame can never stall the composer.
 
 use std::time::{Duration, Instant};
 
@@ -1402,5 +1416,198 @@ mod theme13_review_r1_non_ascii_osc_color_tests {
                 rgb: [0x0A, 0x1B, 0x2C, 0xFF]
             }]
         );
+    }
+}
+
+#[cfg(test)]
+mod ffi11_shared_subset_equivalence_tests {
+    //! FFI-11: pins the shared-subset framing equivalence between this
+    //! decoder and `opentui_bridge::terminal_input::TerminalInput` by feeding
+    //! identical byte frames to both adapters and asserting the same outcome:
+    //! one atomic paste, one modifier decode, one isolated capability reply.
+    //! The deliberate divergences (oversized/invalid-UTF8
+    //! paste fail-closed, OSC 10/11 carrying an RGB payload, deadline states)
+    //! are pinned as such rather than "fixed" toward the bridge. See the
+    //! crate-header note "keep local, proved equivalent".
+
+    use super::*;
+    use opencode_rk_opentui_bridge::terminal_input::{
+        CapabilityResponse, KeyCode, KeyEvent, KeyEventKind, TerminalEvent, TerminalInput,
+    };
+    // Alias avoids the glob collision with this decoder's own 32 KiB cap.
+    use opencode_rk_opentui_bridge::terminal_input::MAX_PASTE_BYTES as BRIDGE_MAX_PASTE_BYTES;
+
+    /// Feed the same chunks to both adapters byte-for-byte (the cli decoder
+    /// is push-per-byte; the bridge buffers) and drain both queues.
+    fn run_both(chunks: &[&[u8]]) -> (Vec<InputEvent>, Vec<TerminalEvent>) {
+        let mut cli = TerminalInputDecoder::default();
+        let mut bridge = TerminalInput::new();
+        let now = Instant::now();
+        let mut cli_events = Vec::new();
+        for chunk in chunks {
+            for &byte in *chunk {
+                cli.push(byte, now);
+            }
+            bridge.feed(chunk);
+        }
+        while let Some(event) = cli.pop() {
+            cli_events.push(event);
+        }
+        let mut bridge_events = Vec::new();
+        while let Some(event) = bridge.next_event() {
+            bridge_events.push(event);
+        }
+        (cli_events, bridge_events)
+    }
+
+    #[test]
+    fn ffi11_paste_is_atomic_split_and_cr_normalized_identically_in_both_adapters() {
+        // The frame is split mid-terminator, the hardest boundary both
+        // adapters must survive (`prompt/index.tsx:1805` CRLF/CR -> LF).
+        let (cli_events, bridge_events) = run_both(&[
+            b"\x1b[200~one\r\ntwo\r\x1b[20",
+            b"1~",
+        ]);
+        assert_eq!(cli_events, vec![InputEvent::Paste("one\ntwo\n".to_owned())]);
+        assert_eq!(
+            bridge_events,
+            vec![TerminalEvent::Paste {
+                bytes: b"one\r\ntwo\r".to_vec(),
+                truncated: false,
+            }]
+        );
+        // The normalization result is byte-identical on both sides.
+        let bridge_text = bridge_events[0].paste_text().expect("bridge paste");
+        assert_eq!(bridge_text, "one\ntwo\n");
+        match &cli_events[0] {
+            InputEvent::Paste(text) => assert_eq!(*text, bridge_text),
+            other => panic!("expected cli paste, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ffi11_kitty_modifier_parameters_agree_with_bridge_modifiers() {
+        // (frame, cli event, bridge KeyCode, (shift, alt, ctrl)). Both
+        // adapters must read `modifier - 1` bits: shift=1, alt=2, ctrl=4
+        // (`terminal_input.rs` `Modifiers::from_protocol`).
+        let cases: &[(&[u8], InputEvent, KeyCode, (bool, bool, bool))] = &[
+            (b"\x1b[13;2u", InputEvent::ShiftEnter, KeyCode::Enter, (true, false, false)),
+            (b"\x1b[13;5u", InputEvent::CtrlJ, KeyCode::Enter, (false, false, true)),
+            (b"\x1b[13;3u", InputEvent::AltEnter, KeyCode::Enter, (false, true, false)),
+            (b"\x1b[9;5u", InputEvent::TabNext, KeyCode::Tab, (false, false, true)),
+            (b"\x1b[9;6u", InputEvent::TabPrevious, KeyCode::Tab, (true, false, true)),
+            (b"\x1b[49;5u", InputEvent::TabSlot(0), KeyCode::Char('1'), (false, false, true)),
+            (b"\x1b[116;6u", InputEvent::TabReopen, KeyCode::Char('t'), (true, false, true)),
+        ];
+        for (frame, cli_expected, bridge_code, (shift, alt, ctrl)) in cases {
+            let (cli_events, bridge_events) = run_both(&[frame]);
+            assert_eq!(cli_events, vec![cli_expected.clone()], "cli {frame:?}");
+            assert_eq!(bridge_events.len(), 1, "bridge {frame:?}");
+            let TerminalEvent::Key(KeyEvent { code, modifiers, kind }) = &bridge_events[0] else {
+                panic!("bridge key expected for {frame:?}, got {:?}", bridge_events[0]);
+            };
+            assert_eq!(code, bridge_code, "bridge code for {frame:?}");
+            assert_eq!((modifiers.shift, modifiers.alt, modifiers.ctrl), (*shift, *alt, *ctrl));
+            assert_eq!(*kind, KeyEventKind::Press, "press mod {frame:?}");
+        }
+    }
+
+    #[test]
+    fn ffi11_capability_responses_stay_isolated_from_composer_input() {
+        // The bridge models each reply; this decoder is the composer feed and
+        // discards all of them (only OSC 10/11 is captured, see THEME-13).
+        let frames: &[(&[u8], TerminalEvent)] = &[
+            (
+                b"\x1b[12;34R",
+                TerminalEvent::Response(CapabilityResponse::CursorPosition { row: 12, col: 34 }),
+            ),
+            (
+                b"\x1b[?62;22c",
+                TerminalEvent::Response(CapabilityResponse::DeviceAttributes {
+                    secondary: false,
+                    values: vec![62, 22],
+                }),
+            ),
+            (
+                b"\x1b]0;opencode\x07",
+                TerminalEvent::Response(CapabilityResponse::Opaque { code: 0 }),
+            ),
+            (
+                b"\x1b]7777;unknown\x07",
+                TerminalEvent::Response(CapabilityResponse::Opaque { code: 7777 }),
+            ),
+        ];
+        for (frame, bridge_expected) in frames {
+            let (cli_events, bridge_events) = run_both(&[frame]);
+            assert!(cli_events.is_empty(), "cli must discard {frame:?}, got {cli_events:?}");
+            assert_eq!(bridge_events, vec![bridge_expected.clone()], "bridge {frame:?}");
+        }
+    }
+
+    #[test]
+    fn ffi11_osc_10_11_replies_carry_rgb_here_but_only_opaque_code_in_the_bridge() {
+        let frames: &[(&[u8], u8, [u8; 4])] = &[
+            (b"\x1b]11;rgb:11/22/33\x07", 11, [0x11, 0x22, 0x33, 0xFF]),
+            (b"\x1b]10;#0a1b2c\x07", 10, [0x0A, 0x1B, 0x2C, 0xFF]),
+        ];
+        for &(frame, index, rgb) in frames {
+            let (cli_events, bridge_events) = run_both(&[frame]);
+            assert_eq!(
+                cli_events,
+                vec![InputEvent::OscColorReply { index, rgb }],
+                "cli THEME-13 payload for {frame:?}"
+            );
+            assert_eq!(
+                bridge_events,
+                vec![TerminalEvent::Response(CapabilityResponse::Opaque {
+                    code: u16::from(index)
+                })],
+                "bridge keeps only the code for {frame:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ffi11_oversized_paste_fails_closed_here_but_truncates_in_the_bridge() {
+        assert_eq!(
+            super::MAX_PASTE_BYTES,
+            BRIDGE_MAX_PASTE_BYTES,
+            "32 KiB cap is shared"
+        );
+        let mut frame = b"\x1b[200~".to_vec();
+        frame.extend_from_slice(&vec![b'x'; super::MAX_PASTE_BYTES + 2000]);
+        frame.extend_from_slice(b"\x1b[201~");
+        let (cli_events, bridge_events) = run_both(&[&frame, b"ok"]);
+        // cli: the oversized frame is dropped whole; following input stays
+        // atomic (the divergent fail-closed pin).
+        assert_eq!(
+            cli_events,
+            [InputEvent::Byte(b'o'), InputEvent::Byte(b'k')]
+        );
+        // bridge: truncated paste plus the tail text.
+        assert_eq!(bridge_events.len(), 2);
+        let TerminalEvent::Paste { bytes, truncated } = &bridge_events[0] else {
+            panic!("bridge paste expected, got {:?}", bridge_events[0]);
+        };
+        assert!(*truncated);
+        assert_eq!(bytes.len(), BRIDGE_MAX_PASTE_BYTES);
+        assert_eq!(bridge_events[1], TerminalEvent::Text("ok".into()));
+    }
+
+    #[test]
+    fn ffi11_invalid_utf8_paste_fails_closed_here_but_is_lossy_in_the_bridge() {
+        let mut frame = b"\x1b[200~cat\xff\n".to_vec();
+        frame.extend_from_slice(b"\x1b[201~");
+        let (cli_events, bridge_events) = run_both(&[&frame, b"x"]);
+        // cli: the whole frame is rejected; the composer stays clean.
+        assert_eq!(cli_events, vec![InputEvent::Byte(b'x')]);
+        // bridge: lossy replacement keeps the shape (paste_text contract).
+        assert_eq!(bridge_events.len(), 2);
+        assert_eq!(
+            bridge_events[0].paste_text(),
+            Some("cat\u{FFFD}\n".to_owned()),
+            "bridge replaces the invalid scalar instead of dropping"
+        );
+        assert_eq!(bridge_events[1], TerminalEvent::Text("x".into()));
     }
 }
