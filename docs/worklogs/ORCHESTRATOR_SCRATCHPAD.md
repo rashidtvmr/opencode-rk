@@ -13207,3 +13207,42 @@ on `recovery/ui` (base `6c713efb`, 5 files, +652/-18). The 2 initially-failing
 
 **Next:** DIALOG-07 (live per-row select footer) to the first free lane;
 MSG-001/002/003 transcript grouping adapter; keep ledger current.
+
+---
+
+## Wave-98 (2026-11-05, later) — landable remainder exhausted
+
+**Canonical `main-v2` = `a67731f1`** (pushed + ls-remote verified; working tree CLEAN).
+17 features landed this session, each independently reviewed on its exact SHA.
+
+**Landed since Wave-97:** MEDIA-001 gallery half `f6b7fb90`; TOOL-011 Home/End
+`3ee8700e`; PAR-19 transcript weighted budgets `a67731f1` (4 review cycles: P1
+wrong-renderer + 2 P2 test fixes; publish needed 3-way conflict resolution vs
+MSG-009 edits to `native_view_chat.rs`, kept both sides).
+
+**All 16 R5 PARTIAL items now dispositioned:**
+- LANDED: DIFF-001, MEDIA-001 (gallery), MSG-009, CP-22 (already wired), CP-23,
+  CP-26, TOOL-011 residual.
+- NOT_LANDABLE (inert/no live seam): LAY-10/11/13 (detached harness; prior
+  `02b6d5e1` REJECTED); DIALOG-07 (no modal per-cell span channel;
+  `tui_entry.rs:6273-6285`, sidebar spans gated out `:6308`); FFI-06/11
+  (`636c7067` REJECTED — `reconcile_keyed_rows` dead/no-op, `FlowRow.doc_id`
+  write-only; FFI-06 ALREADY_PRESENT at base via `Block.doc_id` `:418`/`rebuild`
+  `:1031`/`match_doc_id` `:1211`); DIALOG-15 (bundled server never emits
+  `needs_auth` — `server/src/mcp_http.rs:32`, `project()` `:254-262` — so the
+  sign-in gate is unreachable live).
+- STILL_BLOCKED: THEME-14 residual (native SyntaxStyle ABI + `renderer.idle()`);
+  SIDE-05 data half (external Console credential; refusal body dropped
+  `server/src/lib.rs:4022`).
+- Residuals: CP-27 (no live terminal-list producer); DIALOG-18 (no live
+  producer); MSG-009 `InboxEnqueued` (no HTTP producer).
+
+**Research persisted:** `R13-side05-dialog15.md` (SIDE-05 blocked; DIALOG-15
+NOT_LANDABLE with correction), `R14-theme14-spec.md` (STILL_BLOCKED).
+
+**In flight:** release rebuild of `oc2` from `a67731f1` (bg shell
+`sh_1ac8c4310001…`); independent live-wiring audits of the dock cluster
+(`ses_e53736f8dffe…`) and transcript/media cluster (`ses_e537337e2ffe…`).
+
+**Next:** install the rebuilt `oc2` (backup; do NOT restart user daemon/DBs);
+resolve any audit INERT/PARTIAL findings; keep `DISPATCH_LEDGER.md` current.
