@@ -2731,6 +2731,137 @@ fn paint_plain_code_block(
     }
 }
 
+/// MD-009: paint a laid-out LaTeX frame as real glyph rows.
+///
+/// Upstream's LaTeX fence handler turns the source into a [`MathLayout`]
+/// grid and renders each row's glyphs, painting bracket/box-drawing glyphs
+/// `subdued`, relational operators bold, and honoring cell bold/italic/dim
+/// (`packages/latex/src/markdown.ts:37-73`), with a one-row top margin
+/// (`:86`). The native engine produces that grid; this is its live consumer,
+/// so a rendered frame paints the formula instead of falling through to the
+/// plain code block. The run-flag model carries bold/italic attributes and
+/// the muted color, so `subdued`/`dim` map onto the muted color and a
+/// `\color{}` cell keeps the row foreground; glyphs and column geometry stay
+/// faithful.
+fn paint_math_frame(
+    rows: &mut Vec<(String, ChatRowClass)>,
+    width: usize,
+    prefix: &str,
+    class: ChatRowClass,
+    frame: &crate::native_math::MathFrame,
+    spans: &mut Vec<(usize, Vec<ChatRunSpan>)>,
+    start: usize,
+) {
+    let layout = &frame.layout;
+    let prefix_cells = row_cells(prefix);
+    // `packages/latex/src/markdown.ts:86`: `marginTop: 1` above the viewport.
+    for _ in 0..frame.margin_top {
+        if rows.len() >= MAX_MESSAGE_ROWS {
+            return;
+        }
+        rows.push((truncate_row(prefix, width), class));
+    }
+    for y in 0..layout.height.max(1) {
+        if rows.len() >= MAX_MESSAGE_ROWS {
+            break;
+        }
+        let text = layout.row_text(y);
+        rows.push((truncate_row(&format!("{prefix}{text}"), width), class));
+        let row_index = rows.len() - 1 - start;
+
+        // Walk the layout row exactly the way `row_text` does (wide glyphs
+        // advance two columns) and coalesce adjacent same-style cells into
+        // runs whose column bounds match the painted row.
+        let mut run_spans: Vec<ChatRunSpan> = Vec::new();
+        let mut run: Option<(usize, u32)> = None;
+        let mut x = 0usize;
+        while x < layout.width {
+            let cell = layout
+                .cells
+                .get(y)
+                .and_then(|row| row.get(x))
+                .and_then(|cell| cell.as_ref());
+            let (ch, flags) = match cell {
+                Some(cell) => (cell.ch, math_cell_flags(cell.ch, cell.style.as_ref())),
+                None => (' ', 0),
+            };
+            if flags != 0 {
+                match run {
+                    Some((_, current)) if current == flags => {}
+                    Some((run_start, current)) => {
+                        push_math_run(&mut run_spans, prefix_cells, run_start, x, current);
+                        run = Some((x, flags));
+                    }
+                    None => run = Some((x, flags)),
+                }
+            } else if let Some((run_start, current)) = run.take() {
+                push_math_run(&mut run_spans, prefix_cells, run_start, x, current);
+            }
+            let advance = crate::native_math::cell_width(ch);
+            x += if advance == 0 { 1 } else { advance };
+        }
+        if let Some((run_start, current)) = run.take() {
+            push_math_run(&mut run_spans, prefix_cells, run_start, x, current);
+        }
+        if !run_spans.is_empty() {
+            spans.push((row_index, run_spans));
+        }
+    }
+}
+
+/// Upstream per-cell paint flags (`packages/latex/src/markdown.ts:57-70`):
+/// bracket/box-drawing glyphs paint `subdued`, relational operators are bold,
+/// and the cell's own bold/italic/dim merge over that. `subdued` and `dim`
+/// both route to the muted color because the run-flag model has no separate
+/// dim attribute.
+fn math_cell_flags(ch: char, style: Option<&crate::native_math::MathStyle>) -> u32 {
+    use crate::markdown_runs::{BOLD, ITALIC, STRIKE};
+    let mut flags = 0;
+    if math_subdued_glyph(ch) {
+        flags |= STRIKE;
+    }
+    let bold = style.is_some_and(|style| style.bold) || math_bold_glyph(ch);
+    if bold {
+        flags |= BOLD;
+    }
+    if style.is_some_and(|style| style.italic) {
+        flags |= ITALIC;
+    }
+    if style.is_some_and(|style| style.dim) {
+        flags |= STRIKE;
+    }
+    flags
+}
+
+/// `packages/latex/src/markdown.ts:57`: `/^[()[\]{}|\u221a\u239b-\u23ad\u2500-\u257f]$/u`.
+fn math_subdued_glyph(ch: char) -> bool {
+    matches!(ch, '(' | ')' | '[' | ']' | '{' | '}' | '|' | '\u{221a}')
+        || ('\u{239b}'..='\u{23ad}').contains(&ch)
+        || ('\u{2500}'..='\u{257f}').contains(&ch)
+}
+
+/// `packages/latex/src/markdown.ts:62`: `/^[=<>\u2260\u2261\u2264\u2265\u2248]$/u`.
+fn math_bold_glyph(ch: char) -> bool {
+    matches!(
+        ch,
+        '=' | '<' | '>' | '\u{2260}' | '\u{2261}' | '\u{2264}' | '\u{2265}' | '\u{2248}'
+    )
+}
+
+fn push_math_run(
+    spans: &mut Vec<ChatRunSpan>,
+    prefix_cells: usize,
+    start: usize,
+    end: usize,
+    flags: u32,
+) {
+    let start = prefix_cells.saturating_add(start).min(u16::MAX as usize) as u16;
+    let end = prefix_cells.saturating_add(end).min(u16::MAX as usize) as u16;
+    if end > start {
+        spans.push(ChatRunSpan { start, end, flags });
+    }
+}
+
 /// MD-007: live fence-handler registrations for the flow. The pinned TUI
 /// registers Mermaid and LaTeX renderers only
 /// (`packages/tui/src/plugin/builtins.ts:14-15`); this client has neither a
@@ -2761,10 +2892,12 @@ fn syntax_fence_registry() -> crate::native_markdown_flow::MarkdownPluginRegistr
 /// `packages/merman/src/plugin.ts:5-14`) and LaTeX
 /// (`packages/tui/src/plugin/builtins.ts:14,30`,
 /// `packages/latex/src/plugin.ts:7-12`) own dedicated renderers upstream. This
-/// client configures neither a [`crate::native_mermaid::DiagramPainter`] nor a
-/// [`crate::native_math::MathLayoutEngine`], so those renderers return their
-/// `Fallback` outcome and the fence paints as the plain code block with its
-/// source preserved — exactly their documented fail-closed contract.
+/// client configures no [`crate::native_mermaid::DiagramPainter`], so Mermaid
+/// returns its `Fallback` outcome and the fence paints as the plain code block
+/// with its source preserved — exactly its documented fail-closed contract.
+/// MD-009 supplies a real [`crate::native_math::MathLayoutEngine`], so a
+/// `latex`/`math` fence renders its laid-out formula through
+/// [`paint_math_frame`] instead.
 ///
 /// MD-007: `fence_handler` is the live flow's resolved handler id for this
 /// block (from the registry [`push_block_markdown`] binds via
@@ -2813,18 +2946,26 @@ fn paint_fence_block(
     if let Some(fence) =
         crate::native_math::MathFence::from_code_block(language, source, raw, block_id, false)
     {
-        let mut renderer = crate::native_math::MathRenderer::without_engine(
+        // MD-009: real math producer. The engine ports
+        // `packages/latex/src/render.ts` (`renderLatex = layoutMath(parse...)`)
+        // in strict/displayMode form, the exact call upstream's code-block
+        // renderer makes (`markdown.ts:112-118`).
+        let mut renderer = crate::native_math::MathRenderer::new(
+            crate::native_math_engine::UpstreamMathEngine::default(),
             crate::native_math::MathTheme::new("text.base", "text.muted"),
         );
         match renderer.render(&fence, width) {
             crate::native_math::MathOutcome::Fallback(fallback) => {
                 debug_assert_eq!(fallback.source, fence.source);
+                paint_plain_code_block(rows, width, prefix, class, raw, mode, false, spans, start);
             }
             crate::native_math::MathOutcome::Rendered(frame) => {
                 debug_assert!(frame.layout.height > 0);
+                debug_assert!(!frame.layout.cells.is_empty());
+                debug_assert!(frame.layout.cells.iter().all(|row| row.len() == frame.layout.width));
+                paint_math_frame(rows, width, prefix, class, &frame, spans, start);
             }
         }
-        paint_plain_code_block(rows, width, prefix, class, raw, mode, false, spans, start);
         return;
     }
     if is_diff_fence_language(language) && push_diff_fence(rows, width, prefix, source) {
@@ -8521,25 +8662,69 @@ mod footer_v3_consumer_tests {
     }
 
     #[test]
-    fn mermaid_and_math_fences_fail_closed_to_the_plain_code_block() {
+    fn mermaid_fence_fails_closed_to_the_plain_code_block() {
         use crate::markdown_runs::MarkdownMode;
+        // The native client configures no diagram painter, so the Mermaid
+        // renderer returns its fail-closed fallback and the fence keeps the
+        // plain code block with its source preserved.
+        let text = "```mermaid\ngraph TD\n  A --> B\n```";
+        let mut rows = Vec::new();
+        push_block_markdown(
+            &mut rows, 60, text, "", ChatRowClass::AssistantCard, MarkdownMode::Rendered,
+        );
+        assert!(
+            rows.first().is_some_and(|(row, _)| row.starts_with("```")),
+            "fence delimiter preserved for {text:?}: {rows:?}"
+        );
+        assert!(
+            rows.last().is_some_and(|(row, _)| row == "```"),
+            "closing delimiter preserved for {text:?}: {rows:?}"
+        );
+        assert!(rows.iter().all(|(_, class)| *class == ChatRowClass::AssistantCard));
+    }
+
+    /// MD-009: a `latex`/`math`/`tex` fence now renders the laid-out formula
+    /// through the live flow instead of falling through to the plain code
+    /// block. Upstream replaces the whole code block with the formula
+    /// viewport and never shows the fence markers
+    /// (`packages/latex/src/markdown.ts:37-98`; `markdown.test.ts` asserts the
+    /// captured frame does not contain the source).
+    #[test]
+    fn md009_math_fence_paints_formula_rows_on_the_live_path() {
+        use crate::markdown_runs::{MarkdownMode, STRIKE};
         for text in [
-            "```mermaid\ngraph TD\n  A --> B\n```",
-            "```latex\nx^2\n```",
-            "```math\n\\frac{1}{2}\n```",
-            "```tex\ny\n```",
+            "```math\n\\frac{m}{n}\n```",
+            "```latex\n\\frac{m}{n}\n```",
+            "```tex\n\\frac{m}{n}\n```",
         ] {
             let mut rows = Vec::new();
-            push_block_markdown(
+            let spans = push_block_markdown(
                 &mut rows, 60, text, "", ChatRowClass::AssistantCard, MarkdownMode::Rendered,
             );
+            // The renderer replaces the code block: no fence markers, no
+            // source leakage.
             assert!(
-                rows.first().is_some_and(|(row, _)| row.starts_with("```")),
-                "fence delimiter preserved for {text:?}: {rows:?}"
+                !rows.iter().any(|(row, _)| row.contains("```")),
+                "fence markers replaced by the formula for {text:?}: {rows:?}"
             );
             assert!(
-                rows.last().is_some_and(|(row, _)| row == "```"),
-                "closing delimiter preserved for {text:?}: {rows:?}"
+                !rows.iter().any(|(row, _)| row.contains("\\frac")),
+                "source replaced by the formula for {text:?}: {rows:?}"
+            );
+            let texts: Vec<&str> = rows.iter().map(|(row, _)| row.as_str()).collect();
+            assert!(texts.iter().any(|row| row.contains('m')), "numerator for {text:?}: {texts:?}");
+            assert!(texts.iter().any(|row| row.contains('n')), "denominator for {text:?}: {texts:?}");
+            assert!(texts.iter().any(|row| row.contains('─')), "fraction rule for {text:?}: {texts:?}");
+            // The box-drawing rule glyph is a subdued char -> muted run.
+            let rule_row = rows.iter().position(|(row, _)| row.contains('─')).unwrap();
+            let rule_spans = spans
+                .iter()
+                .find(|(offset, _)| *offset == rule_row)
+                .map(|(_, spans)| spans)
+                .expect("rule row carries painted spans");
+            assert!(
+                rule_spans.iter().any(|span| span.flags & STRIKE != 0),
+                "the fraction rule is subdued for {text:?}: {rule_spans:?}"
             );
             assert!(rows.iter().all(|(_, class)| *class == ChatRowClass::AssistantCard));
         }
@@ -8589,15 +8774,15 @@ mod footer_v3_consumer_tests {
     }
 
     /// MD-007: a fence whose language has no registered handler (including the
-    /// dedicated `mermaid`/`latex`/`math` renderer languages, and an unknown
+    /// dedicated `mermaid` renderer language, and an unknown
     /// language) keeps the fail-closed plain code block: delimiters and source
-    /// preserved, and no SYN_* syntax spans on the code rows.
+    /// preserved, and no SYN_* syntax spans on the code rows. (`latex`/`math`
+    /// are handled by the MD-009 math renderer and no longer fall closed.)
     #[test]
     fn md_007_unhandled_fence_keeps_plain_code_block_without_syntax_flags() {
         use crate::markdown_runs::{CODE, CODE_BLOCK, SYN_MASK, MarkdownMode};
         for text in [
             "```mermaid\ngraph TD\n```",
-            "```latex\nx^2\n```",
             "```no-such-lang\nlet n = 42;\n```",
         ] {
             let mut rows = Vec::new();

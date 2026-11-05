@@ -146,6 +146,8 @@ mod native_mermaid;
 #[cfg(feature = "native")]
 mod native_math;
 #[cfg(feature = "native")]
+mod native_math_engine;
+#[cfg(feature = "native")]
 mod native_image_preview;
 #[cfg(feature = "native")]
 mod native_graph;

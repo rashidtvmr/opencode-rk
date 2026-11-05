@@ -11,13 +11,14 @@
 //! *extends* the previous source, a render-output cache keyed by
 //! `(source, width, theme)` and the resulting block/scroll footprint.
 //!
-//! It deliberately does **not** model LaTeX parsing or layout. There is no
-//! tokenizer, macro expansion, MathNode tree, layout engine or styled cell
-//! output; [`MathLayoutEngine`] is the caller-supplied boundary and the
-//! geometry-only [`MathLayout`] carries no glyph cells. Formula correctness is
-//! therefore explicitly NOT implemented and NOT claimed. Without an engine
-//! every fence keeps its plain code block (fail-closed), which is exactly what
-//! upstream does for unsupported syntax.
+//! It deliberately did **not** originally model LaTeX parsing or layout;
+//! MD-009 adds the real producer: [`crate::native_math_engine::
+//! UpstreamMathEngine`] is a bounded port of `packages/latex/src/parser.ts`
+//! plus `layout.ts` that returns painted glyph [`MathCell`]s in
+//! [`MathLayout::cells`]. [`MathLayoutEngine`] is still the caller-supplied
+//! boundary, so the unknown-command / oversize fail-closed path is unchanged.
+//! Macro expansion (`ParseOptions.macros`) is not ported: the only live
+//! caller (`markdown.ts:112-118`) passes no macros.
 //!
 //! Evidence pins (OpenCode pin `450e7b92412c780a7b5a75226bb8d49aaca24e22`)
 //! --------------------------------------------------------------------
@@ -364,25 +365,152 @@ impl Default for MathTheme {
 
 // ── Layout boundary ───────────────────────────────────────────────────
 
-/// Geometry-only projection of upstream `MathLayout`
-/// (`packages/latex/src/types.ts:85-91`); the `cells` array is intentionally
-/// not modelled.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Upstream `MathStyle` (`packages/latex/src/types.ts:73-78`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MathStyle {
+    pub color: Option<String>,
+    pub bold: bool,
+    pub italic: bool,
+    pub dim: bool,
+}
+
+impl MathStyle {
+    /// Shorthand used by variant layouts (`layout.ts` `withVariant`).
+    #[must_use]
+    pub fn flagged(bold: bool, italic: bool) -> Option<Self> {
+        if bold || italic {
+            Some(Self {
+                bold,
+                italic,
+                ..Self::default()
+            })
+        } else {
+            None
+        }
+    }
+}
+
+/// Upstream `MathCell` (`packages/latex/src/types.ts:80-83`): one glyph in
+/// the laid-out formula grid.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MathCell {
+    pub ch: char,
+    pub style: Option<MathStyle>,
+}
+
+impl MathCell {
+    #[must_use]
+    pub const fn new(ch: char) -> Self {
+        Self { ch, style: None }
+    }
+
+    #[must_use]
+    pub const fn styled(ch: char, style: MathStyle) -> Self {
+        Self {
+            ch,
+            style: Some(style),
+        }
+    }
+}
+
+/// Projection of upstream `MathLayout`
+/// (`packages/latex/src/types.ts:85-91`): the cell grid plus the geometry
+/// the scroll box and transcript footprint need.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MathLayout {
     pub width: usize,
     pub height: usize,
     pub baseline: usize,
+    /// `layout.cells`: `height` rows of `width` optional styled glyphs.
+    pub cells: Vec<Vec<Option<MathCell>>>,
 }
 
 impl MathLayout {
+    /// Geometry with an all-blank grid (stub/sentinel layouts).
     #[must_use]
-    pub const fn new(width: usize, height: usize, baseline: usize) -> Self {
+    pub fn new(width: usize, height: usize, baseline: usize) -> Self {
+        let cells = vec![vec![None; width]; height.max(1)];
         Self {
             width,
             height,
             baseline,
+            cells,
         }
     }
+
+    /// Real layout: takes ownership of a `height x width` grid built by the
+    /// layout engine (`layout.ts` `blank`).
+    #[must_use]
+    pub fn with_cells(
+        width: usize,
+        height: usize,
+        baseline: usize,
+        cells: Vec<Vec<Option<MathCell>>>,
+    ) -> Self {
+        debug_assert_eq!(cells.len(), height.max(1), "cell rows must match height");
+        debug_assert!(
+            cells.iter().all(|row| row.len() == width),
+            "cell rows must match width"
+        );
+        Self {
+            width,
+            height,
+            baseline,
+            cells,
+        }
+    }
+
+    /// Row text the way upstream `MathLayout.toString()` renders it
+    /// (`types.ts:96-107`): blanks for absent cells, wide glyphs skip their
+    /// following column, trailing whitespace trimmed.
+    #[must_use]
+    pub fn row_text(&self, y: usize) -> String {
+        let mut output = String::new();
+        let mut x = 0usize;
+        while x < self.width {
+            let cell = self
+                .cells
+                .get(y)
+                .and_then(|row| row.get(x))
+                .and_then(|cell| cell.as_ref());
+            if let Some(cell) = cell {
+                output.push(cell.ch);
+            } else {
+                output.push(' ');
+            }
+            // Upstream `toString` (`layout.ts:656-666`) always advances at
+            // least one column; a zero-width glyph (combining mark) must not
+            // stall the scan.
+            x += cell_width(output.chars().last().unwrap_or(' ')).max(1);
+        }
+        output.trim_end().to_owned()
+    }
+}
+
+/// Upstream `cellWidth` (`packages/latex/src/layout.ts:617-645`): zero-width
+/// for control, combining and variation-selector runes, wide for CJK/emoji
+/// runs, one column otherwise. Bold-free mirror of the same table.
+#[must_use]
+pub fn cell_width(ch: char) -> usize {
+    let code = ch as u32;
+    if matches!(code, 0x0000..=0x001f | 0x007f..=0x009f | 0x0300..=0x036f | 0xfe00..=0xfe0f) {
+        return 0;
+    }
+    if code >= 0x1100
+        && (code <= 0x115f
+            || code == 0x2329
+            || code == 0x232a
+            || (0x2e80..=0xa4cf).contains(&code)
+            || (0xac00..=0xd7a3).contains(&code)
+            || (0xf900..=0xfaff).contains(&code)
+            || (0xfe10..=0xfe6f).contains(&code)
+            || (0xff00..=0xff60).contains(&code)
+            || (0xffe0..=0xffe6).contains(&code)
+            || (0x1f300..=0x1faff).contains(&code))
+    {
+        return 2;
+    }
+    1
 }
 
 /// Layout request. `display_mode` is always true, matching
@@ -573,7 +701,7 @@ struct RenderCache {
 
 impl RenderCache {
     fn get(&self, key: &CacheKey) -> Option<MathLayout> {
-        self.entries.get(key).copied()
+        self.entries.get(key).cloned()
     }
 
     fn insert(&mut self, key: CacheKey, value: MathLayout) {
@@ -703,7 +831,7 @@ impl<E: MathLayoutEngine> MathRenderer<E> {
             theme: self.theme.id(),
         };
         if let Some(layout) = self.cache.get(&key) {
-            self.claim(fence.block_id, fence.source.clone(), layout);
+            self.claim(fence.block_id, fence.source.clone(), &layout);
             return MathOutcome::Rendered(MathFrame {
                 source: fence.source.clone(),
                 layout,
@@ -752,7 +880,7 @@ impl<E: MathLayoutEngine> MathRenderer<E> {
 
         match layout {
             Ok(layout) => {
-                self.store(key, fence.block_id, &fence.source, layout);
+                self.store(key, fence.block_id, &fence.source, &layout);
                 MathOutcome::Rendered(MathFrame {
                     source: fence.source.clone(),
                     layout,
@@ -765,7 +893,7 @@ impl<E: MathLayoutEngine> MathRenderer<E> {
                 if fence.is_streaming() {
                     if let Some(previous) = retained {
                         // `markdown.ts:44-48`: keep the last good frame.
-                        self.claim(fence.block_id, previous.source.clone(), previous.layout);
+                        self.claim(fence.block_id, previous.source.clone(), &previous.layout);
                         return MathOutcome::Rendered(MathFrame {
                             source: previous.source,
                             layout: previous.layout,
@@ -780,13 +908,13 @@ impl<E: MathLayoutEngine> MathRenderer<E> {
         }
     }
 
-    fn store(&mut self, key: CacheKey, block_id: usize, source: &str, layout: MathLayout) {
-        self.cache.insert(key, layout);
+    fn store(&mut self, key: CacheKey, block_id: usize, source: &str, layout: &MathLayout) {
+        self.cache.insert(key, layout.clone());
         self.claim(block_id, source.to_owned(), layout);
     }
 
     /// `lastGood.set(key, frame)` (`markdown.ts:100-104`), bounded per block.
-    fn claim(&mut self, block_id: usize, source: String, layout: MathLayout) {
+    fn claim(&mut self, block_id: usize, source: String, layout: &MathLayout) {
         if !self.last_good.contains_key(&block_id) {
             self.last_good_order.push(block_id);
             while self.last_good_order.len() > MAX_LAST_GOOD_BLOCKS {
@@ -795,7 +923,7 @@ impl<E: MathLayoutEngine> MathRenderer<E> {
             }
         }
         self.last_good
-            .insert(block_id, LastGood { source, layout });
+            .insert(block_id, LastGood { source, layout: layout.clone() });
     }
 }
 
@@ -919,7 +1047,7 @@ mod tests {
             assert!(request.display_mode, "displayMode: true (markdown.ts:114)");
             let mut responses = self.responses.borrow_mut();
             if responses.is_empty() {
-                return Ok(self.default);
+                return Ok(self.default.clone());
             }
             responses.remove(0)
         }
