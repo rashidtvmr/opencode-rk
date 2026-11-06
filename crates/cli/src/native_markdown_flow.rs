@@ -2452,6 +2452,21 @@ mod tests {
         assert!(rows.iter().any(|row| row == "│ quoted"));
     }
 
+    #[test]
+    fn md_001_list_items_use_live_conceal_projection_for_nested_inline_markup() {
+        let source = "- **bold** and [link](https://example.test)\n  - *nested*\n";
+        let markdown = flow(source);
+        let rows = rendered(&markdown, 80);
+        assert!(rows.iter().any(|row| row.contains("bold and link (https://example.test)")));
+        assert!(rows.iter().any(|row| row.contains("nested")));
+
+        let mut source_flow = MarkdownFlow::new(MarkdownOptions { conceal: false, ..MarkdownOptions::default() });
+        source_flow.set_content(source);
+        let source_rows = rendered(&source_flow, 80);
+        assert!(source_rows.iter().any(|row| row.contains("**bold** and [link](https://example.test)")));
+        assert!(source_rows.iter().any(|row| row.contains("*nested*")));
+    }
+
     /// MD-002. Upstream: unfinished fences stay code blocks with every text byte
     /// (`markdown-parser.ts:13-79`, `Markdown.ts:1171-1186`), split Unicode is
     /// never replaced, empty chunks are no-ops (`Markdown.ts:430-437`), and
