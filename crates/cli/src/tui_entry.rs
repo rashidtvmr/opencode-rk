@@ -5465,7 +5465,7 @@ fn open_directory_in_file_manager(path: &str) -> Result<(), String> {
 fn dispatch_working_directory_action(
     view: &mut crate::native_view::NativeView,
     transcript: &mut NativeChatHistory,
-    toast: &mut crate::native_toast::Toast,
+    chrome: &mut crate::native_modal_layer::ChromeModel,
     action: crate::native_view_status::native_sidebar::FooterAction,
 ) {
     use crate::native_view_status::native_sidebar::FooterAction;
@@ -5482,7 +5482,7 @@ fn dispatch_working_directory_action(
             };
             view.dialogs.close();
             match written {
-                Ok(()) => toast.show(crate::native_toast::ToastOptions::new(
+                Ok(()) => chrome.show_toast(crate::native_toast::ToastOptions::new(
                     crate::native_toast::ToastVariant::Info,
                     "Path copied to clipboard",
                 )),
@@ -10182,8 +10182,6 @@ fn native_loop(
         std::collections::HashMap::new();
     // DIALOG-20: the live toast controller (`ui/toast.tsx`). Its logical clock
     // is advanced on the animation tick so auto-dismiss is deterministic.
-    let mut toast = crate::native_toast::Toast::new();
-    let mut toast_now_ms: u64 = 0;
     let mut chrome = crate::native_modal_layer::ChromeModel::new();
     // DIALOG-19: the ticked frame each loop iteration paints from.
     let mut chrome_frame = crate::native_modal_layer::ChromeFrame::default();
@@ -11948,7 +11946,7 @@ fn native_loop(
         // cadence, so the loop must keep ticking while any open tab runs.
         let tab_spinner_animation = animations && crate::native_tabs::any_running(&navigation);
         let busy_animation = worker.is_some() || model_load.is_some() || title_animation
-            || toast.current().is_some()
+            || chrome.toast().current().is_some()
             || tab_spinner_animation;
         let next_tick = u128::from(animation_start.now_ms()) / 80;
         if busy_animation && next_tick != animation_tick {
@@ -11963,11 +11961,6 @@ fn native_loop(
         // (`ui/toast.tsx`), and a repaint is scheduled while one is visible.
         {
             let now_ms = animation_start.now_ms() as u64;
-            if now_ms > toast_now_ms {
-                toast.advance(now_ms - toast_now_ms);
-                toast_now_ms = now_ms;
-                needs_paint = true;
-            }
             // DIALOG-19: the shared chrome clock advances lifecycle overlays
             // from this frame's same logical timestamp, every loop pass.
             chrome_frame = chrome.tick(&now_ms);
@@ -12778,10 +12771,10 @@ fn native_loop(
             // DIALOG-20: lay the live toast out into bounded styled cells
             // (`ui/toast.tsx`); `None` when nothing is visible or the viewport
             // cannot host the minimum box.
-            let toast_frame = toast.current().and_then(|options| {
+            let toast_frame = chrome.toast().current().and_then(|options| {
                 crate::native_toast::ToastFrame::layout(
                     options,
-                    toast.pending(),
+                    chrome.toast().pending(),
                     viewport.0,
                     viewport.1,
                     &crate::native_toast::ToastPalette::from_palette(&theme.palette, theme.mode),
@@ -13876,7 +13869,7 @@ fn native_loop(
                         if let Some(screen) = view.dialogs.crash_screen_mut() {
                             screen.mark_copy(copied);
                         }
-                        toast.show(crate::native_toast::ToastOptions::new(
+                        chrome.show_toast(crate::native_toast::ToastOptions::new(
                             crate::native_toast::ToastVariant::Info,
                             if copied { "Report copied" } else { "Copy failed" },
                         ));
@@ -13972,7 +13965,7 @@ fn native_loop(
                         let mut stdout = std::io::stdout().lock();
                         stdout.write_all(frame.as_bytes())?;
                         stdout.flush()?;
-                        toast.show(crate::native_toast::ToastOptions::new(
+                        chrome.show_toast(crate::native_toast::ToastOptions::new(
                             crate::native_toast::ToastVariant::Info,
                             "Copied code",
                         ));
@@ -13985,7 +13978,7 @@ fn native_loop(
                         let mut stdout = std::io::stdout().lock();
                         stdout.write_all(frame.as_bytes())?;
                         stdout.flush()?;
-                        toast.show(crate::native_toast::ToastOptions::new(
+                        chrome.show_toast(crate::native_toast::ToastOptions::new(
                             crate::native_toast::ToastVariant::Info,
                             "Copied output",
                         ));
@@ -14282,6 +14275,27 @@ fn native_loop(
             needs_paint = true;
             continue;
         }
+        // DIALOG-04: the shared dialog layer owns Escape/Ctrl-C before the
+        // composer and global exit path.  Selection is deliberately queried
+        // first, matching ui/dialog.tsx's selection-clear precedence.
+        if view.dialogs.intercepts_input()
+            && matches!(event, native_input_decoder::InputEvent::Escape
+                | native_input_decoder::InputEvent::Byte(3))
+        {
+            let has_selection = selection.has_selection();
+            let editor_has_text = view.dialogs.prompt_value().is_some_and(|text| !text.is_empty());
+            let route = if matches!(event, native_input_decoder::InputEvent::Escape) {
+                view.dialogs.escape_route(has_selection)
+            } else {
+                view.dialogs.ctrl_c_route(has_selection, editor_has_text)
+            };
+            if matches!(route.key, crate::native_modal_layer::ModalKey::SelectionCleared) {
+                selection.clear();
+            }
+            utf8.reset();
+            needs_paint = true;
+            continue;
+        }
         // Normalize only after higher-priority modal/page/completion owners
         // have handled the event. The existing composer KeyAction/SubmitKeymap
         // remains the authority for newline versus submission.
@@ -14342,7 +14356,7 @@ fn native_loop(
                     let me=match kind { 0=>Some(crate::native_tab_context_menu::MenuEvent::PointerDown{button:crate::native_tab_context_menu::MouseButton::Left,x,y}),2=>Some(crate::native_tab_context_menu::MenuEvent::PointerUp{button:crate::native_tab_context_menu::MouseButton::Left,x,y}),5=>Some(crate::native_tab_context_menu::MenuEvent::PointerDown{button:crate::native_tab_context_menu::MouseButton::Right,x,y}),6=>Some(crate::native_tab_context_menu::MenuEvent::PointerUp{button:crate::native_tab_context_menu::MouseButton::Right,x,y}),7=>Some(crate::native_tab_context_menu::MenuEvent::PointerMove{x,y}),3|4=>Some(crate::native_tab_context_menu::MenuEvent::Scroll{delta:if kind==3{-3}else{3},x,y}),_=>None};
                     if let Some(me)=me { let outcome=menu.handle(me,menu_vp); if let crate::native_tab_context_menu::MenuOutcome::Invoke(action)=outcome { context_menu=None; match action {
                         crate::native_tab_context_menu::MenuAction::NewSession => { let model=selected.as_ref().map(|m|m.qualified()); let saved=if navigation.active().is_some(){navigation.save_active_state(draft.clone(),draft_cursor,view.chat_scroll_offset(),model)}else{Ok(())}; if let Err(e)=saved{append_transcript(&mut transcript,format!("error: new tab: state save refused: {e:?}"));}else{live=None;history_window=None;history_pending=false;history_active=None;history_navigation_request=None;blocked_history_scroll=None;history_tail_refresh_pending=false;history_browsing=false;draft.clear(); draft_parts.clear();draft_cursor=0;navigation.enter_home();session_route=false;view.reset_to_home_after_tab_close();view.set_chat_scroll_offset(0);} },
-                        crate::native_tab_context_menu::MenuAction::CopySessionId{session}=>{let frame=selection_clipboard_frame(&session.0);let mut out=std::io::stdout().lock();out.write_all(frame.as_bytes())?;out.flush()?;toast.show(crate::native_toast::ToastOptions::new(crate::native_toast::ToastVariant::Info,"Copied to clipboard"));needs_paint=true;},
+                        crate::native_tab_context_menu::MenuAction::CopySessionId{session}=>{let frame=selection_clipboard_frame(&session.0);let mut out=std::io::stdout().lock();out.write_all(frame.as_bytes())?;out.flush()?;chrome.show_toast(crate::native_toast::ToastOptions::new(crate::native_toast::ToastVariant::Info,"Copied to clipboard"));needs_paint=true;},
                         crate::native_tab_context_menu::MenuAction::Close{session}=>{close_hold=None;let scroll=view.chat_scroll_offset();match close_tab_transition(&mut view,&mut transcript,&mut navigation,&draft,draft_cursor,daemon_origin,auth,binding_generation,&session,selected.as_ref().map(|m|m.qualified()),scroll){Ok(result)=>apply_close_tab_result(result,&mut view,&mut live,&mut history_window,&mut binding_generation,&mut draft,&mut draft_cursor,&mut selected,&models,&mut session_route,&mut compact_worker),Err(e)=>append_transcript(&mut transcript,format!("error: close tab: {e}"))}},
                         crate::native_tab_context_menu::MenuAction::Rename{session,current_title}=>{
                             rename_error=None;
@@ -14944,6 +14958,33 @@ fn native_loop(
                 }
                 if view.dialogs.intercepts_input() {
                     let modal = view.modal_presentation();
+                    if modifiers == 0 && (kind == 8 || kind == 9) {
+                        let inside = x >= modal.x
+                            && x < modal.x.saturating_add(modal.width)
+                            && y >= modal.y
+                            && y < modal.content_y
+                                .saturating_add(
+                                    u16::try_from(view.modal_content_height()).unwrap_or(u16::MAX),
+                                )
+                                .saturating_add(modal.bottom_padding);
+                        if kind == 8 {
+                            if !inside {
+                                view.dialogs.backdrop_mouse_down(selection.has_selection());
+                            }
+                        } else {
+                            let release = if inside {
+                                view.dialogs.panel_mouse_up(selection.has_selection());
+                                crate::native_modal_layer::BackdropRelease::Suppressed
+                            } else {
+                                view.dialogs.backdrop_mouse_up()
+                            };
+                            if release == crate::native_modal_layer::BackdropRelease::Closed {
+                                selection.clear();
+                            }
+                        }
+                        needs_paint = true;
+                        continue;
+                    }
                     let row = y.checked_sub(modal.content_y).map(usize::from);
                     if kind == 0 && modifiers == 0 && x >= modal.content_x
                         && x < modal.content_x.saturating_add(modal.content_width) {
@@ -16081,7 +16122,7 @@ fn native_loop(
                     dispatch_working_directory_action(
                         &mut view,
                         &mut transcript,
-                        &mut toast,
+                        &mut chrome,
                         action,
                     );
                 }
@@ -21225,11 +21266,11 @@ mod dialog14_15_tests {
         let mut view = crate::native_view::NativeView::new(100, 30);
         view.set_sidebar_location(Some("/tmp/oc2-dialog14-none".into()), None);
         let mut transcript = NativeChatHistory::default();
-        let mut toast = crate::native_toast::Toast::default();
+        let mut chrome = crate::native_modal_layer::ChromeModel::new();
         dispatch_working_directory_action(
             &mut view,
             &mut transcript,
-            &mut toast,
+            &mut chrome,
             crate::native_view_status::native_sidebar::FooterAction::Workspaces,
         );
         assert_eq!(view.dialogs.open_kind(), Some(DialogKind::Workspaces));
