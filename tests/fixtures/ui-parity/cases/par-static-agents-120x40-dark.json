@@ -1,0 +1,67 @@
+{
+ "checklist_ids": [
+  "PAR-01",
+  "PAR-03",
+  "PAR-04",
+  "PAR-05",
+  "LAY-01",
+  "THEME-02",
+  "DIALOG-11"
+ ],
+ "clock_ms": 0,
+ "compare": [
+  "styled_cells",
+  "cursor",
+  "layout_and_clipping",
+  "focus",
+  "semantic_actions",
+  "hit_targets"
+ ],
+ "environment": {
+  "COLORTERM": "truecolor",
+  "TERM": "xterm-256color"
+ },
+ "events": [
+  {
+   "type": "wait",
+   "ms": 300
+  },
+  {
+   "type": "text",
+   "text": "/agents"
+  },
+  {
+   "type": "key",
+   "key": "enter"
+  },
+  {
+   "type": "wait",
+   "ms": 600
+  }
+ ],
+ "expected_rules": [
+  "/agents opens the Agents page: a read-only roster of the available subagents",
+  "Each row shows the agent id and its description; the first row is selected",
+  "Every cell style resolves through the selected theme",
+  "Wide cells keep a continuation column; no cell is silently dropped",
+  "Cursor/focus/action traces are compared together with styled cells"
+ ],
+ "id": "par-static-agents-120x40-dark",
+ "oracle": {
+  "golden_status": "not_captured",
+  "production_components": true,
+  "runtime_result": "not_executed_against_rust"
+ },
+ "purpose": "Deterministic Agents roster page (/agents) at 120x40, dark theme",
+ "settings": {},
+ "state_overrides": {},
+ "theme": {
+  "mode": "dark",
+  "name": "opencode",
+  "new_designs": false
+ },
+ "viewport": {
+  "columns": 120,
+  "rows": 40
+ }
+}

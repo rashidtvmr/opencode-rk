@@ -1,0 +1,64 @@
+{
+ "checklist_ids": [
+  "PAR-01",
+  "PAR-03",
+  "PAR-04",
+  "PAR-05",
+  "PAR-14",
+  "LAY-01",
+  "THEME-02",
+  "DIALOG-11"
+ ],
+ "clock_ms": 0,
+ "compare": [
+  "styled_cells",
+  "cursor",
+  "layout_and_clipping",
+  "focus",
+  "semantic_actions",
+  "hit_targets"
+ ],
+ "environment": {
+  "COLORTERM": "truecolor",
+  "TERM": "xterm-256color"
+ },
+ "events": [
+  {
+   "type": "wait",
+   "ms": 300
+  },
+  {
+   "type": "key",
+   "key": "ctrl-k"
+  },
+  {
+   "type": "wait",
+   "ms": 500
+  }
+ ],
+ "expected_rules": [
+  "Ctrl-K opens the Commands page (the advertised local-command entry)",
+  "The page owns focus: styled heading, search row and the local-command roster",
+  "Every cell style resolves through the selected theme",
+  "Wide cells keep a continuation column; no cell is silently dropped",
+  "Cursor/focus/action traces are compared together with styled cells"
+ ],
+ "id": "par-static-commands-120x40-dark",
+ "oracle": {
+  "golden_status": "not_captured",
+  "production_components": true,
+  "runtime_result": "not_executed_against_rust"
+ },
+ "purpose": "Deterministic Commands page (Ctrl-K) at 120x40, dark theme",
+ "settings": {},
+ "state_overrides": {},
+ "theme": {
+  "mode": "dark",
+  "name": "opencode",
+  "new_designs": false
+ },
+ "viewport": {
+  "columns": 120,
+  "rows": 40
+ }
+}
