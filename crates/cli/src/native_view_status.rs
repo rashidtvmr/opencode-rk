@@ -115,6 +115,10 @@ pub struct McpEntry {
 /// Typed upstream status union (`packages/opencode/src/mcp/index.ts`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum McpStatus {
+    /// SIDE-07: the upstream `pending` member
+    /// (`packages/schema/src/mcp.ts:72-88`), emitted while a server is still
+    /// connecting. Renders the live "Connecting" sidebar row.
+    Pending,
     Connected,
     Disabled,
     Failed { error: String },
@@ -132,6 +136,7 @@ impl McpStatus {
             McpStatus::Failed { .. } => "failed",
             McpStatus::NeedsAuth => "needs_auth",
             McpStatus::NeedsClientRegistration { .. } => "needs_client_registration",
+            McpStatus::Pending => "pending",
         }
     }
 
@@ -158,6 +163,7 @@ impl McpStatus {
             McpStatus::Connected => "Connected ✓",
             McpStatus::Failed { .. } => "Failed !",
             McpStatus::NeedsAuth => "Sign in required →",
+            McpStatus::Pending => "Connecting …",
             McpStatus::Disabled | McpStatus::NeedsClientRegistration { .. } => "Disabled ○",
         }
     }
@@ -908,6 +914,7 @@ impl StatusView {
                     McpStatus::Disabled => native_sidebar::McpDisplayStatus::Disabled,
                     McpStatus::Failed { .. } => native_sidebar::McpDisplayStatus::Failed,
                     McpStatus::NeedsAuth => native_sidebar::McpDisplayStatus::NeedsAuth,
+                    McpStatus::Pending => native_sidebar::McpDisplayStatus::Pending,
                     McpStatus::NeedsClientRegistration { .. } => {
                         native_sidebar::McpDisplayStatus::NeedsClientRegistration
                     }
@@ -1695,6 +1702,10 @@ fn parse_entry(name: &str, raw: &Value) -> Result<McpEntry, String> {
             allow_fields(obj, &["status"])?;
             McpStatus::NeedsAuth
         }
+        "pending" => {
+            allow_fields(obj, &["status"])?;
+            McpStatus::Pending
+        }
         "failed" => {
             allow_fields(obj, &["status", "error"])?;
             McpStatus::Failed {
@@ -2214,6 +2225,29 @@ mod tests {
             .is_err());
         assert!(!view.mcp_acknowledged());
         assert!(view.entries().is_empty());
+    }
+
+    // SIDE-07: the upstream `pending` member
+    // (`packages/schema/src/mcp.ts:72-88`) must be accepted, projected to the
+    // live "Connecting" sidebar row, and worded `Connecting …`. If the
+    // `pending` parse arm or the sidebar mapping is removed this fails.
+    #[test]
+    fn side07_pending_mcp_status_reaches_the_connecting_sidebar_row() {
+        let mut view = StatusView::default();
+        view.apply_mcp(&json!({"alpha": {"status": "pending"}}))
+            .unwrap();
+        assert_eq!(view.entries()[0].status, McpStatus::Pending);
+        assert_eq!(view.entries()[0].status.as_str(), "pending");
+        assert_eq!(view.entries()[0].status.footer_word(), "Connecting …");
+        let rendered: String = view.render_sidebar(38, 30).join("\n");
+        assert!(
+            rendered.contains("Connecting"),
+            "pending must paint the live Connecting row: {rendered:?}"
+        );
+        // An unknown field is still rejected on the new arm.
+        assert!(view
+            .apply_mcp(&json!({"beta": {"status": "pending", "error": "x"}}))
+            .is_err());
     }
 
     #[test]

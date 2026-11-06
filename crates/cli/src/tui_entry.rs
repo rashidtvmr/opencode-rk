@@ -11943,8 +11943,12 @@ fn native_loop(
         // exactly as upstream `component/title-shimmer.tsx:50-55` reports
         // `live = animating` while a rename is pending and motion is on.
         let title_animation = crate::native_tabs::title_shimmer_runs(rename_inflight.is_some(), animations);
+        // TAB-04: a busy tab (even a background one) drives the 80 ms spinner
+        // cadence, so the loop must keep ticking while any open tab runs.
+        let tab_spinner_animation = animations && crate::native_tabs::any_running(&navigation);
         let busy_animation = worker.is_some() || model_load.is_some() || title_animation
-            || toast.current().is_some();
+            || toast.current().is_some()
+            || tab_spinner_animation;
         let next_tick = u128::from(animation_start.now_ms()) / 80;
         if busy_animation && next_tick != animation_tick {
             animation_tick = next_tick;
@@ -12322,9 +12326,18 @@ fn native_loop(
             status.prompt_pulse = 0;
         }
         // TAB-04: paint the numeric indicator column when `config.tabs.indicators`
-        // is "numbers" (`session-tabs.tsx:525`).
+        // is "numbers" (`session-tabs.tsx:525`), and feed the live busy-tab
+        // spinner frame. `now_ms / 80` is the upstream `<spinner interval={80}>`
+        // cadence (`component/session-tabs.tsx:57-58,198`); reduced motion
+        // leaves it `None` so the glyph stays on frame 0.
+        let tab_spinner_frame = if animations {
+            Some(animation_start.now_ms() / 80)
+        } else {
+            None
+        };
         for input in &mut tab_inputs {
             input.indicators = tab_indicators;
+            input.spinner_frame = tab_spinner_frame;
         }
         if tab_drag.preview().is_some() {
             // Paint (and hit-test) the pending drag order until the move is
@@ -20964,6 +20977,7 @@ mod middle_close_hit_tests {
             indicators: crate::native_tabs::TabIndicators::Status,
             number: String::new(),
             prompt_pulse: 0,
+            spinner_frame: None,
         }).collect();
         let strip = TabStrip::render_with_hover_and_add(&tabs, TabOrientation::Horizontal, 60, 1, 0, None, true);
         // Some session rects exist.

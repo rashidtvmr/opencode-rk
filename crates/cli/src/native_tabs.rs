@@ -128,6 +128,13 @@ pub struct TabInput {
     /// ignites the number cell exactly like `createNumberIgnition`
     /// (`component/session-tabs.tsx:213-227`). Zero keeps the idle number.
     pub prompt_pulse: u64,
+    /// TAB-04: the live spinner frame for a busy tab. `None` (the default)
+    /// keeps the static `TAB_SPINNERS.dots.frames[0]` glyph `⠋`; `Some(n)`
+    /// paints `TAB_SPINNER_DOTS[n % len]`. The live loop feeds
+    /// `now_ms / 80`, the upstream `<spinner interval={80}>` cadence
+    /// (`component/session-tabs.tsx:57-58,198`), and leaves it `None` when
+    /// `config.animations` is off so reduced motion stays on frame 0.
+    pub spinner_frame: Option<u64>,
 }
 
 impl TabInput {
@@ -146,6 +153,7 @@ impl TabInput {
             indicators: TabIndicators::Status,
             number: String::new(),
             prompt_pulse: 0,
+            spinner_frame: None,
         }
     }
 
@@ -178,6 +186,23 @@ fn is_descendant(nav: &NavigationState, session: &SessionRef, ancestor: &Session
         current = parent;
     }
     false
+}
+
+/// TAB-04: whether any open tab is running, so the live loop keeps its 80 ms
+/// repaint cadence while a busy-tab spinner animates. Mirrors the family
+/// roll-up in [`TabStrip::from_navigation`]: a tab is running when its own
+/// session is running or any open descendant is (`context/session-tabs.tsx:
+/// 171-176`). A busy tab that is not the active session still needs the tick,
+/// so the loop cannot rely on the active worker alone.
+#[must_use]
+pub fn any_running(nav: &NavigationState) -> bool {
+    let running = |session: &SessionRef| nav.work_state(session) == Some(WorkState::Running);
+    nav.tabs().iter().any(|tab| {
+        running(&tab.session)
+            || nav.tabs().iter().any(|candidate| {
+                is_descendant(nav, &candidate.session, &tab.session) && running(&candidate.session)
+            })
+    })
 }
 
 /// Visible-cluster fade window for an overflowing title, a port of
@@ -1617,6 +1642,24 @@ pub fn indicator_label(
     is_home: bool,
     unread: bool,
 ) -> &'static str {
+    indicator_label_frame(flags, attention, is_home, unread, None)
+}
+
+/// TAB-04: [`indicator_label`] with the live spinner frame. `spinner_frame`
+/// is `None` for reduced motion / no live clock, which keeps the static
+/// `TAB_SPINNERS.dots.frames[0]` glyph `⠋`; `Some(n)` paints
+/// `TAB_SPINNER_DOTS[n % len]`, matching the upstream
+/// `<spinner frames interval={80}>` renderable
+/// (`component/session-tabs.tsx:57-58,198`) that replaces the static label
+/// whenever `runs() && animations && !numbers`.
+#[must_use]
+pub fn indicator_label_frame(
+    flags: &TabFlags,
+    attention: Option<TabAttention>,
+    is_home: bool,
+    unread: bool,
+    spinner_frame: Option<u64>,
+) -> &'static str {
     if is_home {
         return "+";
     }
@@ -1629,7 +1672,12 @@ pub fn indicator_label(
         return "!";
     }
     if flags.busy {
-        return "\u{280b}";
+        return match spinner_frame {
+            Some(frame) => TAB_SPINNER_DOTS[(frame as usize) % TAB_SPINNER_DOTS.len()],
+            // `TAB_SPINNER_DOTS[0]` is `⠋`; keep the literal so this branch is
+            // independent of the frame table's first entry.
+            None => "\u{280b}",
+        };
     }
     if unread {
         // `TAB_UNREAD_MARKERS["small-dot"]` (`session-tabs.tsx:63-70`), the
@@ -1663,7 +1711,13 @@ fn horizontal_row(input: &TabInput, slot_width: u16, gauge: usize, hovered: bool
     // the indicator column (`session-tabs.tsx:173` `if (props.numbers) return
     // props.label`), so a status change never moves the title start cell.
     // `Status` keeps the existing status-glyph precedence unchanged.
-    let status_glyph = indicator_label(&input.flags, input.attention, false, input.unread);
+    let status_glyph = indicator_label_frame(
+        &input.flags,
+        input.attention,
+        false,
+        input.unread,
+        input.spinner_frame,
+    );
     let glyph = if input.indicators == TabIndicators::Numbers {
         input.number.as_str()
     } else {
@@ -2832,6 +2886,7 @@ mod tests {
             indicators: TabIndicators::Status,
             number: String::new(),
             prompt_pulse: 0,
+            spinner_frame: None,
         }
     }
 
@@ -3053,6 +3108,7 @@ mod tests {
             indicators: TabIndicators::Status,
             number: String::new(),
             prompt_pulse: 0,
+            spinner_frame: None,
         };
         let strip = TabStrip::render(&[tab], TabOrientation::Vertical, 6, 1, 0);
         assert_eq!(strip.rects[0].0, SessionRef("busy".into()));
@@ -3921,6 +3977,69 @@ mod tests {
             "status mode paints the busy spinner glyph: {:?}",
             strip.rows[0]
         );
+    }
+
+    // TAB-04: the live busy-tab spinner animates through `TAB_SPINNER_DOTS`
+    // from the frame the live loop feeds (`now_ms / 80`). The static default
+    // (`None`) and frame 0 both paint `⠋`; a different frame paints a different
+    // glyph, so this fails if `horizontal_row` ignores `spinner_frame`.
+    #[test]
+    fn tab_04_busy_spinner_animates_from_the_live_frame() {
+        let painted = |frame: Option<u64>| {
+            let tab = TabInput {
+                flags: TabFlags {
+                    busy: true,
+                    ..TabFlags::default()
+                },
+                spinner_frame: frame,
+                ..input("s", "title")
+            };
+            TabStrip::render(&[tab], TabOrientation::Horizontal, 20, 1, 0).rows[0].clone()
+        };
+        assert!(painted(None).contains('⠋'), "reduced motion keeps frame 0");
+        assert!(painted(Some(0)).contains('⠋'), "frame 0 is the first dot");
+        assert!(
+            painted(Some(1)).contains('⠙'),
+            "frame 1 advances to the second dot: {:?}",
+            painted(Some(1))
+        );
+        assert_ne!(painted(Some(0)), painted(Some(1)), "frames must differ");
+        assert_eq!(painted(Some(10)), painted(Some(0)), "the frame wraps modulo the table");
+        // A non-busy tab ignores the frame entirely.
+        let idle = TabInput {
+            spinner_frame: Some(3),
+            ..input("s", "title")
+        };
+        assert!(
+            !TabStrip::render(&[idle], TabOrientation::Horizontal, 20, 1, 0).rows[0].contains('⠙'),
+            "an idle tab never paints a spinner frame"
+        );
+    }
+
+    // TAB-04: `any_running` keeps the live loop's 80 ms tick alive for a busy
+    // tab even when it is not the active session (so the active worker alone
+    // cannot be the gate).
+    #[test]
+    fn tab_04_any_running_covers_background_and_family_tabs() {
+        use crate::native_navigation::{DaemonEvent, NavigationState, WorkState};
+        let mut nav = NavigationState::new();
+        assert!(!any_running(&nav), "no tabs is not running");
+        nav.open_tab(SessionRef("a".into()));
+        assert!(!any_running(&nav), "an idle tab is not running");
+        nav.apply(DaemonEvent::WorkState {
+            session: SessionRef("a".into()),
+            state: WorkState::Running,
+        });
+        assert!(any_running(&nav), "a busy tab is running");
+        // A running child with no open tab still wakes the parent tab's spinner.
+        let mut family = NavigationState::new();
+        family.open_tab(SessionRef("parent".into()));
+        family.open_forked(SessionRef("child".into()), SessionRef("parent".into()));
+        family.apply(DaemonEvent::WorkState {
+            session: SessionRef("child".into()),
+            state: WorkState::Running,
+        });
+        assert!(any_running(&family), "a running descendant keeps the tick alive");
     }
 
     #[test]

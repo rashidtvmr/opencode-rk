@@ -3539,6 +3539,7 @@ impl NativeView {
                 error: error.clone(),
             },
             Some(McpStatus::Connected) => PickerStatus::Connected,
+            Some(McpStatus::Pending) => PickerStatus::Pending,
             Some(McpStatus::Disabled) | None => PickerStatus::Disabled,
         };
         let enter: McpEnter = mcp_enter(&projected);
