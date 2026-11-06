@@ -38,6 +38,15 @@ use crate::native_tabs::{TabOrientation, TabReservation, TabStrip};
 use crate::native_navigation::SessionRef;
 use clap::{Args, ValueEnum};
 
+/// Serialize tests that create a native renderer. The bridge's renderer claim
+/// is process-global and single-owner (`opentui-bridge/src/handle.rs:41-53`),
+/// so parallel test threads must not create renderers concurrently.
+#[cfg(all(test, feature = "native"))]
+fn renderer_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poison| poison.into_inner())
+}
+
 #[cfg(feature = "native")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HistoryRequestKind { Older, Newer, Tail, Refresh }
@@ -2885,6 +2894,10 @@ mod surface_paint_regressions {
     #[test]
     fn vertical_rail_preserves_overlapping_modal_body_cells() {
         use crate::native_tab_rail::{RailRect, RailRow, RailRowKind, RailStyle};
+        // The bridge's renderer claim is process-global and single-owner
+        // (`opentui-bridge/src/handle.rs:41-53`); serialize renderer-creating
+        // tests so parallel test threads cannot race it.
+        let _renderer_lock = renderer_test_lock();
         let mut renderer = NativeRenderer::create_memory(12, 3).unwrap();
         let foreground = Rgba::rgb(240, 240, 240);
         let background = Rgba::rgb(20, 20, 20);
@@ -2905,6 +2918,10 @@ mod surface_paint_regressions {
 
     #[test]
     fn horizontal_rules_span_past_512_cells_without_crossing_viewport() {
+        // The bridge's renderer claim is process-global and single-owner
+        // (`opentui-bridge/src/handle.rs:41-53`); serialize renderer-creating
+        // tests so parallel test threads cannot race it.
+        let _renderer_lock = renderer_test_lock();
         let mut renderer = NativeRenderer::create_memory(620, 5).unwrap();
         let color = Rgba::rgb(220, 220, 220);
         draw_horizontal_rule(&mut renderer, 2, 1, 616, '─', color, color).unwrap();
@@ -2924,6 +2941,10 @@ mod surface_paint_regressions {
         let appearance = BoxAppearance { preset: RadiusPreset::IosSquircle, ..Default::default() };
         assert!(appearance.full_outline(BoxId::Menu));
         let style = appearance.effective(BoxId::Menu);
+        // The bridge's renderer claim is process-global and single-owner
+        // (`opentui-bridge/src/handle.rs:41-53`); serialize renderer-creating
+        // tests so parallel test threads cannot race it.
+        let _renderer_lock = renderer_test_lock();
         let mut renderer = NativeRenderer::create_memory(20, 8).unwrap();
         let accent = Rgba::rgb(200, 190, 100);
         let surface = Rgba::rgb(25, 25, 25);
@@ -2942,6 +2963,10 @@ mod surface_paint_regressions {
         view.set_session_route(true);
         let lines = view.render_typed("draft", &[], true, &[]);
         let composer = view.composer_region("draft").expect("composer region");
+        // The bridge's renderer claim is process-global and single-owner
+        // (`opentui-bridge/src/handle.rs:41-53`); serialize renderer-creating
+        // tests so parallel test threads cannot race it.
+        let _renderer_lock = renderer_test_lock();
         let mut renderer = NativeRenderer::create_memory(80, 24).expect("memory renderer");
         native_paint(&mut renderer, &lines, PaintCtx {
             palette: crate::native_theme_runtime::Palette::opencode_dark(),
@@ -3007,6 +3032,10 @@ mod surface_paint_regressions {
             .collect();
         let lines = view.render_typed("draft", &messages, false, &[]);
         let scrollbar = view.transcript_scrollbar().expect("overflowing transcript shows the bar");
+        // The bridge's renderer claim is process-global and single-owner
+        // (`opentui-bridge/src/handle.rs:41-53`); serialize renderer-creating
+        // tests so parallel test threads cannot race it.
+        let _renderer_lock = renderer_test_lock();
         let mut renderer = NativeRenderer::create_memory(80, 24).expect("memory renderer");
         native_paint(&mut renderer, &lines, PaintCtx {
             palette: crate::native_theme_runtime::Palette::opencode_dark(),
@@ -3101,6 +3130,10 @@ mod surface_paint_regressions {
         let lines = view.render_typed("draft", &[], false, &[]);
         let scrollbar = view.sidebar_scrollbar().expect("overflowing sidebar shows the bar");
         let (start, len) = scrollbar.thumb.expect("overflowing body has a thumb");
+        // The bridge's renderer claim is process-global and single-owner
+        // (`opentui-bridge/src/handle.rs:41-53`); serialize renderer-creating
+        // tests so parallel test threads cannot race it.
+        let _renderer_lock = renderer_test_lock();
         let mut renderer = NativeRenderer::create_memory(148, 30).expect("memory renderer");
         native_paint(&mut renderer, &lines, PaintCtx {
             palette: crate::native_theme_runtime::Palette::opencode_dark(),
@@ -3174,6 +3207,10 @@ mod surface_paint_regressions {
             11, 60, 20, 8, true, false, false, "A long title", "the detail",
         )
         .expect("hovered compact entry opens the tooltip");
+        // The bridge's renderer claim is process-global and single-owner
+        // (`opentui-bridge/src/handle.rs:41-53`); serialize renderer-creating
+        // tests so parallel test threads cannot race it.
+        let _renderer_lock = renderer_test_lock();
         let mut renderer = NativeRenderer::create_memory(60, 20).expect("memory renderer");
         native_paint(&mut renderer, &lines, PaintCtx {
             palette: crate::native_theme_runtime::Palette::opencode_dark(),
@@ -3898,6 +3935,10 @@ mod dialog19_chrome_paint_tests {
         let mut view = crate::native_view::NativeView::new(80, 24);
         view.set_session_route(true);
         let lines = view.render_typed("draft", &[], true, &[]);
+        // The bridge's renderer claim is process-global and single-owner
+        // (`opentui-bridge/src/handle.rs:41-53`); serialize renderer-creating
+        // tests so parallel test threads cannot race it.
+        let _renderer_lock = renderer_test_lock();
         let mut renderer = NativeRenderer::create_memory(80, 24).expect("memory renderer");
         native_paint(
             &mut renderer,
@@ -4100,6 +4141,10 @@ mod chat_surface_inset_tests {
         );
         // The full live frame paint accepts the hover fact through
         // `PaintCtx.hovered_row` (the loop's only new paint input).
+        // The bridge's renderer claim is process-global and single-owner
+        // (`opentui-bridge/src/handle.rs:41-53`); serialize renderer-creating
+        // tests so parallel test threads cannot race it.
+        let _renderer_lock = renderer_test_lock();
         let mut renderer = NativeRenderer::create_memory(120, 40).expect("memory renderer");
         let palette = crate::native_theme_runtime::Palette::opencode_dark();
         native_paint(
