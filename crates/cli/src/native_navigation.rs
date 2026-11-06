@@ -373,6 +373,12 @@ pub struct NavigationState {
     /// (`context/session-tabs.tsx:120-123`); the native single-client loop
     /// marks it on a Running -> Idle transition for a non-active tab.
     unread: Vec<SessionRef>,
+    /// Tabs whose latest turn ended in error (`outcome === "failed"`,
+    /// `context/session-tabs.tsx:160-162`): their unread indicator paints
+    /// `theme.text.feedback.error.base` instead of the accent unreadColor
+    /// (`session-tabs.tsx:125-130`). Lifecycle mirrors `unread`: cleared on
+    /// focus, archive, tab removal and state reload.
+    failed_unread: Vec<SessionRef>,
     /// Sessions removed from the strip whose queued re-registration becomes a
     /// no-op. Upstream keeps `cancelledTabs` so a registration landing after
     /// a removal cannot resurrect the tab; navigating to the session again
@@ -475,6 +481,7 @@ impl NavigationState {
         self.cancelled.retain(|candidate| *candidate != session);
         // Focusing the route views it (`context/session-tabs.tsx:229-267`).
         self.unread.retain(|candidate| *candidate != session);
+        self.failed_unread.retain(|candidate| *candidate != session);
         self.record_history(&session);
     }
 
@@ -609,6 +616,7 @@ impl NavigationState {
         self.closed.clear();
         self.cancelled.clear();
         self.unread.clear();
+        self.failed_unread.clear();
     }
 
     /// Explicit tab lifecycle name used by native view callers. This is an
@@ -850,6 +858,25 @@ impl NavigationState {
         self.unread.contains(session)
     }
 
+    /// Record an errored background turn (`outcome === "failed"`) for
+    /// `session` so its unread marker paints the error color until focused
+    /// (`context/session-tabs.tsx:160-162`, `session-tabs.tsx:125-130`).
+    pub fn mark_unread_failed(&mut self, session: &SessionRef) {
+        // An errored completion is still an unread completion: it paints the
+        // unread indicator, just in the error color (`session-tabs.tsx:125-130`).
+        self.mark_unread(session);
+        if self.failed_unread.contains(session) || self.failed_unread.len() >= MAX_TABS {
+            return;
+        }
+        self.failed_unread.push(session.clone());
+    }
+
+    /// Whether `session` has an unviewed errored completion.
+    #[must_use]
+    pub fn is_unread_failed(&self, session: &SessionRef) -> bool {
+        self.failed_unread.contains(session)
+    }
+
     /// Unread tabs in tab order.
     #[must_use]
     pub fn unread_sessions(&self) -> Vec<SessionRef> {
@@ -1064,6 +1091,7 @@ impl NavigationState {
                 self.remove_tab(&session);
                 self.closed.retain(|entry| entry.session != session);
                 self.unread.retain(|candidate| *candidate != session);
+                self.failed_unread.retain(|candidate| *candidate != session);
                 self.titles.retain(|(s, _, _)| *s != session);
                 self.snapshot_titles.retain(|(s, _)| *s != session);
                 self.work.retain(|(s, _)| *s != session);
@@ -1184,6 +1212,10 @@ impl NavigationState {
             None => return false,
         };
         self.tabs.remove(idx);
+        // The tab's unread facts die with it (upstream removes the session
+        // subscription on close, `context/session-tabs.tsx:349-351`).
+        self.unread.retain(|candidate| candidate != session);
+        self.failed_unread.retain(|candidate| candidate != session);
         if self.tabs.is_empty() {
             self.active = 0;
         } else if idx < self.active {
@@ -1801,8 +1833,37 @@ mod tests {
     }
 
     #[test]
+    fn failed_unread_marks_errors_and_clears_like_activity_unread() {
+        // TAB-07: `outcome === "failed"` tints the unread indicator with the
+        // error color (`context/session-tabs.tsx:160-162`); the failed mark
+        // mirrors the activity-unread lifecycle (`session-tabs.tsx:120-123`).
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.open(s("b"));
+        nav.mark_unread_failed(&s("b"));
+        assert!(nav.is_unread_failed(&s("b")));
+        // An errored completion is still an unread completion: the strip's
+        // paint path requires `unread` before it swaps in the error tint
+        // (`session-tabs.tsx:125-130`), so the failed mark implies activity
+        // unread rather than living beside it.
+        assert!(nav.is_unread(&s("b")), "a failed turn is also unread");
+        // Focusing the tab views it and clears every unread fact.
+        nav.open(s("b"));
+        assert!(!nav.is_unread_failed(&s("b")));
+        assert!(!nav.is_unread(&s("b")));
+
+        // Closing the tab drops the mark so it cannot resurrect.
+        nav.open(s("c"));
+        nav.mark_unread_failed(&s("c"));
+        nav.close(&s("c")).unwrap();
+        assert!(!nav.is_unread_failed(&s("c")));
+    }
+
+    #[test]
     fn close_active_with_work_state_retains_daemon_work() {
         // Verifies the explicit user extension: active close still retains
+        // daemon work (same as close_active) while also being callable via
+        // the navigation.close entry used for background closes.
         // daemon work (same as close_active) while also being callable via
         // the navigation.close entry used for background closes.
         let mut nav = NavigationState::new();

@@ -11385,6 +11385,22 @@ fn native_loop(
                             let partial_text = std::mem::take(&mut partial);
                             remove_partial(&mut transcript);
                             settled = true;
+                            // TAB-07: an errored turn (`outcome === "failed"`,
+                            // `context/session-tabs.tsx:160-162`) paints the
+                            // tab's unread indicator with the error color once
+                            // it settles unviewed. An interruption carries the
+                            // `cancelled` code — outcome `cancelled`, never
+                            // `failed` — so it stays plain activity-unread.
+                            // The focused route is being viewed, so only a
+                            // background session accrues the mark (mirroring
+                            // the WorkState Running -> Idle unread rule).
+                            if code.as_deref() != Some(crate::native_assistant_facts::CANCELLED_CODE)
+                                && navigation.active().is_none_or(|tab| tab.session.0 != owned.session_id())
+                            {
+                                navigation.mark_unread_failed(
+                                    &crate::native_navigation::SessionRef(owned.session_id().to_owned()),
+                                );
+                            }
                             let facts =
                                 crate::native_assistant_facts::AssistantFacts::from_error(
                                     code.clone(),
@@ -12324,11 +12340,31 @@ fn native_loop(
                 .filter(|(owner, _)| owner.as_deref() == Some(input.session.0.as_str()))
                 .map(|_| crate::native_tabs::PendingKind::User)
                 .collect();
-            crate::native_tabs::apply_live_status(
-                input,
-                tab_prompt_pulses.get(&input.session),
-                &pending,
-            );
+            // TAB-05: the live `/children` listing marks the root tab busy
+            // while any family member runs (`context/session-tabs.tsx:143-173`
+            // busy). Children are polled only for the active route session
+            // (`live_children` binds to the live snapshot), so the roll-up
+            // applies only to that session's tab; every other tab keeps the
+            // plain pulse/pending feed.
+            let family_status = if live_children.session() == Some(input.session.0.as_str()) {
+                let root = tab_prompt_pulses.get(&input.session).copied().unwrap_or_default();
+                let members: Vec<crate::native_tabs::TabStatus> = live_children
+                    .rows()
+                    .iter()
+                    .filter(|row| row.session_id != input.session.0)
+                    .map(|row| crate::native_tabs::TabStatus {
+                        busy: row.is_running(),
+                        ..crate::native_tabs::TabStatus::default()
+                    })
+                    .collect();
+                Some(crate::native_tabs::TabStatus::family(root, &members))
+            } else {
+                None
+            };
+            let status = family_status
+                .as_ref()
+                .or_else(|| tab_prompt_pulses.get(&input.session));
+            crate::native_tabs::apply_live_status(input, status, &pending);
         }
         for status in tab_prompt_pulses.values_mut() {
             status.prompt_pulse = 0;
@@ -21076,6 +21112,7 @@ mod middle_close_hit_tests {
             flags: Default::default(),
             attention: None,
             unread: false,
+            unread_error: false,
             marquee_offset: 0,
             indicators: crate::native_tabs::TabIndicators::Status,
             number: String::new(),
