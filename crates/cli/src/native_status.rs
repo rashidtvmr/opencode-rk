@@ -583,18 +583,44 @@ mod tests {
         let records = [
             ShellRecord {
                 session_id: "ses_a",
+                status: "running",
             },
             ShellRecord {
                 session_id: "ses_b",
+                status: "running",
             },
             ShellRecord {
                 session_id: "ses_a",
+                status: "running",
             },
         ];
         assert_eq!(session_shell_count(&records, "ses_a"), 2);
         assert_eq!(session_shell_count(&records, "ses_b"), 1);
         assert_eq!(session_shell_count(&records, "ses_missing"), 0);
         assert_eq!(session_shell_count(&[], "ses_a"), 0);
+
+        // A shell record's own status transition (running -> completed) leaves
+        // the footer count identical: the projection is identity-based, not
+        // status-based (`footer.tsx:29-35`).
+        let transitioned = [
+            ShellRecord {
+                session_id: "ses_a",
+                status: "completed",
+            },
+            ShellRecord {
+                session_id: "ses_b",
+                status: "running",
+            },
+            ShellRecord {
+                session_id: "ses_a",
+                status: "running",
+            },
+        ];
+        assert_eq!(
+            session_shell_count(&transitioned, "ses_a"),
+            session_shell_count(&records, "ses_a"),
+            "a shell status transition never changes the footer count"
+        );
     }
 
     #[test]
@@ -680,6 +706,11 @@ pub(crate) fn running_subagent_count(family: &[FamilyMember<'_>], session_id: &s
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ShellRecord<'a> {
     pub session_id: &'a str,
+    /// The record's own lifecycle status (`running`/`completed`/…). The footer
+    /// projection deliberately ignores it, but it is carried so a status
+    /// transition can be asserted to leave the count unchanged
+    /// (`footer.tsx:29-35`).
+    pub status: &'a str,
 }
 
 /// Upstream `footer.tsx:29-35`: shells belonging to this session, counted by
