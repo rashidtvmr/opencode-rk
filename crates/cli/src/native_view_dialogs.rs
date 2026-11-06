@@ -3982,13 +3982,13 @@ impl DialogView {
             // other dialog keeps the original choice order. Option ids are the
             // original choice indexes, so paint, click hits and confirm agree.
             let flattened = dialog.select.as_ref().is_some_and(|select| select.flatten());
-            let visible: Vec<(usize, &str, bool, Option<&str>)> = match dialog.select.as_ref() {
+            let visible: Vec<(usize, &str, bool, Option<&str>, Option<&str>)> = match dialog.select.as_ref() {
                 Some(select) => select
                     .filtered()
                     .into_iter()
                     .filter_map(|option| {
                         option.id.parse::<usize>().ok().map(|index| {
-                            (index, option.title.as_str(), option.disabled, option.row_footer(flattened))
+                            (index, option.title.as_str(), option.disabled, option.row_footer(flattened), option.row_description())
                         })
                     })
                     .collect(),
@@ -3996,15 +3996,15 @@ impl DialogView {
                     .choices
                     .iter()
                     .enumerate()
-                    .map(|(index, choice)| (index, choice.as_str(), dialog.disabled[index], None))
+                    .map(|(index, choice)| (index, choice.as_str(), dialog.disabled[index], None, None))
                     .collect(),
             };
             let selected_pos = visible
                 .iter()
-                .position(|(index, _, _, _)| Some(*index) == self.selection)
+                .position(|(index, _, _, _, _)| Some(*index) == self.selection)
                 .unwrap_or(0);
             let start = selected_pos.saturating_sub(capacity.saturating_sub(1));
-            for &(index, choice, disabled, row_footer) in visible.iter().skip(start).take(capacity) {
+            for &(index, choice, disabled, row_footer, row_description) in visible.iter().skip(start).take(capacity) {
                 if lines.len() < height && !disabled && self.phase == Phase::Open {
                     hits[lines.len()] = Some(index);
                 }
@@ -4041,6 +4041,7 @@ impl DialogView {
                 // SIDE-08: the MCP list prints the server name then the exact
                 // upstream status word (`dialog-mcp.tsx:79-85`), with no
                 // numeric index (upstream `DialogSelect` rows carry no number).
+                let choice = row_description.map_or_else(|| choice.to_owned(), |description| format!("{choice} {description}"));
                 let text = if dialog.kind == DialogKind::Mcp {
                     let status = dialog.mcp_status.get(index).map(String::as_str).unwrap_or("");
                     format!("{marker}{choice}  {status}")
@@ -9147,6 +9148,16 @@ mod tests {
             legacy_footer + 1,
             "footerGap=2 adds exactly one body padding row"
         );
+    }
+
+    #[test]
+    fn dialog17_stash_rows_include_relative_description() {
+        use crate::native_paste::{DraftEntry, StashEntry};
+        let now = 1_000_000_000_u64;
+        let entry = |text: &str, timestamp| StashEntry { prompt: DraftEntry { text: text.into(), ..DraftEntry::default() }, timestamp };
+        let mut view = DialogView::new();
+        view.open_stash(vec![entry("draft", now - 120_000)], now as i64).unwrap();
+        assert!(view.render(80, 20).iter().any(|row| row.contains("2m ago")));
     }
 
     #[test]
