@@ -1881,6 +1881,25 @@ mod tests {
         );
     }
 
+    /// SIDE-06/SIDE-07/SIDE-11: a persisted collapsed state is retained in the
+    /// heading, but a list that has shrunk to two entries is forced visible;
+    /// all upstream status labels still use their exact row vocabulary.
+    #[test]
+    fn collapsed_mcp_state_keeps_small_lists_visible_and_status_words_exact() {
+        let items = [
+            McpItem { name: "pending", status: McpDisplayStatus::Pending, included: None },
+            McpItem { name: "auth", status: McpDisplayStatus::NeedsAuth, included: None },
+        ];
+        let section = McpSection { items: &items, open: false };
+        assert!(!section.collapsible());
+        assert!(section.expanded(), "persisted collapse cannot hide <=2 rows");
+        assert_eq!(section.heading(), "MCP (0 active, 1 error)");
+        assert_eq!(section.row(&items[0], 30), "• pending           Connecting");
+        assert_eq!(section.row(&items[1], 30), "• auth                 Sign in");
+        assert_eq!(items[0].status.dot(), Slot::TextMuted);
+        assert_eq!(items[1].status.dot(), Slot::Warning);
+    }
+
     /// SIDE-08: long names truncate before the fixed status label.
     #[test]
     fn long_mcp_name_truncates_before_the_fixed_status() {
@@ -2133,6 +2152,14 @@ mod tests {
         );
         assert_eq!(footer_label("/w", None, 38), "/w");
         assert_eq!(footer_label("/w", Some(""), 38), "/w");
+        // The suffix is part of the same max-width budget: the whole
+        // `directory:branch` value is compacted as one path, so the branch
+        // contributes to the width and survives as the visible tail. Upstream
+        // `truncateFilePath("/Users/example/project:feature/sidebar", 20)`
+        // yields `/…/project:…/sidebar` (segments split on `/`).
+        let with_branch = footer_label("/Users/example/project", Some("feature/sidebar"), 20);
+        assert!(cell_width(&with_branch) <= 20, "{with_branch}");
+        assert_eq!(with_branch, "/…/project:…/sidebar", "{with_branch}");
         // UNIX: keep the basename, compact the middle with `…`.
         let long = "/Users/mymac/Projects/opencode-rk-recovery-20261005/crates/cli/src";
         let truncated = truncate_file_path(long, 38);
@@ -2166,6 +2193,7 @@ mod tests {
         assert!(!emoji.contains('\u{fffd}'));
         assert!(emoji.ends_with('…'), "{emoji}");
         assert_eq!(emoji.matches('🚀').count(), 4, "{emoji}");
+
     }
 
     /// SIDE-01: the header and footer are pinned while the body scrolls.
