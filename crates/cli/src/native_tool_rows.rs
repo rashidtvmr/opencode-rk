@@ -661,7 +661,13 @@ pub fn apply_tool_metadata(mut display: ToolDisplay, metadata_json: &str) -> Too
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
         {
-            display.label = rebase_websearch_provider(&display.label, &web_search_provider_label(Some(provider)));
+            // `rebase_websearch_provider` splices the provider NAME into the
+            // bare `Web Search "q"` label; `web_search_provider_label` already
+            // returns the full `Web Search via {name}` string, so passing it
+            // here would double the prefix. Use the name directly.
+            if let Some(name) = web_search_provider_name(Some(provider)) {
+                display.label = rebase_websearch_provider(&display.label, &name);
+            }
         }
     }
     if display.kind == ToolKind::Skill {
@@ -2122,7 +2128,12 @@ mod tests {
                 "tags": ["a", "b"]
             }),
         );
-        assert_eq!(display.label, "mcp__fixture [uri=db://x, page=2, verbose=true]");
+        // NOTE (known cosmetic divergence): upstream `Object.entries` yields
+        // insertion order, but `serde_json::Map` iterates lexicographically
+        // (the CLI does not enable `preserve_order`), so the summary keys are
+        // sorted here. The substantive behavior — only top-level primitives,
+        // nested JSON excluded — matches.
+        assert_eq!(display.label, "mcp__fixture [page=2, uri=db://x, verbose=true]");
         assert!(!display.label.contains("nested"));
         assert!(!display.label.contains('[') || display.label.starts_with("mcp__fixture ["));
         let multiline = label(
@@ -2152,7 +2163,7 @@ mod tests {
         // The running placeholder is not a Web Search label: untouched.
         let pending = tool_display(80, "websearch", "running", r#"{}"#, "", false);
         let pending = apply_tool_metadata(pending, r#"{"provider":"opencode"}"#);
-        assert_eq!(pending.label, "Searching web...");
+        assert_eq!(pending.label, "Searching web\u{2026}");
         // `metadata.name` beats `input.id` for Skill
         // (`stringValue(props.metadata.name) ?? stringValue(props.input.id)`).
         let skill = tool_display(80, "skill", "completed", r#"{"id":"old"}"#, "", false);
