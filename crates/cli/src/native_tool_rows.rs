@@ -197,7 +197,10 @@ pub fn classify_status(status: &str, is_error: bool) -> ToolStatus {
         "streaming" => ToolStatus::Streaming,
         "running" => ToolStatus::Running,
         "completed" | "complete" | "ok" | "success" | "done" => ToolStatus::Completed,
-        "error" | "failed" | "failure" | "denied" => ToolStatus::Error,
+        "error" | "failed" | "failure" => ToolStatus::Error,
+        // A transport-level denial is semantically different from a failed
+        // execution: upstream renders it muted and struck through.
+        "denied" => ToolStatus::Denied,
         _ => ToolStatus::Pending,
     }
 }
@@ -2108,6 +2111,7 @@ mod tests {
         assert_eq!(classify_status("running", false), ToolStatus::Running);
         assert_eq!(classify_status("completed", false), ToolStatus::Completed);
         assert_eq!(classify_status("completed", true), ToolStatus::Error);
+        assert_eq!(classify_status("denied", false), ToolStatus::Denied);
         assert_eq!(classify_status("ambiguous", false), ToolStatus::Pending);
         assert_eq!(classify_status("something-new", false), ToolStatus::Pending);
         assert_eq!(classify_status("completed", false).row_class(), ChatRowClass::ToolResult);
