@@ -1109,7 +1109,18 @@ impl MarkdownFlow {
             }
             RawKind::Code => {
                 let (lang, content) = fence_parts(&token.raw);
-                let lines: Vec<String> = content.split('\n').map(str::to_owned).collect();
+                // An opening fence has no paintable `token.text` yet.  Do not
+                // manufacture a blank row while the stream is between the
+                // fence and its first body byte: upstream's Markdown
+                // renderable mounts no text child for an empty code token.
+                // This is important for streaming because that synthetic row
+                // otherwise appears as a one-frame blank before the first
+                // code line arrives (`Markdown.ts:1171-1186`).
+                let lines: Vec<String> = if content.is_empty() {
+                    Vec::new()
+                } else {
+                    content.split('\n').map(str::to_owned).collect()
+                };
                 (BlockKind::Code { lang: lang.clone() }, BlockBody::Code { lines, lang })
             }
             RawKind::List => {
@@ -2567,6 +2578,21 @@ mod tests {
             assert_eq!(flow.render(40).len(), 2, "two content rows, no stale block");
         }
         assert_eq!(content_then_finish.render(40), finish_then_content.render(40));
+    }
+
+    /// FFI-06. A fence-opening delta is a real code block but has no
+    /// paintable text.  Streaming must not emit a synthetic blank frame before
+    /// the first body line, and fence markers must never enter the code rows.
+    #[test]
+    fn ffi06_open_fence_has_no_blank_frame_before_body_arrives() {
+        let mut flow = MarkdownFlow::new(MarkdownOptions { streaming: true, ..MarkdownOptions::default() });
+        flow.set_content("```rust\n");
+        assert!(matches!(flow.blocks()[0].kind, BlockKind::Code { .. }));
+        assert!(flow.render(40).is_empty(), "opening fence must not paint a blank row");
+
+        flow.push_chunk("let answer = 42;\n");
+        assert_eq!(flow.render(40).iter().map(FlowRow::text).collect::<Vec<_>>(), vec!["let answer = 42;".to_owned()]);
+        assert!(flow.render(40).iter().all(|row| !row.text().contains("```")));
     }
 
     /// MD-004. Upstream: `Markdown.ts:466-472` (conceal re-renders styles, block
