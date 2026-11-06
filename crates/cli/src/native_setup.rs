@@ -359,6 +359,30 @@ impl ProviderConnectMethod {
     pub(super) const fn label(self) -> &'static str { match self { Self::OAuth => "ChatGPT device-code sign-in", Self::ApiKey => "API key" } }
 }
 
+/// Interpret an OAuth attempt status payload
+/// (`GET /api/integration/{id}/connect/oauth/{attemptID}`; server
+/// `AttemptStatus` at `crates/server/src/provider_integration.rs:59-66`).
+///
+/// Returns `(terminal, message)`: `terminal` is true when the attempt has
+/// resolved and the caller should stop polling; `message` is the setup-surface
+/// notice to paint (only for a terminal status).
+pub(super) fn oauth_status(body: &str) -> (bool, Option<String>) {
+    let value: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+    match value["status"].as_str() {
+        Some("complete") => (true, Some("OpenAI connected".into())),
+        Some("failed") => (
+            true,
+            Some(format!(
+                "OpenAI sign-in failed: {}",
+                value["message"].as_str().unwrap_or("unknown error")
+            )),
+        ),
+        Some("expired") => (true, Some("OpenAI sign-in expired; try again".into())),
+        // `pending` (and any unrecognized status) keeps the attempt live.
+        _ => (false, None),
+    }
+}
+
 
 pub(super) fn catalogue(body: &str) -> Result<Vec<Model>, String> {
     if body.len() > 8 * 1024 * 1024 { return Err("model catalogue is too large".into()); }
@@ -1104,5 +1128,31 @@ mod picker_tests {
         let m = models();
         assert_eq!(selected_row(&m, "j-model-extra", 0), None);
         assert_eq!(m[0].qualified(), "openai/j-model");
+    }
+
+    /// The OAuth attempt status feed (`AttemptStatus`,
+    /// `crates/server/src/provider_integration.rs:59-66`) maps to a terminal
+    /// flag plus the setup-surface notice. `pending` (and any unknown status)
+    /// keeps polling; `complete`/`failed`/`expired` stop it.
+    #[test] fn oauth_status_maps_terminal_states_and_keeps_pending_live() {
+        assert_eq!(oauth_status(r#"{"status":"pending"}"#), (false, None));
+        assert_eq!(oauth_status("{}"), (false, None));
+        assert_eq!(
+            oauth_status(r#"{"status":"complete"}"#),
+            (true, Some("OpenAI connected".into()))
+        );
+        assert_eq!(
+            oauth_status(r#"{"status":"expired"}"#),
+            (true, Some("OpenAI sign-in expired; try again".into()))
+        );
+        assert_eq!(
+            oauth_status(r#"{"status":"failed","message":"denied"}"#),
+            (true, Some("OpenAI sign-in failed: denied".into()))
+        );
+        // A failed status without a message still surfaces a terminal notice.
+        assert_eq!(
+            oauth_status(r#"{"status":"failed"}"#),
+            (true, Some("OpenAI sign-in failed: unknown error".into()))
+        );
     }
 }

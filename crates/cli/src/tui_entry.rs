@@ -9917,6 +9917,13 @@ fn native_loop(
     );
     let mut model_load = None;
     let mut setup_error: Option<String> = None;
+    // Live OpenAI OAuth attempt: the `attemptID` returned by
+    // `POST /api/integration/openai/connect/oauth`, polled via
+    // `GET /api/integration/openai/connect/oauth/{attemptID}` so the setup
+    // surface reflects `pending`/`complete`/`failed`/`expired` like upstream's
+    // connect dialog (`packages/tui/src/component/dialog-integration.tsx`).
+    let mut oauth_attempt: Option<String> = None;
+    let mut oauth_poll = Instant::now();
     if provider_id != "openai"
         && providers.iter().any(|row| row.0 == provider_id)
         && provider_id != "custom"
@@ -11043,6 +11050,33 @@ fn native_loop(
                     view.set_todos_error(&error);
                 }
                 needs_paint = true;
+            }
+        }
+        // OpenAI OAuth attempt polling: while a connect attempt is live, poll
+        // its status once a second so the setup surface reflects
+        // pending/complete/failed/expired like upstream's connect dialog
+        // (`packages/tui/src/component/dialog-integration.tsx`).
+        if oauth_attempt.is_some() && oauth_poll.elapsed() >= Duration::from_millis(1000) {
+            oauth_poll = Instant::now();
+            if let (Some(attempt), Some(snapshot)) = (oauth_attempt.clone(), live.as_ref()) {
+                let path = format!("/api/integration/openai/connect/oauth/{attempt}");
+                match http_request(&snapshot.origin, "GET", &path, None, auth) {
+                    Ok(body) => {
+                        let (terminal, message) = native_setup::oauth_status(&body);
+                        if terminal {
+                            oauth_attempt = None;
+                            if let Some(message) = message {
+                                setup_error = Some(message);
+                            }
+                            needs_paint = true;
+                        }
+                    }
+                    Err(_) => {
+                        oauth_attempt = None;
+                        setup_error = Some("Lost the OpenAI OAuth attempt; try again".into());
+                        needs_paint = true;
+                    }
+                }
             }
         }
         if children_panel.open && children_refresh.elapsed() >= Duration::from_millis(750) {
@@ -17422,7 +17456,12 @@ fn native_loop(
                                 match result {
                                     Ok(body) => {
                                         let value: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
-                                        setup_error = Some(format!("OAuth started: {} {} (status polling is not wired in this setup surface)", value["url"].as_str().unwrap_or(""), value["instructions"].as_str().unwrap_or("")));
+                                        // Keep the attempt id so the loop polls its
+                                        // status; upstream's connect dialog does the
+                                        // same (`dialog-integration.tsx`).
+                                        oauth_attempt = value["attemptID"].as_str().map(str::to_owned);
+                                        oauth_poll = Instant::now();
+                                        setup_error = Some(format!("OAuth started: {} {}", value["url"].as_str().unwrap_or(""), value["instructions"].as_str().unwrap_or("")));
                                     }
                                     Err(_) => setup_error = Some("Unable to start OpenAI OAuth; check daemon".into()),
                                 }
