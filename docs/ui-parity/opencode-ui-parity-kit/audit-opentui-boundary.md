@@ -96,6 +96,43 @@ Keep parsing and backend work off the owner thread if useful, but publish immuta
 
 ## 5. Verification that proves this boundary works
 
+### Lane 23 verification (FFI-02/04/08)
+
+This verification distinguishes Rust-side models from capabilities that are
+actually driven by the production TUI.  The vendored OpenTUI binary does not
+export scene, frame-ticket, host-hook, or output-queue symbols (see the
+boundary notes in `crates/opentui-bridge/src/scene.rs:12-21` and
+`crates/opentui-bridge/src/frame.rs:15-20`).
+
+* **FFI-02 — blocked as a native capability; Rust model already exists.**
+  `Scene::new`, ordered `move_child`, destruction, style/text mutation,
+  viewport, measurement, and focus are implemented at
+  `crates/opentui-bridge/src/scene.rs:338-489` and `:576-781`; text editors
+  are in `crates/opentui-bridge/src/editor.rs:97-619`.  However, no
+  production caller imports `Scene` or `Editor` (the only current bridge
+  production consumer is the renderer and the CLI's diff path), and the
+  selected native library has no scene entry point to bind.  Making this
+  "live" would require inventing an upstream seam, so this item is not
+  landable as native FFI parity in this lane.  The existing bridge unit tests
+  remain the evidence for the Rust model, not acceptance of native parity.
+* **FFI-04 — blocked as an unconsumed protocol model.**
+  `FrameController` implements request tickets, hook ordering, bounded output,
+  failure, and shutdown transitions at
+  `crates/opentui-bridge/src/frame.rs:206-490`, with discriminating tests at
+  `:492-729`.  The native library exports only renderer calls and no frame
+  protocol; no production TUI path consumes `FrameController`.  Wiring it
+  into the host loop would change scheduling semantics without an upstream
+  ABI seam, so it is not landable without a separately specified host-loop
+  integration.
+* **FFI-08 — already live in the production consumer.**
+  `FilePatch::parse` and `DiffLayout` provide parsing, line numbers, gutters,
+  selection, and resize at `crates/opentui-bridge/src/diff.rs:287-1190`.
+  `crates/cli/src/native_diff_view.rs:390-397` selects the bridge classifier
+  for the inline paint pipeline, and `:419-535` adapts its rows and metadata
+  while preserving the legacy fallback for inputs whose semantics differ.
+  The focused CLI tests and bridge tests cover the live path; no additional
+  bridge change is warranted for FFI-08.
+
 Use upstream test semantics as the contract, then replay the same input/state/clock/viewport fixtures against the Rust host. Source inspection is evidence of intended behavior; it is not proof that the Rust implementation already passes.
 
 | Test family | Specific acceptance cases | Upstream starting points |
