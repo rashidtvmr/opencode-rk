@@ -394,6 +394,10 @@ pub struct RailInput {
     /// (`TabInput.unread` / `NavigationState::is_unread`): unread rows paint
     /// in the accent `unreadColor` (`session-tabs.tsx:565,1328`).
     pub unread: bool,
+    /// TAB-04: the live busy spinner frame, copied from `TabInput.spinner_frame`
+    /// so the vertical rail animates from the same `now_ms / 80` tick as the
+    /// horizontal strip. `None` keeps the static `⠋`.
+    pub spinner_frame: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -634,7 +638,7 @@ impl RailFrame {
                     let row_pad = pad.min(width.saturating_sub(tail));
                     let indicator = if part == 0 && input.flags.busy && !input.flags.needs_attention
                     {
-                        "⠋"
+                        crate::native_tabs::spinner_frame_glyph(input.spinner_frame)
                     } else {
                         ""
                     };
@@ -946,7 +950,7 @@ impl RailFrame {
                 let glyph = if input.flags.needs_attention {
                     "!".to_owned()
                 } else if input.flags.busy {
-                    "⠋".to_owned()
+                    crate::native_tabs::spinner_frame_glyph(input.spinner_frame).to_owned()
                 } else {
                     first_grapheme(&input.title)
                 };
@@ -1205,6 +1209,40 @@ mod tests {
         assert_eq!(frame.rows[10].text.trim_end(), " + New session");
     }
 
+    // TAB-04: the vertical rail animates its busy spinner from the same live
+    // frame as the horizontal strip. `None`/frame 0 paint `⠋`; frame 1 paints
+    // `⠙`. This fails if the rail ignores `RailInput.spinner_frame`.
+    #[test]
+    fn tab_04_rail_busy_spinner_animates_from_the_live_frame() {
+        let rows = |frame: Option<u64>, width: u16| {
+            let mut inputs = sessions(1);
+            inputs[0].flags.busy = true;
+            inputs[0].spinner_frame = frame;
+            RailFrame::render_cells(&inputs, width, 24, 0, None, false)
+                .rows
+                .iter()
+                .map(|row| row.text.clone())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        // Expanded (width >= COMPACT_BREAKPOINT).
+        assert!(rows(None, 42).contains('⠋'), "reduced motion keeps frame 0");
+        assert!(rows(Some(0), 42).contains('⠋'), "frame 0 is the first dot");
+        assert!(
+            rows(Some(1), 42).contains('⠙'),
+            "expanded frame 1 advances: {:?}",
+            rows(Some(1), 42)
+        );
+        assert_ne!(rows(Some(0), 42), rows(Some(1), 42), "expanded frames differ");
+        // Compact (width 5): the centered glyph also animates.
+        assert!(rows(Some(0), 5).contains('⠋'));
+        assert!(
+            rows(Some(1), 5).contains('⠙'),
+            "compact frame 1 advances: {:?}",
+            rows(Some(1), 5)
+        );
+    }
+
     #[test]
     fn close_child_is_visible_and_actionable_only_on_hovered_title_row() {
         let inputs = sessions(2);
@@ -1397,6 +1435,7 @@ mod tests {
                 },
                 marquee_offset: 0,
                 unread: false,
+                spinner_frame: None,
             })
             .collect()
     }
@@ -1918,6 +1957,7 @@ mod tests {
                 },
                 marquee_offset: 0,
                 unread: false,
+                spinner_frame: None,
             })
             .collect();
         let frame = RailFrame::render_with_active_new(&inputs, 42, 10, 0, None, true);
@@ -2046,6 +2086,7 @@ mod tests {
                 flags: TabFlags { active: true, busy: false, needs_attention: false },
                 marquee_offset: 0,
                 unread: false,
+                spinner_frame: None,
             },
             RailInput {
                 session: crate::native_navigation::SessionRef("second".into()),
@@ -2054,6 +2095,7 @@ mod tests {
                 flags: TabFlags::default(),
                 marquee_offset: 0,
                 unread: false,
+                spinner_frame: None,
             },
             RailInput {
                 session: crate::native_navigation::SessionRef("third".into()),
@@ -2062,6 +2104,7 @@ mod tests {
                 flags: TabFlags::default(),
                 marquee_offset: 0,
                 unread: false,
+                spinner_frame: None,
             },
         ];
         let frame = RailFrame::render_cells(&inputs, 5, 24, 0, None, false);
@@ -2093,6 +2136,7 @@ mod tests {
                 flags: TabFlags { active: true, busy: false, needs_attention: false },
                 marquee_offset: 0,
                 unread: false,
+                spinner_frame: None,
             },
             RailInput {
                 session: crate::native_navigation::SessionRef("second".into()),
@@ -2101,6 +2145,7 @@ mod tests {
                 flags: TabFlags::default(),
                 marquee_offset: 0,
                 unread: false,
+                spinner_frame: None,
             },
         ];
         // Nothing highlighted: the overlay cell is blank (not a cap glyph).
@@ -2112,6 +2157,7 @@ mod tests {
                 flags: TabFlags::default(),
                 marquee_offset: 0,
                 unread: false,
+                spinner_frame: None,
             },
             RailInput {
                 session: crate::native_navigation::SessionRef("second".into()),
@@ -2120,6 +2166,7 @@ mod tests {
                 flags: TabFlags::default(),
                 marquee_offset: 0,
                 unread: false,
+                spinner_frame: None,
             },
         ];
         let idle = RailFrame::render_cells(&idle_inputs, 5, 24, 0, None, false);
@@ -2160,6 +2207,7 @@ mod tests {
             flags: TabFlags { active: false, busy: true, needs_attention: true },
             marquee_offset: 0,
             unread: false,
+            spinner_frame: None,
         };
         let compact = RailFrame::render_cells(std::slice::from_ref(&input), 11, 10, 0, None, false);
         assert_eq!(compact.rows[3].text.trim(), "!");
@@ -2182,6 +2230,7 @@ mod tests {
             flags: TabFlags::default(),
             marquee_offset: 0,
             unread: false,
+            spinner_frame: None,
         }];
         let plain = RailFrame::render_cells_with_search_hover(&inputs, 5, 8, 0, None, false, false);
         let overlay = RailFrame::render_cells_with_search_hover(&inputs, 5, 8, 0, None, false, true);
@@ -2371,6 +2420,7 @@ mod tests {
                 flags: TabFlags { active: true, busy: false, needs_attention: false },
                 marquee_offset: 0,
                 unread: false,
+                spinner_frame: None,
             },
             RailInput {
                 session: crate::native_navigation::SessionRef("second".into()),
@@ -2379,6 +2429,7 @@ mod tests {
                 flags: TabFlags::default(),
                 marquee_offset: 0,
                 unread: false,
+                spinner_frame: None,
             },
             RailInput {
                 session: crate::native_navigation::SessionRef("third".into()),
@@ -2387,6 +2438,7 @@ mod tests {
                 flags: TabFlags::default(),
                 marquee_offset: 0,
                 unread: false,
+                spinner_frame: None,
             },
         ];
         let frame = RailFrame::render_cells(&inputs, 5, 24, 0, None, false);
@@ -2426,6 +2478,7 @@ mod tests {
                 flags: TabFlags::default(),
                 marquee_offset: 0,
                 unread: true,
+                spinner_frame: None,
             },
             RailInput {
                 session: crate::native_navigation::SessionRef("s-read".into()),
@@ -2434,6 +2487,7 @@ mod tests {
                 flags: TabFlags::default(),
                 marquee_offset: 0,
                 unread: false,
+                spinner_frame: None,
             },
         ];
         // width 8 < COMPACT_BREAKPOINT exercises the compact renderer.

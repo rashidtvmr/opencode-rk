@@ -7080,6 +7080,7 @@ fn rail_inputs_for_navigation(
             detail, flags: tab.flags,
             marquee_offset: tab.marquee_offset,
             unread: tab.unread,
+            spinner_frame: tab.spinner_frame,
         }
     }).collect()
 }
@@ -20917,8 +20918,8 @@ mod middle_close_hit_tests {
 
     fn nav_inputs() -> Vec<RailInput> {
         vec![
-            RailInput { session: crate::native_navigation::SessionRef("s-a".into()), title: "Alpha".into(), detail: "alpha detail".into(), flags: Default::default(), marquee_offset: 0 , unread: false},
-            RailInput { session: crate::native_navigation::SessionRef("s-b".into()), title: "Beta".into(), detail: "".into(), flags: Default::default(), marquee_offset: 0 , unread: false},
+            RailInput { session: crate::native_navigation::SessionRef("s-a".into()), title: "Alpha".into(), detail: "alpha detail".into(), flags: Default::default(), marquee_offset: 0 , unread: false, spinner_frame: None},
+            RailInput { session: crate::native_navigation::SessionRef("s-b".into()), title: "Beta".into(), detail: "".into(), flags: Default::default(), marquee_offset: 0 , unread: false, spinner_frame: None},
         ]
     }
 

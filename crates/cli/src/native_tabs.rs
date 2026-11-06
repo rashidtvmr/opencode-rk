@@ -1672,12 +1672,7 @@ pub fn indicator_label_frame(
         return "!";
     }
     if flags.busy {
-        return match spinner_frame {
-            Some(frame) => TAB_SPINNER_DOTS[(frame as usize) % TAB_SPINNER_DOTS.len()],
-            // `TAB_SPINNER_DOTS[0]` is `⠋`; keep the literal so this branch is
-            // independent of the frame table's first entry.
-            None => "\u{280b}",
-        };
+        return spinner_frame_glyph(spinner_frame);
     }
     if unread {
         // `TAB_UNREAD_MARKERS["small-dot"]` (`session-tabs.tsx:63-70`), the
@@ -1685,6 +1680,19 @@ pub fn indicator_label_frame(
         return "\u{2022}";
     }
     ""
+}
+
+/// TAB-04: the busy spinner glyph for one live frame. `None` (reduced motion or
+/// no live clock) keeps `TAB_SPINNER_DOTS[0]` = `⠋`; `Some(n)` advances to
+/// `TAB_SPINNER_DOTS[n % len]`. Shared by the horizontal strip
+/// ([`indicator_label_frame`]) and the vertical rail so both orientations
+/// animate from the same frame.
+#[must_use]
+pub fn spinner_frame_glyph(frame: Option<u64>) -> &'static str {
+    match frame {
+        Some(n) => TAB_SPINNER_DOTS[(n as usize) % TAB_SPINNER_DOTS.len()],
+        None => TAB_SPINNER_DOTS[0],
+    }
 }
 
 /// `Math.max(2, String(items().length).length)` for the number column.
@@ -4031,7 +4039,8 @@ mod tests {
             state: WorkState::Running,
         });
         assert!(any_running(&nav), "a busy tab is running");
-        // A running child with no open tab still wakes the parent tab's spinner.
+        // A running descendant (opened via `open_forked`) still wakes the
+        // parent tab's spinner, mirroring the `from_navigation` family roll-up.
         let mut family = NavigationState::new();
         family.open_tab(SessionRef("parent".into()));
         family.open_forked(SessionRef("child".into()), SessionRef("parent".into()));
