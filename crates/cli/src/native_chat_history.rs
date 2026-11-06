@@ -16,6 +16,10 @@ pub struct NativeChatHistory {
     partial: Option<(usize, usize)>,
     reasoning_partial: Option<(usize, usize)>,
     reasoning: String,
+    /// Monotonic fallback identity for locally-created rows. Backend ids are
+    /// authoritative when present; this prevents keyed reconciliation from
+    /// silently falling back to a moving vector index for notices/streams.
+    next_local_id: u64,
 }
 
 #[cfg(test)]
@@ -160,6 +164,33 @@ mod tests {
             SessionRow::Entry(crate::native_message_rows::SessionEntry::Message { .. })
         ));
     }
+
+    #[test]
+    fn par11_stream_replacement_keeps_the_same_logical_row_id() {
+        use crate::native_message_rows::{row_key, Verbosity};
+        let mut history = NativeChatHistory::default();
+        history.replace_partial("first");
+        let before = history.rows(Verbosity::Medium);
+        let key_before = row_key(&before[0]).expect("stream row key");
+        history.replace_partial("final content");
+        let after = history.rows(Verbosity::Medium);
+        let key_after = row_key(&after[0]).expect("updated row key");
+        assert_eq!(key_before, key_after, "streaming->complete is an in-place update");
+        assert_eq!(after.len(), 1, "row remains renderable");
+    }
+
+    #[test]
+    fn par10_complete_then_final_content_does_not_duplicate_the_stream_row() {
+        let mut history = NativeChatHistory::default();
+        history.replace_partial("partial");
+        history.remove_partial();
+        history.append("assistant complete".into(), ChatMessage::text(ChatRole::Assistant, "complete"));
+        let count = history.messages.iter().filter(|message| message.role == ChatRole::Assistant).count();
+        assert_eq!(count, 1);
+        history.replace_partial("final");
+        assert_eq!(history.messages.iter().filter(|message| message.role == ChatRole::Assistant).count(), 2);
+        assert!(history.messages.iter().any(|message| message.parts.iter().any(|part| matches!(part, ChatPart::Text(text) if text == "final"))));
+    }
 }
 
 impl Deref for NativeChatHistory {
@@ -241,6 +272,7 @@ impl NativeChatHistory {
         self.messages.clear();
         self.partial = None;
         self.begin_reasoning_turn();
+        self.next_local_id = 0;
         for message in messages {
             self.push_message(message);
         }
@@ -259,6 +291,10 @@ impl NativeChatHistory {
     }
 
     fn push_message(&mut self, mut message: ChatMessage) {
+        if message.message_id.is_none() {
+            message.message_id = Some(format!("local:{}", self.next_local_id));
+            self.next_local_id = self.next_local_id.saturating_add(1);
+        }
         message.parts.truncate(128);
         message.agent = message.agent.map(|v| bounded(&v));
         message.model = message.model.map(|v| bounded(&v));
@@ -365,10 +401,19 @@ impl NativeChatHistory {
     }
 
     pub fn replace_partial(&mut self, text: &str) {
+        // A streaming update is an in-place update from the transcript's
+        // point of view. Preserve the old logical key across replacement so a
+        // keyed remount cannot reset expansion or scroll anchors.
+        let message_id = self
+            .partial
+            .and_then(|(_, index)| self.messages.get(index))
+            .and_then(|message| message.message_id.clone());
         self.remove_partial();
+        let mut message = ChatMessage::text(ChatRole::Assistant, bounded(text));
+        message.message_id = message_id;
         self.append(
             format!("assistant (streaming): {}", bounded(text)),
-            ChatMessage::text(ChatRole::Assistant, bounded(text)),
+            message,
         );
         if !self.lines.is_empty() && !self.messages.is_empty() {
             self.partial = Some((self.lines.len() - 1, self.messages.len() - 1));
@@ -379,20 +424,19 @@ impl NativeChatHistory {
     /// row model (`native_message_rows`) so live history, replayed history and
     /// the daemon projection group identically.
     ///
-    /// Identities are positional (`history:{index}`) because this bounded log
-    /// retains no backend ids; callers that need durable anchors use the
-    /// projection ids instead.
+    /// Identities use backend ids where available and monotonic local ids for
+    /// locally-created rows. They therefore remain stable across in-place
+    /// stream updates and keyed session remounts.
     #[must_use]
     pub fn rows(&self, verbosity: crate::native_message_rows::Verbosity) -> Vec<crate::native_message_rows::SessionRow> {
         let entries: Vec<(String, ChatMessage)> = self
             .messages
             .iter()
-            .enumerate()
-            .map(|(index, message)| {
+            .map(|message| {
                 let id = message
                     .message_id
                     .clone()
-                    .unwrap_or_else(|| format!("history:{index}"));
+                    .unwrap_or_else(|| "local:missing".to_owned());
                 (id, message.clone())
             })
             .collect();

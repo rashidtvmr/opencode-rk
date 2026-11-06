@@ -764,8 +764,13 @@ fn buffer_to_row(buffer: Vec<char>) -> String {
 /// the 1-based offending line; a header-only fence yields no rows so the
 /// renderer falls back to the code block (`markdown.ts:307`).
 fn layout_diagram(request: &DiagramRequest<'_>) -> Result<Vec<String>, MermaidFailure> {
+    // Mermaid registers all six kinds at the pinned TUI.  Flowcharts have a
+    // structured cell layout below; the other registered kinds still need a
+    // diagram surface rather than leaking back to the fenced source block.
+    // Their full parsers belong to the upstream merman package, so OC2 uses a
+    // bounded, syntax-preserving text diagram until those grammars are ported.
     if request.kind != MermaidDiagramKind::Flowchart {
-        return Err(flow_failure(1));
+        return layout_text_diagram(request);
     }
     let mut nodes: Vec<FlowNode> = Vec::new();
     let mut edges: Vec<FlowEdge> = Vec::new();
@@ -789,6 +794,38 @@ fn layout_diagram(request: &DiagramRequest<'_>) -> Result<Vec<String>, MermaidFa
     }
     assign_flow_levels(&mut nodes, &edges);
     Ok(compose_flow(&nodes, &edges, request.width))
+}
+
+/// Render a supported non-flow Mermaid kind as a bounded diagram card.  This
+/// deliberately does not pretend to implement that kind's grammar: malformed
+/// input is still represented as a diagram (matching the dedicated upstream
+/// renderer's replacement semantics), while the source remains readable and
+/// the canvas stays within the same width bound as flowcharts.
+fn layout_text_diagram(request: &DiagramRequest<'_>) -> Result<Vec<String>, MermaidFailure> {
+    let width = request.width.max(1);
+    let mut lines = request
+        .source
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("%%"));
+    let _header = lines.next().ok_or_else(|| flow_failure(1))?;
+    let title = format!("{} diagram", request.kind.as_str());
+    let inner = width.saturating_sub(4).max(1);
+    let mut rows = vec![format!("┌{}┐", boxed_fill(&title, inner))];
+    for line in lines {
+        rows.push(format!("│{}│", boxed_fill(line, inner)));
+    }
+    if rows.len() == 1 {
+        rows.push(format!("│{}│", " ".repeat(inner)));
+    }
+    rows.push(format!("└{}┘", "─".repeat(inner)));
+    Ok(rows)
+}
+
+fn boxed_fill(text: &str, width: usize) -> String {
+    let mut value: String = text.chars().take(width).collect();
+    value.push_str(&" ".repeat(width.saturating_sub(value.chars().count())));
+    value
 }
 
 // ── Outcome ───────────────────────────────────────────────────────────
@@ -1475,6 +1512,30 @@ mod tests {
         assert_eq!(detect_kind("graph XY\nA-->B"), None);
         assert_eq!(detect_kind("timeline BT\nx"), None);
         assert_eq!(detect_kind("gitGraph XX\ncommit"), None);
+    }
+
+    #[test]
+    fn md_008_all_detected_kinds_replace_the_fence_with_diagram_rows() {
+        let painter = CellDiagramPainter;
+        for source in [
+            "gantt\ntitle release",
+            "gitGraph\ncommit",
+            "sequenceDiagram\nA->>B: hello",
+            "stateDiagram-v2\n[*] --> Ready",
+            "timeline\n2024 : release",
+        ] {
+            let kind = detect_kind(source).expect("supported kind");
+            let request = DiagramRequest {
+                kind,
+                source,
+                width: 40,
+                theme: &MermaidTheme::default(),
+            };
+            let rows = painter.cells(&request).expect("diagram rows");
+            assert!(rows.len() >= 3, "{kind:?}: {rows:?}");
+            assert!(rows.iter().all(|row| row.chars().count() <= 40));
+            assert!(rows.iter().any(|row| row.contains(kind.as_str())));
+        }
     }
 
     /// MD-008. Upstream: `packages/merman/src/markdown.ts:66-75` (width 100%,

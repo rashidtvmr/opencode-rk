@@ -14492,6 +14492,27 @@ fn native_loop(
             needs_paint = true;
             continue;
         }
+        // DIALOG-04: the shared dialog layer owns Escape/Ctrl-C before the
+        // composer and global exit path. Selection is deliberately queried
+        // first, matching ui/dialog.tsx's selection-clear precedence.
+        if view.dialogs.intercepts_input()
+            && matches!(event, native_input_decoder::InputEvent::Escape
+                | native_input_decoder::InputEvent::Byte(3))
+        {
+            let has_selection = selection.has_selection();
+            let editor_has_text = view.dialogs.prompt_value().is_some_and(|text| !text.is_empty());
+            let route = if matches!(event, native_input_decoder::InputEvent::Escape) {
+                view.dialogs.escape_route(has_selection)
+            } else {
+                view.dialogs.ctrl_c_route(has_selection, editor_has_text)
+            };
+            if matches!(route.key, crate::native_modal_layer::ModalKey::SelectionCleared) {
+                selection.clear();
+            }
+            utf8.reset();
+            needs_paint = true;
+            continue;
+        }
         // Normalize only after higher-priority modal/page/completion owners
         // have handled the event. The existing composer KeyAction/SubmitKeymap
         // remains the authority for newline versus submission.
