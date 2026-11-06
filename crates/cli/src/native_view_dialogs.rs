@@ -4893,6 +4893,31 @@ pub mod form_overlay {
         }
     }
 
+    /// Pointer target of one tab in the tab bar (`form.tsx:810,826`: the
+    /// `tabHover` signal is `number | "confirm"`).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum TabTarget {
+        Field(usize),
+        Confirm,
+    }
+
+    /// One painted form row classified for pointer routing, mirroring
+    /// [`FormPrompt::render`] row for row so a live pointer move and the
+    /// paint can never disagree.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum ContentHit {
+        /// The tab strip row; the column decides the hovered tab.
+        TabBar,
+        /// The label row of choice `index` (the custom row is
+        /// `rows().len()`).
+        ChoiceLabel(usize),
+        /// A choice's description continuation row (same hit as its label:
+        /// upstream wraps both in the `onMouseMove` box, `form.tsx:922-977`).
+        ChoiceDetail(usize),
+        /// Any row that owns no pointer behavior.
+        None,
+    }
+
     /// Question/form prompt state (`FormPrompt`, `form.tsx:59-1175`).
     #[derive(Clone, Debug)]
     pub struct FormPrompt {
@@ -4910,6 +4935,9 @@ pub mod form_overlay {
         cursor: usize,
         active: bool,
         resolution: Option<BTreeMap<String, FormValue>>,
+        /// Transient pointer-over tab (`form.tsx:810,826` `tabHover`). Not
+        /// part of [`FormDraft`]: upstream keeps it in local signal state.
+        tab_hover: Option<TabTarget>,
     }
 
     impl FormPrompt {
@@ -4941,6 +4969,7 @@ pub mod form_overlay {
                 cursor: 0,
                 active: true,
                 resolution: None,
+                tab_hover: None,
             };
             // The editor mounts with the cursor at the end (`form.tsx:897-900`).
             prompt.cursor = prompt.editor_text().chars().count();
@@ -4971,6 +5000,7 @@ pub mod form_overlay {
                 cursor: 0,
                 active: true,
                 resolution: None,
+                tab_hover: None,
             };
             // Restored editor text (draft custom) mounts with the cursor at
             // the end (`form.tsx:897-900`).
@@ -5174,6 +5204,142 @@ pub mod form_overlay {
         #[must_use]
         pub fn other(&self) -> bool {
             self.custom_field() && self.selected == self.rows().len()
+        }
+
+        /// The tab under the pointer (`form.tsx:810,826` `tabHover`).
+        #[must_use]
+        pub fn tab_hover(&self) -> Option<TabTarget> {
+            self.tab_hover
+        }
+
+        /// Column spans of the painted tab bar, mirroring `render`'s bar
+        /// exactly: every label truncated to [`TAB_LABEL_MAX`] cells, each
+        /// box's `paddingRight={2}` (`form.tsx:806,819,835`) included, then
+        /// the "Submit" box.
+        fn tab_spans(&self) -> Vec<(Option<usize>, usize, usize)> {
+            let mut spans = Vec::new();
+            let mut cursor = 0usize;
+            for (index, field) in self.visible_fields().iter().enumerate() {
+                let cells = truncate(&field.label(), TAB_LABEL_MAX).chars().count();
+                let end = cursor.saturating_add(cells).saturating_add(2);
+                spans.push((Some(index), cursor, end));
+                cursor = end;
+            }
+            let submit = "Submit".chars().count() + 2;
+            spans.push((None, cursor, cursor.saturating_add(submit)));
+            spans
+        }
+
+        /// Classify every painted row (`render`) for pointer routing.
+        fn content_hits(&self, width: usize, terminal_height: usize) -> Vec<ContentHit> {
+            let mut hits = Vec::new();
+            hits.push(ContentHit::None); // title
+            if self.message.is_some() {
+                hits.push(ContentHit::None);
+            }
+            if !self.single() {
+                if self.tabbed(width) {
+                    hits.push(ContentHit::TabBar);
+                } else {
+                    hits.push(ContentHit::None); // progress/counter line
+                }
+            }
+            if !self.confirm() {
+                if let Some(external) = self.external_field() {
+                    if external.title.is_some() {
+                        hits.push(ContentHit::None);
+                    }
+                    if external.description.is_some() {
+                        hits.push(ContentHit::None);
+                    }
+                    if external.url.is_some() {
+                        hits.push(ContentHit::None);
+                    }
+                    hits.push(ContentHit::None); // status line
+                }
+                if let Some(field) = self.answer_field() {
+                    hits.push(ContentHit::None); // description / label
+                    if self.textual() {
+                        let text = self.editor_text();
+                        let lines: Vec<&str> = text.split('\n').collect();
+                        let count = if lines.is_empty() || (lines.len() == 1 && lines[0].is_empty()) {
+                            1
+                        } else {
+                            lines.len().min(EDITOR_MAX_HEIGHT)
+                        };
+                        for _ in 0..count {
+                            hits.push(ContentHit::None);
+                        }
+                    } else {
+                        for (index, row) in self.rows().iter().enumerate() {
+                            hits.push(ContentHit::ChoiceLabel(index));
+                            if row.description.is_some() {
+                                hits.push(ContentHit::ChoiceDetail(index));
+                            }
+                        }
+                        if self.custom_field() {
+                            hits.push(ContentHit::ChoiceLabel(self.rows().len()));
+                        }
+                    }
+                }
+            }
+            if self.confirm() {
+                for _ in self.review_rows()
+                    .into_iter()
+                    .take(self.review_max_height(terminal_height))
+                {
+                    hits.push(ContentHit::None);
+                }
+            }
+            hits.push(ContentHit::None); // footer
+            hits
+        }
+
+        /// Route one live pointer move into the overlay (`form.tsx:810,826,
+        /// 923,977`: tab `onMouseOver`/`onMouseOut` set `tabHover`, choice
+        /// rows' `onMouseMove` sets `selected`; leaving a row never resets
+        /// the selection, exactly like upstream's per-row `onMouseMove`).
+        /// `row`/`col` are coordinates inside the form's own painted rows
+        /// (0,0 = its title row). Returns whether hover/selection changed.
+        pub fn pointer_move(
+            &mut self,
+            width: usize,
+            terminal_height: usize,
+            row: usize,
+            col: usize,
+        ) -> bool {
+            let mut changed = false;
+            match self.content_hits(width, terminal_height).get(row).copied() {
+                Some(ContentHit::TabBar) => {
+                    let target = self
+                        .tab_spans()
+                        .into_iter()
+                        .find(|(_, start, end)| col >= *start && col < *end)
+                        .map(|(field, _, _)| match field {
+                            Some(index) => TabTarget::Field(index),
+                            None => TabTarget::Confirm,
+                        });
+                    if self.tab_hover != target {
+                        self.tab_hover = target;
+                        changed = true;
+                    }
+                }
+                Some(ContentHit::ChoiceLabel(index) | ContentHit::ChoiceDetail(index)) => {
+                    if self.tab_hover.take().is_some() {
+                        changed = true;
+                    }
+                    if self.selected != index {
+                        self.selected = index;
+                        changed = true;
+                    }
+                }
+                _ => {
+                    if self.tab_hover.take().is_some() {
+                        changed = true;
+                    }
+                }
+            }
+            changed
         }
 
         /// Current custom row text (`form.tsx:186`).

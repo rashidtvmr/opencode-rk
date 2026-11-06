@@ -14508,6 +14508,9 @@ fn native_loop(
                         // the pointer hover from the layout it renders, not
                         // only on a fresh move (scroll/resize/mutation).
                         last_pointer = Some((x, y));
+                        if view.dock_hover(x, y, &draft) {
+                            needs_paint = true;
+                        }
                         // User-message hover (`routes/session/index.tsx:2390`
                         // `onMouseOver`): the pointer hover fact belongs to a
                         // `UserCard` transcript row inside the main column,

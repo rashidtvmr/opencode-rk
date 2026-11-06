@@ -8004,22 +8004,24 @@ mod tests {
             msgs.push(user);
         }
         let mut view = ChatView::new();
-        // All 90 groups expanded: each exploration group costs its (2)
-        // visible children, each user entry 1, so message weights are [2, 1]
-        // repeating over the projected row list.
+        // All 90 groups expanded: upstream `rowWeight` counts the group's own
+        // disclosure header plus its children (`mount-budget.ts:19`, the
+        // reduce is seeded with 1), so each exploration group costs 3 and each
+        // user entry 1: message weights are [3, 1] repeating over the
+        // projected row list.
         for i in 0..UNITS {
             view.disclosure.borrow_mut().set_group_expanded("live", &format!("exploration:m{i}"), true);
         }
         // `ops` layout is `[group_i, user_i]` repeating: op `2i` is the
-        // expanded group (weight 2), op `2i + 1` its user entry (weight 1).
+        // expanded group (weight 3), op `2i + 1` its user entry (weight 1).
         let weight_from = |mounting: usize| -> usize {
-            (mounting..2 * UNITS).map(|op| if op % 2 == 0 { 2 } else { 1 }).sum()
+            (mounting..2 * UNITS).map(|op| if op % 2 == 0 { 3 } else { 1 }).sum()
         };
         let appearance = crate::native_box_style::BoxAppearance::default();
         let (rows, _) = view.render_styled_with_spans_mode(80, 10, "ws", &msgs, "", false, &appearance, view.markdown_mode);
         assert!(!rows.is_empty());
         let initial = view.transcript_mounting.get();
-        assert_eq!(initial, 153, "frozen initial live mount cursor");
+        assert_eq!(initial, 160, "frozen initial live mount cursor");
         assert_eq!(weight_from(initial), crate::native_message_rows::TRANSCRIPT_TAIL_ROWS, "initial live window spends exactly the tail budget");
         assert!(rows.iter().any(|row| row.0.contains("u89")), "tail view shows the newest units: {rows:?}");
         // Restored styled-path coverage: the bounded mount renders the exact
@@ -8037,7 +8039,7 @@ mod tests {
         view.scroll_up(192);
         let (scrolled, _) = view.render_styled_with_spans_mode(80, 10, "ws", &msgs, "", false, &appearance, view.markdown_mode);
         let after = view.transcript_mounting.get();
-        assert_eq!(after, 113, "frozen chunk boundary");
+        assert_eq!(after, 130, "frozen chunk boundary");
         let grown = weight_from(after) - weight_from(initial);
         assert_eq!(grown, crate::native_message_rows::TRANSCRIPT_BACKFILL_CHUNK, "one scroll-up step admits exactly one weighted chunk");
         assert!(!scrolled.iter().any(|row| row.0.contains("u89")), "older pane replaces the tail view: {scrolled:?}");

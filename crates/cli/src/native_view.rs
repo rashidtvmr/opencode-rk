@@ -2251,6 +2251,28 @@ impl NativeView {
         true
     }
 
+    /// Update the active composer list from a live pointer move.  The dock's
+    /// body starts after padding, title, and the separator row; output-tail
+    /// rows in the shell tab are deliberately not selectable.
+    pub fn dock_hover(&mut self, x: u16, y: u16, draft: &str) -> bool {
+        let Some((_, composer_y, _, _)) = self.composer_region(draft) else { return false; };
+        let Some(block) = self.dock_block_for(self.presentation().main_width.saturating_sub(4)) else { return false; };
+        let padding = (self.presentation().main_width / 2).min(2);
+        let body_y = composer_y.saturating_sub(block.height()).saturating_add(3);
+        if y < body_y || y >= body_y.saturating_add(u16::try_from(block.body_rows).unwrap_or(u16::MAX))
+            || x < self.tab_reservation.x_offset().saturating_add(padding) { return false; }
+        let row = usize::from(y - body_y);
+        match self.dock.active() {
+            Some(DockTabId::Subagents) => !matches!(self.dock_tab.hover(row), crate::native_children::SubagentAction::None),
+            // Shell rows are currently rendered from the live snapshot rather
+            // than a retained ShellTab model; keep their pointer seam inert
+            // until that model is wired (the painter cannot otherwise expose
+            // a selected style without inventing state).
+            Some(DockTabId::Shell) => false,
+            _ => false,
+        }
+    }
+
     fn dock_block_for(&self, width: u16) -> Option<DockBlock> {
         let body = if self.dock.is_active(DockTabId::Shell) {
             // TOOL-006: the live background-shell rows read by the Shell tab
