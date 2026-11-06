@@ -1719,7 +1719,7 @@ fn tree_weight(
                 size,
             } => tree_weight(*kind, children, *size, level + 1, expanded, grouped),
         })
-        .sum()
+        .sum::<usize>()
 }
 
 /// First row index such that rows `[index, end)` spend at least `budget`
