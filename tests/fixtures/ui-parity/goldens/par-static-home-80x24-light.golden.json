@@ -40,7 +40,7 @@
   "product": {
    "executable": "oc2",
    "name": "opencode-rk",
-   "sha256": "37fe0235d835a69ef543c8733b3c5811dd9cb473cd544c8827aec8aea6bfb9e7",
+   "sha256": "6fd34d772e5e1cf703230d26932941fc0caedd30054c64686dc52991618d305d",
    "version": "oc2 0.1.0-alpha.1"
   },
   "theme": {
@@ -48,7 +48,6 @@
    "name": "opencode"
   }
  },
- "class": "baseline",
  "cursor": {
   "col": 6,
   "row": 14,
@@ -72,26 +71,10 @@
       "bold",
       "underline"
      ],
-     "bg": "#f5f5f5",
+     "bg": "#fafafa",
      "c": 0,
-     "fg": "#535353",
-     "n": 3
-    },
-    {
-     "attrs": [
-      "bold"
-     ],
-     "bg": "#f5f5f5",
-     "c": 3,
-     "fg": "#1a1a1a",
-     "n": 29
-    },
-    {
-     "attrs": [],
-     "bg": "#ffffff",
-     "c": 32,
-     "fg": "#8a8a8a",
-     "n": 3
+     "fg": "#3b7dd8",
+     "n": 35
     },
     {
      "attrs": [],
@@ -101,7 +84,7 @@
      "n": 45
     }
    ],
-   "text": "   Chat                          +                                              ",
+   "text": "Chat •                           +                                              ",
    "w": 80
   },
   {
@@ -524,17 +507,10 @@
     },
     {
      "attrs": [],
-     "bg": "#ffffff",
-     "c": 3,
-     "fg": "#7b5bb6",
-     "n": 1
-    },
-    {
-     "attrs": [],
      "bg": "#f5f5f5",
-     "c": 4,
+     "c": 3,
      "fg": "#1a1a1a",
-     "n": 74
+     "n": 75
     },
     {
      "attrs": [],
@@ -558,17 +534,10 @@
     },
     {
      "attrs": [],
-     "bg": "#ffffff",
-     "c": 3,
-     "fg": "#7b5bb6",
-     "n": 1
-    },
-    {
-     "attrs": [],
      "bg": "#f5f5f5",
-     "c": 4,
+     "c": 3,
      "fg": "#1a1a1a",
-     "n": 74
+     "n": 75
     },
     {
      "attrs": [],
@@ -592,17 +561,10 @@
     },
     {
      "attrs": [],
-     "bg": "#ffffff",
-     "c": 3,
-     "fg": "#7b5bb6",
-     "n": 1
-    },
-    {
-     "attrs": [],
      "bg": "#f5f5f5",
-     "c": 4,
+     "c": 3,
      "fg": "#1a1a1a",
-     "n": 74
+     "n": 75
     },
     {
      "attrs": [],
@@ -626,17 +588,10 @@
     },
     {
      "attrs": [],
-     "bg": "#ffffff",
-     "c": 3,
-     "fg": "#7b5bb6",
-     "n": 1
-    },
-    {
-     "attrs": [],
      "bg": "#f5f5f5",
-     "c": 4,
+     "c": 3,
      "fg": "#1a1a1a",
-     "n": 66
+     "n": 67
     },
     {
      "attrs": [],
@@ -674,9 +629,9 @@
     },
     {
      "attrs": [],
-     "bg": "#ffffff",
+     "bg": "#f5f5f5",
      "c": 3,
-     "fg": "#7b5bb6",
+     "fg": "#1a1a1a",
      "n": 1
     },
     {

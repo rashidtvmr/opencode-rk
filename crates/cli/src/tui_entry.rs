@@ -2079,6 +2079,77 @@ mod memory_file_cap_tests {
 mod footer_gate_tests {
     use super::*;
 
+    // CP-28: the live loop advertises BOTH wired footer hints and both paint on
+    // the rail's shell footer row. If either hint regresses to `None` (the
+    // stale "not advertised" state) this fails; the same helper feeds the live
+    // `set_rail_shortcuts` call.
+    #[test]
+    fn cp28_wired_footer_hints_are_advertised_and_painted() {
+        let (commands, agents) = rail_shortcut_hints();
+        assert_eq!(commands.as_deref(), Some("ctrl+p"), "commands hint wired");
+        assert_eq!(agents.as_deref(), Some("shift+tab"), "agents hint wired");
+        let mut view = crate::native_view::NativeView::new(140, 32);
+        view.set_session_route(true);
+        view.set_workspace("/fixture/project".to_owned());
+        view.set_rail_shortcuts(commands, agents);
+        let row = view.render_typed("", &[], false, &[]).pop().unwrap();
+        assert!(row.contains("ctrl+p commands"), "commands hint: {row:?}");
+        assert!(
+            row.contains("shift+tab agents"),
+            "agents hint advertised now that agent.cycle is dispatched: {row:?}"
+        );
+    }
+
+    // CP-24: ctrl+a (`Byte(1)`) must dispatch
+    // `composer.subagent.toggle-activity` through the live dock and flip the
+    // painted activity filter. Before this wiring the chord was inert, so the
+    // painted hint never changed; the assertion fails if the dispatch is lost.
+    #[test]
+    fn cp24_ctrl_a_toggles_the_live_subagents_activity_filter() {
+        use crate::native_children::{SUBAGENT_INTERRUPT_COMMAND, SUBAGENT_TOGGLE_COMMAND};
+
+        assert_eq!(
+            subagent_key_command(&native_input_decoder::InputEvent::Byte(1)),
+            SUBAGENT_TOGGLE_COMMAND,
+            "ctrl+a is the toggle-activity chord (subagents-tab.tsx:178)"
+        );
+        // The other wired chords are preserved.
+        assert_eq!(
+            subagent_key_command(&native_input_decoder::InputEvent::Byte(4)),
+            SUBAGENT_INTERRUPT_COMMAND
+        );
+
+        let root = "11111111-1111-1111-1111-111111111111";
+        let child = "22222222-2222-2222-2222-222222222222";
+        let mut status = crate::native_children::live::Status::default();
+        status
+            .apply(
+                root,
+                &serde_json::json!({ "children": [
+                    { "session_id": child, "parent_id": root,
+                      "description": "child", "agent": "explore", "state": "running" }
+                ]}),
+            )
+            .expect("fixture listing");
+        let mut view = crate::native_view::NativeView::new(120, 40);
+        view.set_session_route(true);
+        view.set_live_children_status(&status);
+        view.toggle_dock();
+
+        let before = view.render_typed("", &[], false, &[]).join("\n");
+        assert!(before.contains("show inactive"), "pre-toggle hint: {before}");
+
+        // Drive the live command path exactly as the loop does for the chord.
+        assert!(view.dock_command(SUBAGENT_TOGGLE_COMMAND).is_some());
+
+        let after = view.render_typed("", &[], false, &[]).join("\n");
+        assert!(after.contains("show active"), "post-toggle hint: {after}");
+        assert!(
+            !after.contains("show inactive"),
+            "the activity filter really flipped: {after}"
+        );
+    }
+
     #[test]
     fn only_a_delegating_transcript_polls_children() {
         let tool = |name: &str| ChatMessage {
@@ -9521,6 +9592,36 @@ mod native_identity_gate_tests {
 /// plugin load in flight, so readiness is settled in either terminal shell
 /// state; re-driving it here keeps a settled offline run from leaving the
 /// `StartupLoading` "Loading plugins…" hint pending forever.
+/// CP-24: map a composer-layer key to its Subagents-tab command id
+/// (`subagents-tab.tsx:142-195`). Extracted from the live loop so the
+/// dispatch (including the `ctrl+a` toggle-activity chord) is testable in
+/// isolation and cannot silently lose a wired key.
+#[cfg(feature = "native")]
+fn subagent_key_command(event: &native_input_decoder::InputEvent) -> &'static str {
+    use native_input_decoder::InputEvent;
+    match event {
+        InputEvent::ArrowUp => crate::native_children::SUBAGENT_UP_COMMAND,
+        InputEvent::ArrowDown => crate::native_children::SUBAGENT_DOWN_COMMAND,
+        InputEvent::Byte(4) => crate::native_children::SUBAGENT_INTERRUPT_COMMAND,
+        // `composer.subagent.toggle-activity` is bound to ctrl+a
+        // (`subagents-tab.tsx:178`).
+        InputEvent::Byte(1) => crate::native_children::SUBAGENT_TOGGLE_COMMAND,
+        _ => crate::native_children::SUBAGENT_SELECT_COMMAND,
+    }
+}
+
+/// CP-28: the live footer shortcut hints (`prompt/footer.tsx:99-120`). Both
+/// chords ARE dispatched live: `command.palette.show` on the hardcoded Ctrl-P
+/// byte (`16 =>` in the input loop) and `agent.cycle` on
+/// `InputEvent::AgentCycle` (shift+tab, `config/keybind.ts:176`). Extracted so
+/// the live call site and its regression test share one authority; a hint is
+/// advertised only for a chord the loop really handles, so this must never
+/// regress to `None` for a wired command.
+#[cfg(feature = "native")]
+fn rail_shortcut_hints() -> (Option<String>, Option<String>) {
+    (Some("ctrl+p".to_owned()), Some("shift+tab".to_owned()))
+}
+
 fn chrome_lifecycle_frame(
     chrome: &mut crate::native_modal_layer::ChromeModel,
     now_ms: u64,
@@ -10005,11 +10106,16 @@ fn native_loop(
     // every frame and turn event below. Fetches use the existing bounded
     // authenticated client; the facade itself never performs IO.
     let mut view = crate::native_view::NativeView::new(cols as u16, rows as u16);
-    // Built-in footer `commands` hint (`prompt/footer.tsx:110-120`): the
-    // palette opens on the hardcoded Ctrl-P byte (`16 =>` below), so the live
-    // key label is `ctrl+p`. `agent.cycle` (shift+tab) has no native dispatch,
-    // so the `agents` hint is deliberately not advertised.
-    view.set_rail_shortcuts(Some("ctrl+p".to_owned()), None);
+    // Built-in footer `commands`/`agents` hints (`prompt/footer.tsx:99-120`):
+    // the palette opens on the hardcoded Ctrl-P byte (`16 =>` below), so the
+    // live `commands` key label is `ctrl+p`; `agent.cycle` (shift+tab,
+    // `config/keybind.ts:176`) IS dispatched live below (`InputEvent::AgentCycle`
+    // at `agent.cycle` handler), so its `agents` hint is advertised as
+    // `shift+tab`, matching the decoded physical chord (CP-28).
+    {
+        let (commands, agents) = rail_shortcut_hints();
+        view.set_rail_shortcuts(commands, agents);
+    }
     // First-run import discovery is bounded filesystem work and runs once
     // before the native loop starts. No source is written or executed here;
     // the dialog owns the later human offer/preview/apply decisions.
@@ -13370,25 +13476,17 @@ fn native_loop(
                     continue;
                 }
                 // CP-24: subagents-tab command dispatch. The keybinds
-                // (`keybind.ts:249-252`) are up/down/return/ctrl+d; only
-                // dispatched while the Subagents tab owns the dock, otherwise
-                // `dock_command` returns None and the key falls through to the
-                // composer text/history path.
+                // (`subagents-tab.tsx:142-195`) are up/down/return/ctrl+d and
+                // ctrl+a for `composer.subagent.toggle-activity`
+                // (`subagents-tab.tsx:178`); only dispatched while the
+                // Subagents tab owns the dock, otherwise `dock_command` returns
+                // None and the key falls through to the composer
+                // text/history path (so ctrl+a keeps its composer
+                // `input.line.home` meaning when the tab is not active).
                 native_input_decoder::InputEvent::ArrowUp
                 | native_input_decoder::InputEvent::ArrowDown
-                | native_input_decoder::InputEvent::Byte(13 | 10 | 4) => {
-                    let command = match &event {
-                        native_input_decoder::InputEvent::ArrowUp => {
-                            crate::native_children::SUBAGENT_UP_COMMAND
-                        }
-                        native_input_decoder::InputEvent::ArrowDown => {
-                            crate::native_children::SUBAGENT_DOWN_COMMAND
-                        }
-                        native_input_decoder::InputEvent::Byte(4) => {
-                            crate::native_children::SUBAGENT_INTERRUPT_COMMAND
-                        }
-                        _ => crate::native_children::SUBAGENT_SELECT_COMMAND,
-                    };
+                | native_input_decoder::InputEvent::Byte(13 | 10 | 4 | 1) => {
+                    let command = subagent_key_command(&event);
                     match view.dock_command(command) {
                         Some(crate::native_children::SubagentAction::Navigate(child)) => {
                             let Some(parent) = view.dock_session_id().map(str::to_owned) else {
@@ -15644,9 +15742,10 @@ fn native_loop(
             | native_input_decoder::InputEvent::TabSlot(_)
             | native_input_decoder::InputEvent::TabReopen
             // CP-28: shift+tab decodes to `AgentCycle` (upstream
-            // `agent.cycle`, `config/keybind.ts:176`). It stays inert
-            // here because the live loop has no selected-agent state;
-            // see handoff cp28_status.
+            // `agent.cycle`, `config/keybind.ts:176`). The live dispatch arm
+            // (above, `AgentCycle` handler) owns it whenever the composer owns
+            // focus; if one reaches this tail it was gated by a modal/page,
+            // so keep it inert rather than converting it to a composer byte.
             | native_input_decoder::InputEvent::AgentCycle => continue,
             // Defensive unreachable arm: focus reports are consumed above the
             // dialog/page dispatch, but this match stays exhaustive over
