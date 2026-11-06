@@ -300,12 +300,34 @@ pub fn project_row(
 /// separate renderer/action projection and this package must not fabricate one.
 pub fn conceal_inline_row(text: &str, runs: &[MarkdownRun]) -> String {
     let mut hidden = Vec::new();
+    let mut insertions: Vec<(usize, &'static str)> = Vec::new();
     for run in runs {
         let marker = match run.kind {
             RunKind::Bold => "**",
             RunKind::Italic => "*",
             RunKind::Code => "`",
-            RunKind::Link => continue,
+            RunKind::Link => {
+                // OpenTUI's concealed link chunk keeps the target visible on
+                // terminals without OSC-8 support, but removes the Markdown
+                // brackets and adds a separating space (`Markdown.ts:666-680`):
+                // `[label](url)` -> `label (url)`.
+                let Some((url_start, url_end)) = run.url_span else { continue };
+                if url_start > text.len() || url_end > text.len() || url_start > url_end {
+                    continue;
+                }
+                if run.start > 0 && text.as_bytes().get(run.start - 1) == Some(&b'[') {
+                    hidden.push((run.start - 1, run.start));
+                }
+                if run.end + 2 <= text.len() && text.get(run.end..run.end + 2) == Some("](") {
+                    hidden.push((run.end, run.end + 2));
+                }
+                let label = text.get(run.start..run.end).unwrap_or_default();
+                let target = text.get(url_start..url_end).unwrap_or_default();
+                if label != target {
+                    insertions.push((url_start, " ("));
+                }
+                continue;
+            }
         };
         if run.start < marker.len() || run.end > text.len() {
             continue;
@@ -319,15 +341,35 @@ pub fn conceal_inline_row(text: &str, runs: &[MarkdownRun]) -> String {
     }
     hidden.sort_unstable();
     hidden.dedup();
+    insertions.sort_unstable_by_key(|(at, _)| *at);
     let mut out = String::with_capacity(text.len());
-    let mut cursor = 0;
-    for (start, end) in hidden {
-        if start < cursor { continue; }
-        out.push_str(&text[cursor..start]);
-        cursor = end;
+    let mut hidden_index = 0;
+    let mut insertion_index = 0;
+    let mut at = 0;
+    while at < text.len() {
+        while insertion_index < insertions.len() && insertions[insertion_index].0 == at {
+            out.push_str(insertions[insertion_index].1);
+            insertion_index += 1;
+        }
+        while hidden_index < hidden.len() && hidden[hidden_index].1 <= at {
+            hidden_index += 1;
+        }
+        let hidden_now = hidden_index < hidden.len()
+            && hidden[hidden_index].0 <= at
+            && at < hidden[hidden_index].1;
+        let next = next_char_boundary(text, at);
+        if !hidden_now { out.push_str(&text[at..next]); }
+        at = next;
     }
-    out.push_str(&text[cursor..]);
+    while insertion_index < insertions.len() && insertions[insertion_index].0 == text.len() {
+        out.push_str(insertions[insertion_index].1);
+        insertion_index += 1;
+    }
     out
+}
+
+fn next_char_boundary(text: &str, at: usize) -> usize {
+    text[at..].chars().next().map_or(text.len(), |ch| at + ch.len_utf8())
 }
 
 fn sanitize_prose_line(line: &str) -> String {
@@ -676,6 +718,16 @@ mod tests {
         assert_eq!(parsed.rows[0].runs.iter().find(|run| run.kind == RunKind::Link).unwrap().url.as_deref(), Some("https://example.test"));
         let huge = format!("[x]({})", "u".repeat(MAX_URL_BYTES + 1));
         assert!(parse_part(PartKind::Prose, &huge).rows[0].runs[0].url.is_none());
+    }
+
+    #[test]
+    fn concealed_links_remove_markers_and_keep_unlinked_targets() {
+        let parsed = parse_part(PartKind::Prose, "[label](https://example.test) [same](same)");
+        let row = &parsed.rows[0];
+        assert_eq!(display_row(MarkdownMode::Rendered, &row.text, &row.runs),
+            "label (https://example.test) same (same)");
+        assert_eq!(display_row(MarkdownMode::Source, &row.text, &row.runs),
+            "[label](https://example.test) [same](same)");
     }
 
     #[test]

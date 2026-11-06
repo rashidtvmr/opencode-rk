@@ -1114,7 +1114,7 @@ impl MarkdownFlow {
             }
             RawKind::List => {
                 let (ordered, start) = list_meta(&token.raw);
-                let items = parse_items(&token.raw, 0);
+                let items = parse_items(&token.raw, 0, conceal, hyperlinks);
                 (BlockKind::List { ordered, start }, BlockBody::List(items))
             }
             RawKind::Quote => {
@@ -1719,12 +1719,18 @@ fn list_meta(raw: &str) -> (bool, usize) {
     (false, 1)
 }
 
-fn parse_items(raw: &str, base_indent: usize) -> Vec<ListItem> {
+fn parse_items(raw: &str, base_indent: usize, conceal: bool, hyperlinks: bool) -> Vec<ListItem> {
     let spans = line_spans(raw);
-    parse_items_inner(raw, &spans, base_indent)
+    parse_items_inner(raw, &spans, base_indent, conceal, hyperlinks)
 }
 
-fn parse_items_inner(raw: &str, spans: &[LineSpan], base_indent: usize) -> Vec<ListItem> {
+fn parse_items_inner(
+    raw: &str,
+    spans: &[LineSpan],
+    base_indent: usize,
+    conceal: bool,
+    hyperlinks: bool,
+) -> Vec<ListItem> {
     let lines: Vec<&str> = spans.iter().map(|span| line_text(raw, span)).collect();
     let mut items: Vec<ListItem> = Vec::new();
     let mut index = 0usize;
@@ -1750,7 +1756,7 @@ fn parse_items_inner(raw: &str, spans: &[LineSpan], base_indent: usize) -> Vec<L
             }
             Err(_) => "-".to_owned(),
         };
-        let mut lines_out = vec![parse_inline(content.trim_end(), MarkdownRole::Text, false, false)];
+        let mut lines_out = vec![parse_inline(content.trim_end(), MarkdownRole::Text, conceal, hyperlinks)];
         let mut children: Vec<ListItem> = Vec::new();
         let mut loose_after = false;
         index += 1;
@@ -1779,11 +1785,17 @@ fn parse_items_inner(raw: &str, spans: &[LineSpan], base_indent: usize) -> Vec<L
                             break;
                         }
                     }
-                    children.extend(parse_items_inner(raw, &spans[child_start..=child_end], next_indent));
+                    children.extend(parse_items_inner(
+                        raw,
+                        &spans[child_start..=child_end],
+                        next_indent,
+                        conceal,
+                        hyperlinks,
+                    ));
                     index = child_end + 1;
                     continue;
                 }
-                lines_out.push(parse_inline(next.trim(), MarkdownRole::Text, false, false));
+                lines_out.push(parse_inline(next.trim(), MarkdownRole::Text, conceal, hyperlinks));
                 index += 1;
                 continue;
             }
