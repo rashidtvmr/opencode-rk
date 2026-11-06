@@ -39,7 +39,7 @@ pub struct IntegrationInfo {
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
-pub struct MethodInfo { pub id: String, pub kind: &'static str, pub label: String }
+pub struct MethodInfo { pub id: String, #[serde(rename = "type")] pub kind: &'static str, pub label: String }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -289,8 +289,12 @@ impl<R: OAuthRuntime + ?Sized> IntegrationServer<R> {
                 name: "OpenAI".into(),
                 methods: vec![
                     MethodInfo { id: "chatgpt-headless".into(), kind: "oauth", label: "Codex device code (legacy)".into() },
+                    MethodInfo { id: "api-key".into(), kind: "key", label: "API key".into() },
                 ],
             },
+            IntegrationInfo { id: "anthropic".into(), name: "Anthropic".into(), methods: vec![MethodInfo { id: "api-key".into(), kind: "key", label: "API key".into() }] },
+            IntegrationInfo { id: "google".into(), name: "Google".into(), methods: vec![MethodInfo { id: "api-key".into(), kind: "key", label: "API key".into() }] },
+            IntegrationInfo { id: "github-copilot".into(), name: "GitHub Copilot".into(), methods: vec![MethodInfo { id: "api-key".into(), kind: "key", label: "API key".into() }] },
         ]
     }
 
@@ -731,12 +735,22 @@ mod tests {
     }
 
     #[test]
-    fn list_exposes_only_implemented_device_method() {
+    fn list_exposes_real_connect_methods_without_claiming_other_oauth() {
         let integrations = IntegrationServer::<VerifiedRuntime>::list();
         let openai = integrations.iter().find(|i| i.id == "openai").expect("openai present");
-        assert_eq!(openai.methods.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), vec!["chatgpt-headless"]);
+        assert_eq!(openai.methods.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), vec!["chatgpt-headless", "api-key"]);
+        assert!(integrations.iter().map(|item| item.methods.len()).sum::<usize>() > 1);
+        assert!(openai.methods.iter().any(|m| m.kind == "oauth"));
+        assert!(integrations.iter().filter(|item| item.id != "openai").all(|item| item.methods.iter().all(|m| m.kind != "oauth")));
         assert!(!IntegrationServer::<VerifiedRuntime>::method_exists("openai", "chatgpt-browser"));
         assert!(!IntegrationServer::<VerifiedRuntime>::method_exists("github-copilot", "device"));
+    }
+
+    #[test]
+    fn method_info_uses_upstream_type_json_key() {
+        let value = serde_json::to_value(MethodInfo { id: "chatgpt-headless".into(), kind: "oauth", label: "Device code".into() }).unwrap();
+        assert_eq!(value["type"], "oauth");
+        assert!(value.get("kind").is_none());
     }
 
     #[test]

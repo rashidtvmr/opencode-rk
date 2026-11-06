@@ -12045,6 +12045,12 @@ fn native_loop(
                 String::new(),
                 "Enter: continue · Escape: cancel".into(),
             ],
+            native_setup::Dialog::ProviderMethod => vec![
+                "Connect OpenAI".into(), String::new(),
+                format!("{} OAuth · ChatGPT device-code sign-in", if model_row == 0 { ">" } else { " " }),
+                format!("{} API key", if model_row == 1 { ">" } else { " " }),
+                String::new(), "↑/↓ select · Enter continue · Esc cancel".into(),
+            ],
             native_setup::Dialog::BaseUrl => vec![
                 format!("Configure {provider_id}"),
                 String::new(),
@@ -15551,6 +15557,10 @@ fn native_loop(
                     );
                     continue;
                 }
+                if dialog == native_setup::Dialog::ProviderMethod {
+                    model_row = native_setup::move_row(model_row, 2, matches!(direction, native_input_decoder::InputEvent::ArrowDown));
+                    continue;
+                }
                 // A non-Chat page owns Up/Down for its own navigation; the
                 // chat composer is the only other owner. CP-30: on the chat
                 // composer, walk prompt history at the text edges
@@ -17255,8 +17265,9 @@ fn native_loop(
                                 key_input.clear();
                                 dialog = if provider_id == "custom" {
                                     native_setup::Dialog::ProviderId
-                                } else if provider_id == "openai" {
-                                    native_setup::Dialog::ApiKey
+                                 } else if provider_id == "openai" {
+                                     model_row = 0;
+                                     native_setup::Dialog::ProviderMethod
                                 } else {
                                     native_setup::Dialog::BaseUrl
                                 };
@@ -17285,6 +17296,23 @@ fn native_loop(
                                 setup_error = Some(
                                     "Use a lowercase provider ID (letters, numbers, - or _)".into(),
                                 );
+                            }
+                        }
+                        native_setup::Dialog::ProviderMethod => {
+                            if model_row == 1 {
+                                dialog = native_setup::Dialog::ApiKey;
+                            } else {
+                                let result = live.as_ref().ok_or_else(|| "daemon unavailable".to_owned()).and_then(|snapshot| {
+                                    let body = serde_json::json!({"methodID":"chatgpt-headless"}).to_string();
+                                    http_request(&snapshot.origin, "POST", "/api/integration/openai/connect/oauth", Some(&body), auth)
+                                });
+                                match result {
+                                    Ok(body) => {
+                                        let value: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
+                                        setup_error = Some(format!("OAuth started: {} {} (status polling is not wired in this setup surface)", value["url"].as_str().unwrap_or(""), value["instructions"].as_str().unwrap_or("")));
+                                    }
+                                    Err(_) => setup_error = Some("Unable to start OpenAI OAuth; check daemon".into()),
+                                }
                             }
                         }
                         native_setup::Dialog::BaseUrl => {
