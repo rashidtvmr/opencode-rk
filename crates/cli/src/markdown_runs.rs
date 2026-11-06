@@ -799,4 +799,43 @@ mod tests {
         let wide = code_token_cell_spans("界\"x\"");
         assert_eq!(wide, vec![(2, 5, SYN_STRING)]);
     }
+
+    /// MD-002 (run level): an unfinished fence and unfinished inline
+    /// formatting preserve every source byte; blank and whitespace-only rows
+    /// inside the open fence stay exact. Streaming chunk assembly (split
+    /// graphemes, completion arriving before/after final content) is owned by
+    /// `native_markdown_flow`.
+    #[test]
+    fn md_002_unfinished_fence_and_inline_preserve_all_text() {
+        let parsed = parse_part(PartKind::Prose, "~~~\nlet x = 1;\n\n       \n**still open** \n");
+        let rebuilt: String = parsed
+            .rows
+            .iter()
+            .map(|row| row.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!parsed.truncated);
+        assert_eq!(rebuilt, "~~~\nlet x = 1;\n\n       \n**still open** \n");
+        // Every non-blank row under the open fence is a full-row code run: no
+        // inline styling is invented from streaming leftovers.
+        for row in &parsed.rows {
+            assert!(row.code, "{:?}", row.text);
+            if !row.text.is_empty() {
+                assert_eq!(row.runs.len(), 1, "{:?}", row.text);
+                assert_eq!(row.runs[0].kind, RunKind::Code);
+                assert_ne!(row.runs[0].flags & CODE_BLOCK, 0);
+                assert_eq!(row.runs[0].start, 0);
+                assert_eq!(row.runs[0].end, row.text.len());
+            }
+        }
+        // Unfinished inline delimiters in prose stay literal (matching the
+        // existing conceal behavior): delimiters only vanish once complete.
+        let prose = parse_part(PartKind::Prose, "**unfinished `tick and *star");
+        let row = &prose.rows[0];
+        assert!(row.runs.is_empty());
+        assert_eq!(
+            display_row(MarkdownMode::Rendered, &row.text, &row.runs),
+            "**unfinished `tick and *star"
+        );
+    }
 }

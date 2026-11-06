@@ -236,6 +236,22 @@ pub fn web_search_provider_label(provider: Option<&str>) -> String {
     )
 }
 
+/// Splice a metadata-provided provider name into an already-built `WebSearch`
+/// label: `Web Search "q"` becomes `Web Search via {name} "q"`. A label that
+/// already carries a provider (from args) or is not a `Web Search` label at
+/// all (for example the running placeholder) is returned unchanged, matching
+/// the upstream `Show when={provider()}` branch
+/// (`routes/session/index.tsx:3270-3278`).
+fn rebase_websearch_provider(label: &str, provider_label: &str) -> String {
+    const PREFIX: &str = "Web Search";
+    if let Some(rest) = label.strip_prefix(PREFIX) {
+        if !rest.starts_with(" via ") {
+            return format!("{PREFIX} via {provider_label}{rest}");
+        }
+    }
+    label.to_owned()
+}
+
 /// `primitiveInputSummary` (`util/tool-display.ts:12-22`): only top-level
 /// string/number/boolean entries, one flattened line. Nested JSON stays out of
 /// the inline row (expanded view only).
@@ -633,6 +649,24 @@ pub fn apply_tool_metadata(mut display: ToolDisplay, metadata_json: &str) -> Too
                 }
             }
             display.body.extend(extra);
+        }
+    }
+    // TOOL-012: `WebSearch` reads its provider from metadata, not input args
+    // (`routes/session/index.tsx:3269-3278`); `Skill` prefers `metadata.name`
+    // over `input.id` (`:3694-3704`). Live metadata arriving while the row is
+    // being shown rebases the already-built label.
+    if display.kind == ToolKind::WebSearch {
+        if let Some(provider) = meta
+            .get("provider")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
+            display.label = rebase_websearch_provider(&display.label, &web_search_provider_label(Some(provider)));
+        }
+    }
+    if display.kind == ToolKind::Skill {
+        if let Some(name) = meta.get("name").and_then(Value::as_str).filter(|value| !value.is_empty()) {
+            display.label = format!("Skill \"{}\"", clip(name, MAX_FIELD_BYTES));
         }
     }
     if display.kind == ToolKind::Execute {
@@ -2069,6 +2103,61 @@ mod tests {
             assert!(!row.contains('\u{1b}'), "{row:?}");
             assert!(!row.contains("0;title"));
         }
+    }
+
+    // TOOL-004: primitive generic arguments flatten to one line, nested JSON
+    // is excluded from the inline row (expanded view only,
+    // `index.tsx:2750-2765`), and embedded whitespace collapses like the
+    // upstream `replace(/\s+/g, " ")`.
+    #[test]
+    fn generic_arguments_flatten_primitives_and_exclude_nested_json() {
+        let display = label(
+            "mcp__fixture",
+            "completed",
+            json!({
+                "uri": "db://x",
+                "page": 2,
+                "verbose": true,
+                "config": {"nested": [1, 2, 3]},
+                "tags": ["a", "b"]
+            }),
+        );
+        assert_eq!(display.label, "mcp__fixture [uri=db://x, page=2, verbose=true]");
+        assert!(!display.label.contains("nested"));
+        assert!(!display.label.contains('[') || display.label.starts_with("mcp__fixture ["));
+        let multiline = label(
+            "mcp__fixture",
+            "completed",
+            json!({"uri": "db://x\n   y\tz"}),
+        );
+        assert_eq!(multiline.label, "mcp__fixture [uri=db://x y z]");
+    }
+
+    // TOOL-012: `WebSearch` provider and `Skill` name rebase from live
+    // metadata (`routes/session/index.tsx:3269-3278`, `:3694-3704`), never
+    // from input args alone.
+    #[test]
+    fn websearch_provider_and_skill_name_rebase_from_metadata() {
+        let row = tool_display(80, "websearch", "completed", r#"{"query":"rust"}"#, "", false);
+        assert_eq!(row.label, "Web Search \"rust\"");
+        let rebased = apply_tool_metadata(row, r#"{"provider":"opencode"}"#);
+        assert_eq!(rebased.label, "Web Search via OpenCode \"rust\"");
+        // An already-provider'd label is never double-spliced.
+        let twice = apply_tool_metadata(rebased, r#"{"provider":"exa"}"#);
+        assert_eq!(twice.label, "Web Search via OpenCode \"rust\"");
+        // A custom provider name is capitalized like `webSearchProviderName`.
+        let custom = tool_display(80, "websearch", "completed", r#"{"query":"q"}"#, "", false);
+        let custom = apply_tool_metadata(custom, r#"{"provider":"tavily"}"#);
+        assert_eq!(custom.label, "Web Search via Tavily \"q\"");
+        // The running placeholder is not a Web Search label: untouched.
+        let pending = tool_display(80, "websearch", "running", r#"{}"#, "", false);
+        let pending = apply_tool_metadata(pending, r#"{"provider":"opencode"}"#);
+        assert_eq!(pending.label, "Searching web...");
+        // `metadata.name` beats `input.id` for Skill
+        // (`stringValue(props.metadata.name) ?? stringValue(props.input.id)`).
+        let skill = tool_display(80, "skill", "completed", r#"{"id":"old"}"#, "", false);
+        let skill = apply_tool_metadata(skill, r#"{"name":"pdf"}"#);
+        assert_eq!(skill.label, "Skill \"pdf\"");
     }
 
     #[test]
