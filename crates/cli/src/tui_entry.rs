@@ -4929,6 +4929,16 @@ fn select_menu_key(
 #[cfg(feature = "native")]
 enum SessionsKeyAction { Open(String), Rename(String), Delete(String) }
 
+/// DIALOG-16: the Settings dialog key dispatch outcome. `Close` tells the
+/// caller to dismiss the settings dialog (second Escape); `Action` carries a
+/// value change to apply.
+#[cfg(feature = "native")]
+enum SettingsKeyOutcome {
+    None,
+    Close,
+    Action(crate::native_settings::SettingsAction),
+}
+
 #[cfg(feature = "native")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SessionsDecision { Open, Consume, Exit }
@@ -4978,6 +4988,137 @@ fn workspaces_live_dispatch(view: &mut crate::native_view::NativeView, byte: u8)
     }
 }
 
+/// DIALOG-16: the live Settings dialog key dispatch (`dialog-config.tsx`),
+/// split out of the loop so a test drives the exact dispatch the running CLI
+/// uses. The experiments picker is its own dialog: the first Escape dismisses
+/// it and returns to the settings list (`dialog-experiments.tsx`); a second
+/// closes the settings dialog (`Close`). Returns the value change to apply.
+#[cfg(feature = "native")]
+fn settings_dialog_key(
+    view: &mut crate::native_view::NativeView,
+    settings_dialog: &mut crate::native_settings::SettingsDialog,
+    event: &native_input_decoder::InputEvent,
+    utf8: &mut NativeUtf8Decoder,
+) -> SettingsKeyOutcome {
+    match event {
+        native_input_decoder::InputEvent::Escape => {
+            if settings_dialog.experiments_open() {
+                settings_dialog.close_experiments();
+            } else {
+                settings_dialog.close();
+                return SettingsKeyOutcome::Close;
+            }
+            SettingsKeyOutcome::None
+        }
+        native_input_decoder::InputEvent::ArrowUp => {
+            settings_dialog.previous();
+            SettingsKeyOutcome::None
+        }
+        native_input_decoder::InputEvent::ArrowDown => {
+            settings_dialog.next();
+            SettingsKeyOutcome::None
+        }
+        native_input_decoder::InputEvent::ArrowLeft => settings_dialog
+            .left()
+            .map(SettingsKeyOutcome::Action)
+            .unwrap_or(SettingsKeyOutcome::None),
+        native_input_decoder::InputEvent::ArrowRight => settings_dialog
+            .right()
+            .map(SettingsKeyOutcome::Action)
+            .unwrap_or(SettingsKeyOutcome::None),
+        native_input_decoder::InputEvent::Byte(13 | 10) => settings_dialog
+            .right()
+            .map(SettingsKeyOutcome::Action)
+            .unwrap_or(SettingsKeyOutcome::None),
+        native_input_decoder::InputEvent::Byte(8 | 127) => {
+            utf8.reset();
+            settings_dialog.backspace();
+            SettingsKeyOutcome::None
+        }
+        native_input_decoder::InputEvent::Byte(byte) if *byte >= 32 => {
+            if let Some(character) = utf8.push(*byte) {
+                settings_dialog.push_query(character);
+            }
+            SettingsKeyOutcome::None
+        }
+        native_input_decoder::InputEvent::Mouse { x, y, kind: 0, modifiers: 0 } => {
+            let modal = view.modal_presentation();
+            let content_height = view.modal_content_height();
+            let row_id = modal
+                .content_point(*x, *y, content_height)
+                .and_then(|(column, row)| settings_dialog.hit_row(column, row, modal.content_width, content_height));
+            row_id
+                .and_then(|id| settings_dialog.click(id))
+                .map(SettingsKeyOutcome::Action)
+                .unwrap_or(SettingsKeyOutcome::None)
+        }
+        _ => SettingsKeyOutcome::None,
+    }
+}
+
+/// DIALOG-16: apply a settings value change under the save lock
+/// (`dialog-config.tsx:425-445`): the lock engages before the config write
+/// and releases when it completes, so further changes are ignored while a
+/// save is in flight and re-enabled once it lands. Returns the persist
+/// error, or `Ok` when applied.
+#[cfg(feature = "native")]
+fn settings_apply_action(
+    view: &mut crate::native_view::NativeView,
+    settings_dialog: &mut crate::native_settings::SettingsDialog,
+    navigation: &mut crate::native_navigation::NavigationState,
+    cli_path: Option<&std::path::Path>,
+    state_path: &std::path::Path,
+    action: crate::native_settings::SettingsAction,
+) -> Result<(), String> {
+    match action {
+        crate::native_settings::SettingsAction::ApplyTabs(orientation) => {
+            let locked = settings_dialog.begin_save();
+            let result = match cli_path {
+                Some(path) => crate::native_ui_preferences::UiPreferences::persist_tab_orientation(path, orientation)
+                    .map(|()| {
+                        navigation.set_orientation(orientation);
+                        settings_dialog.applied(orientation);
+                    }),
+                None => Err("settings configuration path unavailable".into()),
+            };
+            let _ = locked;
+            settings_dialog.finish_save();
+            result
+        }
+        crate::native_settings::SettingsAction::ApplySidebar(hidden) => {
+            let locked = settings_dialog.begin_save();
+            let result = crate::native_ui_preferences::UiPreferences::persist_sidebar(state_path, hidden)
+                .map(|()| {
+                    view.set_sidebar_hidden(hidden);
+                    settings_dialog.applied_sidebar(hidden);
+                });
+            let _ = locked;
+            settings_dialog.finish_save();
+            result
+        }
+        // DIALOG-16: numeric rows step/saturate in the model; the live
+        // consumer echoes the accepted value back into the dialog state and
+        // repaints. Persistence has no numeric writer yet
+        // (`native_ui_preferences` exposes only tab-orientation/sidebar), so
+        // the value is applied in-memory for this session.
+        crate::native_settings::SettingsAction::ApplyNumeric { id, value } => {
+            let locked = settings_dialog.begin_save();
+            settings_dialog.applied_numeric(id, value);
+            let _ = locked;
+            settings_dialog.finish_save();
+            Ok(())
+        }
+        crate::native_settings::SettingsAction::OpenExperiments => {
+            settings_dialog.show_experiments();
+            Ok(())
+        }
+        crate::native_settings::SettingsAction::ToggleExperiments => {
+            settings_dialog.finish_experiments_toggle();
+            Ok(())
+        }
+    }
+}
+
 #[cfg(feature = "native")]
 fn sessions_live_open(view: &mut crate::native_view::NativeView, byte: u8, cwd: &str, rows: Vec<crate::native_palette::pickers::SessionRow>) -> bool {
     if sessions_live_decision(byte, false) != SessionsDecision::Open { return false; }
@@ -4997,7 +5138,10 @@ fn sessions_menu_key(
         8 | 127 => (view.dialogs.sessions_backspace(), None),
         b' '..=b'~' => (view.dialogs.sessions_push_filter(char::from(byte)), None),
         1 => (view.dialogs.sessions_toggle_scope(), None),
-        4 => match view.dialogs.sessions_focused_id() { Some(id) => (true, Some(SessionsKeyAction::Delete(id))), None => (true, None) },
+        // DIALOG-13: `session.delete` is two-press (`dialog-session-list.tsx:
+        // 259-285`): the first Ctrl-D arms the focused row (`Press ctrl+d
+        // again to confirm`), the second returns the confirmed delete.
+        4 => match view.dialogs.sessions_arm_delete() { Some(id) => (true, Some(SessionsKeyAction::Delete(id))), None => (true, None) },
         18 => match view.dialogs.sessions_focused_id() { Some(id) => (true, Some(SessionsKeyAction::Rename(id))), None => (true, None) },
         13 | 10 => match view.dialogs.sessions_open_focused() { Some(row) => (true, Some(SessionsKeyAction::Open(row.id))), None => (true, None) },
         27 | 3 => { view.dialogs.close(); (true, None) }
@@ -13315,80 +13459,26 @@ fn native_loop(
             continue;
         }
         if matches!(dialog, native_setup::Dialog::Settings) {
-            let action = match event {
-                native_input_decoder::InputEvent::Escape => {
-                    // DIALOG-16: the experiments picker is its own dialog; the
-                    // first Escape dismisses it and returns to the settings
-                    // list (`dialog-experiments.tsx`).
-                    if settings_dialog.experiments_open() {
-                        settings_dialog.close_experiments();
-                    } else {
-                        settings_dialog.close();
-                        utf8.reset();
-                        dialog = native_setup::Dialog::None;
-                    }
+            let outcome = settings_dialog_key(&mut view, &mut settings_dialog, &event, &mut utf8);
+            let action = match outcome {
+                SettingsKeyOutcome::Close => {
+                    utf8.reset();
+                    dialog = native_setup::Dialog::None;
                     None
                 }
-                native_input_decoder::InputEvent::ArrowUp => {
-                    settings_dialog.previous();
-                    None
-                }
-                native_input_decoder::InputEvent::ArrowDown => {
-                    settings_dialog.next();
-                    None
-                }
-                native_input_decoder::InputEvent::ArrowLeft => settings_dialog.left(),
-                native_input_decoder::InputEvent::ArrowRight => settings_dialog.right(),
-                native_input_decoder::InputEvent::Byte(13 | 10) => settings_dialog.right(),
-                native_input_decoder::InputEvent::Byte(8 | 127) => { utf8.reset(); settings_dialog.backspace(); None },
-                native_input_decoder::InputEvent::Byte(byte) if byte >= 32 => {
-                    if let Some(character) = utf8.push(byte) { settings_dialog.push_query(character); }
-                    None
-                },
-                native_input_decoder::InputEvent::Mouse { x, y, kind: 0, modifiers: 0 } => {
-                    let modal = view.modal_presentation();
-                    let content_height = view.modal_content_height();
-                    let row_id = modal
-                        .content_point(x, y, content_height)
-                        .and_then(|(column, row)| settings_dialog.hit_row(
-                            column, row, modal.content_width, content_height));
-                    row_id.and_then(|id| settings_dialog.click(id))
-                }
-                _ => None,
+                SettingsKeyOutcome::Action(action) => Some(action),
+                SettingsKeyOutcome::None => None,
             };
             if let Some(action) = action {
-                let result = match action {
-                    crate::native_settings::SettingsAction::ApplyTabs(orientation) => {
-                        match cli_path.as_deref() {
-                            Some(path) => crate::native_ui_preferences::UiPreferences::persist_tab_orientation(path, orientation)
-                                .map(|()| { navigation.set_orientation(orientation); settings_dialog.applied(orientation); }),
-                            None => Err("settings configuration path unavailable".into()),
-                        }
-                    }
-                    crate::native_settings::SettingsAction::ApplySidebar(hidden) => {
-                        crate::native_ui_preferences::UiPreferences::persist_sidebar(&state_path, hidden)
-                            .map(|()| { view.set_sidebar_hidden(hidden); settings_dialog.applied_sidebar(hidden); })
-                    }
-                    // DIALOG-16: numeric rows step/saturate in the model; the
-                    // live consumer echoes the accepted value back into the
-                    // dialog state and repaints. Persistence has no numeric
-                    // writer yet (`native_ui_preferences` exposes only
-                    // tab-orientation/sidebar), so the value is applied
-                    // in-memory for this session.
-                    crate::native_settings::SettingsAction::ApplyNumeric { id, value } => {
-                        settings_dialog.applied_numeric(id, value);
-                        Ok(())
-                    }
-                    crate::native_settings::SettingsAction::OpenExperiments => {
-                        settings_dialog.show_experiments();
-                        Ok(())
-                    }
-                    crate::native_settings::SettingsAction::ToggleExperiments => {
-                        settings_dialog.finish_experiments_toggle();
-                        Ok(())
-                    }
-                };
-                settings_error = result.err();
+                settings_error = settings_apply_action(
+                    &mut view,
+                    &mut settings_dialog,
+                    &mut navigation,
+                    cli_path.as_deref(),
+                    &state_path,
+                    action,
+                )
+                .err();
             }
             needs_paint = true;
             continue;
@@ -21179,15 +21269,41 @@ mod dialog13_tests {
     }
 
     #[test]
-    fn dialog13_live_ctrl_d_deletes_focused_session() {
+    fn dialog13_live_ctrl_d_arms_then_deletes_focused_session() {
         let mut view = opened();
+        // First Ctrl-D arms the focused row (`dialog-session-list.tsx:263-266`):
+        // no delete action yet, and the row title swaps to the confirmation.
+        let (handled, action) = sessions_menu_key(&mut view, 4);
+        assert!(handled);
+        assert!(action.is_none(), "the first press must arm, not delete");
+        assert!(view.dialogs.sessions_state().unwrap().focused_is_armed());
+        let titles = view.dialogs.sessions_state().unwrap().row_titles("ctrl+d");
+        assert_eq!(titles[0], "Press ctrl+d again to confirm");
+
+        // While armed, Enter must not open the row (it is not openable).
+        assert!(matches!(sessions_menu_key(&mut view, 13).1, None));
+
+        // The second Ctrl-D confirms and returns the delete action.
         assert!(matches!(sessions_menu_key(&mut view, 4).1, Some(SessionsKeyAction::Delete(id)) if id == "a"));
+        assert!(!view.dialogs.sessions_state().unwrap().focused_is_armed());
+
+        // Moving the highlight disarms again (`onMove`,
+        // `dialog-session-list.tsx:247`).
+        let (handled, action) = sessions_menu_key(&mut view, 4);
+        assert!(handled);
+        assert!(action.is_none());
+        assert!(view.dialogs.sessions_state().unwrap().focused_is_armed());
+        sessions_menu_key(&mut view, 14);
+        assert!(!view.dialogs.sessions_state().unwrap().focused_is_armed(), "move disarms");
 
         let mut empty = crate::native_view::NativeView::new(100, 30);
         empty.dialogs.open_sessions(SessionsState::new(true, "/tmp", "")).unwrap();
         let (handled, action) = sessions_menu_key(&mut empty, 4);
         assert!(handled);
         assert!(action.is_none());
+        let (handled, action) = sessions_menu_key(&mut empty, 4);
+        assert!(handled);
+        assert!(action.is_none(), "no rows, nothing to delete");
     }
 
     #[test]

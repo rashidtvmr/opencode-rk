@@ -2707,8 +2707,9 @@ pub mod pickers {
             }
         }
 
-        /// Standalone picker-model confirmation state. The native live dialog
-        /// does not call this because its server has no session DELETE route.
+        /// Standalone picker-model confirmation state. The live dialog arms
+        /// through it before the caller issues the session DELETE request
+        /// (`dialog-session-list.tsx:259-285`).
         pub fn arm_delete(&mut self, id: &str) -> bool {
             if self.to_delete.as_deref() == Some(id) {
                 self.to_delete = None;

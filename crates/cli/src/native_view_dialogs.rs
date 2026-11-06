@@ -1713,6 +1713,24 @@ impl DialogView {
         self.sessions_state().and_then(|state| state.open_focused().cloned())
     }
 
+    /// DIALOG-13: the live `session.delete` two-press guard
+    /// (`dialog-session-list.tsx:259-285`): the first Ctrl-D arms the focused
+    /// row (its title swaps to `Press ctrl+d again to confirm`), the second
+    /// returns the confirmed id for the caller to delete. Moving the
+    /// highlight disarms (`onMove`, `dialog-session-list.tsx:247`). Returns
+    /// `None` while armed, when no row is focused, or on the arming press.
+    #[must_use]
+    pub fn sessions_arm_delete(&mut self) -> Option<String> {
+        let state = self
+            .dialog
+            .as_mut()
+            .filter(|dialog| dialog.kind == DialogKind::Sessions)
+            .and_then(|dialog| dialog.sessions.as_mut())?;
+        let confirmed = state.press_delete()?;
+        self.sync_sessions_choices();
+        Some(confirmed)
+    }
+
     /// DIALOG-13: apply `session.rename` to the live list; the row title (and
     /// the local fallback copy) is replaced. Returns `true` when the id was
     /// present.
