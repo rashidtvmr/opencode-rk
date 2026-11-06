@@ -392,10 +392,13 @@ impl TerminalInputDecoder {
                     b'5' => InputEvent::PageUp,
                     _ => InputEvent::PageDown,
                 });
-            } else if self.state == State::Csi
+            } else if matches!(self.state, State::Csi | State::Ss3)
                 && self.len == 0
                 && matches!(byte, b'H' | b'F')
             {
+                // TOOL-011: both the CSI (`ESC [ H`) and SS3 (`ESC O H`) forms
+                // of Home/End must decode so the execute/diff content viewers
+                // scroll to the top/bottom in either terminal mode.
                 self.emit(if byte == b'H' {
                     InputEvent::Home
                 } else {
@@ -436,6 +439,9 @@ impl TerminalInputDecoder {
                 // Legacy back-tab ESC [ Z; upstream `agent.cycle`
                 // (`config/keybind.ts:176`).
                 self.emit(InputEvent::AgentCycle);
+            } else if self.state == State::Ss3 && self.len == 0 && matches!(byte, b'H' | b'F') {
+                // SS3 Home/End, emitted by terminals using application cursor mode.
+                self.emit(if byte == b'H' { InputEvent::Home } else { InputEvent::End });
             } else if self.state == State::Csi && byte == b'u' {
                 self.decode_kitty();
             } else if self.state == State::Csi
@@ -835,6 +841,16 @@ mod horizontal_cursor_regressions {
         assert_eq!(decoder.pop(), Some(InputEvent::ArrowRight));
         assert_eq!(decoder.pop(), Some(InputEvent::ArrowLeft));
         assert_eq!(decoder.pop(), Some(InputEvent::ArrowRight));
+        assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn ss3_home_end_decode_as_navigation_events() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1bOH\x1bOF" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::Home));
+        assert_eq!(decoder.pop(), Some(InputEvent::End));
         assert_eq!(decoder.pop(), None);
     }
 
@@ -1357,6 +1373,23 @@ mod page_key_regressions {
         // never become typed text or an arrow move.
         assert!(decode(b"\x1b[2~\x1b[3~\x1b[5;2~").is_empty());
         assert!(decode(b"\x1b[5;2~").is_empty());
+    }
+
+    #[test]
+    fn tool011_ss3_home_end_decode() {
+        // TOOL-011: the execute/diff content viewer must scroll to the
+        // top/bottom from the SS3 forms `ESC O H` (Home) and `ESC O F` (End),
+        // not only the CSI forms. Both are emitted as the viewer Home/End
+        // events the live loop routes to the scroll owner.
+        assert_eq!(
+            decode(b"\x1bOH\x1bOF"),
+            vec![InputEvent::Home, InputEvent::End]
+        );
+        // SS3 arrows keep decoding alongside Home/End (no regression).
+        assert_eq!(
+            decode(b"\x1bOA\x1bOB"),
+            vec![InputEvent::ArrowUp, InputEvent::ArrowDown]
+        );
     }
 }
 
