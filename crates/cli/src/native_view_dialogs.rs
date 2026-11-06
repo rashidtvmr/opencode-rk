@@ -3665,10 +3665,41 @@ impl DialogView {
                                 crate::native_diff_view::MAX_DIFF_LINES,
                                 width,
                             );
-                            for row in rendered.rows.iter() {
+                            // Keep the split surface bounded just like the unified
+                            // viewer. Preserve the height of omitted chunks so the
+                            // viewport does not jump when scrolling through a large
+                            // patch. The viewer's heading is outside this scroll area.
+                            let viewport = height.saturating_sub(lines.len()).max(1);
+                            let (first, last) = if rendered.rows.len() > crate::native_diff_view::VIRTUAL_MIN_LINES {
+                                crate::native_diff_view::visible_chunk_range(
+                                    rendered.rows.len().div_ceil(crate::native_diff_view::VIRTUAL_CHUNK_LINES),
+                                    dialog.execute_scroll,
+                                    viewport,
+                                )
+                            } else {
+                                (0, rendered.rows.len().saturating_sub(1) / crate::native_diff_view::VIRTUAL_CHUNK_LINES)
+                            };
+                            for (index, row) in rendered.rows.iter().enumerate() {
+                                if rendered.rows.len() > crate::native_diff_view::VIRTUAL_MIN_LINES {
+                                    let chunk = index / crate::native_diff_view::VIRTUAL_CHUNK_LINES;
+                                    if chunk < first || chunk > last {
+                                        if index % crate::native_diff_view::VIRTUAL_CHUNK_LINES == 0 {
+                                            let omitted = (rendered.rows.len() - index).min(crate::native_diff_view::VIRTUAL_CHUNK_LINES);
+                                            lines.push(line(format!("… {omitted} lines …"), Role::Description));
+                                        }
+                                        continue;
+                                    }
+                                }
                                 match row {
                                     crate::native_diff_view::SplitRow::Full(full) => {
-                                        lines.push(line(full.content.clone(), Role::Item));
+                                        lines.push(line(full.content.clone(), match full.role {
+                                            crate::native_diff_view::DiffLineRole::Added => Role::Action,
+                                            crate::native_diff_view::DiffLineRole::Removed => Role::Error,
+                                            crate::native_diff_view::DiffLineRole::HunkHeader
+                                            | crate::native_diff_view::DiffLineRole::FileHeader
+                                            | crate::native_diff_view::DiffLineRole::DiffHeader => Role::Heading,
+                                            _ => Role::Item,
+                                        }));
                                     }
                                     crate::native_diff_view::SplitRow::Pair { left, right } => {
                                         let mut text = String::new();
@@ -3680,7 +3711,12 @@ impl DialogView {
                                             text.push(' ');
                                             text.push_str(&cell.text);
                                         }
-                                        lines.push(line(text, Role::Item));
+                                        let role = match (left.as_ref().map(|cell| cell.role), right.as_ref().map(|cell| cell.role)) {
+                                            (_, Some(crate::native_diff_view::DiffLineRole::Added)) => Role::Action,
+                                            (Some(crate::native_diff_view::DiffLineRole::Removed), _) => Role::Error,
+                                            _ => Role::Item,
+                                        };
+                                        lines.push(line(text, role));
                                     }
                                 }
                             }
@@ -11602,6 +11638,26 @@ mod dialog07_tests {
         assert!(row.ends_with("f0"), "footer right-aligned: {row:?}");
         assert_eq!(row.chars().count(), 40, "row fills the content width: {row:?}");
         assert!(row.contains("First  "), "title then gap then footer: {row:?}");
+    }
+
+    /// DIALOG-07: the selected row and its own footer move together through
+    /// the live dialog selection (upstream `dialog-select.tsx:803-820`).
+    #[test]
+    fn dialog07_current_row_keeps_its_own_footer_after_selection_moves() {
+        let mut view = select_view(
+            vec![
+                SelectOption::new("0", "First").with_footer("f0"),
+                SelectOption::new("1", "Second").with_footer("f1"),
+            ],
+            false,
+        );
+        view.next();
+        let rows = view.render(40, 12);
+        let selected = rows.iter().find(|row| row.contains("Second")).unwrap();
+        let unselected = rows.iter().find(|row| row.contains("First")).unwrap();
+        assert!(selected.contains("> 2. Second"), "live selected row: {selected:?}");
+        assert!(selected.ends_with("f1"), "current row footer: {selected:?}");
+        assert!(unselected.ends_with("f0"), "other row footer: {unselected:?}");
     }
 
     /// While flattened (`flat(true)` + a filter) the footer is
