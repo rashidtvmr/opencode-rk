@@ -4821,6 +4821,12 @@ mod dialog_parity_tests {
         assert_eq!(IntegrationPhase::entry(2, 1), IntegrationPhase::Accounts);
 
         let mut phase = IntegrationPhase::Methods;
+        phase.start(ConnectMethod::OAuth);
+        assert_eq!(phase, IntegrationPhase::Progress("Connecting…"));
+        let mut phase = IntegrationPhase::Methods;
+        phase.start(ConnectMethod::Key);
+        assert_eq!(phase, IntegrationPhase::Progress("Connecting…"));
+        let mut phase = IntegrationPhase::Methods;
         phase.start(ConnectMethod::Command);
         assert_eq!(phase, IntegrationPhase::Progress("Starting command…"));
         let mut phase = IntegrationPhase::Form;

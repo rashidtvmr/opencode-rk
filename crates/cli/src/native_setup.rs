@@ -344,11 +344,21 @@ pub(super) enum Dialog {
     None,
     Settings,
     Provider,
+    ProviderMethod,
     ProviderId,
     BaseUrl,
     ApiKey,
     Model,
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ProviderConnectMethod { OAuth, ApiKey }
+
+impl ProviderConnectMethod {
+    pub(super) const fn options() -> [Self; 2] { [Self::OAuth, Self::ApiKey] }
+    pub(super) const fn label(self) -> &'static str { match self { Self::OAuth => "ChatGPT device-code sign-in", Self::ApiKey => "API key" } }
+}
+
 
 pub(super) fn catalogue(body: &str) -> Result<Vec<Model>, String> {
     if body.len() > 8 * 1024 * 1024 { return Err("model catalogue is too large".into()); }
