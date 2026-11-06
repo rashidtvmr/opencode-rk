@@ -79,6 +79,12 @@ impl FrameClock {
     }
 }
 
+impl crate::native_modal_layer::Clock for FrameClock {
+    fn now_ms(&self) -> u64 {
+        self.now_ms()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::FrameClock;

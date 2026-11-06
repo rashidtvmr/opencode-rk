@@ -13011,6 +13011,20 @@ fn native_loop(
             input.push(byte[0], Instant::now());
         }
         let Some(mut event) = input.pop() else { continue };
+        // DIALOG-03: the modal layer snapshots the currently focused shell
+        // target on first open.  Keep that snapshot meaningful while the
+        // shell is visible, and consume the one-shot refocus timer after a
+        // close.  The binding generation is the prompt's route identity;
+        // `live.is_some()` is the attachment test, so a closed/deleted route
+        // cannot receive a stale focus restoration.
+        if !view.dialogs.is_open() {
+            view.dialogs.set_focus_target(crate::native_modal_layer::ModalFocus {
+                id: binding_generation,
+                destroyed: false,
+                attached: live.is_some(),
+            });
+            let _ = view.dialogs.take_refocus_at(&animation_start);
+        }
         // THEME-13: terminal OSC 10/11 color replies are protocol, never
         // composer input; they advance the live `system` palette probe.
         if let native_input_decoder::InputEvent::OscColorReply { index, rgb } = event {
@@ -13363,6 +13377,13 @@ fn native_loop(
                 _ => None,
             };
             if let Some(action) = action {
+                let save_locked = matches!(
+                    action,
+                    crate::native_settings::SettingsAction::ApplyTabs(_)
+                        | crate::native_settings::SettingsAction::ApplySidebar(_)
+                        | crate::native_settings::SettingsAction::ApplyNumeric { .. }
+                        | crate::native_settings::SettingsAction::ToggleExperiments
+                ) && settings_dialog.begin_save();
                 let result = match action {
                     crate::native_settings::SettingsAction::ApplyTabs(orientation) => {
                         match cli_path.as_deref() {
@@ -13394,6 +13415,9 @@ fn native_loop(
                         Ok(())
                     }
                 };
+                if save_locked {
+                    settings_dialog.finish_save();
+                }
                 settings_error = result.err();
             }
             needs_paint = true;
