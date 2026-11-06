@@ -2893,6 +2893,61 @@ mod tests {
     }
 
     #[test]
+    fn mount_budget_recurses_nested_groups_exactly_like_upstream() {
+        // Upstream `rowWeight` recursion (`mount-budget.ts:15-21`): an expanded
+        // group costs its own header (the reduce is seeded with 1) plus each
+        // child — a collapsed nested group costs 1, an expanded nested group
+        // its own header plus its leaves, and an ungrouped nested group its raw
+        // `size` regardless of expansion. The live transcript flattens nested
+        // groups into one level, so only this model-level test pins the
+        // recursive semantics a flat-sum regression would silently break.
+        let entries = |ids: &[&str]| -> Vec<SessionNode> {
+            ids.iter()
+                .map(|id| GroupNode::Entry {
+                    entry: SessionEntry::Message {
+                        message_id: (*id).to_owned(),
+                    },
+                })
+                .collect()
+        };
+        let nested = SessionRow::Group(SessionGroup {
+            kind: GroupKind::Activity,
+            size: 5,
+            completed: false,
+            pending: Vec::new(),
+            children: vec![
+                GroupNode::Group {
+                    kind: GroupKind::Reasoning,
+                    size: 3,
+                    children: entries(&["r1", "r2", "r3"]),
+                },
+                GroupNode::Group {
+                    kind: GroupKind::Exploration,
+                    size: 2,
+                    children: entries(&["e1", "e2"]),
+                },
+            ],
+        });
+        // Everything expanded except the nested reasoning group (collapsed):
+        // 1 header + 1 collapsed + (1 header + 2 leaves) = 5.
+        assert_eq!(
+            row_weight(&nested, |_, kind| kind != GroupKind::Reasoning, |_| true),
+            5,
+            "expanded activity = 1 header + collapsed reasoning (1) + expanded exploration (1 + 2)"
+        );
+        // Every level expanded: 1 + (1 + 3) + (1 + 2) = 8.
+        assert_eq!(row_weight(&nested, |_, _| true, |_| true), 8);
+        // Grouping disabled for reasoning only: its raw size counts even
+        // though every level stays expanded: 1 + 3 + (1 + 2) = 7 (with
+        // grouping on, case two above, the same tree costs 8).
+        assert_eq!(
+            row_weight(&nested, |_, kind| kind != GroupKind::Reasoning, |kind| kind != GroupKind::Reasoning),
+            7,
+            "ungrouped nested reasoning costs its size, not its expansion state"
+        );
+    }
+
+    #[test]
     fn message_navigation_uses_user_text_and_assistant_text_parts() {
         let messages = vec![
             RowMessage::user("u1", "first"),
