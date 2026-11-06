@@ -14424,6 +14424,9 @@ fn native_loop(
                         // the pointer hover from the layout it renders, not
                         // only on a fresh move (scroll/resize/mutation).
                         last_pointer = Some((x, y));
+                        if view.dock_hover(x, y, &draft) {
+                            needs_paint = true;
+                        }
                         // User-message hover (`routes/session/index.tsx:2390`
                         // `onMouseOver`): the pointer hover fact belongs to a
                         // `UserCard` transcript row inside the main column,
@@ -14945,7 +14948,17 @@ fn native_loop(
                 if view.dialogs.intercepts_input() {
                     let modal = view.modal_presentation();
                     let row = y.checked_sub(modal.content_y).map(usize::from);
-                    if kind == 0 && modifiers == 0 && x >= modal.content_x
+                    if kind == 7 && modifiers == 0 && x >= modal.content_x
+                        && x < modal.content_x.saturating_add(modal.content_width) {
+                        if let Some(row) = row {
+                            if let Some(col) = x.checked_sub(modal.content_x).map(usize::from) {
+                                if let Some(index) = view.dialogs.choice_at_cell_with_metrics(
+                                    view.dialog_layout_metrics(modal.content_width), row, col) {
+                                    if view.dialogs.select(index) { needs_paint = true; }
+                                }
+                            }
+                        }
+                    } else if kind == 0 && modifiers == 0 && x >= modal.content_x
                         && x < modal.content_x.saturating_add(modal.content_width) {
                         if let Some(row) = row {
                             let content_x = modal.content_x;
