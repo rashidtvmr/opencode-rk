@@ -1704,7 +1704,12 @@ fn tree_weight(
     if !expanded(&id, kind) {
         return 1;
     }
-    children
+    // An expanded group always paints its own disclosure/header row before
+    // its children.  Keep that row in the mount budget (the upstream
+    // `rowWeight` implementation starts the reduction at `1`); otherwise a
+    // backfill can stop one row too early and the visible anchor moves when a
+    // group is expanded or when the terminal is resized.
+    1 + children
         .iter()
         .map(|child| match child {
             SessionNode::Entry { .. } => 1,
@@ -2877,7 +2882,7 @@ mod tests {
         let collapsed = row_weight(&rows[1], |_, _| false, |_| true);
         assert_eq!(collapsed, 1);
         let expanded = row_weight(&rows[1], |_, _| true, |_| true);
-        assert_eq!(expanded, 3);
+        assert_eq!(expanded, 4, "expanded group includes its disclosure header");
         let ungrouped = row_weight(&rows[1], |_, _| true, |_| false);
         assert_eq!(ungrouped, 3);
         let weights = vec![1, 1, 3, 1];
