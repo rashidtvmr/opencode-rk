@@ -439,9 +439,6 @@ impl TerminalInputDecoder {
                 // Legacy back-tab ESC [ Z; upstream `agent.cycle`
                 // (`config/keybind.ts:176`).
                 self.emit(InputEvent::AgentCycle);
-            } else if self.state == State::Ss3 && self.len == 0 && matches!(byte, b'H' | b'F') {
-                // SS3 Home/End, emitted by terminals using application cursor mode.
-                self.emit(if byte == b'H' { InputEvent::Home } else { InputEvent::End });
             } else if self.state == State::Csi && byte == b'u' {
                 self.decode_kitty();
             } else if self.state == State::Csi

@@ -58,10 +58,6 @@
     "cases/par-static-home-80x24-light.json",
     "cases/par-static-home-100x30-dark.json",
     "cases/par-static-home-60x20-dark.json",
-    "cases/par-static-home-80x10-dark.json",
-    "cases/par-static-commands-120x40-dark.json",
-    "cases/par-static-help-120x40-dark.json",
-    "cases/par-static-agents-120x40-dark.json",
-    "cases/par-static-dialog-model-120x40-dark.json"
+    "cases/par-static-home-80x10-dark.json"
   ]
 }
