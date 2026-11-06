@@ -2989,7 +2989,11 @@ fn paint_fence_block(
             crate::native_mermaid::MermaidOutcome::Rendered(frame) => {
                 let request = crate::native_mermaid::DiagramRequest {
                     kind: frame.kind,
-                    source: &fence.source,
+                    // A retained/partial frame is produced from `frame.source`,
+                    // not the currently failing fence source.  Re-painting
+                    // from the latter would make the renderer discard the
+                    // last-good diagram during streaming recovery.
+                    source: &frame.source,
                     width: renderer.effective_width(width),
                     theme: renderer.theme(),
                 };
@@ -3014,7 +3018,18 @@ fn paint_fence_block(
         return;
     }
     if let Some(fence) =
-        crate::native_math::MathFence::from_code_block(language, source, raw, block_id, false)
+        crate::native_math::MathFence::from_code_block(
+            language,
+            source,
+            raw,
+            block_id,
+            // The flow owns the streaming flag in upstream.  The native
+            // projection has no separate stream handle, so an unclosed
+            // opening fence is the observable equivalent for this block.
+            crate::native_math::parse_fence_info(raw).is_some_and(|info| {
+                !crate::native_math::fence_closed_at_end(raw, info.marker, info.marker_len)
+            }),
+        )
     {
         // MD-009: real math producer. The engine ports
         // `packages/latex/src/render.ts` (`renderLatex = layoutMath(parse...)`)
