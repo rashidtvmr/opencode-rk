@@ -3665,10 +3665,41 @@ impl DialogView {
                                 crate::native_diff_view::MAX_DIFF_LINES,
                                 width,
                             );
-                            for row in rendered.rows.iter() {
+                            // Keep the split surface bounded just like the unified
+                            // viewer. Preserve the height of omitted chunks so the
+                            // viewport does not jump when scrolling through a large
+                            // patch. The viewer's heading is outside this scroll area.
+                            let viewport = height.saturating_sub(lines.len()).max(1);
+                            let (first, last) = if rendered.rows.len() > crate::native_diff_view::VIRTUAL_MIN_LINES {
+                                crate::native_diff_view::visible_chunk_range(
+                                    rendered.rows.len().div_ceil(crate::native_diff_view::VIRTUAL_CHUNK_LINES),
+                                    dialog.execute_scroll,
+                                    viewport,
+                                )
+                            } else {
+                                (0, rendered.rows.len().saturating_sub(1) / crate::native_diff_view::VIRTUAL_CHUNK_LINES)
+                            };
+                            for (index, row) in rendered.rows.iter().enumerate() {
+                                if rendered.rows.len() > crate::native_diff_view::VIRTUAL_MIN_LINES {
+                                    let chunk = index / crate::native_diff_view::VIRTUAL_CHUNK_LINES;
+                                    if chunk < first || chunk > last {
+                                        if index % crate::native_diff_view::VIRTUAL_CHUNK_LINES == 0 {
+                                            let omitted = (rendered.rows.len() - index).min(crate::native_diff_view::VIRTUAL_CHUNK_LINES);
+                                            lines.push(line(format!("… {omitted} lines …"), Role::Description));
+                                        }
+                                        continue;
+                                    }
+                                }
                                 match row {
                                     crate::native_diff_view::SplitRow::Full(full) => {
-                                        lines.push(line(full.content.clone(), Role::Item));
+                                        lines.push(line(full.content.clone(), match full.role {
+                                            crate::native_diff_view::DiffLineRole::Added => Role::Action,
+                                            crate::native_diff_view::DiffLineRole::Removed => Role::Error,
+                                            crate::native_diff_view::DiffLineRole::HunkHeader
+                                            | crate::native_diff_view::DiffLineRole::FileHeader
+                                            | crate::native_diff_view::DiffLineRole::DiffHeader => Role::Heading,
+                                            _ => Role::Item,
+                                        }));
                                     }
                                     crate::native_diff_view::SplitRow::Pair { left, right } => {
                                         let mut text = String::new();
@@ -3680,7 +3711,12 @@ impl DialogView {
                                             text.push(' ');
                                             text.push_str(&cell.text);
                                         }
-                                        lines.push(line(text, Role::Item));
+                                        let role = match (left.as_ref().map(|cell| cell.role), right.as_ref().map(|cell| cell.role)) {
+                                            (_, Some(crate::native_diff_view::DiffLineRole::Added)) => Role::Action,
+                                            (Some(crate::native_diff_view::DiffLineRole::Removed), _) => Role::Error,
+                                            _ => Role::Item,
+                                        };
+                                        lines.push(line(text, role));
                                     }
                                 }
                             }
