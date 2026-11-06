@@ -14458,6 +14458,9 @@ fn native_loop(
                         continue;
                     }
                     if kind == 7 {
+                        if view.set_prompt_footer_hover(x, y) {
+                            needs_paint = true;
+                        }
                         // SIDE-14: pinned footer hover (`footer.tsx:98-109`
                         // `onMouseOver`/`onMouseOut` on the
                         // `sidebar.footer.location` box). Repaint only on a

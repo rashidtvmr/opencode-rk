@@ -245,6 +245,10 @@ pub struct NativeView {
     /// Painted bounds `(x, y, cells)` of the footer live label in frame
     /// coordinates, so the label admits a pointer hit exactly where it drew.
     live_footer_hit: Option<(u16, u16, u16)>,
+    /// Painted prompt status/location slot `(x, y, cells)`.
+    prompt_footer_hit: Option<(u16, u16, u16)>,
+    footer_live_hovered: bool,
+    footer_location_hovered: bool,
     /// CP-38: image cells tracked from the live paste path, painted as the
     /// composer preview strip (`native_paste::image_preview`).
     pub(crate) preview_items: Vec<crate::native_paste::PreviewItem>,
@@ -1346,6 +1350,9 @@ impl NativeView {
             live_subagents: 0,
             live_first_child: None,
             live_footer_hit: None,
+            prompt_footer_hit: None,
+            footer_live_hovered: false,
+            footer_location_hovered: false,
             preview_items: Vec::new(),
             preview_strip_painted: None,
             image_preview_enabled: true,
@@ -1430,6 +1437,7 @@ impl NativeView {
         self.footer_hit = None;
         self.context_usage_hit = None;
         self.live_footer_hit = None;
+        self.prompt_footer_hit = None;
         self.sidebar_content_height = 0;
         self.layout = Layout::new(cols, rows);
     }
@@ -1925,6 +1933,20 @@ impl NativeView {
     #[must_use]
     pub fn live_footer_hit(&self) -> Option<(u16, u16, u16)> {
         self.live_footer_hit
+    }
+
+    #[must_use]
+    pub fn prompt_footer_hit(&self) -> Option<(u16, u16, u16)> { self.prompt_footer_hit }
+
+    pub fn set_prompt_footer_hover(&mut self, x: u16, y: u16) -> bool {
+        let hovered = self.prompt_footer_hit.is_some_and(|(left, top, width)|
+            x >= left && x < left.saturating_add(width) && y == top);
+        let live = hovered && self.live_subagent_label().is_some();
+        let location = hovered && !self.prompt_surface.is_busy();
+        if self.footer_live_hovered == live && self.footer_location_hovered == location { return false; }
+        self.footer_live_hovered = live;
+        self.footer_location_hovered = location;
+        true
     }
 
     /// Subagent target under the pointer, when the live label was admitted.
@@ -2590,6 +2612,8 @@ impl NativeView {
             interrupt: self.rail_interrupt,
             now_ms: self.rail_now_ms,
             location: location.as_deref(),
+            live_hovered: self.footer_live_hovered,
+            location_hovered: self.footer_location_hovered,
             // Same budget the caller's `footer_directory` fallback used.
             location_width: usize::from(self.layout.cols.saturating_sub(4)),
             ..crate::native_status_rail::RailFacts::new(usize::from(self.layout.cols))
@@ -4899,6 +4923,12 @@ impl NativeView {
                 let (footer, live) = self.composer_footer_row(width, inner_width, prompt.rail, busy);
                 let row = body.len();
                 body.push(padded(&footer, width));
+                if prompt.rail {
+                    let cells = prompt_metadata_cells(&footer).min(usize::from(u16::MAX)) as u16;
+                    if cells > 0 {
+                        self.prompt_footer_hit = Some((0, u16::try_from(row).unwrap_or(u16::MAX), cells));
+                    }
+                }
                 if let Some((x, cells)) = live {
                     self.live_footer_hit = Some((
                         x,
@@ -5248,6 +5278,10 @@ impl NativeView {
                 hit.3 = hit.3.saturating_add(self.tab_reservation.y_offset());
             }
             if let Some(hit) = self.live_footer_hit.as_mut() {
+                hit.0 = hit.0.saturating_add(self.tab_reservation.x_offset());
+                hit.1 = hit.1.saturating_add(self.tab_reservation.y_offset());
+            }
+            if let Some(hit) = self.prompt_footer_hit.as_mut() {
                 hit.0 = hit.0.saturating_add(self.tab_reservation.x_offset());
                 hit.1 = hit.1.saturating_add(self.tab_reservation.y_offset());
             }
