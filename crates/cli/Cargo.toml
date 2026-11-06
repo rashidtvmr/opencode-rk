@@ -47,6 +47,14 @@ tracing-subscriber.workspace = true
 default = ["native"]
 native = ["opencode-rk-opentui-bridge/native"]
 
+# UI-parity runtime harness (see crates/cli/tests/parity/README.md). Wraps the
+# python-only styled-cell capture/comparator so `cargo test` proves real rendered
+# cell equality against the recorded goldens, not just a self-test.
+[[test]]
+name = "ui_parity_harness"
+path = "tests/parity/ui_parity_harness.rs"
+required-features = ["native"]
+
 [dev-dependencies]
 opencode-rk-opentui-bridge = { path = "../opentui-bridge", features = ["native"] }
 serde_json = "1"

@@ -40,7 +40,7 @@
   "product": {
    "executable": "oc2",
    "name": "opencode-rk",
-   "sha256": "6fd34d772e5e1cf703230d26932941fc0caedd30054c64686dc52991618d305d",
+   "sha256": "37fe0235d835a69ef543c8733b3c5811dd9cb473cd544c8827aec8aea6bfb9e7",
    "version": "oc2 0.1.0-alpha.1"
   },
   "theme": {
@@ -48,6 +48,7 @@
    "name": "opencode"
   }
  },
+ "class": "baseline",
  "cursor": {
   "col": 16,
   "row": 17,
@@ -71,10 +72,26 @@
       "bold",
       "underline"
      ],
-     "bg": "#141414",
+     "bg": "#1e1e1e",
      "c": 0,
-     "fg": "#fab283",
-     "n": 35
+     "fg": "#b5b5b5",
+     "n": 3
+    },
+    {
+     "attrs": [
+      "bold"
+     ],
+     "bg": "#1e1e1e",
+     "c": 3,
+     "fg": "#eeeeee",
+     "n": 29
+    },
+    {
+     "attrs": [],
+     "bg": "#0a0a0a",
+     "c": 32,
+     "fg": "#808080",
+     "n": 3
     },
     {
      "attrs": [],
@@ -84,7 +101,7 @@
      "n": 65
     }
    ],
-   "text": "Chat •                           +                                                                  ",
+   "text": "   Chat                          +                                                                  ",
    "w": 100
   },
   {
@@ -546,10 +563,17 @@
     },
     {
      "attrs": [],
-     "bg": "#1e1e1e",
+     "bg": "#0a0a0a",
      "c": 13,
+     "fg": "#5c9cf5",
+     "n": 1
+    },
+    {
+     "attrs": [],
+     "bg": "#1e1e1e",
+     "c": 14,
      "fg": "#eeeeee",
-     "n": 75
+     "n": 74
     },
     {
      "attrs": [],
@@ -573,10 +597,17 @@
     },
     {
      "attrs": [],
-     "bg": "#1e1e1e",
+     "bg": "#0a0a0a",
      "c": 13,
+     "fg": "#5c9cf5",
+     "n": 1
+    },
+    {
+     "attrs": [],
+     "bg": "#1e1e1e",
+     "c": 14,
      "fg": "#eeeeee",
-     "n": 75
+     "n": 74
     },
     {
      "attrs": [],
@@ -600,10 +631,17 @@
     },
     {
      "attrs": [],
-     "bg": "#1e1e1e",
+     "bg": "#0a0a0a",
      "c": 13,
+     "fg": "#5c9cf5",
+     "n": 1
+    },
+    {
+     "attrs": [],
+     "bg": "#1e1e1e",
+     "c": 14,
      "fg": "#eeeeee",
-     "n": 75
+     "n": 74
     },
     {
      "attrs": [],
@@ -627,10 +665,17 @@
     },
     {
      "attrs": [],
-     "bg": "#1e1e1e",
+     "bg": "#0a0a0a",
      "c": 13,
+     "fg": "#5c9cf5",
+     "n": 1
+    },
+    {
+     "attrs": [],
+     "bg": "#1e1e1e",
+     "c": 14,
      "fg": "#eeeeee",
-     "n": 67
+     "n": 66
     },
     {
      "attrs": [],
@@ -668,9 +713,9 @@
     },
     {
      "attrs": [],
-     "bg": "#1e1e1e",
+     "bg": "#0a0a0a",
      "c": 13,
-     "fg": "#eeeeee",
+     "fg": "#5c9cf5",
      "n": 1
     },
     {
