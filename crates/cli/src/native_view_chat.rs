@@ -4241,9 +4241,10 @@ impl ChatView {
         // `TRANSCRIPT_BACKFILL_CHUNK`-weighted page of older rows per pass
         // (`index.tsx:465-485`), looping only until the scrolled window is
         // covered so a bounded `scroll_up` plus one render still exposes the
-        // oldest pane exactly as before. Residual: the Rust model's expanded
-        // weight omits upstream's header `+1` in the child sum, so expanded
-        // groups undercount by one rendered header each.
+        // oldest pane exactly as before. The model's expanded weight includes
+        // the group's own header exactly like upstream's reduce seed of `1`
+        // (`mount-budget.ts:19`, `native_message_rows.rs::tree_weight`), so
+        // mounted entries never undercount the rendered span.
         let seed = crate::native_message_rows::rows_before(
             &weights, ops.len(), crate::native_message_rows::TRANSCRIPT_TAIL_ROWS);
         let mut mounting = match self.transcript_mounting.get() {
