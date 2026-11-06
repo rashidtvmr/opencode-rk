@@ -4004,7 +4004,35 @@ impl DialogView {
                 .position(|(index, _, _, _)| Some(*index) == self.selection)
                 .unwrap_or(0);
             let start = selected_pos.saturating_sub(capacity.saturating_sub(1));
-            for &(index, choice, disabled, row_footer) in visible.iter().skip(start).take(capacity) {
+            let select_experiment = dialog.select.as_ref().map(|select| select.experiment());
+            let mut last_category: Option<&str> = None;
+            let mut painted_options = 0usize;
+            for &(index, choice, disabled, row_footer) in visible.iter().skip(start) {
+                // DialogSelect's row budget includes category headings (and a
+                // one-row gap before every heading after the first) and option
+                // details, not just selectable rows (`dialog-select.tsx:253-259).
+                // The old native painter silently omitted these rows, making
+                // short-height dialogs disagree with the upstream viewport.
+                if let Some(select) = dialog.select.as_ref() {
+                    let option = select.options().iter().find(|option| option.id.parse::<usize>().ok() == Some(index));
+                    let category = option.and_then(|option| option.category.as_deref());
+                    if !flattened && category != last_category {
+                        let heading_cost = usize::from(last_category.is_some()) + usize::from(category.is_some());
+                        if lines.len().saturating_add(heading_cost) >= height || painted_options >= capacity {
+                            break;
+                        }
+                        if last_category.is_some() {
+                            lines.push(line(String::new(), Role::Description));
+                        }
+                        if let Some(category) = category {
+                            lines.push(line(category.to_owned(), Role::Heading));
+                        }
+                        last_category = category;
+                    }
+                }
+                if lines.len() >= height || painted_options >= capacity {
+                    break;
+                }
                 if lines.len() < height && !disabled && self.phase == Phase::Open {
                     hits[lines.len()] = Some(index);
                 }
@@ -4063,6 +4091,20 @@ impl DialogView {
                     // `Line` carries one role, so the footer inherits the row
                     // role — a recorded residual (no dialog span channel yet).
                     if self.selection == Some(index) { Role::Selected } else if disabled { Role::Description } else if dialog.kind == DialogKind::Permission { Role::Action } else { Role::Item }));
+                painted_options += 1;
+                if let Some(select) = dialog.select.as_ref() {
+                    if let Some(option) = select.options().iter().find(|option| option.id.parse::<usize>().ok() == Some(index)) {
+                        for detail in &option.details {
+                            if lines.len() >= height || painted_options >= capacity { break; }
+                            lines.push(line(detail.clone(), Role::Description));
+                        }
+                    }
+                }
+            }
+            if let (Some(select), Some(experiment)) = (dialog.select.as_ref(), select_experiment) {
+                if experiment.ellipsis_row && select.rows() > capacity && lines.len() < height {
+                    lines.push(line("…".to_string(), Role::Description));
+                }
             }
             // DIALOG-06/09: the select's own empty/no-match view, bounded to
             // the remaining body rows.
@@ -11939,6 +11981,25 @@ mod dialog07_tests {
             row.ends_with("Group"),
             "flattened footer falls back to category: {row:?}"
         );
+    }
+
+    /// DIALOG-05: the select painter reserves category heading/gap and detail
+    /// rows in the same viewport budget as the upstream DialogSelect.
+    #[test]
+    fn dialog05_paints_category_and_detail_rows_in_viewport() {
+        let view = select_view(
+            vec![
+                SelectOption::new("0", "First")
+                    .with_category("Group A")
+                    .with_details(vec!["first detail".into()]),
+                SelectOption::new("1", "Second").with_category("Group B"),
+            ],
+            false,
+        );
+        let rows = view.render(40, 12);
+        assert!(rows.iter().any(|row| row.contains("Group A")));
+        assert!(rows.iter().any(|row| row.contains("first detail")));
+        assert!(rows.iter().any(|row| row.contains("Group B")));
     }
 
     /// A title that collides with the footer is truncated; the footer stays
