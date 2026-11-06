@@ -110,6 +110,12 @@ pub struct TabInput {
     /// in the accent `unreadColor` (`:125-129,565`). Error-unread has no native
     /// producer yet (TAB-21).
     pub unread: bool,
+    /// TAB-07: error-unread fact (`status.unread === "error"`,
+    /// `context/session-tabs.tsx:160-162`): an errored background turn paints
+    /// its unread indicator `theme.text.feedback.error.base` instead of the
+    /// accent (`session-tabs.tsx:125-130`). Fed from
+    /// `NavigationState::is_unread_failed`; only meaningful alongside `unread`.
+    pub unread_error: bool,
     /// Marquee window start for the hovered title (0 paints the plain title).
     /// The strip applies it with the exact title budget its layout reserves.
     pub marquee_offset: usize,
@@ -149,6 +155,7 @@ impl TabInput {
             attention: None,
             session: tab.session.clone(),
             unread: false,
+            unread_error: false,
             marquee_offset: 0,
             indicators: TabIndicators::Status,
             number: String::new(),
@@ -624,8 +631,9 @@ pub fn horizontal_session_paint_with_semantics(
     // attention must be tested before busy or a crying `!`/`?` indicator would
     // keep the running hue instead of the accent. The activity-unread accent
     // override is applied for the row's `unread` fact in
-    // `with_row_colors_semantic`. (The `unread == Error` half has no native
-    // producer yet — see TAB-21.)
+    // `with_row_colors_semantic`. (The `unread == Error` half resolves the
+    // failed-outcome tint in `with_row_colors_semantic` via `row_unread_error`,
+    // fed by `NavigationState::is_unread_failed` — see TAB-07.)
     paint.number_fg = if flags.needs_attention {
         semantic.map_or_else(|| palette.get(Slot::Warning), |theme| theme.tab_attention.rgba)
     } else if flags.busy {
@@ -739,6 +747,11 @@ pub struct TabStrip {
     /// indicator color to the accent `unreadColor` when the row is unread and
     /// not pending (`session-tabs.tsx:148-169`).
     row_unread: Vec<bool>,
+    /// TAB-07: error-unread fact per visible session row, aligned with
+    /// `row_unread`. A failed outcome (`context/session-tabs.tsx:160-162`)
+    /// swaps the indicator color to `text.feedback.error.base`
+    /// (`session-tabs.tsx:125-130`) instead of the accent.
+    row_unread_error: Vec<bool>,
     /// Fade window per visible session row, aligned with `rects` (horizontal
     /// only). `None` means every title cell keeps its solid color.
     pub row_fades: Vec<Option<TitleFade>>,
@@ -856,8 +869,10 @@ impl TabStrip {
                 input.attention = attention_kind;
                 // `context/session-tabs.tsx:139-146`: unread reads the root
                 // session only, so a tab's activity-unread fact is the exact
-                // `NavigationState` mark for that session.
+                // `NavigationState` mark for that session. The failed-outcome
+                // mark (`:160-162`) rides alongside it.
                 input.unread = nav.is_unread(&tab.session);
+                input.unread_error = nav.is_unread_failed(&tab.session);
                 input
             })
             .collect()
@@ -1104,6 +1119,7 @@ impl TabStrip {
                     out.row_colors.push(color);
                     out.row_flags.push(input.flags);
                     out.row_unread.push(input.unread);
+                    out.row_unread_error.push(input.unread_error);
                     out.row_prompt_pulse.push(input.prompt_pulse);
                 }
                 x_or_y = x_or_y.saturating_add(slot_width);
@@ -1384,8 +1400,9 @@ impl TabStrip {
             .iter()
             .zip(self.row_flags.iter())
             .zip(self.row_unread.iter())
+            .zip(self.row_unread_error.iter())
             .enumerate()
-            .map(|(index, ((color, flags), unread))| {
+            .map(|(index, (((color, flags), unread), unread_error))| {
                 let mut paint =
                     horizontal_session_paint_with_semantics(*color, flags, palette, semantic);
                 // TAB-06: a `promptPulse` change ignites the number cell —
@@ -1415,8 +1432,15 @@ impl TabStrip {
                     && *color != TabCellColor::Selected
                 {
                     use crate::native_theme_runtime::Slot;
-                    paint.number_fg =
-                        semantic.map_or_else(|| palette.get(Slot::Warning), |theme| theme.tab_attention.rgba);
+                    // TAB-07: a failed outcome swaps the accent for
+                    // `theme.text.feedback.error.base` (`session-tabs.tsx:
+                    // 125-130`); otherwise the activity accent shows.
+                    paint.number_fg = if *unread_error {
+                        semantic
+                            .map_or_else(|| palette.get(Slot::Error), |theme| theme.text_feedback_error.rgba)
+                    } else {
+                        semantic.map_or_else(|| palette.get(Slot::Warning), |theme| theme.tab_attention.rgba)
+                    };
                 }
                 paint
             })
@@ -2030,15 +2054,18 @@ pub fn member_busy(running: bool, pending: &[PendingKind]) -> bool {
 /// `pending` lists the session's pending items, of which every non-synthetic
 /// kind marks the tab busy through `member_busy` (`:167-171`) on top of the
 /// daemon running fact `from_navigation` already rolled into `flags.busy`.
+/// TAB-05: `status.busy` is the live family roll-up (a running descendant
+/// marks the root busy) and ORs into `flags.busy` the same way.
 pub fn apply_live_status(
     input: &mut TabInput,
     status: Option<&TabStatus>,
     pending: &[PendingKind],
 ) {
+    let live_busy = status.map_or(false, |status| status.busy);
     if let Some(status) = status {
         input.prompt_pulse = status.prompt_pulse;
     }
-    input.flags.busy = member_busy(input.flags.busy, pending);
+    input.flags.busy = member_busy(input.flags.busy || live_busy, pending);
 }
 
 /// TAB-06: the live queue-seam enqueue feed. `context/session-tabs.tsx:334-338`
@@ -2890,6 +2917,7 @@ mod tests {
             flags: TabFlags::default(),
             attention: None,
             unread: false,
+            unread_error: false,
             marquee_offset: 0,
             indicators: TabIndicators::Status,
             number: String::new(),
@@ -4098,6 +4126,66 @@ mod tests {
         );
     }
 
+    /// TAB-05 live path: the `/children` listing feed (the `native_loop`
+    /// roll-up for the active route session) marks the root tab busy through
+    /// `apply_live_status` exactly like upstream's family `busy` scan
+    /// (`context/session-tabs.tsx:143-173`). The member builder filters the
+    /// root row out, so a root-only "running" entry never self-marks.
+    #[test]
+    fn tab_05_live_child_busy_rolls_into_root_flags() {
+        use crate::native_children::live;
+        use serde_json::json;
+        let mut listing = live::Status::default();
+        listing
+            .apply("root", &json!({"children": [
+                {"session_id": "root", "state": "running"},
+                {"session_id": "child", "state": "running"},
+                {"session_id": "idle-child", "state": "idle"},
+            ]}))
+            .unwrap();
+
+        let build = || {
+            let root = EMPTY_TAB_STATUS;
+            let members: Vec<TabStatus> = listing
+                .rows()
+                .iter()
+                .filter(|row| row.session_id != "root")
+                .map(|row| TabStatus {
+                    busy: row.is_running(),
+                    ..TabStatus::default()
+                })
+                .collect();
+            TabStatus::family(root, &members)
+        };
+        assert!(build().busy, "any running child marks the root busy");
+
+        let mut input = input("root", "root session");
+        crate::native_tabs::apply_live_status(&mut input, Some(&build()), &[]);
+        assert!(input.flags.busy, "the live family roll-up reaches the strip flags");
+
+        // A root-only listing (all other rows idle) does not self-mark.
+        let mut alone = live::Status::default();
+        alone
+            .apply("root", &json!({"children": [
+                {"session_id": "root", "state": "running"},
+                {"session_id": "idle-child", "state": "idle"},
+            ]}))
+            .unwrap();
+        let idle_members: Vec<TabStatus> = alone
+            .rows()
+            .iter()
+            .filter(|row| row.session_id != "root")
+            .map(|row| TabStatus {
+                busy: row.is_running(),
+                ..TabStatus::default()
+            })
+            .collect();
+        assert!(!TabStatus::family(EMPTY_TAB_STATUS, &idle_members).busy);
+        let mut idle_input = input("root", "root session");
+        crate::native_tabs::apply_live_status(&mut idle_input, None, &[]);
+        assert!(!idle_input.flags.busy, "a no-op live feed never fabricates busy");
+    }
+
     #[test]
     fn tab_06_background_enqueue_flash_and_synthetic_parking() {
         // context/session-tabs.tsx:355-361 enqueue flash; :167-171 pending busy.
@@ -5191,5 +5279,57 @@ mod tests {
             "live semantic path paints the unread marker with hue.accent[200]"
         );
         assert_ne!(strip.row_paints[index].number_fg, palette.get(Slot::Warning));
+    }
+
+    /// TAB-07 live-path color: an errored turn (`outcome === "failed"`,
+    /// `context/session-tabs.tsx:160-162`) paints the unread indicator
+    /// `theme.text.feedback.error.base` (`session-tabs.tsx:125-130`), not the
+    /// activity accent. Plain activity-unread keeps the accent, and a
+    /// busy/attention tab never takes the unread tint at all.
+    #[test]
+    fn tab_07_error_unread_paints_feedback_error_not_activity_accent() {
+        use crate::native_navigation::NavigationState;
+        use crate::native_theme_runtime::{Palette, RuntimeTheme, ThemeMode, Slot};
+        let theme = RuntimeTheme::builtin_default(ThemeMode::Dark);
+        let palette = Palette::opencode_dark();
+        let semantic = theme.semantic.as_ref().expect("built-in V2 semantic palette");
+        let mut nav = NavigationState::new();
+        nav.open_tab(SessionRef("a".into()));
+        nav.open_tab(SessionRef("b".into()));
+        nav.open_tab(SessionRef("c".into()));
+        nav.mark_unread_failed(&SessionRef("b".into()));
+        nav.mark_unread(&SessionRef("c".into()));
+        // Focus "a" so "b" and "c" are unviewed background tabs.
+        nav.open_tab(SessionRef("a".into()));
+
+        let inputs = TabStrip::from_navigation(&nav, &[]);
+        let failed = inputs.iter().find(|i| i.session == SessionRef("b".into())).unwrap();
+        assert!(failed.unread_error && failed.unread, "failed turn carries both marks");
+        let activity = inputs.iter().find(|i| i.session == SessionRef("c".into())).unwrap();
+        assert!(!activity.unread_error && activity.unread, "activity turn has no failed mark");
+
+        let strip = TabStrip::render_with_hover(&inputs, TabOrientation::Horizontal, 60, 1, 0, None)
+            .with_row_colors_semantic(&palette, theme.semantic.as_ref());
+        let failed_index = strip.rects.iter().position(|(id, _)| id == &SessionRef("b".into())).unwrap();
+        let activity_index = strip.rects.iter().position(|(id, _)| id == &SessionRef("c".into())).unwrap();
+        assert_eq!(
+            strip.row_paints[failed_index].number_fg,
+            semantic.text_feedback_error.rgba,
+            "failed outcome paints text.feedback.error.base"
+        );
+        assert_ne!(strip.row_paints[failed_index].number_fg, semantic.tab_attention.rgba);
+        assert_eq!(
+            strip.row_paints[activity_index].number_fg,
+            semantic.tab_attention.rgba,
+            "activity-unread keeps the accent unreadColor"
+        );
+        // Legacy palette fallback: Slot::Error, not Warning.
+        let legacy = TabStrip::render_with_hover(&inputs, TabOrientation::Horizontal, 60, 1, 0, None)
+            .with_row_colors_semantic(&palette, None);
+        assert_eq!(
+            legacy.row_paints[failed_index].number_fg,
+            palette.get(Slot::Error),
+            "legacy fallback resolves the error slot"
+        );
     }
 }
