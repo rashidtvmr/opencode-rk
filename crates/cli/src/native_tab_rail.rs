@@ -1171,7 +1171,7 @@ pub fn compact_tooltip(
             width,
             height,
         },
-        title: truncate_cells(title, text_width),
+        title: truncate_width_cells(title, text_width),
         detail: truncate_cells(detail, text_width),
     })
 }
@@ -1185,6 +1185,21 @@ fn truncate_cells(value: &str, width: u16) -> String {
             used += cells;
         }
     });
+    out
+}
+
+fn truncate_width_cells(value: &str, width: u16) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    if RailFrame::display_width(value) <= usize::from(width) {
+        return value.to_owned();
+    }
+    if width == 1 {
+        return "…".to_owned();
+    }
+    let mut out = truncate_cells(value, width - 1);
+    out.push('…');
     out
 }
 
@@ -2327,6 +2342,20 @@ mod tests {
                 None
             );
         }
+    }
+
+    #[test]
+    fn tab_12_tooltip_title_uses_width_ellipsis_but_detail_is_hard_cut() {
+        let tooltip = compact_tooltip(1, 10, 8, 2, true, false, false, "abcdefgh", "abcdefgh").unwrap();
+        assert_eq!(tooltip.title, "abcdef".to_owned() + "…");
+        assert_eq!(tooltip.detail, "abcdefg");
+
+        let unchanged = compact_tooltip(1, 10, 8, 2, true, false, false, "abc", "abc").unwrap();
+        assert_eq!(unchanged.title, "abc");
+
+        let narrow = compact_tooltip(1, 4, 8, 2, true, false, false, "abc", "abc").unwrap();
+        assert_eq!(narrow.title, "…");
+        assert_eq!(narrow.detail, "a");
     }
 
     #[test]
