@@ -3112,6 +3112,34 @@ impl DialogView {
         true
     }
 
+    /// Return the original choice index painted at a content row.  The layout
+    /// hit map deliberately omits disabled, pending, and non-choice rows.
+    #[must_use]
+    pub fn hover_index_at_row(&self, metrics: DialogLayoutMetrics, row: usize) -> Option<usize> {
+        let (_, hits, _) = self.layout(metrics);
+        hits.get(row).copied().flatten()
+    }
+
+    /// Apply a pointer hover without submitting the dialog. Select dialogs
+    /// move their filtered pointer model; ordinary dialogs update the dialog
+    /// selection directly. Returns whether the visible selection changed.
+    pub fn hover_at_row(&mut self, metrics: DialogLayoutMetrics, row: usize) -> bool {
+        let Some(index) = self.hover_index_at_row(metrics, row) else { return false };
+        if self.selection == Some(index) { return false; }
+        if let Some(select) = self.dialog.as_mut().and_then(|dialog| dialog.select.as_mut()) {
+            let Some(flat) = select.flat_list().iter().position(|option| option.id == index.to_string()) else {
+                return false;
+            };
+            let changed = select.pointer_move(flat);
+            if changed {
+                self.sync_select_selection();
+            }
+            changed
+        } else {
+            self.select(index)
+        }
+    }
+
     /// Move the selection backward, wrapping and skipping disabled choices.
     pub fn prev(&mut self) {
         self.step(false);

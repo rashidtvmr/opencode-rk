@@ -10184,6 +10184,7 @@ fn native_loop(
     // is advanced on the animation tick so auto-dismiss is deterministic.
     let mut toast = crate::native_toast::Toast::new();
     let mut toast_now_ms: u64 = 0;
+    let mut toast_hovered = false;
     let mut chrome = crate::native_modal_layer::ChromeModel::new();
     // DIALOG-19: the ticked frame each loop iteration paints from.
     let mut chrome_frame = crate::native_modal_layer::ChromeFrame::default();
@@ -12785,13 +12786,13 @@ fn native_loop(
             // (`ui/toast.tsx`); `None` when nothing is visible or the viewport
             // cannot host the minimum box.
             let toast_frame = toast.current().and_then(|options| {
-                crate::native_toast::ToastFrame::layout(
+                    crate::native_toast::ToastFrame::layout(
                     options,
                     toast.pending(),
                     viewport.0,
                     viewport.1,
                     &crate::native_toast::ToastPalette::from_palette(&theme.palette, theme.mode),
-                    false,
+                    toast_hovered,
                 )
             });
             // DIALOG-19: paint the ticked lifecycle overlays from live shell
@@ -13724,6 +13725,20 @@ fn native_loop(
             && import_dialog.as_ref().is_none_or(|import| !import.is_open())
             && view.composer_region(&draft).and_then(|anchor| completion.panel_at(&draft, draft_cursor, anchor)).is_some();
         if completion_mouse_eligible {
+            if let native_input_decoder::InputEvent::Mouse { x, y, kind: 7, modifiers: 0 } = event {
+                if let Some(panel) = view.composer_region(&draft).and_then(|anchor| completion.panel_at(&draft, draft_cursor, anchor)) {
+                    let inside = x >= panel.x && x < panel.x.saturating_add(panel.width)
+                        && y >= panel.y && y < panel.y.saturating_add(panel.height);
+                    if inside {
+                        if let Some(value) = panel.value_at(x, y) {
+                        let changed = completion.visible().iter().position(|item| item.value == value)
+                            .is_some_and(|index| completion.hover_select(index));
+                        if changed { needs_paint = true; }
+                        }
+                        continue;
+                    }
+                }
+            }
             if let native_input_decoder::InputEvent::Mouse { x, y, kind: 0, modifiers: 0 } = event {
             if let Some(panel) = view.composer_region(&draft).and_then(|anchor| completion.panel_at(&draft, draft_cursor, anchor)) {
                             if let Some(value) = panel.value_at(x, y).map(str::to_owned).filter(|_| !panel.is_disabled_at(x, y)) {
@@ -14975,6 +14990,14 @@ fn native_loop(
                 if view.dialogs.intercepts_input() {
                     let modal = view.modal_presentation();
                     let row = y.checked_sub(modal.content_y).map(usize::from);
+                    if kind == 7 && modifiers == 0 {
+                        if let Some(row) = row {
+                            if view.dialogs.hover_at_row(view.dialog_layout_metrics(modal.content_width), row) {
+                                needs_paint = true;
+                            }
+                        }
+                        continue;
+                    }
                     if kind == 0 && modifiers == 0 && x >= modal.content_x
                         && x < modal.content_x.saturating_add(modal.content_width) {
                         if let Some(row) = row {
@@ -15023,6 +15046,30 @@ fn native_loop(
                     }
                     needs_paint = true;
                     continue;
+                }
+                // Toast hover is geometry-only: the rendered frame remains the
+                // source of truth for the action affordance and click target.
+                if kind == 7 || kind == 2 {
+                    let palette = crate::native_toast::ToastPalette::from_palette(&theme.palette, theme.mode);
+                    let inside = toast.current().and_then(|options| {
+                        crate::native_toast::ToastFrame::layout(options, toast.pending(), viewport.0, viewport.1, &palette, false)
+                    }).is_some_and(|frame| {
+                        x >= frame.x && x < frame.x.saturating_add(frame.width)
+                            && y >= frame.y && y < frame.y.saturating_add(frame.height)
+                    });
+                    if kind == 7 {
+                        if inside != toast_hovered {
+                            toast_hovered = inside;
+                            needs_paint = true;
+                        }
+                        continue;
+                    }
+                    if inside {
+                        let _ = toast.activate();
+                        toast_hovered = false;
+                        needs_paint = true;
+                        continue;
+                    }
                 }
                 if permission_editor.open {
                     let modal = view.modal_presentation();

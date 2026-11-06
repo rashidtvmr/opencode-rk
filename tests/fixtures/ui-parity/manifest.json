@@ -51,6 +51,20 @@
       "supports_events": true,
       "supports_state": true,
       "styled": true
+    },
+    "upstream-opentui": {
+      "command": [
+        "{PYTHON}",
+        "{TOOLS}/renderers/upstream_opentui.py"
+      ],
+      "timeout_s": 90,
+      "supports_events": false,
+      "supports_state": false,
+      "styled": true,
+      "product": "opencode",
+      "upstream_commit": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+      "opentui_version": "0.6.8",
+      "opentui_commit": "8d6065a3e60039d16c6ee697692dcfbc46d3c786"
     }
   },
   "fixtures": [
