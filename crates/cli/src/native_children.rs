@@ -889,6 +889,18 @@ impl Panel {
             .map(|r| r.hit)?;
         self.mouse_from_hit(hit)
     }
+
+    /// Hovering a child list row updates only the highlighted row; buttons and
+    /// footer controls remain press-only (`subagents-tab.tsx:224`).
+    pub fn hover(&mut self, row: u16, column: u16, width: u16, height: usize) -> bool {
+        if column >= width { return false; }
+        let hit_map = self.hit_map(width, height);
+        let Some(regions) = hit_map.get(usize::from(row)) else { return false };
+        let Some(Hit::Child(index)) = regions.iter().find(|r| column >= r.start && column <= r.end).map(|r| r.hit) else { return false };
+        if index >= self.rows.len() || self.selected == index { return false }
+        self.selected = index;
+        true
+    }
     fn mouse_from_hit(&mut self, hit: Hit) -> Option<Action> {
         match hit {
             Hit::Child(index) => {

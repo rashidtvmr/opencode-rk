@@ -13607,7 +13607,16 @@ fn native_loop(
                         import.action(action, &policy);
                     }
                     native_input_decoder::InputEvent::Mouse { x, y, kind, modifiers } => {
-                        if kind == 0 && modifiers == 0 {
+                        if kind == 7 && modifiers == 0 {
+                            let modal = view.modal_presentation();
+                            if let Some(row) = y.checked_sub(modal.content_y).map(usize::from) {
+                                if let Some(col) = x.checked_sub(modal.content_x).map(usize::from) {
+                                    if col < usize::from(modal.content_width) && import.hover_at(usize::from(modal.content_width), view.modal_content_height(), row, col) {
+                                        needs_paint = true;
+                                    }
+                                }
+                            }
+                        } else if kind == 0 && modifiers == 0 {
                             let modal = view.modal_presentation();
                             if let Some(row) = y.checked_sub(modal.content_y).map(usize::from) {
                                 let content_x = modal.content_x;
@@ -15271,6 +15280,12 @@ fn native_loop(
                 }
                 if permission_editor.open {
                     let modal = view.modal_presentation();
+                    if kind == 7 && modifiers == 0 {
+                        if let Some((_, row)) = modal.content_point(x, y, view.modal_content_height()) {
+                            if permission_editor.hover(row, view.modal_content_height()) { needs_paint = true; }
+                        }
+                        continue;
+                    }
                     if kind == 0 && modifiers == 0 {
                         if let Some((column, row)) = modal.content_point(x, y, view.modal_content_height()) {
                             if let Some(decision) = permission_editor.click_action(column,row,modal.content_width,view.modal_content_height()) {
@@ -15283,6 +15298,12 @@ fn native_loop(
                 }
                 if appearance.open {
                     let modal = view.modal_presentation();
+                    if kind == 7 && modifiers == 0 {
+                        if appearance.hover_at(x, y, modal.content_x, modal.content_y, modal.content_width, view.modal_content_height() as u16) {
+                            needs_paint = true;
+                        }
+                        continue;
+                    }
                     if let Some(outcome) = appearance.pointer_outcome(
                         x,
                         y,
@@ -15310,6 +15331,14 @@ fn native_loop(
                 }
                 if children_panel.open {
                     let modal = view.modal_presentation();
+                    if kind == 7 && modifiers == 0
+                        && x >= modal.content_x
+                        && x < modal.content_x.saturating_add(modal.content_width)
+                        && y >= modal.content_y
+                    {
+                        if children_panel.hover(y - modal.content_y, x.saturating_sub(modal.content_x), modal.content_width, view.modal_content_height()) { needs_paint = true; }
+                        continue;
+                    }
                     if kind == 0 && modifiers == 0
                         && x >= modal.content_x
                         && x < modal.content_x.saturating_add(modal.content_width)

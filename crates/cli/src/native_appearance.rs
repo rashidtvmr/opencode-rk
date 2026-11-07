@@ -353,6 +353,24 @@ impl AppearanceEditor {
         }
     }
 
+    /// Pointer-over selects a rendered component row, but never changes its
+    /// settings. This is the native equivalent of the form row
+    /// `onMouseMove` in upstream `form.tsx:922-977`.
+    pub fn hover_at(&mut self, x: u16, y: u16, content_x: u16, content_y: u16,
+        content_width: u16, visible_rows: u16) -> bool {
+        let (col, row) = match (x.checked_sub(content_x), y.checked_sub(content_y)) {
+            (Some(col), Some(row)) => (col, row), _ => return false,
+        };
+        if col >= content_width || row >= visible_rows { return false; }
+        if row < 2 || row >= self.rows(content_width).len() as u16 { return false; }
+        if content_width >= 44 && col >= LABEL_SPAN_END { return false; }
+        let next = usize::from(row - 1);
+        if next > BoxId::ALL.len() { return false; }
+        if self.target == next { return false; }
+        self.target = next;
+        true
+    }
+
     /// Legacy viewport-unbounded dispatch; prefer [`pointer_hit`] so clipped
     /// rows stay inert.
     pub fn pointer_controls(&mut self, x: u16, y: u16, kind: u8, content_x: u16, content_y: u16, content_width: u16) -> bool {

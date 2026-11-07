@@ -193,6 +193,22 @@ impl ImportDialog {
         }
     }
 
+    /// Move the visible action highlight without activating it.  The row map
+    /// is shared with `action_at`, so clipped/inert rows cannot become hover
+    /// targets (`dialog-config.tsx` uses the same rendered affordances).
+    pub fn hover_at(&mut self, width: usize, height: usize, row: usize, column: usize) -> bool {
+        let Some(action) = self.action_at(width, height, row, column) else { return false };
+        let index = match self.phase {
+            Phase::Offer => [ImportAction::Import, ImportAction::NotNow].iter().position(|candidate| *candidate == action),
+            Phase::Preview => [ImportAction::Apply, ImportAction::Cancel].iter().position(|candidate| *candidate == action),
+            Phase::Applied | Phase::Error | Phase::Hidden => None,
+        };
+        let Some(index) = index else { return false };
+        if self.selected == index { return false }
+        self.selected = index;
+        true
+    }
+
     /// Action used by Esc for the current phase; unlike selected_action this
     /// is independent of the highlighted row.
     pub fn dismiss_action(&self) -> Option<ImportAction> {

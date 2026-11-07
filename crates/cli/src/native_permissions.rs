@@ -112,6 +112,18 @@ impl Editor {
             (x >= start && x < end && end <= usize::from(width)).then_some(*action)
         })
     }
+
+    /// Pointer hover follows the same rendered tool-row hit map as clicks.
+    /// Action labels are intentionally not selection targets: upstream's
+    /// editor highlights the tool row, while the footer actions remain inert
+    /// until pressed (`permission.tsx:541-552`).
+    pub fn hover(&mut self, row: usize, height: usize) -> bool {
+        let layout = self.layout(height);
+        let Some(index) = layout.hits.get(row).copied().flatten() else { return false };
+        if self.selected == index { return false }
+        self.selected = index;
+        true
+    }
 }
 
 // ---------------------------------------------------------------------------
