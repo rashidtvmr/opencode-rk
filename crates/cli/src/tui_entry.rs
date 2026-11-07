@@ -7948,6 +7948,11 @@ struct PendingPermission {
     /// (`util/permission.ts:121-128` reads `resources[0]` for path fallbacks
     /// and paints one `- {item}` line per resource).
     resources: Vec<String>,
+    /// FORM-001 sub-3: the request's bounded `save` patterns
+    /// (`PermissionRequest.save?: string[]`), kept verbatim so the live dialog
+    /// can paint the always-body summary (`permission.tsx:223-231`,
+    /// `util/permission.ts:154-160`). Empty when save-ineligible.
+    save: Vec<String>,
     /// TOOL-002: the pending request's bounded tool `callID`. Upstream joins
     /// on `request.source.type === "tool" && request.source.id === part.id`
     /// (`routes/session/index.tsx:2793-2799`); oc2's `PermissionSource`
@@ -7973,6 +7978,31 @@ fn permission_save_eligible(save: Option<&serde_json::Value>) -> bool {
         && values
             .iter()
             .all(serde_json::Value::is_string)
+}
+
+/// FORM-001 sub-3: bounded `save` patterns for one pending request (`save?:
+/// string[]`): strings only, control-free, 160 chars and 32 entries max (the
+/// same per-item bounds as [`permission_resources_from_entry`]). Malformed or
+/// absent `save` resolves empty, matching [`permission_save_eligible`] so the
+/// gate that shows the `always` option and the body data it would paint can
+/// never disagree.
+#[cfg(feature = "native")]
+fn permission_save_from_entry(entry: &serde_json::Value) -> Vec<String> {
+    let Some(save) = entry.get("save").and_then(serde_json::Value::as_array) else {
+        return Vec::new();
+    };
+    save.iter()
+        .filter_map(serde_json::Value::as_str)
+        .filter(|pattern| !pattern.is_empty())
+        .map(|pattern| {
+            pattern
+                .chars()
+                .filter(|character| !character.is_control())
+                .take(160)
+                .collect::<String>()
+        })
+        .take(32)
+        .collect()
 }
 
 /// TOOL-002 wire join: the oc2 permission list serializes the request source
@@ -8032,6 +8062,37 @@ mod permission_save_eligible_tests {
         assert!(!permission_save_eligible(Some(&json!(["bash", 1]))));
         assert!(!permission_save_eligible(Some(&json!([{}]))));
         assert!(permission_save_eligible(Some(&json!(["bash"]))));
+    }
+}
+
+/// FORM-001 sub-3: the save patterns reach the live dialog exactly as the
+/// gate saw them (`permission.tsx:223-231` + `util/permission.ts:154-160`):
+/// bounded strings, control-free, in payload order, empty when ineligible.
+#[cfg(all(test, feature = "native"))]
+mod permission_save_from_entry_tests {
+    use super::permission_save_from_entry;
+    use serde_json::json;
+
+    #[test]
+    fn parses_string_patterns_in_order_and_drops_control() {
+        let entry = json!({"save": ["src/**", "lib/*.rs", "bad\npattern", "ok/**"]});
+        assert_eq!(
+            permission_save_from_entry(&entry),
+            vec!["src/**", "lib/*.rs", "badpattern", "ok/**"]
+        );
+        assert_eq!(permission_save_from_entry(&json!({"save": []})), Vec::<String>::new());
+        assert_eq!(permission_save_from_entry(&json!({"save": "bash"})), Vec::<String>::new());
+        assert_eq!(permission_save_from_entry(&json!({"save": ["a", 1]})), vec!["a"]);
+        assert_eq!(permission_save_from_entry(&json!({"no_save": true})), Vec::<String>::new());
+    }
+
+    #[test]
+    fn bounds_pattern_length_and_count_like_resources() {
+        let long = format!("{}-x", "a".repeat(160));
+        let entry = json!({"save": (0..40).map(|_| long.clone()).collect::<Vec<_>>()});
+        let parsed = permission_save_from_entry(&entry);
+        assert_eq!(parsed.len(), 32, "cap at 32 entries");
+        assert_eq!(parsed[0].chars().count(), 160, "cap at 160 chars");
     }
 }
 
@@ -8349,6 +8410,7 @@ fn fetch_permission(
         return Ok(Some(PendingPermission {
             message: permission_message_from_entry(entry),
             resources: permission_resources_from_entry(entry),
+            save: permission_save_from_entry(entry),
             id: id.to_owned(),
             title,
             persistent_allowed,
@@ -8808,6 +8870,7 @@ mod f002r1_tests {
             permission_call_id: Some("c1".to_owned()),
             permission_tool_part: tool_part,
             resources,
+            save: Vec::new(),
             request_metadata: None,
         }
     }
@@ -12094,6 +12157,13 @@ fn native_loop(
                                 // replies immediately (`permission.tsx:243-254`).
                                 view.dialogs
                                     .set_permission_session_has_parent(snapshot.parent_session);
+                                // FORM-001 sub-3: carry the request's `save`
+                                // patterns so selecting `always` swaps the body
+                                // to the always-summary
+                                // (`permission.tsx:223-231`). Empty for a
+                                // save-ineligible request (no `always` option).
+                                view.dialogs
+                                    .set_permission_save(pending.save.clone());
                                 // F002-R1: with a resolved source tool part the
                                 // request paints the live upstream
                                 // presentation — header rows plus per-action
@@ -12308,9 +12378,19 @@ fn native_loop(
         {
             let now_ms = animation_start.now_ms() as u64;
             if now_ms > toast_now_ms {
+                let visible_before = toast.current().is_some();
                 toast.advance(now_ms - toast_now_ms);
                 toast_now_ms = now_ms;
-                needs_paint = true;
+                // Repaint only on a visible-state edge (a toast appearing or
+                // being dismissed). Steady-state toast animation repaints on
+                // the shared 80 ms animation tick (`busy_animation` includes
+                // `toast.current()`), so a quiet clock advance must not
+                // schedule a frame — otherwise every loop iteration during a
+                // bulk input drain repaints the full frame and the drain
+                // throttles below the PTY bulk-write deadline.
+                if visible_before != toast.current().is_some() {
+                    needs_paint = true;
+                }
             }
             // DIALOG-19: the shared chrome clock advances lifecycle overlays
             // from this frame's same logical timestamp, every loop pass.
@@ -12982,63 +13062,71 @@ fn native_loop(
         // renderer frame. Replacements while this frame is in flight retain
         // the previous syntax table until the matching end_frame below.
         syntax_style_arena.begin_frame();
-        let mut lines = if help_open && !dialog_open {
-            Vec::new()
-        } else {
-            // CP-02: thread the resolved prompt surface so the composer lip row
-            // honours a transparent `promptBg` (`index.tsx:1879,1890-1895`).
-            view.set_prompt_background(
-                theme
-                    .semantic
-                    .as_ref()
-                    .map(|semantic| crate::native_prompt_pane::prompt_surface(semantic).rgba),
-            );
-            // Busy reflects only the worker that owns the CURRENT binding;
-            // a stale (superseded) worker never shows busy here.
-            // Event draining above may settle and remove the worker during
-            // this same frame. Use the post-drain fact for the paint, rather
-            // than the loop-entry binding snapshot, otherwise the footer can
-            // retain Thinking until an unrelated input event repaints it.
-            view.render_typed(
-                draft_echo,
-                &transcript.messages,
-                busy_now,
-                &overlay,
-            )
-        };
-        // Help owns the whole frame: heading at row 0 with static content
-        // clipped to the terminal, so a short window still shows the page.
-        // Esc recomputes the ordinary header/composer frame unchanged.
-        // Never painted over an open decision modal (`dialog_open` gate).
-        if help_open && !dialog_open {
-            // Truthful submit-key line for the active keymap; same frozen
-            // whole-frame compact take (rows-bounded), draft/focus rules
-            // and Esc semantics.
-            let help: &[&str] = if matches!(keymap, SubmitKeymap::CtrlJ) {
-                &NATIVE_HELP_LINES_CTRLJ
-            } else {
-                &NATIVE_HELP_LINES
-            };
-            let cols = renderer.cols().min(u32::from(u16::MAX)) as u16;
-            let rows = renderer.rows().min(u32::from(u16::MAX)) as u16;
-            let inset = if cols >= 24 { 4 } else { 0 };
-            let width = cols.saturating_sub(2 * inset).min(100);
-            let left = (cols - width) / 2;
-            let top = crate::native_ui_style::help_top(rows, help.len());
-            let capacity = rows.saturating_sub(2 * top);
-            let gap = u16::from(capacity >= 12);
-            lines = vec![String::new(); usize::from(rows)];
-            for (index, text) in help.iter().enumerate() {
-                let row = top + index as u16 + if index > 0 { gap } else { 0 };
-                if row >= rows.saturating_sub(top) { break; }
-                lines[usize::from(row)] = format!("{}{}", " ".repeat(usize::from(left)), crate::native_view_layout::fit(text, width));
-                help_regions.push(crate::native_ui_style::Region {
-                    x:left,y:row,width,role:if index == 0 {crate::native_ui_style::Role::Heading} else {crate::native_ui_style::Role::Item},detail_from:None,modal:false,
-                });
-            }
-            if inset > 0 && top > 0 { help_panel = Some((left - 2, top - 1, width + 4, capacity + 2)); }
-        }
+        // The frame model is consumed only by the paint below (rows, selectable
+        // bounds, help panel). Rebuilding it on every loop iteration made each
+        // drained input byte pay a full `render_typed`, which throttled a
+        // 32 KiB paste drain past the bulk-write deadline (>20 s). Compute the
+        // rows under the same `needs_paint` gate as the paint that consumes
+        // them; every mutation that changes the frame already sets
+        // `needs_paint`, so no reachable state change skips its repaint.
+        let mut lines: Vec<String> = Vec::new();
         if needs_paint {
+            lines = if help_open && !dialog_open {
+                Vec::new()
+            } else {
+                // CP-02: thread the resolved prompt surface so the composer lip row
+                // honours a transparent `promptBg` (`index.tsx:1879,1890-1895`).
+                view.set_prompt_background(
+                    theme
+                        .semantic
+                        .as_ref()
+                        .map(|semantic| crate::native_prompt_pane::prompt_surface(semantic).rgba),
+                );
+                // Busy reflects only the worker that owns the CURRENT binding;
+                // a stale (superseded) worker never shows busy here.
+                // Event draining above may settle and remove the worker during
+                // this same frame. Use the post-drain fact for the paint, rather
+                // than the loop-entry binding snapshot, otherwise the footer can
+                // retain Thinking until an unrelated input event repaints it.
+                view.render_typed(
+                    draft_echo,
+                    &transcript.messages,
+                    busy_now,
+                    &overlay,
+                )
+            };
+            // Help owns the whole frame: heading at row 0 with static content
+            // clipped to the terminal, so a short window still shows the page.
+            // Esc recomputes the ordinary header/composer frame unchanged.
+            // Never painted over an open decision modal (`dialog_open` gate).
+            if help_open && !dialog_open {
+                // Truthful submit-key line for the active keymap; same frozen
+                // whole-frame compact take (rows-bounded), draft/focus rules
+                // and Esc semantics.
+                let help: &[&str] = if matches!(keymap, SubmitKeymap::CtrlJ) {
+                    &NATIVE_HELP_LINES_CTRLJ
+                } else {
+                    &NATIVE_HELP_LINES
+                };
+                let cols = renderer.cols().min(u32::from(u16::MAX)) as u16;
+                let rows = renderer.rows().min(u32::from(u16::MAX)) as u16;
+                let inset = if cols >= 24 { 4 } else { 0 };
+                let width = cols.saturating_sub(2 * inset).min(100);
+                let left = (cols - width) / 2;
+                let top = crate::native_ui_style::help_top(rows, help.len());
+                let capacity = rows.saturating_sub(2 * top);
+                let gap = u16::from(capacity >= 12);
+                lines = vec![String::new(); usize::from(rows)];
+                for (index, text) in help.iter().enumerate() {
+                    let row = top + index as u16 + if index > 0 { gap } else { 0 };
+                    if row >= rows.saturating_sub(top) { break; }
+                    lines[usize::from(row)] = format!("{}{}", " ".repeat(usize::from(left)), crate::native_view_layout::fit(text, width));
+                    help_regions.push(crate::native_ui_style::Region {
+                        x:left,y:row,width,role:if index == 0 {crate::native_ui_style::Role::Heading} else {crate::native_ui_style::Role::Item},detail_from:None,modal:false,
+                    });
+                }
+                if inset > 0 && top > 0 { help_panel = Some((left - 2, top - 1, width + 4, capacity + 2)); }
+            }
             let paint_started = Instant::now();
             crate::native_debug::event(
                 "ui.state",

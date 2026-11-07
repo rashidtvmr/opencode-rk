@@ -624,6 +624,13 @@ pub struct DialogView {
     /// request (`permission.tsx:144-155,243-254`); confirming it emits a
     /// `reject` reply carrying the typed reason.
     reject_stage: Option<RejectStage>,
+    /// FORM-001 sub-3: the request's bounded `save` patterns
+    /// (`PermissionRequest.save`, upstream `permission.tsx:223-231`). While the
+    /// `always` option is selected, the dialog body swaps to
+    /// `permissionAlwaysLines` (`util/permission.ts:154-160`) instead of the
+    /// request presentation. Empty for save-ineligible requests and every
+    /// non-Permission dialog.
+    permission_save: Vec<String>,
     /// Dialog stack, focus guard, dismissal order and paint geometry
     /// (`ui/dialog.tsx:306-439`). The stack is the single "is a dialog
     /// visible" authority; `phase` only carries the decision lifecycle.
@@ -844,6 +851,7 @@ impl DialogView {
             attempt_counter: 0,
             pending_attempt: 0,
             reject_stage: None,
+            permission_save: Vec::new(),
             modal: ModalLayer::new(),
             open_sequence: 0,
             focus: ModalFocus::new(0),
@@ -2925,6 +2933,17 @@ impl DialogView {
         }
     }
 
+    /// FORM-001 sub-3: carry the request's bounded `save` patterns so the
+    /// body swaps to the always-summary while that option is selected
+    /// (`permission.tsx:223-231`, `util/permission.ts:154-160`). Empty for a
+    /// save-ineligible request (which has no `always` option at all). The
+    /// caller supplies already-bounded text; the view paints it verbatim.
+    pub fn set_permission_save(&mut self, save: Vec<String>) {
+        if self.dialog.as_ref().is_some_and(|dialog| dialog.kind == DialogKind::Permission) {
+            self.permission_save = save;
+        }
+    }
+
     /// F002-R2: true while the nested rejection-reason editor is open and owns
     /// input. False once the decision is pending (the stage is retained only so
     /// a rejected ACK can restore the permission card).
@@ -3960,8 +3979,34 @@ impl DialogView {
             // two-space-prefixed block would paint the whole patch a second
             // time. Every other kind still uses this block.
             if dialog.kind != DialogKind::DiffViewer {
-                for message in dialog.message_lines.iter().take(message_budget) {
-                    lines.push(line(format!("  {message}"), Role::Item));
+                // FORM-001 sub-3: the permission body follows the selected
+                // option (`permission.tsx:223-231`). Selecting `always`
+                // swaps the request presentation for the save-rule summary
+                // (`permissionAlwaysLines`, `util/permission.ts:154-160`):
+                // the first line is muted, the rest base text; every other
+                // option keeps the presentation body.
+                let always_index = dialog
+                    .choices
+                    .iter()
+                    .position(|choice| choice == "Always allow");
+                let always_selected = dialog.kind == DialogKind::Permission
+                    && !self.permission_save.is_empty()
+                    && always_index == self.selection;
+                if always_selected {
+                    let always_lines = crate::native_permissions::permission_always_lines(
+                        &dialog.title,
+                        &self.permission_save,
+                    );
+                    for (index, text) in always_lines.iter().take(message_budget).enumerate() {
+                        lines.push(line(
+                            format!("  {text}"),
+                            if index == 0 { Role::Description } else { Role::Item },
+                        ));
+                    }
+                } else {
+                    for message in dialog.message_lines.iter().take(message_budget) {
+                        lines.push(line(format!("  {message}"), Role::Item));
+                    }
                 }
             }
             if roomy && !dialog.choices.is_empty() {
@@ -4268,6 +4313,7 @@ impl DialogView {
         self.rejected = false;
         self.pending_attempt = 0;
         self.reject_stage = None;
+        self.permission_save = Vec::new();
     }
 
     fn reconcile_closed_route(&mut self, route: ModalRoute) -> ModalRoute {
@@ -11518,6 +11564,81 @@ mod f002r2_reject_stage_tests {
             view.answer().unwrap(),
             DecisionIntent::ScopedPermission { .. }
         ));
+    }
+
+    /// FORM-001 sub-3: changing the selected option changes the body. The
+    /// `always` selection swaps the request presentation for the save-rule
+    /// summary (`permission.tsx:223-231` `body={(option) => ...}` +
+    /// `permissionAlwaysLines`, `util/permission.ts:154-160`); any other
+    /// selection keeps the presentation. Falsifiable: the pre-fix layout
+    /// painted `message_lines` statically, so the always summary never
+    /// appeared and the presentation never disappeared.
+    #[test]
+    fn form001_sub3_always_selection_swaps_body_to_save_rules() {
+        let mut view = DialogView::new();
+        view.open_permission_with_persistent("req-1", "ses-1", "edit", true)
+            .unwrap();
+        view.set_permission_save(vec!["src/**".to_owned()]);
+        view.prompt_set_message(Some(
+            "△ Permission required\n  → Edit src/main.rs\n  No diff provided".to_owned(),
+        ));
+
+        // Unselected keeps the request presentation.
+        let rows = view.render(100, 24).join("\n");
+        assert!(rows.contains("No diff provided"), "\n{rows}");
+        assert!(!rows.contains("This will always allow the following patterns"), "\n{rows}");
+
+        // Selecting "Always allow" (index 1) swaps the body to the summary;
+        // the presentation body is gone.
+        assert!(view.select(1));
+        let rows = view.render(100, 24).join("\n");
+        assert!(
+            rows.contains("This will always allow the following patterns for this project."),
+            "\n{rows}"
+        );
+        assert!(rows.contains("- src/**"), "\n{rows}");
+        assert!(!rows.contains("No diff provided"), "presentation body must be replaced\n{rows}");
+
+        // Selecting "Allow once" (index 0) restores the presentation.
+        assert!(view.select(0));
+        let rows = view.render(100, 24).join("\n");
+        assert!(rows.contains("No diff provided"), "\n{rows}");
+        assert!(!rows.contains("This will always allow the following patterns"), "\n{rows}");
+    }
+
+    /// FORM-001 sub-3: a lone `*` save rule uses the project-wide wording
+    /// (`permissionAlwaysLines`, `util/permission.ts:156-158`) and the swap
+    /// stays live-only — a save-ineligible request (no `always` option) never
+    /// paints the summary.
+    #[test]
+    fn form001_sub3_lone_wildcard_wording_and_no_save_never_swaps() {
+        let mut view = DialogView::new();
+        view.open_permission_with_persistent("req-1", "ses-1", "edit", true)
+            .unwrap();
+        view.set_permission_save(vec!["*".to_owned()]);
+        view.prompt_set_message(Some("  No diff provided".to_owned()));
+        assert!(view.select(1));
+        let rows = view.render(100, 24).join("\n");
+        assert!(rows.contains("This will always allow edit for this project."), "\n{rows}");
+        assert!(!rows.contains("following patterns"), "\n{rows}");
+
+        // Save-ineligible prompt: only `once` + `reject`; no summary possible.
+        let mut bare = DialogView::new();
+        bare.open_permission_with_persistent("req-2", "ses-2", "bash", false)
+            .unwrap();
+        bare.prompt_set_message(Some("  $ ls".to_owned()));
+        assert!(bare.select(0));
+        let rows = bare.render(100, 24).join("\n");
+        assert!(rows.contains("$ ls"), "\n{rows}");
+        assert!(!rows.contains("always allow"), "\n{rows}");
+        // A save setter on a save-ineligible prompt stays inert: the prompt
+        // has no `always` option, so selecting `reject` (index 1) keeps the
+        // presentation body.
+        bare.set_permission_save(vec!["*".to_owned()]);
+        assert!(bare.select(1)); // reject
+        let rows = bare.render(100, 24).join("\n");
+        assert!(rows.contains("$ ls"), "\n{rows}");
+        assert!(!rows.contains("always allow"), "\n{rows}");
     }
 
     /// Upstream `escapeKey="reject"` routes Escape through the same
