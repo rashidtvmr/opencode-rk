@@ -48,6 +48,10 @@ pub enum RuntimeError {
     Denied(String),
     Process(String),
     Protocol(String),
+    /// The peer rejected the handshake because credentials are required.
+    NeedsAuth(String),
+    /// The peer requires OAuth dynamic client registration before login.
+    NeedsClientRegistration(String),
     Timeout,
 }
 
@@ -57,6 +61,8 @@ impl fmt::Display for RuntimeError {
             Self::Denied(message) => write!(f, "MCP process denied: {message}"),
             Self::Process(message) => write!(f, "MCP process failed: {message}"),
             Self::Protocol(message) => write!(f, "MCP protocol failed: {message}"),
+            Self::NeedsAuth(message) => write!(f, "MCP authentication required: {message}"),
+            Self::NeedsClientRegistration(message) => write!(f, "MCP client registration required: {message}"),
             Self::Timeout => f.write_str("MCP operation timed out"),
         }
     }
@@ -113,7 +119,13 @@ impl McpRuntime {
         let _permit = self.connection.serial.acquire().await.map_err(|_| RuntimeError::Process("connection closed".into()))?;
         let init_id = self.id().await;
         let init = self.request(json!({"jsonrpc":"2.0","id":init_id,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"opencode-rk","version":"0.1.0"}}}), init_id).await?;
-        let init_result = init.get("result").ok_or_else(|| RuntimeError::Protocol("initialize rejected".into()))?;
+        let init_result = match init.get("result") {
+            Some(result) => result,
+            None => {
+                let error = init.get("error").and_then(|value| value.get("message")).and_then(Value::as_str).unwrap_or("initialize rejected");
+                return Err(classify_handshake_error(error));
+            }
+        };
         if init_result.get("protocolVersion").and_then(Value::as_str).is_none() || init_result.get("capabilities").and_then(Value::as_object).is_none() { return Err(RuntimeError::Protocol("invalid initialize result".into())); }
         self.notify(json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}})).await?;
         let mut cursor = None;
@@ -224,6 +236,25 @@ impl McpRuntime {
     }
 }
 
+/// Convert the bounded, peer-provided handshake reason into the two statuses
+/// understood by the upstream MCP dialog.  This intentionally matches only
+/// authentication/registration vocabulary; all other protocol failures stay
+/// ordinary `failed` errors and are never promoted to a sign-in gate.
+fn classify_handshake_error(message: &str) -> RuntimeError {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("client registration") || lower.contains("dynamic registration") {
+        RuntimeError::NeedsClientRegistration("client registration required".into())
+    } else if lower.contains("unauthorized")
+        || lower.contains("authentication required")
+        || lower.contains("login required")
+        || lower.contains("requires a login")
+    {
+        RuntimeError::NeedsAuth("authentication required".into())
+    } else {
+        RuntimeError::Protocol("initialize rejected".into())
+    }
+}
+
 /// Routing decision for one inbound frame. A frame with a non-expected id
 /// and a `method` is a server→client request: it must be answerable, not
 /// fatal. Only genuine foreign responses remain protocol errors.
@@ -315,5 +346,12 @@ mod tests {
     fn answer_and_reject_frames_echo_the_captured_request_id() {
         assert_eq!(answer_frame(42, json!({"action":"accept"})), json!({"jsonrpc":"2.0","id":42,"result":{"action":"accept"}}));
         assert_eq!(reject_frame(42, -32800, "cancelled"), json!({"jsonrpc":"2.0","id":42,"error":{"code":-32800,"message":"cancelled"}}));
+    }
+
+    #[test]
+    fn handshake_auth_failures_have_distinct_safe_statuses() {
+        assert!(matches!(classify_handshake_error("Unauthorized"), RuntimeError::NeedsAuth(_)));
+        assert!(matches!(classify_handshake_error("dynamic client registration required"), RuntimeError::NeedsClientRegistration(_)));
+        assert!(matches!(classify_handshake_error("bad protocol"), RuntimeError::Protocol(_)));
     }
 }
