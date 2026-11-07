@@ -10133,6 +10133,10 @@ fn native_loop(
     // never mutates it, and cancel returns the exact original draft.
     let mut filter_input = String::new();
     let mut model_row: usize = 0;
+    // Methods advertised by the daemon for the currently selected provider.
+    // The server is authoritative; this is deliberately not a provider-name
+    // driven list (upstream dialog-integration.tsx does the same).
+    let mut provider_methods: Vec<(String, String, String)> = Vec::new();
     // DIALOG-12: the model dialog's favorites-at-open snapshot
     // (`dialog-model.tsx:79-81,105`). Refreshed ONLY where the dialog opens;
     // `dialog_rows_state` orders against it, so favoriting mid-dialog
@@ -12222,12 +12226,14 @@ fn native_loop(
                 String::new(),
                 "Enter: continue · Escape: cancel".into(),
             ],
-            native_setup::Dialog::ProviderMethod => vec![
-                "Connect OpenAI".into(), String::new(),
-                format!("{} OAuth · ChatGPT device-code sign-in", if model_row == 0 { ">" } else { " " }),
-                format!("{} API key", if model_row == 1 { ">" } else { " " }),
-                String::new(), "↑/↓ select · Enter continue · Esc cancel".into(),
-            ],
+            native_setup::Dialog::ProviderMethod => {
+                let mut panel = vec![format!("Connect {provider_id}"), String::new()];
+                panel.extend(provider_methods.iter().enumerate().map(|(index, (_, kind, label))|
+                    format!("{} {}", if model_row == index { ">" } else { " " },
+                        if kind == "oauth" { format!("OAuth · {label}") } else { label.clone() })));
+                panel.extend([String::new(), "↑/↓ select · Enter continue · Esc cancel".into()]);
+                panel
+            },
             native_setup::Dialog::BaseUrl => vec![
                 format!("Configure {provider_id}"),
                 String::new(),
@@ -15821,7 +15827,7 @@ fn native_loop(
                     continue;
                 }
                 if dialog == native_setup::Dialog::ProviderMethod {
-                    model_row = native_setup::move_row(model_row, 2, matches!(direction, native_input_decoder::InputEvent::ArrowDown));
+                    model_row = native_setup::move_row(model_row, provider_methods.len(), matches!(direction, native_input_decoder::InputEvent::ArrowDown));
                     continue;
                 }
                 // A non-Chat page owns Up/Down for its own navigation; the
@@ -17526,11 +17532,20 @@ fn native_loop(
                                 provider_url = row.2.clone();
                                 setup_error = None;
                                 key_input.clear();
+                                provider_methods = live.as_ref().and_then(|snapshot| {
+                                    http_request(&snapshot.origin, "GET", "/api/integration", None, auth).ok()
+                                }).and_then(|body| serde_json::from_str::<Vec<serde_json::Value>>(&body).ok())
+                                    .and_then(|items| items.into_iter().find(|item| item["id"].as_str() == Some(provider_id.as_str())))
+                                    .map(|item| item["methods"].as_array().cloned().unwrap_or_default().into_iter()
+                                        .filter_map(|method| Some((method["id"].as_str()?.to_owned(), method["type"].as_str()?.to_owned(), method["label"].as_str()?.to_owned())))
+                                        .filter(|(_, kind, _)| kind != "env")
+                                        .collect::<Vec<_>>()).unwrap_or_default();
+                                provider_methods.sort_by_key(|(_, kind, _)| kind == "key");
                                 dialog = if provider_id == "custom" {
                                     native_setup::Dialog::ProviderId
-                                 } else if provider_id == "openai" {
-                                     model_row = 0;
-                                     native_setup::Dialog::ProviderMethod
+                                } else if !provider_methods.is_empty() {
+                                    model_row = 0;
+                                    native_setup::Dialog::ProviderMethod
                                 } else {
                                     native_setup::Dialog::BaseUrl
                                 };
@@ -17562,25 +17577,29 @@ fn native_loop(
                             }
                         }
                         native_setup::Dialog::ProviderMethod => {
-                            if model_row == 1 {
-                                dialog = native_setup::Dialog::ApiKey;
-                            } else {
-                                let result = live.as_ref().ok_or_else(|| "daemon unavailable".to_owned()).and_then(|snapshot| {
-                                    let body = serde_json::json!({"methodID":"chatgpt-headless"}).to_string();
-                                    http_request(&snapshot.origin, "POST", "/api/integration/openai/connect/oauth", Some(&body), auth)
-                                });
-                                match result {
-                                    Ok(body) => {
-                                        let value: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
-                                        // Keep the attempt id so the loop polls its
-                                        // status; upstream's connect dialog does the
-                                        // same (`dialog-integration.tsx`).
-                                        oauth_attempt = value["attemptID"].as_str().map(str::to_owned);
-                                        oauth_poll = Instant::now();
-                                        setup_error = Some(format!("OAuth started: {} {}", value["url"].as_str().unwrap_or(""), value["instructions"].as_str().unwrap_or("")));
+                            if let Some((method_id, kind, _)) = provider_methods.get(model_row) {
+                                if kind == "oauth" {
+                                    let result = live.as_ref().ok_or_else(|| "daemon unavailable".to_owned()).and_then(|snapshot| {
+                                        let body = serde_json::json!({"methodID":method_id}).to_string();
+                                        http_request(&snapshot.origin, "POST", &format!("/api/integration/{provider_id}/connect/oauth"), Some(&body), auth)
+                                    });
+                                    match result {
+                                        Ok(body) => {
+                                            let value: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
+                                            oauth_attempt = value["attemptID"].as_str().map(str::to_owned);
+                                            oauth_poll = Instant::now();
+                                            setup_error = Some(format!("OAuth started: {} {}", value["url"].as_str().unwrap_or(""), value["instructions"].as_str().unwrap_or("")));
+                                        }
+                                        Err(_) => setup_error = Some("Unable to start OAuth; check daemon".into()),
                                     }
-                                    Err(_) => setup_error = Some("Unable to start OpenAI OAuth; check daemon".into()),
+                                } else if provider_id == "openai" {
+                                    dialog = native_setup::Dialog::ApiKey;
+                                } else {
+                                    dialog = native_setup::Dialog::BaseUrl;
+                                    filter_input = provider_url.clone();
                                 }
+                            } else {
+                                dialog = native_setup::Dialog::BaseUrl;
                             }
                         }
                         native_setup::Dialog::BaseUrl => {

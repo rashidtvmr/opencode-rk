@@ -351,14 +351,6 @@ pub(super) enum Dialog {
     Model,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum ProviderConnectMethod { OAuth, ApiKey }
-
-impl ProviderConnectMethod {
-    pub(super) const fn options() -> [Self; 2] { [Self::OAuth, Self::ApiKey] }
-    pub(super) const fn label(self) -> &'static str { match self { Self::OAuth => "ChatGPT device-code sign-in", Self::ApiKey => "API key" } }
-}
-
 /// Interpret an OAuth attempt status payload
 /// (`GET /api/integration/{id}/connect/oauth/{attemptID}`; server
 /// `AttemptStatus` at `crates/server/src/provider_integration.rs:59-66`).

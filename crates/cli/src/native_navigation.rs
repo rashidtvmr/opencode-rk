@@ -1293,6 +1293,9 @@ impl ViewAcknowledgement {
     /// The request failed: forget the watermark for this idle and schedule the
     /// next attempt, capped at 5 s. Returns the delay used.
     pub fn failed(&mut self, now_ms: u64) -> u64 {
+        if self.acknowledged.is_some() && self.acknowledged != self.idle {
+            return 0;
+        }
         self.acknowledged = None;
         let delay = VIEW_RETRY_DELAY_MS
             .saturating_mul(1u64 << self.attempts.min(8))
@@ -2437,6 +2440,16 @@ mod tests {
         ack.observe(true, Some(200), Some(200));
         assert!(!ack.unread());
         assert_eq!(ack.poll(10_000), None);
+    }
+
+    #[test]
+    fn tab_21_superseded_reply_is_inert_and_new_idle_posts_immediately() {
+        let mut ack = ViewAcknowledgement::new();
+        ack.observe(true, Some(100), Some(0));
+        assert_eq!(ack.poll(0), Some(100));
+        ack.observe(true, Some(200), Some(0));
+        assert_eq!(ack.failed(10), 0);
+        assert_eq!(ack.poll(11), Some(200));
     }
 
     #[test]

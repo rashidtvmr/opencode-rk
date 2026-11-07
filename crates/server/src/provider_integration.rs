@@ -1238,6 +1238,43 @@ mod tests {
         // All three attempts must remain in the registry (no overwrite).
         assert_eq!(server.attempts.lock().await.len(), 3, "registry must hold all 3 attempts without overwrite");
     }
+
+    /// The CLI's connect-method chooser reads `GET /api/integration` and keys
+    /// on `methods[].type` (`"oauth"` vs `"key"`), filtering `env` out and
+    /// sorting `key` last (upstream `dialog-integration.tsx:58-82`). Pin the
+    /// exact wire shape the client depends on so the serde rename cannot
+    /// silently drift to `kind`.
+    #[test]
+    fn integration_list_wire_shape_exposes_oauth_and_key_types() {
+        let value: Value = serde_json::to_value(IntegrationServer::<VerifiedRuntime>::list())
+            .expect("integration list serializes");
+        let items = value.as_array().expect("list is an array");
+        let openai = items
+            .iter()
+            .find(|item| item["id"] == "openai")
+            .expect("openai integration is listed");
+        let methods = openai["methods"].as_array().expect("methods array");
+        let kinds: Vec<&str> = methods
+            .iter()
+            .map(|method| method["type"].as_str().expect("method type is a string"))
+            .collect();
+        assert!(kinds.contains(&"oauth"), "openai must advertise an oauth method: {kinds:?}");
+        assert!(kinds.contains(&"key"), "openai must advertise a key method: {kinds:?}");
+        let oauth = methods
+            .iter()
+            .find(|method| method["type"] == "oauth")
+            .expect("oauth method present");
+        assert_eq!(oauth["id"], "chatgpt-headless");
+        assert!(oauth["label"].is_string(), "oauth method carries a label");
+        // Providers with no oauth support must NOT advertise one, or the
+        // chooser would show an unusable option.
+        for id in ["anthropic", "google", "github-copilot"] {
+            let item = items.iter().find(|item| item["id"] == id).expect("integration listed");
+            let has_oauth = item["methods"].as_array().expect("methods").iter()
+                .any(|method| method["type"] == "oauth");
+            assert!(!has_oauth, "{id} must be key-only: {item:?}");
+        }
+    }
 }
 
 // A real injectable route tree used by focused HTTP tests and embedders.

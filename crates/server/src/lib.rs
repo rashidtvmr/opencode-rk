@@ -209,6 +209,7 @@ pub fn router_with_events_and_integration(
             post(exchange_browser_resume),
         )
         .route("/api/integration/{integration_id}/connect/oauth", post(provider_integration::connect_oauth))
+        .route("/api/integration", get(list_integrations))
         .route("/api/integration/{integration_id}/connect/oauth/{attempt_id}", get(provider_integration::status_oauth).delete(provider_integration::cancel_oauth))
         .route("/api/integration/{integration_id}/connect/oauth/{attempt_id}/complete", post(provider_integration::complete_oauth))
         .route("/api/capabilities", get(web_capabilities))
@@ -352,6 +353,10 @@ pub fn router_with_events_and_integration(
             )),
         None => app,
     }
+}
+
+async fn list_integrations() -> Json<Vec<provider_integration::IntegrationInfo>> {
+    Json(provider_integration::IntegrationServer::<provider_integration::VerifiedRuntime>::list())
 }
 
 #[derive(Deserialize)]
