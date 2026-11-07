@@ -13513,3 +13513,89 @@ but no action emits one — a trigger would be invented), `FORM-001` sub-3/4,
 `PARITY_STATUS.md` (`TAB-10`, `THEME-08`, `MSG-010`) and marked the wave-51/83
 "still accurate" paragraphs as superseded, so no section still asserts a landed
 row is absent. Verified by grep: 0 hits for each stale phrase.
+
+---
+
+## 2026-11-07 — wave-113: complete staged parity wave found, verified, published
+
+**State on arrival:** canonical HEAD was `fc942da4` (pushed). The working tree
+carried a large **staged, uncommitted** changeset (2164 insertions incl. a new
+`crates/cli/src/native_auth_login.rs`). I snapshotted it to
+`…/.oc2-features-20261103/artifacts/canonical-staged-snapshot-20261107/`
+(`staged.patch`, sha256 `f3d11b9f…`) before touching anything, and confirmed
+`native_auth_login.rs` exists on **no** ref — unique, non-recoverable work.
+
+**Verification (read the code, not the claim):** the wave is a coherent final
+parity slice, not scratch. Built clean (`cargo build -p opencode-rk-cli --bin
+oc2`), then `cargo test -p opencode-rk-cli --bin oc2` → **2497 passed / 0
+failed** (2474 before). `cargo test -p opencode-rk-cli --no-run` → all 30 CLI
+targets compile. Focused: `platform_alias` 5/0, `native_auth_login` 10/0,
+`theme08*` 9/0, `graph_*` 11/0.
+
+**Published:** `c8fd6f1c` committed by the orchestrator (sole canonical writer,
+`OC2_RECOVERY_CANONICAL_TOKEN` exported), pushed to
+`git@github.com:rashidtvmr/opencode-rk.git`; `git ls-remote … refs/heads/main-v2`
+== `c8fd6f1c…` (verified).
+
+**What the wave lands (user-visible):**
+- **`/login`** — native provider OAuth/device-code sign-in surface
+  (`native_auth_login.rs`): a pure picker + a background RFC-8628 worker, so the
+  frame never blocks on auth; OpenAI device flow shows the code + URL, polls on
+  the `≤100ms` idle tick, and saves the credential. Anthropic's browser flow is
+  listed honestly and refused with a reason (no invented client IDs).
+- **Graph page** — `g` in the Subagents dock projects the daemon-loaded roster
+  (`Panel::family`) into the read-only `Page::Graph`; Up/Down move the cursor.
+- **THEME-08 breadth** — lexical `SYN_FUNCTION/TYPE/CONSTANT/PROPERTY` classes
+  now paint their upstream `syntax.ts` token colors/attributes; `true/false/null`
+  are constants (number color, not italic) rather than keywords.
+- **Command-palette hover** (DIALOG-11) + registry bound 16→24 (the login entry
+  had evicted `/prompt.stash.list`).
+- **Running status** moved from the transcript header to the composer footer
+  (`prompt.footer.status` below the composer), matching upstream; grid-overflow
+  regression test added for the initial conversation page.
+
+**L51 closed (differently than planned):** `native_state_platform_alias.rs` was
+**deleted** and its 5 macOS `/var`↔`/private/var` alias tests relocated into
+`native_ui_preferences.rs::platform_alias_tests`. The target's `#[path]` closure
+pulled in ~66 modules (the whole view layer); relocation is the correct fix. The
+package-level CLI test set now compiles entirely.
+
+**Publish recipe (unchanged, re-verified):**
+```
+export OC2_RECOVERY_CANONICAL_TOKEN="$(cat "$(git rev-parse --git-common-dir)/recovery-state/canonical-write.token")"
+git commit -m …      # prints the NON-FATAL "AUTO_MERGE / update aborted" guard line; the commit STILL LANDS
+git push git@github.com:rashidtvmr/opencode-rk.git HEAD:main-v2
+git ls-remote git@github.com:rashidtvmr/opencode-rk.git refs/heads/main-v2
+```
+
+**Next:** release rebuild from `c8fd6f1c` → install to `~/.local/bin/oc2`
+(timestamped backup, do NOT restart the user daemon/DBs); the running TUI
+predates hover/OAuth fixes so it must be restarted to pick them up.
+
+### Installation + live smoke (2026-11-07)
+
+- Release built from `c8fd6f1c`; installed to `~/.local/bin/oc2`
+  (sha256 `20c118a2…`, identical to the release artifact).
+  Backups: `oc2.bak-20261107T102535` (previous) and `oc2.bak-20261107T154910`.
+- **Install gotcha (record for next time):** an in-place `cp` over the existing
+  `~/.local/bin/oc2` left the new binary exiting **137 (SIGKILL by dyld)** on
+  every run — a stale code-signature page cache for that inode. Copying to a new
+  inode and `mv`-ing it into place fixes it (`cp … .oc2.new && mv .oc2.new oc2`).
+  Always install via write-new-then-rename, and smoke-test
+  `~/.local/bin/oc2 --version` after installing.
+- **Live smoke on a disposable daemon** (throwaway `--data-dir`, `127.0.0.1:47897`;
+  the user's daemon PID 37241 was never touched):
+  - `GET /api/integration` → the full list; `openai` advertises
+    `chatgpt-headless` (oauth) + `api-key` (key); anthropic/google/github-copilot
+    are key-only (upstream-correct — anthropic has no OAuth at the pin).
+  - `POST /api/integration/openai/connect/oauth {"methodID":"chatgpt-headless"}`
+    → real wire shape: `{"attemptID":"con_00000001","mode":"auto",
+    "url":"https://auth.openai.com/codex/device",
+    "instructions":"Enter code: XXXX-XXXX", "time":{…}}`.
+  - unknown methodID → 404; unknown integration → 404.
+  - Fixture removed; no stray daemon left.
+- **Restart required for the user:** the *running* daemon (old binary, 2 days
+  uptime) answers `404` on `GET /api/integration`, confirming the new surfaces
+  are only in the freshly installed binary. The TUI/daemon predate the hover,
+  OAuth-login and graph work and must be restarted to see them. Not restarted by
+  me (explicit rule: do not restart the user's daemon/DBs).
