@@ -800,9 +800,13 @@ impl PageState {
         else {
             return false;
         };
-        self.preview = Some(crate::native_image_preview::PreviewSurface::dialog(
-            state, protocol, None,
-        ));
+        let mut surface = crate::native_image_preview::PreviewSurface::dialog(state, protocol, None);
+        let decoded = crate::native_image_preview::decode_image_uri(surface.state().current().uri.as_str());
+        match decoded {
+            Ok(image) => surface.set_natural(Some(crate::native_image_preview::ImageSize::new(image.width(), image.height()))),
+            Err(_) => surface.state_mut().mark_failed(),
+        }
+        self.preview = Some(surface);
         self.open(Page::ImagePreview);
         true
     }

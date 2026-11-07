@@ -19,6 +19,8 @@ path = "src/main.rs"
 
 [dependencies]
 regex-automata = "0.4"
+png = "0.17"
+jpeg-decoder = "0.3"
 unicode-segmentation.workspace = true
 axum.workspace = true
 clap.workspace = true
