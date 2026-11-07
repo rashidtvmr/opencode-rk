@@ -407,7 +407,14 @@ def run_t06(exe, env, root, captures, daemon_port, descriptor_records):
             if marker is not None or predicate is not None:
                 read_until(master, time.monotonic() + 20, buf, marker or b"native frame", start, screen, predicate)
         command("/connect", b"Connect a provider")
-        command("openai", b"API key", lambda: screen.has_api_prompt())
+        # The connect flow is data-driven: `GET /api/integration` advertises
+        # openai's `chatgpt-headless` (oauth) and `api-key` (key) methods, and
+        # selecting a provider with methods opens the method chooser
+        # (`dialog-integration.tsx:118-336`; CLI `Dialog::ProviderMethod`).
+        # The chooser sorts key methods last, so one ArrowDown selects the
+        # API-key method and Enter opens the API-key form.
+        command("openai", b"Connect openai")
+        command("\x1b[B", b"API key", lambda: screen.has_api_prompt())
         command(KEY, MODEL.encode())
         auth_path = root / "d" / "opencode" / "auth.json"
         if not auth_path.is_file() or auth_path.stat().st_mode & 0o777 != 0o600:
@@ -589,7 +596,11 @@ def run_ui(exe, env, root, first, captures, daemon_port, descriptor_records, aut
             return bytes(buf[start:])
         if first:
             cmd("/connect", b"Connect a provider")
-            cmd("openai", b"API key", lambda: screen.has_api_prompt())
+            # Data-driven connect methods: openai opens the method chooser
+            # (`Dialog::ProviderMethod`); the key method sorts last, so
+            # ArrowDown + Enter opens the API-key form.
+            cmd("openai", b"Connect openai")
+            cmd("\x1b[B", b"API key", lambda: screen.has_api_prompt())
             cmd(KEY, MODEL.encode())
             if KEY.encode() in bytes(buf): raise AssertionError("fixture API key echoed anywhere in PTY")
             if not auth_path.is_file() or auth_path.stat().st_mode & 0o777 != 0o600:
