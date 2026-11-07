@@ -35,6 +35,87 @@
 
 use std::collections::HashMap;
 
+use opencode_rk_opentui_bridge::image::{ImageData, ImageError, ImageRenderable, ImageState};
+
+/// Decode a PNG or JPEG into the bridge's bounded RGBA model.
+pub fn decode_image(bytes: &[u8]) -> Result<ImageData, ImageError> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+        let mut reader = decoder.read_info().map_err(|_| ImageError::Undecodable)?;
+        let mut output = vec![0; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut output).map_err(|_| ImageError::Undecodable)?;
+        let rgba = match info.color_type {
+            png::ColorType::Rgba => output[..info.buffer_size()].to_vec(),
+            png::ColorType::Rgb => output[..info.buffer_size()]
+                .chunks_exact(3)
+                .flat_map(|p| [p[0], p[1], p[2], 255])
+                .collect(),
+            png::ColorType::Grayscale => output[..info.buffer_size()]
+                .iter()
+                .flat_map(|&p| [p, p, p, 255])
+                .collect(),
+            png::ColorType::GrayscaleAlpha => output[..info.buffer_size()]
+                .chunks_exact(2)
+                .flat_map(|p| [p[0], p[0], p[0], p[1]])
+                .collect(),
+            _ => return Err(ImageError::Undecodable),
+        };
+        return ImageData::from_pixels(info.width, info.height, rgba)
+            .map_err(|_| ImageError::Undecodable);
+    }
+    if bytes.starts_with(&[0xff, 0xd8]) {
+        let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(bytes));
+        let pixels = decoder.decode().map_err(|_| ImageError::Undecodable)?;
+        let info = decoder.info().ok_or(ImageError::Undecodable)?;
+        let rgba = match info.pixel_format {
+            jpeg_decoder::PixelFormat::L8 => pixels
+                .iter()
+                .flat_map(|&p| [p, p, p, 255])
+                .collect(),
+            jpeg_decoder::PixelFormat::RGB24 => pixels
+                .chunks_exact(3)
+                .flat_map(|p| [p[0], p[1], p[2], 255])
+                .collect(),
+            _ => return Err(ImageError::Undecodable),
+        };
+        return ImageData::from_pixels(info.width.into(), info.height.into(), rgba)
+            .map_err(|_| ImageError::Undecodable);
+    }
+    Err(ImageError::Undecodable)
+}
+
+pub fn decode_image_uri(uri: &str) -> Result<ImageData, ImageError> {
+    let payload = uri
+        .strip_prefix("data:image/")
+        .and_then(|rest| rest.split_once(","))
+        .map(|(_, data)| data)
+        .ok_or(ImageError::Undecodable)?;
+    let bytes = decode_base64(payload).ok_or(ImageError::Undecodable)?;
+    decode_image(&bytes)
+}
+
+fn decode_base64(input: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(input.len() * 3 / 4);
+    let mut quartet = [0u8; 4];
+    let mut count = 0;
+    for byte in input.bytes().filter(|b| !b.is_ascii_whitespace()) {
+        quartet[count] = match byte {
+            b'A'..=b'Z' => byte - b'A', b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52, b'+' => 62, b'/' => 63,
+            b'=' => 64, _ => return None,
+        };
+        count += 1;
+        if count == 4 {
+            if quartet[0] == 64 || quartet[1] == 64 { return None; }
+            out.push((quartet[0] << 2) | (quartet[1] >> 4));
+            if quartet[2] != 64 { out.push((quartet[1] << 4) | (quartet[2] >> 2)); }
+            if quartet[3] != 64 { out.push((quartet[2] << 6) | quartet[3]); }
+            count = 0;
+        }
+    }
+    (count == 0).then_some(out)
+}
+
 /// `local-attachment.ts:5`
 pub const MAX_LOCAL_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
 /// `local-attachment.ts:4`
@@ -803,6 +884,20 @@ impl PreviewSurface {
 
     pub fn set_natural(&mut self, natural: Option<ImageSize>) {
         self.natural = natural;
+    }
+
+    /// Build the native half-block painter for the current decoded image.
+    #[must_use]
+    pub fn renderable(&self, max: (u32, u32)) -> ImageRenderable {
+        let mut renderable = ImageRenderable::new(max);
+        if self.state.failed() {
+            renderable.set_state(ImageState::Failed);
+        } else if let Ok(image) = decode_image_uri(&self.state.current().uri) {
+            renderable.set_state(ImageState::Ready(image));
+        } else {
+            renderable.set_state(ImageState::Failed);
+        }
+        renderable
     }
 
     #[must_use]
