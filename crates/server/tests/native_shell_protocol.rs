@@ -11,6 +11,11 @@ use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
 use tower::ServiceExt;
 
+// These tests share the process-global turn-admission pool, so serialize them
+// within this test binary instead of allowing unrelated tests to consume its
+// two permits concurrently.
+static NATIVE_SHELL_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 async fn request(
     app: axum::Router,
     method: &str,
@@ -94,6 +99,7 @@ async fn session_directory_survives_storage_reopen() {
 
 #[tokio::test]
 async fn native_shell_waits_for_approval_executes_once_and_hydrates_typed_history() {
+    let _serial = NATIVE_SHELL_TEST_LOCK.lock().await;
     let root = tempfile::tempdir().unwrap();
     let app = app(Arc::new(
         Storage::open_in_memory(root.path().join("blobs")).unwrap(),
@@ -198,6 +204,7 @@ async fn native_shell_waits_for_approval_executes_once_and_hydrates_typed_histor
 
 #[tokio::test]
 async fn native_shell_rejection_is_side_effect_free() {
+    let _serial = NATIVE_SHELL_TEST_LOCK.lock().await;
     let root = tempfile::tempdir().unwrap();
     let app = app(Arc::new(
         Storage::open_in_memory(root.path().join("blobs")).unwrap(),
@@ -249,6 +256,7 @@ async fn native_shell_rejection_is_side_effect_free() {
 
 #[tokio::test]
 async fn disconnected_shell_client_releases_pending_owner_without_execution() {
+    let _serial = NATIVE_SHELL_TEST_LOCK.lock().await;
     let root = tempfile::tempdir().unwrap();
     let app = app(Arc::new(
         Storage::open_in_memory(root.path().join("blobs")).unwrap(),
@@ -302,6 +310,7 @@ async fn disconnected_shell_client_releases_pending_owner_without_execution() {
 
 #[tokio::test]
 async fn shell_large_output_is_durably_bounded_without_losing_terminal_ack() {
+    let _serial = NATIVE_SHELL_TEST_LOCK.lock().await;
     let root = tempfile::tempdir().unwrap();
     let app = app(Arc::new(
         Storage::open_in_memory(root.path().join("blobs")).unwrap(),
@@ -377,6 +386,7 @@ async fn shell_large_output_is_durably_bounded_without_losing_terminal_ack() {
 
 #[tokio::test]
 async fn bounded_message_page_hydrates_its_own_tool_records() {
+    let _serial = NATIVE_SHELL_TEST_LOCK.lock().await;
     let root = tempfile::tempdir().unwrap();
     let app = app(Arc::new(
         Storage::open_in_memory(root.path().join("blobs")).unwrap(),
