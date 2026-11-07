@@ -156,9 +156,26 @@ impl McpStatusRegistry {
             let config = guard.configs.get(name).cloned().ok_or_else(|| "unknown MCP server".to_owned())?;
             let epoch = guard.epochs.get(name).copied().unwrap_or(0).saturating_add(1);
             guard.epochs.insert(name.to_owned(), epoch);
+            // Mark the explicit connect attempt as enabled before the child
+            // handshake so auth/protocol outcomes can be represented as a
+            // typed lifecycle error rather than silently remaining disabled.
+            guard.lifecycle.set_enabled(name, true).map_err(|e| e.to_string())?;
             (config, epoch)
         };
-        let runtime = McpRuntime::connect(LocalConfig { command: config.command, args: config.args, environment: config.env }, std::env::current_dir().map_err(|e| e.to_string())?).await.map_err(|e| e.to_string())?;
+        let runtime = match McpRuntime::connect(LocalConfig { command: config.command, args: config.args, environment: config.env }, std::env::current_dir().map_err(|e| e.to_string())?).await {
+            Ok(runtime) => runtime,
+            Err(error @ mcp_runtime::RuntimeError::NeedsAuth(_)) => {
+                let mut guard = self.inner.lock().await;
+                let _ = guard.lifecycle.mark_error(name, "needs_auth");
+                return Err(error.to_string());
+            }
+            Err(error @ mcp_runtime::RuntimeError::NeedsClientRegistration(_)) => {
+                let mut guard = self.inner.lock().await;
+                let _ = guard.lifecycle.mark_error(name, "needs_client_registration");
+                return Err(error.to_string());
+            }
+            Err(error) => return Err(error.to_string()),
+        };
         let mut guard = self.inner.lock().await;
         if guard.epochs.get(name).copied() != Some(epoch) { drop(guard); let _ = runtime.disconnect().await; return Err("MCP connection superseded".into()); }
         guard.lifecycle.set_enabled(name, true).map_err(|e| e.to_string())?;
@@ -254,6 +271,8 @@ impl McpStatusRegistry {
 fn project(state: &LifecycleState, enabled: bool, connected: bool, tools: Vec<Value>) -> Value {
     match state {
         LifecycleState::Disabled => json!({"status": "disabled", "enabled": false, "tools": []}),
+        LifecycleState::Error { code } if code == "needs_auth" => json!({"status": "needs_auth", "error": "authentication required"}),
+        LifecycleState::Error { code } if code == "needs_client_registration" => json!({"status": "needs_client_registration", "error": "client registration required"}),
         LifecycleState::Error { code } => json!({"status": "failed", "error": safe_code(code)}),
         LifecycleState::Ready if connected => json!({"status": "connected", "enabled": enabled, "tools": tools}),
         LifecycleState::Enabled | LifecycleState::Starting | LifecycleState::Ready => {
