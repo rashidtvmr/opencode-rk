@@ -21,7 +21,11 @@ use crate::native_view_layout::fit;
 use crate::native_view_layout::visit_unpadded_cells;
 
 pub const MAX_QUERY_CHARS: usize = 256;
-const MAX_ENTRIES: usize = 16;
+// Entries the model hands to the painter. The dialog still clips to the
+// terminal viewport in `render_styled`, so this is a registry bound rather
+// than a visible-row bound: at 16 the `/prompt.stash.list` command was silently
+// evicted once the OAuth login entry was registered.
+const MAX_ENTRIES: usize = 24;
 /// `filterThreshold={0.7}` on the pinned palette
 /// (`command-palette.tsx:71`). The threshold is applied to the same weighted
 /// score as `DialogSelect` (title ×2, category + searchText ×1).
@@ -51,6 +55,74 @@ mod filtered_command_regressions {
         let lower = identities(search("session"));
         assert!(!lower.is_empty());
         assert_eq!(identities(search("SESSION")), lower);
+    }
+
+    #[test]
+    fn hover_tracks_only_entry_rows_and_reports_transitions() {
+        let mut palette = CommandPalette::default();
+        palette.open(true);
+        // Row 0 is the `Commands` heading and carries no command identity.
+        assert!(!palette.hover_row(60, 20, 0));
+        // Row 2 is the `Search:` line, which is not selectable either.
+        assert!(!palette.hover_row(60, 20, 2));
+        // Row 4 is the first category heading; row 5 is the first real entry.
+        assert!(!palette.hover_row(60, 20, 4), "a heading is not hoverable");
+        assert!(palette.hover_row(60, 20, 5), "the first entry row hovers");
+        let hovered = palette.hovered_id.expect("a body row hovered");
+        assert!(palette.visible().iter().any(|row| row.id == hovered));
+        // Re-entering the same row is not a repaint.
+        assert!(!palette.hover_row(60, 20, 5));
+        // Leaving the panel clears the identity.
+        assert!(palette.hover_row(60, 20, usize::MAX));
+        assert_eq!(palette.hovered_id, None);
+    }
+
+    #[test]
+    fn hover_lifts_one_row_surface_without_rewriting_text() {
+        use crate::native_ui_style::Role;
+        let mut palette = CommandPalette::default();
+        palette.open(true);
+        // Row 5 holds the keyboard selection, so it paints `Selected` and must
+        // not be repainted by a hover. Row 6 is an ordinary entry row.
+        let selected_id = palette.selected_id;
+        let before = palette.render_styled(60, 20);
+        assert_eq!(before[5].role, Role::Selected);
+        assert_eq!(before[6].role, Role::Item);
+
+        assert!(palette.hover_row(60, 20, 6));
+        let after = palette.render_styled(60, 20);
+        assert_eq!(before.len(), after.len());
+        assert!(
+            before.iter().zip(after.iter()).all(|(a, b)| a.text == b.text),
+            "hover never rewrites row text"
+        );
+        let repainted: Vec<_> = before
+            .iter()
+            .zip(after.iter())
+            .enumerate()
+            .filter(|(_, (old, new))| old.role != new.role)
+            .map(|(index, (old, new))| (index, old.role, new.role))
+            .collect();
+        assert_eq!(repainted.len(), 1, "exactly one row repaints: {repainted:?}");
+        assert_eq!(repainted[0].0, 6);
+        assert_eq!(repainted[0].1, Role::Item);
+        assert_eq!(repainted[0].2, Role::Action);
+        // Selection outranks hover: the selected row keeps its slot paint and
+        // the selection identity is untouched by pointer movement.
+        assert_eq!(after[5].role, Role::Selected);
+        assert_eq!(palette.selected_id, selected_id);
+        assert_ne!(palette.hovered_id, palette.selected_id);
+    }
+
+    #[test]
+    fn a_closed_palette_ignores_hover() {
+        let mut palette = CommandPalette::default();
+        assert!(!palette.hover_row(60, 20, 5));
+        palette.open(true);
+        assert!(palette.hover_row(60, 20, 5));
+        palette.close();
+        assert_eq!(palette.hovered_id, None, "closing clears the hover");
+        assert!(!palette.hover_row(60, 20, 5), "a closed palette never hovers");
     }
 
     #[test]
@@ -125,6 +197,10 @@ pub struct CommandPalette {
     has_session: bool,
     query: String,
     selected_id: Option<&'static str>,
+    /// Command identity under the pointer (`dialog-select.tsx` hover row).
+    /// Deliberately separate from `selected_id` so pointer hover and keyboard
+    /// selection stay independent, exactly like the upstream list.
+    hovered_id: Option<&'static str>,
 }
 
 impl CommandPalette {
@@ -132,6 +208,7 @@ impl CommandPalette {
         self.open = true;
         self.has_session = has_session;
         self.query.clear();
+        self.hovered_id = None;
         self.selected_id = self.visible().first().map(|entry| entry.id);
     }
 
@@ -139,6 +216,7 @@ impl CommandPalette {
         self.open = false;
         self.query.clear();
         self.selected_id = None;
+        self.hovered_id = None;
     }
 
     #[must_use]
@@ -210,6 +288,16 @@ impl CommandPalette {
             "Connect provider",
             "Provider",
             "/connect",
+        ));
+        // Upstream provider authentication is its own entry point, not a
+        // sub-step of `connect` (`dialog-provider.tsx` auth methods). The
+        // native client previously had no login route at all.
+        regular.push(entry(
+            "provider:provider.login",
+            "provider.login",
+            "Log in with OAuth",
+            "Provider",
+            "/login",
         ));
         regular.push(entry(
             "system:opencode.status",
@@ -375,18 +463,29 @@ impl CommandPalette {
         self.render_styled(width, height).into_iter().map(|line| line.text).collect()
     }
 
-    pub fn render_styled(&self, width: u16, height: usize) -> Vec<crate::native_ui_style::Line> {
+    /// Rendered rows plus, for entry rows only, the command identity that row
+    /// represents.
+    ///
+    /// Painting and pointer hit-testing share this one layout, so a hover can
+    /// never land on a row the frame did not paint (the bug class a second,
+    /// hand-written row arithmetic would eventually produce).
+    fn render_rows(
+        &self,
+        width: u16,
+        height: usize,
+    ) -> Vec<(crate::native_ui_style::Line, Option<&'static str>)> {
         use crate::native_ui_style::{Line, Role};
         if !self.open || width == 0 || height == 0 {
             return Vec::new();
         }
         let roomy = height >= 9;
-        let mut lines = vec![("Commands".to_owned(), Role::Heading, 2u16, 2u16)];
-        if roomy { lines.push((String::new(), Role::Description, 0, 0)); }
-        lines.push((format!("Search: {}", self.query), Role::Description, 2, 2));
-        if roomy { lines.push((String::new(), Role::Description, 0, 0)); }
+        let mut lines: Vec<(String, Role, u16, u16, Option<&'static str>)> =
+            vec![("Commands".to_owned(), Role::Heading, 2u16, 2u16, None)];
+        if roomy { lines.push((String::new(), Role::Description, 0, 0, None)); }
+        lines.push((format!("Search: {}", self.query), Role::Description, 2, 2, None));
+        if roomy { lines.push((String::new(), Role::Description, 0, 0, None)); }
         let visible = self.visible();
-        let mut body = Vec::new();
+        let mut body: Vec<(String, Role, u16, u16, Option<&'static str>)> = Vec::new();
         let mut selected_row = 0;
         let mut last_category = None;
         let selected = self.selected_id;
@@ -397,9 +496,9 @@ impl CommandPalette {
         for item in visible {
             if !flattened && last_category != Some(item.category) {
                 if roomy && last_category.is_some() {
-                    body.push((String::new(), Role::Description, 0, 0));
+                    body.push((String::new(), Role::Description, 0, 0, None));
                 }
-                body.push((item.category.to_owned(), Role::Heading, 2, 0));
+                body.push((item.category.to_owned(), Role::Heading, 2, 0, None));
                 last_category = Some(item.category);
             }
             let marker = if selected == Some(item.id) {
@@ -432,25 +531,29 @@ impl CommandPalette {
                     row.push_str(footer);
                 }
             }
-            body.push((
-                row,
-                if selected == Some(item.id) { Role::Selected } else { Role::Item },
-                0,
-                ROW_RIGHT_INSET,
-            ));
+            let role = if selected == Some(item.id) {
+                Role::Selected
+            } else if self.hovered_id == Some(item.id) {
+                // Pointer hover lifts the row surface (`dialog-select.tsx`
+                // hover background) without touching its identity or text.
+                Role::Action
+            } else {
+                Role::Item
+            };
+            body.push((row, role, 0, ROW_RIGHT_INSET, Some(item.id)));
         }
         if self.visible().is_empty() {
-            body.push(("No results found".to_owned(), Role::Description, 2, 2));
+            body.push(("No results found".to_owned(), Role::Description, 2, 2, None));
         }
         let capacity = height.saturating_sub(lines.len() + 1 + usize::from(roomy));
         let start = selected_row.saturating_sub(capacity.saturating_sub(1));
         lines.extend(body.into_iter().skip(start).take(capacity));
-        if roomy { lines.push((String::new(), Role::Description, 0, 0)); }
-        lines.push(("↑/↓ move · Enter select · Esc close".to_owned(), Role::Hint, 2, 0));
+        if roomy { lines.push((String::new(), Role::Description, 0, 0, None)); }
+        lines.push(("↑/↓ move · Enter select · Esc close".to_owned(), Role::Hint, 2, 0, None));
         lines
             .into_iter()
             .take(height)
-            .map(|(text, role, left, right)| {
+            .map(|(text, role, left, right, id)| {
                 let left = left.min(width);
                 let right = right.min(width.saturating_sub(left));
                 let inner = width.saturating_sub(left + right);
@@ -464,9 +567,36 @@ impl CommandPalette {
                     ),
                     width,
                 );
-                Line { text, role, detail_from: None }
+                (Line { text, role, detail_from: None }, id)
             })
             .collect()
+    }
+
+    pub fn render_styled(&self, width: u16, height: usize) -> Vec<crate::native_ui_style::Line> {
+        self.render_rows(width, height)
+            .into_iter()
+            .map(|(line, _)| line)
+            .collect()
+    }
+
+    /// Pointer hover over a rendered row.
+    ///
+    /// Returns `true` only on a real transition, so the caller repaints at most
+    /// once per row crossing. Non-entry rows (headings, the search line, the
+    /// footer) clear the hover instead of inheriting their neighbour's row.
+    pub fn hover_row(&mut self, width: u16, height: usize, row: usize) -> bool {
+        if !self.open {
+            return false;
+        }
+        let target = self
+            .render_rows(width, height)
+            .get(row)
+            .and_then(|(_, id)| *id);
+        if target == self.hovered_id {
+            return false;
+        }
+        self.hovered_id = target;
+        true
     }
 
     fn step(&mut self, down: bool) {
@@ -490,6 +620,9 @@ impl CommandPalette {
     }
 
     fn retain_or_select_first(&mut self, previous: Option<&'static str>) {
+        // A query edit replaces every row identity, so a stale hover can never
+        // survive it.
+        self.hovered_id = None;
         let visible = self.visible();
         self.selected_id = previous
             .filter(|id| visible.iter().any(|item| item.id == *id))

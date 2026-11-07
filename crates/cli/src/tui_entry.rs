@@ -3407,7 +3407,10 @@ mod surface_paint_regressions {
     /// (`packages/theme/src/tui/syntax.ts` token colors).
     #[test]
     fn theme08_syntax_tokens_paint_live_code_fences() {
-        use crate::markdown_runs::{CODE, CODE_BLOCK, SYN_COMMENT, SYN_KEYWORD, SYN_NUMBER, SYN_STRING};
+        use crate::markdown_runs::{
+            CODE, CODE_BLOCK, SYN_COMMENT, SYN_CONSTANT, SYN_FUNCTION, SYN_KEYWORD, SYN_NUMBER,
+            SYN_PROPERTY, SYN_STRING, SYN_TYPE,
+        };
         use crate::native_view_chat::{ChatMessage, ChatRole};
         let semantic = crate::native_theme_runtime::RuntimeTheme::builtin_default(
             crate::native_theme_runtime::ThemeMode::Dark,
@@ -3420,8 +3423,18 @@ mod surface_paint_regressions {
         assert_eq!(color(CODE | CODE_BLOCK | SYN_STRING), Some(syntax.string.rgba));
         assert_eq!(color(CODE | CODE_BLOCK | SYN_NUMBER), Some(syntax.number.rgba));
         assert_eq!(color(CODE | CODE_BLOCK | SYN_COMMENT), Some(syntax.comment.rgba));
+        assert_eq!(color(CODE | CODE_BLOCK | SYN_FUNCTION), Some(syntax.function.rgba));
+        assert_eq!(color(CODE | CODE_BLOCK | SYN_TYPE), Some(syntax.type_name.rgba));
+        assert_eq!(color(CODE | CODE_BLOCK | SYN_CONSTANT), Some(syntax.number.rgba));
+        assert_eq!(color(CODE | CODE_BLOCK | SYN_PROPERTY), Some(syntax.variable.rgba));
         assert_eq!(color(CODE | CODE_BLOCK), Some(markdown.code.rgba));
         assert_ne!(syntax.keyword.rgba, markdown.code.rgba, "token color is distinct");
+        // Font attributes follow the same table: comment/keyword italic,
+        // number/constant and function/type none (`syntax.ts:78,83,90,104,118`).
+        assert_eq!(super::run_attributes(SYN_KEYWORD) & 4, 4, "keywords are italic");
+        assert_eq!(super::run_attributes(SYN_COMMENT) & 4, 4, "comments are italic");
+        assert_eq!(super::run_attributes(SYN_CONSTANT) & 4, 0, "constants carry no attribute");
+        assert_eq!(super::run_attributes(SYN_FUNCTION) & 4, 0, "functions carry no attribute");
 
         // Live producer: the fenced row emits token spans aligned to the row.
         let mut view = crate::native_view::NativeView::new(120, 40);
@@ -5716,16 +5729,20 @@ fn modal_row_fg(line: &str, heading: bool, palette: crate::native_theme_runtime:
 
 fn run_attributes(flags: u32) -> u32 {
     use crate::markdown_runs::{
-        BOLD, CHIP_ACCENT, HEADING, HEADING1, ITALIC, LINK, LINK_TEXT, QUOTE,
+        BOLD, CHIP_ACCENT, HEADING, HEADING1, ITALIC, LINK, LINK_TEXT, QUOTE, SYN_COMMENT,
+        SYN_KEYWORD,
     };
     // Pinned OpenTUI attributes: BOLD=1, ITALIC=4, UNDERLINE=8, matching
     // `generateSyntax` (`packages/theme/src/tui/syntax.ts:46-71`): headings and
     // strong are bold, headings of level 1 underline, emphasis and quotes are
     // italic, and links underline. MSG-005 chip labels are bold
-    // (`routes/session/index.tsx:2436-2441`).
+    // (`routes/session/index.tsx:2436-2441`). THEME-08: the syntax table also
+    // italicizes `comment` (`syntax.ts:78`) and `keyword` (`:90`), while
+    // `string`, `number`/`constant`, `function`, `type` and `punctuation` carry
+    // no attribute — which is why a constant moved out of the keyword class.
     let mut attributes = 0;
     if flags & (BOLD | HEADING | HEADING1 | CHIP_ACCENT) != 0 { attributes |= 1; }
-    if flags & (ITALIC | QUOTE) != 0 { attributes |= 4; }
+    if flags & (ITALIC | QUOTE | SYN_COMMENT | SYN_KEYWORD) != 0 { attributes |= 4; }
     if flags & (LINK | LINK_TEXT | HEADING1) != 0 { attributes |= 8; }
     attributes
 }
@@ -5741,10 +5758,14 @@ fn markdown_run_color<'a>(
 ) -> Option<&'a crate::native_theme_runtime::HueColor> {
     use crate::markdown_runs::{
         BOLD, CODE, HEADING, HEADING1, ITALIC, LINK, LINK_TEXT, LIST, QUOTE, RULE, STRIKE,
-        SYN_COMMENT, SYN_KEYWORD, SYN_MASK, SYN_NUMBER, SYN_STRING,
+        SYN_COMMENT, SYN_CONSTANT, SYN_FUNCTION, SYN_KEYWORD, SYN_MASK, SYN_NUMBER,
+        SYN_PROPERTY, SYN_STRING, SYN_TYPE,
     };
     // THEME-08: fenced token runs paint the `syntax.*` token colors when the
     // frame resolved a semantic palette; without one the code color stays.
+    // Each class maps to the rule that captures it upstream
+    // (`packages/theme/src/tui/syntax.ts:77-125`): `boolean`/`constant` shares
+    // the number color, `property`/`field` shares the variable color.
     if let Some(syntax) = syntax {
         if flags & SYN_MASK != 0 {
             let color = if flags & SYN_COMMENT != 0 {
@@ -5753,8 +5774,14 @@ fn markdown_run_color<'a>(
                 &syntax.keyword
             } else if flags & SYN_STRING != 0 {
                 &syntax.string
-            } else if flags & SYN_NUMBER != 0 {
+            } else if flags & (SYN_NUMBER | SYN_CONSTANT) != 0 {
                 &syntax.number
+            } else if flags & SYN_FUNCTION != 0 {
+                &syntax.function
+            } else if flags & SYN_TYPE != 0 {
+                &syntax.type_name
+            } else if flags & SYN_PROPERTY != 0 {
+                &syntax.variable
             } else {
                 &markdown.code
             };
@@ -9092,6 +9119,25 @@ fn dispatch_permission_reply(
 }
 
 #[cfg(feature = "native")]
+/// Opens the whole-view graph for the roster the Subagents dock already loaded
+/// from `/api/sessions/{id}/children`. Nodes come from that listing, so nothing
+/// is discovered or invented here. The dock closes because the page now owns
+/// focus; Esc (`view.close_page`) returns to the transcript with the draft
+/// untouched, and the panel reopens from `/subagents`.
+fn children_open_graph(
+    panel: &mut crate::native_children::Panel,
+    view: &mut crate::native_view::NativeView,
+) {
+    let width = usize::from(view.modal_presentation().content_width).max(24);
+    let height = view.modal_content_height().max(6);
+    let family = panel.family("this session");
+    view.open_graph(crate::native_graph::GraphView::from_family(
+        &family, width, height,
+    ));
+    panel.open = false;
+}
+
+#[cfg(feature = "native")]
 /// Runs one Stop/Retry/Follow-up control against the existing children HTTP
 /// mapping (stop/retry/continue) and records the transport error on the panel.
 /// Shared by the keyboard path and the child-panel mouse path.
@@ -9111,6 +9157,7 @@ fn children_action_http(
                 Action::Retry(id) => (id, "retry", serde_json::json!({})),
                 Action::Followup(id, text) => (id, "continue", serde_json::json!({"text":text})),
                 Action::Open(_) => unreachable!("open handled before child control HTTP"),
+                Action::Graph => unreachable!("graph handled before child control HTTP"),
             };
             let result = http_request(&snapshot.origin, "POST", &format!("/api/sessions/{}/children/{id}/{operation}", panel.parent), Some(&body.to_string()), auth);
             if result.is_err() { panel.invalidate_actions(); } else { panel.invalidate_actions(); }
@@ -10301,6 +10348,11 @@ fn native_loop(
         crate::native_ui_preferences::UiPreferences::appearance(&state_path).unwrap_or_default(),
     );
     let mut permission_editor = crate::native_permissions::Editor::default();
+    // Provider OAuth/device sign-in surface plus its background worker. The
+    // worker owns the RFC 8628 flow so the frame never blocks on auth; the
+    // `≤100 ms` idle tick is what advances the dialog.
+    let mut login = crate::native_auth_login::LoginSurface::new();
+    let mut login_run: Option<crate::native_auth_login::LoginRun> = None;
     let animation_start = crate::native_clock::FrameClock::new();
     let mut animation_tick = 0u128;
     // STATE-001/004: the live footer clock. `footer_frame_id` is the renderer
@@ -12376,6 +12428,14 @@ fn native_loop(
             overlay = rows;
             view.set_overlay_roles(roles);
         }
+        if login.is_open() {
+            let width = view.modal_presentation().content_width;
+            let mut rows = vec![login.title(), String::new()];
+            rows.extend(login.body(width));
+            rows.push(String::new());
+            rows.push(login.hint().to_owned());
+            overlay = rows;
+        }
         view.set_overlay_roles(crate::native_ui_style::overlay_roles(&overlay,
             appearance.open || (children_panel.open && !children_panel.detail)
                 || matches!(dialog, native_setup::Dialog::Provider | native_setup::Dialog::Model)));
@@ -12902,6 +12962,7 @@ fn native_loop(
                 )
                 && !session_route;
             let input_overlay = dialog_open
+                || login.is_open()
                 || view.command_palette_open()
                 || appearance.open
                 || children_panel.open
@@ -13178,6 +13239,36 @@ fn native_loop(
             .marquee()
             .next_wake()
             .map(|at| animation_start.deadline(at));
+        // OAuth/device login: drain the background worker. This runs on the
+        // `≤100 ms` idle tick, so the dialog advances (code → approval →
+        // saved) without a keystroke and without blocking the frame.
+        if login_run.is_some() {
+            let mut finished = false;
+            if let Some(run) = login_run.as_mut() {
+                while let Some(event) = run.try_poll() {
+                    match event {
+                        crate::native_auth_login::LoginEvent::Authorization { user_code, url } => {
+                            login.began_authorization(user_code, url);
+                        }
+                        crate::native_auth_login::LoginEvent::Saved { account } => {
+                            login.succeeded(account);
+                            finished = true;
+                        }
+                        crate::native_auth_login::LoginEvent::Failed(message) => {
+                            login.failed(message);
+                            finished = true;
+                        }
+                    }
+                    needs_paint = true;
+                    if finished {
+                        break;
+                    }
+                }
+            }
+            if finished {
+                login_run = None;
+            }
+        }
         let timeout = [worker_deadline, input.next_deadline(), marquee_deadline]
             .into_iter()
             .flatten()
@@ -15254,6 +15345,15 @@ fn native_loop(
                     needs_paint = true;
                     continue;
                 }
+                // DIALOG-11: palette rows are interactive and take the same
+                // pointer hover treatment as `dialog-select` rows. This must
+                // run before the toast block, which consumes every move.
+                if view.command_palette_open() && kind == 7 && modifiers == 0 {
+                    if view.command_palette_hover(x, y) {
+                        needs_paint = true;
+                    }
+                    continue;
+                }
                 // Toast hover is geometry-only: the rendered frame remains the
                 // source of truth for the action affordance and click target.
                 if kind == 7 || kind == 2 {
@@ -15353,6 +15453,11 @@ fn native_loop(
                             modal.content_width,
                             view.modal_content_height(),
                         ) {
+                            if matches!(action, crate::native_children::Action::Graph) {
+                                children_open_graph(&mut children_panel, &mut view);
+                                needs_paint = true;
+                                continue;
+                            }
                             if let Some(child) = children_action_http(&mut children_panel, action, live.as_ref(), auth.as_deref(), binding_generation) {
                                 let result = live.as_ref().ok_or_else(|| "daemon unavailable".to_owned()).and_then(|parent_snapshot| open_child_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, &parent_snapshot.origin, auth.as_deref(), binding_generation, &parent_snapshot.session_id, &child, selected.as_ref().map(|model| model.qualified())));
                                 match result {
@@ -15800,6 +15905,20 @@ fn native_loop(
                     // arrow move in a non-select overlay.
                     continue;
                 }
+                // The graph page is read-only: Up/Down move the node cursor
+                // (`GraphView::navigate`) and nothing is submitted. The page
+                // only exists when the caller loaded a projection.
+                if view.page() == crate::native_view_pages::Page::Graph {
+                    view.graph_navigate(
+                        if matches!(&direction, native_input_decoder::InputEvent::ArrowUp) {
+                            crate::native_graph::NavDir::Up
+                        } else {
+                            crate::native_graph::NavDir::Down
+                        },
+                    );
+                    needs_paint = true;
+                    continue;
+                }
                 if permission_editor.open {
                     permission_editor.navigate(direction == native_input_decoder::InputEvent::ArrowDown);
                     needs_paint = true;
@@ -15812,6 +15931,15 @@ fn native_loop(
                 }
                 if children_panel.open {
                     children_panel.key(if direction == native_input_decoder::InputEvent::ArrowUp { 2 } else { 14 });
+                    needs_paint = true;
+                    continue;
+                }
+                if login.is_open() {
+                    if direction == native_input_decoder::InputEvent::ArrowUp {
+                        login.select_prev();
+                    } else {
+                        login.select_next();
+                    }
                     needs_paint = true;
                     continue;
                 }
@@ -16088,6 +16216,12 @@ fn native_loop(
                 children_panel.key(byte)
             };
             if let Some(action) = action {
+                if matches!(action, crate::native_children::Action::Graph) {
+                    children_open_graph(&mut children_panel, &mut view);
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
                 if let Some(child) = children_action_http(&mut children_panel, action, live.as_ref(), auth.as_deref(), binding_generation) {
                     let result = live.as_ref().ok_or_else(|| "daemon unavailable".to_owned()).and_then(|parent_snapshot| open_child_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, &parent_snapshot.origin, auth.as_deref(), binding_generation, &parent_snapshot.session_id, &child, selected.as_ref().map(|model| model.qualified())));
                     match result {
@@ -16563,6 +16697,41 @@ fn native_loop(
         // The palette owns a separate query and returns only an existing
         // local route. All side effects remain in the shared dispatcher.
         let mut palette_route = None;
+        // The login dialog owns input while visible: Enter starts the flow (or
+        // dismisses a terminal phase), Esc cancels the worker so no credential
+        // can land after the dialog closes.
+        if login.is_open() {
+            match byte {
+                27 => {
+                    if let Some(run) = login_run.as_ref() {
+                        run.cancel();
+                    }
+                    login_run = None;
+                    login.close();
+                }
+                13 | 10 => {
+                    if login.phase().is_terminal() {
+                        login.close();
+                    } else if matches!(
+                        login.phase(),
+                        crate::native_auth_login::LoginPhase::Choosing
+                    ) {
+                        if let Ok(provider) = login.begin() {
+                            match crate::native_auth_login::LoginRun::start(provider) {
+                                Ok(run) => login_run = Some(run),
+                                Err(error) => {
+                                    login.failed(error);
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            needs_paint = true;
+            utf8.reset();
+            continue;
+        }
         if view.command_palette_open() && !matches!(byte, 3 | 4) {
             match byte {
                 27 => view.close_command_palette(),
@@ -18448,6 +18617,24 @@ fn native_loop(
                     utf8.reset();
                     continue;
                 }
+                if command == "/login" {
+                    // Provider OAuth/device sign-in. A chat-composer typed
+                    // "/login" is consumed exactly like /connect; the dialog
+                    // owns its own pointer/keystroke state from here.
+                    login.open();
+                    login_run = None;
+                    view.close_page();
+                    view.close_command_palette();
+                    help_open = false;
+                    appearance.open = false;
+                    children_panel.open = false;
+                    permission_editor.open = false;
+                    dialog = native_setup::Dialog::None;
+                    consume_local_command(&mut draft, command, from_chat_composer);
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
                 if command == "/models" {
                     // Same contract as /connect: real Models picker; a
                     // chat-composer typed "/models" is consumed, the
@@ -18953,7 +19140,7 @@ fn configured_command_input(text: &str) -> Option<(&str, &str)> {
 #[cfg(feature = "native")]
 fn is_recognized_local_command(command: &str) -> bool {
     crate::native_view_pages::Page::from_route(command).is_some()
-        || matches!(command, "/commands" | "/new" | "/compact" | "/compact native" | "/compact fallback" | "/compact auto" | "/sidebar" | "/appearance" | "/subagents" | "/permission" | "/permissions" | "/import" | "/settings-import" | "/settings" | "/prompt.stash" | "/prompt.stash.pop" | "/prompt.stash.list")
+        || matches!(command, "/commands" | "/new" | "/compact" | "/compact native" | "/compact fallback" | "/compact auto" | "/sidebar" | "/appearance" | "/login" | "/subagents" | "/permission" | "/permissions" | "/import" | "/settings-import" | "/settings" | "/prompt.stash" | "/prompt.stash.pop" | "/prompt.stash.list")
 }
 
 /// Consume the typed text of a RECOGNIZED local slash command that was
@@ -20554,7 +20741,7 @@ mod command_consumption_tests {
                     || super::native_local_page_route(route).is_some()
                     || matches!(
                         route,
-                        "/help" | "/sessions" | "/new" | "/connect" | "/models" | "/appearance" | "/subagents" | "/import" | "/settings-import" | "/settings" | "/prompt.stash" | "/prompt.stash.pop" | "/prompt.stash.list"
+                        "/help" | "/sessions" | "/new" | "/connect" | "/login" | "/models" | "/appearance" | "/subagents" | "/import" | "/settings-import" | "/settings" | "/prompt.stash" | "/prompt.stash.pop" | "/prompt.stash.list"
                     ),
                 "palette action has no local handler: {route}"
             );

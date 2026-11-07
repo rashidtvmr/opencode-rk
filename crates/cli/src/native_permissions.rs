@@ -2,8 +2,8 @@
 //! overlay (P17 / FORM-001, FORM-002). All rule mutations require a daemon ACK.
 //!
 //! Upstream evidence, pin `450e7b92412c780a7b5a75226bb8d49aaca24e22`:
-//! * option set/order and the `save` gate — `packages/tui/src/routes/session/permission.tsx:232-240`;
-//! * option labels — `packages/tui/src/util/permission.ts:162-168`;
+//! * option set/order — `packages/tui/src/mini/permission.shared.ts:36-38`;
+//! * option labels — `packages/tui/src/util/permission.ts:162-166`;
 //! * `always` body replacement (`permissionAlwaysLines`) —
 //!   `packages/tui/src/util/permission.ts:154-160`,
 //!   `packages/tui/src/routes/session/permission.tsx:223-231`;
@@ -131,7 +131,7 @@ impl Editor {
 // ---------------------------------------------------------------------------
 
 /// One selectable permission reply. The set and its order are fixed by
-/// `permission.tsx:232-240`: `once`, `always` (only when the request carries
+/// `permissionOptions` (`mini/permission.shared.ts:36-38`): `once`, `always` (only when the request carries
 /// `save` rules), `reject`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PermissionOption {
@@ -151,7 +151,8 @@ impl PermissionOption {
         }
     }
 
-    /// Visible label, exact upstream text (`util/permission.ts:162-168`).
+    /// Visible label, exact upstream text (`permissionOptionLabel`,
+    /// `util/permission.ts:162-166`).
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
@@ -163,7 +164,7 @@ impl PermissionOption {
 }
 
 /// Ordered options for a request. A request without `save` rules omits
-/// `always` entirely (`permission.tsx:232-240`); the remaining options keep
+/// `always` entirely (`mini/permission.shared.ts:36-38`); the remaining options keep
 /// their upstream order — never reordered, never synthesized.
 #[must_use]
 pub fn permission_options(save_available: bool) -> Vec<PermissionOption> {
@@ -840,7 +841,7 @@ mod tests {
 
     // FORM-001 — once/always/reject variants, `save` gate, body swap,
     // nested rejection scope.
-    // Upstream: permission.tsx:232-240 (options + save gate),
+    // Upstream: mini/permission.shared.ts:36-38 (option set); the save gate
     // permission.tsx:217-257 (body + selection semantics),
     // util/permission.ts:154-175 (always lines + labels),
     // permission.tsx:144-155,248-254 (nested rejection stage).

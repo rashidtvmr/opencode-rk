@@ -1,12 +1,332 @@
 # OpenCode V2 UI parity — consolidated status
 
-- **Canonical line:** `main-v2` @ `ba04acbe` (remote verified via `git ls-remote`)
+- **Canonical line:** `main-v2` @ `fc942da4` (session base SHA; not re-verified
+  against the push remote in the wave-107 pass)
 - **Upstream oracle:** `/Users/mymac/Projects/tmp/opencode` @ `450e7b92412c780a7b5a75226bb8d49aaca24e22`
 - **Checklist:** `docs/ui-parity/opencode-ui-parity-kit/checklist.json` (223 items)
 - **Method:** source inspection of the live Rust path (implementation + a
   production consumer), cross-checked against the pinned upstream component.
   This is **not** captured-golden acceptance: no matched styled-cell/cursor
   captures were produced. Verdicts below are source-backed, not runtime-proven.
+
+## Wave-112 (2026-11-07) — the last two "open" bounds were already met
+
+Re-checking the remaining rows the same way (read the live consumer, not the
+ledger) closed two more:
+
+| Row | Ledger said | Tree shows |
+| --- | --- | --- |
+| `PAR-19` | viewer has no consumer | `visible_chunk_range` + `placeholder_height` drive both diff-viewer branches (`native_view_dialogs.rs:3722-3781`); `relative_scroll_top` is an identity there because the scroll area has no virtual-root offset |
+| `MSG-010` | turns model dead | the `RowMessage` model is the *marker-era* algorithm, which native sessions cannot use (no persisted `Idle` rows); the live path is `project_with_turn_duration` (nearest preceding input) + `AssistantFacts::tokens_per_second` over server `streamed_ms` |
+
+**What this leaves as genuinely open**, each blocked on something other than a
+missing consumer:
+
+- `LAY-10/11/13` — needs a live plugin-panel/terminal dock. `NativeHost::new`
+  still has no production caller and `compose_shell` is test-only; the live
+  render composes only the sidebar. This is a composition migration plus a new
+  product surface, not a bounded wiring fix.
+- `SIDE-05` — `set_limit` (`native_view_status.rs:1260`) has only a test caller
+  because there is no plan-quota source; the typed `rate_limited` error path
+  (`native_assistant_facts.rs:164`) is live and distinct.
+- `DIALOG-20` — the toast sink (`native_toast.rs`, `native_shell.rs:1773`) is
+  complete but no action emits a toast; adding one would invent a trigger.
+- `PAR-02/03/06` — harness-side obligations; `FFI-*` — deliberate non-goals.
+
+No fabricated completion: every remaining row is blocked on product scope, an
+external API, or a large composition change — not on more ledger bookkeeping.
+
+## Wave-111 (2026-11-07) — syntax capture classes, and a false-negative grep
+
+Two "absent" rows were re-verified and both were **already landed**. The second
+check exposed the audit method's own failure mode: `TAB-10`'s fields are named
+`branch`, `default_branch` and `worktree` (`native_navigation.rs:205-215`), so
+the `current_branch` grep that "proved" the row absent could never match.
+
+`THEME-08` was likewise past its "no producer" claim: the lexical classifier
+`code_token_cell_spans` (`markdown_runs.rs:165`) is called from the live fence
+painter (`native_view_chat.rs:2970`) and its `SYN_*` bits are consumed by the
+live paint loop (`tui_entry.rs:6593`).
+
+What was genuinely missing is breadth, now implemented:
+
+| Property | Result |
+| --- | --- |
+| Capture classes | `SYN_FUNCTION`, `SYN_TYPE`, `SYN_CONSTANT`, `SYN_PROPERTY` (8 of 14 `CaptureClass` variants) |
+| Rule | Closed and line-local: keyword set, literal set, `.` receiver → property, `(` head → function, uppercase lead → type; a bare identifier stays plain |
+| Colors | function → `syntax.function`, type → `syntax.type_name`, constant → `syntax.number`, property → `syntax.variable` — the rules that capture them upstream (`syntax.ts:83,104,113-118`) |
+| Attributes | `comment`/`keyword` italic (`syntax.ts:78,90`); number/constant/function/type unattributed, so `true`/`false` left the keyword set |
+| Disjointness | One class per interval; the base `markdown.code` span still covers the gaps |
+
+Tests: `theme08_lexical_capture_classes_match_upstream_scopes`
+(`markdown_runs.rs`) for the classifier, plus color/attribute assertions in
+`theme08_syntax_tokens_paint_live_code_fences` (`tui_entry.rs`).
+
+Still open, unchanged: `LAY-10/11/13` (no live plugin-panel/terminal producer),
+`SIDE-05` (usage-limits pipeline), `PAR-19`, `MSG-010`, `FORM-001` sub-3/4,
+`DIALOG-20` crash half, `PAR-02/03/06` (harness-side), `FFI-*` (non-goals). No
+styled-cell captures exist, so every verdict stays source-backed.
+
+## Wave-110 (2026-11-07) — subagent whole view is reachable
+
+The Subagents dock (`/subagents`) already previewed child sessions, but the
+whole-session **graph** had no trigger: `PageState::open_graph` had zero
+production callers, so `Page::Graph` could only be reached by tabbing into it,
+where it honestly painted "no graph loaded".
+
+Upstream has no graph route — the diagram is inline content
+(`packages/merman/src/markdown.ts`) and the preview is a dialog
+(`component/dialog-image-preview.tsx`) — so inventing `/graph` would violate the
+authority order. The trigger is therefore the **dock's own family control**:
+`g` (and the matching `g graph` footer cell) on the Subagents panel.
+
+| Property | Result |
+| --- | --- |
+| Node source | `Panel::family` projects the roster the panel already loaded from `/api/sessions/{id}/children`; the bound parent session is the root |
+| No invented parents | A row keeps its daemon `parent_id`; a row without one hangs off the bound session, matching `family_prefix` |
+| No invented status | Roster vocabulary only (`running`/`error`/`stopped`…); anything unreported stays `Idle` |
+| Selection | `g` is family-wide: it needs no selected row and submits nothing |
+| Detail view | Owns its own keys, so `g` is inert there |
+| Navigation | Up/Down move the node cursor through `PageState::graph_navigate`; nothing is submitted |
+| Exit | Esc closes the page (`close_page`) and returns to the transcript with the draft byte-identical |
+| Empty roster | Still a valid one-node graph (the root), not an error |
+
+Verified: `-- native_children::tests` → **22 passed / 0 failed**; `-- graph` →
+**21 passed / 0 failed**; `-- children` → **37 passed / 0 failed**;
+`-- native_view_pages::tests` → **23 passed / 0 failed**; `-- page` → **91
+passed / 0 failed**; `-- native_view` → **597 passed / 0 failed**; `cargo build
+--bin oc2` exit 0.
+
+Still open (unchanged by this wave): `LAY-10` (needs a live panel producer),
+`SIDE-05` (external Console API), `PAR-02/03/06` (harness-side), `FFI-*`
+(deliberate non-goals). No styled-cell/cursor captures exist yet; these verdicts
+remain source-backed, not runtime-captured.
+
+### Also this wave: `FORM-001` sub-behavior 1 verified already-correct
+
+The ledger listed the live permission dialog as emitting 6 labels against
+upstream's 3. That was stale in two ways. The 6-label `open_permission` helper
+(`native_view_dialogs.rs:2824`) has **no production callers** — every call site is
+in its `#[cfg(test)]` module; the live permission poll
+(`tui_entry.rs:11947`) opens `open_permission_with_persistent`, which emits
+`Allow once` / `Always allow` / `Reject` in upstream order.
+
+And the citation was dead: `routes/session/permission.tsx:232-240` does not exist
+at pin `450e7b92`. The option set now lives in `mini/permission.shared.ts:36-38`
+(`return ["once", "always", "reject"]`), labels in `permissionOptionLabel`
+(`util/permission.ts:162-166`), and the always-stage set is `["confirm",
+"cancel"]` (`:41-43`). Source citations corrected in `native_permissions.rs` and
+`native_view_dialogs.rs`.
+
+One genuine residual is recorded rather than hidden: the pin's footer returns all
+three options unconditionally, while the Rust helper drops `always` when the
+request carries no `save` rules. That is a behavior decision a product owner must
+make — I did not change it, and `FORM-001` stays `PARTIAL`, not `MATCH`.
+
+### Six `BLOCKED`/`REAL_GAP` rows were stale — corrected by verification
+
+Before queueing more implementation, I re-checked every seam the open rows
+assert "is absent". Six rows were wrong: the code had landed in earlier waves and
+nobody re-checked. Each is now `ALREADY_CORRECT`/`PARTIAL` with line evidence.
+
+| Row | What the ledger claimed | What the tree actually has |
+| --- | --- | --- |
+| `FORM-001` sub-1 | live dialog emits 6 labels | live poll uses the 3-option helper; 6-label helper is test-only |
+| `DIFF-001` | no `config.diffs.view` parse | `UiPreferences::diffs_view` parsed + live `set_diff_view` → `resolve_view_mode` → `paint_rows_split` |
+| `MSG-005` | no `files`/`skills` anywhere | contract fields, server builder, projection, painted chips |
+| `STATE-002` | no `Compaction` role, no persistence | role + storage enum + server append + CLI part/divider |
+| `TOOL-011` | `execute_dialog` zero consumers | click path opens the execute viewer live |
+| `THEME-08` | `syntax_rules()` zero callers | installed per frame into a live `SyntaxStyleArena` |
+
+**Standing rule this establishes:** a `BLOCKED` row is a claim about the tree
+*now*, not a permanent fact. A row can go stale two ways — the pin moved
+(`component/form.tsx` no longer resolves; only dead path of 20 cited) or the code
+landed. Verify the seam is still absent before assigning work against it, or the
+fleet re-implements what already exists.
+
+**That paragraph was itself stale, and re-checking it a second time is the
+general lesson.** `THEME-08` *does* have a token producer: `code_token_spans` /
+`code_token_cell_spans` (`markdown_runs.rs:69,165`) run on live fenced chunks
+(`native_view_chat.rs:2970`) and their `SYN_*` bits paint through
+`markdown_run_paint_color` (`tui_entry.rs:5836`, consumed `:6593`). `TAB-10`
+spells its fields `branch` / `default_branch` / `worktree`
+(`native_navigation.rs:205-215`), so a `current_branch` grep is a **false
+negative**: `git_vcs_info` (`tui_entry.rs:878`) feeds `LiveSnapshot.session_vcs`
+(`:853`, `:1645`) and the live `rail_inputs_for_navigation` (`:7192`) calls
+`VcsInfo::tab_detail`. Only `LAY-10` still holds. Grep by upstream *concept*,
+never by upstream *symbol name*.
+
+## Wave-109 (2026-11-07) — command-palette row hover
+
+The palette was the last interactive surface with no pointer hover: the model
+had no `hovered` field at all. It now has one, kept **separate** from
+`selected_id` so pointer hover and keyboard selection stay independent, exactly
+like `dialog-select.tsx`.
+
+Hit-testing and painting share one layout. `render_rows` is the single source of
+row identity: it returns each painted `Line` plus, for entry rows only, the
+command identity that row represents. `render_styled` maps it down to plain
+`Line`s, and `hover_row` reads the same output — so a hover can never land on a
+row the frame did not paint, and no second hand-written row arithmetic can drift
+from the painter.
+
+| Property | Result |
+| --- | --- |
+| Hover repaints | Hovered non-selected rows lift to `Role::Action` (`BackgroundPanel` surface) |
+| Selection outranks hover | A selected row keeps `Role::Selected`; `selected_id` is untouched |
+| Row text | Never rewritten by hover (asserted across every row) |
+| Headings/search/footer | Not hoverable; they clear the hover instead of inheriting a neighbour |
+| Repaint cost | `hover_row` returns `true` only on a real row crossing |
+| Query edits / close | Clear the hover so no stale identity survives |
+| Live feed | `command_palette_hover` maps the pointer cell through the same `modal_presentation` geometry the renderer uses; `tui_entry.rs` dispatches it before the toast block, which consumes every move |
+
+Verified: `cargo test -p opencode-rk-cli --bin oc2 -- palette` → **73 passed /
+0 failed**; `-- hover` → **33 passed / 0 failed**.
+
+## Wave-108 (2026-11-07) — provider OAuth/device sign-in added
+
+Three user-reported gaps were checked against source. One was genuinely absent
+and is now implemented end to end; the other two were partly present, and the
+census below records exactly where each still stops.
+
+### `/login` — new, and reachable
+
+Before this wave the CLI had **no login route at all**: `persisted_auth` could
+read and write an OAuth credential and `providers::openai_device_auth` could run
+the RFC 8628 device flow, but nothing in the client ever started either.
+
+| Piece | Location |
+| --- | --- |
+| Pure surface (picker, phases, layout, hints) | `native_auth_login.rs` — `LoginSurface`, `LoginPhase` |
+| Background flow runner | `native_auth_login.rs` — `LoginRun`, current-thread runtime on `oc2-auth-login` |
+| Credential persistence | worker calls `persisted_auth::save_oauth_credential` **before** reporting success |
+| Palette route | `native_command_palette.rs` — `provider:provider.login` / `provider.login` → `/login` |
+| Typed command + recognition | `tui_entry.rs` — `/login` handler, `is_recognized_local_command` |
+| Modal painting | `tui_entry.rs` — login rows replace `overlay`, `input_overlay` includes it |
+| Keys | `tui_entry.rs` — Enter starts/closes, Esc cancels the worker, arrows pick |
+| Progress without blocking | `tui_entry.rs` — `LoginRun::try_poll` drained on the existing `≤100 ms` idle tick |
+
+No access or refresh token crosses the worker channel: the event carries only
+`Authorization { user_code, url }`, `Saved { account }` or `Failed(reason)`.
+
+OpenAI (device code) is fully wired. Anthropic is listed in the picker with its
+real method (browser consent) but `LoginSurface::begin` **fails closed** with an
+explicit reason, because this build cannot receive the hosted callback — the
+dialog never pretends to poll a flow it cannot finish.
+
+Verified: `cargo test -p opencode-rk-cli --bin oc2 -- native_auth_login` →
+**10 passed / 0 failed**.
+
+### Regression this wave caught and fixed
+
+Registering the login entry pushed `/prompt.stash.list` out of the palette's
+`MAX_ENTRIES = 16` list bound — an existing command became unreachable, and the
+existing `prompt_stash_palette_routes_resolve_to_local_commands` test failed
+with `["/prompt.stash", "/prompt.stash.pop"]`. The bound is a registry cap, not
+a visible-row cap (`render_styled` clips to the viewport), so it was raised to
+**24**. Palette suite: **70 passed / 0 failed**.
+
+### Hover — present on most surfaces; two live gaps remain
+
+Already fed by real pointer events in the live loop: tab strip/rail (session,
+Home, add, compact search), pinned footer location, send button, permission
+editor rows, subagent dock rows, user-message cards, and dialog select rows
+(`dialogs.hover_at_row`, `tui_entry.rs:15246`).
+
+Two gaps were recorded in that pass. One was real and is fixed in Wave-109
+(palette rows). The other was a **false positive in this ledger** and is
+corrected here: toast hover *is* wired live. `toast_hovered` is recomputed from
+the rendered `ToastFrame` rect on `kind == 7` and pauses/repaints
+(`tui_entry.rs:15311-15332`). `native_modal_layer::hover_toast` is that layer's
+own API, not the toast lifetime's — the grep behind the earlier claim looked for
+the wrong symbol.
+
+### Subagents — dock is live, whole-view graph is not
+
+`/subagents` is handled (`tui_entry.rs:18491`) and opens the live
+`children_panel` bound to the current session lease, so the dock view works.
+The **whole-session graph** does not: `native_graph::GraphPanel` and
+`PageState::open_graph` exist and are tested, but `open_graph` has **zero
+callers** in `tui_entry.rs`, so no keybinding, slash command or pointer route
+can reach it.
+
+### Not runtime-proven
+
+As with every earlier wave, these verdicts are source inspection plus the named
+focused tests. There are still no captured styled-cell or cursor goldens, so no
+claim here rests on a rendered capture.
+
+## Wave-107 (2026-11-07) — fresh source re-verification: the open list was stale
+
+The "38 remaining" set recorded after wave-81 had not been rolled up since
+waves 82–106 landed. A fresh source pass at `fc942da4` re-checked every item on
+that list for a **live production consumer**. Twenty-five of them are already
+live and move to `LANDED` (twenty-three in the table below, plus `TAB-06` and
+`PAR-07`). Nothing here was runtime-proven with captured
+goldens; this is source inspection plus the named focused tests.
+
+| Item | Was | Now | Live evidence |
+| --- | --- | --- | --- |
+| `DIALOG-07` | `REAL_GAP` | `LANDED` | `row_footer` consumed by the live select body: `native_view_dialogs.rs:3991` (built), `:4010` (windowed), `:4078` (painted right-aligned); test `dialog07_row_footer_paints_right_aligned:11890` |
+| `DIALOG-13` | `BLOCKED` | `LANDED` | `SessionPicker` (`native_palette.rs:2550`, mounted `:3455`) reaches the live `open_sessions` (`native_view_dialogs.rs:1524`), called from `tui_entry.rs:5109` |
+| `DIALOG-15` | `BLOCKED` | `LANDED` | `open_integration` (`native_view_dialogs.rs:2220`, `IntegrationPhase` `native_palette.rs:2930`) live-called `tui_entry.rs:16346` |
+| `DIALOG-17` | `BLOCKED` | `LANDED` | `open_stash` (`native_view_dialogs.rs:1992`) live-called `tui_entry.rs:17941`; rows from `native_palette.rs:3202` |
+| `DIALOG-18` | `BLOCKED` | `LANDED` | live `open_diff_viewer` `tui_entry.rs:15616`; viewer mode resolved `native_view_dialogs.rs:2457` |
+| `TOOL-006` | `BLOCKED` | `LANDED` | **Produced end to end**: server routes `GET /api/shell`, `/api/shell/{id}`, `/api/shell/{id}/output` (`server/src/lib.rs:244-246`) over `shell_registry.rs`; covered by `tests/tool006_shell_routes.rs`; CLI polls live (`tui_entry.rs:10719`) and feeds the Shell dock (`native_shell.rs:1852/1866/1957`, `native_view.rs:280/2047/10418`) |
+| `TOOL-011` | `BLOCKED` | `LANDED` | live `execute_dialog_from_part` `tui_entry.rs:15573`; dialog rows rendered `native_view_dialogs.rs:140/152` |
+| `MEDIA-001` | `REAL_GAP` | `LANDED` | live click route `tui_entry.rs:15152` → `NativeView::open_image_preview_page_at` (`native_view.rs:3774`) → `PageState::open_image_preview` (`native_view_pages.rs:793`) |
+| `MSG-001` | `BLOCKED` | `LANDED` | `SessionRow`→painter adapter now live: `reduce_session_rows` called at `native_view_chat.rs:4165,4377` |
+| `MSG-002` | `BLOCKED` | `LANDED` | same adapter; disclosure state carried through `reduce_session_rows` |
+| `MSG-003` | `BLOCKED` | `LANDED` | live `partition_pending` `native_view_chat.rs:4405` |
+| `MSG-005` | `BLOCKED` | `LANDED` | contract fields exist (`contracts/src/lib.rs:314-319`), projected (`native_chat_projection.rs:787`), painted (`native_view_chat.rs:1287,1353-1357`) |
+| `MD-007` | `BLOCKED` | `LANDED` | live fence registry bound: `set_fence_handlers` `native_view_chat.rs:3081` |
+| `MD-008` | `BLOCKED` | `LANDED` | real painter injected live: `CellDiagramPainter` `native_view_chat.rs:2981` (impl `native_mermaid.rs:463`) |
+| `MD-009` | `BLOCKED` | `LANDED` | real engine injected live: `UpstreamMathEngine` `native_view_chat.rs:3039` (impl `native_math_engine.rs:2331`) |
+| `PAR-09` | `REAL_GAP` | `LANDED` | live syntax-token fence handler `native_view_chat.rs:3081`; test `theme08_syntax_tokens_paint_live_code_fences` (`tui_entry.rs:3409`) |
+| `PAR-19` | `BLOCKED` | `LANDED` | `visible_chunk_range` live in the diff dialog `native_view_dialogs.rs:3720,3772`, fed by the root-relative `relative_scroll_top` (`native_diff_view.rs:1227`) |
+| `DIFF-001` | `BLOCKED` | `LANDED` | preference threaded live (`native_view.rs:97,2784-2790`), inline resolution `native_view_chat.rs:3557`, viewer route `tui_entry.rs:15616` |
+| `DIFF-003` | `BLOCKED` | `LANDED` | chunk virtualization live (same `visible_chunk_range` consumers) |
+| `LAY-11` | `REAL_GAP` | `LANDED` | `right_pane` live `native_view.rs:341,361,5103` and `native_shell_frame.rs:260` |
+| `LAY-13` | `REAL_GAP` | `LANDED` | `pane_resize_handle` live `native_pane_resize.rs:236,637` |
+| `THEME-13` | `REAL_GAP` | `LANDED` | `SystemThemeState` live `tui_entry.rs:9428,10479` |
+| `THEME-14` | `REAL_GAP` | `LANDED` | `SyntaxStyleArena` live `tui_entry.rs:10466-10468` |
+
+**Also re-verified live in the same pass** (the wave-106 open list was wrong here):
+
+- `TAB-06` — the live loop really does feed per-tab status: pending items are
+  filtered by session owner (`tui_entry.rs:12504-12512`), the family roll-up
+  merges live `/children` rows (`:12513-12532`), `apply_live_status` is called at
+  `:12533`, and `record_enqueue` runs from the real enqueue site
+  (`:17441-17458`) with correct `is_open`/`is_current`. The seam
+  `queued_drafts` is owner-tagged, so background tabs are not ignored.
+- `PAR-07` — all four trace families are live, not just three: `form.present`
+  (`tui_entry.rs:12056`), `form.submit` carrying a `posted` outcome (`:14017`),
+  and `form.validation` on a failed submit (`:14030`) — on top of the existing
+  queue/steer (`:12558`, `:12601`), submission (`:13693`) and permission reply
+  (`:6212`) traces. The CLI does have a form surface (`DialogKind::Form`,
+  `open_form`/`open_form_restored`/`form_dismiss`).
+
+**Still genuinely open after this pass (verified absent, not just unwired):**
+
+- `LAY-10` — `panel_open`/`terminal_selected` (`native_shell_frame.rs:122-124`) are
+  never set in production (`:150-151` default false); only tests assign them
+  (`:783-785`). `compose_shell` still has zero production callers and
+  `NativeHost::new` is reached only from `native_host.rs:755` inside `#[cfg(test)]`.
+- `SIDE-05` — no usage-limits route/service (external Console API).
+- `PAR-02`/`PAR-03`/`PAR-06` — harness-side obligations, not product.
+- `FFI-02/03/04/06/07/08/11` — bridge render-substrate models with no CLI
+  consumer; adopting any one replaces the live paint path, so this is a
+  deliberate non-goal rather than a wiring gap.
+
+**Also fixed in this pass (test-harness, not product):**
+`crates/cli/tests/native_state_platform_alias.rs` was **broken on canonical** —
+its `#[path]`-include closure omitted the modules `native_ui_preferences`
+resolves against (24 compile errors at `fc942da4`). Carrying that closure would
+have dragged in the whole view layer (`native_children` → `native_view_chat` →
+~16 more modules), so the 5 macOS path-alias assertions were moved verbatim into
+`native_ui_preferences::platform_alias_tests` (macOS-gated unit tests) and the
+unbuildable target was removed. Verified: **5 passed / 0 failed**
+(`cargo test -p opencode-rk-cli --bin oc2 -- platform_alias`).
 
 ## Wave-83 — DIALOG-14/15 + DIFF-003 landed (2026-11-05)
 
@@ -20,14 +340,10 @@ verified). Full CLI suite on the integrated SHA: **2385 passed / 0 failed**
 | `DIALOG-15` | `REAL_GAP` | `LANDED` | `8d1cab14` live MCP Enter routes through the tested `mcp_enter` (`native_view.rs` `mcp_dialog_enter`): `needs_auth` opens the live `IntegrationState` surface, `failed` shows error details, else inert; toggle moved to space (`config/keybind.ts:283`). 2 focused tests. Seam: live `McpStatus` has no `integrationID`, so `needs_auth` is treated as integration-gated; no server-side sign-in producer exists. |
 | `DIFF-003` | `BLOCKED` | `LANDED` (inline half) | `ba04acbe` `diff003_inline_live_patch_budget_color_and_geometry_are_stable` exercises the live `ChatPart::Patch` arm: 4097-line added file yields only real diff rows up to `MAX_DIFF_LINES` + the `[diff truncated]` row; hunk coloring intact; stable geometry. Independent APPROVE (vyce-deepseek-v41 `ses_e567608f7ffeiPzvz5FJtrLHS9`). Split-mode half remains unwired (see wave-81/`DIFF-001`). |
 
-**Still accurate after this wave:** `MSG-008` TPS end-to-end is `REAL_GAP`
-(producer emits no streamed stamp; `MessageExecution` has no timing field —
-see the wave-81 row); `STATE-001/003/004` remain `REAL_GAP` (their models are
-test-only, no live producer); `PAR-19` is **BLOCKED** with an accurate seam —
-the mount-budget model (`row_weight`/`rows_before`/`rows_after`) operates on
-`SessionRow` (session tree), while the live chat transcript uses `ChatMessage`
-with no such producer, and the renderer already bounds per-frame work by
-walking from the tail. `MSG-005` (skill/file message chips) is in flight.
+**Written in wave-83; superseded 2026-11-07.** `MSG-008` landed in `6a49151f`
+and `PAR-19`'s viewer consumer is live — see wave-112. As of this wave,
+`STATE-001/003/004` were `REAL_GAP` (models test-only, no live producer) and
+`MSG-005` (skill/file message chips) was in flight.
 
 ## Wave-80 — CP-09 + CP-07 landed (2026-11-04)
 
@@ -342,7 +658,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | PAR-16 | `LANDED` (`f240367b`) | Fixture classes (`baseline`/`optional`/`experimental`/`extension`): every fixture resolves to exactly one class, unknown classes are rejected, `--class` filters, the class travels into the request/golden, and a golden/fixture class mismatch is a hard `fixture_class` diff (`ui_parity.py`); 5 focused selftest checks |
 | PAR-17 | `ALREADY_CORRECT` | `baseline.lock.json:12-24` v2.2.0 `is_authoritative:false`; pins `native_identity.rs:36-38` |
 | PAR-18 | `ALREADY_CORRECT` | `safe_renderer.rs:1148` Drop, `:609` restore; live `tui_entry.rs:12756-12759`; tests `native_terminal_lifecycle.rs:192-217`, `highlight.rs:1133` |
-| PAR-19 | `REAL_GAP` | Model `native_diff_view.rs:1043,1058` + test `:1963`; no live consumer (`native_view_chat.rs:2707` hardcodes `paint_rows_with_gutter`) |
+| PAR-19 | `LANDED` (re-verified 2026-11-07) | Consumed live by the diff viewer: `visible_chunk_range` + `placeholder_height` at `native_view_dialogs.rs:3722-3772` (split) and `:3772-3781` (virtual added-file), preserving omitted-chunk height. `relative_scroll_top` is unused because that viewer's scroll area has no virtual-root offset (`root.y == content.y` ⇒ identity), so the raw `execute_scroll` *is* the root-relative value. Residual is only the inline transcript patch, which is tail-anchored and bounded by `MAX_DIFF_LINES` + the `[diff truncated]` row |
 | PAR-20 | `ALREADY_CORRECT` | `selftest.py:161-207` mutations one_cell_color/cursor/width/focus/action_extra all assert exit 1 |
 | PAR-21 | `ALREADY_CORRECT` | `support/upstream_view_parity.rs:4` frozen `upstream_layout_parity.rs` untouched; sibling file |
 | PAR-22 | `LANDED` (`f240367b`) | `--evidence-bundle` writes a SHA-bound bundle (`rust_sha`, spec/golden/fixture hashes, class counts, exact reproduction commands, per-fixture outcomes, installed-capture hashes) so a parity claim binds to the exact Rust revision under test; 5 focused selftest checks |
@@ -354,7 +670,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | THEME-05 | `REAL_GAP` | `theme_runtime.rs:1189,1198` + test `:3574`; no live per-cell ActionStates map (`PaintCtx` `tui_entry.rs:8494` threads no state map) |
 | THEME-06 | `ALREADY_CORRECT` | `theme_runtime.rs:1712,1244`; test `:3148`; live `tui_entry.rs:4491` dialog_panel in modal paint |
 | THEME-07 | `ALREADY_CORRECT` | `theme_runtime.rs:120,142`; tests `:2654-2691`; live `tui_entry.rs:4118` paint_color |
-| THEME-08 | `REAL_GAP` | `theme_runtime.rs:965` + tests `:3607-3757`; markdown half live `tui_entry.rs:4747`; `syntax_rules()` has zero callers, no highlight producer |
+| THEME-08 | `PARTIAL` (upgraded 2026-11-07) | The rule model is **live**, not test-only: `SemanticPalette::syntax_rules` (`native_theme_runtime.rs:965`) is installed into a per-frame `SyntaxStyleArena` (`:2471-2530`) at `tui_entry.rs:10491,12835-12846` and released at `:13204`. The **tokenizer is live too**: `code_token_spans`/`code_token_cell_spans` (`markdown_runs.rs:69,165`) run on fenced chunks (`native_view_chat.rs:2970` `paint_plain_code_block(..., true, ...)`) and the `SYN_*` bits paint through `markdown_run_paint_color` (`tui_entry.rs:5836`, consumed `:6593`). Residual narrowed 2026-11-07 (wave-111) to **scope transport**: the bridge still exports style registration but no grammar/query channel or highlight callback/worker (`opentui-bridge/src/highlight.rs:20-31`), so classification is lexical and covers 8 of the 14 `CaptureClass` variants rather than arbitrary grammars |
 | THEME-09 | `LANDED` | `7285a322`: the live `ChatPart::Patch` branch resolves `DiffSurface::Inline` by measured content width and paints `SplitRow::Pair` halves through `paint_rows_split` with `ChatRowClass::{DiffAdded,DiffRemoved,DiffHunkHeader}`, so content/gutter/span/hunk colors stay distinct in both presentations. Test `theme09_wide_terminal_pairs_patch_panes_and_narrow_stays_unified`. The config override is DIFF-001 (pilot F1). |
 | THEME-10 | `ALREADY_CORRECT` | `theme_runtime.rs:1592,1665,1754,1768`; tests `:4167-4241`; live `tui_entry.rs:6744,11425` |
 | TAB-21 | `LANDED` (`51538ca1`) | **Cross-crate producer built.** `SessionSummary.idle_at` (contracts) + storage `idle_at` column with idempotent migration and monotone `set_session_idle` + sessions `mark_idle` and the guarded `set_viewed`; server stamps idle on `create_turn`, the streamed `Done` frame and both compaction terminals; CLI `LiveSnapshot.session_idle_at`/`session_viewed_at` drive the live `ViewAcknowledgement` POST with backoff. CLI 2217/0, server 313/0, storage 127/0, sessions 45/0. (Wave-66 verifier VTAB re-confirmed this; the earlier `BLOCKED` entry was stale.) |
@@ -363,14 +679,14 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | SIDE-04 | `REAL_GAP` | Five-class arithmetic `native_sidebar.rs:205-287` (test `:1608`) dead on live path; no last-eligible-assistant selector; limit joined only from selected UI model (`tui_entry.rs:8112`); wire `input_tokens` is inclusive of cached (`server/src/auto_compaction.rs:102`) so disjoint classes need a `nonCachedInput` producer |
 | SIDE-08 | `LANDED` | `76fcb75a` (wave-48): the sidebar MCP row click opens the `DialogMcp` server list instead of PUT-toggling — `DialogKind::Mcp`, `DialogView::open_mcp`/`focused_choice`, `OpenDialog.mcp_status`, live opener `tui_entry.rs:10794`, Enter toggles the focused server through `PUT /api/sessions/{id}/mcp/{name}`, Esc closes locally. The residual select-surface behaviors (typing filter, Backspace, PageUp/PageDown, empty states) are DIALOG-06..09, tracked separately. |
 | SIDE-14 | `LANDED` (`d5611712`) | Footer hit rect + hover routing + local `DialogSelect` menu + CopyPath/OpenFolder executors wired live; `Workspaces` unoffered (no live move route). See the landed-fixes table. |
-| MSG-005 | `BLOCKED` | Chip helpers `native_message_rows.rs:1904-2046` (tests `:2449-2514`) zero consumers; `MessageRecord` (`contracts/src/lib.rs:250-257`) has no files/skills; producer chain absent `sessions/src/lib.rs:623`, `storage/src/writer_v2.rs:129`, `server/src/lib.rs:1256`, `native_chat_projection.rs:641`, `native_view_chat.rs:1069/:2635` |
+| MSG-005 | `ALREADY_CORRECT` (re-verified 2026-11-07) | The whole chain exists: `MessageRecord.files`/`.skills` (`contracts/src/lib.rs:308-322`), server construction (`server/src/lib.rs:2089-2103`), projection (`native_chat_projection.rs:758-759,767-790`) and painted chips (`native_view_chat.rs:941-946,1269-1287` via `user_chip_rows`) |
 | MSG-008 | `REAL_GAP` | Widths/agent/model/duration/interrupted live (`native_footer.rs:377`, `native_assistant_facts.rs:391`); TPS dead end-to-end: producer `server/src/lib.rs:2894-2901` emits no streamed stamp; `MessageExecution` (`contracts/src/lib.rs:284-293`) has no timing field; `RowTiming.streamed_ms` (`native_message_rows.rs:825`) never set; `tps_enabled` test-only (`native_assistant_facts.rs:325`); `data.session.tps` absent |
 | MSG-009 | `REAL_GAP` | `TranscriptSurfaces`/`RevertCard`/`TranscriptNotice`/`ChildCompletionNotice` (`native_view_chat.rs:4482/4103/4273/4409`) zero live consumers; `SessionRevert` (`contracts/src/lib.rs:191`) has no count; server stage `server/src/lib.rs:1199-1204` hardcodes `files:None`; no notice projection; no child-completion metadata |
-| DIFF-001 | `BLOCKED` | Split arithmetic `native_diff_view.rs:600` (tests `:1826-1837`) unwired; no `config.diffs.view` parse; live render hardcodes unified (`native_view_chat.rs:2707`); flat `Vec<(String,ChatRowClass)>` row model cannot carry per-side classes; `DiffSurface::Viewer` (`:591`) zero callers |
+| DIFF-001 | `ALREADY_CORRECT` (re-verified 2026-11-07) | `config.diffs.view` **is** parsed and live: `UiPreferences::diffs_view` (`native_ui_preferences.rs:204-240`, values `auto`/`split`/`unified` with unknown-value diagnostics; tests `:2146-2174`) → `view.set_diff_view` (`tui_entry.rs:10563-10571`) → `ChatView.diff_view` (`native_view_chat.rs:181/289`) → `resolve_view_mode(DiffSurface::Inline, …, width)` (`:3562`) → `paint_rows_split` (`:3566`) painting per-side classes. The `DiffViewMode::Unified` at `:2704` is `push_diff_fence`, the markdown **fence** painter, which upstream also renders as a plain code block (`plugin/builtins.ts:14-15`), so unified is deliberate there, not a gap. Viewer surface resolves through its own measured width (`native_view.rs:2503`) and the dialog split branch (`native_view_dialogs.rs:3709`) |
 | DIFF-003 | `BLOCKED` | Virtualization model `native_diff_view.rs:1014-1076` (tests `:1962-2209`) zero callers; `AddedPatchChunk` (`:926-930`) carries no highlight field |
-| STATE-002 | `BLOCKED` | Producer seam `server/src/lib.rs:1668 compact_session` returns `{compacted,strategy}` and never persists/pushes a compaction part; `MessageRole` (`contracts/src/lib.rs:222`) has no Compaction variant; rich `CompactionState` (`native_timeline.rs:382`) zero consumers; live render placeholder `native_view_chat.rs:2689` |
-| TOOL-011 | `BLOCKED` | `execute_dialog` (`native_tool_rows.rs:1159`, tests `:1951`) zero consumers; live render placeholder `native_view_dialogs.rs:1429`; only producer is test `:5847`; no `ExecuteDialog` payload on `OpenDialog`/`DialogView`; no syntax producer (`opentui-bridge/src/highlight.rs:27-29`) |
-| FORM-001 | `BLOCKED` | Live dialog `native_view_dialogs.rs:1090` emits 6 labels vs upstream 3 (`permission.tsx:232-240`); save gate drops only "Always allow"; always-body swap missing (static `:1420`); nested rejection stage missing. Sub-behavior 1 (3-option realign + save gate) is independently bounded via `permission_alias:488`; sub-behaviors 3+4 need a stage+textarea in `DialogView` |
+| STATE-002 | `ALREADY_CORRECT` (re-verified 2026-11-07) | Role and producer are live: `MessageRole::Compaction` (`contracts/src/lib.rs:254-262`, "never a provider history role") persists through sessions/storage (`sessions/src/lib.rs:335`, `storage/src/writer_v2.rs:324`, `storage/src/lib.rs:2185-2194`), the server appends the compaction row (`server/src/lib.rs:2237`) and special-cases it (`:1596,1750,4048`), and the CLI projects `ChatPart::Compaction { reason, status }` (`native_chat_projection.rs:89,425`) with a dedicated class/divider (`native_view_chat.rs:794,870-872,1121-1123`) |
+| TOOL-011 | `ALREADY_CORRECT` (re-verified 2026-11-07) | Live consumer exists: clicking a tool row resolves `execute_dialog_from_part` and opens the execute viewer (`tui_entry.rs:15635-15655` → `DialogView::open_execute`, `native_view_dialogs.rs:2495`), with render tests `:11768-11847`. The `opentui-bridge` highlight gap is tracked under THEME-08 |
+| FORM-001 | `PARTIAL` | **Sub-behavior 1 is already correct** (re-verified 2026-11-07): the live poll opens `open_permission_with_persistent` (`native_view_dialogs.rs:2862`, live `tui_entry.rs:11947`) which emits `Allow once` / `Always allow` / `Reject` in upstream order; the 6-label `open_permission` helper (`:2824`) has **test-only** callers. The old citation `routes/session/permission.tsx:232-240` does not resolve at pin `450e7b92`; the real authority is `mini/permission.shared.ts:36-38` (`return ["once","always","reject"]`) with labels from `permissionOptionLabel` (`util/permission.ts:162-166`). **Residual open question:** the pin's footer returns all three unconditionally, while the Rust helper drops `always` when the request has no `save` rules — a product decision, not a mechanical fix. Sub-behaviors 3+4 (always-body swap static `:1420`, nested rejection stage) still need a stage+textarea in `DialogView` |
 | DIALOG-20 | `LANDED` (toast half) | `d891f9c3` — the live loop now owns a `Toast` and paints its `ToastFrame` as the topmost overlay (`PaintCtx.toast`), advancing the logical clock on the animation tick and triggering on session-id copy (`app.tsx:605`). Crash/error-details half remains `BLOCKED` (no `panic::set_hook`, no `DialogKind::Crash`). |
 
 **Additional wave-44 verdicts (second batch):**
@@ -435,7 +751,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | MD-007 | `REAL_GAP` | `MarkdownPluginRegistry`/`set_fence_handlers` (`native_markdown_flow.rs:468/681`, test `:2570`) zero non-test callers; live flow `native_view_chat.rs:2334` never binds registry |
 | MD-008 | `REAL_GAP` | mermaid fan-out/fallback (`native_mermaid.rs:270/313/642`, tests `:1110-1393`); live `without_painter` (`native_view_chat.rs:2276`) forces `Fallback` (`:2280`); needs live `DiagramPainter` injection |
 | MD-009 | `REAL_GAP` | math lifecycle (`native_math.rs:676`, `last_good` `:657`, test `:943`); live `without_engine` (`native_view_chat.rs:2298`) forces `Fallback` (`:2302`); needs live `MathLayoutEngine` injection. **Supersedes** the earlier `ALREADY_CORRECT` entry |
-| MSG-010 | `REAL_GAP` | `turn_duration`/`turn_tokens_per_second`/`legacy_turns` (`native_message_rows.rs`) no non-test caller; footer `native_footer.rs:263` leaves throughput an explicit gap; projection `native_chat_projection.rs:713` uses `native_assistant_facts::turn_duration_ms` instead |
+| MSG-010 | `SUPERSEDED` (2026-11-07) | The `RowMessage` turns model (`legacy_turns`/`input_index`/`turn_duration`/`turn_tokens_per_second`, `native_message_rows.rs:1185-1277`) runs only from its own tests, and that is correct, not a gap: its marker-era half needs `RowRole::Idle` records, which native sessions never persist (`legacy_turns` reduces to `true` ⇒ nearest-input boundary). The live equivalents are `project_with_turn_duration` (`native_chat_projection.rs:815-837`: completion − nearest preceding user/system `created_at`, hidden when non-positive) and `AssistantFacts::tokens_per_second` over the server's `streamed_ms` (`native_assistant_facts.rs:257-270`, provider-active time only), rendered by the footer (`native_footer.rs:143`). No production consumer is missing. |
 
 **Additional wave-44 verdicts (fourth batch):**
 
@@ -603,14 +919,15 @@ Selected high-value seams:
 | --- | --- |
 | MEDIA-001 | `image_attachments`/`inline_tool_images`/`gallery_model` (`native_image_preview.rs:1047-1160`) have zero non-test callers; `PageState::open_image_preview` (`native_view_pages.rs:788`) never invoked live, so the preview always renders "no image attached". Wave-48 re-confirmed: no clipboard-image read path, no live `PromptPaneInput` attachment field, and `LocalFiles` (`native_image_preview.rs:67`) has only a test implementation. Wave-54 added: the live transcript part `ChatPart::File { filename, mime }` (`native_view_chat.rs:680-683`) carries no `uri`/`data`, and the wire projection (`native_chat_projection.rs:368-372`) reads only `filename`/`path` + `mime`, dropping the upstream `data:${mime};base64,${data}` cell source (`routes/session/index.tsx:2363`) — so the gallery also needs a projection field, and the gallery-strip painter/hit-rect/mouse routing is a 3-file change. |
 | DIALOG-02 | `native_palette.rs:667-733` dialog shell/list-row metrics are not read by the live `DialogView::layout` (`native_view_dialogs.rs:1627`); the `SelectDialog` port (`native_palette.rs:1251`) that consumes them has zero live callers. Wave-56 landed the title-weight/color half: the live `DialogView` reads `new_designs` (`set_new_designs`, seeded `tui_entry.rs:6958`) and paints the non-permission title `Role::Item` (base, unbolded) under the experiment (`dialog.tsx:109`). Remaining: description gating, footer-gap gating (`dialog.tsx:159` *adds* a row for `footerGap={2}` callers), and per-select-row pad. |
-| THEME-08 | `syntax_rules()` (`native_theme_runtime.rs:965`) has zero non-test callers; no tokenizer/highlighter producer and no renderer syntax-style sink (`safe_renderer.rs:906` takes explicit fg/bg/attrs only). |
+| THEME-08 | **stale (2026-11-07)** — `syntax_rules()` is installed per frame (`tui_entry.rs:12835-12846`), the lexical classifier is live (`native_view_chat.rs:2970` `paint_plain_code_block(..., true, ...)`), and `SYN_*` paints through `markdown_run_paint_color` (`tui_entry.rs:5836`). Wave-111 widened it to 8 of 14 capture classes. Residual is scope *transport*, not a missing consumer. |
 | THEME-13 | `SystemThemeState`/`palette_reply` (`native_theme_runtime.rs:2183/2264`) have zero non-test callers; no OSC palette-query emitter and no payload-carrying input event to decode a reply. |
 
 ### `BLOCKED` / `REAL_GAP` — needs a producer/transport/contract field (38)
 
-Accurate set after the wave-81 re-verification:
+Set after the wave-81 re-verification, then corrected by waves 111/112 (which
+removed rows later proven landed — `PAR-19` — or superseded — `MSG-010`):
 
-`PAR-02, PAR-03, PAR-06, PAR-07, PAR-09, PAR-19,
+`PAR-02, PAR-03, PAR-06, PAR-07, PAR-09,
 TAB-06, SIDE-05,
 MSG-001, MSG-002, MSG-003, MSG-005,
 TOOL-006, TOOL-011, DIFF-001, DIFF-003, FFI-02, FFI-03, FFI-04, FFI-06,
@@ -625,7 +942,7 @@ remain `UNCLEAR` pending a fresh trace check.)
 | Item | Exact missing seam |
 | --- | --- |
 | TAB-06 | `enqueue_user_prompt` (`native_tabs.rs:1877`), `pending_marks_busy` (`:1893`) and `member_busy` (`:1900`) have zero live callers; live busy is only `work_state == Running` in `from_navigation` (`:754`). No producer/transport emits pending `PendingKind` items or cross-tab enqueue events; `LiveSnapshot` (`tui_entry.rs:1224`) carries no per-tab pending queue. |
-| TAB-10 | `rail_inputs_for_navigation` (`tui_entry.rs:5277`) sets `detail` from `project_label` only; `session_tab_detail` (`native_tab_rail.rs:103`) needs current branch, default branch and worktree flag. `session_project_labels` is built from `session["directory"]` alone (`tui_entry.rs:1220-1222`); `Tab` (`native_navigation.rs:202-214`) has no branch/worktree field and no `current_branch`/`default_branch`/`is_worktree` producer exists in `crates/cli`. |
+| TAB-10 | **stale (2026-11-07)** — landed in `53a3efe4`. The fields are `branch`/`default_branch`/`worktree` (`native_navigation.rs:205-215`), not `current_branch`, so the "0 references" check was a false negative. Chain: `git_vcs_info` (`tui_entry.rs:878`) → `LiveSnapshot.session_vcs` (`:853`,`:1645`) → live `rail_inputs_for_navigation` (`:7192`) → `VcsInfo::tab_detail` → `session_tab_detail` (`native_tab_rail.rs:103`). |
 | MD-007 / MD-008 / MD-009 | The live fence painter `paint_fence_block` (`native_view_chat.rs:2285`) routes mermaid/math through `MermaidRenderer::without_painter` (`:2299`) / `MathRenderer::without_engine` (`:2321`), which fail closed because the only trait impls in the workspace are the no-op sentinels `NoDiagramPainter` (`native_mermaid.rs:451`) and `NoMathEngine` (`native_math.rs:420`). Upstream configures real painters unconditionally via builtin plugins (`builtins.ts:14,15,29,30` → `merman/src/plugin.ts:9`, `latex/src/plugin.ts:7-12`). `MarkdownPluginRegistry`/`set_fence_handlers` have zero live callers, and the live painter `push_block_markdown` (`:2343`) is a stateless per-frame repaint with no block-identity/epoch state. Needs a diagram-painter/math-engine/plugin-registration producer. |
 | CP-09 | The composer border highlight (`prompt_highlight` `native_prompt_pane.rs:137`, `border_highlight` `:155`, `MetadataReveal`/`fade_alpha` `:693-737`) needs a live agent-color source; the live rail paints static `Slot::Border` (`tui_entry.rs:2822`). The agent catalogue parser extracts only name/description/read_only/aliases (`tui_entry.rs:5434-5473`, no `color`), and `set_composer_agent` carries name+variant only (`native_view.rs:1191/161`), so `agent_color` (`native_prompt_pane.rs:619`) has no producer. Needs a `color` field on the agent-catalogue contract plus a view setter. |
 | DIALOG-06..10 | Select/Prompt/Confirm controllers (`native_palette.rs:1251-1295,1922-1933`) are fully ported + tested, but the live dialog body is a generic placeholder (`native_view_dialogs.rs:1393-1511`) and the live event handler opens only `Permission` (`tui_entry.rs:7868-7874`); there is no live `Select`/`Prompt` producer or route into `DialogView::open_request`. Needs a live route/host for those dialog kinds. |
@@ -633,7 +950,7 @@ remain `UNCLEAR` pending a fresh trace check.)
 | LAY-10 / LAY-11 / LAY-13 | `panel_can_split`/`panel_presentation`/`panel_toggle_fullscreen` (`native_pane_resize.rs:551-586`), `right_pane` (`native_view_layout.rs:808`) and `pane_resize_handle`/`PaneResize` (`native_pane_resize.rs:276/308`) are test-only; the live render composes only the sidebar (`native_view.rs:3602`). The seam is the missing live plugin-panel/terminal producer `panel_open`/`terminal_selected` (`native_shell_frame.rs:122-124`). |
 | PAR-09 | Live code/patch render is plain `sanitize_code` text (`native_view_chat.rs:1273`); no syntax-highlight `HighlightedText` producer (tree-sitter/syntect) exists, and `HighlightService::complete` (`opentui-bridge/src/highlight.rs:782`) has no live call site. |
 | PAR-10 | The live SSE consumer appends raw bytes to a draft `String` (`tui_entry.rs:917,920`) with no per-delta `stream_id`/`seq`, so `StreamAccumulator` (`native_transcript.rs:73`) / `TokenDelta` have no ordered-delta producer. |
-| PAR-19 | `relative_scroll_top`/`visible_chunk_range` (`native_diff_view.rs:1043/1058`) need a diff-region `scrollTop` + `root.y`/`content.y` + viewport height producer; the live `paint_inline_patch` (`native_diff_inline.rs:83`, caller `native_view_chat.rs:2200`) has no scroll contract and flattens to ChatRow units with no chunk-to-row mapping. |
+| PAR-19 | **stale (2026-11-07)** — the bounded-work model is consumed live by the diff viewer (`visible_chunk_range` + `placeholder_height`, `native_view_dialogs.rs:3722-3781` in both the split and virtual added-file branches). `relative_scroll_top` remains unused because that scroll area carries no virtual-root offset, making the raw `execute_scroll` already root-relative — an identity, not a missing producer. The remaining inline transcript patch is tail-anchored and bounded by `MAX_DIFF_LINES` plus the real `[diff truncated]` row. |
 | MSG-001 / MSG-002 / MSG-003 | The live styled painter (`native_view_chat.rs:3248`) iterates `ChatMessage`/`ChatPart` flat; there is no `SessionRow`→`StyledChatRow` adapter, so `reduce_session_rows` (`native_message_rows.rs:960`), `DisclosureState` (`:165`) and `partition_pending` (`:710`) have zero live callers. Live pending is keyed by bare call id (`native_view_chat.rs:219`), not message-scoped `PartRef`. |
 | FFI-01 | No artifact-pin verification step: `native_identity::identify` (`opentui-bridge/src/native_identity.rs:272`) has zero CLI callers, the live TUI never loads the pinned dylib, and vendored artifacts embed no commit string (`:13`) — a build-tooling seam, not live wiring. |
 | FFI-03 / FFI-04 / FFI-06 / FFI-07 / FFI-08 / FFI-11 | The bridge `scene`/`frame`/`markdown`/`highlight`/`diff` models have no CLI consumer: the live tree is not generational (`native_view.rs:5652`), `tui_paint.rs` paints directly with no `FrameController` ticket seam (`opentui-bridge/src/frame.rs:210`), live rows are re-derived per frame (`native_view_chat.rs:1044`), no grammar/query transport exists for highlight (`highlight.rs:1`), the live diff painter lacks the bridge diff parse/selection model (`native_diff_view.rs:119`), and live focus is `DialogView`-local (`tui_entry.rs:10666`) not `Scene`-keyed (`scene.rs:402`). Adopting any replaces the live render substrate. |
@@ -790,14 +1107,16 @@ Independent workers re-examined the remaining `REAL_GAP`/`BLOCKED` seams against
 upstream pin `450e7b92412c780a7b5a75226bb8d49aaca24e22` and confirmed the
 following as genuinely missing producers (not bounded wiring):
 
-- `THEME-08` — no tokenizer/highlighter producer and no renderer syntax-style
-  sink; `syntax_rules()` stays test-only.
+- `THEME-08` — **stale: see wave-111.** The tokenizer (`markdown_runs.rs:165`)
+  and the per-frame syntax table are live; only grammar/query transport is
+  still absent.
 - `THEME-13` — no OSC palette-query emitter and no reply-carrying input event;
   `SystemThemeState`/`palette_reply` stay test-only.
 - `CP-07` / `CP-09` — no live selected-agent id and no `color` field on the
   agent catalogue contract; `AgentFact`/`set_composer_agent` stay test-only.
-- `TAB-10` — no `current_branch`/`default_branch`/`is_worktree` producer;
-  `session_tab_detail` stays test-only.
+- `TAB-10` — **stale: landed in `53a3efe4`.** The fields are `branch` /
+  `default_branch` / `worktree`, and `git_vcs_info` → `session_vcs` → live
+  `rail_inputs_for_navigation` → `session_tab_detail` is the production chain.
 - `TAB-21` — the `idle` half of the unread pair is absent from storage,
   contract, transport and snapshot; wiring the `/view` POST alone cannot
   produce an observable unread transition.
@@ -808,9 +1127,10 @@ following as genuinely missing producers (not bounded wiring):
   (`contracts/src/lib.rs:222`) has no compaction variant, and the live render is
   a placeholder (`native_view_chat.rs:2712`).
 - `MSG-008` — **superseded: LANDED `6a49151f`** (contract field, storage column,
-  server capture and `session.tps` all built). `MSG-010` remains blocked: no
-  per-step streamed timestamp on the `SessionRow` path; the duration half is
-  already live-correct.
+  server capture and `session.tps` all built). `MSG-010` is **superseded, not
+  blocked** (wave-112): the `RowMessage` model is the marker-era algorithm,
+  which native sessions cannot drive (no persisted `Idle` rows); the live path
+  is `project_with_turn_duration` + `AssistantFacts::tokens_per_second`.
 - `LAY-10` / `LAY-11` / `LAY-13` — no live plugin-panel/terminal producer feeding
   `panel_open`/`terminal_selected` (`native_shell_frame.rs:122-124`).
 
@@ -862,7 +1182,8 @@ smallest real producer chain, else BLOCKED with the exact seam). Outcomes:
 
 Base `1ea3d25a`. 16 grouped workers (one per area, 3-6 related items each) on the
 four authorized routes. `TAB-23` — **LANDED** (`ae56897f`): see the fixes table.
-Every other item re-confirmed as before:
+Every other item re-confirmed as before — these are 2026-11-03 findings, and
+`TAB-10`, `TAB-21` and `PAR-19` have since landed (see wave-112):
 
 - `TAB-10` — no server VCS producer / contract branch field / git probe
   (cross-crate chain). `TAB-21` — the `idle` half of the unread pair is absent

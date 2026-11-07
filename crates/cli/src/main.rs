@@ -44,6 +44,7 @@ mod native_app;
 #[cfg(feature = "native")]
 mod native_appearance;
 mod native_approvals;
+mod native_auth_login;
 #[cfg(feature = "native")]
 mod native_box_style;
 mod native_chat_history;

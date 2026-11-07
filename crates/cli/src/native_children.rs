@@ -326,6 +326,7 @@ mod tests {
                             Hit::Stop
                             | Hit::Retry
                             | Hit::Open
+                            | Hit::Graph
                             | Hit::Followup
                             | Hit::Send
                             | Hit::Back
@@ -537,6 +538,56 @@ mod tests {
             .iter()
             .all(|line| !line.chars().any(char::is_control)));
     }
+
+    #[test]
+    fn graph_action_projects_only_the_daemon_roster() {
+        let mut panel = Panel::default();
+        panel.show(IDS[4]);
+        panel
+            .update(&json!({"children":[
+                {"session_id":IDS[0],"parent_id":IDS[4],"agent":"build","state":"running","description":"root child"},
+                {"session_id":IDS[1],"parent_id":IDS[0],"agent":"explore","state":"error","description":"nested child"},
+                {"session_id":IDS[2],"agent":"orphan","state":"stopped","description":"no parent id"}
+            ]}))
+            .unwrap();
+        panel.bind_lease(IDS[4], 1, Some("auth"));
+        // `g` is family-wide: it needs no selected row and submits nothing.
+        assert!(matches!(panel.key(b'g'), Some(Action::Graph)));
+        assert!(panel.open);
+        let family = panel.family("this session");
+        assert_eq!(family.len(), 4);
+        assert_eq!(family[0].id, IDS[4]);
+        assert_eq!(family[0].parent, None);
+        assert_eq!(family[0].label, "this session");
+        assert_eq!(family[1].parent.as_deref(), Some(IDS[4]));
+        assert_eq!(family[2].parent.as_deref(), Some(IDS[0]));
+        // A row without a daemon parent hangs off the bound session; no parent
+        // is invented beyond what the endpoint already implies.
+        assert_eq!(family[3].parent.as_deref(), Some(IDS[4]));
+        assert_eq!(family[1].status, crate::native_graph::NodeStatus::Running);
+        assert_eq!(family[2].status, crate::native_graph::NodeStatus::Error);
+        assert_eq!(family[3].status, crate::native_graph::NodeStatus::Done);
+        let graph = crate::native_graph::GraphView::from_family(&family, 80, 24);
+        assert_eq!(graph.node_count(), 4);
+        // The detail view owns its own keys, so `g` stays inert there.
+        panel.key(13);
+        assert!(panel.detail);
+        assert!(panel.key(b'g').is_none());
+    }
+
+    #[test]
+    fn graph_footer_button_reuses_the_key_action() {
+        let (width, height) = (100u16, 20usize);
+        let mut panel = roster(2);
+        assert!(matches!(
+            click_footer(&mut panel, Hit::Graph, width, height),
+            Some(Action::Graph)
+        ));
+        // The label is a real painted target, not decoration, and a clipped
+        // label is never clickable.
+        assert!(panel.render(width, height)[height - 1].contains("g graph"));
+        assert!(panel.hit_map(30, height)[height - 1].is_empty());
+    }
 }
 
 #[derive(Debug)]
@@ -546,6 +597,10 @@ pub enum Action {
     Stop(String),
     Retry(String),
     Followup(String, String),
+    /// Open the whole-view graph for the daemon-supplied family. Projected
+    /// from the roster already loaded here, so the graph never discovers a
+    /// session the children endpoint did not report.
+    Graph,
 }
 
 /// Visible screen targets the pointer can land on. Row clicks are addressed
@@ -560,6 +615,7 @@ pub enum Hit {
     Send,
     Back,
     Close,
+    Graph,
 }
 
 /// One clickable column range on one rendered row (row = hit-map index).
@@ -679,6 +735,50 @@ impl Panel {
             .map(str::to_owned)
     }
 
+    /// Project the loaded roster into the whole-view graph model
+    /// (`crate::native_graph::FamilyNode`). The bound parent session is the
+    /// root node; each listed child keeps the daemon's `parent_id` when it
+    /// names another listed session and otherwise hangs off the bound parent,
+    /// exactly like [`Self::family_prefix`]. No session is discovered and no
+    /// parent is invented: the input is the children endpoint's own roster.
+    #[must_use]
+    pub fn family(&self, root_label: &str) -> Vec<crate::native_graph::FamilyNode> {
+        use crate::native_graph::{FamilyNode, NodeStatus};
+        let mut family = Vec::with_capacity(self.rows.len() + 1);
+        family.push(FamilyNode::new(
+            self.parent.clone(),
+            root_label,
+            NodeStatus::Idle,
+        ));
+        for row in &self.rows {
+            let Some(id) = row.get("session_id").and_then(Value::as_str) else {
+                continue;
+            };
+            let parent = row
+                .get("parent_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(self.parent.as_str());
+            // The roster's own state vocabulary; anything unreported stays
+            // `Idle` rather than being guessed into a terminal status.
+            let state = row["state"].as_str().unwrap_or_default();
+            let status = if row["awaiting_permission"] == true || state == "running" {
+                NodeStatus::Running
+            } else if state == "error" || state == "failed" {
+                NodeStatus::Error
+            } else if state == "stopped" || state == "done" || state == "completed" {
+                NodeStatus::Done
+            } else {
+                NodeStatus::Idle
+            };
+            family.push(
+                FamilyNode::new(id, Self::row_text(row, "description", "Subagent"), status)
+                    .with_parent(parent),
+            );
+        }
+        family
+    }
+
     fn row_text<'a>(row: &'a Value, key: &str, fallback: &'a str) -> &'a str {
         row.get(key)
             .and_then(Value::as_str)
@@ -783,6 +883,10 @@ impl Panel {
                 self.detail = true;
                 self.chat = ChatView::default();
             }
+            // The whole view is family-wide, so it needs no selected row and
+            // stays available while the roster is still empty (a lone root).
+            // The detail view owns its own keys, so `g` is inert there.
+            b'g' if !self.detail => return Some(Action::Graph),
             b'o' => return self.action_id().map(Action::Open),
             b's' => return self.action_id().map(Action::Stop),
             b'r' => return self.action_id().map(Action::Retry),
@@ -819,7 +923,7 @@ impl Panel {
             } else if self.detail {
                 "↑/↓ scroll · s stop · r retry · c follow-up · Esc back"
             } else {
-                "↑/↓ select · Enter detail · s stop · r retry · Esc close · o open"
+                "↑/↓ select · Enter detail · s stop · r retry · Esc close · o open · g graph"
             };
             let labels: &[(&str, Hit)] = if self.composing {
                 &[
@@ -839,6 +943,7 @@ impl Panel {
                     ("r retry", Hit::Retry),
                     ("Esc close", Hit::Close),
                     ("o open", Hit::Open),
+                    ("g graph", Hit::Graph),
                 ]
             };
             let mut buttons = Vec::new();
@@ -921,6 +1026,7 @@ impl Panel {
                 self.key(b'c');
                 None
             }
+            Hit::Graph => self.key(b'g'),
             Hit::Send => self.key(13),
             Hit::Back | Hit::Close => self.key(27),
         }
@@ -935,7 +1041,7 @@ impl Panel {
         } else if self.detail {
             "↑/↓ scroll · s stop · r retry · c follow-up · Esc back"
         } else {
-            "↑/↓ select · Enter detail · s stop · r retry · Esc close · o open"
+            "↑/↓ select · Enter detail · s stop · r retry · Esc close · o open · g graph"
         };
         if let Some(error) = self.action_error.as_ref().or(self.error.as_ref()) {
             lines.push(format!("Error: {error}"));

@@ -2831,7 +2831,8 @@ impl DialogView {
         // save-aware helper: it exposes the full six-label mechanics model
         // (`permission_alias` recognizes all six scoped labels). The live
         // permission poll uses `open_permission_with_persistent`, which now
-        // emits the exact three-option upstream set (`permission.tsx:232-240`).
+        // emits the exact three-option upstream set
+        // (`mini/permission.shared.ts:36-38`).
         self.open_request(DialogRequest {
             id: request_id.into(),
             session_id: session_id.into(),
@@ -2854,9 +2855,9 @@ impl DialogView {
 
     /// Open a permission prompt with the persistent-grant choice controlled
     /// by the backend request's validated `save` capability. Exact upstream
-    /// option set and order (`permission.tsx:232-240`): `once`, `always`
+    /// option set and order (`mini/permission.shared.ts:36-38`): `once`, `always`
     /// (only when the request carries `save` rules), `reject`
-    /// (`permissionOptionLabel`, `util/permission.ts:162-168`). The save gate
+    /// (`permissionOptionLabel`, `util/permission.ts:162-166`). The save gate
     /// (`props.request.save?.length`) drops **only** the `always` option, so a
     /// save-ineligible request keeps `once` + `reject`.
     pub fn open_permission_with_persistent(
@@ -8844,7 +8845,7 @@ mod scoped_input_tests {
         assert!(rows.iter().any(|row| row.contains("Allow once")));
         assert!(rows.iter().any(|row| row.contains("Reject")));
         // The save gate drops ONLY the persistent `always` option
-        // (`permission.tsx:232-240`); the two non-persistent choices remain.
+        // (`mini/permission.shared.ts:36-38`); the two non-persistent choices remain.
         assert!(!rows.iter().any(|row| row.contains("Always allow")));
         assert!(!rows.iter().any(|row| row.contains("for this session")));
         assert!(!rows.iter().any(|row| row.contains("Always deny")));

@@ -616,14 +616,13 @@ fn render_header(width: usize, workspace: &str, busy: bool, scroll: usize) -> St
         suffix.push_str(&format!(" [+{scroll} up]"));
     }
     let workspace = strip_ansi(clip_utf8_prefix_bytes(workspace, MAX_INPUT_ROW_BYTES)).replace('\t', " ");
-    let row = if busy {
-        // Put the live status at the bounded pane origin so it cannot be
-        // truncated by a long workspace label before becoming visible.
-        format!("Thinking… {workspace}{suffix}")
-    } else {
-        format!("{workspace}{suffix}")
-    };
-    truncate_row(&row, width)
+    // Upstream has no transcript-header status. The running fact belongs to the
+    // prompt footer's `prompt.footer.status` slot *below* the composer
+    // (`prompt/index.tsx:1901-1967`, painted by
+    // `NativeView::composer_footer_row`), so this row carries only the
+    // workspace identity and the scroll offset.
+    let _ = busy;
+    truncate_row(&format!("{workspace}{suffix}"), width)
 }
 
 /// Bounded composer input: the first `take_rows` line slices of an
@@ -7737,6 +7736,49 @@ mod tests {
         assert!(!rows.iter().any(|(row, _)| row.contains("Thought:")));
     }
 
+    /// Conversation flow: one turn reads user prompt -> reasoning -> answer,
+    /// so an assistant's thinking block paints BELOW the user card and ABOVE
+    /// its own answer text (upstream `SessionMessageView` renders the user
+    /// message first and the assistant's `reasoning` part before its `text`
+    /// part, `routes/session/index.tsx:2521-2545,2670-2700`).
+    #[test]
+    fn conversation_flow_paints_thinking_between_user_prompt_and_answer() {
+        use crate::native_view_chat::{ChatMessage, ChatPart, ChatRole};
+        let mut view = crate::native_view::NativeView::new(90, 30);
+        view.set_session_route(true);
+        let messages = vec![
+            ChatMessage {
+                role: ChatRole::User,
+                parts: vec![ChatPart::Text("add a flag".to_owned())],
+                agent: None,
+                model: None,
+                assistant_facts: None,
+                message_id: None,
+                files: Vec::new(),
+                skills: Vec::new(),
+            },
+            ChatMessage {
+                role: ChatRole::Assistant,
+                parts: vec![
+                    ChatPart::Thinking("weigh options".to_owned()),
+                    ChatPart::Text("done".to_owned()),
+                ],
+                agent: None,
+                model: None,
+                assistant_facts: None,
+                message_id: None,
+                files: Vec::new(),
+                skills: Vec::new(),
+            },
+        ];
+        let rows = view.render_typed("", &messages, false, &[]);
+        let user = rows.iter().position(|row| row.contains("add a flag")).expect("user prompt");
+        let thinking = rows.iter().position(|row| row.contains("weigh options")).expect("thinking");
+        let answer = rows.iter().position(|row| row.contains("done")).expect("answer");
+        assert!(user < thinking, "thinking must be below the user prompt: {user} {thinking}");
+        assert!(thinking < answer, "answer must be below thinking: {thinking} {answer}");
+    }
+
     #[test]
     fn typed_tool_thinking_and_metadata_rows_are_labeled_from_facts() {
         let mut view = ChatView::new();
@@ -8279,9 +8321,11 @@ mod tests {
         let h = history(2);
         let busy_rows = ChatView::new().render(40, 6, "my workspace", &h, "hi", true);
         assert!(busy_rows[0].contains("my workspace"));
-        assert!(busy_rows[0].contains("Thinking…"));
+        // The running fact lives in the prompt footer below the composer
+        // (`prompt/index.tsx:1901-1967`), never in the transcript header.
+        assert!(!busy_rows[0].contains("Thinking…"));
         let idle_rows = ChatView::new().render(40, 6, "my workspace", &h, "hi", false);
-        assert!(!idle_rows[0].contains("Thinking…"));
+        assert_eq!(busy_rows[0], idle_rows[0], "header identity is busy-independent");
         for row in &idle_rows {
             assert!(!row.contains("provider"), "no fake provider status");
             assert!(!row.contains("connected"), "no fake connection status");
@@ -8454,8 +8498,8 @@ mod tests {
         let rows = view.render(0, 6, workspace, &long_h, "", true);
         assert!(rows[0].contains(workspace), "width 0 keeps workspace");
         assert!(
-            rows[0].contains("Thinking…"),
-            "width 0 keeps busy label"
+            !rows[0].contains("Thinking…"),
+            "the running fact belongs to the composer footer, not the header"
         );
         assert!(rows[0].contains("[+3 up]"), "width 0 keeps scroll label");
 

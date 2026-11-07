@@ -1,5 +1,155 @@
 # Orchestrator scratchpad
 
+## 2026-11-07 — phase-1 judge run at fc942da4 (PRECHECK_PASS) + W110 candidate frozen
+
+Ran `python3 tools/phase1_judge.py` (non-artifact mode) at canonical
+`fc942da4`. Evidence:
+`/Users/mymac/Projects/opencode-rk/.git/recovery-evidence/fc942da4b7fe340ac76616efea85f0807029ff7e/phase1-judge.json`
+(log copy: `/Users/mymac/Projects/phase1-precheck-fc942da4.log`).
+
+- `status=PRECHECK_PASS`, exit 0, `runtimeUnresolvedFailures=[]`.
+- All 5 precheck checks exit 0: `recovery_guard` GREEN (4.7s),
+  `convergence_structure` GREEN, both native provider/stream-tool fixture
+  self-checks, `cargo_check_workspace_locked` (6.3s).
+- Gates report `UNPROVEN` with `failed=0` in **every** gate: non-artifact mode
+  never certifies, so this is by design, not a failure.
+
+**Why `status` prints `accepted_gates=0/7` while `gates.json` shows 7 ACCEPTED:**
+`recovery_state.py:334` counts a gate only when `status==ACCEPTED and
+acceptedSha==canonical`. All seven were accepted at `5e91ffae` (an ancestor of
+`fc942da4`), so canonical has moved past the acceptance SHA. Acceptance is
+SHA-bound; nothing is failing.
+
+**Blockers for 7/7 (both structural, neither is code):**
+1. artifact mode requires `branch==main-v2 && HEAD==canonical && clean`
+   (`phase1_judge.py:86-91`). This worktree is main-v2 at canonical but carries
+   11 uncommitted files, so `cleanWorktree=false`.
+2. publishing them needs 2 independent approvals for P0/P1, and this session has
+   no `task`/`agent` tool, so no reviewer can exist that isn't the author.
+   Self-approval is forbidden; do not fake it.
+
+**Guard observation (not blocking):** `recovery_guard` GREEN with
+"WARN unexpected local branches (process-only): 48 ['recovery/lane10…'". Those are
+outside the fixed-lane set. Do NOT delete under the merged-and-pushed rule until
+ancestry is proven against the push remote.
+
+**W110 candidate frozen** at `/Users/mymac/Projects/.oc2-features-20261103/W110-CANDIDATE/`
+(base `fc942da4`): `W110-candidate.patch` = tracked diff + new-file diff for
+`crates/cli/src/native_auth_login.rs`; sha256 recorded in `SHA256SUMS.txt`;
+verified with `git apply --check -R` (REVERSE_APPLY=ok), so the patch is
+byte-exact vs the worktree. Publication is now apply + review, not
+reconstruction.
+
+### FORM-001 sub-behavior 1 — verified already-correct (ledger was stale)
+
+The ledger claimed the live permission dialog emits 6 labels vs upstream's 3.
+Both halves of that claim were wrong at pin `450e7b92`:
+
+- The 6-label `open_permission` helper (`native_view_dialogs.rs:2824`) has **no
+  production caller** — every call site sits in its `#[cfg(test)]` module. The
+  live permission poll (`tui_entry.rs:11947`) opens
+  `open_permission_with_persistent`, which emits `Allow once` / `Always allow` /
+  `Reject` in upstream order.
+- The cited `routes/session/permission.tsx:232-240` **does not exist at the pin**.
+  The real authority is `mini/permission.shared.ts:36-38`
+  (`return ["once", "always", "reject"]`), always-stage `["confirm","cancel"]`
+  at `:41-43`, labels in `permissionOptionLabel` (`util/permission.ts:162-166`).
+
+Corrected the citations in `native_permissions.rs` and `native_view_dialogs.rs`
+(comments only, no behavior change) and rewrote the FORM-001 row as `PARTIAL`
+with the real residual recorded: the pin's footer returns all three options
+unconditionally, while the Rust helper drops `always` when the request carries no
+`save` rules. That is a **product decision**, not a mechanical fix — do not
+"align" it by guessing.
+
+Checks after the edit: `-- permission` 47/0, `-- native_view_dialogs` 134/0,
+`cargo build --bin oc2` exit 0. Candidate patch regenerated **after** the edits
+(verified: the patch contains the new citations and only removes the old ones);
+new sha256 `3f7d4cafea1dfdba62c10e01ea949376b173d82fc4f5377c673816de2af257cf`.
+
+Lesson for the ledger: a `REAL_GAP` row that cites an upstream path which no
+longer resolves has probably been staled by a pin change. Re-resolve the citation
+before assigning work against it.
+
+### DIFF-001 — also already wired (second stale row)
+
+Audited all 20 distinct upstream paths cited in PARITY_STATUS: only one
+(`component/form.tsx`) fails to resolve at pin `450e7b92`, so the remaining rows
+are mostly real producer gaps — **except** DIFF-001, which was stale in a
+different way (the code landed since the row was written):
+
+- `UiPreferences::diffs_view` already parses `config.diffs.view`
+  (`native_ui_preferences.rs:204-240`; `auto`/`split`/`unified`, unknown values
+  diagnosed; tests `:2146-2174`).
+- Live wiring exists: `tui_entry.rs:10563-10571` → `view.set_diff_view` →
+  `ChatView.diff_view` → `resolve_view_mode(DiffSurface::Inline, …, width)`
+  (`native_view_chat.rs:3562`) → `paint_rows_split` (`:3566`).
+- The hardcoded `DiffViewMode::Unified` at `:2704` is `push_diff_fence` — the
+  markdown **fence** path, which upstream also renders as a plain code block.
+  Deliberately unified; not the patch path.
+
+I started writing a `DiffViewPreference::from_config` helper before finding the
+existing parser, then **reverted it**: two parsers for the same config key are a
+drift hazard, and the ledger already carries the specific names. Reverted, row
+rewritten to `ALREADY_CORRECT` with line-level evidence.
+
+Pattern worth remembering: a `BLOCKED` row can go stale by the *code landing*,
+not only by the pin moving. Verify the seam is still absent before assigning work.
+
+### Six stale rows corrected (2026-11-07 audit)
+
+Re-checked every "this seam is absent" claim in the open rows. Six were wrong:
+
+| Row | Ledger claim | Actual tree |
+| --- | --- | --- |
+| FORM-001 sub-1 | live dialog emits 6 labels | 3-option live poll; 6-label helper test-only |
+| DIFF-001 | no `config.diffs.view` parse | parsed + live `set_diff_view` → `resolve_view_mode` → `paint_rows_split` |
+| MSG-005 | no `files`/`skills` chain | contract + server builder + projection + painted chips |
+| STATE-002 | no `Compaction` role/persistence | role + storage enum + `server/src/lib.rs:2237` append + CLI part/divider |
+| TOOL-011 | `execute_dialog` zero consumers | click path opens viewer live (`tui_entry.rs:15635-15655`) |
+| THEME-08 | `syntax_rules()` zero callers | per-frame install into `SyntaxStyleArena` (`tui_entry.rs:12835-12846`) |
+
+`THEME-08` keeps a real residual (no highlight callback/worker symbol in the
+bridge → no spans from source). `TAB-10` (`current_branch`: 0 refs) and `LAY-10`
+(`panel_open` only in test-only shell paths) were re-checked and **still hold**.
+
+Also: only 1 of 20 distinct upstream paths cited in the ledger fails to resolve at
+the pin (`component/form.tsx`), so dead citations are rare — stale-by-landing is
+the dominant failure mode here, not pin drift.
+
+Checks after the doc corrections: `-- chip` 3/0, `-- compaction` 20/0,
+`-- execute` 14/0, `-- syntax` 8/0, `cargo build --bin oc2` exit 0.
+
+## 2026-11-07 — wave-110: subagent whole view wired
+
+Working tree only (nothing committed/pushed; canonical is still `fc942da4`).
+
+`PageState::open_graph` / `graph_navigate` / `GraphPanel` existed and were
+unit-tested, with **zero** production callers — `Page::Graph` was reachable only
+by tabbing into an empty surface. Upstream has no graph route (diagram is inline
+merman content; the preview is a dialog), so a `/graph` route would be invented.
+Trigger chosen: the Subagents dock's family control (`g`, plus the `g graph`
+footer cell), because that panel already holds the daemon roster.
+
+- `native_children`: `Action::Graph`, `Hit::Graph`, `g` (inert in detail /
+  composing), footer label in BOTH `hit_map` and `render` (single source so hits
+  cannot drift from paint), and `Panel::family(root_label)` projecting
+  `FamilyNode`s from the loaded rows (daemon `parent_id` preserved, root = bound
+  parent session, status from roster vocabulary only).
+- `native_view`: `open_graph` / `graph_navigate` / `graph` pass-throughs.
+- `tui_entry`: `children_open_graph` helper; intercepts `Action::Graph` before
+  `children_action_http` on BOTH the key and mouse paths (that helper takes no
+  view, so it stays HTTP-only); Up/Down on `Page::Graph` navigate the cursor.
+- Tests: +2 in `native_children` (family projection incl. orphan fallback +
+  detail inertness; footer cell reuse and clipped-label rejection); `Hit` match
+  arms updated in the existing hit-map test.
+
+Checks: build 0; `native_children::tests` 22; `-- graph` 21; `-- children` 37;
+`native_view_pages::tests` 23; `-- page` 91; `-- native_view` 597. All 0 failed.
+
+Lesson: the first `b'g'` arm lacked the `!self.detail` guard the comment claimed —
+the new test caught it. Keep comments and guards in sync.
+
 ## 2026-11-05 — wave-86: DIALOG-14/15 + DIFF-003 landed
 
 Canonical `main-v2` advanced `73765e77 -> 8d1cab14 -> ba04acbe` (pushed +
@@ -13246,3 +13396,120 @@ NOT_LANDABLE with correction), `R14-theme14-spec.md` (STILL_BLOCKED).
 
 **Next:** install the rebuilt `oc2` (backup; do NOT restart user daemon/DBs);
 resolve any audit INERT/PARTIAL findings; keep `DISPATCH_LEDGER.md` current.
+
+---
+
+## Wave-106 (2026-11-07) — user-complaint driven: hover + OAuth methods
+
+**Canonical `main-v2` = `8e522122`** (pushed + ls-remote verified; working tree
+CLEAN). Installed release `~/.local/bin/oc2` sha256 `40dcb5ab…` (backup
+`oc2.bak-20261107T102535`), built from `8e522122`.
+
+**User complaints addressed:**
+1. "no hover effect anywhere" → verification lanes L42/L34 (hover is wired for the
+   transcript: `enable_mouse(true)` `tui_entry.rs:9828`, mouse-move `kind==7`
+   `:14646-14700`, selected-cell paint `:6629/:6995`); remaining-surface gaps
+   under investigation.
+2. "oauth or other methods are not included yet (only api key way)" → **landed**
+   `8e522122`: new `GET /api/integration` server route
+   (`server/src/lib.rs`, `provider_integration.rs`) + data-driven CLI chooser
+   (`native_setup.rs` dead enum removed, `tui_entry.rs` reads `methods[].type`,
+   filters `env`, sorts `key` last). OpenAI OAuth verified end-to-end
+   (`VerifiedRuntime::begin` → `mode:"auto"` → `complete_automatic` worker).
+
+**Landed this wave:** `8e522122` (L28 TAB-12/21 + L35 OAuth-method chooser +
+server wire-shape test). Focused: `tab_12` 2/0, `tab_21` 2/0,
+`integration_list_wire_shape` 1/0, `provider_integration` 27/0.
+
+**Verification-only results:** L37 MD-001..009 all already live (full suite
+2471/0). L38 MSG-001..010 live. L40 CP-04..42 live. L41 THEME/DIALOG live.
+
+**In flight (base `8e522122`):** L39 STATE/TOOL, L42 hover, L43 full-suite gate,
+L44 TAB, L45 SIDE, L46 FFI/LAY, L47 DIFF/FORM, L48 independent OAuth review,
+L49 OAuth e2e tests. Routes: `xkiro-gpt-6-luna` (L42/L45/L46), `9router-th-free`
+(L39/L43/L44/L47/L48/L49).
+
+**Infra finding:** Git 2.54 emits a zero→zero `AUTO_MERGE` no-op reference
+transaction on `worktree add`; the frozen hook rejects it so `add` prints a
+non-fatal `fatal: in 'prepared' phase` while registration still succeeds. New
+lanes created via `worktree add --no-checkout` then `reset --hard`. Hook file is
+`protectedPaths`-frozen — do not edit.
+
+**Route failures:** `9router-river-glm-5-3-flash` → "No active credentials for
+provider: openai-compatible-chat-b27fac64…" (L34/L46); `openai-gpt6-luna` 429;
+`xkiro-haiku-5-5` Anthropic-tools-only; `vyce-deepseek-v41` 400 role=user.
+
+**Next:** integrate any landable lane output via `git diff 8e522122..<tip>`;
+rebuild+reinstall release from the final SHA; keep ledger current.
+
+---
+
+## 2026-11-07 — wave-111: two stale "absent" rows and a false-negative grep
+
+Base `fc942da4` (uncommitted worktree, 13 dirty paths). No publish, no push.
+
+**Method failure found in my own audit.** The previous pass "verified" `TAB-10`
+absent by counting references to `current_branch`. The Rust fields are `branch`,
+`default_branch` and `worktree` (`native_navigation.rs:205-215`), so that grep
+could never match. The row landed in `53a3efe4`: `git_vcs_info`
+(`tui_entry.rs:878`) → `LiveSnapshot.session_vcs` (`:853`,`:1645`) → live
+`rail_inputs_for_navigation` (`:7192`) → `VcsInfo::tab_detail` →
+`session_tab_detail` (`native_tab_rail.rs:103`). Standing correction: grep by
+upstream *concept*, not by upstream *symbol name*.
+
+`THEME-08` was likewise past its "rules live, no producer" claim: the lexical
+classifier `code_token_cell_spans` (`markdown_runs.rs:165`) is called by the live
+fence painter (`native_view_chat.rs:2970`, `paint_plain_code_block(..., true,
+...)`) and the `SYN_*` bits paint through `markdown_run_paint_color`
+(`tui_entry.rs:5836`, consumed `:6593`).
+
+**Implemented this wave (real residual = breadth, not wiring):** new
+`SYN_FUNCTION` / `SYN_TYPE` / `SYN_CONSTANT` / `SYN_PROPERTY` flags (8 of 14
+`CaptureClass` variants), closed line-local rules (`.` receiver → property, `(`
+head → function, uppercase lead → type, literal set → constant, bare identifier
+stays plain), colors mapped to `syntax.function` / `syntax.type_name` /
+`syntax.number` / `syntax.variable` per `syntax.ts:83,104,113-118`, and
+`comment`/`keyword` now italic (`syntax.ts:78,90`) — which is why `true`/`false`
+left the keyword set.
+
+**Executed evidence:** `cargo build -p opencode-rk-cli --bin oc2` → 0; `-- theme08`
+→ **9 passed / 0 failed**; full `--bin oc2` suite → **2495 passed / 0 failed**
+(2494 before, +1 new classifier test). Nothing committed.
+
+**Still genuinely open (source-verified, not wiring gaps):** at that point I
+still listed `PAR-19` and `MSG-010`; wave-112 below closed both as already-met.
+
+---
+
+## 2026-11-07 — wave-112: the last two "open" bounds were already met
+
+Docs-only this wave (source unchanged since the verified 2495/0 run).
+
+- **`PAR-19` is landed, not blocked.** `visible_chunk_range` +
+  `placeholder_height` drive the live diff viewer in both branches — split
+  (`native_view_dialogs.rs:3722-3772`) and virtual added-file (`:3772-3781`) —
+  and omitted chunks keep their height. `relative_scroll_top` is unused because
+  that scroll area has no virtual-root offset (`root.y == content.y`), making the
+  raw `execute_scroll` already the root-relative value: an identity, not a
+  missing producer. Residual is the inline transcript patch, which is
+  tail-anchored and bounded by `MAX_DIFF_LINES` + the real `[diff truncated]` row.
+- **`MSG-010` is superseded, not blocked.** The `RowMessage` turns model
+  (`native_message_rows.rs:1185-1277`) is the *marker-era* algorithm: it needs
+  `RowRole::Idle` rows, which native sessions never persist, so `legacy_turns`
+  is always `true` and the boundary is "nearest preceding input". The live path
+  is `project_with_turn_duration` (`native_chat_projection.rs:815-837`) plus
+  `AssistantFacts::tokens_per_second` over server `streamed_ms`
+  (`native_assistant_facts.rs:257-270`), painted by `native_footer.rs:143`.
+
+**What genuinely remains, each blocked on something other than a consumer:**
+`LAY-10/11/13` (live plugin-panel/terminal dock: `NativeHost::new` has no
+production caller, `compose_shell` is test-only, live render composes only the
+sidebar — a composition migration, not bounded wiring), `SIDE-05` (no plan-quota
+source; the typed `rate_limited` path is live), `DIALOG-20` toast (sink complete
+but no action emits one — a trigger would be invented), `FORM-001` sub-3/4,
+`PAR-02/03/06` (harness-side), `FFI-*` (non-goals).
+
+**Doc hygiene:** corrected the remaining current-tense stale bullets in
+`PARITY_STATUS.md` (`TAB-10`, `THEME-08`, `MSG-010`) and marked the wave-51/83
+"still accurate" paragraphs as superseded, so no section still asserts a landed
+row is absent. Verified by grep: 0 hits for each stale phrase.

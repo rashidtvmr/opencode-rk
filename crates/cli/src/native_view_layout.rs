@@ -663,8 +663,8 @@ const WIDE_RANGES: &[(u32, u32)] = &[
 //
 // These are pure scalars/predicates; the rectangle model lives in
 // `native_layout::SessionRegions` and the row composition in
-// `native_shell_frame`. This module must stay self-contained because
-// `tests/native_state_platform_alias.rs` compiles it through `#[path]`.
+// `native_shell_frame`. This module stays self-contained (no dependency on the
+// rest of the view layer) so it remains usable and testable in isolation.
 // ---------------------------------------------------------------------------
 
 /// Fixed docked sidebar width (`ui/layout.ts:1`).
@@ -927,7 +927,7 @@ pub const fn sidebar_scrollbar_reservation(_shown: bool) -> u16 {
 // The model is a pure function of caller-owned rows plus an injectable reflow
 // (no clock, no scrollbox, no rendering). It lives in this self-contained
 // module so a width reflow and a tab switch restore through one arithmetic and
-// `tests/native_state_platform_alias.rs` keeps compiling it standalone.
+// it stays usable without the rest of the view layer.
 // ---------------------------------------------------------------------------
 
 /// Vertical inset of a group header or an assistant message anchor

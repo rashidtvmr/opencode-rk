@@ -1302,6 +1302,29 @@ impl NativeView {
             .render(geometry.content_width, self.modal_content_height())
     }
 
+    /// DIALOG-11 pointer hover: map a terminal cell onto the palette row the
+    /// frame actually painted.
+    ///
+    /// Geometry is taken from the same `modal_presentation`/`modal_content_height`
+    /// pair `command_palette_render` uses, so hover and paint cannot disagree.
+    /// Returns `true` only when the hovered row really changed.
+    pub fn command_palette_hover(&mut self, x: u16, y: u16) -> bool {
+        if !self.command_palette.is_open() {
+            return false;
+        }
+        let geometry = self.modal_presentation();
+        if x < geometry.content_x
+            || x >= geometry.content_x.saturating_add(geometry.content_width)
+        {
+            return false;
+        }
+        let Some(row) = y.checked_sub(geometry.content_y).map(usize::from) else {
+            return false;
+        };
+        self.command_palette
+            .hover_row(geometry.content_width, self.modal_content_height(), row)
+    }
+
     /// Startup composition for the given kernel geometry.
     pub fn new(cols: u16, rows: u16) -> Self {
         Self {
@@ -2658,7 +2681,12 @@ impl NativeView {
         // replaces the idle directory (`index.tsx:1911-1967`); idle paints the
         // rail's location slot (the working directory). `rail` selects the
         // status slot over the in-box metadata row.
-        let base = if rail {
+        // The running fact always owns this row: upstream paints
+        // `prompt.footer.status` (spinner + interrupt label) beneath the prompt
+        // box regardless of the in-box metadata row
+        // (`prompt/index.tsx:1901-1967`). Idle keeps the previous split: the
+        // rail style shows the location, the framed style its metadata.
+        let base = if running || rail {
             let status = self.composer_status_text(running);
             if status.is_empty() {
                 footer_directory(&self.workspace, inner_width)
@@ -3885,12 +3913,31 @@ impl NativeView {
         self.pages.close();
     }
 
+    /// Load the session graph and switch to the read-only graph page
+    /// (`Page::Graph`). The trigger is the Subagents dock's `g`, because
+    /// upstream has no graph route: the diagram is inline content there, so a
+    /// slash command would be invented.
+    pub fn open_graph(&mut self, graph: crate::native_graph::GraphView) {
+        self.pages.open_graph(graph);
+    }
+
+    /// Cursor navigation inside the loaded graph; `false` when none is loaded.
+    pub fn graph_navigate(&mut self, direction: crate::native_graph::NavDir) -> bool {
+        self.pages.graph_navigate(direction)
+    }
+
     pub fn page(&self) -> Page {
         self.pages.page()
     }
 
     pub fn page_next(&mut self) {
         self.pages.next();
+    }
+
+    /// The loaded graph surface, if any (hit testing + tests).
+    #[must_use]
+    pub fn graph(&self) -> Option<&crate::native_graph::GraphPanel> {
+        self.pages.graph()
     }
 
     pub fn page_prev(&mut self) {
@@ -6920,10 +6967,10 @@ mod footer_layout_tests {
             "running status: {:?}",
             rows[composer_footer]
         );
-        assert!(rows[..composer_footer]
+        // No transcript-header status: the running fact is only this row.
+        assert!(!rows[..composer_footer]
             .iter()
-            .any(|row| row.contains("Thinking")));
-        assert!(!rows[composer_footer].contains("Thinking"));
+            .any(|row| row.contains("Thinking…")));
         let idle = view.render_typed("draft", &[], false, &[]);
         assert!(
             idle[composer_footer].contains("/tmp/") || idle[composer_footer].contains("project"),
@@ -6950,18 +6997,22 @@ mod footer_layout_tests {
         view.set_session_route(true);
         let rows = view.render_typed("draft", &[], true, &[]);
         let main_width = usize::from(view.presentation().main_width);
-        let thinking = rows
+        let status = rows
             .iter()
             .enumerate()
-            .find_map(|(y, row)| row.find("Thinking").map(|x| (x, y)))
-            .expect("busy native session must expose Thinking");
+            .find_map(|(y, row)| row.find("interrupt").map(|x| (x, y)))
+            .expect("busy native session must expose the running status");
         assert!(
-            thinking.0 < main_width,
-            "Thinking must be in main pane: {thinking:?} main_width={main_width}"
+            status.0 < main_width,
+            "running status must be in main pane: {status:?} main_width={main_width}"
         );
         assert!(
-            thinking.1 < rows.len() - 1,
-            "Thinking must not be the global footer row"
+            status.1 < rows.len() - 1,
+            "running status must not be the global footer row"
+        );
+        assert!(
+            !rows.iter().any(|row| row.contains("Thinking…")),
+            "no transcript-header status: {rows:?}"
         );
     }
 
@@ -6971,18 +7022,22 @@ mod footer_layout_tests {
         view.set_session_route(true);
         let rows = view.render_typed("draft", &[], true, &[]);
         let main_width = usize::from(view.presentation().main_width);
-        let thinking = rows
+        let status = rows
             .iter()
             .enumerate()
-            .find_map(|(y, row)| row.find("Thinking").map(|x| (x, y)))
-            .expect("busy native session must expose Thinking");
+            .find_map(|(y, row)| row.find("interrupt").map(|x| (x, y)))
+            .expect("busy native session must expose the running status");
         assert!(
-            thinking.0 < main_width,
-            "Thinking must be in main pane: {thinking:?} main_width={main_width}"
+            status.0 < main_width,
+            "running status must be in main pane: {status:?} main_width={main_width}"
         );
         assert!(
-            thinking.1 < rows.len() - 1,
-            "Thinking must not be the global footer row"
+            status.1 < rows.len() - 1,
+            "running status must not be the global footer row"
+        );
+        assert!(
+            !rows.iter().any(|row| row.contains("Thinking…")),
+            "no transcript-header status: {rows:?}"
         );
     }
 
@@ -7004,13 +7059,10 @@ mod footer_layout_tests {
             "busy Thinking must not paint or alter any cell in the narrow right overlay"
         );
         assert!(
-            rows.iter().any(|row| {
-                row.chars()
-                    .take(right_start)
-                    .collect::<String>()
-                    .contains("Thinking")
-            }),
-            "busy status must remain visible in the main pane"
+            rows.iter()
+                .zip(idle.iter())
+                .any(|(busy_row, idle_row)| busy_row != idle_row),
+            "the running status must change the main pane"
         );
     }
 
@@ -7020,8 +7072,14 @@ mod footer_layout_tests {
         view.set_session_route(true);
         let frame = view.render_typed("", &[], true, &["Accept".to_owned(), "Cancel".to_owned()]);
         assert_eq!(frame.len(), 12);
-        assert!(frame[..11].iter().any(|row| row.contains("Thinking")));
-        assert!(!frame[11].contains("Thinking"));
+        // The running fact is a main-pane composer-footer change; the shell
+        // footer row is identical in both states.
+        let idle = view.render_typed("", &[], false, &["Accept".to_owned(), "Cancel".to_owned()]);
+        assert!(frame[..11]
+            .iter()
+            .zip(idle[..11].iter())
+            .any(|(busy_row, idle_row)| busy_row != idle_row));
+        assert_eq!(frame[11], idle[11], "the shell footer must not carry it");
         let modal = view.modal_presentation();
         assert!(
             modal
@@ -7046,19 +7104,68 @@ mod footer_layout_tests {
             .collect::<Vec<_>>();
         let rows = view.render_typed("", &[], true, &overlay);
         assert_eq!(rows.len(), 7);
-        assert!(
-            rows[..6].iter().any(|row| row.contains("Thinking")),
-            "main Thinking must remain visible"
-        );
-        assert!(
-            !rows[6].contains("Thinking"),
-            "footer must not own Thinking"
+        let idle_rows = view.render_typed("", &[], false, &overlay);
+        // A 7-row frame clips the composer, so no status row is guaranteed to
+        // be paintable here; what must hold is that busy never moves into the
+        // shared shell footer.
+        assert_eq!(
+            rows[6], idle_rows[6],
+            "the shell footer must not own the running status"
         );
         assert!(view
             .ui_regions()
             .iter()
             .filter(|region| region.modal)
             .all(|region| region.y < 6));
+    }
+
+    /// Grid integrity for the initial conversation page: every painted row
+    /// occupies exactly the terminal width at wide, mid and cramped sizes, on
+    /// both the home and session routes. A row that overflows here is what
+    /// bleeds the composer/logo into the sidebar or wraps the terminal.
+    #[test]
+    fn initial_frame_rows_never_overflow_the_grid() {
+        for cols in 20u16..=200 {
+            for rows in [7u16, 12, 20, 24, 30, 40] {
+                for route in [false, true] {
+                    let mut view = NativeView::new(cols, rows);
+                    view.set_session_route(route);
+                    let draft = if cols % 3 == 0 {
+                        "a long single-line draft that has to clip inside the composer box"
+                    } else {
+                        ""
+                    };
+                    let frame = view.render_typed(draft, &[], false, &[]);
+                    assert_eq!(frame.len(), usize::from(rows), "row count at {cols}x{rows} route={route}");
+                    for (index, row) in frame.iter().enumerate() {
+                        let mut cells = 0usize;
+                        crate::native_view_layout::visit_unpadded_cells(row, row.len(), |_, width| cells += width);
+                        assert_eq!(
+                            cells,
+                            usize::from(cols),
+                            "row {index} width at {cols}x{rows} route={route}: {row:?}"
+                        );
+                    }
+                    // The composer must not be laid out beyond its own column:
+                    // a region that escapes `main_width` paints over the
+                    // sidebar and is exactly the grid overflow users see on
+                    // the empty conversation page.
+                    if route {
+                        if let Some((x, y, w, h)) = view.composer_region(draft) {
+                            let main = usize::from(view.presentation().main_width);
+                            assert!(
+                                usize::from(x).saturating_add(usize::from(w)) <= main,
+                                "composer region escapes main column at {cols}x{rows}: x={x} w={w} main={main}"
+                            );
+                            assert!(
+                                usize::from(y).saturating_add(usize::from(h)) <= usize::from(rows),
+                                "composer region escapes the frame at {cols}x{rows}: y={y} h={h}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -7079,13 +7186,21 @@ mod footer_layout_tests {
         let rows = view.render_typed("draft", &[], true, &[]);
         assert_eq!(
             rows.iter().filter(|row| row.contains("Thinking")).count(),
-            1
+            0,
+            "no transcript-header status"
         );
-        assert!(rows[..19].iter().any(|row| row.contains("Thinking")));
-        assert!(!rows[19].contains("Thinking"));
+        // The running fact is the prompt footer row directly beneath the
+        // composer, never the shared shell footer.
+        let composer_footer = rows.len() - 2;
+        assert!(
+            rows[composer_footer].contains("interrupt"),
+            "running status row: {:?}",
+            rows[composer_footer]
+        );
+        assert!(!rows[rows.len() - 1].contains("interrupt"));
         assert!(view.composer_region("draft").is_some());
         let idle = view.render_typed("draft", &[], false, &[]);
-        assert!(idle.iter().all(|row| !row.contains("Thinking")));
+        assert!(idle.iter().all(|row| !row.contains("interrupt")));
         assert!(view.composer_region("draft").is_some());
     }
 

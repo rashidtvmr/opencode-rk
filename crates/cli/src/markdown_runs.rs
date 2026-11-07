@@ -63,12 +63,31 @@ pub const STRIKE: u32 = 2048;
 /// Bounded lexical fallback token classes for fenced code. Upstream colors
 /// code through tree-sitter scopes (`generateSyntax`,
 /// `packages/theme/src/tui/syntax.ts`); the native painter keeps a closed
-/// keyword/string/number/comment heuristic instead and never invents scopes.
+/// lexical classifier instead and never invents a scope it cannot justify from
+/// the line itself.
 pub const SYN_COMMENT: u32 = 4096;
 pub const SYN_KEYWORD: u32 = 8192;
 pub const SYN_STRING: u32 = 16384;
 pub const SYN_NUMBER: u32 = 32768;
-pub const SYN_MASK: u32 = SYN_COMMENT | SYN_KEYWORD | SYN_STRING | SYN_NUMBER;
+/// `function`/`variable.member`/`constructor` — `syntax.function`
+/// (`syntax.ts:104,116`).
+pub const SYN_FUNCTION: u32 = 1 << 18;
+/// `type`/`module`/`class`/`namespace` — `syntax.type_name` (`syntax.ts:118`).
+pub const SYN_TYPE: u32 = 1 << 19;
+/// `boolean`/`constant` — resolves to the `syntax.number` color
+/// (`syntax.ts:83`), not the keyword color.
+pub const SYN_CONSTANT: u32 = 1 << 20;
+/// `property`/`field`/`variable.member` — `syntax.variable`
+/// (`syntax.ts:113-115`).
+pub const SYN_PROPERTY: u32 = 1 << 21;
+pub const SYN_MASK: u32 = SYN_COMMENT
+    | SYN_KEYWORD
+    | SYN_STRING
+    | SYN_NUMBER
+    | SYN_FUNCTION
+    | SYN_TYPE
+    | SYN_CONSTANT
+    | SYN_PROPERTY;
 /// MSG-005: the accent-filled label box of a user message chip
 /// (`component/prompt/index.tsx` skill/file chips). Painted with the accent
 /// background and the panel foreground.
@@ -83,10 +102,30 @@ pub const CHIP_MASK: u32 = CHIP_ACCENT | CHIP_NAME;
 const CODE_KEYWORDS: &[&str] = &[
     "fn", "let", "const", "var", "return", "if", "else", "for", "while", "loop", "match",
     "struct", "enum", "impl", "pub", "use", "mod", "trait", "where", "def", "class", "import",
-    "from", "function", "await", "async", "true", "false", "null", "nil", "none", "self", "new",
+    "from", "function", "await", "async", "self", "new",
     "try", "catch", "throw", "except", "yield", "static", "final", "void", "int", "float",
     "bool", "break", "continue", "lambda", "type", "interface",
 ];
+
+/// Literal spellings upstream captures as `boolean`/`constant`
+/// (`syntax.ts:83` -> `syntax.number`) rather than `keyword`. Matching them as
+/// keywords would paint them italic, which upstream does not.
+const CODE_CONSTANTS: &[&str] = &["true", "false", "null", "nil", "none"];
+
+/// True when the identifier starting at `at` is a member of the expression
+/// immediately before it (`foo.bar`); upstream's `member_expression` has no
+/// space before the dot either.
+fn receiver_dot(bytes: &[u8], at: usize) -> bool {
+    at > 0 && bytes[at - 1] == b'.'
+}
+
+/// True when the next non-space byte is `(`, i.e. a call or definition head.
+fn followed_by_open_paren(bytes: &[u8], end: usize) -> bool {
+    bytes[end..]
+        .iter()
+        .find(|byte| !byte.is_ascii_whitespace())
+        .is_some_and(|byte| *byte == b'(')
+}
 
 /// One bounded lexical pass over a single sanitized code line. Returns
 /// disjoint byte intervals with exactly one `SYN_*` bit each; unlisted bytes
@@ -147,8 +186,26 @@ pub fn code_token_spans(text: &str) -> Vec<(usize, usize, u32)> {
                 {
                     end += 1;
                 }
-                if CODE_KEYWORDS.contains(&&text[at..end]) {
-                    out.push((at, end, SYN_KEYWORD));
+                let word = &text[at..end];
+                // Closed, line-local classification only: keyword, literal,
+                // member, call/definition head, or an uppercase-lead type
+                // name. A bare identifier stays unclassified (plain code
+                // color) instead of being guessed into a scope.
+                let class = if CODE_KEYWORDS.contains(&word) {
+                    SYN_KEYWORD
+                } else if CODE_CONSTANTS.contains(&word) {
+                    SYN_CONSTANT
+                } else if receiver_dot(bytes, at) {
+                    SYN_PROPERTY
+                } else if followed_by_open_paren(bytes, end) {
+                    SYN_FUNCTION
+                } else if word.as_bytes().first().is_some_and(|byte| byte.is_ascii_uppercase()) {
+                    SYN_TYPE
+                } else {
+                    0
+                };
+                if class != 0 {
+                    out.push((at, end, class));
                 }
                 at = end;
             }
@@ -798,6 +855,35 @@ mod tests {
         // at cell 2 (after the 2-cell `界`), not byte 3.
         let wide = code_token_cell_spans("界\"x\"");
         assert_eq!(wide, vec![(2, 5, SYN_STRING)]);
+    }
+
+    /// THEME-08 breadth: the lexical classifier distinguishes the capture
+    /// classes upstream paints with distinct token colors — `function`
+    /// (`syntax.function`), `type`/`class` (`syntax.type_name`),
+    /// `boolean`/`constant` (`syntax.number`) and `property`/`field`
+    /// (`syntax.variable`) — and never fabricates one for a bare identifier.
+    #[test]
+    fn theme08_lexical_capture_classes_match_upstream_scopes() {
+        let class_of = |line: &str, needle: &str| {
+            let at = line.find(needle).expect("needle in line");
+            code_token_spans(line)
+                .into_iter()
+                .find(|(start, end, _)| *start == at && *end == at + needle.len())
+                .map(|(_, _, class)| class)
+        };
+        assert_eq!(class_of("fn main() {", "main"), Some(SYN_FUNCTION), "definition head");
+        assert_eq!(class_of("count = len(xs)", "len"), Some(SYN_FUNCTION), "call head");
+        assert_eq!(class_of("let value: String", "String"), Some(SYN_TYPE), "uppercase type");
+        assert_eq!(class_of("ok = true", "true"), Some(SYN_CONSTANT), "boolean is a constant");
+        assert_eq!(class_of("x = user.name", "name"), Some(SYN_PROPERTY), "member access");
+        assert_eq!(class_of("x = total", "total"), None, "bare identifier stays plain code");
+        // One disjoint class per interval, so every cell resolves one color.
+        let tokens = code_token_spans("let s = build(Thing, true)");
+        assert!(tokens.windows(2).all(|pair| pair[0].1 <= pair[1].0), "disjoint: {tokens:?}");
+        assert!(
+            tokens.iter().all(|(_, _, class)| class.count_ones() == 1),
+            "exactly one class each: {tokens:?}"
+        );
     }
 
     /// MD-002 (run level): an unfinished fence and unfinished inline
