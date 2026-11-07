@@ -97,6 +97,7 @@ pub mod web_tool_chooser;
 pub mod web_turn_adapter;
 pub mod workspace_proxy;
 pub mod workspace_sessions;
+pub mod usage_limits;
 use axum::{
     Json, Router,
     body::{Body, Bytes},
@@ -215,6 +216,7 @@ pub fn router_with_events_and_integration(
         .route("/api/capabilities", get(web_capabilities))
         .route("/api/workspaces", get(list_workspaces))
         .route("/api/models", get(search_models))
+        .route("/api/experimental/usage/limits", get(usage_limits::limits))
         .route("/api/commands", get(list_configured_commands))
         .route("/api/permission-rules",get(list_permission_rules).post(save_permission_rule))
         .route("/api/models/{provider}/{model}", get(get_model))
