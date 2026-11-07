@@ -1,7 +1,7 @@
 # PAR-06 — Capture environment baseline and terminal-specific isolation
 
-**Recorded:** 2026-11-06  
-**Source revision:** `2c477c8afb06d6b34d53353c7686bc4c40d67c04`  
+**Recorded:** 2026-11-07  
+**Source revision:** `7088398873e835bbe303cec43dcd4ad9f3606712`  
 **Upstream oracle:** `/Users/mymac/Projects/tmp/opencode` at
 `450e7b92412c780a7b5a75226bb8d49aaca24e22`  
 **OpenTUI kit pin:** `8d6065a3e60039d16c6ee697692dcfbc46d3c786`, version 0.6.8
@@ -25,6 +25,11 @@ cell geometry, not the host terminal emulator's raster font.
 | Viewport | fixture-defined; adapter passes `cols`/`rows` | `oc2_pty.py:293-294,367-373` |
 | Native library | `crates/opentui-bridge/native/lib/aarch64-apple-darwin` via `DYLD_LIBRARY_PATH` | `docs/ui-parity/CAPTURE.md:17-22` |
 
+The interactive host used to launch the capture command is Apple Terminal
+version **488**, profile **Clear Dark**, on the arm64 Mac recorded above.
+These values are provenance only: the capture itself is launched in an
+isolated PTY and therefore does not rasterize through the host emulator.
+
 ## Font baseline and limitation
 
 The host has system fonts including `.SF NS Mono` (observed at
@@ -35,6 +40,13 @@ Mono” by assumption. `CAPTURE.md:57-61` states that the adapter captures
 cells/styles rather than pixels. A pixel-capture lane must record the terminal
 emulator name/version, font family, size, cell width/height, DPI/scale, and
 theme before claiming PAR-06 pixel evidence.
+
+For this lane, the exact font baseline is consequently recorded as:
+`font_family=UNKNOWN`, `font_size_pt=UNKNOWN`, `cell_width_px=UNKNOWN`,
+`cell_height_px=UNKNOWN`, and `scale_factor=UNKNOWN`. This is an explicit
+measurement limitation, not an assumption about the host's installed fonts.
+Logical cell metrics are fixed at 1 column × 1 row; fixture geometry is the
+actual `viewport.cols` × `viewport.rows` recorded in each screen document.
 
 ## Deterministic adapter settings
 
@@ -63,8 +75,19 @@ also documented in `tools/ui_parity/README.md:71-100`.
 
 ## Reproduction commands
 
+From this worktree, first validate the deterministic renderer environment:
+
 ```sh
-export DYLD_LIBRARY_PATH=/Users/mymac/Projects/opencode-rk-recovery-20261005/crates/opentui-bridge/native/lib/aarch64-apple-darwin
+python3 tools/ui_parity/capture_environment.py --check
+```
+
+The command exits non-zero unless the PTY adapter's required `TERM`,
+`COLORTERM`, UTF-8 locale, and UTC settings are present. The adapter itself
+sets these values in `isolated_env()`; running the validator in an ordinary
+shell is expected to fail unless the same assignments are exported first.
+
+```sh
+export DYLD_LIBRARY_PATH="$PWD/crates/opentui-bridge/native/lib/aarch64-apple-darwin"
 cargo build --release -p opencode-rk-cli --bin oc2
 python3 tools/ui_parity/ui_parity.py --record --filter 'par-static-*' --force --bin target/release/oc2
 python3 tools/ui_parity/ui_parity.py --check --filter 'par-static-*' --bin target/release/oc2
