@@ -17564,12 +17564,8 @@ fn native_loop(
                                 provider_methods = live.as_ref().and_then(|snapshot| {
                                     http_request(&snapshot.origin, "GET", "/api/integration", None, auth).ok()
                                 }).and_then(|body| serde_json::from_str::<Vec<serde_json::Value>>(&body).ok())
-                                    .and_then(|items| items.into_iter().find(|item| item["id"].as_str() == Some(provider_id.as_str())))
-                                    .map(|item| item["methods"].as_array().cloned().unwrap_or_default().into_iter()
-                                        .filter_map(|method| Some((method["id"].as_str()?.to_owned(), method["type"].as_str()?.to_owned(), method["label"].as_str()?.to_owned())))
-                                        .filter(|(_, kind, _)| kind != "env")
-                                        .collect::<Vec<_>>()).unwrap_or_default();
-                                provider_methods.sort_by_key(|(_, kind, _)| kind == "key");
+                                    .map(|items| ordered_provider_methods(&items, &provider_id))
+                                    .unwrap_or_default();
                                 dialog = if provider_id == "custom" {
                                     native_setup::Dialog::ProviderId
                                 } else if !provider_methods.is_empty() {
@@ -22459,5 +22455,62 @@ mod form_live_tests {
             form_live_dispatch(&mut view, &native_input_decoder::InputEvent::Byte(13));
         assert!(handled);
         assert_eq!(action, Some(FormKeyAction::Submit));
+    }
+}
+
+/// Parse the `GET /api/integration` payload into ordered provider methods for
+/// the connect-method chooser: `env` methods are filtered out and `key`
+/// methods sort last (upstream dialog-integration.tsx:58-82).
+fn ordered_provider_methods(items: &[serde_json::Value], provider_id: &str) -> Vec<(String, String, String)> {
+    let mut methods = items.iter()
+        .find(|item| item["id"].as_str() == Some(provider_id))
+        .map(|item| item["methods"].as_array().cloned().unwrap_or_default().into_iter()
+            .filter_map(|method| Some((method["id"].as_str()?.to_owned(), method["type"].as_str()?.to_owned(), method["label"].as_str()?.to_owned())))
+            .filter(|(_, kind, _)| kind != "env")
+            .collect::<Vec<_>>())
+        .unwrap_or_default();
+    methods.sort_by_key(|(_, kind, _)| kind == "key");
+    methods
+}
+
+#[cfg(test)]
+mod provider_method_parse_tests {
+    use super::ordered_provider_methods;
+
+    fn integration_list() -> serde_json::Value {
+        serde_json::json!([
+            {"id": "openai", "name": "OpenAI", "methods": [
+                {"id": "env", "type": "env", "label": "Environment"},
+                {"id": "chatgpt-headless", "type": "oauth", "label": "Device code"},
+                {"id": "api-key", "type": "key", "label": "API key"}]},
+            {"id": "anthropic", "name": "Anthropic", "methods": [
+                {"id": "api-key", "type": "key", "label": "API key"}]}
+        ])
+    }
+
+    #[test]
+    fn openai_methods_are_env_filtered_and_key_last() {
+        let list = integration_list();
+        let items = list.as_array().unwrap();
+        let methods = ordered_provider_methods(items, "openai");
+        assert_eq!(methods, vec![
+            ("chatgpt-headless".to_owned(), "oauth".to_owned(), "Device code".to_owned()),
+            ("api-key".to_owned(), "key".to_owned(), "API key".to_owned()),
+        ]);
+    }
+
+    #[test]
+    fn unknown_provider_yields_no_methods() {
+        let list = integration_list();
+        let items = list.as_array().unwrap();
+        assert!(ordered_provider_methods(items, "nope").is_empty());
+    }
+
+    #[test]
+    fn key_only_provider_lists_single_key_method() {
+        let list = integration_list();
+        let items = list.as_array().unwrap();
+        let methods = ordered_provider_methods(items, "anthropic");
+        assert_eq!(methods, vec![("api-key".to_owned(), "key".to_owned(), "API key".to_owned())]);
     }
 }
