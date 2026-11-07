@@ -2622,6 +2622,21 @@ mod tests {
         assert!(flow.render(40).iter().all(|row| !row.text().contains("```")));
     }
 
+    /// PAR-09: a mid-stream fence with body text is immediately paintable by
+    /// the synchronous lexical flow.  It must not be treated as an empty
+    /// transient frame while a closing fence or asynchronous highlighter is
+    /// absent.
+    #[test]
+    fn par09_partial_fence_body_is_never_blessed_as_blank() {
+        let mut flow = MarkdownFlow::new(MarkdownOptions { streaming: true, ..MarkdownOptions::default() });
+        flow.set_content("```rust\nlet answer = 42;\n");
+
+        let rows = flow.render(40);
+        assert_eq!(rows.iter().map(FlowRow::text).collect::<Vec<_>>(), vec!["let answer = 42;".to_owned()]);
+        assert!(rows.iter().all(|row| !row.text().is_empty()));
+        assert!(rows.iter().all(|row| !row.text().contains("```")));
+    }
+
     /// MD-004. Upstream: `Markdown.ts:466-472` (conceal re-renders styles, block
     /// state kept), `TextTable.ts:663-750` + `text-table-width.ts:15-97` (narrow
     /// reflow fits columns), `Markdown.ts:1171-1186` (code geometry is the
