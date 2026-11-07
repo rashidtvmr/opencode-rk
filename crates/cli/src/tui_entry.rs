@@ -5201,9 +5201,32 @@ fn stash_modal_key(
     (true, true)
 }
 
+/// DIALOG-20: apply a pointer-hover transition to the live toast. Hovering
+/// pauses the lifetime and leaving resumes it (`ui/toast.tsx`), so a toast
+/// never auto-dismisses under a resting pointer. Returns `true` when the
+/// hover state changed (the caller repaints).
+#[cfg(feature = "native")]
+fn toast_hover_transition(
+    toast: &mut crate::native_toast::Toast,
+    inside: bool,
+    hovered: &mut bool,
+) -> bool {
+    if inside == *hovered {
+        return false;
+    }
+    *hovered = inside;
+    if inside {
+        toast.pause();
+    } else {
+        toast.resume();
+    }
+    true
+}
+
 /// DIALOG-20: the live crash surface maps exactly the ErrorComponent keymap
 /// (`error-component.tsx:66-95`): arrows/tab move, Enter uses the selected
-/// action, `c`/`r`/`q` act directly, Ctrl+C exits. Every other event is still
+/// action, `c`/`r`/`q` act directly, Ctrl+C exits, and Home/End jump the
+/// stack-trace scroll box to its start/end. Every other event is still
 /// consumed (the surface is modal), reported as [`crash::CrashOutcome::Ignored`].
 /// The caller handles quit/reset/copy outcomes because they need loop state.
 /// This is the exact routine `native_loop` runs, so a test drives the real
@@ -5225,6 +5248,8 @@ fn crash_surface_key(
         native_input_decoder::InputEvent::ArrowDown => CrashKey::Down,
         native_input_decoder::InputEvent::PageUp => CrashKey::PageUp,
         native_input_decoder::InputEvent::PageDown => CrashKey::PageDown,
+        native_input_decoder::InputEvent::Home => CrashKey::Home,
+        native_input_decoder::InputEvent::End => CrashKey::End,
         native_input_decoder::InputEvent::TabNext => CrashKey::Tab,
         native_input_decoder::InputEvent::TabPrevious => CrashKey::ShiftTab,
         native_input_decoder::InputEvent::Byte(13 | 10) => CrashKey::Enter,
@@ -5238,6 +5263,92 @@ fn crash_surface_key(
         _ => return Some(CrashOutcome::Ignored),
     };
     view.dialogs.handle_crash_key(key, rows)
+}
+
+/// DIALOG-20: the live crash keymap must forward the decoded Home/End events
+/// to the stack-trace scroll box (`error-component.tsx:88-89`). Before the
+/// fix these events fell through to the catch-all and were reported as
+/// `Ignored`, so the operator could not jump to the top/bottom of a long
+/// stack trace.
+#[cfg(all(test, feature = "native"))]
+mod dialog20_crash_keymap_tests {
+    use super::*;
+    use crate::native_view_dialogs::crash::{CrashMode, CrashOutcome};
+
+    fn crashed() -> crate::native_view::NativeView {
+        let mut view = crate::native_view::NativeView::new(100, 30);
+        view.dialogs
+            .open_crash(
+                Some("boom"),
+                Some(
+                    "frame 0\nframe 1\nframe 2\nframe 3\nframe 4\nframe 5\nframe 6\nframe 7\nframe 8\nframe 9\nframe 10\nframe 11\nframe 12\nframe 13\nframe 14\nframe 15\nframe 16\nframe 17\nframe 18\nframe 19\nframe 20\nframe 21\nframe 22\nframe 23\nframe 24\nframe 25\nframe 26\nframe 27\nframe 28\nframe 29\nframe 30\nframe 31",
+                ),
+                "0.0.0",
+                CrashMode::Dark,
+                "xterm-256color",
+            )
+            .expect("crash surface opens");
+        view
+    }
+
+    #[test]
+    fn dialog20_crash_home_and_end_scroll_the_stack() {
+        let mut view = crashed();
+        assert_eq!(
+            crash_surface_key(&mut view, &native_input_decoder::InputEvent::PageDown, 24),
+            Some(CrashOutcome::Moved),
+            "PageDown still scrolls"
+        );
+        assert_eq!(
+            crash_surface_key(&mut view, &native_input_decoder::InputEvent::End, 24),
+            Some(CrashOutcome::Moved),
+            "End jumps to the bottom of the stack"
+        );
+        assert_eq!(
+            crash_surface_key(&mut view, &native_input_decoder::InputEvent::Home, 24),
+            Some(CrashOutcome::Moved),
+            "Home jumps to the top of the stack"
+        );
+    }
+}
+
+/// DIALOG-20: the live toast hover path must pause/resume the lifetime
+/// (`ui/toast.tsx`), not merely repaint. Before the fix `toast_hovered` was
+/// toggled without touching the model, so a toast dismissed under a resting
+/// pointer.
+#[cfg(all(test, feature = "native"))]
+mod dialog20_toast_hover_tests {
+    use super::*;
+    use crate::native_toast::{Toast, ToastOptions, ToastVariant};
+
+    #[test]
+    fn dialog20_hover_pauses_and_leave_resumes_the_live_toast() {
+        let mut toast = Toast::new();
+        toast.show(ToastOptions::new(ToastVariant::Info, "copied").with_duration(5000));
+        let mut hovered = false;
+
+        // Hovering in pauses the lifetime.
+        assert!(toast_hover_transition(&mut toast, true, &mut hovered));
+        assert!(hovered);
+        assert!(toast.is_paused());
+
+        // Time passing while paused does not expire the toast.
+        toast.advance(10_000);
+        assert!(toast.current().is_some(), "paused toast survives its lifetime");
+
+        // Repeating the same hover state is a no-op (no repaint).
+        assert!(!toast_hover_transition(&mut toast, true, &mut hovered));
+
+        // Leaving resumes; the remaining lifetime then expires.
+        assert!(toast_hover_transition(&mut toast, false, &mut hovered));
+        assert!(!hovered);
+        assert!(!toast.is_paused());
+        toast.advance(5_000);
+        assert!(
+            toast.current().is_none(),
+            "resumed toast expires after its remaining lifetime"
+        );
+    }
 }
 
 /// Enter (CR/LF) closes an open message menu. The option it confirms is
@@ -15365,8 +15476,7 @@ fn native_loop(
                             && y >= frame.y && y < frame.y.saturating_add(frame.height)
                     });
                     if kind == 7 {
-                        if inside != toast_hovered {
-                            toast_hovered = inside;
+                        if toast_hover_transition(&mut toast, inside, &mut toast_hovered) {
                             needs_paint = true;
                         }
                         continue;
