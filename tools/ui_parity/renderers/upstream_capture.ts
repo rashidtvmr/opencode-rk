@@ -3,7 +3,7 @@
 // so bare `@opentui/*` imports resolve against that package's node_modules and
 // the fixture import is relative to packages/tui/.
 import { createTestRenderer } from "@opentui/core/testing"
-import { ansi256IndexToRgb } from "@opentui/core"
+import { TextRenderable, ansi256IndexToRgb } from "@opentui/core"
 
 const ATTRS = ["bold", "dim", "italic", "underline", "blink", "reverse", "hidden", "strike"]
 const WIDTH_RE = /[\u1100-\u115f\u2329\u232a\u2e80-\u303e\u3040-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe10-\ufe19\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6]/
@@ -63,7 +63,13 @@ async function main() {
   const cols = Number(request.viewport?.cols ?? fixture.viewport?.columns ?? 80)
   const rows = Number(request.viewport?.rows ?? fixture.viewport?.rows ?? 24)
   let frame: any
-  if (process.argv.includes("--synthetic")) {
+  if (process.argv.includes("--component")) {
+    const setup = await createTestRenderer({ width: cols, height: rows, bufferedOutput: "memory" })
+    const text = String(fixture.component_text ?? "PAR-03 fixture")
+    setup.renderer.root.add(new TextRenderable(setup.renderer, { content: text, width: cols, height: 1 }))
+    await setup.renderOnce()
+    frame = setup.captureSpans(); await setup[Symbol.asyncDispose]()
+  } else if (process.argv.includes("--synthetic")) {
     const setup = await createTestRenderer({ width: cols, height: rows, bufferedOutput: "memory" })
     setup.renderer.start()
     frame = setup.captureSpans(); setup.renderer.destroy()
