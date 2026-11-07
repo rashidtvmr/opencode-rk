@@ -53,6 +53,34 @@ pub(super) struct Model {
     pub variants: Vec<String>,
 }
 
+/// Local daemon quota projection. `None` means no applicable allowance.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct UsageLimit {
+    pub limit: f64,
+    pub spent: f64,
+}
+
+pub(super) fn usage_limit(body: &str) -> Option<UsageLimit> {
+    let value: Value = serde_json::from_str(body).ok()?;
+    let data = value.get("data")?.as_object()?;
+    let limit = data.get("limit")?.as_f64()?;
+    let spent = data.get("spent")?.as_f64()?;
+    (limit.is_finite() && limit > 0.0 && spent.is_finite() && spent >= 0.0)
+        .then_some(UsageLimit { limit, spent })
+}
+
+#[cfg(test)]
+mod usage_limit_tests {
+    use super::usage_limit;
+    #[test]
+    fn parses_positive_and_rejects_hidden_or_invalid_states() {
+        assert_eq!(usage_limit(r#"{"data":{"limit":10,"spent":4}}"#).map(|u| (u.limit,u.spent)), Some((10.0,4.0)));
+        assert!(usage_limit(r#"{"data":null}"#).is_none());
+        assert!(usage_limit(r#"{"data":{"limit":0,"spent":0}}"#).is_none());
+        assert!(usage_limit(r#"{"data":{"limit":10,"spent":-1}}"#).is_none());
+    }
+}
+
 impl Model {
     pub fn qualified(&self) -> String { format!("{}/{}", self.provider_id, self.id) }
     pub fn matches(&self, query: &str) -> bool {

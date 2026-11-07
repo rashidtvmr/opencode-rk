@@ -12643,6 +12643,29 @@ fn native_loop(
         }
         view.set_box_appearance(appearance.style.clone());
         view.set_context_window(selected.as_ref().and_then(|model|model.context_window));
+        // SIDE-05: obtain the daemon's local quota snapshot. Missing data is a
+        // genuine unlimited/unknown state and hides the Limit contribution.
+        view.set_limit(None);
+        if let (Some(snapshot), Some(model)) = (live.as_ref(), selected.as_ref()) {
+            let path = format!(
+                "/api/experimental/usage/limits?provider={}&model={}",
+                model.provider_id, model.id
+            );
+            if let Ok(body) = http_request(&snapshot.origin, "GET", &path, None, auth) {
+                if let Some(usage) = native_setup::usage_limit(&body) {
+                    let request_cost = model.cost.map(|cost| {
+                        crate::native_view_status::native_sidebar::request_cost(
+                            model.context_window.unwrap_or(0), cost.input,
+                        )
+                    }).unwrap_or(0.0);
+                    view.set_limit(Some(crate::native_view_status::native_sidebar::LimitSection::from_usage(
+                        (usage.limit - usage.spent).max(0.0),
+                        usage.spent >= usage.limit,
+                        request_cost,
+                    )));
+                }
+            }
+        }
         view.set_prompt_mode(draft.starts_with('!'));
         view.set_prompt_cursor(draft_cursor);
         // CP-35: the draft's text and its tracked part anchors are owned by a

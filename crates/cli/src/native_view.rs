@@ -1476,6 +1476,11 @@ impl NativeView {
         self.context_window = window;
         self.status.set_context_window(window);
     }
+
+    /// Update the sidebar's selected-model allowance projection.
+    pub fn set_limit(&mut self, limit: Option<crate::native_view_status::native_sidebar::LimitSection>) {
+        self.status.set_limit(limit);
+    }
     pub fn set_usage(
         &mut self,
         input: u64,
