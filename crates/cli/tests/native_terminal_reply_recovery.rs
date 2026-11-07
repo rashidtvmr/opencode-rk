@@ -37,6 +37,10 @@ fn bytes(events: Vec<InputEvent>) -> Vec<u8> {
             InputEvent::ArrowDown => panic!("unexpected ArrowDown event"),
             InputEvent::ArrowLeft => panic!("unexpected ArrowLeft event"),
             InputEvent::ArrowRight => panic!("unexpected ArrowRight event"),
+            InputEvent::PageUp => panic!("unexpected PageUp event"),
+            InputEvent::PageDown => panic!("unexpected PageDown event"),
+            InputEvent::Home => panic!("unexpected Home event"),
+            InputEvent::End => panic!("unexpected End event"),
             InputEvent::AltArrowUp => panic!("unexpected AltArrowUp event"),
             InputEvent::AltArrowDown => panic!("unexpected AltArrowDown event"),
             InputEvent::AltShiftArrowUp => panic!("unexpected AltShiftArrowUp event"),
@@ -51,6 +55,7 @@ fn bytes(events: Vec<InputEvent>) -> Vec<u8> {
             InputEvent::AgentCycle => panic!("unexpected AgentCycle event"),
             InputEvent::FocusGained => panic!("unexpected FocusGained event"),
             InputEvent::FocusLost => panic!("unexpected FocusLost event"),
+            InputEvent::OscColorReply { .. } => panic!("unexpected OscColorReply event"),
             InputEvent::Mouse { .. } => panic!("unexpected Mouse event"),
         })
         .collect()
