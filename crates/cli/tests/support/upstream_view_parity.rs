@@ -208,6 +208,13 @@ fn home_route_preserves_workspace_and_model_identity_without_missing_agent_claim
     view.set_session_route(false);
     view.set_workspace("/real/workspace".to_owned());
     view.set_model(Some("provider/model".to_owned()));
+    // COMPOSER-PARITY supersession (recorded 2026-11-08): the home metadata
+    // row's model cell reads the composer's own selected-model fact
+    // (`context/local.tsx:398-417`); the old status-summary leak through the
+    // fallback is replaced by upstream's unconnected empty state, so the
+    // identity assertion now runs against the real producer. The assertions
+    // themselves are unchanged.
+    view.set_composer_model("provider/model", "provider");
 
     let frame = view.render("", &[], false, &[]);
     let rendered = frame.join("\n");

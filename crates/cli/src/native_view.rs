@@ -2587,38 +2587,50 @@ impl NativeView {
         // parallel re-derivation, so the candidate order, the <44-column
         // agent/provider drop, the provider-shortening fallback and the
         // nine-cell model floor all come from the single authoritative model.
-        let (model, provider) = if self.composer_loading && !self.composer_display.model_label.is_empty()
-        {
+        // COMPOSER-PARITY: with no selected model the row paints upstream's
+        // unconnected empty state (`context/local.tsx:398-417`) — never a
+        // status summary leaking through as the model label (`unset`).
+        let mode = if self.shell_mode {
+            crate::native_prompt_pane::PromptMode::Shell
+        } else {
+            crate::native_prompt_pane::PromptMode::Normal
+        };
+        let input = if self.composer_loading && !self.composer_display.model_label.is_empty() {
             // CP-08: a catalogue reload retains the memo's previous labels
             // (`index.tsx:1551-1567`) instead of falling back to the status
             // summary.
-            (
-                self.composer_display.model_label.clone(),
-                self.composer_display.provider_label.clone(),
-            )
+            crate::native_prompt_pane::PromptMetadataInput {
+                mode,
+                agent: self.composer_agent.as_deref(),
+                // Upstream `auto` comes from `local.permission.mode`; no confirmed
+                // mode fact reaches this view, so it must not fabricate that label.
+                auto: false,
+                model: self.composer_display.model_label.as_str(),
+                provider: self.composer_display.provider_label.as_str(),
+                variant: self.composer_variant.as_deref(),
+                // Workspace usage-limit text is not produced by the live path yet.
+                limit: None,
+                effort: self.composer_effort.as_deref(),
+            }
+        } else if let Some((model, provider)) = self.composer_model.as_ref() {
+            crate::native_prompt_pane::PromptMetadataInput {
+                mode,
+                agent: self.composer_agent.as_deref(),
+                auto: false,
+                model,
+                provider,
+                variant: self.composer_variant.as_deref(),
+                limit: None,
+                effort: self.composer_effort.as_deref(),
+            }
         } else {
-            self.composer_model
-                .as_ref()
-                .map_or((self.status.model_label().to_owned(), String::new()), |(model, provider)| {
-                    (model.to_owned(), provider.to_owned())
-                })
-        };
-        let input = crate::native_prompt_pane::PromptMetadataInput {
-            mode: if self.shell_mode {
-                crate::native_prompt_pane::PromptMode::Shell
-            } else {
-                crate::native_prompt_pane::PromptMode::Normal
-            },
-            agent: self.composer_agent.as_deref(),
-            // Upstream `auto` comes from `local.permission.mode`; no confirmed
-            // mode fact reaches this view, so it must not fabricate that label.
-            auto: false,
-            model: model.as_str(),
-            provider: provider.as_str(),
-            variant: self.composer_variant.as_deref(),
-            // Workspace usage-limit text is not produced by the live path yet.
-            limit: None,
-            effort: self.composer_effort.as_deref(),
+            // Shell mode short-circuits before the empty-state labels
+            // (`metadata.tsx:26`): the row keeps the shell/agent label and
+            // never leaks "No provider selected Connect a provider" there.
+            let mut unconnected =
+                crate::native_prompt_pane::PromptMetadataInput::unconnected(self.composer_agent.as_deref());
+            unconnected.mode = mode;
+            unconnected
         };
         let layout = crate::native_prompt_pane::metadata_layout(&input, self.layout.cols);
         crate::native_prompt_pane::metadata_text(&layout)
@@ -7724,6 +7736,35 @@ mod footer_layout_tests {
 
 #[cfg(test)]
 mod composer_metadata_regression_tests {
+    // COMPOSER-PARITY seam: shell mode short-circuits before the
+    // empty-state labels (`metadata.tsx:26`), so a model-less shell prompt
+    // (failed fetch / model-less catalogue clears composer_model) keeps the
+    // shell/agent label and never leaks "No provider selected Connect a
+    // provider" into the row.
+    #[test]
+    fn shell_mode_with_no_model_keeps_the_shell_label_and_never_leaks_empty_state() {
+        let mut view = super::NativeView::new(140, 32);
+        view.set_session_route(true);
+        view.set_prompt_mode(true);
+        view.set_composer_agent(Some("Build".into()), None);
+        assert_eq!(
+            view.composer_metadata(),
+            "Build",
+            "shell mode keeps the shell/agent label"
+        );
+        // Without an agent the shell row is exactly the shell label too.
+        let mut bare = super::NativeView::new(140, 32);
+        bare.set_session_route(true);
+        bare.set_prompt_mode(true);
+        assert_eq!(bare.composer_metadata(), "Shell");
+        // The normal-mode no-model row is the unconnected empty state.
+        let mut normal = super::NativeView::new(140, 32);
+        normal.set_session_route(true);
+        assert_eq!(
+            normal.composer_metadata(),
+            "No provider selected Connect a provider"
+        );
+    }
     #[test]
     fn home_insertion_caret_tracks_prefix_instead_of_line_end() {
         let mut view = super::NativeView::new(100, 32);
@@ -8272,6 +8313,10 @@ mod tests {
         let mut view = NativeView::new(120, 40);
         view.set_session_route(true);
         view.set_model(Some("fixture-model".into()));
+        // COMPOSER-PARITY: the metadata row reads the composer's own
+        // selected-model fact (the status fallback is now the upstream
+        // unconnected empty state, not a model-label leak).
+        view.set_composer_model("fixture-model", "fixture-provider");
         let frame = view.render_typed("draft", &[], false, &[]);
         assert_eq!(view.composer_region("draft"), Some((2, 33, 116, 5)));
         assert_eq!(view.chat_cursor("draft", 2), Some((7, 34)));
@@ -8414,6 +8459,10 @@ mod tests {
             let mut view = NativeView::new(120, 40);
             view.set_session_route(true);
             view.set_model(Some("fixture-model".into()));
+            // COMPOSER-PARITY: the metadata row reads the composer's own
+            // selected-model fact (the status fallback is now the upstream
+            // unconnected empty state, not a model-label leak).
+            view.set_composer_model("fixture-model", "fixture-provider");
             view.set_tab_reservation(TabReservation::for_view(orientation, 120, 40));
             let frame = view.render_typed("draft", &[], false, &[]);
             let metadata_rows: Vec<_> = frame.iter().enumerate()
@@ -10765,6 +10814,10 @@ mod composer_dock_tests {
         let mut view = NativeView::new(120, 40);
         view.set_session_route(true);
         view.set_model(Some("fixture-model".into()));
+        // COMPOSER-PARITY: the metadata row's model cell comes from the
+        // composer's own selected-model fact, not a status-summary leak
+        // through the old fallback (now the upstream unconnected state).
+        view.set_composer_model("fixture-model", "fixture-provider");
         view.set_live_children_status(&status(children));
         view
     }
@@ -11175,6 +11228,10 @@ mod composer_dock_tests {
         let mut view = NativeView::new(120, 40);
         view.set_session_route(true);
         view.set_model(Some("fixture-model".into()));
+        // COMPOSER-PARITY: the metadata row reads the composer's own
+        // selected-model fact (the status fallback is now the upstream
+        // unconnected empty state, not a model-label leak).
+        view.set_composer_model("fixture-model", "fixture-provider");
 
         // No publish -> no dock row and no `QueueDock` paint class.
         view.set_queued_prompts(std::iter::empty());
@@ -11223,6 +11280,10 @@ mod legacy_render_splice_clamp_tests {
         let mut view = NativeView::new(120, 40);
         view.set_session_route(true);
         view.set_model(Some("fixture-model".into()));
+        // COMPOSER-PARITY: the metadata row reads the composer's own
+        // selected-model fact (the status fallback is now the upstream
+        // unconnected empty state, not a model-label leak).
+        view.set_composer_model("fixture-model", "fixture-provider");
         view.set_queued_prompts([QueuedPrompt {
             id: "queued-0".to_string(),
             text: "hello".to_string(),
@@ -11246,6 +11307,10 @@ mod legacy_render_splice_clamp_tests {
         let mut view = NativeView::new(120, 40);
         view.set_session_route(true);
         view.set_model(Some("fixture-model".into()));
+        // COMPOSER-PARITY: the metadata row reads the composer's own
+        // selected-model fact (the status fallback is now the upstream
+        // unconnected empty state, not a model-label leak).
+        view.set_composer_model("fixture-model", "fixture-provider");
         view.set_session_revert(Some(RevertCard::new(
             2,
             [RevertFileChange {

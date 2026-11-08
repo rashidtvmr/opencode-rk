@@ -7668,6 +7668,24 @@ fn cycle_agent(facts: &[AgentFactOwned], selected: &mut Option<String>) {
     *selected = Some(ids[next].clone());
 }
 
+/// COMPOSER-PARITY: push the resolved agent/variant facts into the composer
+/// metadata row whenever the loop (re)selects a model or cycles the agent
+/// (`context/local.tsx:59-135` agent state; `index.tsx:1559` agentLabel).
+/// The label is the titlecased agent id, matching upstream's display name;
+/// `None` keeps the agent cell out exactly like upstream's
+/// `agent: undefined` (`metadata.tsx:26-101`).
+#[cfg(feature = "native")]
+fn sync_composer_agent(
+    view: &mut crate::native_view::NativeView,
+    agent: Option<&str>,
+    variant: Option<&str>,
+) {
+    view.set_composer_agent(
+        agent.map(crate::native_assistant_facts::titlecase),
+        variant.map(str::to_owned),
+    );
+}
+
 /// CP-09: the composer rail color for the selected agent
 /// (`component/prompt/index.tsx:1591,1656`, `mini/footer.view.tsx:229,766`):
 /// an explicit `agent.color` wins, else the deduped categorical palette at
@@ -10786,6 +10804,11 @@ fn native_loop(
         view.set_model(Some(model.qualified()));
         // The native setup catalogue currently admits only the OpenAI adapter.
         view.set_composer_model(&model.name, &model.provider_id);
+        sync_composer_agent(
+            &mut view,
+            live_agent_selected.as_deref(),
+            native_setup::variant_for(model).as_deref(),
+        );
     } else if models_loaded {
         view.set_model(None); // confirmed: catalogue observed, no model
     } else {
@@ -11550,6 +11573,11 @@ fn native_loop(
                             selected = Some(model.clone());
                             view.set_model(Some(model.qualified()));
                             view.set_composer_model(&model.name, &model.provider_id);
+                            sync_composer_agent(
+                                &mut view,
+                                live_agent_selected.as_deref(),
+                                native_setup::variant_for(&model).as_deref(),
+                            );
                             if dialog == native_setup::Dialog::Provider
                                 && model.provider_id == loaded_provider
                             {
@@ -13826,6 +13854,11 @@ fn native_loop(
             // residual.
             let previous = live_agent_selected.clone();
             cycle_agent(&live_agent_facts, &mut live_agent_selected);
+            sync_composer_agent(
+                &mut view,
+                live_agent_selected.as_deref(),
+                selected.as_ref().and_then(native_setup::variant_for).as_deref(),
+            );
             if let (Some(previous), Some(next)) =
                 (previous.as_deref(), live_agent_selected.as_deref())
             {
@@ -14075,6 +14108,7 @@ fn native_loop(
                                         &mut draft_cursor,
                                         &mut session_route,
                                         &mut completion,
+                                        live_agent_selected.as_deref(),
                                     );
                                 }
                                 Err(error) => append_transcript(
@@ -15682,7 +15716,7 @@ fn native_loop(
                             if let Some(child) = children_action_http(&mut children_panel, action, live.as_ref(), auth.as_deref(), binding_generation) {
                                 let result = live.as_ref().ok_or_else(|| "daemon unavailable".to_owned()).and_then(|parent_snapshot| open_child_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, &parent_snapshot.origin, auth.as_deref(), binding_generation, &parent_snapshot.session_id, &child, selected.as_ref().map(|model| model.qualified())));
                                 match result {
-                                    Ok((snapshot, restored, generation, target_cursor, target_scroll, target_model)) => { children_panel.open = false; view.set_dialog_size(crate::native_view::DialogSize::Medium); commit_child_route(snapshot, restored, generation, target_cursor, target_scroll, target_model, &models, &mut selected, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut session_route, &mut completion); }
+                                    Ok((snapshot, restored, generation, target_cursor, target_scroll, target_model)) => { children_panel.open = false; view.set_dialog_size(crate::native_view::DialogSize::Medium); commit_child_route(snapshot, restored, generation, target_cursor, target_scroll, target_model, &models, &mut selected, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut session_route, &mut completion, live_agent_selected.as_deref()); }
                                     Err(error) => append_transcript(&mut transcript, format!("error: child open: {error}")),
                                 }
                             } else { children_refresh = Instant::now() - Duration::from_secs(1); }
@@ -15872,7 +15906,7 @@ fn native_loop(
                                 );
                                 match result {
                                     Ok((snapshot, restored, generation, target_cursor, target_scroll, target_model)) => {
-                                        commit_child_route(snapshot, restored, generation, target_cursor, target_scroll, target_model, &models, &mut selected, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut session_route, &mut completion);
+                                        commit_child_route(snapshot, restored, generation, target_cursor, target_scroll, target_model, &models, &mut selected, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut session_route, &mut completion, live_agent_selected.as_deref());
                                     }
                                     Err(error) => append_transcript(&mut transcript, format!("error: child open: {error}")),
                                 }
@@ -16446,7 +16480,7 @@ fn native_loop(
                 if let Some(child) = children_action_http(&mut children_panel, action, live.as_ref(), auth.as_deref(), binding_generation) {
                     let result = live.as_ref().ok_or_else(|| "daemon unavailable".to_owned()).and_then(|parent_snapshot| open_child_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, &parent_snapshot.origin, auth.as_deref(), binding_generation, &parent_snapshot.session_id, &child, selected.as_ref().map(|model| model.qualified())));
                     match result {
-                        Ok((snapshot, restored, generation, target_cursor, target_scroll, target_model)) => { children_panel.open = false; view.set_dialog_size(crate::native_view::DialogSize::Medium); commit_child_route(snapshot, restored, generation, target_cursor, target_scroll, target_model, &models, &mut selected, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut session_route, &mut completion); }
+                        Ok((snapshot, restored, generation, target_cursor, target_scroll, target_model)) => { children_panel.open = false; view.set_dialog_size(crate::native_view::DialogSize::Medium); commit_child_route(snapshot, restored, generation, target_cursor, target_scroll, target_model, &models, &mut selected, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut session_route, &mut completion, live_agent_selected.as_deref()); }
                         Err(error) => append_transcript(&mut transcript, format!("error: child open: {error}")),
                     }
                 } else { children_refresh = Instant::now() - Duration::from_secs(1); }
@@ -16471,7 +16505,7 @@ fn native_loop(
             if let Some(parent) = live.as_ref().and_then(|snapshot| snapshot.parent_session_id.clone()) {
                 let result = live.as_ref().ok_or_else(|| "daemon unavailable".to_owned()).and_then(|child_snapshot| return_parent_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, &child_snapshot.origin, auth.as_deref(), binding_generation, &parent));
                 match result {
-                    Ok((snapshot, restored, generation, target_cursor, target_scroll, target_model)) => commit_child_route(snapshot, restored, generation, target_cursor, target_scroll, target_model, &models, &mut selected, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut session_route, &mut completion),
+                    Ok((snapshot, restored, generation, target_cursor, target_scroll, target_model)) => commit_child_route(snapshot, restored, generation, target_cursor, target_scroll, target_model, &models, &mut selected, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut session_route, &mut completion, live_agent_selected.as_deref()),
                     Err(error) => append_transcript(&mut transcript, format!("error: return to parent: {error}")),
                 }
                 needs_paint = true;
@@ -18149,6 +18183,11 @@ fn native_loop(
                                     match native_setup::save_variant(&model, value) {
                                         Ok(()) => {
                                             view.set_composer_model(&model.name, &model.provider_id);
+                                            sync_composer_agent(
+                                                &mut view,
+                                                live_agent_selected.as_deref(),
+                                                value,
+                                            );
                                             variant_pick = None;
                                             dialog = native_setup::Dialog::None;
                                             model_row = 0;
@@ -18173,6 +18212,11 @@ fn native_loop(
                                         // honest live model status update.
                                         view.set_model(selected.as_ref().map(|m| m.qualified()));
                                         view.set_composer_model(&model.name, &model.provider_id);
+                                        sync_composer_agent(
+                                            &mut view,
+                                            live_agent_selected.as_deref(),
+                                            native_setup::variant_for(&model).as_deref(),
+                                        );
                                         // DIALOG-12: a model that advertises
                                         // variants with no still-valid current
                                         // variant opens the flat variant picker
@@ -18683,8 +18727,22 @@ fn native_loop(
                                     if let Some(model) = selected.as_ref() {
                                         view.set_model(Some(model.qualified()));
                                         view.set_composer_model(&model.name, &model.provider_id);
+                                        sync_composer_agent(
+                                            &mut view,
+                                            live_agent_selected.as_deref(),
+                                            native_setup::variant_for(model).as_deref(),
+                                        );
                                     } else {
                                         view.set_model(None);
+                                        // The agent selection is client state that
+                                        // persists across attaches
+                                        // (`context/local.tsx:91-99`); only the
+                                        // variant is model-scoped, so it clears.
+                                        sync_composer_agent(
+                                            &mut view,
+                                            live_agent_selected.as_deref(),
+                                            None,
+                                        );
                                     }
                                     session_route = true;
                                     view.set_session_route(session_route);
@@ -19453,6 +19511,7 @@ fn commit_child_route(
     history_window: &mut Option<crate::native_chat_projection::NativeHistoryWindow>,
     binding_generation: &mut u64, draft: &mut String, draft_cursor: &mut usize,
     session_route: &mut bool, completion: &mut crate::native_completion::Completion,
+    agent_selected: Option<&str>,
 ) {
     *history_window = Some(crate::native_chat_projection::NativeHistoryWindow::new(&snapshot.raw_history, snapshot.history_next_before.clone()));
     *live = Some(snapshot); *binding_generation = generation;
@@ -19463,6 +19522,11 @@ fn commit_child_route(
     if let Some(model) = selected.as_ref() {
         view.set_model(Some(model.qualified()));
         view.set_composer_model(&model.name, &model.provider_id);
+        sync_composer_agent(
+            view,
+            agent_selected,
+            native_setup::variant_for(model).as_deref(),
+        );
     } else { view.set_model_unknown(); }
     *session_route = true; view.set_session_route(true); completion.sync(draft);
 }
@@ -20534,11 +20598,27 @@ mod tab_binding_tests {
         let models = vec![native_setup::Model { id: "child".into(), name: "Child".into(), provider_id: "fixture".into(), context_window: None, free: false, cost: None, variants: Vec::new() }];
         let mut selected = None;
         let snapshot = LiveSnapshot { origin: "http://127.0.0.1:1".into(), session_id: A.into(), title: "A".into(), state: "idle".into(), updated_at: String::new(), message_count: 0, last_text: None, history: vec![], typed_history: vec![], raw_history: vec![], history_next_before: None, history_children: 0, parent_session: true, parent_session_id: Some(B.into()), directory: None, session_titles: vec![], session_project_labels: vec![], session_vcs: vec![], session_revert: None, session_revert_boundary: None, session_idle_at: None, session_viewed_at: None };
-        commit_child_route(snapshot, "child draft".into(), 2, 8, 13, Some("fixture/child".into()), &models, &mut selected, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut route, &mut completion);
+        commit_child_route(snapshot, "child draft".into(), 2, 8, 13, Some("fixture/child".into()), &models, &mut selected, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut route, &mut completion, None);
         assert_eq!(draft, "child draft");
         assert_eq!(cursor, 8);
         assert_eq!(view.chat_scroll_offset(), 13);
         assert_eq!(selected.as_ref().map(|model| model.qualified()), Some("fixture/child".into()));
+        // COMPOSER-PARITY: the client's selected agent persists across the
+        // child-tab restore (context/local.tsx:91-99), so a Some fact lands
+        // in the metadata row while the variant resets with the model.
+        let mut view = crate::native_view::NativeView::new(100, 32);
+        let mut live = None;
+        let mut history = None;
+        let mut generation = 1;
+        let mut draft = String::new();
+        let mut cursor = 0;
+        let mut route = true;
+        let mut completion = crate::native_completion::Completion::default();
+        let mut selected = None;
+        let snapshot = LiveSnapshot { origin: "http://127.0.0.1:1".into(), session_id: A.into(), title: "A".into(), state: "idle".into(), updated_at: String::new(), message_count: 0, last_text: None, history: vec![], typed_history: vec![], raw_history: vec![], history_next_before: None, history_children: 0, parent_session: true, parent_session_id: Some(B.into()), directory: None, session_titles: vec![], session_project_labels: vec![], session_vcs: vec![], session_revert: None, session_revert_boundary: None, session_idle_at: None, session_viewed_at: None };
+        commit_child_route(snapshot, "child draft".into(), 2, 8, 13, Some("fixture/child".into()), &models, &mut selected, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut route, &mut completion, Some("build"));
+        let frame = view.render_typed("child draft", &[], false, &[]).join("\n");
+        assert!(frame.contains("Build · Child fixture"), "agent persists across the child restore: {frame}");
     }
 
     #[test]
