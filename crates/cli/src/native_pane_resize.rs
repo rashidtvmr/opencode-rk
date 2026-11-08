@@ -694,6 +694,84 @@ pub const fn narrow_sidebar_closeable(sidebar_visible: bool, available_width: u1
     sidebar_visible && available_width <= SIDEBAR_OVERLAY_MAX_AVAILABLE
 }
 
+/// LAY-11: resolved `/diff` panel geometry — the only builtin `session.panel`
+/// claim (`opencode.diffs`,
+/// `feature-plugins/system/diff-viewer.tsx:1363-1379` at pin
+/// `450e7b92412c780a7b5a75226bb8d49aaca24e22`).
+///
+/// Composition of the two upstream rules:
+/// - presentation (`context/panel.tsx:15-16`):
+///   [`panel_presentation`] forces fullscreen below
+///   [`SESSION_PANEL_SPLIT_MIN_WIDTH`] (108) or when
+///   `config.diffs.fullscreen` requests it;
+/// - split geometry (`component/session-frame.tsx:277-340`):
+///   [`pane_split_geometry`] docks the panel as a non-shrinking flex sibling
+///   at the pane width, or takes the full available width and hides the
+///   session pane (`visible={!fullscreen()}`, `:280`) under fullscreen.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DiffPanelLayout {
+    /// Effective presentation after the split threshold.
+    pub presentation: PanelPresentation,
+    /// Pane rectangle in absolute cells while the panel is open; zeroed when
+    /// closed. The pane spans the full frame height (the right box is
+    /// `height="100%"`, `session-frame.tsx:326`).
+    pub pane: CellRect,
+    /// Session-column width that keeps painting. Under fullscreen the session
+    /// pane is HIDDEN, so nothing of the main column paints and this is 0
+    /// (upstream still measures the hidden node; the paint contract here is
+    /// the visible one).
+    pub session_width: u16,
+    /// `visible={!fullscreen()}` (`:280`).
+    pub session_visible: bool,
+}
+
+/// Resolve the `/diff` panel geometry. `available` is
+/// `dimensions().width - verticalTabsWidth` (`app.tsx:623`); `pane_resize` is
+/// the pane width — the `/diff` slice has no resize state yet, so callers
+/// pass [`default_pane_width`]`(available)` (upstream's `defaultPaneWidth`,
+/// `session-frame.tsx:44-45`).
+#[must_use]
+pub fn diff_panel_layout(
+    cols: u16,
+    tab_offset: u16,
+    rows: u16,
+    open: bool,
+    fullscreen_requested: bool,
+    pane_resize: u16,
+) -> DiffPanelLayout {
+    if !open {
+        return DiffPanelLayout {
+            presentation: PanelPresentation::Panel,
+            pane: CellRect::new(0, 0, 0, 0),
+            session_width: cols.saturating_sub(tab_offset),
+            session_visible: true,
+        };
+    }
+    let available = cols.saturating_sub(tab_offset);
+    let requested = if fullscreen_requested {
+        PanelPresentation::Fullscreen
+    } else {
+        PanelPresentation::Panel
+    };
+    let presentation = panel_presentation(requested, available);
+    let fullscreen = presentation == PanelPresentation::Fullscreen;
+    let geometry = pane_split_geometry(RightPane::Panel, fullscreen, available, true, pane_resize);
+    // Docked: the pane starts after the session column. Fullscreen: the
+    // session pane is hidden and the right box takes the whole available
+    // width from the rail offset (`session-frame.tsx:330`).
+    let pane_x = if fullscreen {
+        tab_offset
+    } else {
+        tab_offset.saturating_add(geometry.session_width)
+    };
+    DiffPanelLayout {
+        presentation,
+        pane: CellRect::new(pane_x, 0, geometry.right_width, rows),
+        session_width: if fullscreen { 0 } else { geometry.session_width },
+        session_visible: geometry.session_visible,
+    }
+}
+
 /// Outcome of routing one input through the pane focus guard.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum GuardedAction {
@@ -860,6 +938,110 @@ impl PaneFocusGuard {
 mod tests {
     use super::*;
     use crate::native_shell_frame::{ShellFrame, ShellFrameInput, compose_shell};
+
+    // LAY-11: the /diff panel geometry (`opencode.diffs`, the only builtin
+    // `session.panel` claim, `feature-plugins/system/diff-viewer.tsx:1363-1379`).
+    #[test]
+    fn diff_panel_docks_at_the_default_split_above_108() {
+        // 140 cols, no vertical tabs: available 140 >= 108, so the requested
+        // `panel` presentation docks the pane as a flex sibling at
+        // `default_pane_width(140) = 70` (`session-frame.tsx:44-45,329-336`).
+        let layout = diff_panel_layout(140, 0, 40, true, false, default_pane_width(140));
+        assert_eq!(layout.presentation, PanelPresentation::Panel);
+        assert_eq!(layout.pane, CellRect::new(70, 0, 70, 40));
+        assert_eq!(layout.session_width, 70);
+        assert!(layout.session_visible);
+        // The 108 threshold is strict: 107 available cells force fullscreen.
+        let narrow = diff_panel_layout(107, 0, 40, true, false, default_pane_width(107));
+        assert_eq!(narrow.presentation, PanelPresentation::Fullscreen);
+        assert_eq!(narrow.pane, CellRect::new(0, 0, 107, 40));
+        assert_eq!(narrow.session_width, 0);
+        assert!(!narrow.session_visible);
+        // 108 docks again.
+        let exact = diff_panel_layout(108, 0, 40, true, false, default_pane_width(108));
+        assert_eq!(exact.presentation, PanelPresentation::Panel);
+        assert_eq!(exact.session_width, 108 - default_pane_width(108));
+    }
+
+    #[test]
+    fn diff_panel_fullscreen_takes_the_available_width_and_hides_the_session() {
+        // `config.diffs.fullscreen === true` requests fullscreen
+        // (`diff-viewer.tsx:1331-1336`); the pane takes the whole available
+        // width from the rail offset and the session pane is hidden
+        // (`session-frame.tsx:279-281,330`).
+        let layout = diff_panel_layout(140, 0, 40, true, true, 70);
+        assert_eq!(layout.presentation, PanelPresentation::Fullscreen);
+        assert_eq!(layout.pane, CellRect::new(0, 0, 140, 40));
+        assert_eq!(layout.session_width, 0);
+        assert!(!layout.session_visible);
+        // Vertical tabs shrink the available width below the 108 threshold,
+        // which forces fullscreen too (`canSplit = width() >= 108`).
+        let tabbed = diff_panel_layout(140, 42, 40, true, false, default_pane_width(98));
+        assert_eq!(tabbed.presentation, PanelPresentation::Fullscreen);
+        assert_eq!(tabbed.pane, CellRect::new(42, 0, 98, 40));
+        assert_eq!(tabbed.session_width, 0);
+    }
+
+    #[test]
+    fn diff_panel_closed_zeroes_the_pane_and_keeps_the_session() {
+        let layout = diff_panel_layout(140, 0, 40, false, false, 70);
+        assert_eq!(layout.presentation, PanelPresentation::Panel);
+        assert_eq!(layout.pane, CellRect::new(0, 0, 0, 0));
+        assert_eq!(layout.session_width, 140);
+        assert!(layout.session_visible);
+    }
+
+    /// Rendered pin at the acceptance geometry (140x40, panel docked): the
+    /// diff content lives inside the pane's columns and the transcript stays
+    /// inside the shrunk session column — the same `compose_frame` the live
+    /// renderer uses.
+    #[test]
+    fn diff_panel_composed_frame_separates_pane_and_transcript_at_140x40() {
+        use crate::native_view_layout::{compose_frame, fit, Layout};
+        let patch = "--- a/main.rs\n+++ b/main.rs\n@@ -1,2 +1,3 @@\n fn main() {\n-    old();\n+    new();\n+    extra();\n }";
+        let mut state = crate::native_diff_view::DiffPanelState::default();
+        state.open = true;
+        state.patch = Some(patch.to_owned());
+        let layout = diff_panel_layout(140, 0, 40, true, false, default_pane_width(140));
+        assert_eq!(layout.pane.x, 70);
+        let pane_rows = crate::native_diff_view::panel_rows(&state, usize::from(layout.pane.width), 38);
+        assert!(pane_rows.iter().any(|row| row.contains("+    new();")));
+        // The transcript shrinks to the session column; the pane carries the
+        // diff rows.
+        let transcript = vec!["  assistant reply token".to_owned(); 38];
+        let frame_layout = Layout {
+            cols: 140,
+            rows: 40,
+            left_width: 0,
+            center_width: layout.session_width,
+            right_width: layout.pane.width,
+            compact: false,
+        };
+        let frame = compose_frame(&frame_layout, &[], &transcript, &pane_rows);
+        assert_eq!(frame.len(), 40);
+        for row in &frame {
+            let session_region: String = row.chars().take(usize::from(layout.session_width)).collect();
+            let pane_region: String = row
+                .chars()
+                .skip(usize::from(layout.pane.x))
+                .collect();
+            assert!(
+                !session_region.contains("+    new();"),
+                "diff content under the transcript region: {session_region:?}"
+            );
+            assert!(
+                !pane_region.contains("assistant reply token"),
+                "transcript paints under the pane: {pane_region:?}"
+            );
+        }
+        // The pane's own content starts inside its columns.
+        let title_row = frame
+            .iter()
+            .position(|row| row.contains("Diff viewer"))
+            .expect("panel title renders");
+        let title_col = frame[title_row].find("Diff viewer").unwrap();
+        assert!(title_col >= usize::from(layout.pane.x), "title left of the pane");
+    }
 
     fn resize() -> PaneResize {
         // 120-wide panel, 160-wide terminal, persisted 60.

@@ -1495,9 +1495,167 @@ pub fn diagnostics_for_file(
         .unwrap_or_default()
 }
 
+/// LAY-11: the `/diff` panel state — the only builtin `session.panel` claim
+/// (`opencode.diffs`, `feature-plugins/system/diff-viewer.tsx:1363-1379` at
+/// pin `450e7b92412c780a7b5a75226bb8d49aaca24e22`).
+///
+/// Upstream `/diff` (`diff-viewer.tsx:1311-1358`) toggles: close when the
+/// current panel is already `diff` for this session (`:1326-1329`), else
+/// `ui.panel.open("diff", { presentation: config.diffs?.fullscreen === true ?
+/// "fullscreen" : "panel" })` (`:1331-1336`). There is NO modal path; oc2's
+/// DIFF-001 modal is the click-a-diff-row surface and stays untouched.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DiffPanelState {
+    /// Whether the panel is the active right pane.
+    pub open: bool,
+    /// The patch the panel paints. `None` renders the honest empty state:
+    /// oc2 has no `client.session.diff` / `vcs.diff` fetch yet
+    /// (`diff-viewer.tsx:151,163`), so the `/diff` dispatch feeds the
+    /// transcript-projected patch when one exists.
+    pub patch: Option<String>,
+    /// `config.diffs?.fullscreen === true` request (`diff-viewer.tsx:1331`).
+    /// The effective presentation still goes through
+    /// [`crate::native_pane_resize::panel_presentation`] — the 108 split
+    /// threshold (`context/panel.tsx:15-16`) forces fullscreen below it.
+    pub fullscreen_requested: bool,
+}
+
+impl DiffPanelState {
+    /// `/diff` toggle (`diff-viewer.tsx:1326-1336`): close when already the
+    /// current panel, else open with the requested presentation and the
+    /// supplied patch. Returns whether the panel is open after the toggle.
+    pub fn toggle(&mut self, patch: Option<String>, fullscreen_requested: bool) -> bool {
+        if self.open {
+            self.close();
+            return false;
+        }
+        self.open = true;
+        self.patch = patch;
+        self.fullscreen_requested = fullscreen_requested;
+        true
+    }
+
+    /// `ui.panel.close()` (`diff-viewer.tsx:1328`): the panel closes and the
+    /// patch is dropped with it (a reopened panel refetches).
+    pub fn close(&mut self) {
+        self.open = false;
+        self.patch = None;
+    }
+
+    /// Refresh the painted patch while the panel stays open (upstream's
+    /// viewer refetches on session events; oc2's dispatch re-projects the
+    /// transcript per frame).
+    pub fn set_patch(&mut self, patch: Option<String>) {
+        self.patch = patch;
+    }
+}
+
+/// The `/diff` panel's painted rows at the pane's inner width — the same
+/// gutter/wrap model the interactive diff surfaces paint
+/// ([`paint_rows_with_gutter_wrapped`], `component/patch-diff.tsx`). A closed
+/// panel paints nothing; an open panel without a patch paints the honest
+/// empty state. The first row is the viewer title, matching the modal's
+/// `Diff viewer` heading.
+#[must_use]
+pub fn panel_rows(state: &DiffPanelState, width: usize, max_rows: usize) -> Vec<String> {
+    if !state.open || width == 0 || max_rows == 0 {
+        return Vec::new();
+    }
+    let mut rows = vec!["Diff viewer".to_owned()];
+    let Some(patch) = state.patch.as_deref() else {
+        rows.push("No diff available yet.".to_owned());
+        return rows;
+    };
+    // The panel paints the same wrapped gutter rows the interactive surfaces
+    // paint ([`paint_rows_with_gutter_wrapped`]); the modal's split rule
+    // (`diff-viewer.tsx:45,349`) stays a modal concern for this slice — the
+    // pane resolves unified rows at its own measured width.
+    let painted = paint_rows_with_gutter_wrapped(patch, max_rows.saturating_sub(1), width);
+    let truncated = painted.truncated;
+    let available = max_rows.saturating_sub(1);
+    for row in painted.rows.into_iter().take(if truncated {
+        available.saturating_sub(1)
+    } else {
+        available
+    }) {
+        rows.push(row.text);
+    }
+    if truncated && rows.len() < max_rows {
+        rows.push("… diff truncated".to_owned());
+    }
+    rows.truncate(max_rows);
+    rows
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // LAY-11: the /diff panel state and content model.
+    #[test]
+    fn diff_panel_toggle_opens_closes_and_refreshes() {
+        let mut state = DiffPanelState::default();
+        assert!(!state.open);
+        // First /diff opens with the requested presentation and patch.
+        assert!(state.toggle(Some("patch-a".to_owned()), false));
+        assert!(state.open);
+        assert_eq!(state.patch.as_deref(), Some("patch-a"));
+        assert!(!state.fullscreen_requested);
+        // Second /diff closes (upstream `:1326-1329`) and drops the patch.
+        assert!(!state.toggle(Some("patch-b".to_owned()), true));
+        assert!(!state.open);
+        assert_eq!(state.patch, None);
+        // Reopening adopts the new request.
+        assert!(state.toggle(None, true));
+        assert!(state.open);
+        assert!(state.fullscreen_requested);
+        assert_eq!(state.patch, None);
+        // A live refresh keeps the panel open and swaps the patch.
+        state.set_patch(Some("patch-c".to_owned()));
+        assert!(state.open);
+        assert_eq!(state.patch.as_deref(), Some("patch-c"));
+        state.close();
+        assert!(!state.open);
+        assert_eq!(state.patch, None);
+    }
+
+    #[test]
+    fn diff_panel_rows_paint_the_patch_at_the_pane_width() {
+        let patch = "--- a/main.rs\n+++ b/main.rs\n@@ -1,2 +1,3 @@\n fn main() {\n-    old();\n+    new();\n+    extra();\n }";
+        let mut state = DiffPanelState::default();
+        state.open = true;
+        state.patch = Some(patch.to_owned());
+        let rows = panel_rows(&state, 60, 40);
+        assert_eq!(rows[0], "Diff viewer", "title row: {rows:?}");
+        assert!(rows.iter().any(|row| row.contains("+    new();")), "added row: {rows:?}");
+        assert!(rows.iter().any(|row| row.contains("-    old();")), "removed row: {rows:?}");
+        // Every row stays within the pane's inner width (gutter included).
+        for row in &rows {
+            assert!(
+                crate::native_sidebar::cell_width(row) <= 60,
+                "row overruns the pane: {row:?}"
+            );
+        }
+        // The row budget is honoured (title + bounded patch rows).
+        let tight = panel_rows(&state, 60, 3);
+        assert_eq!(tight.len(), 3, "budget: {tight:?}");
+    }
+
+    #[test]
+    fn diff_panel_rows_honest_empty_state_and_closed_panel() {
+        let mut state = DiffPanelState::default();
+        state.open = true;
+        let rows = panel_rows(&state, 60, 20);
+        assert_eq!(rows, vec!["Diff viewer".to_owned(), "No diff available yet.".to_owned()]);
+        // A closed panel paints nothing.
+        state.patch = Some("patch".to_owned());
+        state.open = false;
+        assert!(panel_rows(&state, 60, 20).is_empty());
+        // Degenerate budgets paint nothing rather than partial chrome.
+        state.open = true;
+        assert!(panel_rows(&state, 0, 20).is_empty());
+        assert!(panel_rows(&state, 60, 0).is_empty());
+    }
 
     // T01: basic add/remove/context with line numbers
     #[test]
