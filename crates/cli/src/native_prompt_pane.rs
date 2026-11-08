@@ -28,6 +28,11 @@
 //! - `context/local.tsx:59-135` — visible vs selectable agents and
 //!   deduplicated categorical agent colors (step 400 with new designs, else
 //!   200; explicit agent color wins; index modulo palette length).
+//! - `context/local.tsx:398-417` — `model.parsed()`: the honest empty state
+//!   while no selection exists (`provider: "Connect a provider"`,
+//!   `model: "No provider selected"`), and the resolved display names
+//!   (`provider?.name ?? providerID`, `info?.name ?? "{id} (unavailable)"`)
+//!   once one does.
 //! - `component/prompt/index.tsx:1539-1572` — `promptDisplay`: keep the last
 //!   resolved labels while destination catalogs load, replace them on a
 //!   location change.
@@ -278,6 +283,36 @@ impl<'a> Default for PromptMetadataInput<'a> {
             auto: false,
             model: "",
             provider: "",
+            variant: None,
+            limit: None,
+            effort: None,
+        }
+    }
+}
+
+/// Upstream `local.model.parsed().provider` while no provider/model selection
+/// exists (`context/local.tsx:402-408`): the honest empty state, never a
+/// backend status summary such as `unset`.
+pub(crate) const PROMPT_EMPTY_PROVIDER_LABEL: &str = "Connect a provider";
+/// Upstream `local.model.parsed().model` while no selection exists
+/// (`context/local.tsx:403-407`).
+pub(crate) const PROMPT_EMPTY_MODEL_LABEL: &str = "No provider selected";
+
+impl<'a> PromptMetadataInput<'a> {
+    /// The unconnected empty state (`context/local.tsx:398-417`): while no
+    /// model selection exists the row paints these exact labels — the model
+    /// cell reads `No provider selected` and the provider cell invites the
+    /// connect flow — instead of leaking a status summary (`unset`).
+    /// `agent` stays the caller's resolved agent label
+    /// (`promptDisplay().agentLabel`, `index.tsx:1559`); `None` keeps the
+    /// agent cell out exactly like upstream's `agent: undefined`.
+    pub(crate) fn unconnected(agent: Option<&'a str>) -> Self {
+        Self {
+            mode: PromptMode::Normal,
+            agent,
+            auto: false,
+            model: PROMPT_EMPTY_MODEL_LABEL,
+            provider: PROMPT_EMPTY_PROVIDER_LABEL,
             variant: None,
             limit: None,
             effort: None,
@@ -1992,6 +2027,245 @@ mod tests {
             ..input
         };
         assert_eq!(metadata_layout(&shell, 120).effort, None);
+    }
+
+    // ── COMPOSER-PARITY (task-1): acceptance sizes 80x24 and 140x40 ──────
+    //
+    // Runtime evidence `p1-ui3-initial.txt` / `p1-ui3-session.txt` (140x40)
+    // and `p1-ui-initial.raw` (80 cols): the composer block must sit at
+    // upstream's textarea minimum and grow per wrapped line, and the in-box
+    // metadata row must carry the upstream cells (agent · model provider ·
+    // variant) with honest empty states instead of a status summary.
+
+    /// Upstream textarea `minHeight={1}` (`index.tsx:1773`): an empty draft
+    /// renders exactly one editor row, so the rail block is the five rows
+    /// `padding / editor / metadata padding / metadata / lip`
+    /// (`prompt_rows(1)`, `index.tsx:1690-1698,1855-1898`).
+    #[test]
+    fn composer_parity_empty_draft_renders_the_upstream_minimum_block() {
+        for (width, height) in [(80usize, 24u16), (140usize, 40u16)] {
+            let mut input = composer_input(width, height as usize, "", frame(0));
+            input.terminal_width = u16::try_from(width).unwrap();
+            input.terminal_height = height;
+            input.placeholder = Some("Ask anything… \"Fix a TODO in the codebase\"");
+            let pane = PromptPane::compose(input);
+            let geometry = pane.geometry();
+            assert_eq!(geometry.style, PromptPaneStyle::Rail, "{width}x{height}");
+            assert_eq!(geometry.input_rows, 1, "{width}x{height}: minHeight=1");
+            assert_eq!(geometry.height, 5, "{width}x{height}: prompt_rows(1)");
+            let kinds: Vec<_> = pane.rows().iter().map(|row| row.kind).collect();
+            assert_eq!(
+                kinds,
+                [
+                    PromptPaneRowKind::SurfacePadding,
+                    PromptPaneRowKind::Placeholder,
+                    PromptPaneRowKind::MetadataPadding,
+                    PromptPaneRowKind::Metadata,
+                    PromptPaneRowKind::Lip,
+                ],
+                "{width}x{height}"
+            );
+            assert!(
+                pane.row(1).unwrap().text.contains("Ask anything"),
+                "{width}x{height}: placeholder painted in the single editor row"
+            );
+        }
+    }
+
+    /// Upstream textarea growth (`index.tsx:1773-1774`): one row per wrapped
+    /// line until `maxHeight = max(6, floor(terminalHeight / 3))`
+    /// (`index.tsx:1674`) — 8 editor rows at 24 terminal rows, 13 at 40.
+    #[test]
+    fn composer_parity_editor_grows_per_wrapped_line_to_the_terminal_cap() {
+        let three_lines = "one\ntwo\nthree";
+        let mut input = composer_input(140, 40, three_lines, frame(0));
+        input.terminal_width = 140;
+        input.terminal_height = 40;
+        let pane = PromptPane::compose(input);
+        assert_eq!(pane.geometry().input_rows, 3, "grows with content");
+        assert_eq!(pane.height(), 7, "input + 4 block rows");
+        assert_eq!(
+            pane.rows().iter().filter(|row| row.kind == PromptPaneRowKind::Editor).count(),
+            3
+        );
+
+        let twenty_lines = std::iter::repeat_n("line", 20)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut tall = composer_input(140, 40, twenty_lines.as_str(), frame(0));
+        tall.terminal_width = 140;
+        tall.terminal_height = 40;
+        let pane = PromptPane::compose(tall);
+        assert_eq!(
+            pane.geometry().input_rows,
+            crate::native_prompt_layout::editor_max_rows(40),
+            "140x40 cap is max(6, floor(40/3)) = 13"
+        );
+        assert_eq!(pane.geometry().input_rows, 13);
+
+        let twelve_lines = std::iter::repeat_n("line", 12)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut small = composer_input(80, 24, twelve_lines.as_str(), frame(0));
+        small.terminal_width = 80;
+        small.terminal_height = 24;
+        let pane = PromptPane::compose(small);
+        assert_eq!(
+            pane.geometry().input_rows,
+            crate::native_prompt_layout::editor_max_rows(24),
+            "80x24 cap is max(6, floor(24/3)) = 8"
+        );
+        assert_eq!(pane.geometry().input_rows, 8);
+    }
+
+    /// The structural body clamp stays: the block never exceeds the chat body
+    /// budget even when the terminal cap is larger
+    /// (`prompt_geometry`: `editor_max_rows(terminal).min(height - 4)`).
+    #[test]
+    fn composer_parity_cap_yields_to_the_body_budget() {
+        let twenty_lines = std::iter::repeat_n("line", 20)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut input = composer_input(140, 8, twenty_lines.as_str(), frame(0));
+        input.terminal_width = 140;
+        input.terminal_height = 40;
+        let pane = PromptPane::compose(input);
+        assert_eq!(pane.geometry().input_rows, 4, "body budget 8 - 4 block rows");
+        assert_eq!(pane.height(), 8, "never taller than the body");
+    }
+
+    /// The in-box metadata row paints the upstream cells in order — agent
+    /// (highlight), `·` (muted), model (base), provider (muted, no dot
+    /// between model and provider), `· variant` (warning, bold)
+    /// (`metadata.tsx:39-101`, `index.tsx:1856-1869`).
+    #[test]
+    fn composer_parity_footer_cells_render_agent_model_provider_variant() {
+        let mut input = composer_input(140, 40, "", frame(0));
+        input.terminal_width = 140;
+        input.terminal_height = 40;
+        input.metadata = PromptMetadataInput {
+            agent: Some("Build"),
+            auto: false,
+            model: "Non-default fixture",
+            provider: "openai",
+            variant: Some("balanced"),
+            ..PromptMetadataInput::default()
+        };
+        let pane = PromptPane::compose(input);
+        assert_eq!(
+            pane.metadata_text(),
+            "Build · Non-default fixture openai · balanced",
+            "agent · model provider · variant, no dot between model and provider"
+        );
+        assert_eq!(pane.metadata_row(), Some(3));
+        assert!(
+            pane.row(3).unwrap().text.contains("Build · Non-default fixture openai · balanced"),
+            "the composed metadata row paints the cells: {:?}",
+            pane.row(3).unwrap().text
+        );
+        let runs = pane.metadata_runs();
+        assert_eq!(
+            runs,
+            vec![
+                (MetadataRole::Agent, "Build".to_owned()),
+                (MetadataRole::ModelSeparator, "·".to_owned()),
+                (MetadataRole::Model, "Non-default fixture".to_owned()),
+                (MetadataRole::Provider, "openai".to_owned()),
+                (MetadataRole::VariantSeparator, "·".to_owned()),
+                (MetadataRole::Variant, "balanced".to_owned()),
+            ]
+        );
+        let style = |role| metadata_style(role, false, false);
+        assert_eq!(style(MetadataRole::Agent).fg, MetadataFg::Highlight);
+        assert_eq!(style(MetadataRole::ModelSeparator).fg, MetadataFg::Muted);
+        assert_eq!(style(MetadataRole::Model).fg, MetadataFg::Base);
+        assert_eq!(style(MetadataRole::Provider).fg, MetadataFg::Muted);
+        let variant = style(MetadataRole::Variant);
+        assert_eq!(variant.fg, MetadataFg::Warning);
+        assert!(variant.bold, "variant is bold (`metadata.tsx:79`)");
+    }
+
+    /// The `auto` cell sits between the agent and the model while the
+    /// permission mode is autoaccept (`metadata.tsx:48-50`,
+    /// `index.tsx:1859`), and the same cells fit the 80-column budget
+    /// (`metadata.tsx:28`: `terminalWidth - 13`).
+    #[test]
+    fn composer_parity_footer_cells_fit_80_columns_with_auto_cell() {
+        let mut input = composer_input(80, 24, "", frame(0));
+        input.terminal_width = 80;
+        input.terminal_height = 24;
+        input.metadata = PromptMetadataInput {
+            agent: Some("Build"),
+            auto: true,
+            model: "Non-default fixture",
+            provider: "openai",
+            variant: Some("balanced"),
+            ..PromptMetadataInput::default()
+        };
+        let pane = PromptPane::compose(input);
+        assert_eq!(
+            pane.metadata_text(),
+            "Build auto · Non-default fixture openai · balanced"
+        );
+        let roles: Vec<_> = pane.metadata_runs().iter().map(|(role, _)| *role).collect();
+        assert_eq!(
+            roles,
+            [
+                MetadataRole::Agent,
+                MetadataRole::Auto,
+                MetadataRole::ModelSeparator,
+                MetadataRole::Model,
+                MetadataRole::Provider,
+                MetadataRole::VariantSeparator,
+                MetadataRole::Variant,
+            ]
+        );
+    }
+
+    /// Honest empty state (`context/local.tsx:398-417`): with no model
+    /// selection the row paints `agent · No provider selected Connect a
+    /// provider` at both acceptance widths — never a backend status summary
+    /// such as `unset` (`p1-ui-initial.raw` row 16).
+    #[test]
+    fn composer_parity_unconnected_empty_state_matches_upstream_labels() {
+        for width in [80u16, 140u16] {
+            let mut input = composer_input(usize::from(width), 24, "", frame(0));
+            input.terminal_width = width;
+            input.metadata = PromptMetadataInput::unconnected(Some("Build"));
+            let pane = PromptPane::compose(input);
+            assert_eq!(
+                pane.metadata_text(),
+                "Build · No provider selected Connect a provider",
+                "{width} columns"
+            );
+            let roles: Vec<_> = pane.metadata_runs().iter().map(|(role, _)| *role).collect();
+            assert_eq!(
+                roles,
+                [
+                    MetadataRole::Agent,
+                    MetadataRole::ModelSeparator,
+                    MetadataRole::Model,
+                    MetadataRole::Provider,
+                ],
+                "{width} columns"
+            );
+            assert!(
+                !pane.metadata_text().contains("unset"),
+                "the empty state never leaks the status summary"
+            );
+        }
+        // Without an agent the row is exactly the two empty-state labels
+        // (`metadata.tsx:51-71` gates the separator on the agent).
+        let bare = PromptMetadataInput::unconnected(None);
+        let layout = metadata_layout(&bare, 140);
+        assert_eq!(metadata_text(&layout), "No provider selected Connect a provider");
+        // Shell mode keeps the shell/agent label and an empty model row
+        // (`metadata.tsx:26`), so the empty-state labels never leak there.
+        let shell = PromptMetadataInput {
+            mode: PromptMode::Shell,
+            ..PromptMetadataInput::unconnected(Some("Build"))
+        };
+        assert_eq!(metadata_text(&metadata_layout(&shell, 140)), "Build");
     }
 
     /// CP-04: the rail composer inset keys on the TERMINAL width, not the pane
