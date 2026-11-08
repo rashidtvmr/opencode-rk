@@ -2982,6 +2982,116 @@ mod tests {
         assert!(strip.hit(18, 0).is_none());
     }
 
+    // ── HEADER-TABS (task-3): the captured "defects" are upstream geometry ──
+    //
+    // The release captures (`p1-ui3-busy-1.txt` row 0 `⠹ Chat`, row 0 `+` at
+    // column 33, and the right-panel `Chat`) pin three states this module must
+    // keep matching upstream pin 450e7b92. Each test names the upstream lines
+    // so a future edit that breaks them names what it breaks.
+
+    /// The busy spinner occupies the tab's indicator column — exactly
+    /// upstream's `TabIndicator` box (`session-tabs.tsx:183-208`):
+    /// `width = numberWidth() + 1`, content right-justified with
+    /// `paddingRight 1`, so the glyph lands on strip column 1 and the title
+    /// starts at column 3. The captured `⠹ Chat` is this geometry, not a
+    /// glued prefix; upstream's separate busy surface is the prompt footer
+    /// status slot (`prompt/index.tsx:1911-1967`), which oc2 paints there.
+    #[test]
+    fn header_tabs_busy_spinner_paints_the_tab_indicator_column() {
+        let mut tab = input("a", "Chat");
+        tab.flags.busy = true;
+        tab.flags.active = true;
+        tab.spinner_frame = Some(2); // TAB_SPINNER_DOTS[2] = "⠹", the captured frame
+        let strip =
+            TabStrip::render_with_hover_and_add(&[tab], TabOrientation::Horizontal, 140, 1, 0, None, true);
+        assert_eq!(strip.rects[0].1.width, 32, "one tab caps at SESSION_TAB_MAX_WIDTH");
+        let row = strip.rows[0].clone();
+        assert_eq!(row.chars().nth(1), Some('⠹'), "glyph on indicator cell 1: {row:?}");
+        assert_eq!(row.chars().nth(2), Some(' '), "paddingRight cell: {row:?}");
+        assert!(
+            row.chars().skip(3).collect::<String>().starts_with("Chat"),
+            "title starts at cell 3: {row:?}"
+        );
+        assert_eq!(display_width(&row), 32, "the slot conserves its width");
+        // The idle tab keeps the same title cell with a blank indicator column
+        // (`session-tabs.tsx:176-178` idleLabel "").
+        let idle = TabStrip::render_with_hover_and_add(
+            &[input("a", "Chat")],
+            TabOrientation::Horizontal,
+            140,
+            1,
+            0,
+            None,
+            true,
+        );
+        assert!(
+            idle.rows[0].starts_with("   Chat"),
+            "idle indicator column is blank, title at cell 3: {:?}",
+            idle.rows[0]
+        );
+    }
+
+    /// The idle plus follows the tab flow's end (`session-tabs.tsx:1764-1800`
+    /// renders `" + "` after the solved tabs; the solver
+    /// `context/session-tabs-model.ts:178-260` caps one tab at
+    /// `SESSION_TAB_MAX_WIDTH = 32`), so with a single tab the plus occupies
+    /// columns 32-34 at BOTH acceptance widths — the captured `+` at column 33
+    /// is upstream's own geometry, not a pinned offset. With more tabs the
+    /// plus moves with the flow end instead of staying pinned.
+    #[test]
+    fn header_tabs_plus_follows_the_tab_flow_end_across_widths() {
+        for width in [80u16, 140u16] {
+            let strip = TabStrip::render_with_hover_and_add(
+                &[input("a", "Chat")],
+                TabOrientation::Horizontal,
+                width,
+                1,
+                0,
+                None,
+                true,
+            );
+            let add = strip.add_rect.expect("idle plus");
+            assert_eq!(add.x, 32, "width {width}: one tab caps at 32 cells");
+            assert_eq!(add.width, 3, "width {width}: ADD_TAB_WIDTH");
+        }
+        // Multi-tab: the plus x is the solved flow end (sum of slot widths),
+        // never a fixed column.
+        let tabs: Vec<_> = (0..5)
+            .map(|index| input(&format!("s{index}"), &format!("session-{index}")))
+            .collect();
+        let strip =
+            TabStrip::render_with_hover_and_add(&tabs, TabOrientation::Horizontal, 140, 1, 0, None, true);
+        let flow_end: usize = strip.rects.iter().map(|(_, rect)| usize::from(rect.width)).sum();
+        let add = strip.add_rect.expect("idle plus");
+        assert_eq!(usize::from(add.x), flow_end, "plus sits at the flow end");
+        assert_ne!(add.x, 32, "a five-tab strip is wider than the single-tab cap");
+    }
+
+    /// The horizontal strip owns exactly ONE painted row per tab; a second
+    /// `Chat` under the right panel is the session sidebar's own title
+    /// heading (`routes/session/sidebar.tsx:33-48` renders the session title
+    /// bold at the sidebar top, as upstream does), never a second strip
+    /// paint. This pins the strip side of that fact: one tab, one row, one
+    /// title occurrence.
+    #[test]
+    fn header_tabs_strip_paints_one_row_with_one_title() {
+        let strip = TabStrip::render_with_hover_and_add(
+            &[input("a", "Chat")],
+            TabOrientation::Horizontal,
+            140,
+            1,
+            0,
+            None,
+            true,
+        );
+        assert_eq!(strip.rows.len(), 1, "one tab paints one strip row");
+        assert_eq!(
+            strip.rows[0].matches("Chat").count(),
+            1,
+            "the title appears exactly once in the strip row"
+        );
+    }
+
     #[test]
     fn unicode_labels_use_cells_and_close_hit_is_identity_stable() {
         let tabs = vec![input("a", "界面"), input("b", "second")];

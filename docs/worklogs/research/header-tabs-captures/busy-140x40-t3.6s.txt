@@ -1,0 +1,40 @@
+ 0 | ⠼ Chat                          +                                                                                                          |
+ 1 |  /private/tmp/p1-ui-tabs-thinking/project                                                                                                  |
+ 2 |                                                                                                    Chat                                    |
+ 3 |                                                                                                                                            |
+ 4 |                                                                                                                                            |
+ 5 |                                                                                                                                            |
+ 6 |                                                                                                    ⬖ Getting started                ✕      |
+ 7 |                                                                                                                                            |
+ 8 |                                                                                                      OpenCode includes free models so      |
+ 9 |                                                                                                      you can start immediately.            |
+10 |                                                                                                                                            |
+11 |                                                                                                      Connect from 75+ providers to         |
+12 |                                                                                                      use other models, including           |
+13 |                                                                                                      Claude, GPT, Gemini etc               |
+14 |                                                                                                                                            |
+15 |                                                                                                      Connect provider        /connect      |
+16 |                                                                                                                                            |
+17 |                                                                                                                                            |
+18 |                                                                                                    /…/pr…/tmp/p1-ui-tabs-thinking/project  |
+19 |                                                                                                                                            |
+20 |                                                                                                                                            |
+21 |                                                                                                                                            |
+22 |                                                                                                                                            |
+23 |                                                                                                                                            |
+24 |                                                                                                                                            |
+25 |                                                                                                                                            |
+26 |                                                                                                                                            |
+27 |                                                                                                                                            |
+28 |                                                                                                                                            |
+29 |                                                                                                                                            |
+30 |                                                                                                                                            |
+31 |                                                                                                                                            |
+32 |                                                                                                                                            |
+33 |  ┃                                                                                                                                         |
+34 |  ┃                                                                                                                                         |
+35 |  ┃                                                                                                                                         |
+36 |  ┃  Build · Non-default fixture openai                                                 [Send]                                              |
+37 |  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                            |
+38 |   ⬝■■■■■■⬝ esc interrupt                                                                                                                   |
+39 |  shift+tab agents · ctrl+p commands                                                                                         0.1.0-alpha.1  |
