@@ -10001,6 +10001,43 @@ fn chrome_lifecycle_frame(
     chrome.set_plugins_ready(now_ms, true);
 }
 
+/// How many renderer-frame panics the loop recovers from before it exits.
+/// One recovery shows the crash toast and the crash surface (the upstream
+/// ErrorBoundary swap, `app.tsx:336-339`); a second panic means the renderer
+/// itself is broken, so the loop exits through its normal cleanup instead of
+/// spinning on repeated panics.
+const CRASH_PAINT_CATCH_LIMIT: usize = 1;
+
+/// DIALOG-20 crash half: the recovery applied when the frame paint panics.
+///
+/// The panic hook has already captured message + location; this surfaces it
+/// as the upstream-faithful error toast (`ui/toast.tsx:169`
+/// `toast.show({ variant: "error", message })` — message plus Error
+/// severity) and opens the crash surface (`app.tsx:336-339` ErrorBoundary →
+/// `ErrorComponent`). The caller repaints, and the surface owns input
+/// (c/r/q, `error-component.tsx:63-70`) so the operator exits through the
+/// normal path. Returns `false` when the catch budget is exhausted and the
+/// loop must exit instead of spinning on repeated panics.
+#[cfg(feature = "native")]
+fn crash_paint_recover(
+    view: &mut crate::native_view::NativeView,
+    toast: &mut crate::native_toast::Toast,
+    catches: usize,
+) -> bool {
+    let message = crate::native_view_dialogs::crash::take_panic_capture()
+        .unwrap_or_else(|| "the render loop panicked".to_owned());
+    toast.show(crate::native_toast::crash_toast_options(&message));
+    let terminal = env::var("TERM").unwrap_or_default();
+    let _ = view.dialogs.open_crash(
+        Some(&message),
+        None,
+        env!("CARGO_PKG_VERSION"),
+        crate::native_view_dialogs::crash::CrashMode::Dark,
+        &terminal,
+    );
+    catches <= CRASH_PAINT_CATCH_LIMIT
+}
+
 fn native_loop(
     memory: &[MemoryFile],
     mut live: Option<LiveSnapshot>,
@@ -10926,6 +10963,10 @@ fn native_loop(
     let mut completion_load: Option<tokio::task::JoinHandle<()>> = None;
     let mut completion_loaded = false;
     let mut byte = [0u8; 1];
+    // DIALOG-20 crash half: renderer-frame panics are caught at the paint
+    // seam below; this counter bounds the recovery so a broken renderer
+    // cannot spin the loop on repeated panics.
+    let mut crash_paint_catches = 0usize;
     loop {
         // MSG-002 review fix: the active session id keys live group
         // disclosure, and `live` is reassigned inside this loop on a session
@@ -13369,10 +13410,13 @@ fn native_loop(
             // the pointer is stationary (`routes/session/index.tsx:2390`).
             hovered_row = last_pointer
                 .and_then(|(px, py)| user_card_row_under_pointer(&view, px, py));
-            let paint_result = native_paint(
-                &mut renderer,
-                &lines,
-                PaintCtx {
+            // DIALOG-20 crash half: the frame paint is the one loop region
+            // where a panic would otherwise unwind out of `native_loop` and
+            // abort bare (the renderer Drop restores the terminal, but no
+            // crash surface or toast is ever painted). Catch it here; the
+            // recovery runs after the frame bookkeeping below so the repaint
+            // flag survives the `needs_paint = false` reset.
+            let paint_ctx = PaintCtx {
                     palette: theme.palette,
                     dialog: theme.dialog,
                     markdown: theme.semantic.clone().map(|semantic| semantic.markdown),
@@ -13454,12 +13498,26 @@ fn native_loop(
                 })
                 .unwrap_or_else(|| paint_color(theme.palette, crate::native_theme_runtime::Slot::BackgroundPanel)),
             scrollbar_thumb: paint_color(theme.palette, crate::native_theme_runtime::Slot::Border),
-                },
-            );
-            paint_result?;
+        };
+        let paint_outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            native_paint(&mut renderer, &lines, paint_ctx)
+        }));
+        let paint_panicked = paint_outcome.is_err();
+        let paint_result = paint_outcome.unwrap_or_else(|_| Ok(()));
+        paint_result?;
             rendered_tabs = Some(frame_tabs);
             rendered_rail = frame_rail;
             needs_paint = false;
+            // DIALOG-20 crash half: recover AFTER the frame bookkeeping so the
+            // repaint flag survives the `needs_paint = false` reset above —
+            // the next frame must paint the crash surface and the toast.
+            if paint_panicked {
+                crash_paint_catches += 1;
+                if !crash_paint_recover(&mut view, &mut toast, crash_paint_catches) {
+                    return Err("render loop panicked repeatedly; exiting".into());
+                }
+                needs_paint = true;
+            }
             crate::native_debug::event(
                 "ui.frame",
                 serde_json::json!({"cols":renderer.cols(),"rows":renderer.rows(),"paint_us":paint_started.elapsed().as_micros()}),
@@ -22553,6 +22611,72 @@ mod theme05_live_row_bg_tests {
         assert_eq!(completion_row_bg(Some(action), None, None, panel), panel);
         // No semantic palette -> legacy.
         assert_eq!(completion_row_bg(None, Some(&states(&[("selected", true)])), Some(legacy), panel), legacy);
+    }
+}
+
+/// DIALOG-20 crash half: the renderer-panic recovery. Each test drives the
+/// real seam pieces — the installed panic hook, a panic caught at a
+/// `catch_unwind` site, and [`crash_paint_recover`] — not a copy.
+#[cfg(all(test, feature = "native"))]
+mod dialog20_crash_toast_tests {
+    use super::*;
+
+    /// A panic caught at the paint seam surfaces the upstream error toast
+    /// (`ui/toast.tsx:169` `toast.show({ variant: "error", message })`) and
+    /// opens the crash surface (`app.tsx:336-339` ErrorBoundary →
+    /// `ErrorComponent`); a second renderer panic exhausts the catch budget,
+    /// so the loop exits instead of spinning. One test drives both facts
+    /// sequentially because the panic-capture slot is process-global and
+    /// parallel tests would race for it.
+    #[test]
+    fn crash_paint_recover_surfaces_toast_surface_and_exhausts_budget() {
+        crate::native_view_dialogs::crash::install_panic_hook();
+        // The panic slot is process-global. Drain it so this test cannot
+        // consume a panic recorded by an earlier test.
+        let _ = crate::native_view_dialogs::crash::take_panic_capture();
+
+        // The trigger shape of the seam: a panic inside the frame paint is
+        // caught by the loop's `catch_unwind`, leaving the hook's capture in
+        // the slot for the recovery to take.
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            panic!("dialog20 render boom");
+        }));
+        assert!(caught.is_err(), "the paint panic propagates to the seam");
+
+        let mut view = crate::native_view::NativeView::new(80, 24);
+        let mut toast = crate::native_toast::Toast::new();
+        let recovered = crash_paint_recover(&mut view, &mut toast, 1);
+        assert!(recovered, "the first recovery stays within the catch budget");
+
+        // The toast carries the captured message with Error severity and the
+        // upstream default lifetime (`native_toast::crash_toast_options`).
+        let current = toast.current().expect("crash toast is visible");
+        assert_eq!(current.variant, crate::native_toast::ToastVariant::Error);
+        assert!(
+            current.message.starts_with("dialog20 render boom"),
+            "the toast message is the captured panic: {:?}",
+            current.message
+        );
+        assert!(
+            current.message.chars().count()
+                <= crate::native_toast::CRASH_TOAST_MESSAGE_MAX_CHARS,
+            "the toast message stays bounded"
+        );
+
+        // The crash surface is open (the next frame paints it; the surface
+        // owns input c/r/q, `error-component.tsx:63-70`).
+        assert_eq!(
+            view.dialogs.open_kind(),
+            Some(crate::native_view_dialogs::DialogKind::Crash),
+            "the crash surface is open"
+        );
+
+        // The second renderer panic exhausts the catch budget: the loop must
+        // exit through its normal error path instead of spinning.
+        assert!(
+            !crash_paint_recover(&mut view, &mut toast, CRASH_PAINT_CATCH_LIMIT + 1),
+            "the budget is exhausted after one recovery"
+        );
     }
 }
 

@@ -218,6 +218,34 @@ impl ToastOptions {
     }
 }
 
+/// Upper bound for the crash toast message (`ui/toast.tsx` word-wraps the
+/// whole message, so a multi-kilobyte panic payload would grow the frame
+/// past what the viewport can host and [`ToastFrame::layout`] would drop the
+/// toast entirely). The panic headline plus its location stays readable at
+/// this bound.
+pub const CRASH_TOAST_MESSAGE_MAX_CHARS: usize = 256;
+
+/// The upstream-faithful error toast for a captured crash
+/// (`ui/toast.tsx:169` — `toast.show({ variant: "error", message })`, the
+/// shape every `.catch(toast.error)` sink produces): Error severity, the
+/// default 5000 ms lifetime, and a bounded control-free message so the frame
+/// layout can always host it. An empty payload falls back to upstream's
+/// ErrorComponent message (`error-component.tsx:34`
+/// `props.error.message || "An unknown error occurred."`).
+#[must_use]
+pub fn crash_toast_options(message: &str) -> ToastOptions {
+    let bounded: String = message
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(CRASH_TOAST_MESSAGE_MAX_CHARS)
+        .collect();
+    let trimmed = bounded.trim();
+    if trimmed.is_empty() {
+        return ToastOptions::new(ToastVariant::Error, "An unknown error occurred.");
+    }
+    ToastOptions::new(ToastVariant::Error, trimmed.to_owned())
+}
+
 /// Toast controller mirroring `useToast()` from upstream.
 ///
 /// Time is explicit: callers advance the logical clock with [`Toast::advance`],
@@ -764,6 +792,38 @@ mod tests {
 
     fn palette() -> ToastPalette {
         ToastPalette::opencode_dark()
+    }
+
+    /// DIALOG-20 crash half: the crash toast carries the upstream error shape
+    /// (`ui/toast.tsx:169` `toast.show({ variant: "error", message })`) with
+    /// the default lifetime, and bounds a hostile panic payload so the frame
+    /// layout can always host the box.
+    #[test]
+    fn crash_toast_options_are_error_severity_and_bounded() {
+        let options = crash_toast_options("index out of bounds (at main.rs:12:5)");
+        assert_eq!(options.variant, ToastVariant::Error, "error severity");
+        assert_eq!(options.duration, DEFAULT_DURATION_MS, "upstream default lifetime");
+        assert_eq!(options.title, None);
+        assert_eq!(options.message, "index out of bounds (at main.rs:12:5)");
+
+        // A multi-kilobyte payload is truncated to the documented bound and
+        // stripped of control characters.
+        let hostile = format!("boom\n{}", "x".repeat(4_096));
+        let bounded = crash_toast_options(&hostile);
+        assert_eq!(bounded.message.chars().count(), CRASH_TOAST_MESSAGE_MAX_CHARS);
+        assert!(!bounded.message.contains('\n'), "control characters are stripped");
+        assert!(bounded.message.starts_with("boomx"));
+
+        // An empty (or control-only) payload falls back to upstream's
+        // ErrorComponent message (`error-component.tsx:34`).
+        let empty = crash_toast_options(" \n\u{7}");
+        assert_eq!(empty.message, "An unknown error occurred.");
+        assert_eq!(empty.variant, ToastVariant::Error);
+
+        // The bounded message always lays out: the frame is Some at a small
+        // viewport, so the crash signal cannot be dropped by its own size.
+        let frame = ToastFrame::layout(&bounded, 0, 80, 24, &palette(), false);
+        assert!(frame.is_some(), "bounded crash toast lays out at 80x24");
     }
 
     fn row_span_width(row: &CellRow) -> u16 {
