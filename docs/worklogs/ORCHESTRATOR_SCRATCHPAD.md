@@ -13599,3 +13599,39 @@ predates hover/OAuth fixes so it must be restarted to pick them up.
   are only in the freshly installed binary. The TUI/daemon predate the hover,
   OAuth-login and graph work and must be restarted to see them. Not restarted by
   me (explicit rule: do not restart the user's daemon/DBs).
+
+## UI-parity defect wave 2 (2026-11-08, lead)
+
+User reported 4 visible defects; all 4 clusters closed, integrated, pushed:
+
+- main-v2: 57cb5e46 -> 5a4510aa (composer seam + fixture fix) -> 2e712a4f (header-tabs
+  upstream-geometry pins) -> 55c8620d (right-pane geometry authority + drawer fix).
+  Pushed and remote-verified (ls-remote = 55c8620d).
+- task-1 COMPOSER-PARITY: ab518d15 (model layer, APPROVE) + 9562bbb9 (MEDIA-001
+  fixture repair) + integrator seam (composer_metadata unconnected state + agent/
+  variant facts through 6 set_composer_model sites + cycle_agent + child-route
+  param). Review cycle: 7ada1770 NEEDS_FIX (shell-mode leak F1, agent clear F2) ->
+  5a4510aa APPROVE. Live capture: "Build · Non-default fixture openai" metadata row.
+- task-2 FOOTER-CHROME: ca90f839 APPROVE — path once, " · " separators, version
+  right-aligned. Home-docking premise refuted against routes/home.tsx:80-108.
+- task-3 HEADER-TABS: 2e712a4f APPROVE — all three reported defects are UPSTREAM
+  GEOMETRY (spinner inside TabIndicator session-tabs.tsx:183-208; "+" capped by
+  SESSION_TAB_MAX_WIDTH=32; second "Chat" = sidebar title heading sidebar.tsx:33-48).
+  Test-only pin. Bonus finding: ChatView::render_header paints a transcript-header
+  cwd row upstream lacks (native_view_chat.rs:613-626) — follow-up candidate.
+- task-4 RIGHT-PANEL-OVERLAP: 54694160 (model layer, APPROVE) + integrator seam
+  87b0ba62->55c8620d APPROVE — presentation() consumes session_pane_layout
+  (session_route gate added); drawer covers pane columns full-frame height
+  (session-frame.tsx:384-393), alpha-70 backdrop. Inherited P2 fixed: the 3
+  rendered pins moved out of the standalone-included layout module (parity target
+  compiles again, 44/0).
+- Release artifact rebuilt: bin sha256 47419072b90bfd9b881d7c06c8a08e2b8ac9cecc8219b46655948ca3110e0ea9,
+  receipt source_sha 55c8620d. Full bin suite 2527/0 on the integrated SHA.
+- Incidents: an unauthorized `git stash pop` polluted the ui lane worktree
+  (conflict markers, 7 files) — reset to the lane tip, stash entry preserved; all
+  teammates warned. A corrupted copy of the release binary (SIGKILL on exec) was
+  replaced by a fresh copy (hash identical to target/release).
+- Residuals: LAY-10/11 (terminal/panel producer — scoping research dispatched),
+  DIALOG-20 crash half (implementation dispatched on the ui lane),
+  ChatView::render_header transcript-header row (documented), PAR-02/03/06
+  (harness-side), FFI-* (non-goals).
