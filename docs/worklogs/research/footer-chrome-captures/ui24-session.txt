@@ -1,0 +1,24 @@
+ 0 |   Chat                          +                                              |
+ 1 |                                                                                |
+ 2 |  ┃                                                                             |
+ 3 |  ┃  native provider contract first                                             |
+ 4 |  ┃                                                                             |
+ 5 |                                                                                |
+ 6 |     G2 first response                                                          |
+ 7 |      · openai/gpt-5.6-mini · 15ms                                              |
+ 8 |                                                                                |
+ 9 |                                                                                |
+10 |                                                                                |
+11 |                                                                                |
+12 |                                                                                |
+13 |                                                                                |
+14 |                                                                                |
+15 |                                                                                |
+16 |                                                                                |
+17 |  ┃                                                                             |
+18 |  ┃                                                                             |
+19 |  ┃                                                                             |
+20 |  ┃  Non-default fixture openai                                       [Send]    |
+21 |  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  |
+22 |  /private/tmp/core-caps/session3/project                                       |
+23 |  shift+tab agents · ctrl+p commands                             0.1.0-alpha.1  |

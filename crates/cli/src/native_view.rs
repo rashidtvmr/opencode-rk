@@ -5575,7 +5575,8 @@ impl NativeView {
         }
         // Active Thinking is rendered by the bounded conversation header
         // (`native_view_chat::render_header`), before sidebar composition. The
-        // shared shell footer remains directory + MCP/version status and never
+        // shared shell footer remains MCP/version status plus the statusline
+        // hint groups and never
         // places a loader beneath the right sidebar.
         let _ = loading;
         let mut right = env!("CARGO_PKG_VERSION").to_owned();
@@ -5625,14 +5626,22 @@ impl NativeView {
             ..crate::native_status_rail::RailFacts::new(usize::from(width))
         };
         let rail_spans = crate::native_status_rail::rail_spans(&facts);
-        let footer_text = crate::native_status_rail::slot_text(
-            &rail_spans,
-            crate::native_status_rail::RailSlot::Footer,
-        );
+        // FOOTER-CHROME: upstream joins statusline GROUPS with a muted ` · `
+        // separator (`mini/footer.width.ts:63-73` `place()` inserts the
+        // separator between groups; `mini/footer.view.tsx:990-997` paints it
+        // as its own muted span), while parts inside one group concatenate.
+        // The flat `slot_text` join dropped that separator, so the `agents`
+        // and `commands` hints crammed into one cell run
+        // (`shift+tab agentsctrl+p commands`).
+        let footer_text = Self::footer_statusline_text(&rail_spans);
         // CP-11: the `prompt.footer.status` Switch (`index.tsx:1901-1967`)
         // lives in the composer footer slot (`composer_footer_row`), not this
         // shared shell row, so a running session replaces the directory there.
-        // This row keeps the idle directory as its left term.
+        // Upstream paints exactly ONE directory row — the prompt footer
+        // location slot (`prompt/index.tsx:1943-1961`, idle-only, muted) —
+        // and the statusline groups carry no directory cell
+        // (`mini/footer.width.ts:31-46` group ids), so this row never
+        // repeats the path the composer footer row already painted.
         // The `/context` click target is the usage/cost status list only
         // (`footer.tsx:38-46`), never the adjacent `commands` hint.
         let usage_width = rail_spans
@@ -5644,50 +5653,65 @@ impl NativeView {
         let footer_width = footer_label
             .as_ref()
             .map_or(0, |label| label.chars().count()) as u16;
-        let footer_gap = u16::from(footer_width > 0);
-        let right_width = right
-            .chars()
-            .count()
-            .min(usize::from(inner.saturating_sub(footer_width).saturating_sub(footer_gap)))
-            as u16;
-        let left_width = usize::from(inner)
-            .saturating_sub(usize::from(right_width))
-            .saturating_sub(usize::from(footer_width))
-            .saturating_sub(usize::from(footer_gap))
-            .saturating_sub(1);
-        let gap = usize::from(inner).saturating_sub(
-            left_width
-                + usize::from(right_width)
-                + usize::from(footer_width)
-                + usize::from(footer_gap),
-        );
+        // Statusline groups lead the row, left-aligned exactly as upstream
+        // paints them (`mini/footer.view.tsx:973-997`); the version/MCP
+        // chrome trails right like the upstream home footer's trailing
+        // version cell (`feature-plugins/home/footer.tsx:104-115`).
+        let right_chars = right.chars().count() as u16;
+        let footer_gap = u16::from(footer_width > 0 && right_chars > 0);
+        let right_width = right_chars.min(inner.saturating_sub(footer_width).saturating_sub(footer_gap));
+        let label_width = footer_width.min(inner.saturating_sub(right_width).saturating_sub(footer_gap));
+        let gap = usize::from(inner)
+            .saturating_sub(usize::from(label_width))
+            .saturating_sub(usize::from(right_width));
         let padding = (width / 2).min(2);
-        // The usage/cost list leads the footer group (live counts are absent
-        // here; the `commands` hint follows), so its hit starts at the group
-        // left edge and spans exactly the Usage spans.
-        let context_hit = (usage_width > 0).then_some((
-            padding.saturating_add(inner).saturating_sub(footer_width),
-            usage_width,
-        ));
-        let directory = fit(
-            &footer_directory(&self.workspace, left_width as u16),
-            left_width as u16,
-        );
+        // The usage/cost list leads the statusline groups, so its hit starts
+        // at the row's left inset and spans exactly the Usage spans, capped
+        // by any label truncation.
+        let context_hit = (usage_width > 0).then_some((padding, usage_width.min(label_width)));
         let footer = padded(
             &format!(
-                "{}{}{}{}{}",
-                directory,
-                " ".repeat(gap),
-                fit(&right, right_width),
-                " ".repeat(usize::from(footer_gap)),
+                "{}{}{}",
                 footer_label
                     .as_ref()
-                    .map(|label| fit(label, footer_width))
-                    .unwrap_or_default()
+                    .map(|label| fit(label, label_width))
+                    .unwrap_or_default(),
+                " ".repeat(gap),
+                fit(&right, right_width),
             ),
             width,
         );
         (footer, context_hit)
+    }
+
+    /// FOOTER-CHROME: statusline text with upstream's group separator.
+    /// Upstream joins footer statusline GROUPS with a muted ` · ` separator
+    /// (`mini/footer.width.ts:63-73` `place()` inserts `separator` between
+    /// groups; `mini/footer.view.tsx:990-997` paints it as its own muted
+    /// span) while parts inside one group concatenate. The rail spans arrive
+    /// flat, so consecutive spans sharing one segment are one group and the
+    /// grouping restores the upstream cell text exactly.
+    fn footer_statusline_text(spans: &[crate::native_status_rail::RailSpan]) -> String {
+        let mut groups: Vec<String> = Vec::new();
+        let mut current: Option<(crate::native_status_rail::RailSegment, String)> = None;
+        for span in spans {
+            if span.slot() != crate::native_status_rail::RailSlot::Footer {
+                continue;
+            }
+            match &mut current {
+                Some((segment, text)) if *segment == span.segment => text.push_str(&span.text),
+                other => {
+                    if let Some((_, text)) = other.take() {
+                        groups.push(text);
+                    }
+                    *other = Some((span.segment, span.text.clone()));
+                }
+            }
+        }
+        if let Some((_, text)) = current {
+            groups.push(text);
+        }
+        groups.join(" · ")
     }
 
     // home.tsx: two flex-grow spacers, three fixed rows before the logo,
@@ -6983,11 +7007,28 @@ mod footer_layout_tests {
             idle[composer_footer]
         );
         assert!(!idle[composer_footer].contains("Thinking"));
-        // The shared shell row keeps the idle directory in both states.
+        // FOOTER-CHROME: upstream paints exactly ONE directory row in the
+        // bottom chrome — the prompt footer location slot
+        // (`prompt/index.tsx:1943-1961`, idle only) — so the shared shell row
+        // never repeats the path in either state (`mini/footer.width.ts:31-46`
+        // statusline groups carry no directory cell). The transcript header's
+        // workspace identity row is top chrome, outside this contract.
         assert!(
-            rows[19].contains("/tmp/") || rows[19].contains("project"),
-            "shell footer keeps the directory while running: {:?}",
+            !rows[19].contains("/tmp/") && !rows[19].contains("project"),
+            "shell footer must not duplicate the directory: {:?}",
             rows[19]
+        );
+        assert_eq!(
+            rows[18..].iter().filter(|row| row.contains("project")).count(),
+            0,
+            "running bottom chrome paints no directory row: {:?}",
+            &rows[18..]
+        );
+        assert_eq!(
+            idle[18..].iter().filter(|row| row.contains("project")).count(),
+            1,
+            "idle bottom chrome paints the directory exactly once: {:?}",
+            &idle[18..]
         );
     }
 
@@ -7228,20 +7269,213 @@ mod footer_layout_tests {
 
     #[test]
     fn footer_directory_tail_keeps_selected_project_name_visible() {
+        // FOOTER-CHROME: the directory row is the composer footer row — the
+        // single upstream location row (`prompt/index.tsx:1943-1961`); the
+        // shared shell row no longer repeats it.
         let mut first = NativeView::new(64, 20);
         first.set_workspace("/very/long/root/selected-alpha".to_owned());
-        let alpha = first.render_typed("", &[], false, &[]).pop().unwrap();
+        let alpha_frame = first.render_typed("", &[], false, &[]);
+        let alpha = alpha_frame[alpha_frame.len() - 2].clone();
         let mut second = NativeView::new(64, 20);
         second.set_workspace("/very/long/root/selected-beta".to_owned());
-        let beta = second.render_typed("", &[], false, &[]).pop().unwrap();
+        let beta_frame = second.render_typed("", &[], false, &[]);
+        let beta = beta_frame[beta_frame.len() - 2].clone();
         assert!(alpha.contains("selected-alpha"));
         assert!(beta.contains("selected-beta"));
         assert_ne!(alpha, beta);
         assert_eq!(alpha.chars().count(), 64);
         let mut narrow = NativeView::new(18, 20);
         narrow.set_workspace("/長い/プロジェクト🦀/名前".to_owned());
-        let row = narrow.render_typed("", &[], false, &[]).pop().unwrap();
-        assert_eq!(row.chars().count(), 18);
+        let narrow_frame = narrow.render_typed("", &[], false, &[]);
+        let row = narrow_frame[narrow_frame.len() - 2].clone();
+        // The composer footer row is cell-exact to its own main-column width
+        // (the shell footer below it owns the full terminal row); wide
+        // characters make chars() understate the cell count.
+        let cells = {
+            let mut cells = 0usize;
+            crate::native_view_layout::visit_unpadded_cells(&row, usize::from(u16::MAX), |_, width| {
+                cells += width;
+            });
+            cells
+        };
+        assert_eq!(
+            cells,
+            usize::from(narrow.presentation().main_width),
+            "composer footer row is cell-exact: {row:?}"
+        );
+        // The bounded tail helper keeps the selected project's basename with
+        // an ellipsis prefix when the confirmed directory exceeds the segment
+        // (`footer_directory`, the composer footer row's fallback and the
+        // home location row's projector). The basename is 14 cells, so a
+        // 16-cell segment keeps it whole behind the ellipsis.
+        let clipped = footer_directory("/very/long/root/selected-alpha", 16);
+        assert!(clipped.contains("selected-alpha"), "tail: {clipped:?}");
+        let tighter = footer_directory("/very/long/root/selected-alpha", 12);
+        assert!(tighter.starts_with('…'), "ellipsis prefix: {tighter:?}");
+        assert!(tighter.ends_with("alpha"), "tail keeps the name suffix: {tighter:?}");
+    }
+
+    // FOOTER-CHROME: the bottom chrome renders the project path exactly once
+    // (the composer footer row — upstream's single prompt footer location
+    // slot, `prompt/index.tsx:1943-1961`), separates the statusline hint
+    // groups with upstream's muted ` · ` separator
+    // (`mini/footer.width.ts:63-73`, `mini/footer.view.tsx:990-997`), and
+    // trails the version chrome right like the upstream home footer's
+    // trailing version cell (`feature-plugins/home/footer.tsx:104-115`).
+    #[test]
+    fn footer_chrome_path_renders_once_and_hints_separate_at_140x40() {
+        let mut view = NativeView::new(140, 40);
+        view.set_session_route(true);
+        view.set_workspace("/private/tmp/p1-ui-session3/project".to_owned());
+        view.set_rail_shortcuts(Some("ctrl+p".to_owned()), Some("shift+tab".to_owned()));
+        let frame = view.render_typed("", &[], false, &[]);
+        assert_eq!(frame.len(), 40);
+        let composer_footer = frame[frame.len() - 2].clone();
+        let shell_row = frame[frame.len() - 1].clone();
+        assert!(
+            composer_footer.contains("/private/tmp/p1-ui-session3/project"),
+            "composer footer carries the path: {composer_footer:?}"
+        );
+        assert_eq!(
+            frame[frame.len() - 2..]
+                .iter()
+                .filter(|row| row.contains("p1-ui-session3"))
+                .count(),
+            1,
+            "bottom chrome paints the path exactly once: {:?}",
+            &frame[frame.len() - 2..]
+        );
+        assert!(
+            !shell_row.contains("p1-ui-session3"),
+            "shell row must not repeat the path: {shell_row:?}"
+        );
+        assert!(
+            shell_row.contains("shift+tab agents · ctrl+p commands"),
+            "hint groups join with the upstream separator: {shell_row:?}"
+        );
+        assert!(
+            shell_row.trim_end().ends_with(env!("CARGO_PKG_VERSION")),
+            "version chrome trails right: {shell_row:?}"
+        );
+    }
+
+    #[test]
+    fn footer_chrome_path_renders_once_and_anchors_at_the_rail_at_80x24() {
+        let mut view = NativeView::new(80, 24);
+        view.set_session_route(true);
+        view.set_workspace("/private/tmp/p1-ui-capture/project".to_owned());
+        view.set_rail_shortcuts(Some("ctrl+p".to_owned()), Some("shift+tab".to_owned()));
+        let frame = view.render_typed("", &[], false, &[]);
+        assert_eq!(frame.len(), 24);
+        let composer_footer = frame[frame.len() - 2].clone();
+        let shell_row = frame[frame.len() - 1].clone();
+        assert!(
+            composer_footer.contains("/private/tmp/p1-ui-capture/project"),
+            "composer footer carries the path: {composer_footer:?}"
+        );
+        assert!(
+            !shell_row.contains("p1-ui-capture"),
+            "shell row must not repeat the path: {shell_row:?}"
+        );
+        // The path anchors at the rail column: the composer footer row shares
+        // the composer's 2-cell inset, exactly like the `┃` rail above it
+        // (`prompt/index.tsx:1683-1694` left border + padding), at every
+        // width.
+        assert!(
+            composer_footer.starts_with("  /private/tmp"),
+            "path anchors at the rail column: {composer_footer:?}"
+        );
+        assert!(
+            shell_row.contains("shift+tab agents · ctrl+p commands"),
+            "hint groups join with the upstream separator: {shell_row:?}"
+        );
+    }
+
+    #[test]
+    fn footer_statusline_groups_join_with_the_upstream_separator() {
+        // `mini/footer.width.ts:63-73`: groups join ` · ` (mono builds ` - `);
+        // parts inside one group concatenate. The usage/cost list leads; the
+        // `agents` hint exists only when the live/status branch is empty
+        // (`footer.tsx:99-108`), the `commands` hint is its sibling.
+        let mut view = NativeView::new(120, 32);
+        view.set_session_route(true);
+        view.set_rail_shortcuts(Some("ctrl+p".to_owned()), Some("shift+tab".to_owned()));
+        view.set_context_window(Some(5_609));
+        view.set_usage(1_234, 0, None, None);
+        let row = view.render_typed("", &[], false, &[]).pop().unwrap();
+        assert!(
+            row.contains("1.2K (22%) · ctrl+p commands"),
+            "usage group leads the statusline: {row:?}"
+        );
+        let mut idle = NativeView::new(120, 32);
+        idle.set_session_route(true);
+        idle.set_rail_shortcuts(Some("ctrl+p".to_owned()), Some("shift+tab".to_owned()));
+        let row = idle.render_typed("", &[], false, &[]).pop().unwrap();
+        assert!(
+            row.contains("shift+tab agents · ctrl+p commands"),
+            "hint groups join with the upstream separator: {row:?}"
+        );
+    }
+
+    // FOOTER-CHROME: the home footer band is the terminal's true bottom at
+    // every height — content row plus top/bottom padding, nothing below
+    // (`feature-plugins/home/footer.tsx:82-101`; band docking
+    // `routes/home.tsx:106-108`).
+    #[test]
+    fn home_footer_band_docks_at_the_bottom_at_24_and_40_rows() {
+        use super::*;
+        for (cols, rows) in [(80_u16, 24_u16), (140_u16, 40_u16)] {
+            let mut view = NativeView::new(cols, rows);
+            view.set_session_route(false);
+            view.set_workspace("/fixture/project".into());
+            let frame = view.render("", &[], false, &[]);
+            assert_eq!(frame.len(), usize::from(rows));
+            let footer_rows = usize::from(view.home_footer_rows());
+            assert_eq!(footer_rows, 3, "tall terminals pad the band at {cols}x{rows}");
+            let body_end = usize::from(rows) - footer_rows;
+            let version_row = body_end + 1;
+            assert!(
+                frame[version_row].contains(env!("CARGO_PKG_VERSION")),
+                "version docks at the bottom band at {cols}x{rows}: {:?}",
+                frame[version_row]
+            );
+            assert!(frame[body_end].trim().is_empty(), "band top padding: {cols}x{rows}");
+            assert!(frame[body_end + 2].trim().is_empty(), "band bottom padding: {cols}x{rows}");
+            for (index, row) in frame.iter().enumerate().skip(version_row + 1) {
+                assert!(
+                    row.trim().is_empty(),
+                    "nothing paints below the docked band at {cols}x{rows} row {index}: {row:?}"
+                );
+            }
+        }
+    }
+
+    // FOOTER-CHROME: upstream centers the home prompt block
+    // (`routes/home.tsx:80-105` `alignItems="center"` + `maxWidth={75}`) and
+    // the prompt footer location row lives INSIDE that centered block
+    // (`prompt/index.tsx:1898-1961`), so the home path anchor follows the
+    // centered prompt at every width — col 3 at 80 cols, col 33 at 140 — the
+    // same `div_ceil` centering `native_home.rs` documents for Yoga's rounded
+    // spacer split.
+    #[test]
+    fn home_footer_path_follows_the_centered_prompt_anchor() {
+        use super::*;
+        for (cols, expected_left) in [(80_u16, 3_usize), (140_u16, 33_usize)] {
+            let mut view = NativeView::new(cols, 40);
+            view.set_session_route(false);
+            view.set_workspace("/fixture/project".into());
+            let frame = view.render("", &[], false, &[]);
+            let path_row = frame
+                .iter()
+                .position(|row| row.contains("ctrl+p commands"))
+                .expect("home path row renders");
+            let leading = frame[path_row].len() - frame[path_row].trim_start().len();
+            assert_eq!(
+                leading, expected_left,
+                "home path anchor at {cols} cols: {:?}",
+                frame[path_row]
+            );
+        }
     }
 
     #[test]
@@ -7452,7 +7686,15 @@ mod footer_layout_tests {
         assert!(joined.contains("Two-client fixture"));
         assert!(joined.contains("acme"));
         assert!(joined.contains("first reply"));
+        // FOOTER-CHROME: the confirmed directory stays visible in the composer
+        // footer row — the single upstream location row
+        // (`prompt/index.tsx:1943-1961`); the shell row no longer repeats it.
         assert!(rows
+            .iter()
+            .rev()
+            .nth(1)
+            .is_some_and(|row| row.contains("/selected/project")));
+        assert!(!rows
             .last()
             .is_some_and(|row| row.contains("/selected/project")));
         assert!(rows.iter().any(|row| row.trim_start().starts_with("┃  draft")));
@@ -10039,7 +10281,19 @@ mod p05_footer_caller_regression {
         assert_eq!(display_cells(idle_row), 80);
         assert!(!idle_row.contains("esc shell"));
         assert!(!idle_row.contains("exit shell mode"));
-        assert!(idle_row.contains("/fixture/project"), "directory restored: {idle_row:?}");
+        // FOOTER-CHROME: the idle directory is restored in the composer
+        // footer row — the single upstream location row
+        // (`prompt/index.tsx:1943-1961`) — and the shared shell row restores
+        // the usage chrome without repeating the path.
+        assert_eq!(
+            idle.iter().filter(|row| row.contains("/fixture/project")).count(),
+            1,
+            "exactly one directory row after shell mode: {idle:?}"
+        );
+        assert!(
+            !idle_row.contains("/fixture/project"),
+            "shell row must not duplicate the directory: {idle_row:?}"
+        );
         assert!(idle_row.contains("1.0K (10%)"), "persistent context restored: {idle_row:?}");
     }
 }
