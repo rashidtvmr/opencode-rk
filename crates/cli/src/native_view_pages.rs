@@ -2131,10 +2131,14 @@ mod tests {
     // ── v6 (image preview + graph reachability) ─────────────────────────
 
     fn preview_images(count: usize) -> Vec<crate::native_image_preview::PreviewImage> {
+        // A real 1x1 PNG: MEDIA-001's open_image_preview now decodes the URI
+        // fail-closed, so the fixture must carry a decodable payload or the
+        // surface takes the failure path and the description lines vanish.
+        const ONE_BY_ONE_PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
         (0..count)
             .map(|index| {
                 crate::native_image_preview::PreviewImage::with_mention(
-                    format!("data:image/png;base64,{index}"),
+                    format!("data:image/png;base64,{ONE_BY_ONE_PNG}"),
                     format!("[Image {}]", index + 1),
                 )
             })
