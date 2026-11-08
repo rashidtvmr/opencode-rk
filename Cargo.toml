@@ -48,7 +48,18 @@ zstd = "0.13"
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
-panic = "abort"
+# DIALOG-20 crash half: the release profile must permit unwinding so the
+# render-loop `catch_unwind` seam (crates/cli/src/tui_entry.rs) can surface
+# the crash toast + crash surface in the shipped binary. `panic = "abort"`
+# made that seam inert in release (the hook ran, then the process died with
+# no Drop, no terminal restore, no surface). No site relies on abort
+# semantics: CLI background workers report failure through mpsc
+# disconnection (`native_setup.rs` "model discovery interrupted",
+# `tui_entry.rs` "compact worker stopped without a response"), the security
+# crate's locks are poisoning-tolerant (`security/src/lib.rs:276,300,304,442`),
+# and the server's spawned stream tasks close their channels on panic
+# (truncated response, daemon survives) — the tokio norm. Guarded by
+# `release_profile_permits_unwind` in `crates/cli/src/tui_entry.rs`.
 
 [profile.dev]
 debug = 1

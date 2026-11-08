@@ -230,7 +230,7 @@ pub const CRASH_TOAST_MESSAGE_MAX_CHARS: usize = 256;
 /// shape every `.catch(toast.error)` sink produces): Error severity, the
 /// default 5000 ms lifetime, and a bounded control-free message so the frame
 /// layout can always host it. An empty payload falls back to upstream's
-/// ErrorComponent message (`error-component.tsx:34`
+/// ErrorComponent message (`error-component.tsx:44`
 /// `props.error.message || "An unknown error occurred."`).
 #[must_use]
 pub fn crash_toast_options(message: &str) -> ToastOptions {
@@ -815,7 +815,7 @@ mod tests {
         assert!(bounded.message.starts_with("boomx"));
 
         // An empty (or control-only) payload falls back to upstream's
-        // ErrorComponent message (`error-component.tsx:34`).
+        // ErrorComponent message (`error-component.tsx:44`).
         let empty = crash_toast_options(" \n\u{7}");
         assert_eq!(empty.message, "An unknown error occurred.");
         assert_eq!(empty.variant, ToastVariant::Error);

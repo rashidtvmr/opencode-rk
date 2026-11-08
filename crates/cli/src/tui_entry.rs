@@ -10015,7 +10015,7 @@ const CRASH_PAINT_CATCH_LIMIT: usize = 1;
 /// `toast.show({ variant: "error", message })` — message plus Error
 /// severity) and opens the crash surface (`app.tsx:336-339` ErrorBoundary →
 /// `ErrorComponent`). The caller repaints, and the surface owns input
-/// (c/r/q, `error-component.tsx:63-70`) so the operator exits through the
+/// (c/r/q, `error-component.tsx:57-63`) so the operator exits through the
 /// normal path. Returns `false` when the catch budget is exhausted and the
 /// loop must exit instead of spinning on repeated panics.
 #[cfg(feature = "native")]
@@ -22664,7 +22664,7 @@ mod dialog20_crash_toast_tests {
         );
 
         // The crash surface is open (the next frame paints it; the surface
-        // owns input c/r/q, `error-component.tsx:63-70`).
+        // owns input c/r/q, `error-component.tsx:57-63`).
         assert_eq!(
             view.dialogs.open_kind(),
             Some(crate::native_view_dialogs::DialogKind::Crash),
@@ -22677,6 +22677,42 @@ mod dialog20_crash_toast_tests {
             !crash_paint_recover(&mut view, &mut toast, CRASH_PAINT_CATCH_LIMIT + 1),
             "the budget is exhausted after one recovery"
         );
+    }
+
+    /// The shipped release profile must permit unwinding, or the paint seam's
+    /// `catch_unwind` is inert in the binary CAPTURE.md builds and
+    /// install-oc2.sh ships: the hook runs, the process aborts bare, and no
+    /// Drop / crash surface / toast / terminal restore ever happens. A real
+    /// unwind probe cannot be used here (under an abort profile it would
+    /// abort the whole test binary), so this guard pins the manifest
+    /// directly: `[profile.release]` must not set `panic = "abort"`.
+    #[test]
+    fn release_profile_permits_unwind() {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("crates/cli sits two levels under the workspace root")
+            .join("Cargo.toml");
+        let source = std::fs::read_to_string(&manifest).expect("workspace Cargo.toml is readable");
+        let mut in_release = false;
+        for line in source.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('[') {
+                in_release = trimmed == "[profile.release]";
+                continue;
+            }
+            if in_release {
+                if let Some(value) = trimmed.strip_prefix("panic") {
+                    let value = value.trim_start_matches(['=', ' ', '\t']).trim();
+                    assert!(
+                        value.starts_with("unwind"),
+                        "[profile.release] panic strategy must permit unwinding \
+                         (found {value:?}); the DIALOG-20 crash seam needs unwind \
+                         in the shipped binary ({manifest:?})"
+                    );
+                }
+            }
+        }
     }
 }
 
