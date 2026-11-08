@@ -5608,8 +5608,8 @@ impl NativeView {
                 .unwrap_or_default();
             return (padded(&label, width), None);
         }
-        // Active Thinking is rendered by the bounded conversation header
-        // (`native_view_chat::render_header`), before sidebar composition. The
+        // Active Thinking is rendered inside the bounded conversation body
+        // (spinner/working rows), before sidebar composition. The
         // shared shell footer remains MCP/version status plus the statusline
         // hint groups and never
         // places a loader beneath the right sidebar.

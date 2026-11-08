@@ -493,10 +493,13 @@ impl ChatView {
         &self,
         width: usize,
         height: usize,
-        workspace: &str,
+        // Upstream paints no transcript-header row, so the workspace identity
+        // and busy fact no longer reach this legacy flat render; the
+        // parameters stay for call-site stability.
+        _workspace: &str,
         transcript: &[String],
         draft: &str,
-        busy: bool,
+        _busy: bool,
     ) -> Vec<String> {
         // Resource bound first: clamp the effective height so every Vec
         // capacity, composer/header/transcript budget, padding loop and
@@ -516,21 +519,20 @@ impl ChatView {
         // full line materialization; the prompt row always fits.
         let draft_lines = draft.split('\n').count();
         let composer_h = draft_lines.clamp(1, (height / 2).max(1));
-        let header_h = usize::from(height > composer_h);
-        let transcript_h = height - composer_h - header_h;
+        // Upstream paints no transcript-header row (`routes/session/index.tsx`
+        // renders the transcript directly between the tab strip and the
+        // composer; the working directory lives in the composer footer
+        // location slot alone), so the whole non-composer body is transcript.
+        let transcript_h = height - composer_h;
 
         let mut rows: Vec<String> = Vec::with_capacity(height);
         // Bottom-anchored viewport: fill the allocated transcript region
         // with bounded EMPTY rows when the scroll window is short (empty
         // history, short history or overscroll), so the composer always
-        // lands on the pane's last rows instead of shifting up under the
-        // header. Only blank rows are added here — never invented
-        // transcript content — and the window's content and scroll offset
-        // selection below are untouched.
+        // lands on the pane's last rows. Only blank rows are added here —
+        // never invented transcript content — and the window's content and
+        // scroll offset selection below are untouched.
         let window = self.transcript_window(width, transcript_h, transcript);
-        if header_h == 1 {
-            rows.push(render_header(width, workspace, busy, self.scroll.get()));
-        }
         for _ in 0..transcript_h.saturating_sub(window.len()) {
             rows.push(String::new());
         }
@@ -602,27 +604,6 @@ impl ChatView {
         let start = end.saturating_sub(height);
         rev[start..end].to_vec()
     }
-}
-
-    /// Workspace header row: workspace plus caller/view-fact suffixes (the
-    /// busy flag the integrator observed, this view's own scroll offset),
-/// composed first and then clipped as one row by the char-safe
-/// [`truncate_row`] helper so the full row — suffix included — never
-/// exceeds `width` in chars, including `width` 1 or 2. `width == 0`
-/// disables clipping (no truncation, no underflow).
-fn render_header(width: usize, workspace: &str, busy: bool, scroll: usize) -> String {
-    let mut suffix = String::new();
-    if scroll > 0 {
-        suffix.push_str(&format!(" [+{scroll} up]"));
-    }
-    let workspace = strip_ansi(clip_utf8_prefix_bytes(workspace, MAX_INPUT_ROW_BYTES)).replace('\t', " ");
-    // Upstream has no transcript-header status. The running fact belongs to the
-    // prompt footer's `prompt.footer.status` slot *below* the composer
-    // (`prompt/index.tsx:1901-1967`, painted by
-    // `NativeView::composer_footer_row`), so this row carries only the
-    // workspace identity and the scroll offset.
-    let _ = busy;
-    truncate_row(&format!("{workspace}{suffix}"), width)
 }
 
 /// Bounded composer input: the first `take_rows` line slices of an
@@ -4020,10 +4001,13 @@ impl ChatView {
         &self,
         width: usize,
         height: usize,
-        workspace: &str,
+        // Upstream paints no transcript-header row, so the workspace identity
+        // and busy fact no longer reach this classified render; the
+        // parameters stay for call-site stability.
+        _workspace: &str,
         messages: &[ChatMessage],
         draft: &str,
-        busy: bool,
+        _busy: bool,
     ) -> Vec<(String, ChatRowClass)> {
         let height = height.min(MAX_VIEW_ROWS);
         if height == 0 {
@@ -4032,17 +4016,12 @@ impl ChatView {
         let draft = clip_utf8_prefix_bytes(draft, MAX_DRAFT_BYTES);
         let draft_lines = draft.split('\n').count();
         let composer_h = draft_lines.clamp(1, (height / 2).max(1));
-        let header_h = usize::from(height > composer_h);
-        let transcript_h = height - composer_h - header_h;
+        // Upstream paints no transcript-header row: the whole non-composer
+        // body is transcript (see `render` above).
+        let transcript_h = height - composer_h;
 
         let mut rows: Vec<(String, ChatRowClass)> = Vec::with_capacity(height);
         let window = self.typed_window(width, transcript_h, messages);
-        if header_h == 1 {
-            rows.push((
-                render_header(width, workspace, busy, self.scroll.get()),
-                ChatRowClass::Header,
-            ));
-        }
         for _ in 0..transcript_h.saturating_sub(window.len()) {
             rows.push((String::new(), ChatRowClass::Blank));
         }
@@ -4094,19 +4073,14 @@ impl ChatView {
         let pad = usize::from(frame.padding);
         let frame_h = layout.height;
         let body_h = height - frame_h;
-        let header_h = usize::from(body_h > 0);
-        let window = self.typed_window(width, body_h - header_h, messages);
+        // Upstream paints no transcript-header row: the whole framed body is
+        // transcript (see `render` above).
+        let window = self.typed_window(width, body_h, messages);
         let mut rows = Vec::with_capacity(height);
-        while rows.len() < body_h.saturating_sub(header_h).saturating_sub(window.len()) {
+        while rows.len() < body_h.saturating_sub(window.len()) {
             rows.push((String::new(), ChatRowClass::Blank));
         }
         rows.extend(window);
-        if header_h > 0 {
-            rows.insert(
-                0,
-                (render_header(width, workspace, busy, self.scroll.get()), ChatRowClass::Header),
-            );
-        }
         let draft = clip_utf8_prefix_bytes(draft, MAX_DRAFT_BYTES);
         // The pane owns the editor rows (prefix, scroll window, placeholder);
         // this method only adds the outline glyphs around them.
@@ -4531,16 +4505,9 @@ impl ChatView {
         // path only needs its rows.
         let pane = self.rendered_prompt_pane(width, height, draft, busy, appearance);
         let mut rows = if !show_prompt {
-            let mut rows = vec![(String::new(), ChatRowClass::Blank); height];
-            if let Some(header) = rows.first_mut() {
-                *header = (render_header(width, workspace, busy, self.scroll.get()), ChatRowClass::Header);
-            }
-            rows
+            vec![(String::new(), ChatRowClass::Blank); height]
         } else if pane.geometry().style == PromptPaneStyle::Rail {
             let mut rows = vec![(String::new(), ChatRowClass::Blank); height.saturating_sub(pane.height())];
-            if let Some(header) = rows.first_mut() {
-                *header = (render_header(width, workspace, busy, self.scroll.get()), ChatRowClass::Header);
-            }
             rows.extend(pane.rows().iter().map(|row| (
                 row.text.clone(),
                 if row.kind == PromptPaneRowKind::Metadata {
@@ -4552,9 +4519,6 @@ impl ChatView {
             rows
         } else if pane.geometry().style == PromptPaneStyle::Plain {
             let mut rows = vec![(String::new(), ChatRowClass::Blank); height.saturating_sub(pane.height())];
-            if let Some(header) = rows.first_mut() {
-                *header = (render_header(width, workspace, busy, self.scroll.get()), ChatRowClass::Header);
-            }
             rows.extend(pane.rows().iter().map(|row| (row.text.clone(), ChatRowClass::Composer)));
             rows
         } else { self.render_typed_classified_framed(
@@ -4578,7 +4542,10 @@ impl ChatView {
             .iter()
             .position(|(_, class)| *class == ChatRowClass::Composer)
             .unwrap_or(rows.len());
-        let transcript_h = body_h.saturating_sub(1);
+        // Upstream paints no transcript-header row (`routes/session/index.tsx`
+        // renders the transcript directly between the tab strip and the
+        // composer), so the whole body above the composer is transcript.
+        let transcript_h = body_h;
         let target = self.scroll.get().saturating_add(transcript_h);
         // MSG-001/002: per-message render plan from the same session grouping
         // reducer the history projection uses. A message can anchor more than
@@ -6892,14 +6859,16 @@ mod tests {
         for height in [18, 40, 59] {
             let rows = view.render_styled(60, height, "workspace", &messages, "", false,
                 &crate::native_box_style::BoxAppearance::default());
-            assert_eq!(rows[0].1, ChatRowClass::Header, "the header/spacer is not overwritten");
-            assert!(rows[0].0.contains("workspace"), "helper header content is preserved");
-            assert_eq!(rows[1].1, ChatRowClass::UserCard, "user padding starts after the scrollbox spacer");
-            assert_eq!(rows[2].0.trim_end(), "┃  question");
-            assert_eq!(rows[3].1, ChatRowClass::UserCard);
-            assert_eq!(rows[4].1, ChatRowClass::Separator, "assistant row wrapper marginTop=1");
-            assert_eq!(rows[5].0.trim_end(), "   answer");
-            assert!(rows.iter().skip(6).take_while(|(_, class, _)| *class != ChatRowClass::Composer)
+            assert!(
+                rows.iter().all(|(text, _, _)| !text.contains("workspace")),
+                "no transcript-header row is painted"
+            );
+            assert_eq!(rows[0].1, ChatRowClass::UserCard, "user padding starts at the top of the body");
+            assert_eq!(rows[1].0.trim_end(), "┃  question");
+            assert_eq!(rows[2].1, ChatRowClass::UserCard);
+            assert_eq!(rows[3].1, ChatRowClass::Separator, "assistant row wrapper marginTop=1");
+            assert_eq!(rows[4].0.trim_end(), "   answer");
+            assert!(rows.iter().skip(5).take_while(|(_, class, _)| *class != ChatRowClass::Composer)
                 .all(|(text, _, _)| text.trim().is_empty()), "unused space follows the conversation");
         }
     }
@@ -8164,10 +8133,13 @@ mod tests {
     fn scroll_5000_entry_history_stays_bounded() {
         let mut view = ChatView::new();
         let h = history(5000);
-        // Layout at height 10: header, 8 transcript rows, prompt row.
+        // Layout at height 10: 9 transcript rows, prompt row.
         let rows = view.render(40, 10, "ws", &h, "", false);
         assert_eq!(rows.len(), 10, "full pane filled");
-        assert!(rows[0].contains("ws"), "workspace header first");
+        assert!(
+            rows.iter().all(|row| !row.contains("ws")),
+            "no workspace header row is painted"
+        );
         assert_eq!(rows[8], "entry 4999", "tail follows newest");
         assert_eq!(rows[9], "> ", "composer prompt is the bottom row");
 
@@ -8176,7 +8148,10 @@ mod tests {
         let rows = scrolled.render(40, 10, "ws", &h, "", false);
         assert_eq!(rows.len(), 10);
         assert_eq!(rows[8], "entry 4994", "5 rows above tail");
-        assert!(rows[0].contains("[+5 up]"), "scroll offset visible");
+        assert!(
+            rows.iter().all(|row| !row.contains("[+")),
+            "no transcript-header scroll label is painted"
+        );
 
         // Overscroll past the end clamps to the oldest reachable pane.
         let mut overs = ChatView::new();
@@ -8265,14 +8240,17 @@ mod tests {
         h.push("error: turn failed".to_owned());
         let rows = view.render(40, 8, "ws", &h, "", false);
         assert_eq!(rows.len(), 8);
-        assert!(rows[0].contains("[+3 up]"));
+        assert!(
+            rows.iter().all(|row| !row.contains("[+")),
+            "no transcript-header scroll label is painted"
+        );
         assert!(
             !rows.iter().any(|r| r.contains("error: turn failed")),
             "appended tail rows stay below a scrolled-up window"
         );
         view.follow_tail();
         let rows = view.render(40, 8, "ws", &h, "", false);
-        // Actual height-8 layout: header row 0, history rows 1..=6,
+        // Actual height-8 layout: history rows 0..=6,
         // composer row 7 — the tail error is the last history row.
         assert_eq!(
             rows[rows.len() - 2],
@@ -8315,17 +8293,22 @@ mod tests {
     }
 
     /// Busy comes from the caller bool only; no provider/model status is
-    /// ever rendered.
+    /// ever rendered. Upstream paints no transcript-header row, so the
+    /// workspace identity appears nowhere in the body and busy cannot
+    /// change the transcript render at all.
     #[test]
     fn busy_state_is_caller_honest_and_never_fabricated() {
         let h = history(2);
         let busy_rows = ChatView::new().render(40, 6, "my workspace", &h, "hi", true);
-        assert!(busy_rows[0].contains("my workspace"));
+        assert!(
+            busy_rows.iter().all(|row| !row.contains("my workspace")),
+            "no transcript-header row carries the workspace identity"
+        );
         // The running fact lives in the prompt footer below the composer
-        // (`prompt/index.tsx:1901-1967`), never in the transcript header.
-        assert!(!busy_rows[0].contains("Thinking…"));
+        // (`prompt/index.tsx:1901-1967`), never in a transcript header.
+        assert!(busy_rows.iter().all(|row| !row.contains("Thinking…")));
         let idle_rows = ChatView::new().render(40, 6, "my workspace", &h, "hi", false);
-        assert_eq!(busy_rows[0], idle_rows[0], "header identity is busy-independent");
+        assert_eq!(busy_rows, idle_rows, "busy never changes the transcript render");
         for row in &idle_rows {
             assert!(!row.contains("provider"), "no fake provider status");
             assert!(!row.contains("connected"), "no fake connection status");
@@ -8448,9 +8431,10 @@ mod tests {
                 .render(20, 0, "ws", &h, "", false)
                 .is_empty()
         );
-        // Empty history still yields header + prompt, no fake filler.
+        // Empty history still yields a blank viewport + prompt, no fake
+        // filler and no workspace header row.
         let rows = ChatView::new().render(20, 6, "ws", &[], "", false);
-        assert_eq!(rows[0], "ws");
+        assert!(rows[0].is_empty(), "no workspace header row is painted");
         assert_eq!(rows[rows.len() - 1], "> ");
         assert!(rows.len() <= 6);
         // width == 0 disables wrapping; row count stays height-bound.
@@ -8458,12 +8442,14 @@ mod tests {
         assert_eq!(rows.len(), 4);
     }
 
-    /// Regression for the header-composition fix: workspace + busy /
-    /// scrolled suffix is clipped as ONE char-safe row, so every header
-    /// line (and every other row) stays within `width` even at width
-    /// 1/2 with a Unicode workspace. `width == 0` keeps the full header
-    /// (no truncation, no underflow). `height == 1` keeps composer
-    /// priority: exactly one row, the `"> "` prompt.
+    /// Regression guard for the transcript-header removal: upstream paints
+    /// no header row above the transcript (`routes/session/index.tsx`
+    /// renders the transcript directly between the tab strip and the
+    /// composer), so no workspace identity, busy fact or scroll label may
+    /// appear as a body row at any width — including `width == 0` where
+    /// the old header skipped clipping. Every row still stays within
+    /// `width` chars, and `height == 1` keeps composer priority: exactly
+    /// one row, the `"> "` prompt.
     #[test]
     fn header_clips_to_width_with_busy_scrolled_and_unicode_workspace() {
         let h = history(2);
@@ -8482,26 +8468,33 @@ mod tests {
                             row.chars().count() <= width,
                             "width {width} busy {busy} scroll {scroll} row too wide: {row:?}"
                         );
+                        assert!(
+                            !row.contains(workspace),
+                            "width {width} busy {busy} scroll {scroll}: \
+                             no transcript-header row may carry the workspace: {row:?}"
+                        );
                     }
-                    // rows[0] is the header whenever height >= 2.
-                    assert!(
-                        rows[0].chars().count() <= width,
-                        "header line exceeds width {width}"
-                    );
                 }
             }
         }
-        // width == 0: full header preserved, suffix included, no panic.
+        // width == 0: no header row is painted either (the old header skipped
+        // clipping here), and no scroll label or busy fact leaks into the body.
         let mut view = ChatView::new();
         view.scroll_up(3);
         let long_h = history(10);
         let rows = view.render(0, 6, workspace, &long_h, "", true);
-        assert!(rows[0].contains(workspace), "width 0 keeps workspace");
         assert!(
-            !rows[0].contains("Thinking…"),
-            "the running fact belongs to the composer footer, not the header"
+            rows.iter().all(|row| !row.contains(workspace)),
+            "width 0 paints no workspace header either"
         );
-        assert!(rows[0].contains("[+3 up]"), "width 0 keeps scroll label");
+        assert!(
+            rows.iter().all(|row| !row.contains("Thinking…")),
+            "the running fact belongs to the composer footer, not the body"
+        );
+        assert!(
+            rows.iter().all(|row| !row.contains("[+")),
+            "width 0 paints no transcript-header scroll label"
+        );
 
         // height 1: composer prompt wins; height 0: nothing rendered.
         let rows = ChatView::new().render(20, 1, workspace, &h, "draft", false);
@@ -8522,28 +8515,27 @@ mod tests {
     #[test]
     fn empty_and_short_history_keep_composer_on_the_bottom_row() {
         // Empty history at full shell geometry (120 cols x 30 rows):
-        // workspace header row 0, viewport rows 1..=28 blank, prompt row 29.
+        // viewport rows 0..=28 blank (no workspace header row), prompt row 29.
         let rows = ChatView::new().render(120, 30, "/private/tmp/real-project", &[], "", false);
         assert_eq!(rows.len(), 30, "full pane filled");
-        assert_eq!(
-            rows[0], "/private/tmp/real-project",
-            "workspace header on row 0"
+        assert!(
+            rows.iter().all(|row| !row.contains("/private/tmp/real-project")),
+            "no workspace header row above the transcript"
         );
         assert_eq!(rows[29], "> ", "prompt on the bottom row");
         assert!(
-            rows[1..29].iter().all(String::is_empty),
+            rows[..29].iter().all(String::is_empty),
             "transcript viewport is blank — no synthesized transcript rows"
         );
         // Few-line transcript: content bottom-anchored directly above the
-        // composer, blank viewport above it; prompt still not under the
-        // header.
+        // composer, blank viewport above it.
         let h = vec!["first".to_owned(), "second".to_owned()];
         let rows = ChatView::new().render(120, 30, "ws", &h, "", false);
         assert_eq!(rows.len(), 30);
         assert_eq!(rows[27], "first", "oldest visible row above the tail");
         assert_eq!(rows[28], "second", "tail row hugs the composer");
         assert_eq!(rows[29], "> ", "prompt stays on the bottom row");
-        assert!(rows[1..27].iter().all(String::is_empty));
+        assert!(rows[..27].iter().all(String::is_empty));
     }
 
     /// Multiline drafts on tiny panes stay bounded to exactly `height`
@@ -8555,7 +8547,7 @@ mod tests {
         for height in [3_usize, 4, 5] {
             let rows = ChatView::new().render(20, height, "ws", &[], "a\nb", false);
             assert_eq!(rows.len(), height, "exact height {height}");
-            assert_eq!(rows[0], "ws", "header stays row 0");
+            assert!(rows[0].is_empty(), "no workspace header row at height {height}");
             let prompt = rows
                 .iter()
                 .position(|r| r.starts_with("> "))
@@ -8609,7 +8601,7 @@ mod tests {
             "height clamped: {} rows",
             rows.len()
         );
-        assert!(rows.len() >= 3, "header + transcript + composer survive");
+        assert!(rows.len() >= 2, "transcript + composer survive");
         for row in &rows {
             assert!(
                 row.len() <= max_row_bytes,
@@ -8643,10 +8635,9 @@ mod tests {
         );
         let big_ws = "w".repeat(MAX_INPUT_ROW_BYTES);
         let rows = ChatView::new().render(0, 6, &big_ws, &[], "", false);
-        assert_eq!(
-            rows[0].len(),
-            MAX_INPUT_ROW_BYTES,
-            "workspace row retained at the input cap"
+        assert!(
+            rows.iter().all(|row| !row.contains('w')),
+            "no workspace header row is painted, even at the input cap"
         );
 
         // UTF-8 boundary adjust (<= 3 bytes) never splits a scalar.
@@ -8805,9 +8796,8 @@ mod tests {
         assert_eq!(rows[origin].1, ChatRowClass::Composer);
         let metadata = pane.metadata_row().expect("rail metadata row");
         assert_eq!(rows[origin + metadata].1, ChatRowClass::Metadata);
-        // Everything above the block is blank apart from the header.
-        assert_eq!(rows[0].1, ChatRowClass::Header);
-        assert!(rows[1..origin]
+        // Everything above the block is blank (no workspace header row).
+        assert!(rows[..origin]
             .iter()
             .all(|(text, class, _)| *class == ChatRowClass::Blank && text.is_empty()));
     }
