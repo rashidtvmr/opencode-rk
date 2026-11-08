@@ -2879,25 +2879,36 @@ impl NativeView {
     /// Current region geometry (no ANSI): positions for the style writer.
     #[must_use]
     pub fn presentation(&self) -> ViewPresentation {
-        let sidebar = self.sidebar_visible();
-        let inline = sidebar && self.sidebar_wide();
-        let sidebar_width = if sidebar { self.layout.cols.min(42) } else { 0 };
-        let main_width = self
-            .layout
-            .cols
-.saturating_sub(self.tab_reservation.x_offset())
-            .saturating_sub(if inline { sidebar_width } else { 0 });
+        // RIGHT-PANEL-OVERLAP: the single-source right-pane geometry authority
+        // (`session-frame.tsx:106-120,262-336,383-391`) replaces the
+        // duplicated sidebar_wide/inline derivation. The dock is oc2's panel
+        // producer (the `right_pane` precedence below feeds the same fact),
+        // and oc2 has no resizable terminal/panel pane yet, so the resize
+        // width is 0.
+        let pane = crate::native_view_layout::session_pane_layout(
+            self.layout.cols,
+            self.tab_reservation.x_offset(),
+            self.layout.rows,
+            self.session_route,
+            self.parent_session,
+            self.sidebar_open,
+            self.sidebar_hidden,
+            self.dock_open(),
+            0,
+        );
+        // Degenerate viewports keep the reviewed `cols.min(42)` clamp: the
+        // pane never claims more columns than the terminal owns.
+        let sidebar_width = pane.sidebar_width.min(self.layout.cols);
+        let sidebar_offset = pane
+            .sidebar_offset
+            .map(|offset| offset.min(self.layout.cols.saturating_sub(sidebar_width)));
         ViewPresentation {
             cols: self.layout.cols,
             rows: self.layout.rows,
-            main_offset: self.tab_reservation.x_offset(),
-            main_width,
+            main_offset: pane.main_offset,
+            main_width: pane.main_width,
             main_padding: 2,
-            sidebar_offset: if sidebar {
-                Some(self.layout.cols.saturating_sub(sidebar_width))
-            } else {
-                None
-            },
+            sidebar_offset,
             sidebar_width,
         }
     }
@@ -5420,6 +5431,18 @@ impl NativeView {
                             fit(&frame[row], offset),
                             fit(line, presentation.sidebar_width)
                         ),
+                        self.layout.cols,
+                    );
+                }
+                // RIGHT-PANEL-OVERLAP: the drawer covers the pane's columns
+                // for the FULL frame height (`session-frame.tsx:384-393`: the
+                // absolute box spans top/left/right/bottom 0), so rows below
+                // the sidebar's own content paint the pane's blank background
+                // instead of leaving transcript cells under the pane.
+                let blank = " ".repeat(usize::from(presentation.sidebar_width));
+                for row in sidebar.len()..frame.len() {
+                    frame[row] = fit(
+                        &format!("{}{}", fit(&frame[row], offset), &blank),
                         self.layout.cols,
                     );
                 }
@@ -11263,6 +11286,139 @@ mod composer_dock_tests {
         );
     }
 }
+
+    /// Rendered pin at the acceptance geometry: with the docked panel open,
+    /// the transcript wraps inside the shrunk main column and never paints
+    /// under the pane's columns; the footer path stays left of the pane.
+    #[test]
+    fn right_pane_docked_frame_never_paints_under_the_panel_at_140x40() {
+        use crate::native_view::NativeView;
+        let mut view = NativeView::new(140, 40);
+        view.set_session_route(true);
+        view.set_workspace("/private/tmp/p1-ui-session3/project".to_owned());
+        view.set_sidebar_location(Some("/private/tmp/p1-ui-session3/project".to_owned()), None);
+        view.set_onboarding(Some(crate::native_view_status::native_sidebar::Onboarding {
+            dismissed: false,
+            integrations_known: true,
+            connected_provider: false,
+        }));
+        let long = "assistant reply token ".repeat(12);
+        let messages = [crate::native_view_chat::ChatMessage::text(
+            crate::native_view_chat::ChatRole::Assistant,
+            long.as_str(),
+        )];
+        let frame = view.render_typed("draft", &messages, false, &[]);
+        assert_eq!(frame.len(), 40);
+        let presentation = view.presentation();
+        let offset = usize::from(presentation.sidebar_offset.expect("wide session docks the pane"));
+        assert_eq!(offset, 98);
+        assert_eq!(usize::from(presentation.main_width), 98);
+        assert!(!view.narrow_sidebar_overlay_open(), "wide viewports dock");
+        // The transcript's distinctive token never reaches the pane's columns.
+        for (y, row) in frame.iter().enumerate() {
+            let pane_region: String = row.chars().skip(offset).collect();
+            assert!(
+                !pane_region.contains("reply token"),
+                "transcript paints under the docked panel at row {y}: {pane_region:?}"
+            );
+        }
+        // The panel's own content lives inside its columns.
+        let title_row = frame
+            .iter()
+            .position(|row| row.contains("Getting started"))
+            .expect("getting-started panel renders when known and undismissed");
+        let title_col = frame[title_row].find("Getting started").unwrap();
+        assert!(title_col >= offset, "panel title left of its own pane");
+        // The footer path (composer footer row) stays left of the pane.
+        let footer_row = &frame[frame.len() - 2];
+        let path_col = footer_row
+            .find("/private/tmp")
+            .expect("footer path renders in the composer footer row");
+        assert!(path_col < offset, "footer path must not render under the pane");
+    }
+
+    /// Rendered facts for the narrow drawer regime (vertical tabs keep the
+    /// effective width at/below the dock threshold): the geometry matches the
+    /// upstream drawer, and the measured overlap defect is documented for the
+    /// integrator seam (see
+    /// `docs/worklogs/research/right-panel-scratchpad.md`).
+    #[test]
+    fn right_pane_overlay_geometry_matches_the_upstream_drawer() {
+        use crate::native_view::NativeView;
+        let mut view = NativeView::new(140, 40);
+        view.set_session_route(true);
+        view.set_workspace("/private/tmp/p1-ui-session3/project".to_owned());
+        view.set_tab_reservation(crate::native_tabs::TabReservation::for_view(
+            crate::native_tabs::TabOrientation::Vertical,
+            140,
+            40,
+        ));
+        // Auto visibility stays off below the dock threshold
+        // (`session-frame.tsx:112-114`).
+        assert_eq!(view.presentation().sidebar_offset, None);
+        // An explicit open shows the drawer.
+        view.toggle_sidebar();
+        view.set_sidebar_location(Some("/private/tmp/p1-ui-session3/project".to_owned()), None);
+        let presentation = view.presentation();
+        assert!(view.narrow_sidebar_overlay_open(), "drawer regime");
+        assert_eq!(usize::from(presentation.main_offset), 42);
+        assert_eq!(usize::from(presentation.main_width), 98);
+        assert_eq!(presentation.sidebar_offset, Some(98));
+        assert_eq!(usize::from(presentation.sidebar_width), 42);
+        // The layout authority prescribes the same geometry.
+        let layout = crate::native_view_layout::session_pane_layout(140, 42, 40, true, false, true, false, false, 70);
+        assert!(!layout.docked);
+        assert_eq!(layout.main_width, 98);
+        assert_eq!(layout.sidebar_offset, Some(98));
+    }
+
+    /// RIGHT-PANEL-OVERLAP integrator seam pin: with the drawer open the
+    /// pane's columns are covered for the FULL frame height
+    /// (`session-frame.tsx:384-393` absolute box), so no transcript cell
+    /// survives under the pane in any row — the ragged clip the user reported
+    /// as content "partially hidden behind the right sidebar".
+    #[test]
+    fn right_pane_drawer_covers_the_pane_columns_for_the_full_frame() {
+        use crate::native_view::NativeView;
+        let mut view = NativeView::new(140, 40);
+        view.set_session_route(true);
+        view.set_workspace("/private/tmp/p1-ui-session3/project".to_owned());
+        view.set_tab_reservation(crate::native_tabs::TabReservation::for_view(
+            crate::native_tabs::TabOrientation::Vertical,
+            140,
+            40,
+        ));
+        view.toggle_sidebar();
+        view.set_sidebar_location(Some("/private/tmp/p1-ui-session3/project".to_owned()), None);
+        view.set_onboarding(Some(crate::native_view_status::native_sidebar::Onboarding {
+            dismissed: false,
+            integrations_known: true,
+            connected_provider: false,
+        }));
+        let long = "assistant reply token ".repeat(12);
+        let messages = [crate::native_view_chat::ChatMessage::text(
+            crate::native_view_chat::ChatRole::Assistant,
+            long.as_str(),
+        )];
+        let frame = view.render_typed("draft", &messages, false, &[]);
+        assert_eq!(frame.len(), 40);
+        let offset = usize::from(view.presentation().sidebar_offset.expect("drawer open"));
+        assert!(view.narrow_sidebar_overlay_open(), "drawer regime");
+        for (y, row) in frame.iter().enumerate() {
+            let pane_region: String = row.chars().skip(offset).collect();
+            assert!(
+                !pane_region.contains("reply token"),
+                "transcript paints under the drawer at row {y}: {pane_region:?}"
+            );
+        }
+        // The pane's columns are fully covered: every row carries the pane's
+        // own cells (content or blank background), never raw transcript text.
+        let title_row = frame
+            .iter()
+            .position(|row| row.contains("Getting started"))
+            .expect("drawer paints the panel");
+        assert!(frame[title_row].find("Getting started").unwrap() >= offset);
+    }
 
 /// Legacy-render splice safety: `chat_markdown_spans` is only populated by the
 /// typed render path, so on the plain `render()` path it stays empty while

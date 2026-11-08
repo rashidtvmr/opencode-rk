@@ -891,24 +891,29 @@ pub struct SessionPaneLayout {
 
 /// Resolve the live right-pane geometry from the upstream session-frame
 /// model. `pane_resize` is the user-resized terminal/panel width (the
-/// sidebar always takes [`SESSION_SIDEBAR_WIDTH`]).
+/// sidebar always takes [`SESSION_SIDEBAR_WIDTH`]). `session_route` carries
+/// oc2's routing fact: the sidebar lives inside the session frame
+/// (`session-frame.tsx` renders it), so a non-session route (home) never
+/// reserves the pane — the reviewed LAY-08 `sidebar_visible` gate.
 #[must_use]
 pub fn session_pane_layout(
     cols: u16,
     tab_offset: u16,
     rows: u16,
+    session_route: bool,
     parent_session: bool,
     sidebar_open: bool,
     sidebar_hidden: bool,
     dock_open: bool,
     pane_resize: u16,
 ) -> SessionPaneLayout {
-    // Visibility (`session-frame.tsx:109-115`): parent sessions never show
-    // the sidebar; an explicit open wins over the auto gate; `auto` shows it
-    // only on a wide viewport. oc2 additionally gates on `rows >= 2`
-    // (LAY-08's reviewed `sidebar_visible`).
+    // Visibility (`session-frame.tsx:109-115`): the session frame owns the
+    // pane, parent sessions never show the sidebar; an explicit open wins
+    // over the auto gate; `auto` shows it only on a wide viewport. oc2
+    // additionally gates on `rows >= 2` (LAY-08's reviewed `sidebar_visible`).
     let wide = session_wide(cols, tab_offset);
-    let sidebar_visible = !parent_session
+    let sidebar_visible = session_route
+        && !parent_session
         && rows >= 2
         && (sidebar_open || (!sidebar_hidden && wide));
     let pane = right_pane(dock_open, sidebar_open, sidebar_visible, false);
@@ -1454,7 +1459,7 @@ mod tests {
         // Wide viewport (140 > 120), sidebar auto-visible: the pane is a
         // docked flex sibling and the main column shrinks to its left edge
         // (`session-frame.tsx:269-274,326-336`).
-        let layout = session_pane_layout(140, 0, 40, false, false, false, false, 70);
+        let layout = session_pane_layout(140, 0, 40, true, false, false, false, false, 70);
         assert_eq!(
             layout,
             SessionPaneLayout {
@@ -1474,7 +1479,7 @@ mod tests {
         // `:383-391` absolute drawer anchored right: the main column keeps
         // `cols - tab_offset` and the pane overlays `cols - 42` with the dim
         // backdrop. `docked == false` tells the caller the pane overlays.
-        let layout = session_pane_layout(140, 42, 40, false, true, false, false, 70);
+        let layout = session_pane_layout(140, 42, 40, true, false, true, false, false, 70);
         assert_eq!(
             layout,
             SessionPaneLayout {
@@ -1487,7 +1492,7 @@ mod tests {
         );
         // Narrow terminals behave the same when the sidebar is opened
         // explicitly (`sidebarVisible`, `session-frame.tsx:109-115`).
-        let narrow = session_pane_layout(100, 0, 30, false, true, false, false, 50);
+        let narrow = session_pane_layout(100, 0, 30, true, false, true, false, false, 50);
         assert_eq!(narrow.main_width, 100);
         assert_eq!(narrow.sidebar_offset, Some(58));
         assert!(!narrow.docked);
@@ -1498,13 +1503,13 @@ mod tests {
         // `rightPane()` precedence (`session-frame.tsx:115-120`): an active
         // panel wins over an open sidebar, and both terminal/panel panes are
         // docked siblings at the resized width (`:329-336`).
-        let panel = session_pane_layout(140, 0, 40, false, true, false, true, 60);
+        let panel = session_pane_layout(140, 0, 40, true, false, true, false, true, 60);
         assert_eq!(panel.sidebar_width, 60);
         assert_eq!(panel.sidebar_offset, Some(80));
         assert_eq!(panel.main_width, 80);
         assert!(panel.docked);
         // Without a dock the auto sidebar docks at the fixed 42-cell width.
-        let sidebar = session_pane_layout(140, 0, 40, false, false, false, false, 60);
+        let sidebar = session_pane_layout(140, 0, 40, true, false, false, false, false, 60);
         assert_eq!(sidebar.sidebar_width, SESSION_SIDEBAR_WIDTH);
         assert!(sidebar.docked);
     }
@@ -1513,104 +1518,19 @@ mod tests {
     fn session_pane_layout_parent_and_hidden_gates_suppress_the_sidebar() {
         // A parent session never shows the sidebar
         // (`session-frame.tsx:110`).
-        let parent = session_pane_layout(140, 0, 40, true, true, false, false, 70);
+        let parent = session_pane_layout(140, 0, 40, true, true, true, false, false, 70);
         assert_eq!(parent.sidebar_offset, None);
         assert_eq!(parent.sidebar_width, 0);
         assert_eq!(parent.main_width, 140);
         assert!(!parent.docked);
         // `session.sidebar = "hide"` suppresses the auto-open even when wide;
         // only an explicit open shows it (`session-frame.tsx:112-114`).
-        let hidden = session_pane_layout(140, 0, 40, false, false, true, false, 70);
+        let hidden = session_pane_layout(140, 0, 40, true, false, false, true, false, 70);
         assert_eq!(hidden.sidebar_offset, None);
         assert_eq!(hidden.main_width, 140);
         // Short viewports keep oc2's reviewed rows >= 2 gate.
-        let short = session_pane_layout(140, 0, 1, false, true, false, false, 70);
+        let short = session_pane_layout(140, 0, 1, true, false, true, false, false, 70);
         assert_eq!(short.sidebar_offset, None);
-    }
-
-    /// Rendered pin at the acceptance geometry: with the docked panel open,
-    /// the transcript wraps inside the shrunk main column and never paints
-    /// under the pane's columns; the footer path stays left of the pane.
-    #[test]
-    fn right_pane_docked_frame_never_paints_under_the_panel_at_140x40() {
-        use crate::native_view::NativeView;
-        let mut view = NativeView::new(140, 40);
-        view.set_session_route(true);
-        view.set_workspace("/private/tmp/p1-ui-session3/project".to_owned());
-        view.set_sidebar_location(Some("/private/tmp/p1-ui-session3/project".to_owned()), None);
-        view.set_onboarding(Some(crate::native_view_status::native_sidebar::Onboarding {
-            dismissed: false,
-            integrations_known: true,
-            connected_provider: false,
-        }));
-        let long = "assistant reply token ".repeat(12);
-        let messages = [crate::native_view_chat::ChatMessage::text(
-            crate::native_view_chat::ChatRole::Assistant,
-            long.as_str(),
-        )];
-        let frame = view.render_typed("draft", &messages, false, &[]);
-        assert_eq!(frame.len(), 40);
-        let presentation = view.presentation();
-        let offset = usize::from(presentation.sidebar_offset.expect("wide session docks the pane"));
-        assert_eq!(offset, 98);
-        assert_eq!(usize::from(presentation.main_width), 98);
-        assert!(!view.narrow_sidebar_overlay_open(), "wide viewports dock");
-        // The transcript's distinctive token never reaches the pane's columns.
-        for (y, row) in frame.iter().enumerate() {
-            let pane_region: String = row.chars().skip(offset).collect();
-            assert!(
-                !pane_region.contains("reply token"),
-                "transcript paints under the docked panel at row {y}: {pane_region:?}"
-            );
-        }
-        // The panel's own content lives inside its columns.
-        let title_row = frame
-            .iter()
-            .position(|row| row.contains("Getting started"))
-            .expect("getting-started panel renders when known and undismissed");
-        let title_col = frame[title_row].find("Getting started").unwrap();
-        assert!(title_col >= offset, "panel title left of its own pane");
-        // The footer path (composer footer row) stays left of the pane.
-        let footer_row = &frame[frame.len() - 2];
-        let path_col = footer_row
-            .find("/private/tmp")
-            .expect("footer path renders in the composer footer row");
-        assert!(path_col < offset, "footer path must not render under the pane");
-    }
-
-    /// Rendered facts for the narrow drawer regime (vertical tabs keep the
-    /// effective width at/below the dock threshold): the geometry matches the
-    /// upstream drawer, and the measured overlap defect is documented for the
-    /// integrator seam (see
-    /// `docs/worklogs/research/right-panel-scratchpad.md`).
-    #[test]
-    fn right_pane_overlay_geometry_matches_the_upstream_drawer() {
-        use crate::native_view::NativeView;
-        let mut view = NativeView::new(140, 40);
-        view.set_session_route(true);
-        view.set_workspace("/private/tmp/p1-ui-session3/project".to_owned());
-        view.set_tab_reservation(crate::native_tabs::TabReservation::for_view(
-            crate::native_tabs::TabOrientation::Vertical,
-            140,
-            40,
-        ));
-        // Auto visibility stays off below the dock threshold
-        // (`session-frame.tsx:112-114`).
-        assert_eq!(view.presentation().sidebar_offset, None);
-        // An explicit open shows the drawer.
-        view.toggle_sidebar();
-        view.set_sidebar_location(Some("/private/tmp/p1-ui-session3/project".to_owned()), None);
-        let presentation = view.presentation();
-        assert!(view.narrow_sidebar_overlay_open(), "drawer regime");
-        assert_eq!(usize::from(presentation.main_offset), 42);
-        assert_eq!(usize::from(presentation.main_width), 98);
-        assert_eq!(presentation.sidebar_offset, Some(98));
-        assert_eq!(usize::from(presentation.sidebar_width), 42);
-        // The layout authority prescribes the same geometry.
-        let layout = session_pane_layout(140, 42, 40, false, true, false, false, 70);
-        assert!(!layout.docked);
-        assert_eq!(layout.main_width, 98);
-        assert_eq!(layout.sidebar_offset, Some(98));
     }
 
     /// Vertical pane border from the frozen harness set: a main-only column
