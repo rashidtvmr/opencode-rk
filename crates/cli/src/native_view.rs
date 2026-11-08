@@ -95,6 +95,8 @@ pub struct NativeView {
     sessions: SessionView,
     chat: ChatView,
     diff_view_preference: crate::native_diff_view::DiffViewPreference,
+    /// Live `/diff` session-panel state (`diff-viewer.tsx:1311-1358`).
+    diff_panel: crate::native_diff_view::DiffPanelState,
     pages: PageState,
     memory: crate::native_memory::Memory,
     compaction: crate::native_compaction_settings::CompactionSettingsView,
@@ -1336,6 +1338,7 @@ impl NativeView {
             sessions: SessionView::default(),
             chat: ChatView::default(),
             diff_view_preference: crate::native_diff_view::DiffViewPreference::Auto,
+            diff_panel: crate::native_diff_view::DiffPanelState::default(),
             pages: PageState::default(),
             memory: crate::native_memory::Memory::new(),
             compaction: crate::native_compaction_settings::CompactionSettingsView::new(),
@@ -2835,6 +2838,44 @@ impl NativeView {
         self.diff_view_preference
     }
 
+    /// Toggle the live `/diff` right panel (`diff-viewer.tsx:1326-1336`).
+    pub fn toggle_diff_panel(&mut self, patch: Option<String>, fullscreen_requested: bool) -> bool {
+        self.diff_panel.toggle(patch, fullscreen_requested)
+    }
+
+    pub fn close_diff_panel(&mut self) {
+        self.diff_panel.close();
+    }
+
+    #[must_use]
+    pub fn diff_panel_open(&self) -> bool {
+        self.diff_panel.open
+    }
+
+    #[must_use]
+    pub fn diff_panel_fullscreen(&self) -> bool {
+        if !self.diff_panel.open {
+            return false;
+        }
+        crate::native_pane_resize::diff_panel_layout(
+            self.layout.cols,
+            self.tab_reservation.x_offset(),
+            self.layout.rows,
+            true,
+            self.diff_panel.fullscreen_requested,
+            crate::native_view_layout::default_pane_width(
+                self.layout.cols.saturating_sub(self.tab_reservation.x_offset()),
+            ),
+        )
+        .presentation
+            == crate::native_pane_resize::PanelPresentation::Fullscreen
+    }
+
+    #[must_use]
+    pub fn diff_panel_patch(&self) -> Option<&str> {
+        self.diff_panel.patch.as_deref()
+    }
+
     /// Scrollbar painted by the last render, if the bar is shown and the
     /// transcript content overflows its viewport.
     #[must_use]
@@ -2879,6 +2920,27 @@ impl NativeView {
     /// Current region geometry (no ANSI): positions for the style writer.
     #[must_use]
     pub fn presentation(&self) -> ViewPresentation {
+        if self.diff_panel.open {
+            let layout = crate::native_pane_resize::diff_panel_layout(
+                self.layout.cols,
+                self.tab_reservation.x_offset(),
+                self.layout.rows,
+                true,
+                self.diff_panel.fullscreen_requested,
+                crate::native_view_layout::default_pane_width(
+                    self.layout.cols.saturating_sub(self.tab_reservation.x_offset()),
+                ),
+            );
+            return ViewPresentation {
+                cols: self.layout.cols,
+                rows: self.layout.rows,
+                main_offset: self.tab_reservation.x_offset(),
+                main_width: layout.session_width,
+                main_padding: 2,
+                sidebar_offset: Some(layout.pane.x),
+                sidebar_width: layout.pane.width,
+            };
+        }
         // RIGHT-PANEL-OVERLAP: the single-source right-pane geometry authority
         // (`session-frame.tsx:106-120,262-336,383-391`) replaces the
         // duplicated sidebar_wide/inline derivation. The dock is oc2's panel
@@ -5175,12 +5237,16 @@ impl NativeView {
         // right pane wins. The dock is the native panel producer; when it is
         // open it owns the right-pane slot and suppresses sidebar painting
         // AND every geometry fact published for it (spans, regions, hits).
-        let right_pane = crate::native_view_layout::right_pane(
-            self.dock_open(),
-            self.sidebar_open,
-            self.sidebar_visible(),
-            false,
-        );
+        let right_pane = if self.diff_panel.open {
+            RightPane::Panel
+        } else {
+            crate::native_view_layout::right_pane(
+                self.dock_open(),
+                self.sidebar_open,
+                self.sidebar_visible(),
+                false,
+            )
+        };
         let sidebar_painted = right_pane == RightPane::Sidebar;
         if let Some(left) = presentation.sidebar_offset.filter(|_| sidebar_painted) {
             // Do not publish regions for a frame that failed closed. For a
@@ -5321,6 +5387,19 @@ impl NativeView {
             }
         }
         let inline = presentation.sidebar_width > 0 && self.sidebar_wide();
+        let diff_rows = if self.diff_panel.open {
+            crate::native_diff_view::panel_rows(
+                &self.diff_panel,
+                usize::from(presentation.sidebar_width.saturating_sub(4)),
+                height.saturating_sub(2),
+            )
+        } else {
+            Vec::new()
+        };
+        let diff_panel_lines: Vec<String> = diff_rows
+            .iter()
+            .map(|row| fit(row, presentation.sidebar_width.saturating_sub(2)))
+            .collect();
         let sidebar_for_frame = if right_pane == RightPane::Sidebar {
             sidebar.as_slice()
         } else {
@@ -5328,7 +5407,7 @@ impl NativeView {
         };
         let effective = Layout {
             center_width: width,
-            right_width: if inline && right_pane == RightPane::Sidebar {
+            right_width: if self.diff_panel.open || (inline && right_pane == RightPane::Sidebar) {
                 presentation.sidebar_width
             } else {
                 0
@@ -5337,6 +5416,15 @@ impl NativeView {
             ..self.layout
         };
         let mut frame = compose_frame(&effective, &[], &center, sidebar_for_frame);
+        if self.diff_panel.open {
+            let left = usize::from(presentation.sidebar_offset.unwrap_or(0));
+            for (i, row) in diff_panel_lines.iter().enumerate() {
+                if i >= frame.len() { break; }
+                let mut line = frame[i].chars().take(left).collect::<String>();
+                line.push_str(row);
+                frame[i] = fit(&line, self.layout.cols);
+            }
+        }
         if self.tab_reservation.width > 0 || self.tab_reservation.height > 0 {
             let x = usize::from(self.tab_reservation.x_offset());
             let y = usize::from(self.tab_reservation.y_offset());
@@ -8196,6 +8284,35 @@ pub fn initial_page_rows(backend: bool) -> Vec<PageRow> {
 /// `tui_entry::native_loop` exclusively inside `owns_now` branches; its
 /// end-to-end proof belongs to the future installed PTY test, not a fake
 /// local simulation.
+#[cfg(test)]
+mod live_diff_panel_tests {
+    use super::*;
+
+    #[test]
+    fn diff_panel_open_reserves_right_pane_and_paints_patch_rows() {
+        let mut view = NativeView::new(140, 40);
+        view.set_session_route(true);
+        assert!(view.toggle_diff_panel(Some("--- a/main.rs\n+++ b/main.rs\n+new();".to_owned()), false));
+        let frame = view.render_typed("draft", &[], false, &[]);
+        assert!(view.diff_panel_open());
+        assert_eq!(view.presentation().sidebar_offset, Some(70));
+        assert!(frame.iter().any(|row| row.contains("Diff viewer")));
+        assert!(frame.iter().any(|row| row.contains("+new();")));
+        assert!(!frame.iter().any(|row| row.contains("Getting started")));
+        view.toggle_diff_panel(None, false);
+        assert!(!view.diff_panel_open());
+    }
+
+    #[test]
+    fn diff_panel_fullscreen_hides_session_width_below_split_threshold() {
+        let mut view = NativeView::new(107, 24);
+        view.set_session_route(true);
+        view.toggle_diff_panel(None, false);
+        assert!(view.diff_panel_fullscreen());
+        assert_eq!(view.presentation().main_width, 0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// SIDE-01: `NativeView` forwards the sidebar title's rename-pending

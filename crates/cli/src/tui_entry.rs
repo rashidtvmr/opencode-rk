@@ -18505,6 +18505,21 @@ fn native_loop(
                     needs_paint = true;
                     continue;
                 }
+                if command == "/diff" {
+                    let patch = live.as_ref()
+                        .and_then(|snapshot| {
+                            crate::native_chat_projection::project_history_entries(&snapshot.raw_history)
+                                .into_iter()
+                                .rev()
+                                .find_map(|(_, message)| crate::native_view_chat::diff_text_from_message(&message))
+                        });
+                    let opened = view.toggle_diff_panel(patch, false);
+                    if opened {
+                        view.close_page();
+                    }
+                    needs_paint = true;
+                    continue;
+                }
                 let local_page = native_local_page_route(command);
                 if let Some(page) = local_page {
                     if matches!(page, crate::native_view_pages::Page::Commands) {
