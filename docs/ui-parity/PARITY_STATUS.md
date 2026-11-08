@@ -22,15 +22,14 @@ ledger) closed two more:
 **What this leaves as genuinely open**, each blocked on something other than a
 missing consumer:
 
-- `LAY-10/11/13` — needs a live plugin-panel/terminal dock. `NativeHost::new`
+- `LAY-10` — needs a live terminal PTY/emulator producer; `LAY-11/13` geometry/model layers are now implemented and tested, but LAY-11 still needs live /diff dispatch into the panel. `NativeHost::new`
   still has no production caller and `compose_shell` is test-only; the live
   render composes only the sidebar. This is a composition migration plus a new
   product surface, not a bounded wiring fix.
 - `SIDE-05` — `set_limit` (`native_view_status.rs:1260`) has only a test caller
   because there is no plan-quota source; the typed `rate_limited` error path
   (`native_assistant_facts.rs:164`) is live and distinct.
-- `DIALOG-20` — the toast sink (`native_toast.rs`, `native_shell.rs:1773`) is
-  complete but no action emits a toast; adding one would invent a trigger.
+- `DIALOG-20` — toast and crash-render recovery are landed; input-path/PaintCtx-construction panic recovery remains a separately scoped follow-up.
 - `PAR-02/03/06` — harness-side obligations; `FFI-*` — deliberate non-goals.
 
 No fabricated completion: every remaining row is blocked on product scope, an
@@ -62,7 +61,7 @@ Tests: `theme08_lexical_capture_classes_match_upstream_scopes`
 (`markdown_runs.rs`) for the classifier, plus color/attribute assertions in
 `theme08_syntax_tokens_paint_live_code_fences` (`tui_entry.rs`).
 
-Still open, unchanged: `LAY-10/11/13` (no live plugin-panel/terminal producer),
+Still open: `LAY-10` (terminal PTY/emulator producer) and `LAY-11` live `/diff` panel dispatch (no live plugin-panel/terminal producer),
 `SIDE-05` (usage-limits pipeline), `PAR-19`, `MSG-010`, `FORM-001` sub-3/4,
 `DIALOG-20` crash half, `PAR-02/03/06` (harness-side), `FFI-*` (non-goals). No
 styled-cell captures exist, so every verdict stays source-backed.
@@ -286,8 +285,8 @@ goldens; this is source inspection plus the named focused tests.
 | `PAR-19` | `BLOCKED` | `LANDED` | `visible_chunk_range` live in the diff dialog `native_view_dialogs.rs:3720,3772`, fed by the root-relative `relative_scroll_top` (`native_diff_view.rs:1227`) |
 | `DIFF-001` | `BLOCKED` | `LANDED` | preference threaded live (`native_view.rs:97,2784-2790`), inline resolution `native_view_chat.rs:3557`, viewer route `tui_entry.rs:15616` |
 | `DIFF-003` | `BLOCKED` | `LANDED` | chunk virtualization live (same `visible_chunk_range` consumers) |
-| `LAY-11` | `REAL_GAP` | `LANDED` | `right_pane` live `native_view.rs:341,361,5103` and `native_shell_frame.rs:260` |
-| `LAY-13` | `REAL_GAP` | `LANDED` | `pane_resize_handle` live `native_pane_resize.rs:236,637` |
+| `LAY-11` | `REAL_GAP` | `MODEL LANDED; LIVE /diff DISPATCH OPEN` | `DiffPanelState`/`diff_panel_layout` model candidate `6f176616` `native_view.rs:341,361,5103` and `native_shell_frame.rs:260` |
+| `LAY-13` | `REAL_GAP` | `MODEL LANDED` | `pane_resize_handle` live `native_pane_resize.rs:236,637` |
 | `THEME-13` | `REAL_GAP` | `LANDED` | `SystemThemeState` live `tui_entry.rs:9428,10479` |
 | `THEME-14` | `REAL_GAP` | `LANDED` | `SyntaxStyleArena` live `tui_entry.rs:10466-10468` |
 

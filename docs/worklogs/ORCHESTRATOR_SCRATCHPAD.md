@@ -13635,3 +13635,19 @@ User reported 4 visible defects; all 4 clusters closed, integrated, pushed:
   DIALOG-20 crash half (implementation dispatched on the ui lane),
   ChatView::render_header transcript-header row (documented), PAR-02/03/06
   (harness-side), FFI-* (non-goals).
+
+## Wave 2 continuation (2026-11-08, lead) — post-a2c7dcca
+
+All wave-2 defects closed/integrated/pushed (main-v2 @ a2c7dcca, remote verified):
+- task-1 COMPOSER-PARITY: ab518d15 (model) + 9562bbb9 (MEDIA-001 fixture) + seam 7ada1770->NEEDS_FIX->5a4510aa (APPROVE) — "Build · Non-default fixture openai" metadata row live.
+- task-2 FOOTER-CHROME: ca90f839 APPROVE — path once, " · " separators, version right-aligned.
+- task-3 HEADER-TABS: 2e712a4f APPROVE — upstream-faithful pins; bonus: transcript-header cwd row (follow-up, in progress: 55570e04 on lane, full suite 2530/0, capture saved).
+- task-4 RIGHT-PANEL-OVERLAP: 54694160 (model) + seam 87b0ba62->55c8620d (APPROVE) — drawer covers full frame.
+- DIALOG-20 crash half: b4b52857 (APPROVE model) + a2c7dcca (F1 repair, REMOVE panic=abort from [profile.release], +3MB unwind tables, profile guard test, release-profile proven) — RELEASE build 17.4MB.
+- Full suite on a2c7dcca: 2530/0; release binary sha 1b66f384... receipt source_sha a2c7dcca.
+
+Open from user's original defect list: status loading/thinking labels placement — verified upstream-accurate (spinner in TabIndicator session-tabs.tsx:183-208; status slot in prompt footer). Initial screen composer thin/overflow — verified upstream-minimum 5-row block at rest, growing with content.
+
+Remaining PARITY_STATUS items: LAY-10/11 (terminal panel — scoping research dispatched, ~5-8kLOC: PTY daemon + WS + VT emulator, OUT OF PHASE-1 scope unless separately funded); LAY-13 (pane resize handle, ALREADY_CORRECT per scratchpad); DIALOG-20 crash half DONE; PAR-02/03/06 (harness-side); FFI-* (non-goals).
+
+Active work: transcript-header fix commit 55570e04 awaiting review; LAY-11 diff-panel slice: reviewer-test uncommitted in core lane (native_diff_view.rs + native_pane_resize.rs modified).
