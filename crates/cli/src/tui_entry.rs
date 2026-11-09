@@ -699,6 +699,39 @@ fn composer_enter_plan(
     crate::native_composer::plan_submit(draft, delivery, ctx)
 }
 
+/// Transactional composer submit preflight. This owns the draft and submit
+/// plan but performs no network, worker, or view mutation. A later dispatcher
+/// may commit the owned draft only after its external command has been
+/// accepted; a panic before commit simply drops this value (no replay).
+#[cfg(feature = "native")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ComposerSubmitPreflight {
+    pub(crate) draft: String,
+    pub(crate) plan: crate::native_composer::SubmitPlan,
+}
+
+#[cfg(feature = "native")]
+impl ComposerSubmitPreflight {
+    pub(crate) fn prepare(
+        draft: &str,
+        turn_owns_binding: bool,
+        has_session: bool,
+        completion_visible: bool,
+        queued: usize,
+    ) -> Self {
+        Self {
+            draft: draft.to_owned(),
+            plan: composer_enter_plan(
+                draft,
+                turn_owns_binding,
+                has_session,
+                completion_visible,
+                queued,
+            ),
+        }
+    }
+}
+
 /// PAR-07 event-trace payloads for the live journal
 /// (`native_debug::event`): queue/steer and submission sinks record
 /// bounded behavior facts only (session, size, depth, kind) -- never
@@ -2407,6 +2440,76 @@ fn native_size() -> (u32, u32) {
 /// from the caller's own overlay/dialog content length, and `home` from the
 /// explicit route fact, so text roles are projected from known structure.
 #[cfg(feature = "native")]
+/// Owned, panic-boundary-safe derived frame data. This deliberately excludes
+/// `NativeView` and syntax arenas; it is the first transactional slice before
+/// the legacy `PaintCtx` is assembled.
+#[cfg(feature = "native")]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct FrameDerivedSnapshot {
+    selectable: Vec<String>,
+}
+
+#[cfg(feature = "native")]
+fn derive_selectable_snapshot(
+    lines: &[String],
+    home: bool,
+    modal_open: bool,
+    help_open: bool,
+    row_classes: &[crate::native_view_chat::ChatRowClass],
+    text_bounds: &[Option<(u16, u16)>],
+) -> FrameDerivedSnapshot {
+    let selectable = lines
+        .iter()
+        .enumerate()
+        .map(|(row, line)| {
+            if !home
+                && !modal_open
+                && !help_open
+                && crate::tui_entry::chat_row_is_selectable(row_classes.get(row))
+            {
+                if let Some((left, width)) = text_bounds.get(row).copied().flatten() {
+                    format!(
+                        "{}{}",
+                        " ".repeat(usize::from(left)),
+                        crate::native_view_layout::slice_cells(line, left, width)
+                    )
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
+        })
+        .collect();
+    FrameDerivedSnapshot { selectable }
+}
+
+#[cfg(feature = "native")]
+#[cfg(test)]
+mod frame_derived_snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn selectable_snapshot_is_owned_and_stable() {
+        let lines = vec!["  abcdef".to_owned()];
+        let classes = vec![crate::native_view_chat::ChatRowClass::Text];
+        let bounds = vec![Some((2, 3))];
+        let snapshot = derive_selectable_snapshot(&lines, false, false, false, &classes, &bounds);
+        assert_eq!(snapshot.selectable, vec!["  abc"]);
+        assert_eq!(snapshot.selectable.len(), 1);
+    }
+
+    #[test]
+    fn non_chat_or_overlay_snapshot_has_no_selectable_rows() {
+        let lines = vec!["text".to_owned()];
+        let classes = vec![crate::native_view_chat::ChatRowClass::Text];
+        let bounds = vec![Some((0, 4))];
+        assert_eq!(derive_selectable_snapshot(&lines, true, false, false, &classes, &bounds).selectable, vec![""]);
+        assert_eq!(derive_selectable_snapshot(&lines, false, true, false, &classes, &bounds).selectable, vec![""]);
+        assert_eq!(derive_selectable_snapshot(&lines, false, false, true, &classes, &bounds).selectable, vec![""]);
+    }
+}
+
 struct PaintCtx {
     palette: crate::native_theme_runtime::Palette,
     /// THEME-06: palette resolved for the contextual upstream `@dialog`
@@ -13308,33 +13411,15 @@ fn native_loop(
                     )?;
                 }
             }
-            let selectable: Vec<String> = lines
-                .iter()
-                .enumerate()
-                .map(|(row, line)| {
-                    if !home
-                        && modal_rows.is_none()
-                        && !help_open
-                        && crate::tui_entry::chat_row_is_selectable(
-                            view.chat_row_classes().get(row),
-                        )
-                    {
-                        if let Some((left, width)) =
-                            view.chat_text_bounds().get(row).copied().flatten()
-                        {
-                            format!(
-                                "{}{}",
-                                " ".repeat(usize::from(left)),
-                                crate::native_view_layout::slice_cells(line, left, width)
-                            )
-                        } else {
-                            String::new()
-                        }
-                    } else {
-                        String::new()
-                    }
-                })
-                .collect();
+            let selectable_snapshot = derive_selectable_snapshot(
+                &lines,
+                home,
+                modal_rows.is_some(),
+                help_open,
+                view.chat_row_classes(),
+                view.chat_text_bounds(),
+            );
+            let selectable = selectable_snapshot.selectable;
             selection.set_rows(&selectable, 0, 0, u32::from(presentation.main_width));
             // DIALOG-20: lay the live toast out into bounded styled cells
             // (`ui/toast.tsx`); `None` when nothing is visible or the viewport
@@ -20828,11 +20913,12 @@ mod command_consumption_tests {
     #[test]
     fn composer_enter_routes_through_plan_submit_queue_and_steer() {
         use crate::native_composer::{QueueRejection, SubmitPlan};
-        // Idle + draft: steer straight to the existing dispatch.
-        assert_eq!(
-            super::composer_enter_plan("hello", false, true, false, 0),
-            SubmitPlan::Steer
-        );
+        // Idle + draft: the owned preflight matches the existing pure plan
+        // and performs no external action.
+        let preflight = super::ComposerSubmitPreflight::prepare("hello", false, true, false, 0);
+        assert_eq!(preflight.draft, "hello");
+        assert_eq!(preflight.plan, super::composer_enter_plan("hello", false, true, false, 0));
+        assert_eq!(preflight.plan, SubmitPlan::Steer);
         // Busy + draft: the bounded queue, never a dropped draft.
         assert_eq!(
             super::composer_enter_plan("hello", true, true, false, 0),
