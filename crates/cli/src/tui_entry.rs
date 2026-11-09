@@ -732,6 +732,51 @@ impl ComposerSubmitPreflight {
     }
 }
 
+/// Deferred external effects for one composer submit. Planning is pure and
+/// bounded; this command list is intentionally not executed here. A panic
+/// before `commit` drops the list, so no queue enqueue, worker steer, or
+/// network action is replayed or partially duplicated.
+#[cfg(feature = "native")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ExternalAction {
+    QueuePrompt { session: Option<String>, text: String },
+    SteerPrompt { session: Option<String>, text: String },
+}
+
+#[cfg(feature = "native")]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct CommandPlan {
+    pub(crate) actions: Vec<ExternalAction>,
+    pub(crate) committed: bool,
+}
+
+#[cfg(feature = "native")]
+impl CommandPlan {
+    pub(crate) fn new() -> Self { Self::default() }
+    pub(crate) fn push(&mut self, action: ExternalAction) { self.actions.push(action); }
+    pub(crate) fn commit(&mut self) { self.committed = true; }
+    pub(crate) fn rollback(&mut self) { self.actions.clear(); self.committed = false; }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod command_plan_tests {
+    use super::{CommandPlan, ExternalAction};
+
+    #[test]
+    fn command_plan_is_owned_and_rolls_back_without_replay() {
+        let mut plan = CommandPlan::new();
+        plan.push(ExternalAction::QueuePrompt { session: Some("s".into()), text: "hello".into() });
+        assert_eq!(plan.actions.len(), 1);
+        plan.rollback();
+        assert!(plan.actions.is_empty());
+        assert!(!plan.committed);
+        plan.push(ExternalAction::SteerPrompt { session: None, text: "again".into() });
+        plan.commit();
+        assert!(plan.committed);
+        assert_eq!(plan.actions.len(), 1);
+    }
+}
+
 /// PAR-07 event-trace payloads for the live journal
 /// (`native_debug::event`): queue/steer and submission sinks record
 /// bounded behavior facts only (session, size, depth, kind) -- never
