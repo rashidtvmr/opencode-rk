@@ -10674,6 +10674,19 @@ fn native_loop(
     let (configured_markdown, markdown_diagnostics) = crate::native_ui_preferences::UiPreferences::markdown_mode(cli_path.as_deref(), inline_cli.as_deref());
     for diagnostic in markdown_diagnostics { append_transcript(&mut transcript, format!("error: {diagnostic}")); }
     view.set_markdown_mode(match configured_markdown.as_deref() { Some("source") => crate::markdown_runs::MarkdownMode::Source, _ => crate::markdown_runs::MarkdownMode::Rendered });
+    let (transcript_verbosity, transcript_grouping, transcript_thinking, transcript_diagnostics) =
+        crate::native_ui_preferences::UiPreferences::session_transcript_options(
+            cli_path.as_deref(),
+            inline_cli.as_deref(),
+        );
+    for diagnostic in transcript_diagnostics {
+        append_transcript(&mut transcript, format!("error: {diagnostic}"));
+    }
+    view.set_transcript_options(
+        transcript_verbosity,
+        transcript_grouping,
+        transcript_thinking,
+    );
     let (tab_orientation, tab_diagnostics) =
         crate::native_ui_preferences::UiPreferences::tab_orientation(
             cli_path.as_deref(),

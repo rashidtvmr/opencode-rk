@@ -131,6 +131,86 @@ impl UiPreferences {
         (selected, diagnostics)
     }
 
+    /// Resolve the live transcript settings consumed by the session route.
+    /// Disk CLI config applies first; inline CLI config overrides it.
+    pub fn session_transcript_options(
+        cli_path: Option<&Path>,
+        inline: Option<&str>,
+    ) -> (
+        crate::native_message_rows::Verbosity,
+        crate::native_message_rows::Grouping,
+        crate::native_message_rows::ThinkingMode,
+        Vec<String>,
+    ) {
+        use crate::native_message_rows::{Grouping, ThinkingMode, Verbosity};
+        fn apply(
+            text: &str,
+            verbosity: &mut Verbosity,
+            grouping: &mut Grouping,
+            thinking: &mut ThinkingMode,
+            diagnostics: &mut Vec<String>,
+            label: &str,
+        ) {
+            if text.len() > MAX_CONFIG_BYTES {
+                diagnostics.push(format!("{label} configuration exceeds size limit"));
+                return;
+            }
+            let clean = match strip_jsonc(text) {
+                Ok(clean) => clean,
+                Err(_) => {
+                    diagnostics.push(format!("invalid {label} configuration"));
+                    return;
+                }
+            };
+            let value = match serde_json::from_str::<Value>(&clean) {
+                Ok(value) => value,
+                Err(_) => {
+                    diagnostics.push(format!("invalid {label} configuration"));
+                    return;
+                }
+            };
+            let Some(session) = value.get("session") else { return };
+            if let Some(value) = session.get("verbosity") {
+                match value.as_str() {
+                    Some("low") => *verbosity = Verbosity::Low,
+                    Some("medium") => *verbosity = Verbosity::Medium,
+                    Some("high") => *verbosity = Verbosity::High,
+                    _ => diagnostics.push("invalid session.verbosity value".into()),
+                }
+            }
+            if let Some(value) = session.get("grouping") {
+                match value.as_str() {
+                    Some("auto") => *grouping = Grouping::Auto,
+                    Some("none") => *grouping = Grouping::None,
+                    _ => diagnostics.push("invalid session.grouping value".into()),
+                }
+            }
+            if let Some(value) = session.get("thinking") {
+                match value.as_str() {
+                    Some("hide") => *thinking = ThinkingMode::Hide,
+                    Some("show") => *thinking = ThinkingMode::Show,
+                    _ => diagnostics.push("invalid session.thinking value".into()),
+                }
+            }
+        }
+        let mut verbosity = Verbosity::Medium;
+        let mut grouping = Grouping::Auto;
+        let mut thinking = ThinkingMode::Hide;
+        let mut diagnostics = Vec::new();
+        if let Some(path) = cli_path {
+            let mut budget = crate::native_ui_budget::ReadBudget::default();
+            match budget.read(path, MAX_CONFIG_BYTES, "CLI config") {
+                Ok(Some(text)) => apply(&text, &mut verbosity, &mut grouping, &mut thinking, &mut diagnostics, "disk CLI"),
+                Ok(None) => {}
+                Err(_) => diagnostics.push("unable to read bounded global CLI configuration".into()),
+            }
+        }
+        if let Some(text) = inline {
+            apply(text, &mut verbosity, &mut grouping, &mut thinking, &mut diagnostics, "inline CLI");
+        }
+        (verbosity, grouping, thinking, diagnostics)
+    }
+
     /// `config.session.scrollbar` (`routes/session/index.tsx:243`). Upstream
     /// defaults to `false`; an explicit non-boolean is reported as the same
     /// bounded diagnostic style used for the other session settings.

@@ -4242,6 +4242,17 @@ impl NativeView {
         self.chat.set_pending_permission_calls(calls);
     }
 
+    /// MSG-002: publish the resolved session transcript settings to the live
+    /// chat renderer.
+    pub fn set_transcript_options(
+        &mut self,
+        verbosity: crate::native_message_rows::Verbosity,
+        grouping: crate::native_message_rows::Grouping,
+        thinking: crate::native_message_rows::ThinkingMode,
+    ) {
+        self.chat.set_transcript_options(verbosity, grouping, thinking);
+    }
+
     /// MSG-002: publish the active session id so the live render keys group
     /// disclosure per session.
     pub fn set_active_session_id(&mut self, id: &str) {

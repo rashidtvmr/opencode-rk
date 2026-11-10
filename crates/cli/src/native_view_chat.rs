@@ -203,6 +203,10 @@ pub struct ChatView {
     /// [`crate::native_message_rows::TRANSCRIPT_BACKFILL_CHUNK`]-weighted
     /// page of older rows (`index.tsx:465-485`).
     transcript_mounting: Cell<usize>,
+    /// Live transcript options resolved from `config.session.*`.
+    transcript_verbosity: crate::native_message_rows::Verbosity,
+    transcript_grouping: crate::native_message_rows::Grouping,
+    transcript_thinking: crate::native_message_rows::ThinkingMode,
 }
 
 impl Default for ChatView {
@@ -229,12 +233,63 @@ impl Default for ChatView {
             notices: Vec::new(),
             child_notices: Vec::new(),
             transcript_mounting: Cell::new(usize::MAX),
+            transcript_verbosity: crate::native_message_rows::Verbosity::Medium,
+            transcript_grouping: crate::native_message_rows::Grouping::Auto,
+            transcript_thinking: crate::native_message_rows::ThinkingMode::Hide,
         }
     }
 }
 
 impl ChatView {
     pub fn set_active_session_id(&self, id: &str) { *self.active_session_id.borrow_mut() = id.to_owned(); }
+
+    /// Resolve the live `session.verbosity`, `session.grouping`, and
+    /// `session.thinking` settings. Defaults match the pinned TUI.
+    pub fn set_transcript_options(
+        &mut self,
+        verbosity: crate::native_message_rows::Verbosity,
+        grouping: crate::native_message_rows::Grouping,
+        thinking: crate::native_message_rows::ThinkingMode,
+    ) {
+        self.transcript_verbosity = verbosity;
+        self.transcript_grouping = grouping;
+        self.transcript_thinking = thinking;
+        self.transcript_mounting.set(usize::MAX);
+    }
+
+    fn grouped_kind(&self, kind: crate::native_message_rows::GroupKind) -> bool {
+        crate::native_message_rows::grouped_kind(
+            kind,
+            self.transcript_thinking,
+            self.transcript_grouping,
+        )
+    }
+
+    fn pending_calls_for_message(
+        &self,
+        messages: &[ChatMessage],
+        index: usize,
+    ) -> std::collections::BTreeSet<String> {
+        let Some(message_id) = messages.get(index).and_then(|message| message.message_id.as_deref()) else {
+            return std::collections::BTreeSet::new();
+        };
+        self.pending_permission_calls
+            .iter()
+            .filter(|call| {
+                messages.iter().enumerate().rev().find_map(|(_, message)| {
+                    let id = message.message_id.as_deref()?;
+                    let carries_call = message.parts.iter().any(|part| {
+                        matches!(
+                            part,
+                            ChatPart::ToolCall { id, .. } | ChatPart::ToolState { id, .. } if id == *call
+                        )
+                    });
+                    carries_call.then_some(id)
+                }) == Some(message_id)
+            })
+            .cloned()
+            .collect()
+    }
 
     /// MSG-009: replace the painted live switch notices. The producer (live
     /// loop) owns the accumulation; renders read only.
@@ -249,7 +304,7 @@ impl ChatView {
 
     pub fn toggle_group(&self, session_id: &str, group_id: &str, kind: crate::native_message_rows::GroupKind) -> bool {
         let mut state = self.disclosure.borrow_mut();
-        let current = state.group_expanded(session_id, group_id, crate::native_message_rows::Verbosity::Medium, kind);
+        let current = state.group_expanded(session_id, group_id, self.transcript_verbosity, kind);
         state.set_group_expanded(session_id, group_id, !current);
         !current
     }
@@ -981,6 +1036,7 @@ impl ChatMessage {
 struct GroupPlan {
     headers: Vec<GroupHeader>,
     skip: bool,
+    hidden_parts: std::collections::BTreeSet<crate::native_message_rows::PartRef>,
 }
 
 #[derive(Clone, Debug)]
@@ -1024,6 +1080,49 @@ fn message_part_ids(message: &ChatMessage) -> Option<Vec<String>> {
         }
     }
     Some(out)
+}
+
+/// Keep ungrouped leaves visible while a grouped sibling is collapsed.
+fn message_without_hidden_parts(
+    message: &ChatMessage,
+    hidden: &std::collections::BTreeSet<crate::native_message_rows::PartRef>,
+) -> ChatMessage {
+    if hidden.is_empty() || message.role != ChatRole::Assistant {
+        return message.clone();
+    }
+    let Some(message_id) = message.message_id.as_deref() else {
+        return message.clone();
+    };
+    let mut text_ordinal = 0usize;
+    let mut reasoning_ordinal = 0usize;
+    let parts = message
+        .parts
+        .iter()
+        .enumerate()
+        .filter_map(|(index, part)| {
+            let part_id = match part {
+                ChatPart::Text(text) if !text.trim().is_empty() => {
+                    let id = format!("text:{text_ordinal}");
+                    text_ordinal += 1;
+                    id
+                }
+                ChatPart::Thinking(text) if !text.trim().is_empty() => {
+                    let id = format!("reasoning:{reasoning_ordinal}");
+                    reasoning_ordinal += 1;
+                    id
+                }
+                ChatPart::ToolState { id, .. } | ChatPart::ToolCall { id, .. } => id.clone(),
+                ChatPart::ToolResult { .. } => format!("result:{index}"),
+                ChatPart::Text(_) | ChatPart::Thinking(_) => return Some(part.clone()),
+                _ => return Some(part.clone()),
+            };
+            (!hidden.contains(&crate::native_message_rows::PartRef::new(message_id, part_id)))
+                .then(|| part.clone())
+        })
+        .collect();
+    let mut visible = message.clone();
+    visible.parts = parts;
+    visible
 }
 
 /// Display class of one rendered frame row. Paint metadata only: the paint
@@ -4136,7 +4235,7 @@ impl ChatView {
             crate::native_message_rows::row_message_from_chat(&id, message)
         }).collect();
         let session_rows = crate::native_message_rows::reduce_session_rows(
-            &projected, crate::native_message_rows::Verbosity::Medium, false);
+            &projected, self.transcript_verbosity, false);
         // Translate the reducer's tree to live transcript operations in tree
         // order. A group owns one header, never one header per referenced part.
         fn refs(nodes: &[crate::native_message_rows::SessionNode], out: &mut Vec<String>) {
@@ -4193,7 +4292,7 @@ impl ChatView {
                 |_, expanded_kind| self.disclosure.borrow().group_expanded(
                     &self.active_session_id.borrow(),
                     gid,
-                    crate::native_message_rows::Verbosity::Medium,
+                    self.transcript_verbosity,
                     expanded_kind,
                 ),
                 |_| true,
@@ -4231,7 +4330,7 @@ impl ChatView {
             let mut ordered = Vec::<(usize, &ChatMessage, Option<(String, crate::native_message_rows::GroupKind, usize, bool)>)>::new();
             for (gid, ids, kind, size) in ops[mounting..].iter() {
                 if let Some((gid, kind)) = gid.as_ref().zip(kind.as_ref()) {
-                    let expanded = self.disclosure.borrow().group_expanded(&self.active_session_id.borrow(), gid, crate::native_message_rows::Verbosity::Medium, *kind);
+                    let expanded = self.disclosure.borrow().group_expanded(&self.active_session_id.borrow(), gid, self.transcript_verbosity, *kind);
                     let anchor = ids.first().and_then(|id| by_id.get(id).copied());
                     if let Some((index, message)) = anchor { ordered.push((index, message, Some((gid.clone(), *kind, *size, expanded)))); }
                     if expanded { for id in ids { if let Some((index,message)) = by_id.get(id).copied() { ordered.push((index,message,None)); } } }
@@ -4250,7 +4349,7 @@ impl ChatView {
                     &mut Vec::new(),
                     self.markdown_mode,
                     width,
-                    &self.pending_permission_calls,
+                    &self.pending_calls_for_message(messages, index),
                     self.spin_frame.get(),
                     self.tps_enabled(),
                     self.diff_view,
@@ -4349,7 +4448,7 @@ impl ChatView {
             .collect();
         let mut session_rows = crate::native_message_rows::reduce_session_rows(
             &projected,
-            crate::native_message_rows::Verbosity::Medium,
+            self.transcript_verbosity,
             false,
         );
         // MSG-003: partition permission-blocked leaves by full (message, part)
@@ -4381,14 +4480,9 @@ impl ChatView {
             let crate::native_message_rows::SessionRow::Group(group) = row else {
                 continue;
             };
-            let pending_ids: std::collections::BTreeSet<&str> =
-                group.pending.iter().map(|r| r.message_id.as_str()).collect();
-            let message_pending = |index: usize| {
-                messages
-                    .get(index)
-                    .and_then(|m| m.message_id.as_deref())
-                    .is_some_and(|id| pending_ids.contains(id))
-            };
+            if !self.grouped_kind(group.kind) {
+                continue;
+            }
             let mut ids: Vec<String> = Vec::new();
             let mut refs: Vec<crate::native_message_rows::PartRef> = Vec::new();
             fn collect(
@@ -4421,7 +4515,7 @@ impl ChatView {
             let expanded = self.disclosure.borrow().group_expanded(
                 &session,
                 &gid,
-                crate::native_message_rows::Verbosity::Medium,
+                self.transcript_verbosity,
                 group.kind,
             );
             let mut indices: Vec<usize> = ids.iter().filter_map(|id| by_id.get(id.as_str()).copied()).collect();
@@ -4429,24 +4523,6 @@ impl ChatView {
             indices.dedup();
             let Some(anchor) = indices.first().copied() else {
                 continue;
-            };
-            // A message collapses only when EVERY one of its renderable parts
-            // belongs to this group; a message with a standalone part (e.g. a
-            // bash/execute call beside a grouped read, or a File/Subtask part
-            // the reducer does not group) keeps rendering, so a group can never
-            // hide an unrelated row.
-            let fully_grouped = |index: usize| {
-                let Some(message) = messages.get(index) else {
-                    return false;
-                };
-                let mid = message.message_id.clone().unwrap_or_default();
-                let Some(needed) = message_part_ids(message) else {
-                    return false;
-                };
-                !needed.is_empty()
-                    && needed
-                        .iter()
-                        .all(|part_id| refs.iter().any(|r| r.message_id == mid && &r.part_id == part_id))
             };
             // A message can anchor more than one group, so every group
             // contributes its own header.
@@ -4457,12 +4533,29 @@ impl ChatView {
                 expanded,
             });
             if !expanded {
-                for index in indices {
-                    if fully_grouped(index) && !message_pending(index) {
-                        plans[index].skip = true;
+                for reference in refs.iter().filter(|reference| !group.pending.contains(reference)) {
+                    if let Some(index) = by_id.get(reference.message_id.as_str()).copied() {
+                        plans[index].hidden_parts.insert(reference.clone());
                     }
                 }
             }
+        }
+        for (index, plan) in plans.iter_mut().enumerate() {
+            let Some(message) = messages.get(index) else { continue; };
+            let Some(parts) = message_part_ids(message) else {
+                // A renderable part the reducer does not group (File/Subtask/etc.)
+                // must keep the whole message visible; do not hide grouped siblings.
+                plan.hidden_parts.clear();
+                plan.skip = false;
+                continue;
+            };
+            plan.skip = !parts.is_empty()
+                && parts.iter().all(|part_id| {
+                    plan.hidden_parts.contains(&crate::native_message_rows::PartRef::new(
+                        message.message_id.as_deref().unwrap_or_default(),
+                        part_id,
+                    ))
+                });
         }
         plans
     }
@@ -4630,6 +4723,10 @@ impl ChatView {
                 let plan = plans.get(index);
                 let skip = plan.is_some_and(|p| p.skip);
                 if !skip {
+                    let render_message = plan
+                        .map(|plan| message_without_hidden_parts(message, &plan.hidden_parts))
+                        .unwrap_or_else(|| message.clone());
+                    let message = &render_message;
                     let mut message_spans: Vec<(usize, Vec<ChatRunSpan>)> = Vec::new();
                     let mut message_children: Vec<(usize, String)> = Vec::new();
                     let mut message_tools: Vec<(usize, usize)> = Vec::new();
@@ -4642,7 +4739,7 @@ impl ChatView {
                         &mut message_children,
                         &mut message_tools,
                         markdown_mode,
-                        &self.pending_permission_calls,
+                        &self.pending_calls_for_message(messages, index),
                         self.spin_frame.get(),
                         self.tps_enabled(),
                         self.diff_view,
