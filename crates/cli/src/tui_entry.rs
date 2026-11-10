@@ -11050,6 +11050,7 @@ fn native_loop(
     let mut utf8 = NativeUtf8Decoder::default();
     let mut input = native_input_decoder::TerminalInputDecoder::default();
     let mut observed_size = (cols, rows);
+    let mut resize_generation: u64 = 0;
     // TAB-21: last observed terminal focus report. Startup assumes focused
     // (`Some(true)`) like the upstream renderer's initial focus state.
     let mut client_focused: Option<bool> = Some(true);
@@ -12240,6 +12241,10 @@ fn native_loop(
         }
         if let Ok(Some(size)) = renderer.terminal_size() {
             if size != observed_size {
+                let mut resize_tx = crate::native_input_transaction::ResizeEventTxn::begin(
+                    (observed_size.0 as u16, observed_size.1 as u16),
+                    (size.0 as u16, size.1 as u16), resize_generation,
+                );
                 crate::native_debug::event(
                     "ui.resize",
                     serde_json::json!({"old_cols":observed_size.0,"old_rows":observed_size.1,"cols":size.0,"rows":size.1}),
@@ -12267,7 +12272,13 @@ fn native_loop(
                     &draft,
                     preserve_anchor,
                 );
-                needs_paint = true;
+                if let Some((committed_size, generation)) = resize_tx.commit() {
+                    observed_size = (committed_size.0 as u32, committed_size.1 as u32);
+                    resize_generation = generation;
+                    needs_paint = true;
+                } else {
+                    resize_tx.rollback();
+                }
             }
         }
         // Binding identity: events/busy apply only while this worker's

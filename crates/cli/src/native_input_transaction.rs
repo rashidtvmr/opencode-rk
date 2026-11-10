@@ -85,6 +85,34 @@ pub(crate) fn classify_protocol(event: ProtocolEvent) -> DispatchOutcome {
     }
 }
 
+/// Owned geometry facts for one terminal resize notification. The transaction
+/// does not touch the renderer or NativeView; callers commit the facts only
+/// after their resize operations succeed, so a rejected event cannot replay a
+/// stale size or generation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ResizeEventTxn {
+    prior: (u16, u16),
+    next: (u16, u16),
+    prior_generation: u64,
+    committed: bool,
+}
+
+impl ResizeEventTxn {
+    pub(crate) fn begin(prior: (u16, u16), next: (u16, u16), generation: u64) -> Self {
+        Self { prior, next, prior_generation: generation, committed: false }
+    }
+    pub(crate) fn commit(&mut self) -> Option<((u16, u16), u64)> {
+        if self.committed || self.next == self.prior { return None; }
+        self.committed = true;
+        Some((self.next, self.prior_generation.wrapping_add(1)))
+    }
+    pub(crate) fn rollback(&mut self) {
+        self.next = self.prior;
+        self.committed = false;
+    }
+    pub(crate) fn committed(&self) -> bool { self.committed }
+}
+
 #[derive(Debug)]
 pub(crate) struct InputEventTxn {
     draft: InputStateDraft,
@@ -150,6 +178,19 @@ mod tests {
         ] {
             assert_eq!(classify_protocol(event), DispatchOutcome::NeedsPaint);
         }
+    }
+
+    #[test]
+    #[test]
+    fn resize_transaction_commits_once_and_rolls_back_without_replay() {
+        let mut tx = ResizeEventTxn::begin((80, 24), (100, 30), 4);
+        assert_eq!(tx.commit(), Some(((100, 30), 5)));
+        assert_eq!(tx.commit(), None);
+        assert!(tx.committed());
+        let mut rolled = ResizeEventTxn::begin((80, 24), (120, 40), 9);
+        rolled.rollback();
+        assert_eq!(rolled.commit(), None);
+        assert!(!rolled.committed());
     }
 
     #[test]
