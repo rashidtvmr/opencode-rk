@@ -64,6 +64,27 @@ pub(crate) enum DispatchOutcome {
     Crash(String),
 }
 
+/// Protocol-only events are classified before any mutable NativeView or
+/// external command handling. This is the first live-dispatch seam: protocol
+/// replies and focus reports consume their event exactly once and request a
+/// repaint without entering the broad legacy dispatcher.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProtocolEvent {
+    FocusGained,
+    FocusLost,
+    OscColorReply,
+    Resize,
+}
+
+pub(crate) fn classify_protocol(event: ProtocolEvent) -> DispatchOutcome {
+    match event {
+        ProtocolEvent::FocusGained
+        | ProtocolEvent::FocusLost
+        | ProtocolEvent::OscColorReply
+        | ProtocolEvent::Resize => DispatchOutcome::NeedsPaint,
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct InputEventTxn {
     draft: InputStateDraft,
@@ -117,6 +138,18 @@ mod tests {
         assert_eq!(draft.text, "ab");
         assert_eq!(actions.unwrap().len(), 1);
         assert_eq!(DispatchOutcome::NeedsPaint, DispatchOutcome::NeedsPaint);
+    }
+
+    #[test]
+    fn protocol_classification_is_pure_and_requests_paint() {
+        for event in [
+            ProtocolEvent::FocusGained,
+            ProtocolEvent::FocusLost,
+            ProtocolEvent::OscColorReply,
+            ProtocolEvent::Resize,
+        ] {
+            assert_eq!(classify_protocol(event), DispatchOutcome::NeedsPaint);
+        }
     }
 
     #[test]

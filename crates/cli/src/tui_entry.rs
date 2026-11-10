@@ -14204,6 +14204,28 @@ fn native_loop(
             input.push(byte[0], Instant::now());
         }
         let Some(mut event) = input.pop() else { continue };
+        // Transactional protocol classification is pure and happens before
+        // any NativeView mutation. The legacy branches below retain their
+        // established side effects; this seam proves they receive an owned
+        // outcome without crossing the broad dispatcher boundary.
+        let _protocol_outcome = match &event {
+            native_input_decoder::InputEvent::FocusGained => Some(
+                crate::native_input_transaction::classify_protocol(
+                    crate::native_input_transaction::ProtocolEvent::FocusGained,
+                ),
+            ),
+            native_input_decoder::InputEvent::FocusLost => Some(
+                crate::native_input_transaction::classify_protocol(
+                    crate::native_input_transaction::ProtocolEvent::FocusLost,
+                ),
+            ),
+            native_input_decoder::InputEvent::OscColorReply { .. } => Some(
+                crate::native_input_transaction::classify_protocol(
+                    crate::native_input_transaction::ProtocolEvent::OscColorReply,
+                ),
+            ),
+            _ => None,
+        };
         // DIALOG-03: the modal layer snapshots the currently focused shell
         // target on first open.  Keep that snapshot meaningful while the
         // shell is visible, and consume the one-shot refocus timer after a
