@@ -18109,13 +18109,14 @@ fn native_loop(
                             binding_generation,
                         )
                     });
-                    match composer_enter_plan(
+                    let preflight = ComposerSubmitPreflight::prepare(
                         &draft,
                         turn_owns_binding,
                         live.is_some(),
                         completion.triggered(),
                         queued_drafts.len(),
-                    ) {
+                    );
+                    match preflight.plan {
                         // Idle steer keeps the existing dispatch path; the
                         // native model gate below still owns the selection
                         // dialog (upstream `promptModelWarning`), and no
@@ -18163,7 +18164,7 @@ fn native_loop(
                                 );
                             } else {
                                 let queued_text =
-                                    crate::native_paste::expand_for_submit(&draft, &draft_parts);
+                                    crate::native_paste::expand_for_submit(&preflight.draft, &draft_parts);
                                 crate::native_debug::event(
                                     "prompt.queued",
                                     prompt_queued_event_fields(
