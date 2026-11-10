@@ -750,6 +750,46 @@ pub(crate) struct CommandPlan {
     pub(crate) committed: bool,
 }
 
+/// Page-query transaction: the query is local, bounded, and owns its working
+/// copy. It is intentionally separate from NativeView until commit; a panic
+/// during filtering cannot publish a partial query or replay the key event.
+#[cfg(feature = "native")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PageQueryTransaction {
+    original: String,
+    working: String,
+    committed: bool,
+}
+
+#[cfg(feature = "native")]
+impl PageQueryTransaction {
+    pub(crate) fn begin(query: &str) -> Self {
+        Self { original: query.to_owned(), working: query.to_owned(), committed: false }
+    }
+
+    pub(crate) fn push(&mut self, character: char) -> bool {
+        if self.working.chars().count() + 1 > 256 {
+            return false;
+        }
+        self.working.push(character);
+        true
+    }
+
+    pub(crate) fn backspace(&mut self) -> bool {
+        self.working.pop().is_some()
+    }
+
+    pub(crate) fn commit(&mut self, view: &mut crate::native_view::NativeView) {
+        view.replace_page_query(&self.working);
+        self.committed = true;
+    }
+
+    pub(crate) fn rollback(&mut self) {
+        self.working = self.original.clone();
+        self.committed = false;
+    }
+}
+
 #[cfg(feature = "native")]
 impl CommandPlan {
     pub(crate) fn new() -> Self { Self::default() }
@@ -760,7 +800,19 @@ impl CommandPlan {
 
 #[cfg(all(test, feature = "native"))]
 mod command_plan_tests {
-    use super::{CommandPlan, ExternalAction};
+    use super::{CommandPlan, ExternalAction, PageQueryTransaction};
+
+    #[test]
+    fn page_query_is_owned_and_commits_once() {
+        let mut tx = PageQueryTransaction::begin("old");
+        assert!(tx.push('x'));
+        assert!(tx.backspace());
+        tx.rollback();
+        assert!(!tx.committed);
+        assert_eq!(tx.working, "old");
+        assert!(tx.push('y'));
+        assert_eq!(tx.working, "oldy");
+    }
 
     #[test]
     fn command_plan_is_owned_and_rolls_back_without_replay() {
@@ -2490,8 +2542,71 @@ fn native_size() -> (u32, u32) {
 /// the legacy `PaintCtx` is assembled.
 #[cfg(feature = "native")]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct FrameDerivedSnapshot {
+struct FrameSnapshot {
+    /// Owned lines are the immutable source for all paint inputs in this phase.
+    lines: Vec<String>,
+    /// Owned interaction rows derived from the same immutable facts.
     selectable: Vec<String>,
+}
+
+#[cfg(feature = "native")]
+struct FrameSnapshotFacts<'a> {
+    lines: &'a [String],
+    home: bool,
+    modal_open: bool,
+    help_open: bool,
+    row_classes: &'a [crate::native_view_chat::ChatRowClass],
+    text_bounds: &'a [Option<(u16, u16)>],
+}
+
+#[cfg(feature = "native")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct FrameSnapshotBuilder {
+    /// Test-only fault injection is represented as an immutable input fact;
+    /// production always uses `false`. No NativeView or syntax arena is held.
+    inject_before_derive: bool,
+}
+
+#[cfg(feature = "native")]
+impl FrameSnapshotBuilder {
+    fn new() -> Self { Self::default() }
+
+    #[cfg(test)]
+    fn with_injected_panic() -> Self { Self { inject_before_derive: true } }
+
+    fn build(&self, facts: FrameSnapshotFacts<'_>) -> FrameSnapshot {
+        if self.inject_before_derive {
+            panic!("deterministic frame snapshot injection");
+        }
+        let selectable = facts
+            .lines
+            .iter()
+            .enumerate()
+            .map(|(row, line)| {
+                if !facts.home
+                    && !facts.modal_open
+                    && !facts.help_open
+                    && crate::tui_entry::chat_row_is_selectable(facts.row_classes.get(row))
+                {
+                    if let Some((left, width)) = facts.text_bounds.get(row).copied().flatten() {
+                        format!(
+                            "{}{}",
+                            " ".repeat(usize::from(left)),
+                            crate::native_view_layout::slice_cells(line, left, width)
+                        )
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                }
+            })
+            .collect();
+        FrameSnapshot {
+            lines: facts.lines.to_vec(),
+            selectable,
+        }
+    }
 }
 
 #[cfg(feature = "native")]
@@ -2502,31 +2617,15 @@ fn derive_selectable_snapshot(
     help_open: bool,
     row_classes: &[crate::native_view_chat::ChatRowClass],
     text_bounds: &[Option<(u16, u16)>],
-) -> FrameDerivedSnapshot {
-    let selectable = lines
-        .iter()
-        .enumerate()
-        .map(|(row, line)| {
-            if !home
-                && !modal_open
-                && !help_open
-                && crate::tui_entry::chat_row_is_selectable(row_classes.get(row))
-            {
-                if let Some((left, width)) = text_bounds.get(row).copied().flatten() {
-                    format!(
-                        "{}{}",
-                        " ".repeat(usize::from(left)),
-                        crate::native_view_layout::slice_cells(line, left, width)
-                    )
-                } else {
-                    String::new()
-                }
-            } else {
-                String::new()
-            }
-        })
-        .collect();
-    FrameDerivedSnapshot { selectable }
+) -> FrameSnapshot {
+    FrameSnapshotBuilder::new().build(FrameSnapshotFacts {
+        lines,
+        home,
+        modal_open,
+        help_open,
+        row_classes,
+        text_bounds,
+    })
 }
 
 #[cfg(feature = "native")]
@@ -2552,6 +2651,34 @@ mod frame_derived_snapshot_tests {
         assert_eq!(derive_selectable_snapshot(&lines, true, false, false, &classes, &bounds).selectable, vec![""]);
         assert_eq!(derive_selectable_snapshot(&lines, false, true, false, &classes, &bounds).selectable, vec![""]);
         assert_eq!(derive_selectable_snapshot(&lines, false, false, true, &classes, &bounds).selectable, vec![""]);
+    }
+
+    #[test]
+    fn builder_owns_lines_and_panic_does_not_publish_partial_snapshot() {
+        let mut lines = vec!["stable".to_owned()];
+        let classes = vec![crate::native_view_chat::ChatRowClass::Text];
+        let bounds = vec![Some((0, 6))];
+        let snapshot = FrameSnapshotBuilder::new().build(FrameSnapshotFacts {
+            lines: &lines,
+            home: false,
+            modal_open: false,
+            help_open: false,
+            row_classes: &classes,
+            text_bounds: &bounds,
+        });
+        lines[0].replace_range(..6, "mutate");
+        assert_eq!(snapshot.lines, vec!["stable"]);
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            FrameSnapshotBuilder::with_injected_panic().build(FrameSnapshotFacts {
+                lines: &lines,
+                home: false,
+                modal_open: false,
+                help_open: false,
+                row_classes: &classes,
+                text_bounds: &bounds,
+            })
+        }));
+        assert!(panic.is_err());
     }
 }
 
@@ -13456,15 +13583,18 @@ fn native_loop(
                     )?;
                 }
             }
-            let selectable_snapshot = derive_selectable_snapshot(
-                &lines,
+            // Owned immutable-facts snapshot: all interaction rows for this
+            // phase are computed without borrowing NativeView or syntax state
+            // across the future panic boundary.
+            let frame_snapshot = FrameSnapshotBuilder::new().build(FrameSnapshotFacts {
+                lines: &lines,
                 home,
-                modal_rows.is_some(),
+                modal_open: modal_rows.is_some(),
                 help_open,
-                view.chat_row_classes(),
-                view.chat_text_bounds(),
-            );
-            let selectable = selectable_snapshot.selectable;
+                row_classes: view.chat_row_classes(),
+                text_bounds: view.chat_text_bounds(),
+            });
+            let selectable = frame_snapshot.selectable;
             selection.set_rows(&selectable, 0, 0, u32::from(presentation.main_width));
             // DIALOG-20: lay the live toast out into bounded styled cells
             // (`ui/toast.tsx`); `None` when nothing is visible or the viewport
