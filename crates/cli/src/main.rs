@@ -30,6 +30,8 @@ mod ci_output;
 mod ci_run;
 mod composer;
 mod tui_entry;
+#[cfg(feature = "native")]
+mod native_input_transaction;
 use tui_entry::TuiArgs;
 mod app_start;
 mod chat;
