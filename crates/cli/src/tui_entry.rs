@@ -7982,10 +7982,10 @@ fn bind_session(
     let draft = view
         .bind_commit(
             Ok((
-                snapshot.session_id.clone(),
+                bound_id.clone(),
                 snapshot.history.clone(),
                 rows,
-                snapshot.message_count,
+                bound_count,
             )),
             global_draft,
             &mut transcript.lines,
@@ -7998,9 +7998,9 @@ fn bind_session(
     // triple is always the freshly bound session — never a stale title,
     // stale count or a mismatched id.
     view.set_session_binding(
-        Some(snapshot.session_id.clone()),
-        Some(snapshot.title.clone()),
-        Some(snapshot.message_count),
+        Some(bound_id),
+        Some(bound_title),
+        Some(bound_count),
     );
     transcript.reset(snapshot.history.clone(), snapshot.typed_history.clone());
     view.set_parent_session(snapshot.parent_session);
