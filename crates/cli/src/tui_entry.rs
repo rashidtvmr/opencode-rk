@@ -762,6 +762,43 @@ pub(crate) struct PageQueryTransaction {
 }
 
 #[cfg(feature = "native")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ComposerDraftTransaction {
+    original: String,
+    working: String,
+    original_cursor: usize,
+    cursor: usize,
+    committed: bool,
+}
+
+#[cfg(feature = "native")]
+impl ComposerDraftTransaction {
+    pub(crate) fn begin(draft: &str, cursor: usize) -> Self {
+        Self { original: draft.to_owned(), working: draft.to_owned(), original_cursor: cursor, cursor, committed: false }
+    }
+
+    pub(crate) fn backspace(&mut self) -> bool {
+        if self.cursor == 0 { return false; }
+        let previous = self.working[..self.cursor].char_indices().next_back().map_or(0, |(i, _)| i);
+        self.working.drain(previous..self.cursor);
+        self.cursor = previous;
+        true
+    }
+
+    pub(crate) fn commit(&mut self, draft: &mut String, cursor: &mut usize) {
+        *draft = self.working.clone();
+        *cursor = self.cursor;
+        self.committed = true;
+    }
+
+    pub(crate) fn rollback(&mut self) {
+        self.working = self.original.clone();
+        self.cursor = self.original_cursor;
+        self.committed = false;
+    }
+}
+
+#[cfg(feature = "native")]
 impl PageQueryTransaction {
     pub(crate) fn begin(query: &str) -> Self {
         Self { original: query.to_owned(), working: query.to_owned(), committed: false }
@@ -880,7 +917,24 @@ mod http_intent_tests {
 
 #[cfg(all(test, feature = "native"))]
 mod command_plan_tests {
-    use super::{CommandPlan, ExternalAction, PageQueryTransaction};
+    use super::{CommandPlan, ComposerDraftTransaction, ExternalAction, PageQueryTransaction};
+
+    #[test]
+    fn composer_backspace_rolls_back_without_replay_and_commits_once() {
+        let mut tx = ComposerDraftTransaction::begin("café", 5);
+        assert!(tx.backspace());
+        tx.rollback();
+        assert!(!tx.committed);
+        assert_eq!(tx.working, "café");
+        assert_eq!(tx.cursor, 5);
+        assert!(tx.backspace());
+        let mut draft = "café".to_owned();
+        let mut cursor = 5;
+        tx.commit(&mut draft, &mut cursor);
+        assert!(tx.committed);
+        assert_eq!(draft, "caf");
+        assert_eq!(cursor, 3);
+    }
 
     #[test]
     fn page_query_is_owned_and_commits_once() {
@@ -17932,10 +17986,11 @@ fn native_loop(
                         continue;
                     }
                     if draft_cursor > 0 {
-                        let previous = draft[..draft_cursor].char_indices().next_back().map_or(0, |(i, _)| i);
-                        draft.drain(previous..draft_cursor);
-                        draft_cursor = previous;
-                        crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
+                        let mut tx = ComposerDraftTransaction::begin(&draft, draft_cursor);
+                        if tx.backspace() {
+                            tx.commit(&mut draft, &mut draft_cursor);
+                            crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
+                        }
                     }
                 } else {
                     filter_input.pop();
