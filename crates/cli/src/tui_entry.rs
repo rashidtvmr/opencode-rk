@@ -832,6 +832,12 @@ impl HttpRequestIntent {
 
     pub(crate) fn commit(&mut self) { self.committed = true; }
 
+    /// Consume a committed request exactly once for the post-transaction I/O
+    /// phase. Uncommitted intents are discarded rather than executed.
+    pub(crate) fn into_committed(self) -> Option<(String, String, Option<String>, Option<String>)> {
+        self.committed.then_some((self.method, self.path, self.body, self.auth))
+    }
+
     pub(crate) fn rollback(&mut self) {
         self.method.clear();
         self.path.clear();
@@ -5350,6 +5356,17 @@ impl DialogActionPlan {
         self.action.take()
     }
     fn rollback(&mut self) { self.action = None; self.committed = false; }
+}
+
+/// Consume a dialog intent exactly once after the owning local dispatch has
+/// returned. The action is moved out of the plan before any external handler
+/// runs, so a later panic cannot replay the already-consumed input event.
+#[cfg(feature = "native")]
+fn commit_dialog_action(action: Option<SessionsKeyAction>) -> Option<SessionsKeyAction> {
+    action.map(|action| {
+        let mut plan = DialogActionPlan::new(action);
+        plan.commit()
+    }).flatten()
 }
 
 #[cfg(all(test, feature = "native"))]
@@ -17212,6 +17229,7 @@ fn native_loop(
             }
             if view.dialogs.open_kind() == Some(crate::native_view_dialogs::DialogKind::Sessions) {
                 let (handled, action) = sessions_live_dispatch(&mut view, byte);
+                let action = commit_dialog_action(action);
                 match action {
                     Some(SessionsKeyAction::Open(id)) => {
                         let scroll = view.chat_scroll_offset();
@@ -17238,9 +17256,25 @@ fn native_loop(
                         }
                     }
                     Some(SessionsKeyAction::Delete(id)) => {
+                        // Build and commit the owned request before executing I/O;
+                        // consuming it below is exactly-once and cannot replay a
+                        // consumed dialog event after a panic/rollback.
+                        let mut request_intent = daemon_origin
+                            .map(|_| HttpRequestIntent::new(
+                                "DELETE",
+                                format!("/api/sessions/{id}"),
+                                None,
+                                auth,
+                            ));
                         let deletion = daemon_origin
                             .ok_or_else(|| "daemon unavailable".to_owned())
-                            .and_then(|origin| http_request(origin, "DELETE", &format!("/api/sessions/{id}"), None, auth));
+                            .and_then(|origin| {
+                                let mut intent = request_intent.take().ok_or_else(|| "missing request intent".to_owned())?;
+                                intent.commit();
+                                let (method, path, body, request_auth) = intent.into_committed()
+                                    .ok_or_else(|| "request intent was not committed".to_owned())?;
+                                http_request(origin, &method, &path, body.as_deref(), request_auth.as_deref())
+                            });
                         match deletion {
                             Ok(_) => {
                                 view.dialogs.sessions_remove(&id);
