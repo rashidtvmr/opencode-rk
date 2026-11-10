@@ -1711,9 +1711,9 @@ fn snapshot_from_listing(
         #[cfg(feature = "native")]
         session_revert_boundary,
         #[cfg(feature = "native")]
-        session_idle_at: crate::native_assistant_facts::created_at_ms(target, "/idleAt"),
+        session_idle_at: crate::native_assistant_facts::created_at_ms(target, "/idle_at"),
         #[cfg(feature = "native")]
-        session_viewed_at: crate::native_assistant_facts::created_at_ms(target, "/viewedAt"),
+        session_viewed_at: crate::native_assistant_facts::created_at_ms(target, "/viewed_at"),
     })
 }
 
