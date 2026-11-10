@@ -14347,14 +14347,18 @@ fn native_loop(
             native_input_decoder::InputEvent::FocusGained
                 | native_input_decoder::InputEvent::FocusLost
         ) {
-            match &event {
-                native_input_decoder::InputEvent::FocusGained if client_focused != Some(true) => {
-                    client_focused = Some(true);
+            let next_focus = match &event {
+                native_input_decoder::InputEvent::FocusGained => Some(true),
+                native_input_decoder::InputEvent::FocusLost => Some(false),
+                _ => None,
+            };
+            if let Some(next_focus) = next_focus {
+                let mut focus_tx = crate::native_input_transaction::FocusEventTxn::begin(client_focused, next_focus);
+                if let Some(committed) = focus_tx.commit() {
+                    client_focused = Some(committed);
+                } else {
+                    focus_tx.rollback();
                 }
-                native_input_decoder::InputEvent::FocusLost if client_focused != Some(false) => {
-                    client_focused = Some(false);
-                }
-                _ => {}
             }
             needs_paint = true;
             continue;

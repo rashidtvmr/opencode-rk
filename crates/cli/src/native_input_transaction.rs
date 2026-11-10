@@ -85,6 +85,30 @@ pub(crate) fn classify_protocol(event: ProtocolEvent) -> DispatchOutcome {
     }
 }
 
+/// Owned focus fact transition. The transaction does not touch the live loop;
+/// callers publish the staged edge only after classification succeeds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FocusEventTxn {
+    prior: Option<bool>,
+    next: Option<bool>,
+    committed: bool,
+}
+
+impl FocusEventTxn {
+    pub(crate) fn begin(prior: Option<bool>, next: bool) -> Self {
+        Self { prior, next: Some(next), committed: false }
+    }
+    pub(crate) fn commit(&mut self) -> Option<bool> {
+        if self.committed || self.next == self.prior { return None; }
+        self.committed = true;
+        self.next
+    }
+    pub(crate) fn rollback(&mut self) {
+        self.next = self.prior;
+        self.committed = false;
+    }
+}
+
 /// Owned geometry bookkeeping for one terminal resize notification. The
 /// transaction does not touch the renderer or NativeView. Callers commit the
 /// observed size and generation only after resize-side operations return;
@@ -111,6 +135,38 @@ impl ResizeEventTxn {
         self.committed = false;
     }
     pub(crate) fn committed(&self) -> bool { self.committed }
+}
+
+/// Owned completion edit intent. The selected route and resulting draft are
+/// prepared without touching the live completion widget; callers publish the
+/// draft and dismiss the widget only after commit succeeds.
+#[derive(Debug)]
+pub(crate) struct CompletionEditTxn {
+    draft: String,
+    cursor: usize,
+    route: String,
+    committed: bool,
+}
+
+impl CompletionEditTxn {
+    pub(crate) fn begin(draft: &str, cursor: usize, route: &str) -> Option<Self> {
+        if route == "/cd" || cursor > draft.len() || !draft.is_char_boundary(cursor) { return None; }
+        let mut staged = draft.to_owned();
+        staged.replace_range(.., route);
+        Some(Self { draft: staged, cursor: route.len(), route: route.to_owned(), committed: false })
+    }
+
+    pub(crate) fn commit(&mut self) -> Option<(String, usize, String)> {
+        if self.committed || self.route.is_empty() { return None; }
+        self.committed = true;
+        Some((std::mem::take(&mut self.draft), self.cursor, std::mem::take(&mut self.route)))
+    }
+
+    pub(crate) fn rollback(&mut self) {
+        self.draft.clear();
+        self.route.clear();
+        self.committed = false;
+    }
 }
 
 #[derive(Debug)]
@@ -166,6 +222,26 @@ mod tests {
         assert_eq!(draft.text, "ab");
         assert_eq!(actions.unwrap().len(), 1);
         assert_eq!(DispatchOutcome::NeedsPaint, DispatchOutcome::NeedsPaint);
+    }
+
+    #[test]
+    fn completion_edit_commits_once_and_rolls_back_without_replay() {
+        let mut tx = CompletionEditTxn::begin("/mo", 3, "/models").unwrap();
+        assert_eq!(tx.commit(), Some(("/models".into(), 7, "/models".into())));
+        assert_eq!(tx.commit(), None);
+        let mut rolled = CompletionEditTxn::begin("/mo", 3, "/models").unwrap();
+        rolled.rollback();
+        assert_eq!(rolled.commit(), None);
+    }
+
+    #[test]
+    fn focus_transaction_commits_once_and_rolls_back_without_replay() {
+        let mut tx = FocusEventTxn::begin(Some(true), false);
+        assert_eq!(tx.commit(), Some(false));
+        assert_eq!(tx.commit(), None);
+        let mut rolled = FocusEventTxn::begin(Some(true), false);
+        rolled.rollback();
+        assert_eq!(rolled.commit(), None);
     }
 
     #[test]
