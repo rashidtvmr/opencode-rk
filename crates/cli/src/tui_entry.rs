@@ -798,6 +798,80 @@ impl CommandPlan {
     pub(crate) fn rollback(&mut self) { self.actions.clear(); self.committed = false; }
 }
 
+/// Owned HTTP intent for a single deferred request. Building this value is
+/// pure and bounded: it validates/copies all request fields without opening a
+/// socket. The caller may commit the intent exactly once after its surrounding
+/// state transaction commits; rollback consumes the request so a panic or
+/// aborted dispatch cannot replay an already-consumed input event.
+#[cfg(feature = "native")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct HttpRequestIntent {
+    pub(crate) method: String,
+    pub(crate) path: String,
+    pub(crate) body: Option<String>,
+    pub(crate) auth: Option<String>,
+    pub(crate) committed: bool,
+}
+
+#[cfg(feature = "native")]
+impl HttpRequestIntent {
+    pub(crate) fn new(
+        method: impl Into<String>,
+        path: impl Into<String>,
+        body: Option<&str>,
+        auth: Option<&str>,
+    ) -> Self {
+        Self {
+            method: method.into(),
+            path: path.into(),
+            body: body.map(str::to_owned),
+            auth: auth.map(str::to_owned),
+            committed: false,
+        }
+    }
+
+    pub(crate) fn commit(&mut self) { self.committed = true; }
+
+    pub(crate) fn rollback(&mut self) {
+        self.method.clear();
+        self.path.clear();
+        self.body = None;
+        self.auth = None;
+        self.committed = false;
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod http_intent_tests {
+    use super::HttpRequestIntent;
+
+    #[test]
+    fn http_intent_is_owned_and_rollback_prevents_replay() {
+        let mut intent = HttpRequestIntent::new(
+            "POST",
+            "/api/session/s/interrupt",
+            Some("{}"),
+            Some("token"),
+        );
+        assert_eq!(intent.method, "POST");
+        assert_eq!(intent.path, "/api/session/s/interrupt");
+        assert_eq!(intent.body.as_deref(), Some("{}"));
+        assert_eq!(intent.auth.as_deref(), Some("token"));
+        intent.rollback();
+        assert!(!intent.committed);
+        assert!(intent.method.is_empty());
+        assert!(intent.path.is_empty());
+        assert!(intent.body.is_none());
+        assert!(intent.auth.is_none());
+
+        let mut committed = HttpRequestIntent::new("DELETE", "/api/session/s", None, None);
+        committed.commit();
+        assert!(committed.committed);
+        assert_eq!(committed.method, "DELETE");
+    }
+}
+
+
 #[cfg(all(test, feature = "native"))]
 mod command_plan_tests {
     use super::{CommandPlan, ExternalAction, PageQueryTransaction};
@@ -5260,7 +5334,37 @@ fn select_menu_key(
 }
 
 #[cfg(feature = "native")]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum SessionsKeyAction { Open(String), Rename(String), Delete(String) }
+
+#[cfg(feature = "native")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DialogActionPlan { action: Option<SessionsKeyAction>, committed: bool }
+
+#[cfg(feature = "native")]
+impl DialogActionPlan {
+    fn new(action: SessionsKeyAction) -> Self { Self { action: Some(action), committed: false } }
+    fn commit(&mut self) -> Option<SessionsKeyAction> {
+        if self.committed { return None; }
+        self.committed = true;
+        self.action.take()
+    }
+    fn rollback(&mut self) { self.action = None; self.committed = false; }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod dialog_action_plan_tests {
+    use super::{DialogActionPlan, SessionsKeyAction};
+    #[test]
+    fn dialog_action_plan_rolls_back_without_replay_and_commits_once() {
+        let mut rolled = DialogActionPlan::new(SessionsKeyAction::Open("session-a".into()));
+        rolled.rollback();
+        assert_eq!(rolled.commit(), None);
+        let mut committed = DialogActionPlan::new(SessionsKeyAction::Delete("session-b".into()));
+        assert_eq!(committed.commit(), Some(SessionsKeyAction::Delete("session-b".into())));
+        assert_eq!(committed.commit(), None);
+    }
+}
 
 /// DIALOG-16: the Settings dialog key dispatch outcome. `Close` tells the
 /// caller to dismiss the settings dialog (second Escape); `Action` carries a
