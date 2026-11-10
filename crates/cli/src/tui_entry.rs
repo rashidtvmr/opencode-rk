@@ -17843,10 +17843,6 @@ fn native_loop(
                     needs_paint = true;
                 } else if let Some(candidate) = pending_session.take() {
                     // Stage navigation metadata separately from the fallible bind.
-                    // The live navigation state is published only after the
-                    // authenticated bind succeeds; a failed request cannot
-                    // partially switch tabs or replay this consumed key.
-                    let mut navigation_plan = NavigationPreflight::begin(&navigation);
                     let bound = live
                         .as_ref()
                         .ok_or_else(|| "daemon unavailable".to_owned())
