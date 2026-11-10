@@ -4182,6 +4182,13 @@ impl NativeView {
         true
     }
 
+    /// Commit an already-validated page-query transaction. The transaction
+    /// owns the candidate string and performs no routing or I/O; this setter
+    /// is the sole publication point for query edits.
+    pub(crate) fn replace_page_query(&mut self, query: &str) {
+        self.pages.search(query);
+    }
+
     /// Open the Commands page with its static route rows bound to the
     /// current page (open FIRST, then load: rows bind at load time — the
     /// same ordering as `/sessions`). The SINGLE production open path:
