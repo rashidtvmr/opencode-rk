@@ -11464,6 +11464,56 @@ mod f002r2_reject_stage_tests {
         assert!(!view.reject_stage(), "the stage is consumed on confirm");
     }
 
+    /// FORM-001 sub-4: the rejection-reason editor is scoped to its own
+    /// permission request.  Upstream mounts a fresh `RejectPrompt` with its own
+    /// `TextareaRenderable` per request and replies with that request's identity
+    /// (`routes/session/permission.tsx:144-155,272-277,296-306`), so completing
+    /// one child rejection must not leave its textarea value in the next child
+    /// permission dialog, and the second reply must carry the second request's
+    /// identity and reason.
+    #[test]
+    fn form001_sub4_rejection_reason_does_not_leak_between_nested_dialogs() {
+        let mut view = child_permission();
+        assert!(view.begin_reject_stage());
+        for ch in "first request reason".chars() {
+            assert!(view.prompt_push(ch));
+        }
+        assert_eq!(view.reject_reason(), "first request reason");
+        let first = view.confirm_reject_stage().expect("first reject emits intent");
+        let first_ack = DialogAck {
+            request_id: first.request_id().to_owned(),
+            session_id: first.session_id().to_owned(),
+            accepted: true,
+            attempt: first.attempt(),
+        };
+        assert_eq!(view.ack(first_ack).unwrap(), AckOutcome::Closed);
+        assert!(!view.is_open(), "the first dialog is closed");
+
+        // A different child permission request opens its own dialog.
+        view.open_permission_with_persistent("req-2", "ses-2", "write", true)
+            .expect("second permission opens");
+        view.set_permission_session_has_parent(true);
+        assert!(view.select(2), "the second reject row is selectable");
+        assert!(view.begin_reject_stage());
+        assert_eq!(view.reject_reason(), "", "the new editor starts empty");
+        for ch in "second request reason".chars() {
+            assert!(view.prompt_push(ch));
+        }
+        match view.confirm_reject_stage().expect("second reject emits intent") {
+            DecisionIntent::Reject {
+                request_id,
+                session_id,
+                message,
+                ..
+            } => {
+                assert_eq!(request_id, "req-2");
+                assert_eq!(session_id, "ses-2");
+                assert_eq!(message.as_deref(), Some("second request reason"));
+            }
+            other => panic!("expected second reject, got {other:?}"),
+        }
+    }
+
     #[test]
     fn f002r2_confirm_with_empty_reason_omits_the_message() {
         let mut view = child_permission();
