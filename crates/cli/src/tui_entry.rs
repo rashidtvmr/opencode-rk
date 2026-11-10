@@ -785,6 +785,19 @@ impl ComposerDraftTransaction {
         true
     }
 
+    pub(crate) fn insert(&mut self, character: char, max_bytes: usize) -> bool {
+        let width = character.len_utf8();
+        if self.working.len().checked_add(width).is_none_or(|len| len > max_bytes)
+            || self.cursor > self.working.len()
+            || !self.working.is_char_boundary(self.cursor)
+        {
+            return false;
+        }
+        self.working.insert(self.cursor, character);
+        self.cursor += width;
+        true
+    }
+
     pub(crate) fn commit(&mut self, draft: &mut String, cursor: &mut usize) {
         *draft = self.working.clone();
         *cursor = self.cursor;
@@ -884,6 +897,53 @@ impl HttpRequestIntent {
     }
 }
 
+/// Owned request plan for the initial session listing during bind. Building
+/// this plan copies request data only; socket I/O and all view/navigation
+/// mutations remain outside the plan and happen after exactly-once consume.
+#[cfg(feature = "native")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BindRequestPlan {
+    path: String,
+    auth: Option<String>,
+    committed: bool,
+}
+
+#[cfg(feature = "native")]
+impl BindRequestPlan {
+    pub(crate) fn begin(auth: Option<&str>) -> Self {
+        Self { path: "/api/sessions".to_owned(), auth: auth.map(str::to_owned), committed: false }
+    }
+
+    pub(crate) fn commit(&mut self) { self.committed = true; }
+
+    pub(crate) fn into_committed(self) -> Option<(String, Option<String>)> {
+        self.committed.then_some((self.path, self.auth))
+    }
+
+    pub(crate) fn rollback(&mut self) {
+        self.path.clear();
+        self.auth = None;
+        self.committed = false;
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod bind_request_plan_tests {
+    use super::BindRequestPlan;
+
+    #[test]
+    fn bind_request_plan_rolls_back_without_replay_and_commits_once() {
+        let mut rolled = BindRequestPlan::begin(Some("token"));
+        rolled.rollback();
+        assert_eq!(rolled.into_committed(), None);
+
+        let mut committed = BindRequestPlan::begin(Some("token"));
+        committed.commit();
+        let first = committed.into_committed();
+        assert_eq!(first, Some(("/api/sessions".to_owned(), Some("token".to_owned()))));
+    }
+}
+
 #[cfg(all(test, feature = "native"))]
 mod http_intent_tests {
     use super::HttpRequestIntent;
@@ -934,6 +994,21 @@ mod command_plan_tests {
         assert!(tx.committed);
         assert_eq!(draft, "caf");
         assert_eq!(cursor, 3);
+    }
+
+    #[test]
+    fn composer_insert_rolls_back_without_replay_and_commits_once() {
+        let mut tx = ComposerDraftTransaction::begin("ab", 2);
+        assert!(tx.insert('é', 16));
+        tx.rollback();
+        assert_eq!(tx.working, "ab");
+        assert_eq!(tx.cursor, 2);
+        assert!(tx.insert('é', 16));
+        let mut draft = "ab".to_owned();
+        let mut cursor = 2;
+        tx.commit(&mut draft, &mut cursor);
+        assert_eq!(draft, "abé");
+        assert_eq!(cursor, 4);
     }
 
     #[test]
@@ -7830,7 +7905,12 @@ fn bind_session(
     // Phase 1 — every required authenticated fetch, ZERO local mutation.
     // A listing failure / parse failure ERRORS HERE, before bind_commit can
     // touch the draft store, rows, active marker, status or transcript.
-    let listing = http_request(origin, "GET", "/api/sessions", None, auth)
+    let mut request_plan = BindRequestPlan::begin(auth);
+    request_plan.commit();
+    let (listing_path, listing_auth) = request_plan
+        .into_committed()
+        .ok_or_else(|| "session listing request was not committed".to_owned())?;
+    let listing = http_request(origin, "GET", &listing_path, None, listing_auth.as_deref())
         .map_err(|error| format!("session listing unavailable: {error}"))?;
     let value: serde_json::Value = serde_json::from_str(&listing)
         .map_err(|error| format!("session listing is not valid JSON: {error}"))?;
@@ -19917,9 +19997,9 @@ fn native_loop(
                         let width = character.len_utf8();
                         if prompt_byte_insert_allowed(&prompt_focus, dialog) {
                             crate::native_composer::normalize_cursor(&draft, &mut draft_cursor);
-                            if draft.len().checked_add(width).is_some_and(|len| len <= MAX_NATIVE_DRAFT_BYTES) {
-                                draft.insert(draft_cursor, character);
-                                draft_cursor += width;
+                            let mut tx = ComposerDraftTransaction::begin(&draft, draft_cursor);
+                            if tx.insert(character, MAX_NATIVE_DRAFT_BYTES) {
+                                tx.commit(&mut draft, &mut draft_cursor);
                                 // An ordinary edit can shift or delete a
                                 // folded placeholder; re-anchor the tracked
                                 // ranges to the current draft so a later
