@@ -3748,10 +3748,29 @@ impl DialogView {
                             for (index, row) in rendered.rows.iter().enumerate() {
                                 if rendered.rows.len() > crate::native_diff_view::VIRTUAL_MIN_LINES {
                                     let chunk = index / crate::native_diff_view::VIRTUAL_CHUNK_LINES;
-                                    if chunk < first || chunk > last {
+                                    // DIFF-003: rows above the painted window are
+                                    // outside the scroll viewport, so the body starts
+                                    // at the first visible chunk (the window already
+                                    // keeps one chunk of overscan above,
+                                    // `patch-diff.tsx:164-181`). Painting them would
+                                    // push the real viewport out of the body budget.
+                                    if chunk < first {
+                                        continue;
+                                    }
+                                    if chunk > last {
                                         if index % crate::native_diff_view::VIRTUAL_CHUNK_LINES == 0 {
-                                            let omitted = (rendered.rows.len() - index).min(crate::native_diff_view::VIRTUAL_CHUNK_LINES);
-                                            lines.push(line(format!("… {omitted} lines …"), Role::Description));
+                                            // DIFF-003: an omitted chunk keeps its
+                                            // exact painted height — one placeholder
+                                            // row per painted row. A single marker row
+                                            // would shorten the body by `rows - 1` and
+                                            // move every later chunk to a different
+                                            // absolute row.
+                                            for row in crate::native_diff_view::split_placeholder_lines(
+                                                rendered.rows.len(),
+                                                chunk,
+                                            ) {
+                                                lines.push(line(row, Role::Description));
+                                            }
                                         }
                                         continue;
                                     }
@@ -3789,11 +3808,29 @@ impl DialogView {
                         }
                         _ => {
                         if let Some(virtual_patch) = crate::native_diff_view::virtual_added_patch(&patch, true) {
+                            let viewport = height.saturating_sub(lines.len()).max(1);
                             let (first, last) = crate::native_diff_view::visible_chunk_range(
-                                virtual_patch.chunks.len(), dialog.execute_scroll, height.saturating_sub(lines.len()).max(1));
+                                virtual_patch.chunks.len(), dialog.execute_scroll, viewport);
                             for (index, chunk) in virtual_patch.chunks.iter().enumerate() {
-                                if index < first || index > last {
-                                    lines.push(line(format!("… {} lines …", crate::native_diff_view::placeholder_height(chunk)), Role::Description));
+                                // DIFF-003: chunks above the painted window sit
+                                // outside the scroll viewport; the body is painted
+                                // from the first visible chunk, which already carries
+                                // one chunk of overscan above it
+                                // (`patch-diff.tsx:164-181`).
+                                if index < first {
+                                    continue;
+                                }
+                                if index > last {
+                                    // DIFF-003: an omitted chunk keeps its exact
+                                    // painted height (`chunk.rows` rows). A single
+                                    // collapsed marker would shorten the virtual body
+                                    // by `rows - 1` per chunk and move every later
+                                    // chunk to a different absolute row, so a scroll
+                                    // offset would paint the wrong diff row. Rows past
+                                    // the body budget are dropped by `truncate(height)`.
+                                    for row in crate::native_diff_view::placeholder_lines(chunk) {
+                                        lines.push(line(row, Role::Description));
+                                    }
                                 } else {
                                     lines.extend(chunk.lines.iter().cloned().map(|row| line(row, Role::Item)));
                                 }
@@ -11906,6 +11943,132 @@ mod diff_tests {
         view.open_diff_viewer(patch, 80, crate::native_diff_view::DiffViewPreference::Auto).expect("opens");
         let (_, max) = view.execute_scroll_state(80, 20);
         assert_eq!(max, total_rows - 18, "clamped to painted rows, not chunks");
+    }
+
+    /// DIFF-003: a virtualizable added-file patch with no trailing newline, so
+    /// the dialog's `message_lines.join("\n")` round-trip is byte-identical
+    /// and the test reasons about the exact patch the render arm sees.
+    fn virtualized_added_patch(lines: usize) -> String {
+        let mut patch = format!("@@ -0,0 +1,{lines} @@");
+        for n in 1..=lines {
+            patch.push_str(&format!("\n+line{n}"));
+        }
+        patch
+    }
+
+    /// DIFF-003: an omitted chunk paints exactly `chunk.rows` rows and the
+    /// chunks above the painted window paint nothing, so the visible body
+    /// starts at the window's first chunk. The scroll math
+    /// (`visible_chunk_range` / the clamped maximum) is unchanged.
+    #[test]
+    fn diff003_unified_omitted_chunks_keep_exact_height() {
+        // 3201 added rows -> 26 chunks, the last one 1 row.
+        let mut view = DialogView::new();
+        view.open_diff_viewer(virtualized_added_patch(3201), 80, crate::native_diff_view::DiffViewPreference::Auto)
+            .expect("opens");
+        let (start, max) = view.execute_scroll_state(80, 20);
+        assert_eq!(start, 0);
+        assert_eq!(max, 3201 - 18);
+
+        // At scroll 0 the window is chunk 0..1, so the body begins with the
+        // first visible row and no collapsed row precedes it.
+        let top = texts(&view.render_styled(80, 20));
+        assert_eq!(top[0], "Diff viewer");
+        assert_eq!(top[2], "diff viewer · Esc to close");
+        assert_eq!(top[3], "+line1", "{top:?}");
+
+        // Scrolled into chunk 10 the window is 9..11; nothing above it is
+        // painted, so the first body row is chunk 9's first row.
+        view.set_execute_scroll(1280);
+        assert_eq!(view.execute_scroll_state(80, 20).0, 1280);
+        let scrolled = texts(&view.render_styled(80, 20));
+        assert_eq!(
+            scrolled[3], "+line1153",
+            "omitted chunks above the window paint no rows: {scrolled:?}"
+        );
+        assert!(
+            !scrolled.iter().any(|t| t == "+line1"),
+            "top chunk scrolled away: {scrolled:?}"
+        );
+        // The painted body is always exactly the viewport height.
+        assert_eq!(scrolled.len(), 20);
+    }
+
+    /// DIFF-003: the split surface virtualizes its painted rows in the same
+    /// 128-row groups and keeps the identical exact-height/omit contract.
+    #[test]
+    fn diff003_split_omitted_chunks_keep_exact_height() {
+        let patch = virtualized_added_patch(3201);
+        let rendered = crate::native_diff_view::paint_rows_split(
+            &patch,
+            crate::native_diff_view::MAX_DIFF_LINES,
+            120,
+        );
+        // Split painting emits a full-width hunk-header row before the paired
+        // added rows, and virtualization groups those painted rows.
+        assert!(rendered.rows.len() > crate::native_diff_view::VIRTUAL_MIN_LINES);
+        let mut view = DialogView::new();
+        // Width 100+ resolves to split.
+        view.open_diff_viewer(patch, 120, crate::native_diff_view::DiffViewPreference::Auto)
+            .expect("opens");
+        assert_eq!(view.open_kind(), Some(DialogKind::DiffViewer));
+        let (start, max) = view.execute_scroll_state(120, 20);
+        assert_eq!(start, 0);
+        assert!(max > 0, "the virtualized split body overflows the viewport");
+
+        let top = texts(&view.render_styled(120, 20));
+        assert_eq!(top[2], "diff viewer · Esc to close");
+        assert!(top.iter().any(|t| t == "+ line1"), "{top:?}");
+        assert!(
+            !top.iter().any(|t| t.starts_with('…')),
+            "the painted window shows no collapsed row: {top:?}"
+        );
+
+        // Scrolling keeps painting the window's own rows: no omitted chunk is
+        // expanded into rows above it, so the body still starts at the
+        // window's first chunk.
+        view.set_execute_scroll(1280);
+        assert_eq!(view.execute_scroll_state(120, 20).0, 1280);
+        let scrolled = texts(&view.render_styled(120, 20));
+        assert!(
+            !scrolled.iter().any(|t| t.starts_with('…')),
+            "omitted split chunks above the window paint no rows: {scrolled:?}"
+        );
+        assert!(
+            !scrolled.iter().any(|t| t == "+ line1"),
+            "top chunk scrolled away: {scrolled:?}"
+        );
+        assert_eq!(scrolled.len(), 20);
+
+        // The exact chunk heights still sum to the full painted row count, so
+        // no omitted chunk can swallow a row from a later chunk.
+        let rows = rendered.rows.len();
+        let collapsed: usize = (0..rows.div_ceil(crate::native_diff_view::VIRTUAL_CHUNK_LINES))
+            .map(|index| crate::native_diff_view::split_chunk_height(rows, index))
+            .sum();
+        assert_eq!(collapsed, rows);
+        assert_eq!(
+            crate::native_diff_view::split_chunk_height(rows, rows.div_ceil(128) - 1),
+            rows - (rows.div_ceil(128) - 1) * 128
+        );
+    }
+
+    /// DIFF-003: an omitted chunk's placeholder block is one row per source
+    /// row, so a fully collapsed 3001-row body still measures 3001 rows.
+    #[test]
+    fn diff003_placeholder_block_matches_chunk_rows() {
+        let patch = virtualized_added_patch(3001);
+        let virtual_patch = crate::native_diff_view::virtual_added_patch(&patch, true).expect("virtualized");
+        assert_eq!(virtual_patch.chunks.len(), 24);
+        let mut body = 0usize;
+        for chunk in &virtual_patch.chunks {
+            let placeholder = crate::native_diff_view::placeholder_lines(chunk);
+            assert_eq!(placeholder.len(), chunk.rows);
+            assert_eq!(placeholder.len(), crate::native_diff_view::placeholder_height(chunk));
+            body += placeholder.len();
+        }
+        assert_eq!(body, 3001);
+        assert_eq!(virtual_patch.total_rows, 3001);
     }
 }
 

@@ -1105,12 +1105,37 @@ fn split_rows(hunk: &str) -> usize {
     rows
 }
 
+/// DIFF-003: one bounded lexical source span transported with a live diff
+/// chunk. `flags` carries the same `SYN_*` bits as the Markdown code painter
+/// (`markdown_runs::code_token_cell_spans`), so a native painter reuses that
+/// existing theme mapping instead of inventing a second one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DiffHighlightSpan {
+    /// Inclusive display-cell start inside the rendered row. The row is
+    /// `+<source>` (`util/diff.ts:18-38` keeps the sign), so the sign occupies
+    /// cell 0 and a source token at cell `n` starts at `n + 1`.
+    pub start: u16,
+    /// Exclusive display-cell end on the same row.
+    pub end: u16,
+    /// One `markdown_runs::SYN_*` class bit for `[start, end)`.
+    pub flags: u32,
+}
+
 /// A chunk of an added-file patch (`util/diff.ts:7-11,18-38`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AddedPatchChunk {
     pub patch: String,
     pub lines: Vec<String>,
     pub rows: usize,
+    /// DIFF-003: source language inferred from the added-file path. `None`
+    /// preserves plain rendering when the patch carries no usable source
+    /// path, and it suppresses token spans for the whole chunk set.
+    pub filetype: Option<String>,
+    /// DIFF-003: bounded lexical spans for exactly [`Self::rows`] rows, in
+    /// the same order as [`Self::lines`]. Each entry is sorted and disjoint
+    /// over the rendered row; every entry is empty when [`Self::filetype`] is
+    /// `None`.
+    pub highlight_spans: Vec<Vec<DiffHighlightSpan>>,
 }
 
 /// Splits a new-file patch into `size`-line chunks. Returns `None` for
@@ -1132,6 +1157,12 @@ pub fn split_added_patch(patch: &str, size: usize) -> Option<Vec<AddedPatchChunk
         return None;
     }
     let prefix = &patch[..header_start];
+    // DIFF-003: the language belongs to the file header, not to a chunk, so
+    // resolve it once and transport it on every chunk. Spans are computed
+    // over the whole added file before slicing, then carried per chunk, so a
+    // later chunk keeps the same highlighting it has in the full body.
+    let filetype = added_filetype(prefix);
+    let whole_file_spans = added_file_highlights(&lines, filetype.as_deref());
     let chunk_count = count.div_ceil(size);
     Some(
         (0..chunk_count)
@@ -1156,10 +1187,93 @@ pub fn split_added_patch(patch: &str, size: usize) -> Option<Vec<AddedPatchChunk
                     ),
                     rows: slice.len(),
                     lines: slice,
+                    filetype: filetype.clone(),
+                    highlight_spans: whole_file_spans
+                        .iter()
+                        .skip(start)
+                        .take(size)
+                        .cloned()
+                        .collect(),
                 }
             })
             .collect(),
     )
+}
+
+/// DIFF-003: resolves the added side's source language from the patch header
+/// — everything before the first `@@` hunk header, which is the only region
+/// that can contain a real `+++ ` file line. `+++ b/<path>` names the new
+/// file; a `/dev/null` destination carries no added-file language.
+fn added_filetype(header: &str) -> Option<String> {
+    let path = header.lines().find_map(|line| line.strip_prefix("+++ "))?.trim();
+    let path = path.strip_prefix("b/").unwrap_or(path);
+    if path.is_empty() || path == "/dev/null" {
+        return None;
+    }
+    let extension = std::path::Path::new(path)
+        .extension()?
+        .to_str()?
+        .to_ascii_lowercase();
+    let language = match extension.as_str() {
+        "c" => "c",
+        "cc" | "cpp" | "cxx" | "h" | "hpp" => "cpp",
+        "css" => "css",
+        "dart" => "dart",
+        "go" => "go",
+        "html" | "htm" => "html",
+        "java" => "java",
+        "js" | "jsx" | "mjs" | "cjs" => "javascript",
+        "json" => "json",
+        "kt" | "kts" => "kotlin",
+        "lua" => "lua",
+        "php" => "php",
+        "py" => "python",
+        "rb" => "ruby",
+        "rs" => "rust",
+        "scala" => "scala",
+        "sh" | "bash" | "zsh" => "shell",
+        "sql" => "sql",
+        "swift" => "swift",
+        "toml" => "toml",
+        "ts" | "tsx" | "mts" | "cts" => "typescript",
+        "yaml" | "yml" => "yaml",
+        _ => return None,
+    };
+    Some(language.to_owned())
+}
+
+/// DIFF-003: whole-file lexical spans, one row-relative entry per added line.
+/// An unresolved language keeps every row plain rather than guessing a
+/// grammar the shared tokenizer was not registered for.
+fn added_file_highlights(lines: &[String], filetype: Option<&str>) -> Vec<Vec<DiffHighlightSpan>> {
+    if filetype.is_none() {
+        // No resolved language: keep one empty entry per row so the chunk
+        // slice stays row-aligned with `lines`.
+        return vec![Vec::new(); lines.len()];
+    }
+    let mut spans = Vec::with_capacity(lines.len());
+    for line in lines {
+        spans.push(added_row_highlights(line));
+    }
+    spans
+}
+
+/// DIFF-003: token spans for one rendered `+<source>` row.
+fn added_row_highlights(row: &str) -> Vec<DiffHighlightSpan> {
+    let Some(source) = row.strip_prefix('+') else {
+        return Vec::new();
+    };
+    crate::markdown_runs::code_token_cell_spans(source)
+        .into_iter()
+        .filter_map(|(start, end, flags)| {
+            // The rendered row keeps the `+` sign, so a source token at cell
+            // `n` paints at row cell `n + 1`. Spans outside the `u16` wire
+            // range are dropped instead of being clamped onto a wrong cell.
+            let start = u16::try_from(start.saturating_add(1)).ok()?;
+            let end = u16::try_from(end.saturating_add(1)).ok()?;
+            (start < end).then_some(DiffHighlightSpan { start, end, flags })
+        })
+        .collect()
 }
 
 fn find_new_file_header(patch: &str) -> Option<(usize, usize, usize)> {
@@ -1259,6 +1373,38 @@ pub fn visible_chunk_range(
 #[must_use]
 pub fn placeholder_height(chunk: &AddedPatchChunk) -> usize {
     chunk.rows
+}
+
+/// DIFF-003: the painted rows of one omitted virtual chunk — exactly
+/// `chunk.rows` rows, not one marker row.
+///
+/// Upstream unmounts an offscreen chunk's content but the virtual box keeps
+/// its height, so the row that follows it stays at the same absolute offset
+/// (`component/patch-diff.tsx:164-181`). A single collapsed label would
+/// shorten the body by `rows - 1` per omitted chunk and move every later
+/// chunk, which makes a scroll offset point at the wrong diff row.
+#[must_use]
+pub fn placeholder_lines(chunk: &AddedPatchChunk) -> Vec<String> {
+    let rows = placeholder_height(chunk);
+    vec![format!("… {rows} lines …"); rows]
+}
+
+/// DIFF-003: exact row height of virtual chunk `index` in the split viewer.
+/// The split surface virtualizes its already-painted rows in the same
+/// `VIRTUAL_CHUNK_LINES` groups, so the final group is partial.
+#[must_use]
+pub fn split_chunk_height(total_rows: usize, index: usize) -> usize {
+    total_rows
+        .saturating_sub(index.saturating_mul(VIRTUAL_CHUNK_LINES))
+        .min(VIRTUAL_CHUNK_LINES)
+}
+
+/// DIFF-003: the painted rows of one omitted split-viewer chunk, at exact
+/// height. See [`placeholder_lines`] for why the height must not collapse.
+#[must_use]
+pub fn split_placeholder_lines(total_rows: usize, index: usize) -> Vec<String> {
+    let rows = split_chunk_height(total_rows, index);
+    vec![format!("… {rows} lines …"); rows]
 }
 
 // --- wire metadata (`routes/session/index.tsx:3769-3794`) -----------------
@@ -2299,6 +2445,17 @@ index abc123..def456 100644
         patch
     }
 
+    fn added_file_patch_at(path: &str, lines: &[&str]) -> String {
+        let mut patch = format!("--- /dev/null\n+++ b/{path}\n");
+        patch.push_str(&format!("@@ -0,0 +1,{} @@\n", lines.len()));
+        for line in lines {
+            patch.push('+');
+            patch.push_str(line);
+            patch.push('\n');
+        }
+        patch
+    }
+
     // DIFF-003: virtualization is gated on a scroll-aware caller and on more
     // than 3000 added lines; chunks are 128 rows with exact placeholders.
     #[test]
@@ -2344,6 +2501,125 @@ index abc123..def456 100644
             128
         )
         .is_none());
+    }
+
+    // DIFF-003: an omitted chunk must paint exactly `chunk.rows` rows. A
+    // single marker row per omitted chunk shrinks the virtual body by
+    // `rows - 1`, so a `scroll` offset would land on a different diff row
+    // (`component/patch-diff.tsx:164-181`). Both live callers expand their
+    // omitted chunks through these helpers.
+    #[test]
+    fn diff003_omitted_chunks_keep_exact_painted_height() {
+        let over = added_file_patch(VIRTUAL_MIN_LINES + 1);
+        let virtual_patch = virtual_added_patch(&over, true).expect("3001 rows virtualize");
+        assert_eq!(virtual_patch.total_rows, 3001);
+        assert_eq!(virtual_patch.chunks[23].rows, 57);
+
+        // Collapsing every chunk to placeholders reproduces the body height
+        // exactly; one marker row per chunk would lose 127 rows each.
+        let collapsed: usize = virtual_patch
+            .chunks
+            .iter()
+            .map(|chunk| placeholder_lines(chunk).len())
+            .sum();
+        assert_eq!(collapsed, virtual_patch.total_rows);
+        let full = placeholder_lines(&virtual_patch.chunks[0]);
+        assert_eq!(full.len(), VIRTUAL_CHUNK_LINES);
+        assert!(full.iter().all(|row| row == "… 128 lines …"));
+        let partial = placeholder_lines(&virtual_patch.chunks[23]);
+        assert_eq!(partial.len(), 57);
+        assert!(partial.iter().all(|row| row == "… 57 lines …"));
+
+        // The split viewer virtualizes its painted split rows in the same
+        // 128-row groups, so its exact placeholder height is derived from the
+        // painted row count instead of the added-line count.
+        assert_eq!(split_chunk_height(3001, 0), VIRTUAL_CHUNK_LINES);
+        assert_eq!(split_chunk_height(3001, 23), 57);
+        assert_eq!(split_chunk_height(3001, 24), 0);
+        assert_eq!(
+            (0..24).map(|index| split_chunk_height(3001, index)).sum::<usize>(),
+            3001
+        );
+        assert_eq!(split_placeholder_lines(3001, 23).len(), 57);
+        assert!(split_placeholder_lines(3001, 23)
+            .iter()
+            .all(|row| row == "… 57 lines …"));
+        assert!(split_placeholder_lines(3001, 24).is_empty());
+
+        // The scroll math itself is unchanged: same chunk window, same max.
+        assert_eq!(visible_chunk_range(24, 2944, 10), (22, 23));
+        assert_eq!(visible_chunk_range(24, 0, 10), (0, 1));
+    }
+
+    // DIFF-003: chunk metadata travels with the chunk. The language belongs
+    // to the file header and the token spans to each added row, so a sliced
+    // chunk keeps the highlighting it would have in the full body.
+    #[test]
+    fn diff003_chunk_metadata_transports_language_and_spans() {
+        let source = added_file_patch_at(
+            "src/main.rs",
+            &["fn main() {", "    let answer = 42;", "}"],
+        );
+        let chunks = split_added_patch(&source, 2).expect("added source splits");
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].filetype.as_deref(), Some("rust"));
+        assert_eq!(chunks[1].filetype.as_deref(), Some("rust"));
+
+        // Exactly one span row per painted row, in `lines` order.
+        assert_eq!(chunks[0].rows, 2);
+        assert_eq!(chunks[0].highlight_spans.len(), chunks[0].lines.len());
+        assert_eq!(chunks[1].rows, 1);
+        assert_eq!(chunks[1].highlight_spans.len(), chunks[1].lines.len());
+
+        // `fn` is a keyword at source cell 0; the rendered row keeps the `+`
+        // sign, so the transported span starts at cell 1.
+        let keyword = chunks[0].highlight_spans[0][0];
+        assert_eq!(keyword.start, 1);
+        assert_eq!(keyword.flags, crate::markdown_runs::SYN_KEYWORD);
+        assert!(
+            chunks[0].highlight_spans[0]
+                .iter()
+                .any(|span| span.flags == crate::markdown_runs::SYN_FUNCTION),
+            "call head keeps its function scope: {:?}",
+            chunks[0].highlight_spans[0]
+        );
+        // The second row keeps its own literals after the chunk boundary.
+        assert!(
+            chunks[0].highlight_spans[1]
+                .iter()
+                .any(|span| span.flags == crate::markdown_runs::SYN_NUMBER),
+            "number literal survives slicing: {:?}",
+            chunks[0].highlight_spans[1]
+        );
+        // The final chunk's row is plain but still accounted for.
+        assert!(chunks[1].highlight_spans[0].is_empty());
+
+        // Every transported span is a real forward interval on its own row.
+        assert!(chunks
+            .iter()
+            .flat_map(|chunk| chunk.highlight_spans.iter())
+            .flatten()
+            .all(|span| span.start < span.end));
+
+        // No usable source path -> no language and no spans, but the rows are
+        // still present one-for-one so a painter never shifts a row.
+        let headerless = "@@ -0,0 +1,2 @@\n+const a = 1;\n+b\n".to_string();
+        let plain = split_added_patch(&headerless, 128).expect("header-less added patch splits");
+        assert_eq!(plain[0].filetype, None);
+        assert_eq!(plain[0].highlight_spans.len(), plain[0].lines.len());
+        assert!(plain[0].highlight_spans.iter().all(|row| row.is_empty()));
+
+        // An unknown extension stays plain instead of guessing a grammar.
+        let unknown = added_file_patch_at("src/data.zzz", &["const a = 1;"]);
+        let unknown = split_added_patch(&unknown, 128).expect("unknown extension still splits");
+        assert_eq!(unknown[0].filetype, None);
+        assert!(unknown[0].highlight_spans[0].is_empty());
+
+        // A header without the `b/` prefix still resolves its language.
+        let no_prefix = "--- /dev/null\n+++ src/lib.ts\n@@ -0,0 +1,1 @@\n+const a = 1;\n";
+        let no_prefix = split_added_patch(no_prefix, 128).expect("prefixed header splits");
+        assert_eq!(no_prefix[0].filetype.as_deref(), Some("typescript"));
+        assert!(!no_prefix[0].highlight_spans[0].is_empty());
     }
 
     // DIFF-004: deleted counts, applied-resource fallback, and malformed wire
