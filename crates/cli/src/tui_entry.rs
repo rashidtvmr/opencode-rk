@@ -14216,6 +14216,15 @@ fn native_loop(
             input.push(byte[0], Instant::now());
         }
         let Some(mut event) = input.pop() else { continue };
+        // Every event has one ownership handoff before legacy dispatch. The
+        // transaction owns only local draft/command planning here; existing
+        // handlers remain outside a panic boundary until their full families
+        // are extracted.
+        let mut input_tx = crate::native_input_transaction::InputEventTxn::begin(
+            crate::native_input_transaction::InputStateDraft::new(&draft, draft_cursor, binding_generation),
+        );
+        let _ = input_tx.consume();
+        let _planned_actions = input_tx.commit_without_publication();
         // Transactional protocol classification is pure and happens before
         // any NativeView mutation. The legacy branches below retain their
         // established side effects; this seam proves they receive an owned

@@ -194,6 +194,15 @@ impl InputEventTxn {
         self.draft.rollback();
     }
     pub(crate) fn consumed(&self) -> bool { self.consumed }
+
+    /// Finalize ownership before entering legacy side-effectful handlers. This
+    /// deliberately publishes no live state; callers that have not staged a
+    /// draft or command still get an exactly-once consumed event and an empty
+    /// command set, so a later panic cannot replay the input.
+    pub(crate) fn commit_without_publication(self) -> Option<Vec<ExternalAction>> {
+        let (_draft, actions) = self.commit();
+        actions
+    }
 }
 
 #[cfg(test)]
