@@ -85,10 +85,10 @@ pub(crate) fn classify_protocol(event: ProtocolEvent) -> DispatchOutcome {
     }
 }
 
-/// Owned geometry facts for one terminal resize notification. The transaction
-/// does not touch the renderer or NativeView; callers commit the facts only
-/// after their resize operations succeed, so a rejected event cannot replay a
-/// stale size or generation.
+/// Owned geometry bookkeeping for one terminal resize notification. The
+/// transaction does not touch the renderer or NativeView. Callers commit the
+/// observed size and generation only after resize-side operations return;
+/// this bookkeeping seam does not claim atomic renderer/View rollback.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ResizeEventTxn {
     prior: (u16, u16),
@@ -180,7 +180,6 @@ mod tests {
         }
     }
 
-    #[test]
     #[test]
     fn resize_transaction_commits_once_and_rolls_back_without_replay() {
         let mut tx = ResizeEventTxn::begin((80, 24), (100, 30), 4);

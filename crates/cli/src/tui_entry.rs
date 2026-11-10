@@ -12250,7 +12250,8 @@ fn native_loop(
                     serde_json::json!({"old_cols":observed_size.0,"old_rows":observed_size.1,"cols":size.0,"rows":size.1}),
                 );
                 renderer.resize(size.0, size.1)?;
-                observed_size = size;
+                // Keep observed_size unchanged until all resize-side bookkeeping
+                // completes and the owned transaction commits.
                 rail_resize.cancel();
                 let next_orientation = match navigation.orientation() {
                     crate::native_navigation::TabOrientation::Horizontal => TabOrientation::Horizontal,
