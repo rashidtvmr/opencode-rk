@@ -3638,6 +3638,15 @@ pub mod pickers {
         pub delete: ArmedDelete,
         pub loading: bool,
         pub error: bool,
+        /// DIALOG-14: a destructive removal in flight for this directory. The
+        /// row paints `Deleting <dir>` and the list is locked while it is set
+        /// (`dialog-workspaces.tsx:62,175-180,353`).
+        pub removing: Option<String>,
+        /// DIALOG-14: pending dirty-file confirmation before a destructive
+        /// worktree remove (`dialog-workspaces.tsx:248-262` turns the failed
+        /// `forceRequired` removal into `DialogWorkspaceFileChanges`). Holds
+        /// the directory and the `vcs.status` rows the confirm renders.
+        pub pending_dirty: Option<(String, Vec<FileChange>)>,
         /// Snapshot of the outgoing selection to restore on back.
         snapshots: Vec<SelectSnapshot>,
     }
@@ -3656,15 +3665,40 @@ pub mod pickers {
         /// (`dialog-open.tsx:56-84`).
         /// Returns `true` when rows actually changed.
         pub fn apply_load(&mut self, generation: u64, directories: Vec<String>, current: Option<&str>) -> bool {
-            let Some(roots) = self.guard.apply(
+            let roots = directories
+                .into_iter()
+                .map(|directory| WorkspaceRoot {
+                    directory,
+                    strategy: None,
+                })
+                .collect();
+            self.apply_load_roots(generation, roots, current)
+        }
+
+        /// The same load with each root's `strategy` preserved
+        /// (`Worktree.Directory`, `worktree.ts:35-40`): only a linked worktree
+        /// carries a strategy, so this is what keeps the plain project checkout
+        /// non-removable and orders worktrees after it
+        /// (`dialog-workspaces.tsx:130-138,373-380`).
+        pub fn apply_load_roots(
+            &mut self,
+            generation: u64,
+            roots: Vec<WorkspaceRoot>,
+            current: Option<&str>,
+        ) -> bool {
+            let strategies: std::collections::BTreeMap<String, Option<String>> = roots
+                .iter()
+                .map(|root| (root.directory.clone(), root.strategy.clone()))
+                .collect();
+            let Some(applied) = self.guard.apply(
                 generation,
-                directories
+                roots
                     .into_iter()
-                    .map(|directory| crate::native_palette::select::SelectOption {
-                        title: directory.clone(),
+                    .map(|root| crate::native_palette::select::SelectOption {
+                        title: root.directory.clone(),
                         ..crate::native_palette::select::SelectOption::new(
-                            directory.clone(),
-                            directory,
+                            root.directory.clone(),
+                            root.directory,
                         )
                     })
                     .collect(),
@@ -3672,11 +3706,11 @@ pub mod pickers {
                 return false;
             };
             self.loading = false;
-            self.roots = roots
+            self.roots = applied
                 .into_iter()
                 .map(|option| WorkspaceRoot {
+                    strategy: strategies.get(&option.id).cloned().flatten(),
                     directory: option.id,
-                    strategy: None,
                 })
                 .collect();
             sort_workspace_roots(&mut self.roots, current);
@@ -3700,7 +3734,7 @@ pub mod pickers {
                     category: workspace_category(&root.directory, current),
                     subdirectory: false,
                     deleting: self.delete.armed() == Some(root.directory.as_str()),
-                    removing: false,
+                    removing: self.removing.as_deref() == Some(root.directory.as_str()),
                 })
                 .map(|mut row| {
                     if let Some(armed) = row.deleting.then(|| row.title.clone()) {
@@ -3763,18 +3797,97 @@ pub mod pickers {
         }
 
         /// Enter: first press arms, second press confirms the delete. Returns
-        /// the removed directory when the caller must remove it.
+        /// the removed directory when the caller must remove it. The gate is
+        /// [`Self::prepare_remove`], so the plain project checkout and
+        /// subdirectory rows are never removable
+        /// (`dialog-workspaces.tsx:373-380` `disabled`).
         pub fn press_enter(&mut self, current: Option<&str>) -> Option<String> {
+            let directory = self.prepare_remove(current)?;
+            self.guard.remove(&directory);
+            self.roots.retain(|root| root.directory != directory);
+            self.clamp_selected();
+            Some(directory)
+        }
+
+        /// DIALOG-14: the live removal gate
+        /// (`dialog-workspaces.tsx:236-247,373-380`). Delete is only offered
+        /// for a root row that carries a worktree `strategy` — never a
+        /// subdirectory row and never the plain project checkout. The first
+        /// press arms the confirm title; the second returns the directory so
+        /// the caller can run the removal and then report `forceRequired`
+        /// back through [`Self::set_dirty_confirmation`].
+        pub fn prepare_remove(&mut self, current: Option<&str>) -> Option<String> {
             let row = self.rows(current).get(self.selected)?.clone();
-            if self.delete.press(&row.location) {
-                let directory = row.location.clone();
-                self.guard.remove(&directory);
-                self.roots.retain(|root| root.directory != directory);
-                self.clamp_selected();
-                Some(directory)
-            } else {
-                None
+            let root = self.roots.iter().find(|root| root.directory == row.location)?;
+            if row.subdirectory || root.strategy.is_none() {
+                self.delete.clear();
+                return None;
             }
+            self.delete
+                .press(&row.location)
+                .then_some(row.location)
+        }
+
+        /// DIALOG-14: mark the directory whose removal is in flight so its row
+        /// paints `Deleting <dir>` and the list locks
+        /// (`dialog-workspaces.tsx:62,175-180,353`).
+        #[allow(dead_code)] // live wiring awaits a local git worktree remover (DIALOG-14)
+        pub fn set_removing(&mut self, directory: Option<String>) {
+            self.removing = directory;
+            self.delete.clear();
+        }
+
+        /// DIALOG-14: hold the failed `forceRequired` status until the caller
+        /// resolves the confirmation (`dialog-workspaces.tsx:248-262`).
+        #[allow(dead_code)] // live wiring awaits a local git worktree remover (DIALOG-14)
+        pub fn set_dirty_confirmation(&mut self, directory: String, files: Vec<FileChange>) {
+            self.delete.clear();
+            self.removing = None;
+            self.pending_dirty = Some((directory, files));
+        }
+
+        /// The pending confirmation's directory and `vcs.status` rows, for the
+        /// `DialogWorkspaceFileChanges` surface
+        /// (`dialog-workspace-file-changes.tsx:62-105`).
+        #[must_use]
+        #[allow(dead_code)] // live wiring awaits a local git worktree remover (DIALOG-14)
+        pub fn dirty_confirmation(&self) -> Option<(&str, &[FileChange])> {
+            self.pending_dirty
+                .as_ref()
+                .map(|(directory, files)| (directory.as_str(), files.as_slice()))
+        }
+
+        /// Resolve the dirty confirmation. `true` commits the local removal
+        /// state and returns the directory (the caller then re-enumerates);
+        /// `false` keeps the row exactly as it was
+        /// (`dialog-workspaces.tsx:262-266`).
+        #[allow(dead_code)] // live wiring awaits a local git worktree remover (DIALOG-14)
+        pub fn resolve_dirty_confirmation(&mut self, confirm: bool) -> Option<String> {
+            let (directory, _) = self.pending_dirty.take()?;
+            if !confirm {
+                return None;
+            }
+            self.removing = None;
+            self.guard.remove(&directory);
+            self.roots.retain(|root| root.directory != directory);
+            self.clamp_selected();
+            Some(directory)
+        }
+
+        /// DIALOG-14: an explicit refresh (`dialog.move_session.refresh`,
+        /// `dialog-workspaces.tsx:374`) or the post-removal refetch (`:283`).
+        /// A new generation supersedes any in-flight load, and the
+        /// [`LateLoadGuard`] keeps a locally removed root removed even when the
+        /// fresh enumeration still lists it
+        /// (`dialog-workspaces.tsx:119-124`).
+        pub fn refresh(&mut self, roots: Vec<WorkspaceRoot>) -> bool {
+            let generation = self.guard.begin();
+            let current = self.current.clone();
+            let applied = self.apply_load_roots(generation, roots, current.as_deref());
+            if applied {
+                self.removing = None;
+            }
+            applied
         }
 
         fn clamp_selected(&mut self) {
@@ -5001,6 +5114,152 @@ mod dialog_parity_tests {
         assert_eq!(
             removing.armed_title("ctrl+d"),
             Some("Deleting /w/current/sub".into())
+        );
+    }
+
+    /// DIALOG-14: the live removal gate refuses the plain project checkout and
+    /// any subdirectory row, and only offers the second press for a linked
+    /// worktree (`dialog-workspaces.tsx:373-380` disable + `:236-247` remove).
+    #[test]
+    fn workspace_removal_gate_requires_a_worktree_strategy() {
+        let mut state = WorkspacesState::open(Some("/w/current"));
+        state.loading = false;
+        state.roots = vec![
+            WorkspaceRoot {
+                directory: "/w/current".into(),
+                strategy: None,
+            },
+            WorkspaceRoot {
+                directory: "/w/feature".into(),
+                strategy: Some("worktree".into()),
+            },
+        ];
+        // The first row is the plain checkout: delete is disabled outright.
+        assert_eq!(state.selected, 0);
+        assert_eq!(state.prepare_remove(Some("/w/current")), None);
+        // Focus the linked worktree: first press arms, second press yields it.
+        state.move_selection(1, 2);
+        assert_eq!(state.prepare_remove(Some("/w/current")), None);
+        assert_eq!(
+            state.prepare_remove(Some("/w/current")).as_deref(),
+            Some("/w/feature")
+        );
+        // The model does not drop the row; the caller owns the real removal.
+        assert!(state
+            .roots
+            .iter()
+            .any(|root| root.directory == "/w/feature"));
+        // An in-flight removal paints `Deleting <dir>` on that row.
+        state.set_removing(Some("/w/feature".into()));
+        let row = state
+            .rows(Some("/w/current"))
+            .into_iter()
+            .find(|row| row.location == "/w/feature")
+            .expect("worktree row");
+        assert!(row.removing);
+        assert_eq!(
+            row.armed_title("ctrl+d").as_deref(),
+            Some("Deleting /w/feature"),
+            "the in-flight title wins over the armed prompt"
+        );
+    }
+
+    /// DIALOG-14: a refresh keeps each root's strategy label
+    /// (`Worktree.Directory`) and re-sorts worktrees after plain checkouts,
+    /// while the late-load fence still suppresses a locally removed root.
+    #[test]
+    fn workspace_refresh_preserves_strategy_and_respects_the_removal_fence() {
+        let mut state = WorkspacesState::open(Some("/w/current"));
+        state.loading = false;
+        let roots = vec![
+            WorkspaceRoot {
+                directory: "/w/feature".into(),
+                strategy: Some("worktree".into()),
+            },
+            WorkspaceRoot {
+                directory: "/w/current".into(),
+                strategy: None,
+            },
+            WorkspaceRoot {
+                directory: "/w".into(),
+                strategy: None,
+            },
+        ];
+        assert!(state.refresh(roots.clone()));
+        let order: Vec<(&str, bool)> = state
+            .roots
+            .iter()
+            .map(|root| (root.directory.as_str(), root.strategy.is_some()))
+            .collect();
+        assert_eq!(
+            order,
+            vec![("/w/current", false), ("/w", false), ("/w/feature", true)],
+            "current first, plain checkouts by length, strategy worktrees last"
+        );
+        // A locally removed root stays removed across a later refresh.
+        state.guard.remove("/w/feature");
+        assert!(state.refresh(roots));
+        assert!(!state.roots.iter().any(|root| root.directory == "/w/feature"));
+        // The refresh started a new generation, so an older load is dropped.
+        assert!(!state.apply_load_roots(
+            0,
+            vec![WorkspaceRoot {
+                directory: "/w/stale".into(),
+                strategy: None,
+            }],
+            Some("/w/current"),
+        ));
+        assert!(!state.roots.iter().any(|root| root.directory == "/w/stale"));
+    }
+
+    /// DIALOG-14: the `forceRequired` hand-off. Cancelling keeps the row and
+    /// clears the pending prompt; confirming commits the local removal once.
+    #[test]
+    fn workspace_dirty_confirmation_round_trip() {
+        let mut state = WorkspacesState::open(Some("/w/current"));
+        state.loading = false;
+        state.roots = vec![WorkspaceRoot {
+            directory: "/w/feature".into(),
+            strategy: Some("worktree".into()),
+        }];
+        let files = vec![FileChange {
+            file: "src/lib.rs".into(),
+            additions: 4,
+            deletions: 1,
+            status: "modified".into(),
+        }];
+        state.set_dirty_confirmation("/w/feature".into(), files.clone());
+        // The prompt supersedes the in-flight `Deleting …` paint and the arm.
+        assert!(state.removing.is_none());
+        assert_eq!(state.delete.armed(), None);
+        let (directory, held) = state.dirty_confirmation().expect("pending");
+        assert_eq!(directory, "/w/feature");
+        assert_eq!(held, files.as_slice());
+        // Cancel keeps the row.
+        assert_eq!(state.resolve_dirty_confirmation(false), None);
+        assert!(state.dirty_confirmation().is_none());
+        assert!(state
+            .roots
+            .iter()
+            .any(|root| root.directory == "/w/feature"));
+        // Confirm removes it and fences a later load.
+        state.set_dirty_confirmation("/w/feature".into(), files);
+        assert_eq!(
+            state.resolve_dirty_confirmation(true).as_deref(),
+            Some("/w/feature")
+        );
+        assert!(!state.roots.iter().any(|root| root.directory == "/w/feature"));
+        assert!(state.apply_load_roots(
+            state.guard.generation(),
+            vec![WorkspaceRoot {
+                directory: "/w/feature".into(),
+                strategy: Some("worktree".into()),
+            }],
+            Some("/w/current"),
+        ));
+        assert!(
+            !state.roots.iter().any(|root| root.directory == "/w/feature"),
+            "a late load cannot resurrect the confirmed removal"
         );
     }
 

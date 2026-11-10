@@ -1991,6 +1991,114 @@ impl DialogView {
         applied
     }
 
+    /// DIALOG-14: the live removal gate
+    /// (`dialog-workspaces.tsx:236-247,373-380`). Returns the linked worktree
+    /// the caller must now remove; the plain checkout and subdirectory rows
+    /// are refused. The second press is the confirmed one.
+    #[allow(dead_code)] // live wiring awaits a local git worktree remover (DIALOG-14)
+    pub fn workspaces_remove_target(&mut self) -> Option<String> {
+        if self.phase != Phase::Open {
+            return None;
+        }
+        let target = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.workspaces.as_mut())
+            .and_then(|state| {
+                let current = state.current.clone();
+                state.prepare_remove(current.as_deref())
+            });
+        if target.is_some() {
+            self.sync_workspaces_choices();
+        }
+        target
+    }
+
+    /// DIALOG-14: paint `Deleting <dir>` (and lock the list) while a removal
+    /// is in flight (`dialog-workspaces.tsx:62,175-180,353`).
+    #[allow(dead_code)] // live wiring awaits a local git worktree remover (DIALOG-14)
+    pub fn workspaces_set_removing(&mut self, directory: Option<String>) -> bool {
+        let Some(state) = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.workspaces.as_mut())
+        else {
+            return false;
+        };
+        state.set_removing(directory);
+        self.sync_workspaces_choices();
+        true
+    }
+
+    /// DIALOG-14: hold the `forceRequired` dirty status for the
+    /// `DialogWorkspaceFileChanges` confirmation
+    /// (`dialog-workspaces.tsx:248-262`).
+    #[allow(dead_code)] // live wiring awaits a local git worktree remover (DIALOG-14)
+    pub fn workspaces_set_dirty(
+        &mut self,
+        directory: String,
+        files: Vec<crate::native_palette::pickers::FileChange>,
+    ) -> bool {
+        let Some(state) = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.workspaces.as_mut())
+        else {
+            return false;
+        };
+        state.set_dirty_confirmation(directory, files);
+        self.sync_workspaces_choices();
+        true
+    }
+
+    /// DIALOG-14: the pending dirty confirmation, `(directory, files)`.
+    #[must_use]
+    #[allow(dead_code)] // live wiring awaits a local git worktree remover (DIALOG-14)
+    pub fn workspaces_dirty_confirmation(
+        &self,
+    ) -> Option<(&str, &[crate::native_palette::pickers::FileChange])> {
+        self.workspaces_state()
+            .and_then(|state| state.dirty_confirmation())
+    }
+
+    /// DIALOG-14: resolve the dirty confirmation. `true` commits the local
+    /// removal and returns the directory for re-enumeration; `false` keeps the
+    /// row (`dialog-workspaces.tsx:262-266`).
+    #[allow(dead_code)] // live wiring awaits a local git worktree remover (DIALOG-14)
+    pub fn workspaces_resolve_dirty(&mut self, confirm: bool) -> Option<String> {
+        let removed = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.workspaces.as_mut())
+            .and_then(|state| state.resolve_dirty_confirmation(confirm));
+        if removed.is_some() {
+            self.sync_workspaces_choices();
+        }
+        removed
+    }
+
+    /// DIALOG-14: explicit refresh (`dialog.move_session.refresh`,
+    /// `dialog-workspaces.tsx:374`) and the post-removal refetch (`:283`).
+    /// Applies a fresh enumeration through the generation fence so a stale
+    /// response is dropped and a removed root is never resurrected.
+    pub fn workspaces_refresh(
+        &mut self,
+        roots: Vec<crate::native_palette::pickers::WorkspaceRoot>,
+    ) -> bool {
+        if self.phase != Phase::Open {
+            return false;
+        }
+        let applied = self
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.workspaces.as_mut())
+            .is_some_and(|state| state.refresh(roots));
+        if applied {
+            self.sync_workspaces_choices();
+        }
+        applied
+    }
+
     // ---- DIALOG-17: the prompt-stash dialog ----
 
     /// DIALOG-17: open the stash dialog from the live `PromptStash` list

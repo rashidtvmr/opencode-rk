@@ -93,6 +93,13 @@ pub struct UiPreferences {
     /// Drives reduced-motion tab/hover paint (TAB-24) and the existing
     /// spinner/status fallbacks.
     pub animations: Option<bool>,
+    /// DIALOG-13: the session picker's persisted `allProjects` scope
+    /// (`dialog-session-list.tsx:42-46`
+    /// `useStorage().store("session-list", { initial: { allProjects:
+    /// config.tabs?.scope !== "cwd" } })`, persisted by the `ctrl+a` binding
+    /// at `:224-230`). `None` means the store was never written, so the caller
+    /// falls back to the config-derived default `tabs.scope !== "cwd"`.
+    pub session_all_projects: Option<bool>,
     /// TAB-23: raw TUI `keybinds` overrides (`config/index.tsx:78`,
     /// `Schema.optional(TuiKeybind.KeybindOverrides)`). Kept as raw JSON like
     /// `cursor`; the caller validates entries and resolves the live
@@ -609,6 +616,15 @@ impl UiPreferences {
                 Map::new()
             }
         };
+        // DIALOG-13: the picker's persisted scope, read from the exact
+        // upstream storage namespace and key shape `"session-list":
+        // {"allProjects": bool}`. `None` when never written so the caller
+        // keeps the config-derived `tabs.scope !== "cwd"` default.
+        let session_all_projects = state
+            .get("session-list")
+            .and_then(Value::as_object)
+            .and_then(|value| value.get("allProjects"))
+            .and_then(Value::as_bool);
         let stored_theme = state
             .get("theme")
             .and_then(Value::as_str)
@@ -651,6 +667,7 @@ impl UiPreferences {
             onboarding_dismissed,
             cursor,
             animations,
+            session_all_projects,
             keybinds,
             diagnostics,
         })
@@ -662,6 +679,20 @@ impl UiPreferences {
             state_path,
             "sidebar",
             Some(Value::String(if hidden { "hide" } else { "auto" }.into())),
+        )
+    }
+
+    /// DIALOG-13: persist the session picker's scope under the exact upstream
+    /// storage namespace and value shape (`dialog-session-list.tsx:42-46,224-230`
+    /// `updatePrefs((draft) => { draft.allProjects = !draft.allProjects })`
+    /// over `storage.store("session-list", { initial: { allProjects: ... } })`):
+    /// `"session-list": {"allProjects": bool}`. Writes only that key, so every
+    /// unrelated KV entry (tabs, theme, sidebar, plugin namespaces) survives.
+    pub fn persist_session_scope(state_path: &Path, all_projects: bool) -> Result<(), String> {
+        update_state(
+            state_path,
+            "session-list",
+            Some(serde_json::json!({ "allProjects": all_projects })),
         )
     }
 
@@ -1881,6 +1912,46 @@ mod tests {
         assert_eq!(saved["getting-started"]["dismissed"], true);
         assert_eq!(saved["keep"], 7);
         assert_eq!(saved["sidebar"], "auto");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// DIALOG-13: the session picker's scope round-trips under the exact
+    /// upstream storage namespace/value shape
+    /// (`dialog-session-list.tsx:42-46,224-230`): `"session-list":
+    /// {"allProjects": bool}`. A missing key stays `None` so the caller keeps
+    /// the config-derived `tabs.scope !== "cwd"` default, and the write never
+    /// clobbers unrelated KV entries.
+    #[test]
+    fn session_scope_round_trips_under_the_session_list_namespace() {
+        let dir = std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "opencode-ui-session-scope-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = dir.join("opencode/kv.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, br#"{"sidebar":"auto","keep":7,"theme":"opencode"}"#).unwrap();
+        assert_eq!(
+            UiPreferences::load(&[], &path).unwrap().session_all_projects,
+            None,
+            "never stored => caller falls back to config.tabs.scope"
+        );
+        UiPreferences::persist_session_scope(&path, true).unwrap();
+        assert_eq!(
+            UiPreferences::load(&[], &path).unwrap().session_all_projects,
+            Some(true)
+        );
+        let saved = read_state(&path).unwrap();
+        assert_eq!(saved["session-list"]["allProjects"], true);
+        assert_eq!(saved["keep"], 7);
+        assert_eq!(saved["sidebar"], "auto");
+        assert_eq!(saved["theme"], "opencode");
+        UiPreferences::persist_session_scope(&path, false).unwrap();
+        assert_eq!(
+            UiPreferences::load(&[], &path).unwrap().session_all_projects,
+            Some(false),
+            "the explicit cwd scope persists too, not as an absent key"
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 

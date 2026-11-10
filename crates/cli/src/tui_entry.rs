@@ -981,7 +981,12 @@ fn local_worktree_roots(directory: &str) -> Vec<crate::native_palette::pickers::
                 if let Some(dir) = Path::new(body.trim()).parent() {
                     roots.push(WorkspaceRoot {
                         directory: dir.to_string_lossy().into_owned(),
-                        strategy: None,
+                        // `Worktree.Directory.strategy` (`worktree.ts:35-40`):
+                        // a linked worktree carries a strategy, the plain
+                        // project checkout does not. This is what makes delete
+                        // eligible here and keeps checkouts ordered first
+                        // (`dialog-workspaces.tsx:130-138,373-380`).
+                        strategy: Some(WORKTREE_STRATEGY_LABEL.into()),
                     });
                 }
             }
@@ -991,6 +996,14 @@ fn local_worktree_roots(directory: &str) -> Vec<crate::native_palette::pickers::
     roots.dedup_by(|a, b| a.directory == b.directory);
     roots
 }
+
+/// The `strategy` label this build reports for an on-disk linked worktree.
+/// Upstream reads a real strategy id from the worktree table
+/// (`packages/core/src/worktree/sql.ts:15`); the local enumerator only knows
+/// that the directory is a linked worktree, and every consumer tests
+/// `strategy.is_some()` for ordering and delete eligibility, never its text.
+#[cfg(feature = "native")]
+const WORKTREE_STRATEGY_LABEL: &str = "worktree";
 
 /// CP-13: whether a bare Escape byte belongs to `session.interrupt`
 /// (`prompt/index.tsx:500-531`). The command's keymap layer enables only while
@@ -5115,9 +5128,15 @@ fn settings_dialog_key(
 }
 
 #[cfg(feature = "native")]
-fn sessions_live_open(view: &mut crate::native_view::NativeView, byte: u8, cwd: &str, rows: Vec<crate::native_palette::pickers::SessionRow>) -> bool {
+fn sessions_live_open(
+    view: &mut crate::native_view::NativeView,
+    byte: u8,
+    cwd: &str,
+    rows: Vec<crate::native_palette::pickers::SessionRow>,
+    scope_cwd: bool,
+) -> bool {
     if sessions_live_decision(byte, false) != SessionsDecision::Open { return false; }
-    let mut state = crate::native_palette::pickers::SessionsState::new(true, cwd, "");
+    let mut state = crate::native_palette::pickers::SessionsState::new(scope_cwd, cwd, "");
     state.seed_local(rows);
     view.dialogs.open_sessions(state).is_ok()
 }
@@ -16893,6 +16912,27 @@ fn native_loop(
                     }
                     None => {}
                 }
+                // DIALOG-13: `ctrl+a` persists the new scope
+                // (`dialog-session-list.tsx:224-230`
+                // `updatePrefs((draft) => { draft.allProjects = !draft.allProjects })`
+                // over `storage.store("session-list", ...)`), so the choice
+                // survives reopening the picker and restarting the TUI.
+                if byte == 1 {
+                    if let Some(all_projects) = view
+                        .dialogs
+                        .sessions_state()
+                        .map(|state| state.all_projects())
+                    {
+                        if let Err(error) =
+                            crate::native_ui_preferences::UiPreferences::persist_session_scope(
+                                &state_path,
+                                all_projects,
+                            )
+                        {
+                            append_transcript(&mut transcript, format!("error: {error}"));
+                        }
+                    }
+                }
                 if matches!(byte, 8 | 127) || (b' '..=b'~').contains(&byte) {
                     sessions_debounce_deadline = Some((animation_start.now_ms() as u64).saturating_add(150));
                 }
@@ -16906,6 +16946,25 @@ fn native_loop(
             // point, Ctrl-N/Ctrl-B and the arrows move the highlight, Enter
             // drills/arms/deletes and Esc drills back or closes locally.
             if view.dialogs.open_kind() == Some(crate::native_view_dialogs::DialogKind::Workspaces) {
+                // DIALOG-14: `dialog.move_session.refresh` re-enumerates the
+                // project's worktrees and folds the result through the
+                // generation fence, so a stale response is dropped and a
+                // removed root is never resurrected
+                // (`dialog-workspaces.tsx:119-124,374`). Ctrl-R carries the
+                // upstream action because this dialog has no footer action bar.
+                if byte == 18 {
+                    if let Some(current) = view
+                        .dialogs
+                        .workspaces_state()
+                        .and_then(|state| state.current.clone())
+                    {
+                        view.dialogs
+                            .workspaces_refresh(local_worktree_roots(&current));
+                    }
+                    needs_paint = true;
+                    utf8.reset();
+                    continue;
+                }
                 if workspaces_live_dispatch(&mut view, byte) {
                     needs_paint = true;
                 }
@@ -19388,7 +19447,15 @@ fn native_loop(
                     } else if sessions_live_decision(b, false) == SessionsDecision::Open {
                         let cwd = std::env::current_dir().map(|dir| dir.to_string_lossy().into_owned()).unwrap_or_default();
                         let local = view.session_rows().iter().map(|row| crate::native_palette::pickers::SessionRow { id: row.id.clone(), title: row.title.clone(), parent: false, updated_date: String::new(), pinned: false, directory: row.directory.clone().unwrap_or_default() }).collect();
-                        if sessions_live_open(&mut view, b, &cwd, local) {
+                        // DIALOG-13: `allProjects` seeds from the persisted
+                        // `session-list.allProjects` store, falling back to the
+                        // config-derived default `config.tabs.scope !== "cwd"`
+                        // (`dialog-session-list.tsx:42-46`).
+                        let all_projects = preferences.session_all_projects.unwrap_or(matches!(
+                            tab_scope,
+                            crate::native_ui_preferences::TabPersistenceScope::Global
+                        ));
+                        if sessions_live_open(&mut view, b, &cwd, local, !all_projects) {
                             if let Some((generation, _, _)) = view.dialogs.sessions_debounce_fired() {
                                 if let Some(snapshot) = live.as_ref() {
                                     match session_page_rows(&snapshot.origin, auth, Some(&snapshot.session_id)) {
@@ -22069,9 +22136,24 @@ mod dialog13_tests {
     #[test]
     fn dialog13_live_opener_opens_sessions() {
         let mut view = crate::native_view::NativeView::new(100, 30);
-        assert!(sessions_live_open(&mut view, b'l', "/tmp", Vec::new()));
+        assert!(sessions_live_open(&mut view, b'l', "/tmp", Vec::new(), true));
         assert_eq!(view.dialogs.open_kind(), Some(crate::native_view_dialogs::DialogKind::Sessions));
         assert_eq!(sessions_live_decision(b'x', false), SessionsDecision::Consume);
+    }
+
+    /// DIALOG-13: the opener's scope comes from the caller
+    /// (`SessionsState::new(scope_cwd, ..)`), and the live `ctrl+a` toggle is
+    /// what the persistence writer reads back
+    /// (`dialog-session-list.tsx:42-46,224-230`).
+    #[test]
+    fn dialog13_live_opener_seeds_scope_and_ctrl_a_toggles_it() {
+        let mut view = crate::native_view::NativeView::new(100, 30);
+        // `scope_cwd == false` => `allProjects` starts on, as a persisted
+        // `allProjects: true` or a `tabs.scope: "global"` config would.
+        assert!(sessions_live_open(&mut view, b'l', "/tmp", Vec::new(), false));
+        assert!(view.dialogs.sessions_state().expect("open").all_projects());
+        assert!(matches!(sessions_menu_key(&mut view, 1).1, None));
+        assert!(!view.dialogs.sessions_state().expect("open").all_projects());
     }
 
     #[test]
@@ -22139,9 +22221,11 @@ mod dialog14_15_tests {
     fn opened_workspaces() -> crate::native_view::NativeView {
         let mut view = crate::native_view::NativeView::new(100, 30);
         let mut state = WorkspacesState::open(Some("/w/alpha"));
+        // Real enumeration output: `/w/alpha` is the plain current checkout
+        // (never removable) and `/w/beta` is a linked worktree.
         state.roots = vec![
             WorkspaceRoot { directory: "/w/alpha".into(), strategy: None },
-            WorkspaceRoot { directory: "/w/beta".into(), strategy: None },
+            WorkspaceRoot { directory: "/w/beta".into(), strategy: Some("worktree".into()) },
         ];
         state.loading = false;
         view.dialogs.open_workspaces(state).unwrap();
@@ -22213,6 +22297,104 @@ mod dialog14_15_tests {
         );
         assert!(workspaces_live_dispatch(&mut view, 27));
         assert_eq!(view.dialogs.open_kind(), None, "second Esc closes");
+    }
+
+    /// DIALOG-14: the on-disk enumerator labels a linked worktree with a
+    /// strategy and leaves the plain checkout without one — the exact input
+    /// the delete gate and the root ordering depend on
+    /// (`Worktree.Directory.strategy`, `worktree.ts:35-40`).
+    #[test]
+    fn dialog14_local_roots_label_linked_worktrees_with_a_strategy() {
+        let root = std::env::temp_dir().join(format!(
+            "oc2-dialog14-roots-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let repo = root.join("repo");
+        let linked = root.join("linked");
+        std::fs::create_dir_all(repo.join(".git/worktrees/wt1")).unwrap();
+        std::fs::create_dir_all(linked.join(".git")).unwrap();
+        std::fs::write(
+            repo.join(".git/worktrees/wt1/gitdir"),
+            format!("{}/.git\n", linked.display()),
+        )
+        .unwrap();
+        let repo_label = repo.to_string_lossy().into_owned();
+        let linked_label = linked.to_string_lossy().into_owned();
+        let roots = local_worktree_roots(&repo_label);
+        assert_eq!(roots.len(), 2, "main checkout plus one linked worktree");
+        let main = roots
+            .iter()
+            .find(|root| root.directory == repo_label)
+            .expect("main checkout root");
+        assert_eq!(main.strategy, None, "the plain checkout is never removable");
+        let worktree = roots
+            .iter()
+            .find(|root| root.directory == linked_label)
+            .expect("linked worktree root");
+        assert!(worktree.strategy.is_some(), "a linked worktree carries a strategy");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// DIALOG-14: the live refresh forwarder re-enumerates through the
+    /// generation fence, so the painted choices follow the new roots and a
+    /// confirmed worktree removal is not resurrected by a later refresh
+    /// (`dialog-workspaces.tsx:119-124,283,374`).
+    #[test]
+    fn dialog14_live_refresh_applies_new_roots_and_keeps_removals_fenced() {
+        let mut view = opened_workspaces();
+        assert!(view.dialogs.workspaces_refresh(vec![
+            WorkspaceRoot { directory: "/w/alpha".into(), strategy: None },
+            WorkspaceRoot { directory: "/w/gamma".into(), strategy: Some("worktree".into()) },
+        ]));
+        assert_eq!(
+            view.dialogs
+                .workspaces_state()
+                .expect("open")
+                .roots
+                .iter()
+                .map(|root| root.directory.as_str())
+                .collect::<Vec<_>>(),
+            vec!["/w/alpha", "/w/gamma"],
+            "the refreshed enumeration replaces the stale roots"
+        );
+        // A confirmed dirty removal fences that root against every later load.
+        assert!(view.dialogs.workspaces_set_dirty(
+            "/w/gamma".into(),
+            vec![crate::native_palette::pickers::FileChange {
+                file: "src/lib.rs".into(),
+                additions: 2,
+                deletions: 1,
+                status: "modified".into(),
+            }],
+        ));
+        assert_eq!(
+            view.dialogs.workspaces_dirty_confirmation().map(|(dir, files)| (
+                dir.to_owned(),
+                files.len()
+            )),
+            Some(("/w/gamma".to_owned(), 1))
+        );
+        assert_eq!(
+            view.dialogs.workspaces_resolve_dirty(true).as_deref(),
+            Some("/w/gamma")
+        );
+        // The next refresh still enumerates gamma, and it must stay gone.
+        assert!(view.dialogs.workspaces_refresh(vec![
+            WorkspaceRoot { directory: "/w/alpha".into(), strategy: None },
+            WorkspaceRoot { directory: "/w/gamma".into(), strategy: Some("worktree".into()) },
+        ]));
+        assert!(
+            !view
+                .dialogs
+                .workspaces_state()
+                .expect("open")
+                .roots
+                .iter()
+                .any(|root| root.directory == "/w/gamma"),
+            "a late refresh cannot resurrect the confirmed removal"
+        );
     }
 
     #[test]
