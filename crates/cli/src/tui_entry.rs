@@ -17755,7 +17755,12 @@ fn native_loop(
                 // segregated key buffer, a provider/model dialog's own
                 // filter buffer, otherwise the composer.
                 if page_query_open {
-                    view.page_query_backspace();
+                    // Page-query edits are local and transactional; publish
+                    // only after the bounded mutation completes.
+                    let current = view.page_query();
+                    let mut tx = PageQueryTransaction::begin(&current);
+                    tx.backspace();
+                    tx.commit(&mut view);
                 } else if matches!(dialog, native_setup::Dialog::ApiKey) {
                     key_input.pop();
                 } else if matches!(dialog, native_setup::Dialog::None) {
@@ -19822,6 +19827,56 @@ fn native_process_exit_route(command: &str) -> bool {
         command,
         "/exit" | "/quit" | "/q" | "exit" | "quit" | ":q" | ":quit"
     )
+}
+
+/// Navigation preflight owns a cloned tab state until the caller has
+/// completed any fallible bind/HTTP work. It never performs I/O and therefore
+/// cannot replay or partially publish a tab mutation after a panic.
+#[cfg(feature = "native")]
+#[derive(Clone, Debug)]
+struct NavigationPreflight {
+    original: crate::native_navigation::NavigationState,
+    staged: crate::native_navigation::NavigationState,
+    committed: bool,
+}
+
+#[cfg(feature = "native")]
+impl NavigationPreflight {
+    fn begin(navigation: &crate::native_navigation::NavigationState) -> Self {
+        Self { original: navigation.clone(), staged: navigation.clone(), committed: false }
+    }
+
+    fn staged_mut(&mut self) -> &mut crate::native_navigation::NavigationState { &mut self.staged }
+
+    fn commit(mut self, navigation: &mut crate::native_navigation::NavigationState) {
+        *navigation = self.staged;
+        self.committed = true;
+    }
+
+    fn rollback(&mut self) {
+        self.staged = self.original.clone();
+        self.committed = false;
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod navigation_preflight_tests {
+    use super::*;
+
+    #[test]
+    fn navigation_preflight_rolls_back_without_publishing_or_replaying() {
+        let mut navigation = crate::native_navigation::NavigationState::default();
+        navigation.open(crate::native_navigation::SessionRef("one".into()));
+        let original = navigation.clone();
+        let mut plan = NavigationPreflight::begin(&navigation);
+        plan.staged_mut().enter_home();
+        plan.rollback();
+        assert_eq!(navigation.active().map(|tab| tab.session.0.as_str()), original.active().map(|tab| tab.session.0.as_str()));
+        assert_eq!(navigation.tab_len(), original.tab_len());
+        plan.staged_mut().enter_home();
+        plan.commit(&mut navigation);
+        assert!(navigation.active().is_none());
+    }
 }
 
 #[cfg(feature = "native")]
