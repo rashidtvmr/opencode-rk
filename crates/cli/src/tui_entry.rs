@@ -927,6 +927,58 @@ impl BindRequestPlan {
     }
 }
 
+/// Owned local publication facts produced after a successful bind parse. The
+/// plan has no view or navigation references: a failed parse drops it, while
+/// commit transfers the accepted identity facts exactly once to the caller.
+#[cfg(feature = "native")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BindSessionPlan {
+    session_id: String,
+    title: String,
+    message_count: usize,
+    committed: bool,
+}
+
+#[cfg(feature = "native")]
+impl BindSessionPlan {
+    pub(crate) fn begin(snapshot: &LiveSnapshot) -> Self {
+        Self {
+            session_id: snapshot.session_id.clone(),
+            title: snapshot.title.clone(),
+            message_count: snapshot.message_count,
+            committed: false,
+        }
+    }
+    pub(crate) fn commit(&mut self) { self.committed = true; }
+    pub(crate) fn into_committed(self) -> Option<(String, String, usize)> {
+        self.committed.then_some((self.session_id, self.title, self.message_count))
+    }
+    pub(crate) fn rollback(&mut self) {
+        self.session_id.clear();
+        self.title.clear();
+        self.message_count = 0;
+        self.committed = false;
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod bind_session_plan_tests {
+    use super::BindSessionPlan;
+    #[test]
+    fn bind_session_plan_rolls_back_without_replay_and_commits_once() {
+        let mut plan = BindSessionPlan {
+            session_id: "s".into(), title: "title".into(), message_count: 2, committed: false,
+        };
+        plan.rollback();
+        assert_eq!(plan.into_committed(), None);
+        let mut plan = BindSessionPlan {
+            session_id: "s".into(), title: "title".into(), message_count: 2, committed: false,
+        };
+        plan.commit();
+        assert_eq!(plan.into_committed(), Some(("s".into(), "title".into(), 2)));
+    }
+}
+
 #[cfg(all(test, feature = "native"))]
 mod bind_request_plan_tests {
     use super::BindRequestPlan;
@@ -7920,6 +7972,12 @@ fn bind_session(
     // membership (bind_commit step 0 proves the target is an actual row of
     // THIS payload before the first mutation).
     let snapshot = snapshot_from_listing(origin, &value, session, auth)?;
+    // Stage only the local publication facts; external refreshes remain after commit.
+    let mut local_plan = BindSessionPlan::begin(&snapshot);
+    local_plan.commit();
+    let (bound_id, bound_title, bound_count) = local_plan
+        .into_committed()
+        .ok_or_else(|| "bind session plan was not committed".to_owned())?;
     // Phase 2 — the single all-or-nothing facade transaction.
     let draft = view
         .bind_commit(
