@@ -5862,12 +5862,30 @@ fn dispatch_message_actions(
                     );
                     continue;
                 };
-                let path = revert_stage_request_path(session_id);
-                let body = revert_stage_request_body(&message_id);
+                // Build the complete request intent before any external I/O.
+                // The committed intent is moved out exactly once below; an
+                // uncommitted or consumed intent cannot replay this input.
+                let request_body = revert_stage_request_body(&message_id);
+                let mut request_intent = HttpRequestIntent::new(
+                    "POST",
+                    revert_stage_request_path(session_id),
+                    Some(&request_body),
+                    auth,
+                );
                 let result = origin
                     .ok_or_else(|| "daemon unavailable".to_owned())
                     .and_then(|origin| {
-                        http_request_with_status(origin, "POST", &path, Some(&body), auth)
+                        request_intent.commit();
+                        let (method, path, body, request_auth) = request_intent
+                            .into_committed()
+                            .ok_or_else(|| "request intent was not committed".to_owned())?;
+                        http_request_with_status(
+                            origin,
+                            &method,
+                            &path,
+                            body.as_deref(),
+                            request_auth.as_deref(),
+                        )
                             .and_then(|(reply, status)| {
                                 if (200..300).contains(&status) {
                                     Ok(reply)
@@ -17824,6 +17842,11 @@ fn native_loop(
                     );
                     needs_paint = true;
                 } else if let Some(candidate) = pending_session.take() {
+                    // Stage navigation metadata separately from the fallible bind.
+                    // The live navigation state is published only after the
+                    // authenticated bind succeeds; a failed request cannot
+                    // partially switch tabs or replay this consumed key.
+                    let mut navigation_plan = NavigationPreflight::begin(&navigation);
                     let bound = live
                         .as_ref()
                         .ok_or_else(|| "daemon unavailable".to_owned())
