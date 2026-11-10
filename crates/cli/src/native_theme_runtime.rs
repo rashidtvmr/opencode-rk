@@ -2475,7 +2475,27 @@ pub struct SyntaxStyleArena<T> {
     release_pending: bool,
 }
 
-impl<T> SyntaxStyleArena<T> {
+/// Owned transaction token for one syntax frame. The token snapshots the
+/// current style and retention watermark before `begin_frame`; a failed
+/// preparation can restore the previous style without releasing a style that
+/// an in-flight renderer frame may still reference. This is intentionally
+/// renderer-aware: commit ends the frame through `end_frame`, while rollback
+/// restores the pre-frame in-flight count and retention state.
+#[derive(Debug)]
+pub struct SyntaxFrameTxn<T: Clone> {
+    prior_current: Option<T>,
+    prior_retained_len: usize,
+    prior_frames_in_flight: u32,
+    prior_release_pending: bool,
+    finished: bool,
+}
+
+impl<T: Clone> SyntaxFrameTxn<T> {
+    #[must_use]
+    pub fn finished(&self) -> bool { self.finished }
+}
+
+impl<T: Clone> SyntaxStyleArena<T> {
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -2504,6 +2524,39 @@ impl<T> SyntaxStyleArena<T> {
 
     pub fn begin_frame(&mut self) {
         self.frames_in_flight = self.frames_in_flight.saturating_add(1);
+    }
+
+    /// Begin a renderer-aware transaction. The current style is moved into
+    /// the token, so rollback can restore it without cloning or dropping
+    /// renderer-retained style data.
+    pub fn begin_frame_txn(&mut self) -> SyntaxFrameTxn<T> {
+        let txn = SyntaxFrameTxn {
+            prior_current: self.current.clone(),
+            prior_retained_len: self.retained.len(),
+            prior_frames_in_flight: self.frames_in_flight,
+            prior_release_pending: self.release_pending,
+            finished: false,
+        };
+        self.frames_in_flight = self.frames_in_flight.saturating_add(1);
+        txn
+    }
+
+    /// Commit a syntax frame after paint has accepted the current style.
+    pub fn commit_frame_txn(&mut self, mut txn: SyntaxFrameTxn<T>) {
+        debug_assert!(!txn.finished);
+        txn.finished = true;
+        let _ = self.end_frame();
+    }
+
+    /// Roll back a syntax frame before paint. No retained style is released;
+    /// renderer idleness semantics remain intact.
+    pub fn rollback_frame_txn(&mut self, mut txn: SyntaxFrameTxn<T>) {
+        debug_assert!(!txn.finished);
+        self.current = txn.prior_current.take();
+        self.retained.truncate(txn.prior_retained_len);
+        self.frames_in_flight = txn.prior_frames_in_flight;
+        self.release_pending = txn.prior_release_pending;
+        txn.finished = true;
     }
 
     /// End a frame. Drains pending releases only when the last in-flight
@@ -4111,6 +4164,24 @@ fn theme13_system_palette_keeps_zero_alpha_and_infers_from_default_bg_only() {
 }
 
 // ── THEME-14: syntax replacement cannot free before renderer idle ────────
+
+#[test]
+fn theme14_syntax_frame_txn_rolls_back_and_commits_renderer_state() {
+    let mut arena = SyntaxStyleArena::new();
+    arena.install(vec![1u8, 2]);
+    let txn = arena.begin_frame_txn();
+    arena.install(vec![3u8]);
+    assert_eq!(arena.retained_count(), 1);
+    arena.rollback_frame_txn(txn);
+    assert_eq!(arena.current(), Some(&vec![1u8, 2]));
+    assert_eq!(arena.retained_count(), 0);
+    let txn = arena.begin_frame_txn();
+    arena.install(vec![4u8]);
+    arena.commit_frame_txn(txn);
+    assert_eq!(arena.current(), Some(&vec![4u8]));
+    assert!(arena.is_idle());
+    assert_eq!(arena.retained_count(), 0);
+}
 
 #[test]
 fn theme14_syntax_replacement_is_retained_until_renderer_idle() {
