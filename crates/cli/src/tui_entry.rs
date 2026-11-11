@@ -5682,6 +5682,48 @@ enum SettingsKeyOutcome {
 }
 
 #[cfg(feature = "native")]
+#[derive(Debug)]
+struct SettingsActionPlan {
+    action: Option<crate::native_settings::SettingsAction>,
+    closed: bool,
+}
+
+#[cfg(feature = "native")]
+impl SettingsActionPlan {
+    fn new(action: crate::native_settings::SettingsAction) -> Self {
+        Self { action: Some(action), closed: false }
+    }
+
+    fn commit(&mut self) -> Option<crate::native_settings::SettingsAction> {
+        if self.closed { return None; }
+        self.closed = true;
+        self.action.take()
+    }
+
+    fn rollback(&mut self) {
+        self.action = None;
+        self.closed = true;
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod settings_action_plan_tests {
+    use super::SettingsActionPlan;
+    use crate::native_navigation::TabOrientation;
+    use crate::native_settings::SettingsAction;
+
+    #[test]
+    fn settings_action_plan_commits_once_and_rolls_back_without_replay() {
+        let mut committed = SettingsActionPlan::new(SettingsAction::ApplyTabs(TabOrientation::Vertical));
+        assert!(matches!(committed.commit(), Some(SettingsAction::ApplyTabs(TabOrientation::Vertical))));
+        assert!(committed.commit().is_none());
+        let mut rolled = SettingsActionPlan::new(SettingsAction::ApplySidebar(true));
+        rolled.rollback();
+        assert!(rolled.commit().is_none());
+    }
+}
+
+#[cfg(feature = "native")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SessionsDecision { Open, Consume, Exit }
 
@@ -14812,6 +14854,8 @@ fn native_loop(
                 SettingsKeyOutcome::None => None,
             };
             if let Some(action) = action {
+                let mut action_plan = SettingsActionPlan::new(action);
+                let Some(action) = action_plan.commit() else { continue };
                 let save_locked = matches!(
                     action,
                     crate::native_settings::SettingsAction::ApplyTabs(_)
