@@ -137,6 +137,37 @@ impl ResizeEventTxn {
     pub(crate) fn committed(&self) -> bool { self.committed }
 }
 
+/// Owned worker intent. Constructing this value performs no network or task
+/// creation; commit moves the complete request into the post-transaction
+/// worker start phase exactly once.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WorkerActionPlan {
+    origin: String,
+    session: String,
+    auth: String,
+    model: String,
+    generation: u64,
+    strategy: String,
+    committed: bool,
+}
+
+impl WorkerActionPlan {
+    pub(crate) fn compact(
+        origin: impl Into<String>, session: impl Into<String>, auth: impl Into<String>,
+        model: impl Into<String>, generation: u64, strategy: impl Into<String>,
+    ) -> Self {
+        Self { origin: origin.into(), session: session.into(), auth: auth.into(), model: model.into(), generation, strategy: strategy.into(), committed: false }
+    }
+    pub(crate) fn commit(&mut self) -> Option<(String, String, String, String, u64, String)> {
+        if self.committed { return None; }
+        self.committed = true;
+        Some((std::mem::take(&mut self.origin), std::mem::take(&mut self.session), std::mem::take(&mut self.auth), std::mem::take(&mut self.model), self.generation, std::mem::take(&mut self.strategy)))
+    }
+    pub(crate) fn rollback(&mut self) {
+        self.origin.clear(); self.session.clear(); self.auth.clear(); self.model.clear(); self.strategy.clear(); self.committed = false;
+    }
+}
+
 /// Owned completion edit intent. The selected route and resulting draft are
 /// prepared without touching the live completion widget; callers publish the
 /// draft and dismiss the widget only after commit succeeds.
@@ -231,6 +262,17 @@ mod tests {
         assert_eq!(draft.text, "ab");
         assert_eq!(actions.unwrap().len(), 1);
         assert_eq!(DispatchOutcome::NeedsPaint, DispatchOutcome::NeedsPaint);
+    }
+
+    #[test]
+    fn worker_action_commits_once_and_rolls_back_without_replay() {
+        let mut plan = WorkerActionPlan::compact("http://o", "s", "a", "m", 4, "auto");
+        let committed = plan.commit().expect("first commit");
+        assert_eq!(committed.1, "s");
+        assert!(plan.commit().is_none());
+        let mut rolled = WorkerActionPlan::compact("o", "s", "a", "m", 1, "auto");
+        rolled.rollback();
+        assert!(rolled.commit().is_some(), "rollback permits a fresh owned plan");
     }
 
     #[test]
