@@ -5557,7 +5557,7 @@ fn commit_dialog_action(action: Option<SessionsKeyAction>) -> Option<SessionsKey
 #[derive(Debug)]
 struct SessionDeletePlan {
     session_id: String,
-    request: HttpRequestIntent,
+    request: Option<HttpRequestIntent>,
     committed: bool,
 }
 
@@ -5565,28 +5565,31 @@ struct SessionDeletePlan {
 impl SessionDeletePlan {
     fn new(session_id: String, auth: Option<&str>) -> Self {
         Self {
-            request: HttpRequestIntent::new(
+            request: Some(HttpRequestIntent::new(
                 "DELETE",
                 format!("/api/sessions/{session_id}"),
                 None,
                 auth,
-            ),
+            )),
             session_id,
             committed: false,
         }
     }
 
     fn commit(&mut self) -> Option<(String, String, String, Option<String>)> {
-        if self.committed || self.request.path.is_empty() { return None; }
+        if self.committed { return None; }
+        let mut request = self.request.take()?;
+        request.commit();
+        let (method, path, _body, auth) = request.into_committed()?;
         self.committed = true;
-        self.request.commit();
-        let (method, path, _body, auth) = self.request.clone().into_committed()?;
         Some((self.session_id.clone(), method, path, auth))
     }
 
     fn rollback(&mut self) {
-        self.request.rollback();
-        self.committed = false;
+        if let Some(mut request) = self.request.take() {
+            request.rollback();
+        }
+        self.committed = true;
     }
 }
 
@@ -5597,6 +5600,8 @@ mod session_delete_plan_tests {
     #[test]
     fn delete_plan_commits_once_and_rolls_back_without_replay() {
         let mut rolled = SessionDeletePlan::new("s1".into(), Some("token"));
+        rolled.rollback();
+        assert!(rolled.commit().is_none());
         rolled.rollback();
         assert!(rolled.commit().is_none());
 
