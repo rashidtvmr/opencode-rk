@@ -5550,6 +5550,63 @@ fn commit_dialog_action(action: Option<SessionsKeyAction>) -> Option<SessionsKey
     }).flatten()
 }
 
+/// Owned plan for the Sessions delete action. The local removal is published
+/// only after the committed HTTP intent succeeds; extracting the plan consumes
+/// the dialog event exactly once and leaves no request available for replay.
+#[cfg(feature = "native")]
+#[derive(Debug)]
+struct SessionDeletePlan {
+    session_id: String,
+    request: HttpRequestIntent,
+    committed: bool,
+}
+
+#[cfg(feature = "native")]
+impl SessionDeletePlan {
+    fn new(session_id: String, auth: Option<&str>) -> Self {
+        Self {
+            request: HttpRequestIntent::new(
+                "DELETE",
+                format!("/api/sessions/{session_id}"),
+                None,
+                auth,
+            ),
+            session_id,
+            committed: false,
+        }
+    }
+
+    fn commit(&mut self) -> Option<(String, String, String, Option<String>)> {
+        if self.committed || self.request.path.is_empty() { return None; }
+        self.committed = true;
+        self.request.commit();
+        let (method, path, _body, auth) = self.request.clone().into_committed()?;
+        Some((self.session_id.clone(), method, path, auth))
+    }
+
+    fn rollback(&mut self) {
+        self.request.rollback();
+        self.committed = false;
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod session_delete_plan_tests {
+    use super::SessionDeletePlan;
+
+    #[test]
+    fn delete_plan_commits_once_and_rolls_back_without_replay() {
+        let mut rolled = SessionDeletePlan::new("s1".into(), Some("token"));
+        rolled.rollback();
+        assert!(rolled.commit().is_none());
+
+        let mut committed = SessionDeletePlan::new("s2".into(), Some("token"));
+        let (id, method, path, auth) = committed.commit().expect("first commit");
+        assert_eq!((id, method, path, auth), ("s2".to_owned(), "DELETE".to_owned(), "/api/sessions/s2".to_owned(), Some("token".to_owned())));
+        assert!(committed.commit().is_none());
+    }
+}
+
 #[cfg(all(test, feature = "native"))]
 mod dialog_action_plan_tests {
     use super::{DialogActionPlan, SessionsKeyAction};
@@ -17516,21 +17573,14 @@ fn native_loop(
                         // Build and commit the owned request before executing I/O;
                         // consuming it below is exactly-once and cannot replay a
                         // consumed dialog event after a panic/rollback.
-                        let mut request_intent = daemon_origin
-                            .map(|_| HttpRequestIntent::new(
-                                "DELETE",
-                                format!("/api/sessions/{id}"),
-                                None,
-                                auth,
-                            ));
+                        let mut delete_plan = SessionDeletePlan::new(id.clone(), auth);
                         let deletion = daemon_origin
                             .ok_or_else(|| "daemon unavailable".to_owned())
                             .and_then(|origin| {
-                                let mut intent = request_intent.take().ok_or_else(|| "missing request intent".to_owned())?;
-                                intent.commit();
-                                let (method, path, body, request_auth) = intent.into_committed()
-                                    .ok_or_else(|| "request intent was not committed".to_owned())?;
-                                http_request(origin, &method, &path, body.as_deref(), request_auth.as_deref())
+                                let (_id, method, path, request_auth) = delete_plan
+                                    .commit()
+                                    .ok_or_else(|| "delete intent was not committed".to_owned())?;
+                                http_request(origin, &method, &path, None, request_auth.as_deref())
                             });
                         match deletion {
                             Ok(_) => {
@@ -19155,7 +19205,11 @@ fn native_loop(
                                 append_transcript(&mut transcript, "busy: turn or compaction already in progress".into());
                             } else if let (Some(snapshot), Some(model)) = (live.as_ref(), selected.as_ref()) {
                                 let strategy = text.split_whitespace().nth(1).unwrap_or("auto");
-                                match auth.ok_or_else(|| "missing daemon token".to_owned()).and_then(|token| NativeCompactWorker::start_strategy(&snapshot.origin, &snapshot.session_id, token, &model.qualified(), binding_generation, strategy)) {
+                                match auth.ok_or_else(|| "missing daemon token".to_owned()).and_then(|token| {
+                                    let mut plan = crate::native_input_transaction::WorkerActionPlan::compact(&snapshot.origin, &snapshot.session_id, token, model.qualified(), binding_generation, strategy);
+                                    let (origin, session, auth, model, generation, strategy) = plan.commit().ok_or_else(|| "worker action already consumed".to_owned())?;
+                                    NativeCompactWorker::start_strategy(&origin, &session, &auth, &model, generation, &strategy)
+                                }) {
                                     Ok(next) => compact_worker = Some(next),
                                     Err(error) => append_transcript(&mut transcript, format!("error: compact: {error}")),
                                 }
