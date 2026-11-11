@@ -703,6 +703,20 @@ fn composer_enter_plan(
 /// plan but performs no network, worker, or view mutation. A later dispatcher
 /// may commit the owned draft only after its external command has been
 /// accepted; a panic before commit simply drops this value (no replay).
+#[cfg(all(test, feature = "native"))]
+mod composer_queue_submit_plan_tests {
+    use super::ComposerQueueSubmitPlan;
+    #[test]
+    fn queue_submit_commits_once_and_rollback_prevents_replay() {
+        let mut plan = ComposerQueueSubmitPlan::new(Some("s".into()), "hello".into());
+        assert_eq!(plan.try_commit(), Some((Some("s".into()), "hello".into())));
+        assert_eq!(plan.try_commit(), None);
+        let mut rolled = ComposerQueueSubmitPlan::new(Some("s".into()), "retry".into());
+        rolled.rollback();
+        assert_eq!(rolled.try_commit(), None);
+    }
+}
+
 #[cfg(feature = "native")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ComposerSubmitPreflight {
@@ -729,6 +743,37 @@ impl ComposerSubmitPreflight {
                 queued,
             ),
         }
+    }
+}
+
+/// Owned queue submission intent. The live queue is mutated only after the
+/// intent has committed and moved its text/session fields exactly once. A
+/// failed admission leaves the intent available for retry; rollback closes it
+/// permanently so a consumed Enter event cannot replay a queue insertion.
+#[cfg(feature = "native")]
+#[derive(Debug)]
+pub(crate) struct ComposerQueueSubmitPlan {
+    session: Option<String>,
+    text: String,
+    committed: bool,
+}
+
+#[cfg(feature = "native")]
+impl ComposerQueueSubmitPlan {
+    pub(crate) fn new(session: Option<String>, text: String) -> Self {
+        Self { session, text, committed: false }
+    }
+
+    pub(crate) fn try_commit(&mut self) -> Option<(Option<String>, String)> {
+        if self.committed || self.text.is_empty() { return None; }
+        self.committed = true;
+        Some((self.session.take(), std::mem::take(&mut self.text)))
+    }
+
+    pub(crate) fn rollback(&mut self) {
+        self.session = None;
+        self.text.clear();
+        self.committed = true;
     }
 }
 
@@ -18744,10 +18789,18 @@ fn native_loop(
                                         queued_drafts.len() + 1,
                                     ),
                                 );
-                                queued_drafts.push_back((
+                                let mut queue_plan = ComposerQueueSubmitPlan::new(
                                     live.as_ref().map(|snapshot| snapshot.session_id.clone()),
                                     queued_text,
-                                ));
+                                );
+                                if let Some((queued_session, queued_text)) = queue_plan.try_commit() {
+                                    queued_drafts.push_back((queued_session, queued_text));
+                                } else {
+                                    queue_plan.rollback();
+                                    utf8.reset();
+                                    needs_paint = true;
+                                    continue;
+                                }
                                 // TAB-06: feed the enqueue pulse map the way
                                 // `session.inbox.enqueued` feeds upstream
                                 // (`context/session-tabs.tsx:334-338`): user
