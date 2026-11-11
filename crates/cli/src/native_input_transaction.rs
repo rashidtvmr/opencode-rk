@@ -163,6 +163,23 @@ impl WorkerActionPlan {
         self.committed = true;
         Some((std::mem::take(&mut self.origin), std::mem::take(&mut self.session), std::mem::take(&mut self.auth), std::mem::take(&mut self.model), self.generation, std::mem::take(&mut self.strategy)))
     }
+    /// Attempt the post-transaction worker creation while retaining ownership
+    /// until the fallible operation succeeds. A failed start leaves this plan
+    /// uncommitted (the caller may report the error, but must not replay it).
+    pub(crate) fn try_commit_with<R, F, E>(&mut self, start: F) -> Result<R, E>
+    where
+        F: FnOnce(&str, &str, &str, &str, u64, &str) -> Result<R, E>,
+    {
+        let result = start(&self.origin, &self.session, &self.auth, &self.model, self.generation, &self.strategy)?;
+        self.committed = true;
+        self.origin.clear();
+        self.session.clear();
+        self.auth.clear();
+        self.model.clear();
+        self.strategy.clear();
+        Ok(result)
+    }
+
     pub(crate) fn rollback(&mut self) {
         self.origin.clear(); self.session.clear(); self.auth.clear(); self.model.clear(); self.strategy.clear(); self.committed = false;
     }

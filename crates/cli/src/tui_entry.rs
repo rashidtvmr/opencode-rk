@@ -19212,8 +19212,9 @@ fn native_loop(
                                 let strategy = text.split_whitespace().nth(1).unwrap_or("auto");
                                 match auth.ok_or_else(|| "missing daemon token".to_owned()).and_then(|token| {
                                     let mut plan = crate::native_input_transaction::WorkerActionPlan::compact(&snapshot.origin, &snapshot.session_id, token, model.qualified(), binding_generation, strategy);
-                                    let (origin, session, auth, model, generation, strategy) = plan.commit().ok_or_else(|| "worker action already consumed".to_owned())?;
-                                    NativeCompactWorker::start_strategy(&origin, &session, &auth, &model, generation, &strategy)
+                                    plan.try_commit_with(|origin, session, auth, model, generation, strategy|
+                                        NativeCompactWorker::start_strategy(origin, session, auth, model, generation, strategy)
+                                    )
                                 }) {
                                     Ok(next) => compact_worker = Some(next),
                                     Err(error) => append_transcript(&mut transcript, format!("error: compact: {error}")),
