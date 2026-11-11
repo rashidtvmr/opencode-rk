@@ -777,6 +777,94 @@ impl ComposerQueueSubmitPlan {
     }
 }
 
+/// Owned queue-to-steer promotion. Queue removal and draft publication occur
+/// only at commit; rollback permanently closes the consumed Enter event.
+#[cfg(feature = "native")]
+#[derive(Debug)]
+pub(crate) struct BlankPromotionPlan {
+    index: Option<usize>,
+    text: String,
+    committed: bool,
+}
+
+#[cfg(feature = "native")]
+impl BlankPromotionPlan {
+    pub(crate) fn begin(
+        queued_drafts: &[(Option<String>, String)],
+        active_session: Option<&str>,
+    ) -> Option<Self> {
+        let index = queued_drafts.iter().position(|(session, _)|
+            session.as_deref() == active_session
+        )?;
+        Some(Self { index: Some(index), text: queued_drafts[index].1.clone(), committed: false })
+    }
+
+    pub(crate) fn try_commit(
+        &mut self,
+        queued_drafts: &mut std::collections::VecDeque<(Option<String>, String)>,
+    ) -> Option<String> {
+        if self.committed { return None; }
+        let index = self.index.take()?;
+        let (_, text) = queued_drafts.remove(index)?;
+        self.committed = true;
+        Some(text)
+    }
+
+    pub(crate) fn rollback(&mut self) {
+        self.index = None;
+        self.text.clear();
+        self.committed = true;
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod blank_promotion_plan_tests {
+    use super::BlankPromotionPlan;
+    use std::collections::VecDeque;
+    #[test]
+    fn promotion_commits_once_and_rollback_prevents_replay() {
+        let mut queue = VecDeque::from(vec![(Some("s".into()), "hello".into())]);
+        let facts: Vec<_> = queue.iter().cloned().collect();
+        let mut plan = BlankPromotionPlan::begin(&facts, Some("s")).unwrap();
+        assert_eq!(plan.try_commit(&mut queue), Some("hello".into()));
+        assert_eq!(plan.try_commit(&mut queue), None);
+        let mut rolled = BlankPromotionPlan::begin(&facts, Some("s")).unwrap();
+        rolled.rollback();
+        assert_eq!(rolled.try_commit(&mut queue), None);
+    }
+}
+
+/// Owned terminal-exit submit intent. It has no external effect, but is
+/// consumed exactly once so a decided exit cannot replay the Enter event.
+#[cfg(feature = "native")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ExitSubmitPlan { committed: bool }
+
+#[cfg(feature = "native")]
+impl ExitSubmitPlan {
+    pub(crate) fn new() -> Self { Self { committed: false } }
+    pub(crate) fn try_commit(&mut self) -> bool {
+        if self.committed { return false; }
+        self.committed = true;
+        true
+    }
+    pub(crate) fn rollback(&mut self) { self.committed = true; }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod exit_submit_plan_tests {
+    use super::ExitSubmitPlan;
+    #[test]
+    fn exit_submit_commits_once_and_rollback_prevents_replay() {
+        let mut plan = ExitSubmitPlan::new();
+        assert!(plan.try_commit());
+        assert!(!plan.try_commit());
+        let mut rolled = ExitSubmitPlan::new();
+        rolled.rollback();
+        assert!(!rolled.try_commit());
+    }
+}
+
 /// Deferred external effects for one composer submit. Planning is pure and
 /// bounded; this command list is intentionally not executed here. A panic
 /// before `commit` drops the list, so no queue enqueue, worker steer, or
@@ -18804,6 +18892,11 @@ fn native_loop(
                             continue;
                         }
                         crate::native_composer::SubmitPlan::Exit => {
+                            let mut exit_plan = ExitSubmitPlan::new();
+                            if !exit_plan.try_commit() {
+                                exit_plan.rollback();
+                                continue;
+                            }
                             // Upstream `void exit()` (`index.tsx:1141-1144`):
                             // the exit word terminates the client exactly
                             // like the typed terminal command above.
