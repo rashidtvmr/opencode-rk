@@ -83,8 +83,19 @@ impl RefreshPlan {
         self.actions.clear();
         self.committed = true;
     }
+    /// Transfer the committed requests to the post-publication executor.
+    ///
+    /// This consumes the plan before any request is attempted. Consequently,
+    /// an executor error or panic cannot leave a retryable plan behind and
+    /// cannot replay a request on a later dispatch pass. Callers must record
+    /// per-request errors while iterating the returned owned vector.
     pub(crate) fn into_committed(self) -> Option<Vec<ExternalAction>> {
         self.committed.then_some(self.actions)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_closed(&self) -> bool {
+        self.committed
     }
 }
 
@@ -394,6 +405,7 @@ mod tests {
         let mut rolled = RefreshPlan::begin();
         rolled.push_get("/api/sessions/s/mcp", None);
         rolled.rollback();
+        assert!(rolled.is_closed());
         assert_eq!(rolled.into_committed().unwrap().len(), 0);
     }
 
