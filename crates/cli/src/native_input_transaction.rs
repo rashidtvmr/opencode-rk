@@ -289,7 +289,22 @@ mod tests {
         assert!(plan.commit().is_none());
         let mut rolled = WorkerActionPlan::compact("o", "s", "a", "m", 1, "auto");
         rolled.rollback();
-        assert!(rolled.commit().is_some(), "rollback permits a fresh owned plan");
+        assert!(rolled.commit().is_some(), "rollback discards this plan; a caller must create a fresh plan");
+    }
+
+    #[test]
+    fn worker_action_failed_start_does_not_consume_plan() {
+        let mut plan = WorkerActionPlan::compact("o", "s", "a", "m", 1, "auto");
+        let failed = plan.try_commit_with(|_, _, _, _, _, _| -> Result<(), &'static str> { Err("start failed") });
+        assert_eq!(failed, Err("start failed"));
+        let mut calls = 0;
+        let succeeded = plan.try_commit_with(|_, _, _, _, _, _| -> Result<(), &'static str> {
+            calls += 1;
+            Ok(())
+        });
+        assert_eq!(succeeded, Ok(()));
+        assert_eq!(calls, 1);
+        assert!(plan.commit().is_none());
     }
 
     #[test]
