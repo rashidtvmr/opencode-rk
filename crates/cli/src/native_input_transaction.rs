@@ -56,6 +56,38 @@ impl CommandPlan {
     pub(crate) fn committed(&self) -> bool { self.committed }
 }
 
+/// Owned post-bind refresh intents. Construction and commit perform no I/O;
+/// callers execute the moved requests only after local bind publication succeeds.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RefreshPlan {
+    actions: Vec<ExternalAction>,
+    committed: bool,
+}
+
+impl RefreshPlan {
+    pub(crate) fn begin() -> Self { Self::default() }
+    pub(crate) fn push_get(&mut self, path: impl Into<String>, auth: Option<&str>) {
+        if !self.committed {
+            self.actions.push(ExternalAction::Http {
+                method: "GET".into(), path: path.into(), body: None,
+                auth: auth.map(str::to_owned),
+            });
+        }
+    }
+    pub(crate) fn commit(&mut self) -> bool {
+        if self.committed { return false; }
+        self.committed = true;
+        true
+    }
+    pub(crate) fn rollback(&mut self) {
+        self.actions.clear();
+        self.committed = true;
+    }
+    pub(crate) fn into_committed(self) -> Option<Vec<ExternalAction>> {
+        self.committed.then_some(self.actions)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum DispatchOutcome {
     Continue,
@@ -349,6 +381,20 @@ mod tests {
         rolled.rollback();
         assert_eq!(rolled.commit(), None);
         assert!(!rolled.committed());
+    }
+
+    #[test]
+    fn refresh_plan_rolls_back_and_commits_once() {
+        let mut plan = RefreshPlan::begin();
+        plan.push_get("/api/sessions/s/mcp", Some("token"));
+        plan.push_get("/api/sessions/s/todo", Some("token"));
+        assert!(plan.commit());
+        assert!(!plan.commit());
+        assert_eq!(plan.into_committed().unwrap().len(), 2);
+        let mut rolled = RefreshPlan::begin();
+        rolled.push_get("/api/sessions/s/mcp", None);
+        rolled.rollback();
+        assert_eq!(rolled.into_committed().unwrap().len(), 0);
     }
 
     #[test]
