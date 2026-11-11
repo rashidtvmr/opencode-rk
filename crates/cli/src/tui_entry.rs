@@ -19033,6 +19033,16 @@ fn native_loop(
                                 let next =
                                     next_queued_for_session(&queued_drafts, active.as_deref());
                                 if let Some((index, next)) = next {
+                                     let facts: Vec<_> = queued_drafts.iter().cloned().collect();
+                                     let mut promotion_plan = BlankPromotionPlan::begin(&facts, active.as_deref());
+                                     let promoted = promotion_plan.as_mut().and_then(|plan| plan.try_commit(&mut queued_drafts));
+                                     if promoted.is_none() {
+                                         if let Some(plan) = promotion_plan.as_mut() { plan.rollback(); }
+                                         utf8.reset();
+                                         needs_paint = true;
+                                         continue;
+                                     }
+                                     debug_assert_eq!(promoted.as_deref(), Some(next.as_str()));
                                     queued_drafts.remove(index);
                                     // PAR-07: the queue->steer transition
                                     // (`mutatePending("steer", next.id)`)
