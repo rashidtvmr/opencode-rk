@@ -865,6 +865,47 @@ mod exit_submit_plan_tests {
     }
 }
 
+/// Owned restoration of a stashed prompt. The plan is consumed exactly once;
+/// rollback permanently closes it so a modal Enter cannot replay into the
+/// composer after a failed dispatch.
+#[cfg(feature = "native")]
+#[derive(Debug)]
+pub(crate) struct StashRestorePlan {
+    text: Option<String>,
+    cursor: usize,
+    closed: bool,
+}
+
+#[cfg(feature = "native")]
+impl StashRestorePlan {
+    pub(crate) fn begin(text: String, cursor: usize) -> Self {
+        Self { text: Some(text), cursor, closed: false }
+    }
+    pub(crate) fn commit(&mut self) -> Option<(String, usize)> {
+        if self.closed { return None; }
+        self.closed = true;
+        self.text.take().map(|text| (text, self.cursor))
+    }
+    pub(crate) fn rollback(&mut self) {
+        self.text = None;
+        self.closed = true;
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod stash_restore_plan_tests {
+    use super::StashRestorePlan;
+    #[test]
+    fn stash_restore_commits_once_and_rollback_prevents_replay() {
+        let mut plan = StashRestorePlan::begin("draft".into(), 5);
+        assert_eq!(plan.commit(), Some(("draft".into(), 5)));
+        assert_eq!(plan.commit(), None);
+        let mut rolled = StashRestorePlan::begin("draft".into(), 5);
+        rolled.rollback();
+        assert_eq!(rolled.commit(), None);
+    }
+}
+
 /// Deferred external effects for one composer submit. Planning is pure and
 /// bounded; this command list is intentionally not executed here. A panic
 /// before `commit` drops the list, so no queue enqueue, worker steer, or
@@ -17923,13 +17964,19 @@ fn native_loop(
                     4 => { view.dialogs.stash_delete(); needs_paint = true; }
                     13 | 10 => {
                         if let Some(entry) = view.dialogs.stash_enter() {
-                            draft = entry.prompt.text;
-                            draft_cursor = entry.prompt.cursor.min(draft.len());
-                            while draft_cursor > 0 && !draft.is_char_boundary(draft_cursor) {
-                                draft_cursor -= 1;
+                            let mut restore = StashRestorePlan::begin(
+                                entry.prompt.text,
+                                entry.prompt.cursor,
+                            );
+                            if let Some((restored, cursor)) = restore.commit() {
+                                draft = restored;
+                                draft_cursor = cursor.min(draft.len());
+                                while draft_cursor > 0 && !draft.is_char_boundary(draft_cursor) {
+                                    draft_cursor -= 1;
+                                }
+                                draft_parts = entry.prompt.parts;
+                                view.dialogs.close();
                             }
-                            draft_parts = entry.prompt.parts;
-                            view.dialogs.close();
                         }
                         needs_paint = true;
                     }
