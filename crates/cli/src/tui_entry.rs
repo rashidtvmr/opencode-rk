@@ -6100,6 +6100,55 @@ mod dialog_restore_prompt_plan_tests {
     }
 }
 
+/// Owned plan for the message revert HTTP effect. Construction performs no
+/// I/O; commit moves the request exactly once for post-commit execution.
+#[cfg(feature = "native")]
+struct MessageRevertPlan {
+    request: Option<HttpRequestIntent>,
+    committed: bool,
+}
+
+#[cfg(feature = "native")]
+impl MessageRevertPlan {
+    fn begin(session_id: &str, message_id: &str, auth: Option<&str>) -> Self {
+        let body = revert_stage_request_body(message_id);
+        Self {
+            request: Some(HttpRequestIntent::new(
+                "POST", revert_stage_request_path(session_id), Some(&body), auth,
+            )),
+            committed: false,
+        }
+    }
+
+    fn commit(&mut self) -> Option<(String, String, Option<String>, Option<String>)> {
+        if self.committed { return None; }
+        let mut request = self.request.take()?;
+        request.commit();
+        let result = request.into_committed();
+        if result.is_some() { self.committed = true; }
+        result
+    }
+
+    fn rollback(&mut self) {
+        if let Some(mut request) = self.request.take() { request.rollback(); }
+        self.committed = true;
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod message_revert_plan_tests {
+    use super::MessageRevertPlan;
+    #[test]
+    fn message_revert_plan_commits_once_and_rolls_back_without_replay() {
+        let mut plan = MessageRevertPlan::begin("session", "message", Some("token"));
+        assert!(plan.commit().is_some());
+        assert!(plan.commit().is_none());
+        let mut rolled = MessageRevertPlan::begin("session", "message", None);
+        rolled.rollback();
+        assert!(rolled.commit().is_none());
+    }
+}
+
 /// Execute every effect the resolved message action produced
 /// (`dialog-message.tsx:34-88`). The view performs no IO itself; each effect
 /// is a real request here or a named gap.
@@ -6151,19 +6200,12 @@ fn dispatch_message_actions(
                 // Build the complete request intent before any external I/O.
                 // The committed intent is moved out exactly once below; an
                 // uncommitted or consumed intent cannot replay this input.
-                let request_body = revert_stage_request_body(&message_id);
-                let mut request_intent = HttpRequestIntent::new(
-                    "POST",
-                    revert_stage_request_path(session_id),
-                    Some(&request_body),
-                    auth,
-                );
+                let mut plan = MessageRevertPlan::begin(session_id, &message_id, auth);
                 let result = origin
                     .ok_or_else(|| "daemon unavailable".to_owned())
                     .and_then(|origin| {
-                        request_intent.commit();
-                        let (method, path, body, request_auth) = request_intent
-                            .into_committed()
+                        let (method, path, body, request_auth) = plan
+                            .commit()
                             .ok_or_else(|| "request intent was not committed".to_owned())?;
                         http_request_with_status(
                             origin,
@@ -8117,11 +8159,40 @@ fn bind_session(
     let (route_branch, route_worktree) = rail_location_facts(&route_directory);
     view.set_rail_location(route_branch.clone(), route_worktree);
     view.set_sidebar_location(Some(route_directory), route_branch);
-    if let Err(error) = refresh_session_mcp(view, &snapshot, auth) {
-        append_transcript(transcript, format!("error: session mcp unavailable: {error}"));
-    }
-    if let Err(error) = refresh_session_todos(view, &snapshot, auth) {
-        append_transcript(transcript, format!("error: session todos unavailable: {error}"));
+    // Post-publication refreshes are planned as owned GET intents.  The plan
+    // is committed only after bind publication succeeds; each moved intent is
+    // then executed exactly once, preserving the existing error-to-transcript
+    // behavior without allowing a failed preparation to replay I/O.
+    let mut refresh_plan = crate::native_input_transaction::RefreshPlan::begin();
+    refresh_plan.push_get(format!("/api/sessions/{}/mcp", snapshot.session_id), auth);
+    refresh_plan.push_get(format!("/api/sessions/{}/todo", snapshot.session_id), auth);
+    let _ = refresh_plan.commit();
+    let refresh_actions = refresh_plan
+        .into_committed()
+        .ok_or_else(|| "post-bind refresh plan was not committed".to_owned())?;
+    for action in refresh_actions {
+        let is_mcp = matches!(&action, crate::native_input_transaction::ExternalAction::Http { path, .. } if path.ends_with("/mcp"));
+        let result = match action {
+            crate::native_input_transaction::ExternalAction::Http { path, auth, .. }
+                if is_mcp => {
+                    http_request(&snapshot.origin, "GET", &path, None, auth.as_deref())
+                        .and_then(|body| serde_json::from_str(&body)
+                            .map_err(|error| format!("invalid MCP response: {error}")))
+                        .and_then(|value| view.apply_mcp(&value))
+                }
+            crate::native_input_transaction::ExternalAction::Http { path, auth, .. }
+                if path.ends_with("/todo") => {
+                    http_request(&snapshot.origin, "GET", &path, None, auth.as_deref())
+                        .and_then(|body| serde_json::from_str(&body)
+                            .map_err(|error| format!("invalid todo response: {error}")))
+                        .and_then(|value: serde_json::Value| view.apply_todos(&value))
+                }
+            _ => Ok(()),
+        };
+        if let Err(error) = result {
+            let label = if is_mcp { "mcp" } else { "todos" };
+            append_transcript(transcript, format!("error: session {label} unavailable: {error}"));
+        }
     }
     Ok((snapshot, draft))
 }
