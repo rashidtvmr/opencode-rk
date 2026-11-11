@@ -6060,6 +6060,46 @@ fn revert_stage_request_body(message_id: &str) -> String {
     serde_json::json!({ "messageID": message_id }).to_string()
 }
 
+/// Owned local plan for restoring the composer from a message dialog. The
+/// dialog result is staged before touching the live draft; commit transfers
+/// the text exactly once, while rollback permanently discards the intent.
+#[cfg(feature = "native")]
+#[derive(Debug, PartialEq, Eq)]
+struct DialogRestorePromptPlan {
+    text: Option<String>,
+    committed: bool,
+}
+
+#[cfg(feature = "native")]
+impl DialogRestorePromptPlan {
+    fn begin(text: String) -> Self { Self { text: Some(text), committed: false } }
+    fn commit(&mut self) -> Option<String> {
+        if self.committed { return None; }
+        self.committed = true;
+        self.text.take()
+    }
+    fn rollback(&mut self) {
+        self.text = None;
+        self.committed = true;
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod dialog_restore_prompt_plan_tests {
+    use super::DialogRestorePromptPlan;
+
+    #[test]
+    fn restore_prompt_commits_once_and_rollback_cannot_replay() {
+        let mut plan = DialogRestorePromptPlan::begin("restore me".to_owned());
+        assert_eq!(plan.commit(), Some("restore me".to_owned()));
+        assert_eq!(plan.commit(), None);
+        let mut rolled = DialogRestorePromptPlan::begin("discard".to_owned());
+        rolled.rollback();
+        assert_eq!(rolled.commit(), None);
+        assert!(rolled.text.is_none());
+    }
+}
+
 /// Execute every effect the resolved message action produced
 /// (`dialog-message.tsx:34-88`). The view performs no IO itself; each effect
 /// is a real request here or a named gap.
@@ -6088,14 +6128,17 @@ fn dispatch_message_actions(
                 // no live row-anchor reveal for yet. Named seam.
             }
             MessageActionEffect::RestorePrompt { text, .. } => {
-                let cursor = text.len();
-                crate::native_composer::replace_draft_with_cursor(
-                    draft,
-                    draft_cursor,
-                    text,
-                    cursor,
-                );
-                draft_parts.clear();
+                let mut plan = DialogRestorePromptPlan::begin(text);
+                if let Some(restored) = plan.commit() {
+                    let cursor = restored.len();
+                    crate::native_composer::replace_draft_with_cursor(
+                        draft,
+                        draft_cursor,
+                        restored,
+                        cursor,
+                    );
+                    draft_parts.clear();
+                }
             }
             MessageActionEffect::StageRevert { message_id } => {
                 let Some(session_id) = session_id else {
