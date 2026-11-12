@@ -990,6 +990,27 @@ impl<'a> PromptPaneInput<'a> {
             background: [0x14, 0x14, 0x14, 0xff],
         }
     }
+
+    /// Build a session composer input while preserving the resolved prompt
+    /// surface and terminal-cell metadata facts. This is the production
+    /// equivalent of the upstream `Prompt` constructor: callers provide the
+    /// already-resolved box/background rather than silently reverting to the
+    /// opaque default.
+    pub(crate) fn composer_with_background(
+        appearance: &crate::native_box_style::BoxAppearance,
+        width: usize,
+        height: usize,
+        draft: &'a str,
+        terminal_width: u16,
+        mode: PromptMode,
+        busy: bool,
+        metadata: PromptMetadataInput<'a>,
+        background: [u8; 4],
+    ) -> Self {
+        let mut input = Self::composer(appearance, width, height, draft, terminal_width, mode, busy, metadata);
+        input.background = background;
+        input
+    }
 }
 
 /// The composed composer block: rows, metadata row, placeholder row and the

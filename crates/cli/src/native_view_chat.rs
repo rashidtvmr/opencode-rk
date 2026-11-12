@@ -375,7 +375,8 @@ impl ChatView {
         busy: bool,
         appearance: &crate::native_box_style::BoxAppearance,
     ) -> PromptPane<'a> {
-        let mut input = PromptPaneInput::composer(
+        let background = self.prompt_background.unwrap_or([0x14, 0x14, 0x14, 0xff]);
+        let input = PromptPaneInput::composer_with_background(
             appearance,
             width,
             height,
@@ -384,12 +385,8 @@ impl ChatView {
             PromptMode::Normal,
             busy,
             PromptMetadataInput::default(),
+            background,
         );
-        // CP-02: the live frame threads the resolved prompt surface so the lip
-        // row honours a transparent `promptBg` (`index.tsx:1879,1890-1895`).
-        if let Some(background) = self.prompt_background {
-            input.background = background;
-        }
         self.prompt_pane(input)
     }
 
