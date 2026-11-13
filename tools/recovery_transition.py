@@ -178,12 +178,12 @@ def write_cap(path: pathlib.Path, record: dict) -> None:
     os.replace(tmp, path)
 
 
-CAPABILITY_KINDS = {"bootstrap-controller", "observer-correction", "lane-sync-controller", "bootstrap-repair", "driver-policy-reconciliation"}
+CAPABILITY_KINDS = {"bootstrap-controller", "observer-correction", "lane-sync-controller", "bootstrap-repair", "driver-policy-reconciliation", "retained-checkpoint"}
 CAPABILITY_STATUSES = {"PENDING", "ARMED", "APPLIED", "PINNED", "REJECTED"}
-CAPABILITY_ID = re.compile(r"^(?:ui-phase-transition-v2|observer-correction|lane-sync-controller|bootstrap-repair|driver-policy-reconciliation)-[0-9a-f]{16}$")
+CAPABILITY_ID = re.compile(r"^(?:ui-phase-transition-v2|observer-correction|lane-sync-controller|bootstrap-repair|driver-policy-reconciliation|retained-checkpoint)-[0-9a-f]{16}$")
 KIND_PATHS = {"bootstrap-controller": frozenset(ALLOWED_PATHS), "observer-correction": frozenset(OBSERVER_PATHS),
                "lane-sync-controller": frozenset({"tools/recovery_state.py"}), "bootstrap-repair": frozenset(BOOTSTRAP_REPAIR_PATHS),
-               "driver-policy-reconciliation": frozenset({"policy.json"})}
+               "driver-policy-reconciliation": frozenset({"policy.json"}), "retained-checkpoint": frozenset()}
 
 def validate_capability_schema(record: dict) -> None:
     if not isinstance(record, dict):
@@ -210,6 +210,9 @@ def validate_capability_schema(record: dict) -> None:
         if (not allowed or not set(map(str, allowed)) <= set(KIND_PATHS[kind])
                 or set(map(str, allowed)) != set(map(str, proposed))):
             raise TransitionError("observer correction must name a non-empty subset of the closed observer set")
+    elif kind == "retained-checkpoint":
+        if not allowed or set(map(str, allowed)) != set(map(str, proposed)):
+            raise TransitionError("retained checkpoint requires exact changed-path/blob manifest")
     elif set(map(str, allowed)) != set(KIND_PATHS[kind]) or set(map(str, proposed)) != set(KIND_PATHS[kind]):
         raise TransitionError("capability path set does not match its closed kind")
     if kind == "lane-sync-controller" and record.get("authorizedObserverBlobs") != {}:
@@ -218,6 +221,12 @@ def validate_capability_schema(record: dict) -> None:
         raise TransitionError("bootstrap-repair capability may not authorize observer blobs")
     if kind == "driver-policy-reconciliation" and record.get("authorizedObserverBlobs") not in (None, {}):
         raise TransitionError("driver reconciliation may not authorize observer blobs")
+    if kind == "retained-checkpoint":
+        cp = record.get("checkpoint")
+        if not isinstance(cp, dict) or not SHA40.fullmatch(str(cp.get("oldSha"))) or not SHA40.fullmatch(str(cp.get("candidateSha"))):
+            raise TransitionError("retained checkpoint identity is malformed")
+        if cp.get("ref") != "refs/heads/recovery/core" or cp.get("canonicalBase") is None:
+            raise TransitionError("retained checkpoint ref/scope is malformed")
     if not SHA40.fullmatch(str(record.get("baseSha"))) or not record.get("canonicalHead") or not record.get("capabilityId"):
         raise TransitionError("capability identity/base is malformed")
     if not isinstance(record.get("expiresAt"), str):
@@ -247,6 +256,9 @@ def capability_digest(record: dict) -> str:
             "originalProtectedEvaluatorBlobs": record.get("originalProtectedEvaluatorBlobs"),
             "expiresAt": record.get("expiresAt"),
         }
+    if record.get("kind") == "retained-checkpoint":
+        fields["checkpoint"] = record.get("checkpoint")
+        fields["protectedPins"] = record.get("protectedPins")
     # Historical capabilities did not contain a pin plan.  Do not silently
     # invalidate receipts for those records merely because this amendment is
     # installed; only the newly supported producer binds a plan.
@@ -1160,7 +1172,7 @@ def prepare_driver_policy_reconciliation(root: pathlib.Path, author: str) -> dic
         if cap_path(root).exists():
             raise TransitionError("capability slot occupied")
         write_cap(cap_path(root), record)
-    return record
+        return record
 
 
 def reconcile_driver_policy(root: pathlib.Path, operator: str) -> str:
@@ -1406,6 +1418,146 @@ def record_receipts(root: pathlib.Path, receipts_dir: pathlib.Path) -> dict:
             )
         write_cap(cap_path(root), record)
     return record
+
+
+def prepare_retained_checkpoint(root: pathlib.Path, proposal: pathlib.Path, author: str) -> dict:
+    """Prepare a one-use, noncanonical retained-core ref capability.
+
+    ``proposal`` is controller-produced JSON containing the already-created
+    one-parent candidate and its exact manifest.  This function only records
+    and validates identities; it never advances a ref.
+    """
+    if not author:
+        raise TransitionError("retained checkpoint requires named author")
+    data = json.loads(proposal.read_text(encoding="utf-8"))
+    required = {"oldSha", "candidateSha", "canonicalBase", "ref", "paths", "proposedBlobs",
+                "workspace", "commonGitDir", "taskId", "jobId", "token", "generation", "reservationId",
+                "storeRoot", "storeConfig"}
+    if not required <= set(data):
+        raise TransitionError("retained checkpoint proposal is incomplete")
+    old, candidate = str(data["oldSha"]), str(data["candidateSha"])
+    if not SHA40.fullmatch(old) or not SHA40.fullmatch(candidate) or not SHA40.fullmatch(str(data["canonicalBase"])):
+        raise TransitionError("retained checkpoint SHA identity is malformed")
+    if data.get("ref") != "refs/heads/recovery/core" or git(root, "rev-parse", data["ref"]) != old:
+        raise TransitionError("retained checkpoint old ref does not match")
+    if git(root, "rev-parse", "main-v2") != str(data["canonicalBase"]):
+        raise TransitionError("retained checkpoint canonical base changed")
+    if git(root, "rev-list", "--parents", "-n", "1", candidate).split() != [candidate, old]:
+        raise TransitionError("retained checkpoint must be one-parent child of old ref")
+    paths = sorted(map(str, data["paths"]))
+    blobs = {str(k): str(v) for k, v in data["proposedBlobs"].items()}
+    if paths != sorted(blobs) or not paths:
+        raise TransitionError("retained checkpoint manifest is not exact")
+    changed = changed_paths_for_recovery(root, old, candidate)
+    if changed != paths or any(git(root, "rev-parse", f"{candidate}:{p}") != blobs[p] for p in paths):
+        raise TransitionError("retained checkpoint tree does not match manifest")
+    policy = _load_policy_checked(root)
+    pins = policy.get("protectedEvaluatorBlobs")
+    if not isinstance(pins, dict) or any(git(root, "rev-parse", f"{candidate}:{p}") != b for p, b in pins.items()):
+        raise TransitionError("retained checkpoint changes approved protected pins")
+    # Delivery authority is selected from the repository's controller-owned
+    # state location, never from proposal-supplied root/config values.  In
+    # particular, do not call engine.setup here: setup may create/reconcile a
+    # caller-selected database before the reservation is checked.
+    import sys
+    sys.path.insert(0, str(root))
+    from tools.delivery.store import Store
+    from tools.delivery.model import digest as config_digest
+    authoritative_root = (common_git_dir(root) / "delivery-state").resolve()
+    if not authoritative_root.is_dir() or authoritative_root.is_symlink():
+        raise TransitionError("authoritative delivery state is missing or unsafe")
+    if not (authoritative_root / "delivery.sqlite3").is_file() or (authoritative_root / "delivery.sqlite3").is_symlink():
+        raise TransitionError("authoritative delivery database is missing or unsafe")
+    if pathlib.Path(data["storeRoot"]).resolve() != authoritative_root:
+        raise TransitionError("retained checkpoint proposal selected a non-authoritative Store")
+    store = Store(authoritative_root)
+    actual_cfg = store.meta("config")
+    actual_digest = store.meta("config_hash")
+    if not isinstance(actual_cfg, dict) or actual_digest != config_digest(actual_cfg):
+        raise TransitionError("authoritative delivery configuration is missing or inconsistent")
+    supplied_cfg = data.get("storeConfig")
+    if not isinstance(supplied_cfg, dict) or config_digest(supplied_cfg) != actual_digest:
+        raise TransitionError("retained checkpoint proposal configuration differs from authoritative Store")
+    with store.workspace_mutation(data["taskId"], data["jobId"], data["token"],
+            feature_ref=data["ref"], path=data["workspace"], base=old) as reservation:
+        if (str(data["workspace"]).resolve() if False else str(pathlib.Path(data["workspace"]).resolve())) != str(pathlib.Path(reservation["path"]).resolve()):
+            raise TransitionError("retained checkpoint workspace differs from live reservation")
+        if reservation["generation"] != int(data["generation"]):
+            raise TransitionError("retained checkpoint generation changed")
+        if str(common_git_dir(root).resolve()) != str(pathlib.Path(data["commonGitDir"]).resolve()):
+            raise TransitionError("retained checkpoint repository identity changed")
+    record = {"schemaVersion": 1, "kind": "retained-checkpoint", "status": "PENDING",
+              "capabilityId": "retained-checkpoint-" + secrets.token_hex(8), "author": author,
+              "baseSha": str(data["canonicalBase"]), "canonicalHead": "main-v2", "allowedPaths": paths,
+              "proposedBlobs": blobs, "protectedPins": pins, "checkpoint": data,
+              "createdAt": now(), "expiresAt": (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=900)).isoformat(),
+              "authorizedObserverBlobs": {}, "originalProtectedEvaluatorBlobs": pins, "approvals": []}
+    data["storeRoot"] = str(authoritative_root)
+    data["storeConfigDigest"] = actual_digest
+    validate_capability_schema(record)
+    record["capabilityDigest"] = capability_digest(record)
+    with locked(state_dir(root) / "state.lock"):
+        if cap_path(root).exists() or (state_dir(root) / "retained-checkpoint-capability.json").exists():
+            raise TransitionError("capability slot occupied")
+        write_cap(cap_path(root), record)
+    return record
+
+
+def apply_retained_checkpoint(root: pathlib.Path, operator: str) -> str:
+    if not operator:
+        raise TransitionError("retained checkpoint requires operator identity")
+    with locked(state_dir(root) / "state.lock"):
+        record = load_cap(root)
+        if record.get("kind") != "retained-checkpoint" or record.get("status") != "PENDING":
+            raise TransitionError("retained checkpoint is not pending")
+        if capability_expired(record) or validate_approvals(record):
+            raise TransitionError("retained checkpoint approvals or expiry are invalid")
+        cp = record["checkpoint"]
+        if dt.datetime.now(dt.timezone.utc).timestamp() >= float(cp["leaseUntil"]):
+            raise TransitionError("retained checkpoint lease expired")
+        import sys
+        sys.path.insert(0, str(root))
+        from tools.delivery.store import Store
+        from tools.delivery.model import digest as config_digest
+        authoritative_root = (common_git_dir(root) / "delivery-state").resolve()
+        if pathlib.Path(cp["storeRoot"]).resolve() != authoritative_root or not authoritative_root.is_dir() or authoritative_root.is_symlink():
+            raise TransitionError("retained checkpoint Store identity is not authoritative")
+        store = Store(authoritative_root)
+        actual_cfg = store.meta("config")
+        actual_digest = store.meta("config_hash")
+        if not isinstance(actual_cfg, dict) or actual_digest != config_digest(actual_cfg) or cp.get("storeConfigDigest") != actual_digest:
+            raise TransitionError("authoritative delivery configuration changed")
+        cap = state_dir(root) / "retained-checkpoint-capability.json"
+        if cap.exists():
+            raise TransitionError("retained checkpoint hook capability slot occupied")
+        hook_record = {"schemaVersion":1,"kind":"retained-checkpoint","status":"ARMED",
+            "capabilityId":record["capabilityId"],"capabilityDigest":record["capabilityDigest"],
+            "author":record["author"],"baseSha":record["baseSha"],"canonicalHead":"main-v2",
+            "canonicalBase":cp["canonicalBase"],"allowedPaths":record["allowedPaths"],
+            "proposedBlobs":record["proposedBlobs"],"protectedPins":record["protectedPins"],
+            "checkpoint":cp,"oldSha":cp["oldSha"],"candidateSha":cp["candidateSha"],
+            "ref":cp["ref"],"paths":cp["paths"],"expiresAt":record["expiresAt"],
+            "approvals":record["approvals"],"authorizedObserverBlobs":{},
+            "originalProtectedEvaluatorBlobs":record["originalProtectedEvaluatorBlobs"]}
+        # The hook sidecar is created only at the operator apply boundary, after
+        # receipts and live Store fencing have been checked.
+        write_cap(cap, hook_record)
+        try:
+            with store.workspace_mutation(cp["taskId"], cp["jobId"], cp["token"], feature_ref=cp["ref"], path=cp["workspace"], base=cp["oldSha"]):
+                if dt.datetime.now(dt.timezone.utc).timestamp() >= float(cp["leaseUntil"]):
+                    raise TransitionError("retained checkpoint lease expired")
+                git(root, "update-ref", cp["ref"], cp["candidateSha"], cp["oldSha"])
+        except Exception:
+            # A prepared/aborted hook callback consumes its capability. If the
+            # ref never moved, record refusal without turning it into APPLIED.
+            record["status"] = "REJECTED"; record["rejectedAt"] = now(); record["rejectedBy"] = operator
+            write_cap(cap_path(root), record)
+            raise
+        if git(root, "rev-parse", cp["ref"]) != cp["candidateSha"]:
+            raise TransitionError("retained checkpoint landed at unexpected SHA")
+        record["status"] = "APPLIED"; record["appliedSha"] = cp["candidateSha"]; record["appliedAt"] = now()
+        write_cap(cap_path(root), record)
+        return cp["candidateSha"]
 
 
 def _finish_policy(root: pathlib.Path, record: dict, applied_sha: str) -> None:
@@ -2071,6 +2223,11 @@ def main(argv: list[str]) -> int:
         elif cmd == "prepare-driver-policy-reconciliation":
             record = prepare_driver_policy_reconciliation(root, os.environ.get("USER", "unknown"))
             print(f"CAPABILITY-PENDING {record['capabilityId']} base={record['baseSha']}")
+        elif cmd == "prepare-retained-checkpoint":
+            if len(argv) < 4:
+                raise TransitionError("prepare-retained-checkpoint requires <root> <proposal-json>")
+            record = prepare_retained_checkpoint(root, pathlib.Path(argv[3]).resolve(), os.environ.get("USER", "unknown"))
+            print(f"CHECKPOINT-PENDING {record['capabilityId']} candidate={record['checkpoint']['candidateSha']}")
         elif cmd == "archive":
             archived = archive_capability(root)
             print(f"CAPABILITY-ARCHIVED {archived}")
@@ -2096,6 +2253,8 @@ def main(argv: list[str]) -> int:
             print(f"INTERSTAGE-HOOK-REFRESHED {interstage_hook_refresh(root, argv[3] if len(argv) > 3 else '')}")
         elif cmd == "reconcile-driver-policy":
             print(f"DRIVER-POLICY-RECONCILED {reconcile_driver_policy(root, argv[3] if len(argv) > 3 else '')}")
+        elif cmd == "apply-retained-checkpoint":
+            print(f"CHECKPOINT-APPLIED {apply_retained_checkpoint(root, argv[3] if len(argv) > 3 else '')}")
         elif cmd == "cancel-driver-policy-reconciliation":
             if len(argv) < 6:
                 raise TransitionError("cancel-driver-policy-reconciliation requires <root> <capability-id> <digest> <operator> <reason>")

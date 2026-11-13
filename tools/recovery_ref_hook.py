@@ -193,6 +193,97 @@ def transition_window_allows(rows: list[tuple[str, str, str]]) -> bool:
     return True
 
 
+def retained_checkpoint_allows(rows: list[tuple[str, str, str]], phase: str) -> bool:
+    """Consume one controller-minted retained-core checkpoint permission.
+
+    Unlike the bootstrap window this never names the canonical ref and never
+    changes protected policy pins.  The record is an exact commit/ref/manifest
+    capability produced by the delivery controller; the hook only admits the
+    single prepared transaction and consumes it on either callback.
+    """
+    path = common_git_dir() / "recovery-state" / "retained-checkpoint-capability.json"
+    try:
+        if phase not in {"prepared", "committed", "aborted"} or len(rows) != 1:
+            return False
+        cap = json.loads(path.read_text(encoding="utf-8"))
+        if cap.get("status") not in {"ARMED", "PREPARED"} or cap.get("ref") != "refs/heads/recovery/core":
+            return False
+        # Git invokes the hook again after the transaction.  Once the
+        # prepared callback admitted the exact row, committed/aborted is a
+        # terminal consumption callback: do not re-run expiry or mutable-state
+        # checks and accidentally leave a replayable capability behind.
+        if phase in {"committed", "aborted"}:
+            if cap.get("status") != "PREPARED" or len(rows) != 1:
+                return False
+            old, new, ref = rows[0]
+            if old != cap.get("oldSha") or new != cap.get("candidateSha") or ref != cap.get("ref"):
+                return False
+            path.unlink()
+            return True
+        approvals = cap.get("approvals")
+        if not isinstance(approvals, list) or len(approvals) != 2:
+            return False
+        reviewers = {str(row.get("reviewer")) for row in approvals}
+        roles = {str(row.get("role")) for row in approvals}
+        if len(reviewers) != 2 or not {"security", "test"} <= roles:
+            return False
+        if any(row.get("verdict") != "APPROVE" or not row.get("capabilityDigest") == cap.get("capabilityDigest")
+               or str(row.get("reviewer")) == str(cap.get("author")) for row in approvals):
+            return False
+        if dt.datetime.now(dt.timezone.utc) >= dt.datetime.fromisoformat(str(cap["expiresAt"])):
+            return False
+        cp = cap.get("checkpoint")
+        if not isinstance(cp, dict):
+            return False
+        old, new, ref = rows[0]
+        if (cap.get("oldSha") != cp.get("oldSha") or cap.get("candidateSha") != cp.get("candidateSha")
+                or cap.get("paths") != cp.get("paths") or cap.get("proposedBlobs") != cp.get("proposedBlobs")
+                or old != cp.get("oldSha") or new != cp.get("candidateSha") or ref != cap.get("ref")):
+            return False
+        immutable = {"kind": cap.get("kind", "bootstrap-controller"), "baseSha": cap.get("baseSha"),
+            "allowedPaths": cap.get("allowedPaths"), "proposedBlobs": cap.get("proposedBlobs"),
+            "authorizedObserverBlobs": cap.get("authorizedObserverBlobs"),
+            "futureControllerBlob": cap.get("futureControllerBlob"),
+            "originalProtectedEvaluatorBlobs": cap.get("originalProtectedEvaluatorBlobs"),
+            "expiresAt": cap.get("expiresAt"), "checkpoint": cp, "protectedPins": cap.get("protectedPins")}
+        if hashlib.sha256(json.dumps(immutable, sort_keys=True).encode()).hexdigest() != cap.get("capabilityDigest"):
+            return False
+        parents = _git_out(["git", "rev-list", "--parents", "-n", "1", new])
+        if parents is None or parents.split() != [new, old]:
+            return False
+        policy = json.loads((common_git_dir() / "recovery-state" / "policy.json").read_text())
+        pins = policy.get("protectedEvaluatorBlobs", {})
+        if cap.get("protectedPins") != pins or cap.get("canonicalBase") != _git_out(["git", "rev-parse", "refs/heads/main-v2"]):
+            return False
+        proposed = cap.get("proposedBlobs", {})
+        if not isinstance(proposed, dict) or set(proposed) != set(cap.get("paths", [])):
+            return False
+        changed = sorted(x for x in (_git_out(["git", "diff", "--name-only", old, new]) or "").splitlines() if x)
+        if changed != sorted(proposed):
+            return False
+        for rel, blob in proposed.items():
+            if _git_out(["git", "rev-parse", f"{new}:{rel}"]) != str(blob):
+                return False
+        for rel, blob in pins.items():
+            if _git_out(["git", "rev-parse", f"{new}:{rel}"]) != str(blob):
+                return False
+        if phase == "prepared":
+            if cap.get("status") != "ARMED":
+                return False
+            cap["status"] = "PREPARED"
+            tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(cap, sort_keys=True) + "\n")
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, path)
+            return True
+        if cap.get("status") != "PREPARED":
+            return False
+        path.unlink()
+        return True
+    except Exception:
+        return False
+
+
 
 def lane_sync_allows(rows: list[tuple[str, str, str]], phase: str) -> bool:
     """Validate one state-command-minted fixed-lane synchronization.
@@ -304,6 +395,8 @@ def main() -> int:
             malformed = True
             continue
         raw_rows.append((fields[0], fields[1], fields[2]))
+    if not malformed and retained_checkpoint_allows(raw_rows, phase):
+        return 0
     if not malformed and lane_sync_allows(raw_rows, phase):
         return 0
     if phase in {"committed", "aborted"}:
