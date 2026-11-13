@@ -129,6 +129,9 @@ def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+write_json = atomic_write
+
+
 def bump(meta: dict) -> None:
     meta["stateRevision"] = int(meta.get("stateRevision", 0)) + 1
     meta["updatedAt"] = now()
@@ -137,18 +140,25 @@ def bump(meta: dict) -> None:
 def install_reference_hook(cfg: dict, paths: dict[str, pathlib.Path]) -> str:
     canonical = str(cfg["canonicalBranch"])
     canonical_root = pathlib.Path(cfg["approvedRecoveryWorktrees"][canonical]).resolve()
-    hook_driver = canonical_root / "tools" / "recovery_ref_hook.py"
-    if not hook_driver.is_file():
-        raise RuntimeError(f"reference hook driver missing: {hook_driver}")
-    hook = common_git_dir() / "hooks" / "reference-transaction"
-    hook.parent.mkdir(parents=True, exist_ok=True)
+    source_driver = canonical_root / "tools" / "recovery_ref_hook.py"
+    if not source_driver.is_file():
+        raise RuntimeError(f"reference hook driver missing: {source_driver}")
+    hooks_dir = common_git_dir() / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    # Immutable installed driver copy: adjudication must not follow mutable working-tree bytes
+    # (prevents self-swap during staged transitions). Post-land refresh reinstalls.
+    driver_installed = hooks_dir / "recovery_ref_hook.driver.py"
+    driver_bytes = source_driver.read_bytes()
+    driver_installed.write_bytes(driver_bytes)
+    driver_installed.chmod(0o644)
+    hook = hooks_dir / "reference-transaction"
     wrapper = (
         "#!/bin/sh\n"
-        f"exec /usr/bin/env python3 {shlex.quote(str(hook_driver))} \"$@\"\n"
+        f"exec /usr/bin/env python3 {shlex.quote(str(driver_installed))} \"$@\"\n"
     )
     if hook.exists():
         existing = hook.read_text(encoding="utf-8", errors="replace")
-        if "recovery_ref_hook.py" not in existing:
+        if "recovery_ref_hook" not in existing:
             raise RuntimeError(
                 f"existing reference-transaction hook is not Recovery Mode owned: {hook}"
             )
@@ -162,19 +172,7 @@ def build_runtime_policy(cfg: dict, sha: str, paths: dict[str, pathlib.Path]) ->
     frozen = snapshot.get("refs", {})
     if not isinstance(frozen, dict) or not frozen:
         raise RuntimeError("legacy snapshot has no frozen refs")
-    mutable = list(cfg.get("fixedMutableBranches", []))
-    canonical_token = secrets.token_hex(32)
-    paths["canonical_token"].write_text(canonical_token + "\n", encoding="utf-8")
-    paths["canonical_token"].chmod(0o600)
-    ref_policy = {
-        "schemaVersion": 1,
-        "activationSha": sha,
-        "mutableHeads": mutable,
-        "canonicalHead": cfg["canonicalBranch"],
-        "canonicalWriteTokenSha256": sha256_bytes(canonical_token.encode()),
-        "frozenHeads": frozen,
-        "protectedPaths": cfg.get("evaluationPolicy", {}).get("protectedEvaluatorPaths", []),
-    }
+    ref_policy = build_runtime_ref_policy(cfg, sha, paths, preserve_token=False)
     atomic_write(paths["ref_policy"], ref_policy)
 
     protected: dict[str, str] = {}
@@ -191,6 +189,37 @@ def build_runtime_policy(cfg: dict, sha: str, paths: dict[str, pathlib.Path]) ->
         "createdAt": now(),
         "protectedEvaluatorBlobs": protected,
         "referenceHookSha256": hook_sha,
+    }
+
+
+def build_runtime_ref_policy(cfg: dict, sha: str, paths: dict[str, pathlib.Path], preserve_token: bool = False) -> dict:
+    snapshot = load_json(ROOT / cfg["legacySnapshot"])
+    frozen = snapshot.get("refs", {})
+    if not isinstance(frozen, dict) or not frozen:
+        raise RuntimeError("legacy snapshot has no frozen refs")
+    mutable = list(cfg.get("fixedMutableBranches", []))
+    token_hash = None
+    if preserve_token and paths["canonical_token"].is_file() and paths["ref_policy"].is_file():
+        try:
+            existing = load_json(paths["ref_policy"])
+            token_hash = existing.get("canonicalWriteTokenSha256")
+            if not token_hash:
+                token_hash = sha256_bytes(paths["canonical_token"].read_text(encoding="utf-8").strip().encode())
+        except Exception:
+            token_hash = None
+    if not token_hash:
+        canonical_token = secrets.token_hex(32)
+        paths["canonical_token"].write_text(canonical_token + "\n", encoding="utf-8")
+        paths["canonical_token"].chmod(0o600)
+        token_hash = sha256_bytes(canonical_token.encode())
+    return {
+        "schemaVersion": 1,
+        "activationSha": sha,
+        "mutableHeads": mutable,
+        "canonicalHead": cfg["canonicalBranch"],
+        "canonicalWriteTokenSha256": token_hash,
+        "frozenHeads": frozen,
+        "protectedPaths": cfg.get("evaluationPolicy", {}).get("protectedEvaluatorPaths", []),
     }
 
 
@@ -313,6 +342,38 @@ def cmd_recover_state(cfg: dict) -> int:
     print(f"RECOVERY STATE RESTORED revision={backup['meta'].get('stateRevision')}")
     return 0
 
+
+
+def cmd_refresh_ref_policy(cfg: dict, args: argparse.Namespace) -> int:
+    meta, failures, gates, salvage, paths = require_state(cfg)
+    with locked(paths["lock"]):
+        meta, failures, gates, salvage, paths = require_state(cfg)
+        sha = main_sha(cfg)
+        # Reinstall immutable hook driver from canonical source and sync policy/ref-policy;
+        # preserve canonical token so existing guarded authority remains valid.
+        hook_sha = install_reference_hook(cfg, paths)
+        if paths["policy"].is_file():
+            policy = load_json(paths["policy"])
+        else:
+            policy = {"schemaVersion": 1, "activationSha": sha}
+        policy["referenceHookSha256"] = hook_sha
+        policy["refreshedAt"] = now()
+        # keep protected evaluator blobs consistent with current canonical if present
+        protected = policy.get("protectedEvaluatorBlobs") or {}
+        for rel in cfg.get("evaluationPolicy", {}).get("protectedEvaluatorPaths", []):
+            try:
+                protected[rel] = git("rev-parse", f"{cfg['canonicalBranch']}:{rel}")
+            except Exception:
+                pass
+        if protected:
+            policy["protectedEvaluatorBlobs"] = protected
+        write_json(paths["policy"], policy)
+        ref_policy = build_runtime_ref_policy(cfg, sha, paths, preserve_token=True)
+        write_json(paths["ref_policy"], ref_policy)
+        bump(meta)
+        save_all(meta, failures, gates, salvage, paths)
+    print(f"REFRESHED ref-policy mutable={len(ref_policy.get('mutableHeads', []))} protected={len(ref_policy.get('protectedPaths', []))}")
+    return 0
 
 def cmd_status(cfg: dict) -> int:
     meta, failures, gates, _, paths = require_state(cfg)
@@ -1330,6 +1391,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init")
     sub.add_parser("recover-state")
     sub.add_parser("status")
+    p = sub.add_parser("refresh-ref-policy")
+    p.set_defaults(func=cmd_refresh_ref_policy)
 
     p = sub.add_parser("salvage-status")
     p.add_argument("--failure")
@@ -1425,6 +1488,8 @@ def main() -> int:
             return cmd_recover_state(cfg)
         if args.cmd == "status":
             return cmd_status(cfg)
+        if args.cmd == "refresh-ref-policy":
+            return cmd_refresh_ref_policy(cfg, args)
         if args.cmd == "salvage-status":
             return cmd_salvage_status(cfg, args)
         if args.cmd == "salvage-query":
