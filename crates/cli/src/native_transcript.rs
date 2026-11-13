@@ -179,9 +179,33 @@ impl StreamAccumulator {
     }
 }
 
+/// Length in bytes of the UTF-8 scalar that starts with `lead`.
+///
+/// The input is a `&str`, so `lead` is always a valid UTF-8 lead byte and the
+/// whole scalar is present. The fallback keeps the scanner moving if that
+/// assumption is ever broken.
+fn utf8_scalar_len(lead: u8) -> usize {
+    match lead {
+        0x00..=0x7f => 1,
+        0xc0..=0xdf => 2,
+        0xe0..=0xef => 3,
+        0xf0..=0xf7 => 4,
+        _ => 1,
+    }
+}
+
 /// Strip ANSI CSI/SGR, OSC (incl. hostile OSC-8 hyperlinks), lone ESC/C1, and
 /// C0 controls except `\n` and `\t`. Terminator-less OSC is swallowed to end
 /// of input (fail closed). Output truncated to `MAX_SANITIZED_BYTES`.
+///
+/// An escape sequence ends at the first byte that cannot continue it, as in
+/// upstream OpenTUI's `ANSI_SEQUENCES` (`packages/core/src/lib/paste.ts`):
+/// intermediates are `0x20..=0x2f` and the final byte is `0x30..=0x7e`. A
+/// byte outside those classes — a C0 control, DEL, or a UTF-8 lead byte —
+/// ends the sequence, so it goes through the normal rules: the C0 policy
+/// keeps `\n` and `\t` and drops the other controls, and a multi-byte scalar
+/// stays ordinary text. Every skip advances by whole scalars, so the copy
+/// below always starts on a character boundary.
 pub fn strip_ansi(input: &str) -> String {
     let bytes = input.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(input.len().min(MAX_SANITIZED_BYTES));
@@ -237,12 +261,26 @@ pub fn strip_ansi(input: &str) -> String {
                         i += 1;
                     }
                 }
-                b'(' | b')' | b'#' => {
-                    i += 3.min(bytes.len() - i);
-                }
                 _ => {
-                    // Lone ESC + single char: drop both.
-                    i += 2;
+                    // Any other escape: ESC + intermediate bytes
+                    // (`0x20..=0x2f`) + an optional final byte
+                    // (`0x30..=0x7e`). `ESC ( B`, `ESC ) B` and `ESC # B` are
+                    // this case: `(`, `)` and `#` are intermediate bytes.
+                    //
+                    // A byte outside those two classes cannot continue the
+                    // sequence — a C0 control, DEL, or a UTF-8 lead byte — so
+                    // the sequence ends at the ESC and that byte goes through
+                    // the normal rules below: the C0 policy keeps `\n` and
+                    // `\t` and drops the other controls, and a multi-byte
+                    // scalar stays ordinary text. The ESC itself never
+                    // reaches the output.
+                    i += 1;
+                    while i < bytes.len() && (0x20..=0x2f).contains(&bytes[i]) {
+                        i += 1;
+                    }
+                    if i < bytes.len() && (0x30..=0x7e).contains(&bytes[i]) {
+                        i += 1;
+                    }
                 }
             }
             continue;
@@ -284,19 +322,14 @@ pub fn strip_ansi(input: &str) -> String {
             i += 1;
             continue;
         }
-        // Copy one UTF-8 scalar.
-        let s = &input[i..];
-        match s.chars().next() {
-            Some(ch) => {
-                let len = ch.len_utf8();
-                if out.len() + len > MAX_SANITIZED_BYTES {
-                    break;
-                }
-                out.extend_from_slice(&bytes[i..i + len]);
-                i += len;
-            }
-            None => break,
+        // Copy one UTF-8 scalar. The length comes from the lead byte, so the
+        // copy never slices the input at `i` and cannot split a scalar.
+        let len = utf8_scalar_len(b);
+        if out.len() + len > MAX_SANITIZED_BYTES {
+            break;
         }
+        out.extend_from_slice(&bytes[i..i + len]);
+        i += len;
     }
     String::from_utf8(out).unwrap_or_default()
 }
@@ -854,5 +887,186 @@ mod tests {
         assert_eq!(t.index_of(anchor), None, "anchor evicted from bounded scrollback");
         assert_eq!(t.anchored_offset(anchor, 10), None);
         assert!(t.anchored_page(anchor, 10).is_empty());
+    }
+
+    // ---------------------------------------------------------------------
+    // ESC followed by a multi-byte UTF-8 scalar.
+    //
+    // `strip_ansi` skipped a fixed byte count after an unknown ESC, so the
+    // next slice started inside the following scalar and panicked. The escape
+    // grammar is unchanged for ASCII; a byte that cannot continue an escape
+    // sequence ends it (upstream OpenTUI `packages/core/src/lib/paste.ts`
+    // `ANSI_SEQUENCES`: "A sequence also ends at the first character that
+    // cannot continue it"), and a UTF-8 lead byte is neither an intermediate
+    // (`0x20..=0x2f`) nor a final byte (`0x30..=0x7e`).
+    // ---------------------------------------------------------------------
+
+    /// Two-, three- and four-byte scalars for the ESC boundary cases.
+    const MULTIBYTE_SCALARS: [&str; 3] = ["\u{e9}", "\u{754c}", "\u{1f980}"];
+
+    #[test]
+    fn esc_before_multibyte_scalar_strips_the_escape_and_keeps_the_text() {
+        for scalar in MULTIBYTE_SCALARS {
+            let input = format!("a\x1b{scalar}b");
+            let clean = strip_ansi(&input);
+            assert!(!clean.contains('\x1b'), "ESC leaked: {clean:?}");
+            assert_eq!(clean, format!("a{scalar}b"), "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn esc_intermediate_before_multibyte_scalar_keeps_the_text() {
+        // `ESC (` is an escape with one intermediate byte; a UTF-8 lead byte
+        // cannot continue it, so the scalar stays ordinary text.
+        for scalar in MULTIBYTE_SCALARS {
+            let input = format!("a\x1b({scalar}b");
+            let clean = strip_ansi(&input);
+            assert!(!clean.contains('\x1b'), "ESC leaked: {clean:?}");
+            assert_eq!(clean, format!("a{scalar}b"), "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn esc_before_multibyte_scalar_keeps_the_ascii_escape_grammar() {
+        // Two-byte escape: the escape and its single final byte go.
+        assert_eq!(strip_ansi("a\x1bb"), "a");
+        // `ESC ( B` is three bytes.
+        assert_eq!(strip_ansi("a\x1b(B"), "a");
+        // Recognized control sequences are unchanged.
+        assert_eq!(strip_ansi("\x1b[31mred\x1b[0m"), "red");
+        assert_eq!(strip_ansi("\x1b]0;title\x07text"), "text");
+        assert_eq!(strip_ansi("\x1bPpayload\x1b\\tail"), "tail");
+        assert_eq!(strip_ansi("\x1bXpayload\x07tail"), "tail");
+        assert_eq!(strip_ansi("\x1b^payload\x07tail"), "tail");
+        assert_eq!(strip_ansi("\x1b_payload\x07tail"), "tail");
+        // C0 protection and the dangling ESC are unchanged.
+        assert_eq!(strip_ansi("keep\nnewline\ttab"), "keep\nnewline\ttab");
+        assert_eq!(strip_ansi("a\x1b"), "a");
+        // A C1 control after an ESC is still a C1 control.
+        assert_eq!(strip_ansi("\x1b\u{9b}31m"), "");
+        assert_eq!(strip_ansi("\x1b\u{9d}0;title\u{7}text"), "text");
+    }
+
+    #[test]
+    fn huge_esc_multibyte_input_stays_bounded_and_leak_free() {
+        let input = "a\x1b\u{754c}b".repeat(20_000);
+        let clean = strip_ansi(&input);
+        assert!(!clean.contains('\x1b'), "ESC leaked");
+        assert!(
+            clean.len() <= MAX_SANITIZED_BYTES,
+            "sanitized output {} exceeded the bound",
+            clean.len()
+        );
+    }
+
+    #[test]
+    fn wrap_prompt_survives_esc_before_multibyte_scalar() {
+        for scalar in MULTIBYTE_SCALARS {
+            let draft = format!("a\x1b{scalar}b");
+            let rows = crate::native_prompt_layout::wrap_prompt(&draft, 43, draft.len());
+            assert_eq!(rows.rows, vec![format!("a{scalar}b")], "draft: {draft:?}");
+            for row in &rows.rows {
+                assert!(!row.contains('\x1b'), "ESC leaked into a row: {row:?}");
+            }
+            let (column, row_index) = rows.cursor.expect("cursor must exist");
+            let row = &rows.rows[row_index];
+            let cells = crate::native_view_layout::visit_unpadded_cells(row, 1024, |_, _| {});
+            assert_eq!(column, cells, "cursor column for {draft:?} in {row:?}");
+        }
+    }
+
+    #[test]
+    fn wrap_prompt_cursor_inside_an_escape_stays_inside_the_row() {
+        for scalar in MULTIBYTE_SCALARS {
+            let draft = format!("a\x1b{scalar}b");
+            // Cursor between the ESC and the scalar: the sanitized prefix is
+            // the text before the escape, never a split scalar.
+            let rows = crate::native_prompt_layout::wrap_prompt(&draft, 43, 2);
+            for row in &rows.rows {
+                assert!(!row.contains('\x1b'), "ESC leaked into a row: {row:?}");
+            }
+            let (column, row_index) = rows.cursor.expect("cursor must exist");
+            let row = &rows.rows[row_index];
+            let cells = crate::native_view_layout::visit_unpadded_cells(row, 1024, |_, _| {});
+            assert!(column <= cells, "cursor column {column} beyond {cells} cells: {row:?}");
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // S-ESC-01: the final byte of an escape sequence is `0x30..=0x7e`.
+    //
+    // Upstream OpenTUI `packages/core/src/lib/paste.ts` (`ANSI_SEQUENCES`,
+    // selected revision 8d6065a3e60039d16c6ee697692dcfbc46d3c786) spells the
+    // "any other escape" rule as `\x1b[\x20-\x2f]*[\x30-\x7e]?`: ESC, then
+    // intermediate bytes, then an optional final byte. "A sequence also ends
+    // at the first character that cannot continue it." A C0 control, DEL or
+    // a UTF-8 lead byte is none of those, so the sequence ends at the ESC and
+    // that byte goes through the normal rules — the C0 policy keeps `\n` and
+    // `\t` and drops the other controls.
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn esc_before_c0_control_keeps_the_c0_policy() {
+        // The ESC alone is removed; the control that follows is ordinary text
+        // under the documented C0 policy.
+        assert_eq!(strip_ansi("a\x1b\nb"), "a\nb");
+        assert_eq!(strip_ansi("a\x1b\tb"), "a\tb");
+        assert_eq!(strip_ansi("a\x1b\rb"), "ab");
+        assert_eq!(strip_ansi("a\x1b\x07b"), "ab");
+        assert_eq!(strip_ansi("a\x1b\x00b"), "ab");
+        assert_eq!(strip_ansi("a\x1b\x7fb"), "ab");
+    }
+
+    #[test]
+    fn esc_intermediate_before_c0_control_keeps_the_c0_policy() {
+        // Same rule after an escape intermediate byte.
+        assert_eq!(strip_ansi("a\x1b(\nb"), "a\nb");
+        assert_eq!(strip_ansi("a\x1b(\tb"), "a\tb");
+        assert_eq!(strip_ansi("a\x1b(\rb"), "ab");
+        assert_eq!(strip_ansi("a\x1b(\x07b"), "ab");
+    }
+
+    #[test]
+    fn esc_intermediate_chain_consumes_its_final_byte() {
+        // ESC + intermediates + an optional final byte: the whole sequence
+        // goes, exactly like the pinned `ESC ( B` case.
+        assert_eq!(strip_ansi("a\x1b(B"), "a");
+        assert_eq!(strip_ansi("a\x1b!B"), "a");
+        assert_eq!(strip_ansi("a\x1b b"), "a");
+        assert_eq!(strip_ansi("a\x1b!"), "a");
+        assert_eq!(strip_ansi("a\x1b! B"), "a");
+    }
+
+    #[test]
+    fn esc_intermediate_chain_before_multibyte_scalar_keeps_the_text() {
+        // A UTF-8 lead byte cannot continue an escape sequence, with or
+        // without an intermediate byte in front of it.
+        for scalar in MULTIBYTE_SCALARS {
+            let input = format!("a\x1b!{scalar}b");
+            let clean = strip_ansi(&input);
+            assert!(!clean.contains('\x1b'), "ESC leaked: {clean:?}");
+            assert_eq!(clean, format!("a{scalar}b"), "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn wrap_prompt_keeps_the_newline_after_an_escape() {
+        // The newline after an escape is ordinary text: it keeps its row
+        // break and the cursor follows it.
+        let draft = "a\x1b\nb";
+        let rows = crate::native_prompt_layout::wrap_prompt(draft, 43, draft.len());
+        assert_eq!(rows.rows, vec!["a".to_owned(), "b".to_owned()]);
+        for row in &rows.rows {
+            assert!(!row.contains('\x1b'), "ESC leaked into a row: {row:?}");
+        }
+        let (column, row_index) = rows.cursor.expect("cursor must exist");
+        assert_eq!(row_index, 1, "cursor must follow the preserved newline");
+        assert_eq!(column, 1, "cursor must sit after the last glyph");
+        // A tab after an escape keeps the editor's fixed two-cell tab width.
+        let tabbed = "a\x1b\tb";
+        let rows = crate::native_prompt_layout::wrap_prompt(tabbed, 43, tabbed.len());
+        assert_eq!(rows.rows, vec!["a  b".to_owned()]);
+        let (column, row_index) = rows.cursor.expect("cursor must exist");
+        assert_eq!((column, row_index), (4, 0));
     }
 }
