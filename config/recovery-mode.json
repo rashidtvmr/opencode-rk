@@ -269,7 +269,7 @@
     "laneSyncController": {
       "kind": "lane-sync-controller",
       "path": "tools/recovery_state.py",
-      "blob": "43b1e60e8151f5376f4e49077b2cc7ecdb809f2f",
+      "blob": "300f5027cc1fa016ed642440bfb01f4b3a922ab9",
       "maxLifetimeSeconds": 60
     }
   }

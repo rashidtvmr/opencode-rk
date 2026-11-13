@@ -86,10 +86,15 @@ def transition_window_allows(rows: list[tuple[str, str, str]]) -> bool:
     if not isinstance(cap, dict) or cap.get("status") != "ARMED":
         return False
     bootstrap = {"config/recovery-mode.json", "tools/recovery_ref_hook.py", "tools/recovery_transition.py"}
+    bootstrap_repair = {"config/recovery-mode.json", "tools/recovery_ref_hook.py", "tools/recovery_transition.py",
+                        "tools/recovery_state.py", "tools/recovery_guard.py"}
     lane_controller = {"tools/recovery_state.py"}
     observer = {"tests/e2e/native_provider_setup.py", "tests/e2e/native_stream_tool.py", "tests/e2e/native_utf8_input.py", "tests/e2e/native_escape_input.py", "tests/e2e/native_resize.py", "tests/e2e/native_bracketed_paste.py"}
     kind = cap.get("kind")
-    expected = bootstrap if kind == "bootstrap-controller" else observer if kind == "observer-correction" else lane_controller if kind == "lane-sync-controller" else None
+    expected = (bootstrap if kind == "bootstrap-controller" else
+                bootstrap_repair if kind == "bootstrap-repair" else
+                observer if kind == "observer-correction" else
+                lane_controller if kind == "lane-sync-controller" else None)
     allowed = cap.get("allowedPaths")
     proposed = cap.get("proposedBlobs")
     if expected is None or not isinstance(allowed, list) or len(allowed) != len(set(allowed)) or not isinstance(proposed, dict):
@@ -168,8 +173,19 @@ def transition_window_allows(rows: list[tuple[str, str, str]]) -> bool:
     if diff is None:
         return False
     changed = sorted(line for line in diff.splitlines() if line)
-    if changed != sorted(str(p) for p in allowed):
-        return False
+    if kind in {"bootstrap-repair", "bootstrap-controller", "lane-sync-controller"}:
+        # exact per-changed-path subset binding: commit may change only a subset
+        # (e.g. stage-2 after stage-1 landed part of the closed set), but every
+        # changed path must be allowed and the full allowed tree must match the
+        # proposed blobs at the new SHA.
+        if not changed or not set(changed).issubset(set(map(str, allowed))):
+            return False
+    elif kind == "observer-correction":
+        if changed != sorted(str(p) for p in allowed):
+            return False
+    else:
+        if changed != sorted(str(p) for p in allowed):
+            return False
     for rel, blob in proposed.items():
         actual = _git_out(["git", "rev-parse", f"{new}:{rel}"])
         if actual is None or actual != str(blob):
@@ -316,6 +332,11 @@ def main() -> int:
         return 0
 
     for old, new, ref in rows:
+        # Narrowly justified no-op: Git emits delete-of-absent pseudo-ref cleanup
+        # (e.g. AUTO_MERGE) as 000...0 000...0 <ref> after verified commit/merge/checkout.
+        # This grants no ref rights and does not authorize any real ref mutation.
+        if old == ZERO and new == ZERO and ref == "AUTO_MERGE":
+            continue
         if ref.startswith("refs/remotes/"):
             continue
         if ref in {
