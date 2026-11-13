@@ -1,276 +1,354 @@
 {
-  "schemaVersion": 2,
-  "status": "ACTIVE",
-  "mode": "phase1-product-failure-burndown",
-  "canonicalBranch": "main-v2",
-  "bootstrapBranch": "controller/recovery-mode-v1",
-  "phase1Contract": "docs/PHASE1_ACCEPTANCE.md",
-  "trackedFailureSeed": "recovery/failures.json",
-  "trackedGateDefinitions": "recovery/phase1-gates.json",
-  "trackedSalvageTemplate": "recovery/salvage-index.json",
-  "runtimeStateLocation": "git-common-dir/recovery-state",
-  "runtimeEvidenceLocation": "git-common-dir/recovery-evidence",
-  "failureQueue": "git-common-dir/recovery-state/failures.json",
-  "phase1GateState": "git-common-dir/recovery-state/gates.json",
-  "legacySnapshot": "recovery/legacy-snapshot.json",
-  "salvageIndex": "git-common-dir/recovery-state/salvage-index.json",
-  "branchInventoryIsExecutionQueue": false,
-  "bulkLegacyMergeAllowed": false,
-  "heritageMergeRequiredForPhase1": false,
-  "legacyRefsMutable": false,
-  "fixedMutableBranches": [
-    "main-v2",
-    "recovery/core",
-    "recovery/runtime",
-    "recovery/ui",
-    "recovery/platform"
-  ],
-  "lanePathIntent": {
-    "recovery/core": [
-      "crates/cli",
-      "crates/server",
-      "crates/providers",
-      "crates/catalog",
-      "Cargo.toml",
-      "Cargo.lock"
+    "schemaVersion": 2,
+    "status": "ACTIVE",
+    "mode": "phase1-product-failure-burndown",
+    "canonicalBranch": "main-v2",
+    "bootstrapBranch": "controller/recovery-mode-v1",
+    "phase1Contract": "docs/PHASE1_ACCEPTANCE.md",
+    "trackedFailureSeed": "recovery/failures.json",
+    "trackedGateDefinitions": "recovery/phase1-gates.json",
+    "trackedSalvageTemplate": "recovery/salvage-index.json",
+    "runtimeStateLocation": "git-common-dir/recovery-state",
+    "runtimeEvidenceLocation": "git-common-dir/recovery-evidence",
+    "failureQueue": "git-common-dir/recovery-state/failures.json",
+    "phase1GateState": "git-common-dir/recovery-state/gates.json",
+    "legacySnapshot": "recovery/legacy-snapshot.json",
+    "salvageIndex": "git-common-dir/recovery-state/salvage-index.json",
+    "branchInventoryIsExecutionQueue": false,
+    "bulkLegacyMergeAllowed": false,
+    "heritageMergeRequiredForPhase1": false,
+    "legacyRefsMutable": false,
+    "fixedMutableBranches": [
+        "main-v2",
+        "recovery/core",
+        "recovery/runtime",
+        "recovery/ui",
+        "recovery/platform",
+        "recovery/feature-01",
+        "recovery/feature-02",
+        "recovery/feature-03",
+        "recovery/feature-04",
+        "recovery/feature-05",
+        "recovery/feature-06",
+        "recovery/feature-07",
+        "recovery/feature-08",
+        "recovery/feature-09",
+        "recovery/feature-10",
+        "recovery/feature-11",
+        "recovery/feature-12",
+        "recovery/feature-13",
+        "recovery/feature-14",
+        "recovery/feature-15",
+        "recovery/feature-16",
+        "recovery/feature-17",
+        "recovery/feature-18",
+        "recovery/feature-19",
+        "recovery/feature-20",
+        "recovery/feature-21",
+        "recovery/feature-22",
+        "recovery/feature-23",
+        "recovery/feature-24",
+        "recovery/feature-25",
+        "recovery/feature-26",
+        "recovery/feature-27",
+        "recovery/feature-28",
+        "recovery/feature-29",
+        "recovery/feature-30"
     ],
-    "recovery/runtime": [
-      "crates/server",
-      "crates/sessions",
-      "crates/tools",
-      "crates/security",
-      "crates/storage",
-      "Cargo.toml",
-      "Cargo.lock"
-    ],
-    "recovery/ui": [
-      "crates/cli",
-      "crates/opentui-bridge",
-      "tests/e2e",
-      "Cargo.toml",
-      "Cargo.lock"
-    ],
-    "recovery/platform": [
-      "release",
-      "scripts",
-      "tests",
-      "tools",
-      "Cargo.toml",
-      "Cargo.lock"
-    ]
-  },
-  "maxFixedRecoveryLanes": 4,
-  "maxVerifiedUnintegratedCandidates": 4,
-  "integrationWriters": 1,
-  "maxHeavyValidations": 1,
-  "logicalSubagentCeiling": 48,
-  "parallelReadOnlySubagents": 32,
-  "parallelImplementationCandidates": 8,
-  "parallelIndependentReviewers": 8,
-  "subagentPolicy": {
-    "allowed": true,
-    "readOnlyResearchAndReview": "encouraged",
-    "persistentBranchCreation": "forbidden",
-    "persistentWorktreeCreation": "forbidden",
-    "implementationOutput": "patch_or_candidate_commit_to_lane_owner",
-    "reviewOutput": "verdict_and_evidence_only"
-  },
-  "queuePolicy": {
-    "authority": "observed_product_failure_or_unproven_phase1_gate",
-    "allowedSources": [
-      "compiler",
-      "focused-test",
-      "phase1-golden-journey",
-      "upstream-parity",
-      "security-adversarial",
-      "unproven-gate"
-    ],
-    "candidateHighWaterBehavior": "stop_new_implementation_and_shift_to_review_integration_salvage",
-    "failedPreparedCandidate": "eject_and_reopen_failure",
-    "createRepairDescendantBranch": false,
-    "stateMutationsMustUseTool": true,
-    "trackedSeedsAreImmutable": true,
-    "runtimeStateOutsideTrackedHistory": true,
-    "judgeResultsMustBeIngested": true,
-    "manualQueueInsertionAllowed": false
-  },
-  "acceptancePolicy": {
-    "exactIntegratedShaRequired": true,
-    "workerSelfReportIsAcceptance": false,
-    "candidateGreenIsAcceptance": false,
-    "claimsCompletedIsAcceptance": false,
-    "branchMergedIsAcceptance": false,
-    "phase1FailureCountMustBeZero": true,
-    "artifactSourceShaMustEqualCurrentMainV2": true,
-    "allPhase1GatesMustPassOnSameSha": true,
-    "quickJudgeCannotAcceptRelease": true,
-    "trackedStateCommitMayNotCreateAcceptance": true
-  },
-  "resourcePolicy": {
-    "cargoBuildJobs": 2,
-    "rustTestThreads": 2,
-    "preferFocusedBeforeWorkspace": true,
-    "centralizeHeavyValidation": true,
-    "heavyValidationLock": "git-common-dir/recovery-state/heavy-validation.lock"
-  },
-  "bootstrapMutable": false,
-  "requireCanonicalRecoveryConfig": true,
-  "rejectUnexpectedLocalBranches": true,
-  "rejectUnexpectedWorktrees": true,
-  "executionLanes": [
-    "recovery/core",
-    "recovery/runtime",
-    "recovery/ui",
-    "recovery/platform"
-  ],
-  "approvedRecoveryWorktrees": {
-    "main-v2": "/Users/mymac/Projects/opencode-rk-recovery-20261005",
-    "recovery/core": "/Users/mymac/Projects/opencode-rk-recovery-lanes/core",
-    "recovery/runtime": "/Users/mymac/Projects/opencode-rk-recovery-lanes/runtime",
-    "recovery/ui": "/Users/mymac/Projects/opencode-rk-recovery-lanes/ui",
-    "recovery/platform": "/Users/mymac/Projects/opencode-rk-recovery-lanes/platform"
-  },
-  "approvedNonExecutionBranches": [
-    "lane/PERM-POPUP",
-    "lane/R1.2-security-workflow-repair-migration",
-    "recovery/pre-unclog-20261031",
-    "review-i03-theme",
-    "feat/web-agents-20261026",
-    "feat/web-files-20261026",
-    "feat/web-jobs-20261026",
-    "feat/web-mcp-20261026",
-    "feat/web-nav-20261026",
-    "feat/web-parity-restoration-20261026",
-    "feat/web-queue-20261026",
-    "feat/web-rich-20261026"
-  ],
-  "frozenRefForwardAmendments": {
-    "lane/R1.2-security-workflow-repair": {
-      "from": "0c1dda250fd952a02068364d1caa21f88bc074ef",
-      "to": "4fae90af25cfa1027e0ecd0ac1c369ecde272f55",
-      "why": "fast-forward continuation; snapshot tip is an ancestor of the new tip",
-      "at": "2026-10-31T00:00:00+00:00"
-    }
-  },
-  "lanePolicy": {
-    "oneActiveFailurePerLane": true,
-    "claimRequiresLaneAtCurrentMainV2": true,
-    "maxAheadCommits": 6,
-    "resetOrFastForwardLaneAfterDisposition": true,
-    "rebaseOrReapplyBeforeIntegration": true,
-    "overlappingPathGrantsForbidden": true,
-    "candidateDiffMustFitPathGrant": true,
-    "pathGrantMustFitLaneIntent": true,
-    "integrationMode": "fast-forward-only"
-  },
-  "integrationLock": ".git/recovery-integration.lock",
-  "stateLock": ".git/recovery-state.lock",
-  "stateMutationTool": "tools/recovery_state.py",
-  "evaluationPolicy": {
-    "method": "evaluator-optimizer",
-    "authorAndReviewerMustBeIndependent": true,
-    "blindDiffFirstReview": true,
-    "requiredApprovalsByPriority": {
-      "P0": 2,
-      "P1": 2,
-      "P2": 1,
-      "P3": 1
+    "lanePathIntent": {
+        "recovery/core": [
+            "crates/cli",
+            "crates/server",
+            "crates/providers",
+            "crates/catalog",
+            "Cargo.toml",
+            "Cargo.lock"
+        ],
+        "recovery/runtime": [
+            "crates/server",
+            "crates/sessions",
+            "crates/tools",
+            "crates/security",
+            "crates/storage",
+            "Cargo.toml",
+            "Cargo.lock"
+        ],
+        "recovery/ui": [
+            "crates/cli",
+            "crates/opentui-bridge",
+            "tests/e2e",
+            "Cargo.toml",
+            "Cargo.lock"
+        ],
+        "recovery/platform": [
+            "release",
+            "scripts",
+            "tests",
+            "tools",
+            "Cargo.toml",
+            "Cargo.lock"
+        ]
     },
-    "reviewDisagreement": "any_negative_verdict_requires_new_candidate; third evaluator may diagnose but cannot override a rejection",
-    "securityOrPermissionChangeRequiresSecurityEvaluator": true,
-    "optimizerMayNotMarkOwnCandidateAccepted": true,
-    "protectedEvaluatorPaths": [
-      "config/recovery-mode.json",
-      "docs/PHASE1_ACCEPTANCE.md",
-      "recovery/failures.json",
-      "recovery/phase1-gates.json",
-      "tools/phase1_judge.py",
-      "tools/recovery_guard.py",
-      "tools/recovery_state.py",
-      "tools/recovery_ref_hook.py",
-      "tests/e2e/native_provider_setup.py",
-      "tests/e2e/native_stream_tool.py",
-      "tests/e2e/native_utf8_input.py",
-      "tests/e2e/native_escape_input.py",
-      "tests/e2e/native_resize.py",
-      "tests/e2e/native_bracketed_paste.py",
-      "tests/e2e/native_interactive_pty.py",
-      "tests/bootstrap/test_native_provider_auth_control.py"
+    "maxFixedRecoveryLanes": 35,
+    "maxVerifiedUnintegratedCandidates": 4,
+    "integrationWriters": 1,
+    "maxHeavyValidations": 1,
+    "logicalSubagentCeiling": 48,
+    "parallelReadOnlySubagents": 32,
+    "parallelImplementationCandidates": 8,
+    "parallelIndependentReviewers": 8,
+    "subagentPolicy": {
+        "allowed": true,
+        "readOnlyResearchAndReview": "encouraged",
+        "persistentBranchCreation": "forbidden",
+        "persistentWorktreeCreation": "controller-provisioned-only",
+        "implementationOutput": "patch_or_candidate_commit_to_lane_owner",
+        "reviewOutput": "verdict_and_evidence_only"
+    },
+    "queuePolicy": {
+        "authority": "observed_product_failure_or_unproven_phase1_gate",
+        "allowedSources": [
+            "compiler",
+            "focused-test",
+            "phase1-golden-journey",
+            "upstream-parity",
+            "security-adversarial",
+            "unproven-gate"
+        ],
+        "candidateHighWaterBehavior": "stop_new_implementation_and_shift_to_review_integration_salvage",
+        "failedPreparedCandidate": "eject_and_reopen_failure",
+        "createRepairDescendantBranch": false,
+        "stateMutationsMustUseTool": true,
+        "trackedSeedsAreImmutable": true,
+        "runtimeStateOutsideTrackedHistory": true,
+        "judgeResultsMustBeIngested": true,
+        "manualQueueInsertionAllowed": false
+    },
+    "acceptancePolicy": {
+        "exactIntegratedShaRequired": true,
+        "workerSelfReportIsAcceptance": false,
+        "candidateGreenIsAcceptance": false,
+        "claimsCompletedIsAcceptance": false,
+        "branchMergedIsAcceptance": false,
+        "phase1FailureCountMustBeZero": true,
+        "artifactSourceShaMustEqualCurrentMainV2": true,
+        "allPhase1GatesMustPassOnSameSha": true,
+        "quickJudgeCannotAcceptRelease": true,
+        "trackedStateCommitMayNotCreateAcceptance": true
+    },
+    "resourcePolicy": {
+        "cargoBuildJobs": 2,
+        "rustTestThreads": 2,
+        "preferFocusedBeforeWorkspace": true,
+        "centralizeHeavyValidation": true,
+        "heavyValidationLock": "git-common-dir/recovery-state/heavy-validation.lock"
+    },
+    "bootstrapMutable": false,
+    "requireCanonicalRecoveryConfig": true,
+    "rejectUnexpectedLocalBranches": true,
+    "rejectUnexpectedWorktrees": true,
+    "executionLanes": [
+        "recovery/core",
+        "recovery/runtime",
+        "recovery/ui",
+        "recovery/platform"
     ],
-    "securitySensitivePaths": [
-      "crates/security",
-      "crates/tools",
-      "crates/server/src/lib.rs",
-      "crates/server/src/daemon.rs",
-      "crates/providers",
-      "crates/cli/src/daemon_client.rs",
-      "crates/cli/src/app_start.rs"
+    "approvedRecoveryWorktrees": {
+        "main-v2": "/Users/mymac/Projects/opencode-rk-recovery-20261005",
+        "recovery/core": "/Users/mymac/Projects/opencode-rk-recovery-lanes/core",
+        "recovery/runtime": "/Users/mymac/Projects/opencode-rk-recovery-lanes/runtime",
+        "recovery/ui": "/Users/mymac/Projects/opencode-rk-recovery-lanes/ui",
+        "recovery/platform": "/Users/mymac/Projects/opencode-rk-recovery-lanes/platform"
+    },
+    "approvedNonExecutionBranches": [
+        "lane/PERM-POPUP",
+        "lane/R1.2-security-workflow-repair-migration",
+        "recovery/pre-unclog-20261031",
+        "review-i03-theme",
+        "feat/web-agents-20261026",
+        "feat/web-files-20261026",
+        "feat/web-jobs-20261026",
+        "feat/web-mcp-20261026",
+        "feat/web-nav-20261026",
+        "feat/web-parity-restoration-20261026",
+        "feat/web-queue-20261026",
+        "feat/web-rich-20261026"
     ],
-    "evaluatorSensitivePaths": [
-      "tools/convergence_gate.py",
-      "tests/e2e/native_second_client.py"
-    ],
-    "evaluatorChangeRequiresTestEvaluator": true,
-    "evaluatorChangeMinimumApprovals": 2
-  },
-  "activationPolicy": {
-    "oldControllersAndMergeWavesMustBeStopped": true,
-    "canonicalMustContainRecoveryModeBeforeProductClaims": true,
-    "fixedLaneBranchesMustStartAtCanonical": true,
-    "unexpectedBranchOrWorktreeCreationBlocks": true,
-    "installReferenceTransactionHook": true,
-    "freezeEvaluatorAtActivation": true,
-    "runtimeStateRevisionMustBeAtomic": true
-  },
-  "salvagePolicy": {
-    "legacyInventoryImportAllowed": false,
-    "historicalEvidenceOnly": [
-      "docs/convergence-v2-salvage.json",
-      "docs/CONVERGENCE_V2_SALVAGE.md"
-    ],
-    "requiresActiveFailure": true,
-    "scanEntireFrozenSnapshot": true,
-    "collapseAliasesByTipSha": true,
-    "maxMaterializedCandidatesPerFailure": 8,
-    "oneActiveQueryPerFailure": true,
-    "unresolvedCandidatesBlockIntegration": true,
-    "terminalDispositions": [
-      "ALREADY_PRESENT",
-      "SALVAGED_PRODUCT",
-      "SALVAGED_TEST",
-      "SUPERSEDED_BY",
-      "DUPLICATE",
-      "PROCESS_ONLY",
-      "EVIDENCE_ONLY",
-      "CONFLICTING_IMPL_PRESERVED"
+    "frozenRefForwardAmendments": {
+        "lane/R1.2-security-workflow-repair": {
+            "from": "0c1dda250fd952a02068364d1caa21f88bc074ef",
+            "to": "4fae90af25cfa1027e0ecd0ac1c369ecde272f55",
+            "why": "fast-forward continuation; snapshot tip is an ancestor of the new tip",
+            "at": "2026-10-31T00:00:00+00:00"
+        }
+    },
+    "lanePolicy": {
+        "oneActiveFailurePerLane": true,
+        "claimRequiresLaneAtCurrentMainV2": true,
+        "maxAheadCommits": 6,
+        "resetOrFastForwardLaneAfterDisposition": true,
+        "rebaseOrReapplyBeforeIntegration": true,
+        "overlappingPathGrantsForbidden": true,
+        "candidateDiffMustFitPathGrant": true,
+        "pathGrantMustFitLaneIntent": true,
+        "integrationMode": "fast-forward-only"
+    },
+    "integrationLock": ".git/recovery-integration.lock",
+    "stateLock": ".git/recovery-state.lock",
+    "stateMutationTool": "tools/recovery_state.py",
+    "evaluationPolicy": {
+        "method": "evaluator-optimizer",
+        "authorAndReviewerMustBeIndependent": true,
+        "blindDiffFirstReview": true,
+        "requiredApprovalsByPriority": {
+            "P0": 2,
+            "P1": 2,
+            "P2": 1,
+            "P3": 1
+        },
+        "reviewDisagreement": "any_negative_verdict_requires_new_candidate; third evaluator may diagnose but cannot override a rejection",
+        "securityOrPermissionChangeRequiresSecurityEvaluator": true,
+        "optimizerMayNotMarkOwnCandidateAccepted": true,
+        "protectedEvaluatorPaths": [
+            "config/recovery-mode.json",
+            "docs/PHASE1_ACCEPTANCE.md",
+            "recovery/failures.json",
+            "recovery/phase1-gates.json",
+            "tools/phase1_judge.py",
+            "tools/recovery_guard.py",
+            "tools/recovery_state.py",
+            "tools/recovery_ref_hook.py",
+            "tests/e2e/native_provider_setup.py",
+            "tests/e2e/native_stream_tool.py",
+            "tests/e2e/native_utf8_input.py",
+            "tests/e2e/native_escape_input.py",
+            "tests/e2e/native_resize.py",
+            "tests/e2e/native_bracketed_paste.py",
+            "tests/e2e/native_interactive_pty.py",
+            "tests/bootstrap/test_native_provider_auth_control.py"
+        ],
+        "securitySensitivePaths": [
+            "crates/security",
+            "crates/tools",
+            "crates/server/src/lib.rs",
+            "crates/server/src/daemon.rs",
+            "crates/providers",
+            "crates/cli/src/daemon_client.rs",
+            "crates/cli/src/app_start.rs"
+        ],
+        "evaluatorSensitivePaths": [
+            "tools/convergence_gate.py",
+            "tests/e2e/native_second_client.py"
+        ],
+        "evaluatorChangeRequiresTestEvaluator": true,
+        "evaluatorChangeMinimumApprovals": 2
+    },
+    "activationPolicy": {
+        "oldControllersAndMergeWavesMustBeStopped": true,
+        "canonicalMustContainRecoveryModeBeforeProductClaims": true,
+        "fixedLaneBranchesMustStartAtCanonical": true,
+        "unexpectedBranchOrWorktreeCreationBlocks": true,
+        "installReferenceTransactionHook": true,
+        "freezeEvaluatorAtActivation": true,
+        "runtimeStateRevisionMustBeAtomic": true
+    },
+    "salvagePolicy": {
+        "legacyInventoryImportAllowed": false,
+        "historicalEvidenceOnly": [
+            "docs/convergence-v2-salvage.json",
+            "docs/CONVERGENCE_V2_SALVAGE.md"
+        ],
+        "requiresActiveFailure": true,
+        "scanEntireFrozenSnapshot": true,
+        "collapseAliasesByTipSha": true,
+        "maxMaterializedCandidatesPerFailure": 8,
+        "oneActiveQueryPerFailure": true,
+        "unresolvedCandidatesBlockIntegration": true,
+        "terminalDispositions": [
+            "ALREADY_PRESENT",
+            "SALVAGED_PRODUCT",
+            "SALVAGED_TEST",
+            "SUPERSEDED_BY",
+            "DUPLICATE",
+            "PROCESS_ONLY",
+            "EVIDENCE_ONLY",
+            "CONFLICTING_IMPL_PRESERVED"
+        ]
+    },
+    "optimizerPolicy": {
+        "maxFailedCandidateCyclesBeforeStrategyReview": 3,
+        "strategyReviewRequiresIndependentEvaluator": true,
+        "strategyReviewMustRecordDiagnosisAndNewApproach": true
+    },
+    "transitionPolicy": {
+        "mechanism": "tools/recovery_transition.py",
+        "requiredApprovals": 2,
+        "requiredRoles": [
+            "security",
+            "test"
+        ],
+        "authorMayNotApprove": true,
+        "oneUse": true,
+        "boundToCanonicalSha": true,
+        "boundToExactBlobs": true,
+        "capabilityLocation": "git-common-dir/recovery-state/transition-capability.json",
+        "failClosedOnActiveClaims": true,
+        "failClosedOnIntegrationLock": true,
+        "capabilityExpirySeconds": 900,
+        "authorizedObserverBlobsAreExact": true,
+        "laneSyncController": {
+            "kind": "lane-sync-controller",
+            "path": "tools/recovery_state.py",
+            "blob": "300f5027cc1fa016ed642440bfb01f4b3a922ab9",
+            "maxLifetimeSeconds": 60
+        }
+    },
+    "featureWorkspacePolicy": {
+        "status": "proposed-controller-owned",
+        "root": "/Users/mymac/Projects/opencode-rk-recovery-lanes/workspaces",
+        "branchPrefix": "recovery/feature-",
+        "refs": [
+            "refs/heads/recovery/feature-01",
+            "refs/heads/recovery/feature-02",
+            "refs/heads/recovery/feature-03",
+            "refs/heads/recovery/feature-04",
+            "refs/heads/recovery/feature-05",
+            "refs/heads/recovery/feature-06",
+            "refs/heads/recovery/feature-07",
+            "refs/heads/recovery/feature-08",
+            "refs/heads/recovery/feature-09",
+            "refs/heads/recovery/feature-10",
+            "refs/heads/recovery/feature-11",
+            "refs/heads/recovery/feature-12",
+            "refs/heads/recovery/feature-13",
+            "refs/heads/recovery/feature-14",
+            "refs/heads/recovery/feature-15",
+            "refs/heads/recovery/feature-16",
+            "refs/heads/recovery/feature-17",
+            "refs/heads/recovery/feature-18",
+            "refs/heads/recovery/feature-19",
+            "refs/heads/recovery/feature-20",
+            "refs/heads/recovery/feature-21",
+            "refs/heads/recovery/feature-22",
+            "refs/heads/recovery/feature-23",
+            "refs/heads/recovery/feature-24",
+            "refs/heads/recovery/feature-25",
+            "refs/heads/recovery/feature-26",
+            "refs/heads/recovery/feature-27",
+            "refs/heads/recovery/feature-28",
+            "refs/heads/recovery/feature-29",
+            "refs/heads/recovery/feature-30"
+        ],
+        "maxActiveWorktrees": 30,
+        "requireGitRegistration": true,
+        "requirePersistentDisk": true,
+        "requireOutsideCanonicalAndCommonGit": true,
+        "leaseSeconds": 900,
+        "retainUntilVerifiedRetirement": true,
+        "automaticCleanup": "report-only",
+        "creation": "controller-provisioned-only"
+    },
+    "approvedManagedWorkspaceRoots": [
+        "/Users/mymac/Projects/opencode-rk-recovery-lanes/workspaces"
     ]
-  },
-  "optimizerPolicy": {
-    "maxFailedCandidateCyclesBeforeStrategyReview": 3,
-    "strategyReviewRequiresIndependentEvaluator": true,
-    "strategyReviewMustRecordDiagnosisAndNewApproach": true
-  },
-  "transitionPolicy": {
-    "mechanism": "tools/recovery_transition.py",
-    "requiredApprovals": 2,
-    "requiredRoles": [
-      "security",
-      "test"
-    ],
-    "authorMayNotApprove": true,
-    "oneUse": true,
-    "boundToCanonicalSha": true,
-    "boundToExactBlobs": true,
-    "capabilityLocation": "git-common-dir/recovery-state/transition-capability.json",
-    "failClosedOnActiveClaims": true,
-    "failClosedOnIntegrationLock": true,
-    "capabilityExpirySeconds": 900,
-    "authorizedObserverBlobsAreExact": true,
-    "laneSyncController": {
-      "kind": "lane-sync-controller",
-      "path": "tools/recovery_state.py",
-      "blob": "300f5027cc1fa016ed642440bfb01f4b3a922ab9",
-      "maxLifetimeSeconds": 60
-    }
-  }
 }

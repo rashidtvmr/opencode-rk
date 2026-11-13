@@ -233,6 +233,19 @@ def main() -> int:
     unexpected_paths = sorted(
         set(actual_worktrees) - snapshot_paths - set(str(p) for p in approved_map.values())
     )
+    managed_roots = [str(p) for p in cfg.get("approvedManagedWorkspaceRoots", []) if isinstance(p, str)]
+    managed_feature = set()
+    if managed_roots:
+        managed_feature = {
+            path for path in unexpected_paths
+            if any(path.startswith(root.rstrip("/") + "/") for root in managed_roots)
+        }
+        unexpected_paths = [path for path in unexpected_paths if path not in managed_feature]
+    if managed_feature:
+        warnings.append(
+            f"managed feature worktrees under approved roots (controller-owned): {len(sorted(managed_feature))} "
+            f"{sorted(managed_feature)[:5]}"
+        )
     if unexpected_paths:
         warnings.append(
             f"unregistered worktrees (process-only): {len(unexpected_paths)} "
@@ -275,13 +288,13 @@ def main() -> int:
     expected_hook = policy.get("referenceHookSha256")
     if cfg.get("activationPolicy", {}).get("installReferenceTransactionHook", False):
         if not hook.is_file() or not os.access(hook, os.X_OK):
-            warnings.append("reference-transaction hook file missing or not executable")
+            errors.append("reference-transaction hook file missing or not executable")
         elif expected_hook:
             actual_hook = hashlib.sha256(hook.read_bytes()).hexdigest()
             if actual_hook != expected_hook:
-                warnings.append("reference-transaction hook hash changed")
+                errors.append("reference-transaction hook hash changed")
         if hook.is_file() and not hook_effective(hook):
-            warnings.append(
+            errors.append(
                 "reference-transaction hook is installed but Git cannot reach it "
                 "(core.hooksPath is empty or points elsewhere)"
             )
@@ -413,9 +426,14 @@ def main() -> int:
             errors.append(f"salvage query {fid!r} is not an object")
             continue
         if query.get("refsScanned") != len(snapshot_refs):
-            warnings.append(
-                f"salvage query {fid} refsScanned {query.get('refsScanned')} != {len(snapshot_refs)} (process-only)"
+            unresolved_query = any(not c.get("disposition") for c in (query.get("candidates", []) or []))
+            msg = (
+                f"salvage query {fid} refsScanned {query.get('refsScanned')} != {len(snapshot_refs)}"
             )
+            if unresolved_query or query.get("status") in {"ACTIVE", "OPEN"}:
+                errors.append(msg + " (active/incomplete historical scan)")
+            else:
+                warnings.append(msg + " (historical)")
         candidates = query.get("candidates", [])
         if not isinstance(candidates, list) or len(candidates) > max_salvage:
             errors.append(f"salvage query {fid} exceeds bounded candidate limit {max_salvage}")
