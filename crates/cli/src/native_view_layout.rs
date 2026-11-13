@@ -49,14 +49,18 @@ const MAX_CLUSTER_BYTES: usize = 48;
 /// Max zero-width continuations (combining marks, variation selectors,
 /// skin modifiers, ZWJ) kept per cluster; further marks are dropped.
 const MAX_CONTINUATIONS: usize = 8;
-/// Max base scalars per cluster, bounding ZWJ join chains.
-const MAX_CLUSTER_BASES: usize = 4;
+/// Max base scalars per cluster, bounding ZWJ join chains. Eight keeps every
+/// RGI family (at most four bases) and a five-member chain in one cluster while
+/// still splitting an arbitrarily long chain into further bounded clusters.
+const MAX_CLUSTER_BASES: usize = 8;
 /// Fixed per-line scan overhead on top of the per-cell budget, so short
 /// panes can still consume ordinary escape prefixes before the bounded
 /// prefix limit stops the scan.
 const SCAN_OVERHEAD_BYTES: usize = 256;
 /// ZWJ (U+200D): joins the next base into one cluster.
 const ZWJ: char = '\u{200D}';
+/// Variation selector-16 (U+FE0F): requests emoji presentation (two cells).
+const VS16: char = '\u{FE0F}';
 /// Below this viewport height the shell cannot reserve a composer row, so the
 /// sidebar is suppressed (height-safe guard).
 const MIN_FULL_HEIGHT: u16 = 2;
@@ -258,9 +262,17 @@ pub(crate) fn visit_unpadded_cells(line: &str, budget: usize, mut visit: impl Fn
             }
             continue;
         }
-        if cluster.last_was_zwj && cluster.can_join(c) {
-            // ZWJ + following base stays one cluster (bounded join chain).
+        if cluster.last_was_zwj && cluster.can_join(c) && !cluster.composed {
+            // ZWJ + following base stays one cluster (bounded join chain). A
+            // composed Hangul syllable never absorbs that join: the pinned
+            // oracle breaks there because conjoining jamo are not
+            // Extended_Pictographic (executed `1100 1161 200D 1F680` = 4).
             cluster.join(c, w);
+            continue;
+        }
+        if cluster.can_extend_hangul(c) {
+            // Decomposed Hangul stays one syllable cluster (L+V, LV+T).
+            cluster.join_hangul(c, w);
             continue;
         }
         if is_regional(raw) && cluster.regional == 1 && cluster.bases == 1 && cluster.conts == 0 {
@@ -312,8 +324,14 @@ pub(crate) fn visit_cells(line: &str, width: u16, mut visit: impl FnMut(u16, &st
             }
             continue;
         }
+        if !cluster.is_empty() && cluster.can_extend_hangul(c) {
+            // Same conjoining-Hangul rule as `fit`, so measurement and
+            // slicing cannot disagree about a syllable's cells.
+            cluster.join_hangul(c, usize::from(char_width(c)));
+            continue;
+        }
         if !cluster.is_empty()
-            && ((cluster.last_was_zwj && cluster.can_join(c))
+            && ((cluster.last_was_zwj && cluster.can_join(c) && !cluster.composed)
                 || (is_regional(c)
                     && cluster.regional == 1
                     && cluster.bases == 1
@@ -414,6 +432,11 @@ struct Cluster {
     last_was_zwj: bool,
     /// Regional indicators stored: 0 none, 1 lone, 2 complete flag.
     regional: usize,
+    /// A variation selector-16 (U+FE0F) requests emoji presentation, which the
+    /// pinned renderer widens to two cells even for an ASCII base.
+    vs16: bool,
+    /// The base chain is a conjoining Hangul syllable (L+V or L+V+T).
+    composed: bool,
 }
 
 impl Cluster {
@@ -431,6 +454,8 @@ impl Cluster {
         self.zwj = false;
         self.last_was_zwj = false;
         self.regional = 0;
+        self.vs16 = false;
+        self.composed = false;
     }
 
     /// Append a zero-width continuation while within the byte and count
@@ -444,6 +469,8 @@ impl Cluster {
         if c == ZWJ {
             self.zwj = true;
             self.last_was_zwj = true;
+        } else if c == VS16 {
+            self.vs16 = true;
         }
     }
 
@@ -463,6 +490,28 @@ impl Cluster {
         self.bases < MAX_CLUSTER_BASES && self.text.len() + c.len_utf8() <= MAX_CLUSTER_BYTES
     }
 
+    /// Join a conjoining Hangul jamo (L+V or LV+T). The syllable renders as the
+    /// widest base, never the scalar sum.
+    fn join_hangul(&mut self, c: char, w: usize) {
+        self.join(c, w);
+        self.composed = true;
+    }
+
+    /// Whether `c` continues a conjoining Hangul syllable (UAX #29 GB6/GB7
+    /// subset): a medial vowel after a leading consonant, or a final consonant
+    /// after the letter+vowel syllable. Marks and ZWJ never take this path.
+    fn can_extend_hangul(&self, c: char) -> bool {
+        if self.conts != 0 || self.zwj || self.regional != 0 {
+            return false;
+        }
+        let Some(last) = self.text.chars().last() else {
+            return false;
+        };
+        let (last, next) = (last as u32, c as u32);
+        ((0x1100..=0x115F).contains(&last) && (0x1160..=0x11A7).contains(&next))
+            || ((0x1160..=0x11A7).contains(&last) && (0x11A8..=0x11FF).contains(&next))
+    }
+
     /// Complete the cluster: a trailing ZWJ is removed (never a dangling
     /// join), a lone regional indicator is dropped (never a half flag), an
     /// empty cluster yields nothing (never a combining-only atom). Returns
@@ -477,16 +526,23 @@ impl Cluster {
             self.reset();
             return None;
         }
-        let width = if self.regional == 2 {
+        let mut width = if self.regional == 2 {
             // A completed flag pair is one 2-cell glyph; never the naive
             // scalar sum of its halves (4 when the width table classifies
             // regional indicators as wide).
             FLAG_PAIR_CELLS
-        } else if self.zwj && self.bases >= 2 {
+        } else if (self.zwj || self.composed) && self.bases >= 2 {
+            // A joined emoji sequence or a conjoining Hangul syllable occupies
+            // the width of its widest base, not the scalar sum.
             self.max
         } else {
             self.sum
         };
+        if self.vs16 {
+            // Emoji presentation is two cells regardless of the base: the
+            // pinned renderer measures `a`+U+FE0F and `1`+U+FE0F as 2.
+            width = width.max(2);
+        }
         let text = std::mem::take(&mut self.text);
         self.reset();
         Some((text, width))
@@ -501,16 +557,21 @@ impl Cluster {
         self.zwj = false;
         self.last_was_zwj = false;
         self.regional = 0;
+        self.vs16 = false;
+        self.composed = false;
     }
 }
 
 /// Display cells occupied by `c`: 0 for combining/zero-width marks, 2 for
 /// wide (CJK, fullwidth, emoji) scalars, 1 otherwise.
 ///
-/// `ponytail:` bounded std-only approximation of East Asian Width + grapheme
-/// cluster behavior (no Unicode tables in std, no new Cargo deps allowed for
-/// this part). Ceiling: a handful of edge emoji/Indic cases may be counted 1
-/// instead of 2. Upgrade path: swap this body for the `unicode-width` crate
+/// The per-scalar table is the executed pinned-renderer `unicode` width table
+/// (`WIDE_RANGES` / `ZERO_WIDTH_RANGES`), swept over the whole codespace
+/// `0x0000..=0x10FFFF`. The cluster *segmentation* around it is still a bounded
+/// heuristic subset of UAX #29 (see [`Cluster`]), so a grapheme rule this module
+/// does not model (a ZWJ chain longer than the cluster byte/base caps, a ZWJ
+/// after a non-emoji base, or a script-specific conjoining rule) can still
+/// differ from the renderer. Upgrade path: the `unicode-segmentation` crate
 /// when dependency additions are permitted.
 fn char_width(c: char) -> u16 {
     if c.is_control() {
@@ -530,7 +591,16 @@ fn in_ranges(cp: u32, ranges: &[(u32, u32)]) -> bool {
     ranges.iter().any(|&(lo, hi)| cp >= lo && cp <= hi)
 }
 
-/// Combining marks, variation selectors and format characters (width 0).
+/// Combining marks, variation selectors, format characters and the
+/// default-ignorable supplementary plane (width 0).
+///
+/// Derived by an executed single-scalar sweep of the pinned renderer,
+/// OpenTUI 0.6.8 `measureEditText(text, { widthMethod: "unicode", tabWidth: 2 })`,
+/// over the whole codespace `0x0000..=0x10FFFF` — 1_112_064 measured scalars,
+/// lone surrogates excluded (`cell-width-implementation/supplementary-repair/
+/// probe-supplementary.json`, which extends the earlier `0x0000..=0x3FFFD`
+/// sweep in `probe-bmp.json`). Every scalar listed measures 0 there, so this is
+/// the renderer's mark/format table rather than a hand-picked fixture list.
 const ZERO_WIDTH_RANGES: &[(u32, u32)] = &[
     (0x0300, 0x036F),
     (0x0483, 0x0489),
@@ -540,6 +610,7 @@ const ZERO_WIDTH_RANGES: &[(u32, u32)] = &[
     (0x05C4, 0x05C5),
     (0x05C7, 0x05C7),
     (0x0610, 0x061A),
+    (0x061C, 0x061C),
     (0x064B, 0x065F),
     (0x0670, 0x0670),
     (0x06D6, 0x06DC),
@@ -550,53 +621,431 @@ const ZERO_WIDTH_RANGES: &[(u32, u32)] = &[
     (0x0730, 0x074A),
     (0x07A6, 0x07B0),
     (0x07EB, 0x07F3),
+    (0x07FD, 0x07FD),
     (0x0816, 0x0819),
     (0x081B, 0x0823),
     (0x0825, 0x0827),
     (0x0829, 0x082D),
-    // Tamil dependent signs and vowels are combining editor marks.
-    (0x0B82, 0x0B83),
+    (0x0859, 0x085B),
+    (0x0897, 0x089F),
+    (0x08CA, 0x08E1),
+    (0x08E3, 0x0903),
+    (0x093A, 0x093C),
+    (0x093E, 0x094F),
+    (0x0951, 0x0957),
+    (0x0962, 0x0963),
+    (0x0981, 0x0983),
+    (0x09BC, 0x09BC),
+    (0x09BE, 0x09C4),
+    (0x09C7, 0x09C8),
+    (0x09CB, 0x09CD),
+    (0x09D7, 0x09D7),
+    (0x09E2, 0x09E3),
+    (0x09FE, 0x09FE),
+    (0x0A01, 0x0A03),
+    (0x0A3C, 0x0A3C),
+    (0x0A3E, 0x0A42),
+    (0x0A47, 0x0A48),
+    (0x0A4B, 0x0A4D),
+    (0x0A51, 0x0A51),
+    (0x0A70, 0x0A71),
+    (0x0A75, 0x0A75),
+    (0x0A81, 0x0A83),
+    (0x0ABC, 0x0ABC),
+    (0x0ABE, 0x0AC5),
+    (0x0AC7, 0x0AC9),
+    (0x0ACB, 0x0ACD),
+    (0x0AE2, 0x0AE3),
+    (0x0AFA, 0x0AFF),
+    (0x0B01, 0x0B03),
+    (0x0B3C, 0x0B3C),
+    (0x0B3E, 0x0B44),
+    (0x0B47, 0x0B48),
+    (0x0B4B, 0x0B4D),
+    (0x0B55, 0x0B57),
+    (0x0B62, 0x0B63),
+    (0x0B82, 0x0B82),
     (0x0BBE, 0x0BC2),
     (0x0BC6, 0x0BC8),
     (0x0BCA, 0x0BCD),
     (0x0BD7, 0x0BD7),
+    (0x0C00, 0x0C04),
+    (0x0C3C, 0x0C3C),
+    (0x0C3E, 0x0C44),
+    (0x0C46, 0x0C48),
+    (0x0C4A, 0x0C4D),
+    (0x0C55, 0x0C56),
+    (0x0C62, 0x0C63),
+    (0x0C81, 0x0C83),
+    (0x0CBC, 0x0CBC),
+    (0x0CBE, 0x0CC4),
+    (0x0CC6, 0x0CC8),
+    (0x0CCA, 0x0CCD),
+    (0x0CD5, 0x0CD6),
+    (0x0CE2, 0x0CE3),
+    (0x0CF3, 0x0CF3),
+    (0x0D00, 0x0D03),
+    (0x0D3B, 0x0D3C),
+    (0x0D3E, 0x0D44),
+    (0x0D46, 0x0D48),
+    (0x0D4A, 0x0D4D),
+    (0x0D57, 0x0D57),
+    (0x0D62, 0x0D63),
+    (0x0D81, 0x0D83),
+    (0x0DCA, 0x0DCA),
+    (0x0DCF, 0x0DD4),
+    (0x0DD6, 0x0DD6),
+    (0x0DD8, 0x0DDF),
+    (0x0DF2, 0x0DF3),
     (0x0E31, 0x0E31),
     (0x0E34, 0x0E3A),
     (0x0E47, 0x0E4E),
-    (0x1AB0, 0x1AFF),
+    (0x0EB1, 0x0EB1),
+    (0x0EB4, 0x0EBC),
+    (0x0EC8, 0x0ECE),
+    (0x0F18, 0x0F19),
+    (0x0F35, 0x0F35),
+    (0x0F37, 0x0F37),
+    (0x0F39, 0x0F39),
+    (0x0F3E, 0x0F3F),
+    (0x0F71, 0x0F84),
+    (0x0F86, 0x0F87),
+    (0x0F8D, 0x0F97),
+    (0x0F99, 0x0FBC),
+    (0x0FC6, 0x0FC6),
+    (0x102B, 0x103E),
+    (0x1056, 0x1059),
+    (0x105E, 0x1060),
+    (0x1062, 0x1064),
+    (0x1067, 0x106D),
+    (0x1071, 0x1074),
+    (0x1082, 0x108D),
+    (0x108F, 0x108F),
+    (0x109A, 0x109D),
+    (0x135D, 0x135F),
+    (0x1712, 0x1715),
+    (0x1732, 0x1734),
+    (0x1752, 0x1753),
+    (0x1772, 0x1773),
+    (0x17B4, 0x17D3),
+    (0x17DD, 0x17DD),
+    (0x180B, 0x180F),
+    (0x1885, 0x1886),
+    (0x18A9, 0x18A9),
+    (0x1920, 0x192B),
+    (0x1930, 0x193B),
+    (0x1A17, 0x1A1B),
+    (0x1A55, 0x1A5E),
+    (0x1A60, 0x1A7C),
+    (0x1A7F, 0x1A7F),
+    (0x1AB0, 0x1ADD),
+    (0x1AE0, 0x1AEB),
+    (0x1B00, 0x1B04),
+    (0x1B34, 0x1B44),
+    (0x1B6B, 0x1B73),
+    (0x1B80, 0x1B82),
+    (0x1BA1, 0x1BAD),
+    (0x1BE6, 0x1BF3),
+    (0x1C24, 0x1C37),
+    (0x1CD0, 0x1CD2),
+    (0x1CD4, 0x1CE8),
+    (0x1CED, 0x1CED),
+    (0x1CF4, 0x1CF4),
+    (0x1CF7, 0x1CF9),
     (0x1DC0, 0x1DFF),
     (0x200B, 0x200F),
     (0x202A, 0x202E),
-    (0x2060, 0x2064),
-    (0x20D0, 0x20FF),
+    (0x2060, 0x206F),
+    (0x20D0, 0x20F0),
+    (0x2CEF, 0x2CF1),
+    (0x2D7F, 0x2D7F),
+    (0x2DE0, 0x2DFF),
+    (0x302A, 0x302F),
+    (0x3099, 0x309A),
+    (0x3164, 0x3164),
+    (0xA66F, 0xA672),
+    (0xA674, 0xA67D),
+    (0xA69E, 0xA69F),
+    (0xA6F0, 0xA6F1),
+    (0xA802, 0xA802),
+    (0xA806, 0xA806),
+    (0xA80B, 0xA80B),
+    (0xA823, 0xA827),
+    (0xA82C, 0xA82C),
+    (0xA880, 0xA881),
+    (0xA8B4, 0xA8C5),
+    (0xA8E0, 0xA8F1),
+    (0xA8FF, 0xA8FF),
+    (0xA926, 0xA92D),
+    (0xA947, 0xA953),
+    (0xA980, 0xA983),
+    (0xA9B3, 0xA9C0),
+    (0xA9E5, 0xA9E5),
+    (0xAA29, 0xAA36),
+    (0xAA43, 0xAA43),
+    (0xAA4C, 0xAA4D),
+    (0xAA7B, 0xAA7D),
+    (0xAAB0, 0xAAB0),
+    (0xAAB2, 0xAAB4),
+    (0xAAB7, 0xAAB8),
+    (0xAABE, 0xAABF),
+    (0xAAC1, 0xAAC1),
+    (0xAAEB, 0xAAEF),
+    (0xAAF5, 0xAAF6),
+    (0xABE3, 0xABEA),
+    (0xABEC, 0xABED),
+    (0xFB1E, 0xFB1E),
     (0xFE00, 0xFE0F),
     (0xFE20, 0xFE2F),
     (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0),
+    (0xFFF0, 0xFFF8),
+    (0x101FD, 0x101FD),
+    (0x102E0, 0x102E0),
+    (0x10376, 0x1037A),
+    (0x10A01, 0x10A03),
+    (0x10A05, 0x10A06),
+    (0x10A0C, 0x10A0F),
+    (0x10A38, 0x10A3A),
+    (0x10A3F, 0x10A3F),
+    (0x10AE5, 0x10AE6),
+    (0x10D24, 0x10D27),
+    (0x10D69, 0x10D6D),
+    (0x10EAB, 0x10EAC),
+    (0x10EFA, 0x10EFF),
+    (0x10F46, 0x10F50),
+    (0x10F82, 0x10F85),
+    (0x11000, 0x11002),
+    (0x11038, 0x11046),
+    (0x11070, 0x11070),
+    (0x11073, 0x11074),
+    (0x1107F, 0x11082),
+    (0x110B0, 0x110BA),
+    (0x110C2, 0x110C2),
+    (0x11100, 0x11102),
+    (0x11127, 0x11134),
+    (0x11145, 0x11146),
+    (0x11173, 0x11173),
+    (0x11180, 0x11182),
+    (0x111B3, 0x111C0),
+    (0x111C9, 0x111CC),
+    (0x111CE, 0x111CF),
+    (0x1122C, 0x11237),
+    (0x1123E, 0x1123E),
+    (0x11241, 0x11241),
+    (0x112DF, 0x112EA),
+    (0x11300, 0x11303),
+    (0x1133B, 0x1133C),
+    (0x1133E, 0x11344),
+    (0x11347, 0x11348),
+    (0x1134B, 0x1134D),
+    (0x11357, 0x11357),
+    (0x11362, 0x11363),
+    (0x11366, 0x1136C),
+    (0x11370, 0x11374),
+    (0x113B8, 0x113C0),
+    (0x113C2, 0x113C2),
+    (0x113C5, 0x113C5),
+    (0x113C7, 0x113CA),
+    (0x113CC, 0x113D0),
+    (0x113D2, 0x113D2),
+    (0x113E1, 0x113E2),
+    (0x11435, 0x11446),
+    (0x1145E, 0x1145E),
+    (0x114B0, 0x114C3),
+    (0x115AF, 0x115B5),
+    (0x115B8, 0x115C0),
+    (0x115DC, 0x115DD),
+    (0x11630, 0x11640),
+    (0x116AB, 0x116B7),
+    (0x1171D, 0x1172B),
+    (0x1182C, 0x1183A),
+    (0x11930, 0x11935),
+    (0x11937, 0x11938),
+    (0x1193B, 0x1193E),
+    (0x11940, 0x11940),
+    (0x11942, 0x11943),
+    (0x119D1, 0x119D7),
+    (0x119DA, 0x119E0),
+    (0x119E4, 0x119E4),
+    (0x11A01, 0x11A0A),
+    (0x11A33, 0x11A39),
+    (0x11A3B, 0x11A3E),
+    (0x11A47, 0x11A47),
+    (0x11A51, 0x11A5B),
+    (0x11A8A, 0x11A99),
+    (0x11B60, 0x11B67),
+    (0x11C2F, 0x11C36),
+    (0x11C38, 0x11C3F),
+    (0x11C92, 0x11CA7),
+    (0x11CA9, 0x11CB6),
+    (0x11D31, 0x11D36),
+    (0x11D3A, 0x11D3A),
+    (0x11D3C, 0x11D3D),
+    (0x11D3F, 0x11D45),
+    (0x11D47, 0x11D47),
+    (0x11D8A, 0x11D8E),
+    (0x11D90, 0x11D91),
+    (0x11D93, 0x11D97),
+    (0x11EF3, 0x11EF6),
+    (0x11F00, 0x11F01),
+    (0x11F03, 0x11F03),
+    (0x11F34, 0x11F3A),
+    (0x11F3E, 0x11F42),
+    (0x11F5A, 0x11F5A),
+    (0x13440, 0x13440),
+    (0x13447, 0x13455),
+    (0x1611E, 0x1612F),
+    (0x16AF0, 0x16AF4),
+    (0x16B30, 0x16B36),
+    (0x16F4F, 0x16F4F),
+    (0x16F51, 0x16F87),
+    (0x16F8F, 0x16F92),
+    (0x16FE4, 0x16FE4),
+    (0x16FF0, 0x16FF1),
+    (0x1BC9D, 0x1BC9E),
+    (0x1BCA0, 0x1BCA3),
+    (0x1CF00, 0x1CF2D),
+    (0x1CF30, 0x1CF46),
+    (0x1D165, 0x1D169),
+    (0x1D16D, 0x1D182),
+    (0x1D185, 0x1D18B),
+    (0x1D1AA, 0x1D1AD),
+    (0x1D242, 0x1D244),
+    (0x1DA00, 0x1DA36),
+    (0x1DA3B, 0x1DA6C),
+    (0x1DA75, 0x1DA75),
+    (0x1DA84, 0x1DA84),
+    (0x1DA9B, 0x1DA9F),
+    (0x1DAA1, 0x1DAAF),
+    (0x1E000, 0x1E006),
+    (0x1E008, 0x1E018),
+    (0x1E01B, 0x1E021),
+    (0x1E023, 0x1E024),
+    (0x1E026, 0x1E02A),
+    (0x1E08F, 0x1E08F),
+    (0x1E130, 0x1E136),
+    (0x1E2AE, 0x1E2AE),
+    (0x1E2EC, 0x1E2EF),
+    (0x1E4EC, 0x1E4EF),
+    (0x1E5EE, 0x1E5EF),
+    (0x1E6E3, 0x1E6E3),
+    (0x1E6E6, 0x1E6E6),
+    (0x1E6EE, 0x1E6EF),
+    (0x1E6F5, 0x1E6F5),
+    (0x1E8D0, 0x1E8D6),
+    (0x1E944, 0x1E94A),
+    // Default-ignorable plane 14: tag scalars (U+E0020..U+E007F) that compose
+    // RGI subdivision flags, and variation selectors 17..256 used by
+    // ideographic variation sequences. Executed width 0.
+    (0xE0000, 0xE0FFF),
 ];
 
-/// East Asian Wide / Fullwidth and emoji scalars (width 2).
+/// East Asian Wide / Fullwidth, emoji-presentation and other 2-cell scalars.
+///
+/// Same executed full-codespace sweep of the pinned renderer (see
+/// `ZERO_WIDTH_RANGES`); nothing above `0x3FFFD` measures 2. C0, C1 and DEL
+/// scalars are excluded on purpose: their width in the renderer comes from
+/// control/caret notation, which the prompt surface (`native_prompt_layout`)
+/// owns, not this module.
 const WIDE_RANGES: &[(u32, u32)] = &[
     (0x1100, 0x115F),
-    (0x2E80, 0x303E),
-    (0x3041, 0x33FF),
-    (0x3400, 0x4DBF),
-    (0x4E00, 0x9FFF),
-    (0xA000, 0xA4CF),
-    (0xA960, 0xA97F),
+    (0x203C, 0x203C),
+    (0x2049, 0x2049),
+    (0x231A, 0x231B),
+    (0x2329, 0x232A),
+    (0x23E9, 0x23EC),
+    (0x23F0, 0x23F0),
+    (0x23F3, 0x23F3),
+    (0x25FD, 0x25FE),
+    (0x2614, 0x2615),
+    (0x2622, 0x2623),
+    (0x2630, 0x2637),
+    (0x2648, 0x2653),
+    (0x267F, 0x267F),
+    (0x268A, 0x268F),
+    (0x2693, 0x2693),
+    (0x269B, 0x269B),
+    (0x26A1, 0x26A1),
+    (0x26AA, 0x26AB),
+    (0x26BD, 0x26BE),
+    (0x26C4, 0x26C5),
+    (0x26CE, 0x26CE),
+    (0x26D1, 0x26D1),
+    (0x26D4, 0x26D4),
+    (0x26EA, 0x26EA),
+    (0x26F2, 0x26F3),
+    (0x26F5, 0x26F5),
+    (0x26FA, 0x26FA),
+    (0x26FD, 0x26FD),
+    (0x2705, 0x2705),
+    (0x270A, 0x270B),
+    (0x2728, 0x2728),
+    (0x274C, 0x274C),
+    (0x274E, 0x274E),
+    (0x2753, 0x2755),
+    (0x2757, 0x2757),
+    (0x2760, 0x2767),
+    (0x2795, 0x2797),
+    (0x27B0, 0x27B0),
+    (0x27BF, 0x27BF),
+    (0x2B1B, 0x2B1C),
+    (0x2B50, 0x2B50),
+    (0x2B55, 0x2B55),
+    (0x2E80, 0x2E99),
+    (0x2E9B, 0x2EF3),
+    (0x2F00, 0x2FD5),
+    (0x2FF0, 0x3029),
+    (0x3030, 0x303E),
+    (0x3041, 0x3096),
+    (0x309B, 0x30FF),
+    (0x3105, 0x312F),
+    (0x3131, 0x3163),
+    (0x3165, 0x318E),
+    (0x3190, 0x31E5),
+    (0x31EF, 0x321E),
+    (0x3220, 0x3247),
+    (0x3250, 0xA48C),
+    (0xA490, 0xA4C6),
+    (0xA960, 0xA97C),
     (0xAC00, 0xD7A3),
     (0xF900, 0xFAFF),
     (0xFE10, 0xFE19),
-    (0xFE30, 0xFE6F),
-    (0xFF00, 0xFF60),
+    (0xFE30, 0xFE52),
+    (0xFE54, 0xFE66),
+    (0xFE68, 0xFE6B),
+    (0xFF01, 0xFF60),
     (0xFFE0, 0xFFE6),
-    (0x16FE0, 0x16FE4),
-    (0x17000, 0x18AFF),
-    (0x1B000, 0x1B12F),
-    (0x1F004, 0x1F004),
-    (0x1F0CF, 0x1F0CF),
+    (0x16FE0, 0x16FE3),
+    (0x16FF2, 0x16FF6),
+    (0x17000, 0x18CD5),
+    (0x18CFF, 0x18D1E),
+    (0x18D80, 0x18DF2),
+    (0x1AFF0, 0x1AFF3),
+    (0x1AFF5, 0x1AFFB),
+    (0x1AFFD, 0x1AFFE),
+    (0x1B000, 0x1B122),
+    (0x1B132, 0x1B132),
+    (0x1B150, 0x1B152),
+    (0x1B155, 0x1B155),
+    (0x1B164, 0x1B167),
+    (0x1B170, 0x1B2FB),
+    (0x1D300, 0x1D356),
+    (0x1D360, 0x1D376),
+    (0x1F000, 0x1F02B),
+    (0x1F030, 0x1F093),
+    (0x1F0A0, 0x1F0AE),
+    (0x1F0B1, 0x1F0BF),
+    (0x1F0C1, 0x1F0CF),
+    (0x1F0D1, 0x1F0F5),
     (0x1F18E, 0x1F18E),
     (0x1F191, 0x1F19A),
-    (0x1F200, 0x1F320),
+    (0x1F200, 0x1F202),
+    (0x1F210, 0x1F23B),
+    (0x1F240, 0x1F248),
+    (0x1F250, 0x1F251),
+    (0x1F260, 0x1F265),
+    (0x1F300, 0x1F320),
     (0x1F32D, 0x1F335),
     (0x1F337, 0x1F37C),
     (0x1F37E, 0x1F393),
@@ -607,23 +1056,34 @@ const WIDE_RANGES: &[(u32, u32)] = &[
     (0x1F3F8, 0x1F43E),
     (0x1F440, 0x1F440),
     (0x1F442, 0x1F4FC),
-    (0x1F4FF, 0x1F53D),
-    (0x1F54B, 0x1F54E),
-    (0x1F550, 0x1F567),
-    (0x1F57A, 0x1F57A),
-    (0x1F595, 0x1F596),
-    (0x1F5A4, 0x1F5A4),
-    (0x1F5FB, 0x1F64F),
-    (0x1F680, 0x1F6C5),
+    (0x1F4FF, 0x1F6C5),
     (0x1F6CC, 0x1F6CC),
     (0x1F6D0, 0x1F6D2),
+    (0x1F6D5, 0x1F6D8),
+    (0x1F6DC, 0x1F6DF),
     (0x1F6EB, 0x1F6EC),
     (0x1F6F4, 0x1F6FC),
+    (0x1F700, 0x1F773),
+    (0x1F780, 0x1F7D8),
     (0x1F7E0, 0x1F7EB),
+    (0x1F7F0, 0x1F7F0),
+    (0x1F800, 0x1F80B),
+    (0x1F810, 0x1F847),
+    (0x1F850, 0x1F859),
+    (0x1F860, 0x1F887),
+    (0x1F890, 0x1F8AD),
+    (0x1F8B0, 0x1F8B1),
     (0x1F90C, 0x1F93A),
     (0x1F93C, 0x1F945),
-    (0x1F947, 0x1F9FF),
-    (0x1FA70, 0x1FAFF),
+    (0x1F947, 0x1FA53),
+    (0x1FA60, 0x1FA6D),
+    (0x1FA70, 0x1FA7C),
+    (0x1FA80, 0x1FA8A),
+    (0x1FA8E, 0x1FAC6),
+    (0x1FAC8, 0x1FAC8),
+    (0x1FACD, 0x1FADC),
+    (0x1FADF, 0x1FAEA),
+    (0x1FAEF, 0x1FAF8),
     (0x20000, 0x2FFFD),
     (0x30000, 0x3FFFD),
 ];
@@ -2387,6 +2847,602 @@ mod tests {
             timeline.content_y(&AnchorTarget::part("absent", "p"), 40),
             None,
             "an unmounted target has no content y"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // UI-PARITY-CELL-WIDTH-20261113: shared Unicode cell-width parity.
+    //
+    // Every expectation below is an **executed** value of the pinned renderer,
+    // never a reading of our own model:
+    //
+    //   measureEditText(text, { widthMethod: "unicode", tabWidth: 2 })
+    //
+    // from the pinned OpenTUI 0.6.8 install
+    // `artifacts/upstream-opentui068/node_modules/.bun/@opentui+core@0.6.8+
+    //  eff4d38d6a4a2cd9/node_modules/@opentui/core` (package.json
+    // `68b72bb4a373514f272ae2c060f8962e1cd49ffb86176b78660a480b5b3f6db7`,
+    // edit-buffer.d.ts `1b2091483e11ee99c1f353e91bf151ce66154ee96ca3ba87feb5
+    // 40efc4e5f514`, chunk-node-jhq62x0c.js `2ec40eb00d62da309874e8114e0fcf
+    // f451b93f920adf1baf4f4979838daf6ec0`). This is the exact call the pinned
+    // application makes (`packages/tui/src/component/prompt/index.tsx:217`,
+    // `:1097-1404`) with `renderer.widthMethod`, whose 0.6.8 default is
+    // `"unicode"` (`chunk-node-jhq62x0c.js:8587`, `options.widthMethod ??
+    // "unicode"`), pin `450e7b92412c780a7b5a75226bb8d49aaca24e22`.
+    //
+    // Row values are frozen from the executed oracle
+    // (`artifacts/ui-parity-autonomous-20261113/cell-width/oracle.json`,
+    // sha256 472a81aa…, 94 assertions, rc=0) and the single-scalar sweep of the
+    // same API recorded in
+    // `cell-width-implementation/probe-bmp.json` (260_094 measured scalars).
+    //
+    // Deliberately NOT asserted here: C0/C1 control *caret notation* (`\f` ->
+    // `^L`, C1 -> 2-cell caret) is the paste/prompt owner's behaviour
+    // (`native_prompt_layout`), and a tab is expanded to two cells by that
+    // prompt surface (`native_prompt_layout.rs:16-19`) before this model runs,
+    // so tab rows are asserted through that documented composition rather than
+    // claimed for this module.
+    // -----------------------------------------------------------------------
+
+    /// Unpadded display cells of `text` under the production clustering model.
+    fn model_cells(text: &str) -> usize {
+        visit_unpadded_cells(text, 4096, |_, _| {})
+    }
+
+    #[test]
+    fn ui_parity_cell_width_oracle_unicode_method() {
+        // (fixture id, text, executed `unicode` cells)
+        const ROWS: &[(&str, &str, usize)] = &[
+            // A: emoji-presentation scalars (wide even without VS16).
+            ("heart-bare", "\u{2764}", 2),
+            ("ep-check-mark", "\u{2705}", 2),
+            ("ep-sparkles", "\u{2728}", 2),
+            ("ep-star", "\u{2B50}", 2),
+            ("ep-no-entry", "\u{26D4}", 2),
+            ("ep-snowman", "\u{26C4}", 2),
+            ("ep-umbrella", "\u{2614}", 2),
+            ("ep-alarm-clock", "\u{23F0}", 2),
+            ("ep-hourglass", "\u{231B}", 2),
+            ("ep-watch", "\u{231A}", 2),
+            // B: VS16 presents an otherwise text-default base as emoji.
+            ("vs16-heart", "\u{2764}\u{FE0F}", 2),
+            ("vs16-smiley", "\u{263A}\u{FE0F}", 2),
+            ("vs16-copyright", "\u{00A9}\u{FE0F}", 2),
+            ("vs16-trade-mark", "\u{2122}\u{FE0F}", 2),
+            ("vs16-registered", "\u{00AE}\u{FE0F}", 2),
+            ("vs16-warning", "\u{26A0}\u{FE0F}", 2),
+            ("vs16-airplane", "\u{2708}\u{FE0F}", 2),
+            ("vs16-info", "\u{2139}\u{FE0F}", 2),
+            ("vs16-arrow", "\u{2194}\u{FE0F}", 2),
+            ("vs16-ascii-a", "a\u{FE0F}", 2),
+            ("keycap-1", "1\u{FE0F}\u{20E3}", 2),
+            ("keycap-12", "1\u{FE0F}\u{20E3}2\u{FE0F}\u{20E3}", 4),
+            // C: Indic dependent signs are zero-width editor marks.
+            ("devanagari-ki", "\u{0915}\u{093F}", 1),
+            ("bengali-ki", "\u{0995}\u{09BF}", 1),
+            // D: decomposed Hangul conjoining jamo is one syllable cluster.
+            ("hangul-jamo-decomposed", "\u{1100}\u{1161}", 2),
+            // E: a five-member ZWJ family is one 2-cell cluster.
+            (
+                "zwj-family-5",
+                "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}\u{200D}\u{1F466}",
+                2,
+            ),
+            // Matching controls: must not regress.
+            ("cjk-1", "\u{4E2D}", 2),
+            ("cjk-2", "\u{4E2D}\u{6587}", 4),
+            ("cjk-hangul", "\u{AC00}", 2),
+            ("cjk-mention", "@\u{52A9}\u{624B}", 5),
+            ("combining-e-acute", "e\u{0301}", 1),
+            ("combining-stacked", "o\u{0308}\u{0323}", 1),
+            ("precomposed-e-acute", "\u{00E9}", 1),
+            ("tamil-ni", "\u{0BA8}\u{0BBF}", 1),
+            ("thai-ko-i", "\u{0E01}\u{0E34}", 1),
+            (
+                "zwj-family-3",
+                "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}",
+                2,
+            ),
+            (
+                "zwj-family-4",
+                "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}",
+                2,
+            ),
+            ("zwj-flag-rainbow", "\u{1F3F3}\u{FE0F}\u{200D}\u{1F308}", 2),
+            ("skin-tone-thumbs", "\u{1F44D}\u{1F3FD}", 2),
+            (
+                "skin-tone-zwj-astronaut",
+                "\u{1F9D1}\u{1F3FD}\u{200D}\u{1F680}",
+                2,
+            ),
+            ("flag-in", "\u{1F1EE}\u{1F1F3}", 2),
+            ("keycap-bare-1", "1\u{20E3}", 1),
+            ("tp-ballot-check", "\u{2611}", 1),
+            ("tp-play", "\u{25B6}", 1),
+            ("tp-heavy-check", "\u{2714}", 1),
+            ("tp-sun", "\u{2600}", 1),
+            ("amb-star", "\u{2605}", 1),
+            ("amb-omega", "\u{03A9}", 1),
+            ("amb-arrow", "\u{2192}", 1),
+            ("amb-plus-minus", "\u{00B1}", 1),
+            ("amb-section", "\u{00A7}", 1),
+            ("amb-circled-1", "\u{2460}", 1),
+            ("amb-box-drawing", "\u{2500}", 1),
+        ];
+        for (id, text, expected) in ROWS {
+            assert_eq!(
+                model_cells(text),
+                *expected,
+                "cell width of fixture {id} ({text:?}) must match the pinned \
+                 unicode method"
+            );
+        }
+
+        // TAB-08 / SIDE-13: the prompt surface expands `\t` to two cells
+        // before this model measures (`native_prompt_layout.rs:16-19`).
+        const TABS: &[(&str, &str, usize)] = &[
+            ("tab-default", "a\tb", 4),
+            ("tab-cjk-zwj-tamil", "\u{4E2D}\t\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{0BA8}\u{0BBF}", 7),
+        ];
+        for (id, text, expected) in TABS {
+            assert_eq!(
+                model_cells(&text.replace('\t', "  ")),
+                *expected,
+                "prompt-composed tab fixture {id}"
+            );
+        }
+
+        // The general per-scalar table, executed from the same pinned API, not
+        // just the repaired fixtures: symbols and emoji that must widen, marks
+        // that must not, and text scalars that must stay one cell.
+        const SINGLE: &[(char, usize)] = &[
+            ('\u{203C}', 2),
+            ('\u{2049}', 2),
+            ('\u{2329}', 2),
+            ('\u{232A}', 2),
+            ('\u{23E9}', 2),
+            ('\u{25FD}', 2),
+            ('\u{267F}', 2),
+            ('\u{2B1B}', 2),
+            ('\u{2B55}', 2),
+            ('\u{4DC0}', 2),
+            ('\u{1F004}', 2),
+            ('\u{1F0CF}', 2),
+            ('\u{1F6D0}', 2),
+            ('\u{1F7E0}', 2),
+            ('\u{1F90C}', 2),
+            ('\u{1F9FF}', 2),
+            ('\u{1FA70}', 2),
+            ('\u{1FAF8}', 2),
+            ('\u{3164}', 0),
+            ('\u{302A}', 0),
+            ('\u{0903}', 0),
+            ('\u{093F}', 0),
+            ('\u{09BF}', 0),
+            ('\u{0ABF}', 0),
+            ('\u{20E3}', 0),
+            ('\u{FE0F}', 0),
+            ('\u{2500}', 1),
+            ('\u{2502}', 1),
+            ('\u{2605}', 1),
+            ('\u{303F}', 1),
+            ('\u{FF00}', 1),
+            ('\u{1161}', 1),
+            ('\u{11A8}', 1),
+            ('\u{1100}', 2),
+            ('\u{2764}', 2),
+            ('\u{2705}', 2),
+            ('\u{2611}', 1),
+            ('\u{25B6}', 1),
+            ('\u{2714}', 1),
+            ('\u{2600}', 1),
+            ('\u{00A9}', 1),
+            ('\u{2122}', 1),
+            ('\u{00AE}', 1),
+            ('\u{26A0}', 1),
+            ('\u{2708}', 1),
+            ('\u{2139}', 1),
+            ('\u{2194}', 1),
+        ];
+        for (scalar, expected) in SINGLE {
+            assert_eq!(
+                model_cells(&scalar.to_string()),
+                *expected,
+                "single scalar U+{:04X} width",
+                *scalar as u32
+            );
+        }
+
+        // Hangul conjoining jamo: L+V and L+V+T are one syllable (executed 2);
+        // a standalone medial or final jamo keeps its own one cell (executed 1).
+        assert_eq!(model_cells("\u{1100}\u{1161}"), 2);
+        assert_eq!(model_cells("\u{1100}\u{1161}\u{11A8}"), 2);
+        assert_eq!(model_cells("\u{1161}"), 1);
+        assert_eq!(model_cells("\u{11A8}"), 1);
+        assert_eq!(model_cells("\u{1100}\u{1161}\u{11A8}\u{1100}\u{1161}"), 4);
+
+        // Bounded overlong-ZWJ behaviour. Within the cluster caps a longer
+        // valid chain is still one 2-cell cluster (executed 2 for six members);
+        // beyond the caps it must split into a bounded number of bounded
+        // clusters, never an unbounded glyph or scan.
+        let six = "\u{1F468}\u{200D}".repeat(5) + "\u{1F468}";
+        assert_eq!(model_cells(&six), 2, "six-member ZWJ chain is one cluster");
+        let twenty = "\u{1F468}\u{200D}".repeat(19) + "\u{1F468}";
+        let overlong = model_cells(&twenty);
+        assert!(
+            (2..=8).contains(&overlong),
+            "overlong ZWJ chain stays bounded, got {overlong}"
+        );
+        let fitted = fit(&twenty, 40);
+        assert_eq!(
+            model_cells(&fitted),
+            40,
+            "the composed row stays exactly one viewport wide"
+        );
+        assert!(
+            !fitted.trim_end_matches(' ').ends_with('\u{200D}'),
+            "no dangling ZWJ in the composed row"
+        );
+        assert!(
+            fitted.len() <= 40 * MAX_CLUSTER_BYTES + 40,
+            "retained bytes stay bounded for an overlong ZWJ chain"
+        );
+        assert!(fitted.starts_with('\u{1F468}'));
+    }
+
+    // -----------------------------------------------------------------------
+    // UI-PARITY-CELL-WIDTH-20261113 supplementary repair (review F1 + F3).
+    //
+    // The expectations below come from the EXTENDED executed oracle that sweeps
+    // the ENTIRE Unicode codespace, not the previous `0x0000..=0x3FFFD` prefix:
+    //
+    //   `cell-width-implementation/supplementary-repair/probe-supplementary.json`
+    //   sweep 0x0000..=0x10FFFF, 1_112_064 measured scalars (lone surrogates
+    //   excluded), via the same pinned call
+    //     measureEditText(text, { widthMethod: "unicode", tabWidth: 2 })
+    //   against the published runtime of the selected OpenTUI pin
+    //   `8d6065a3e60039d16c6ee697692dcfbc46d3c786` ("Release v0.6.8"):
+    //   npm `@opentui/core@0.6.8` + `@opentui/core-darwin-arm64@0.6.8`,
+    //   dylib sha256 `a2013c73d6bc9835aa59c7aa4ae6d58b0a1b6e0822a7f44ef9e21644bac72910`
+    //   (source `packages/native/src/utf8.zig` `eawToWidth` at the pin).
+    //   It is deliberately NOT the product bridge dylib `9e332559…`, which is a
+    //   different artifact from an unpinned checkout (`c01292fd`/`4954312d`).
+    //
+    // OpenCode pin for the consuming surface is unchanged:
+    // `450e7b92412c780a7b5a75226bb8d49aaca24e22`
+    // (`packages/tui/src/component/prompt/index.tsx:217`).
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ui_parity_cell_width_supplementary_oracle_unicode_method() {
+        // F1: RGI subdivision tag flags are ONE 2-cell cluster. Every tag
+        // scalar (U+E0020..U+E007F) and the cancel tag (U+E007F) measure 0 in
+        // the executed oracle, so the flag keeps its base width of 2.
+        const FLAGS: &[(&str, &str, usize)] = &[
+            (
+                "subdiv-england",
+                "\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}",
+                2,
+            ),
+            (
+                "subdiv-scotland",
+                "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}",
+                2,
+            ),
+            (
+                "subdiv-wales",
+                "\u{1F3F4}\u{E0067}\u{E0062}\u{E0077}\u{E006C}\u{E0073}\u{E007F}",
+                2,
+            ),
+            ("tag-flag-bare", "\u{1F3F4}", 2),
+            ("lone-tag-g", "\u{E0067}", 0),
+            ("two-tags", "\u{E0067}\u{E0062}", 0),
+        ];
+        for (id, text, expected) in FLAGS {
+            assert_eq!(
+                model_cells(text),
+                *expected,
+                "cell width of fixture {id} ({text:?}) must match the pinned \
+                 full-codespace unicode oracle"
+            );
+        }
+
+        // F1: ideographic variation sequences (VS17..VS256) attach at width 0,
+        // so the pair keeps the base ideograph's two cells.
+        const IVS: &[(&str, &str, usize)] = &[
+            ("ivs-han-E0100", "\u{6F22}\u{E0100}", 2),
+            ("ivs-han-E0101", "\u{6F22}\u{E0101}", 2),
+            ("ivs-han-E01EF", "\u{6F22}\u{E01EF}", 2),
+            ("ivs-han-noVS", "\u{6F22}", 2),
+            ("ivs-two-han", "\u{6F22}\u{5B57}\u{E0100}", 4),
+            ("ivs-three-han", "\u{6F22}\u{5B57}\u{6587}\u{E0100}", 6),
+        ];
+        for (id, text, expected) in IVS {
+            assert_eq!(
+                model_cells(text),
+                *expected,
+                "ideographic variation fixture {id} must match the pinned oracle"
+            );
+        }
+
+        // F1: the whole of plane 14 measures 0 up to U+E0FFF and 1 after it —
+        // the executed sweep's ONLY non-one range above U+3FFFD.
+        const PLANE14: &[(char, usize)] = &[
+            ('\u{E0000}', 0),
+            ('\u{E0001}', 0),
+            ('\u{E001F}', 0),
+            ('\u{E0020}', 0),
+            ('\u{E007F}', 0),
+            ('\u{E0080}', 0),
+            ('\u{E00FF}', 0),
+            ('\u{E0100}', 0),
+            ('\u{E01EF}', 0),
+            ('\u{E01F0}', 0),
+            ('\u{E0FFF}', 0),
+            // Range boundaries immediately outside the zero range.
+            ('\u{E1000}', 1),
+            ('\u{E1FFF}', 1),
+            ('\u{EFFFF}', 1),
+            ('\u{F0000}', 1),
+            ('\u{10FFFF}', 1),
+        ];
+        for (scalar, expected) in PLANE14 {
+            assert_eq!(
+                model_cells(&scalar.to_string()),
+                *expected,
+                "plane-14 scalar U+{:04X} width",
+                *scalar as u32
+            );
+        }
+
+        // Range boundaries around an existing zero range, plus the executed
+        // zero/one edge scalars the pinned rules single out.
+        const BOUNDARIES: &[(char, usize)] = &[
+            ('\u{02FF}', 1),
+            ('\u{0300}', 0),
+            ('\u{036F}', 0),
+            ('\u{0370}', 1),
+            // U+00AD is explicitly NOT default-ignorable-zero in the pin.
+            ('\u{00AD}', 1),
+            // Conjoining jamo fillers keep their widths at the pin.
+            ('\u{115F}', 2),
+            ('\u{1160}', 1),
+            ('\u{200B}', 0),
+            ('\u{2060}', 0),
+            ('\u{FE0E}', 0),
+            ('\u{FE0F}', 0),
+        ];
+        for (scalar, expected) in BOUNDARIES {
+            assert_eq!(
+                model_cells(&scalar.to_string()),
+                *expected,
+                "boundary scalar U+{:04X} width",
+                *scalar as u32
+            );
+        }
+
+        // F3: a COMPOSED Hangul syllable must not absorb a following ZWJ plus
+        // base. The executed oracle breaks there (the medial/final jamo is not
+        // Extended_Pictographic), so the syllable and the following emoji are
+        // two clusters: 2 + 2 = 4.
+        const F3: &[(&str, &str, usize)] = &[
+            ("f3-hangul-zwj-rocket", "\u{1100}\u{1161}\u{200D}\u{1F680}", 4),
+            (
+                "f3-hangul-lvt-zwj-rocket",
+                "\u{1100}\u{1161}\u{11A8}\u{200D}\u{1F680}",
+                4,
+            ),
+            ("f3-hangul-only", "\u{1100}\u{1161}", 2),
+            ("f3-rocket-only", "\u{1F680}", 2),
+            ("f3-zwj-rocket", "\u{200D}\u{1F680}", 2),
+        ];
+        for (id, text, expected) in F3 {
+            assert_eq!(
+                model_cells(text),
+                *expected,
+                "decomposed-Hangul fixture {id} must match the pinned oracle"
+            );
+        }
+
+        // The subdivision flag is one cluster in BOTH segmentation paths, so
+        // measurement (`fit`) and native styling (`visit_cells`) cannot split it.
+        let england = FLAGS[0].1;
+        let mut glyphs: Vec<(String, usize)> = Vec::new();
+        let used = visit_unpadded_cells(england, 4096, |glyph, cells| {
+            glyphs.push((glyph.to_string(), cells))
+        });
+        assert_eq!(used, 2, "the flag occupies one 2-cell cluster");
+        assert_eq!(glyphs.len(), 1, "the flag is never split into pieces");
+        assert_eq!(glyphs[0].0, england, "every tag scalar is retained");
+        let mut first: Option<(u16, String, u16)> = None;
+        visit_cells(england, 40, |x, glyph, cells| {
+            if first.is_none() {
+                first = Some((x, glyph.to_string(), cells));
+            }
+        });
+        assert_eq!(
+            first,
+            Some((0, england.to_string(), 2)),
+            "visit_cells agrees with fit on the flag cluster"
+        );
+
+        // Boundedness: an arbitrarily long tag run stays a bounded 2-cell
+        // cluster. The oracle keeps it at 2; the model caps retained
+        // continuations at MAX_CONTINUATIONS, which is width-invisible here.
+        let long = format!("\u{1F3F4}{}", "\u{E0067}".repeat(200));
+        assert_eq!(model_cells(&long), 2, "overlong tag run stays two cells");
+        let fitted = fit(&long, 40);
+        assert_eq!(model_cells(&fitted), 40, "composed row stays one viewport wide");
+        assert!(fitted.starts_with('\u{1F3F4}'), "base is never dropped");
+        assert!(
+            fitted.chars().filter(|c| *c == '\u{E0067}').count() <= MAX_CONTINUATIONS,
+            "retained tag scalars stay bounded"
+        );
+        assert!(fitted.len() <= 40 * MAX_CLUSTER_BYTES + 40);
+    }
+
+    // -----------------------------------------------------------------------
+    // UI-PARITY-CELL-WIDTH-20261113 supplementary repair — focused F1 test.
+    //
+    // This isolates ONE fix: the missing default-ignorable plane-14 range
+    // `U+E0000..=U+E0FFF` in `ZERO_WIDTH_RANGES`. Every expectation is an
+    // executed full-codespace oracle value from
+    // `supplementary-repair/probe-supplementary.json` (pinned npm
+    // `@opentui/core-darwin-arm64@0.6.8`, dylib
+    // `a2013c73d6bc9835aa59c7aa4ae6d58b0a1b6e0822a7f44ef9e21644bac72910`),
+    // where the ONLY non-one range above `U+3FFFD` is exactly that range.
+    // It is kept separate from the broad test so the range regression has its
+    // own executed RED when that one row is removed.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn ui_parity_cell_width_supplementary_plane14_zero_range() {
+        // Zero scalars: every one of them is measured 0 in the executed sweep.
+        const ZERO: &[char] = &[
+            '\u{E0000}', // LANGUAGE TAG
+            '\u{E0001}', // TAG + deprecated markup
+            '\u{E001F}',
+            '\u{E0020}', // first tag letter scalar
+            '\u{E007F}', // CANCEL TAG, closes every RGI subdivision flag
+            '\u{E0080}',
+            '\u{E00FF}',
+            '\u{E0100}', // first ideographic variation selector (VS17)
+            '\u{E01EF}', // last ideographic variation selector (VS256)
+            '\u{E01F0}', // unassigned inside the zero span
+            '\u{E0FFF}', // last zero scalar on the plane
+        ];
+        for scalar in ZERO {
+            assert_eq!(
+                model_cells(&scalar.to_string()),
+                0,
+                "plane-14 scalar U+{:04X} must measure zero",
+                *scalar as u32
+            );
+        }
+
+        // One scalar past the range is NOT zero: the oracle reports 1 for the
+        // whole remainder of the plane, so the range end is exactly E0FFF.
+        const ONE: &[char] = &[
+            '\u{E1000}',
+            '\u{E1FFF}',
+            '\u{EFFFF}',
+            '\u{F0000}',
+            '\u{10FFFF}',
+        ];
+        for scalar in ONE {
+            assert_eq!(
+                model_cells(&scalar.to_string()),
+                1,
+                "scalar U+{:04X} beyond the plane-14 zero range must measure one",
+                *scalar as u32
+            );
+        }
+
+        // Tag scalars and variation selectors are cluster continuations, which
+        // is what keeps a subdivision flag (tag base + tags + cancel) and an
+        // ideographic variation sequence in one cluster.
+        for scalar in ['\u{E0020}', '\u{E0067}', '\u{E007F}', '\u{E0100}', '\u{E01EF}'] {
+            assert!(
+                is_continuation(scalar),
+                "U+{:04X} must extend the preceding cluster",
+                scalar as u32
+            );
+        }
+        assert_eq!(model_cells("\u{1F3F4}\u{E0067}\u{E007F}"), 2);
+        assert_eq!(model_cells("\u{6F22}\u{E0100}"), 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // UI-PARITY-CELL-WIDTH-20261113 supplementary repair — focused F3 test.
+    //
+    // This isolates ONE fix: the `!cluster.composed` guard on the post-ZWJ join
+    // in both segmentation paths. The executed oracle breaks after a COMPOSED
+    // Hangul syllable (`1100 1161 200D 1F680` = 4) because conjoining jamo are
+    // not Extended_Pictographic, while ordinary emoji ZWJ sequences still join
+    // (`1F469 200D 1F4BB` = 2).
+    // -----------------------------------------------------------------------
+    #[test]
+    fn ui_parity_cell_width_supplementary_composed_hangul_zwj_join() {
+        // Composed Hangul syllable + ZWJ + base: two clusters, 2 + 2.
+        const SPLIT: &[(&str, &str, usize)] = &[
+            ("f3-hangul-zwj-rocket", "\u{1100}\u{1161}\u{200D}\u{1F680}", 4),
+            (
+                "f3-hangul-lvt-zwj-rocket",
+                "\u{1100}\u{1161}\u{11A8}\u{200D}\u{1F680}",
+                4,
+            ),
+            ("hangul-zwj-hangul", "\u{1100}\u{1161}\u{200D}\u{1100}\u{1161}", 4),
+        ];
+        // NOT asserted here: `\u{AC00}\u{200D}\u{1F680}` (a PRECOMPOSED syllable
+        // followed by ZWJ) measures 2 in this model while the executed oracle
+        // reports 4. That is a pre-existing gap of the same class — the model
+        // does not track Extended_Pictographic, so any ZWJ after a
+        // non-Extended_Pictographic base still joins. It predates this repair
+        // (base behaviour is also 2) and fixing it needs a real
+        // Extended_Pictographic property, which this bounded heuristic does not
+        // carry. Recorded as a remaining gap in the handoff, not frozen as an
+        // expected value here.
+        for (id, text, expected) in SPLIT {
+            assert_eq!(
+                model_cells(text),
+                *expected,
+                "composed-Hangul fixture {id} must break at the ZWJ"
+            );
+        }
+
+        // The pieces alone, so the split is 2 + 2 and not some other sum.
+        assert_eq!(model_cells("\u{1100}\u{1161}"), 2);
+        assert_eq!(model_cells("\u{1100}\u{1161}\u{11A8}"), 2);
+        assert_eq!(model_cells("\u{200D}\u{1F680}"), 2);
+        assert_eq!(model_cells("\u{1F680}"), 2);
+
+        // The guard must not stop ordinary emoji ZWJ sequences from joining.
+        assert_eq!(
+            model_cells("\u{1F469}\u{200D}\u{1F4BB}"),
+            2,
+            "woman technologist is one 2-cell cluster"
+        );
+        assert_eq!(
+            model_cells("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"),
+            2,
+            "family ZWJ sequence is one 2-cell cluster"
+        );
+
+        // Both segmentation paths agree: `fit` emits two 2-cell clusters, and
+        // `visit_cells`/`visit_unpadded_cells` place the rocket at column 2.
+        let text = "\u{1100}\u{1161}\u{200D}\u{1F680}";
+        let fitted = fit(text, 80);
+        assert_eq!(model_cells(&fitted), 80, "the row is padded to the budget");
+        assert!(
+            fitted.starts_with("\u{1100}\u{1161}"),
+            "the syllable is preserved intact"
+        );
+        assert!(
+            fitted.contains('\u{1F680}'),
+            "the base after the ZWJ is emitted as its own cluster"
+        );
+
+        let mut unpadded: Vec<(String, usize)> = Vec::new();
+        let used = visit_unpadded_cells(text, 80, |glyph, cells| {
+            unpadded.push((glyph.to_string(), cells))
+        });
+        assert_eq!(used, 4, "still four cells in total");
+        assert_eq!(unpadded.len(), 2, "measurement sees two clusters");
+        assert_eq!(unpadded[0], ("\u{1100}\u{1161}".to_string(), 2));
+        assert_eq!(unpadded[1], ("\u{1F680}".to_string(), 2));
+
+        let mut cells: Vec<(u16, String, u16)> = Vec::new();
+        // Exact viewport: `visit_cells` walks the padded `fit` row, so a budget
+        // equal to the cluster width leaves no padding cells to filter.
+        visit_cells(text, 4, |x, glyph, w| {
+            cells.push((x, glyph.to_string(), w))
+        });
+        assert_eq!(
+            cells,
+            vec![
+                (0, "\u{1100}\u{1161}".to_string(), 2),
+                (2, "\u{1F680}".to_string(), 2),
+            ],
+            "styling path splits at the same boundary as measurement"
         );
     }
 }
