@@ -60,6 +60,7 @@ import subprocess
 import stat
 import errno
 import sys
+import time
 from contextlib import contextmanager
 
 
@@ -1530,6 +1531,8 @@ def apply_retained_checkpoint(root: pathlib.Path, operator: str) -> str:
         cap = state_dir(root) / "retained-checkpoint-capability.json"
         if cap.exists():
             raise TransitionError("retained checkpoint hook capability slot occupied")
+        operation_nonce = secrets.token_hex(24)
+        hook_record_nonce = operation_nonce
         hook_record = {"schemaVersion":1,"kind":"retained-checkpoint","status":"ARMED",
             "capabilityId":record["capabilityId"],"capabilityDigest":record["capabilityDigest"],
             "author":record["author"],"baseSha":record["baseSha"],"canonicalHead":"main-v2",
@@ -1538,26 +1541,60 @@ def apply_retained_checkpoint(root: pathlib.Path, operator: str) -> str:
             "checkpoint":cp,"oldSha":cp["oldSha"],"candidateSha":cp["candidateSha"],
             "ref":cp["ref"],"paths":cp["paths"],"expiresAt":record["expiresAt"],
             "approvals":record["approvals"],"authorizedObserverBlobs":{},
-            "originalProtectedEvaluatorBlobs":record["originalProtectedEvaluatorBlobs"]}
-        # The hook sidecar is created only at the operator apply boundary, after
-        # receipts and live Store fencing have been checked.
-        write_cap(cap, hook_record)
+            "originalProtectedEvaluatorBlobs":record["originalProtectedEvaluatorBlobs"],
+            "operationNonce": hook_record_nonce}
         try:
+            env = dict(os.environ)
+            env["OC2_RETAINED_CHECKPOINT_NONCE"] = operation_nonce
             with store.workspace_mutation(cp["taskId"], cp["jobId"], cp["token"], feature_ref=cp["ref"], path=cp["workspace"], base=cp["oldSha"]):
                 if dt.datetime.now(dt.timezone.utc).timestamp() >= float(cp["leaseUntil"]):
                     raise TransitionError("retained checkpoint lease expired")
-                git(root, "update-ref", cp["ref"], cp["candidateSha"], cp["oldSha"])
+                # The reservation fence must cover creation of the sidecar and
+                # the complete Git transaction. A revoked/replaced job cannot
+                # leave an armed capability behind.
+                write_cap(cap, hook_record)
+                git(root, "update-ref", cp["ref"], cp["candidateSha"], cp["oldSha"], env=env)
         except Exception:
-            # A prepared/aborted hook callback consumes its capability. If the
-            # ref never moved, record refusal without turning it into APPLIED.
-            record["status"] = "REJECTED"; record["rejectedAt"] = now(); record["rejectedBy"] = operator
+            # Consume only this operation's sidecar. Never unlink a foreign
+            # replacement or unknown state; that ambiguity remains durable.
+            try:
+                if cap.is_file() and not cap.is_symlink():
+                    current = json.loads(cap.read_text(encoding="utf-8"))
+                    if (current.get("capabilityId") == record["capabilityId"] and
+                            current.get("operationNonce") == operation_nonce):
+                        cap.unlink()
+            except Exception:
+                pass
+            actual_result = subprocess.run(["git", "rev-parse", cp["ref"]], cwd=root, text=True, capture_output=True)
+            actual = actual_result.stdout.strip() if actual_result.returncode == 0 else ""
+            if actual == cp["candidateSha"]:
+                record["status"] = "ARMED"
+                record["recoveryJournal"] = {"state":"LANDED_UNVERIFIED", "actualRef":actual, "at":now()}
+            else:
+                record["status"] = "REJECTED"; record["rejectedAt"] = now(); record["rejectedBy"] = operator
             write_cap(cap_path(root), record)
             raise
-        if git(root, "rev-parse", cp["ref"]) != cp["candidateSha"]:
-            raise TransitionError("retained checkpoint landed at unexpected SHA")
-        record["status"] = "APPLIED"; record["appliedSha"] = cp["candidateSha"]; record["appliedAt"] = now()
-        write_cap(cap_path(root), record)
-        return cp["candidateSha"]
+        try:
+            if git(root, "rev-parse", cp["ref"]) != cp["candidateSha"]:
+                raise TransitionError("retained checkpoint landed at unexpected SHA")
+            record["status"] = "APPLIED"; record["appliedSha"] = cp["candidateSha"]; record["appliedAt"] = now()
+            record["recoveryJournal"] = {"state":"COMPLETED", "outcome":"DIRECT_APPLY", "actualRef":cp["candidateSha"], "at":now()}
+            write_cap(cap_path(root), record)
+            return cp["candidateSha"]
+        except Exception:
+            # The Git transaction may already have committed while primary
+            # audit persistence failed. Preserve a retained-specific journal
+            # for recover(); never route this state through bootstrap recovery.
+            actual_result = subprocess.run(["git", "rev-parse", cp["ref"]], cwd=root, text=True, capture_output=True)
+            actual = actual_result.stdout.strip() if actual_result.returncode == 0 else ""
+            if actual == cp["candidateSha"]:
+                record["status"] = "ARMED"
+                record["recoveryJournal"] = {"state":"LANDED_UNVERIFIED", "actualRef":actual, "at":now()}
+                write_cap(cap_path(root), record)
+            else:
+                record["status"] = "REJECTED"; record["rejectedAt"] = now(); record["rejectedBy"] = operator
+                write_cap(cap_path(root), record)
+            raise
 
 
 def _finish_policy(root: pathlib.Path, record: dict, applied_sha: str) -> None:
@@ -2024,10 +2061,117 @@ def activate(root: pathlib.Path, operator: str) -> str:
     return applied
 
 
+def _validate_retained_completed_identity(root: pathlib.Path, record: dict, cp: dict) -> None:
+    """Validate a completed retained checkpoint without requiring a live lease."""
+    journal = record.get("recoveryJournal")
+    if not isinstance(journal, dict) or journal.get("state") not in {"COMPLETED", "LANDED_UNVERIFIED"}:
+        raise TransitionError("retained checkpoint completed journal is missing or invalid")
+    if record.get("kind") != "retained-checkpoint" or cp.get("ref") != "refs/heads/recovery/core":
+        raise TransitionError("retained checkpoint completed identity is invalid")
+    if capability_digest(record) != record.get("capabilityDigest") or validate_approvals(record):
+        raise TransitionError("retained checkpoint completed capability or receipts changed")
+    if record.get("appliedSha") != cp.get("candidateSha"):
+        raise TransitionError("retained checkpoint applied SHA does not match candidate")
+    actual = git(root, "rev-parse", cp["ref"])
+    if actual != cp["candidateSha"]:
+        raise TransitionError("retained checkpoint applied ref changed")
+    if git(root, "rev-list", "--parents", "-n", "1", actual).split() != [actual, cp["oldSha"]]:
+        raise TransitionError("retained checkpoint completed parent changed")
+    if git(root, "rev-parse", "main-v2") != cp["canonicalBase"]:
+        raise TransitionError("retained checkpoint completed canonical base changed")
+    changed = changed_paths_for_recovery(root, cp["oldSha"], actual)
+    if changed != sorted(cp["paths"]):
+        raise TransitionError("retained checkpoint completed path manifest changed")
+    for rel, blob in cp["proposedBlobs"].items():
+        if git(root, "rev-parse", f"{actual}:{rel}") != blob:
+            raise TransitionError("retained checkpoint completed blob changed")
+    policy = _load_policy_checked(root)
+    if policy.get("protectedEvaluatorBlobs") != record.get("protectedPins"):
+        raise TransitionError("retained checkpoint completed protected pins changed")
+    for rel, blob in record["protectedPins"].items():
+        if git(root, "rev-parse", f"{actual}:{rel}") != blob:
+            raise TransitionError("retained checkpoint completed protected blob changed")
+    authoritative_root = (common_git_dir(root) / "delivery-state").resolve()
+    if pathlib.Path(cp.get("storeRoot", "")).resolve() != authoritative_root or not authoritative_root.is_dir():
+        raise TransitionError("retained checkpoint completed Store identity changed")
+    from tools.delivery.store import Store
+    from tools.delivery.model import digest as config_digest
+    store = Store(authoritative_root)
+    cfg = store.meta("config")
+    if store.meta("config_hash") != config_digest(cfg) or cp.get("storeConfigDigest") != store.meta("config_hash"):
+        raise TransitionError("retained checkpoint completed Store configuration changed")
+
+
+def _recover_retained_checkpoint(root: pathlib.Path, record: dict) -> str:
+    """Recover only the retained-core operation; never enter bootstrap recovery."""
+    cp = record.get("checkpoint")
+    journal = record.get("recoveryJournal")
+    if record.get("status") == "APPLIED" and isinstance(cp, dict):
+        _validate_retained_completed_identity(root, record, cp)
+        return "RETAINED-CHECKPOINT-ALREADY-APPLIED"
+    if not isinstance(cp, dict) or not isinstance(journal, dict) or journal.get("state") != "LANDED_UNVERIFIED":
+        raise TransitionError("retained checkpoint has no valid recovery journal")
+    if record.get("status") != "ARMED" or record.get("kind") != "retained-checkpoint":
+        raise TransitionError("retained checkpoint recovery state is not ARMED")
+    if capability_digest(record) != record.get("capabilityDigest") or validate_approvals(record):
+        raise TransitionError("retained checkpoint recovery capability or receipts changed")
+    if (journal.get("actualRef") != cp.get("candidateSha") or cp.get("ref") != "refs/heads/recovery/core"
+            or record.get("proposedBlobs") != cp.get("proposedBlobs")):
+        raise TransitionError("retained checkpoint recovery journal identity mismatch")
+    actual = git(root, "rev-parse", cp["ref"])
+    if actual != cp["candidateSha"]:
+        if actual == cp["oldSha"]:
+            raise TransitionError("retained checkpoint ref is unchanged; operation remains closed")
+        raise TransitionError("retained checkpoint ref is outside recorded old/candidate states")
+    if git(root, "rev-list", "--parents", "-n", "1", actual).split() != [actual, cp["oldSha"]]:
+        raise TransitionError("retained checkpoint landed commit parent is not the recorded old core")
+    if git(root, "rev-parse", "main-v2") != cp["canonicalBase"]:
+        raise TransitionError("retained checkpoint canonical base changed")
+    policy = _load_policy_checked(root)
+    if policy.get("protectedEvaluatorBlobs") != record.get("protectedPins"):
+        raise TransitionError("retained checkpoint protected pins changed")
+    for rel, blob in record["protectedPins"].items():
+        if git(root, "rev-parse", f"{actual}:{rel}") != blob:
+            raise TransitionError("retained checkpoint landed protected blob changed")
+    authoritative_root = (common_git_dir(root) / "delivery-state").resolve()
+    if pathlib.Path(cp.get("storeRoot", "")).resolve() != authoritative_root or not authoritative_root.is_dir():
+        raise TransitionError("retained checkpoint authoritative Store identity changed")
+    from tools.delivery.store import Store
+    from tools.delivery.model import digest as config_digest
+    store = Store(authoritative_root)
+    cfg = store.meta("config")
+    if store.meta("config_hash") != config_digest(cfg) or cp.get("storeConfigDigest") != store.meta("config_hash"):
+        raise TransitionError("retained checkpoint authoritative Store configuration changed")
+    try:
+        with store.workspace_mutation(cp["taskId"], cp["jobId"], cp["token"],
+                feature_ref=cp["ref"], path=cp["workspace"], base=cp["oldSha"]) as reservation:
+            if reservation.get("generation") != cp.get("generation"):
+                raise TransitionError("retained checkpoint recovery generation changed")
+            if time.time() >= float(cp.get("leaseUntil", 0)):
+                raise TransitionError("retained checkpoint recovery lease expired")
+            record["status"] = "APPLIED"
+            record["appliedSha"] = actual
+            record["appliedAt"] = now()
+            record["recoveryJournal"] = dict(journal, state="COMPLETED", outcome="LANDED_RECONCILED", at=now())
+            write_cap(cap_path(root), record)
+            return "RETAINED-CHECKPOINT-RECOVERED-TO-APPLIED"
+    except Exception as exc:
+        # Do not rewrite capability/journal state on a failed validation: the
+        # persisted LANDED_UNVERIFIED record is already closed, and recording
+        # refusal here would itself mutate protected recovery state. If the
+        # APPLIED write raised, preserve that persistence failure as-is; never
+        # replace a successful disposition with a refusal record.
+        if record.get("status") == "APPLIED":
+            raise
+        raise TransitionError("retained checkpoint recovery refused by authoritative reservation fence: " + str(exc)) from exc
+
+
 def recover(root: pathlib.Path) -> str:
     with locked(state_dir(root) / "state.lock"):
         record = load_cap(root)
         status = record.get("status")
+        if record.get("kind") == "retained-checkpoint":
+            return _recover_retained_checkpoint(root, record)
         if record.get("kind") == "driver-policy-reconciliation" and isinstance(record.get("reconciliationJournal"), dict):
             if git(root, "rev-parse", "main-v2") != record.get("baseSha"):
                 raise TransitionError("reconciliation recovery base changed")

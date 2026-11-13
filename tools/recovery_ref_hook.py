@@ -208,6 +208,8 @@ def retained_checkpoint_allows(rows: list[tuple[str, str, str]], phase: str) -> 
         cap = json.loads(path.read_text(encoding="utf-8"))
         if cap.get("status") not in {"ARMED", "PREPARED"} or cap.get("ref") != "refs/heads/recovery/core":
             return False
+        if os.environ.get("OC2_RETAINED_CHECKPOINT_NONCE", "") != str(cap.get("operationNonce", "")):
+            return False
         # Git invokes the hook again after the transaction.  Once the
         # prepared callback admitted the exact row, committed/aborted is a
         # terminal consumption callback: do not re-run expiry or mutable-state
