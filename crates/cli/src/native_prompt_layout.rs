@@ -14,8 +14,165 @@ pub(crate) fn bounded_source(draft: &str) -> &str {
 }
 
 fn normalize(draft: &str) -> String {
+    // Pinned `packages/tui/test/prompt-paste.test.tsx` pastes
+    // `a\fb\u001b[31mc\u0000d` and expects the prompt row `xa^Lbc^@d`: the
+    // editor keeps pasted C0 controls and paints each in caret notation, so a
+    // control costs two cells (`^` plus `c ^ 0x40`) and the insertion caret
+    // advances across those same two cells.
+    //
+    // `\n` and `\t` keep their editor meaning (row break, fixed two-cell tab)
+    // and ESC stays literal, so genuine ANSI/OSC sequences are still recognized
+    // by the shared sanitizer instead of being painted as `^[`. DEL (0x7f) is
+    // not a C0 control and is not covered by the pinned oracle, so the shared
+    // sanitizer keeps dropping it.
+    let expanded = caret_expand_controls(draft);
     // OpenTUI UnifiedTextBuffer defaults to a fixed two-cell tab width.
-    crate::native_transcript::strip_ansi(draft).replace('\t', "  ")
+    crate::native_transcript::strip_ansi(&expanded).replace('\t', "  ")
+}
+
+/// Rewrite bare C0 controls (`0x00..=0x1f` other than `\n`, `\t` and ESC) as
+/// the caret pair `^` + `c ^ 0x40`, and consume C1 controls (see below).
+///
+/// ESC-prefixed terminal control sequences are copied byte-for-byte rather than
+/// expanded inside: a caret pair inside CSI parameters ends the sequence at its
+/// own `^` (a legal `0x40..=0x7e` final byte), and `^G` would destroy an
+/// OSC/DCS `BEL` terminator. Either would change which bytes the shared
+/// sanitizer strips afterwards, so ESC sequences keep exactly the grammar
+/// `strip_ansi` already implements, and only C0 controls outside them gain
+/// cells.
+///
+/// C1 controls are *not* C0 controls and have no caret notation: a `&str`
+/// always encodes them as `0xc2 0x80..=0x9f`, and a terminal treats them as
+/// controls rather than glyphs. They are consumed (never copied and never
+/// expanded) so neither the control scalar nor a DCS/SOS/PM/APC/OSC payload
+/// can survive into the display projection or a painted row.
+fn caret_expand_controls(draft: &str) -> String {
+    let bytes = draft.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(draft.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte == 0x1b {
+            // ESC-prefixed sequence: copy it, do not touch its interior.
+            let end = escape_sequence_end(bytes, index);
+            out.extend_from_slice(&bytes[index..end]);
+            index = end;
+            continue;
+        }
+        // C1 control (`U+0080..=U+009F`). Consume the whole control and drop
+        // it: a real terminal would, and the display projection must not paint
+        // a spurious blank cell or print a buried payload as visible text.
+        if byte == 0xc2 {
+            if let Some(&second) = bytes.get(index + 1) {
+                if (0x80..=0x9f).contains(&second) {
+                    index = c1_control_end(bytes, index, second);
+                    continue;
+                }
+            }
+        }
+        if byte < 0x20 && byte != b'\n' && byte != b'\t' {
+            out.push(b'^');
+            out.push(byte + 0x40);
+            index += 1;
+            continue;
+        }
+        let end = (index + utf8_width(byte)).min(bytes.len());
+        out.extend_from_slice(&bytes[index..end]);
+        index = end;
+    }
+    // Expansion only inserts ASCII, so valid input stays valid UTF-8.
+    String::from_utf8(out).unwrap_or_default()
+}
+
+/// Byte offset just past the ESC sequence starting at `start`, mirroring the
+/// ESC grammar in `native_transcript::strip_ansi`.
+fn escape_sequence_end(bytes: &[u8], start: usize) -> usize {
+    let len = bytes.len();
+    if start + 1 >= len {
+        return len;
+    }
+    match bytes[start + 1] {
+        b'[' => csi_end(bytes, start + 2),
+        b']' => osc_end(bytes, start + 2),
+        b'P' | b'X' | b'^' | b'_' => osc_end(bytes, start + 2),
+        b'(' | b')' | b'#' => (start + 3).min(len),
+        _ => (start + 2).min(len),
+    }
+}
+
+/// CSI parameters/intermediates, ending on the first `0x40..=0x7e` byte.
+fn csi_end(bytes: &[u8], mut index: usize) -> usize {
+    while index < bytes.len() {
+        let byte = bytes[index];
+        index += 1;
+        if (0x40..=0x7e).contains(&byte) {
+            break;
+        }
+    }
+    index
+}
+
+/// OSC/DCS/SOS/PM/APC payload, ending at `BEL`, `ST` (`ESC \`) or end of input.
+fn osc_end(bytes: &[u8], mut index: usize) -> usize {
+    while index < bytes.len() {
+        if bytes[index] == 0x07 {
+            return index + 1;
+        }
+        if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'\\') {
+            return index + 2;
+        }
+        index += 1;
+    }
+    bytes.len()
+}
+
+/// UTF-8 sequence width from a lead byte; the input is `&str`, so bytes agree.
+fn utf8_width(lead: u8) -> usize {
+    match lead {
+        0x00..=0x7f => 1,
+        0xc0..=0xdf => 2,
+        0xe0..=0xef => 3,
+        0xf0..=0xf7 => 4,
+        _ => 1,
+    }
+}
+
+/// Byte offset just past the C1 control at `start` (lead `0xc2`, `second` in
+/// `0x80..=0x9f`), following that control's own terminator.
+///
+/// `CSI` (U+009B) ends at its first `0x40..=0x7e` final byte; the DCS/SOS/PM/APC
+/// string families (U+0090, U+0098, U+009E, U+009F) and `OSC` (U+009D) run to
+/// `BEL`, `ST` or end-of-input; every other C1 scalar — including `ST` itself
+/// (U+009C) — is a single zero-width no-op.
+fn c1_control_end(bytes: &[u8], start: usize, second: u8) -> usize {
+    match second {
+        0x9b => csi_end(bytes, start + 2),
+        0x90 | 0x98 | 0x9d | 0x9e | 0x9f => c1_string_end(bytes, start + 2),
+        _ => start + 2,
+    }
+}
+
+/// C1 string payload (`DCS`/`SOS`/`PM`/`APC`/`OSC`), ending at `BEL`, `ESC \`
+/// (7-bit `ST`), UTF-8 `ST` (`0xc2 0x9c`) or end of input (fail closed).
+///
+/// This mirrors `native_transcript::strip_ansi`'s OSC/DCS grammar and adds the
+/// UTF-8 `ST` terminator that only exists for C1-encoded controls. ESC-prefixed
+/// sequences keep using [`osc_end`], so that grammar is unchanged. Every probe
+/// byte is ASCII, so a multi-byte scalar inside the payload is never split.
+fn c1_string_end(bytes: &[u8], mut index: usize) -> usize {
+    while index < bytes.len() {
+        if bytes[index] == 0x07 {
+            return index + 1;
+        }
+        if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'\\') {
+            return index + 2;
+        }
+        if bytes[index] == 0xc2 && bytes.get(index + 1) == Some(&0x9c) {
+            return index + 2;
+        }
+        index += 1;
+    }
+    bytes.len()
 }
 
 pub(crate) struct PromptRows {
@@ -299,6 +456,277 @@ mod tests {
         let rows = wrap_prompt("hello", 5, 5);
         assert_eq!(rows.window_start(0), 0);
         assert_eq!(rows.window_start(1), 0);
+    }
+
+    // Pinned upstream `packages/tui/test/prompt-paste.test.tsx`
+    // (`await setup.mockInput.pasteBracketedText("a\fb\u001b[31mc\u0000d")`):
+    // the prompt keeps pasted control characters and renders each in caret
+    // notation, so `xa\fbc\0d` occupies nine cells and the caret follows them.
+    // The editor plaintext stays the seven literal characters.
+    #[test]
+    fn pasted_c0_controls_paint_caret_notation_cells_and_cursor() {
+        let draft = "xa\u{0c}bc\u{0}d";
+        let rows = wrap_prompt(draft, 43, draft.len());
+        assert_eq!(rows.rows, ["xa^Lbc^@d"]);
+        assert_eq!(visit_unpadded_cells(&rows.rows[0], 32, |_, _| {}), 9);
+        assert_eq!(rows.cursor, Some((9, 0)));
+        assert_eq!(draft.len(), 7, "the source draft bytes are unchanged");
+    }
+
+    #[test]
+    fn control_caret_expansion_keeps_cursor_affinity_at_every_source_offset() {
+        let draft = "xa\u{0c}bc\u{0}d";
+        for (offset, column, caret) in [
+            (0usize, 0usize, ""),
+            (1, 1, "x"),
+            (2, 2, "xa"),
+            (3, 4, "xa^L"),
+            (4, 5, "xa^Lb"),
+            (5, 6, "xa^Lbc"),
+            (6, 8, "xa^Lbc^@"),
+            (7, 9, "xa^Lbc^@d"),
+        ] {
+            assert!(draft.is_char_boundary(offset), "offset={offset}");
+            assert_eq!(wrap_prompt(draft, 43, offset).cursor, Some((column, 0)), "offset={offset}");
+            assert_eq!(visit_unpadded_cells(caret, 32, |_, _| {}), column, "offset={offset}");
+        }
+    }
+
+    #[test]
+    fn ansi_sequences_are_stripped_and_never_displayed_while_controls_remain() {
+        // The escape sequence disappears; the control character beside it does
+        // not. No escape or control scalar reaches a painted row.
+        let draft = "a\u{1b}[31m\u{0c}b";
+        let rows = wrap_prompt(draft, 43, draft.len());
+        assert_eq!(rows.rows, ["a^Lb"]);
+        assert!(rows.rows.iter().all(|row| !row.chars().any(char::is_control)));
+        assert!(!rows.rows.iter().any(|row| row.contains('\u{1b}')));
+        // A dangling escape is still dropped, never rendered as `^[`.
+        let dangling = "a\u{1b}";
+        assert_eq!(wrap_prompt(dangling, 43, dangling.len()).rows, ["a"]);
+        assert_eq!(wrap_prompt(dangling, 43, dangling.len()).cursor, Some((1, 0)));
+        // Controls inside a sequence belong to the sequence: they pass through
+        // untouched so the shared sanitizer still strips the whole sequence. A
+        // caret pair expanded inside the parameters would terminate the
+        // sequence early (`^` is a legal CSI final byte) and leak the rest.
+        let csi_control = "a\u{1b}[1\u{0}mz";
+        assert_eq!(wrap_prompt(csi_control, 43, csi_control.len()).rows, ["az"]);
+        // BEL still terminates an OSC, so the text after it stays visible.
+        let osc_bel = "a\u{1b}]0;t\u{7}b";
+        assert_eq!(wrap_prompt(osc_bel, 43, osc_bel.len()).rows, ["ab"]);
+    }
+
+    #[test]
+    fn tabs_newlines_del_and_utf8_keep_documented_cell_semantics() {
+        // Tabs keep the two-cell OpenTUI width and newlines split rows. DEL is
+        // still dropped exactly as `native_transcript::strip_ansi` documents:
+        // the pinned paste oracle proves C0 caret notation only, so widening
+        // DEL to `^?` would be an unproven control-cell policy change.
+        let rows = wrap_prompt("a\tb\nc\u{7f}d", 43, 9);
+        assert_eq!(rows.rows, ["a  b", "cd"]);
+        assert_eq!(rows.cursor, Some((2, 1)));
+        let utf8 = "a\u{0c}\u{754c}\nb";
+        let rows = wrap_prompt(utf8, 43, utf8.len());
+        assert_eq!(rows.rows, ["a^L\u{754c}", "b"]);
+        assert_eq!(rows.cursor, Some((1, 1)));
+    }
+
+    #[test]
+    fn wrapping_counts_expanded_control_cells_at_the_row_edge() {
+        // `a b ^ A c d e` is seven cells, so a five-cell row must wrap.
+        let draft = "ab\u{1}cde";
+        let rows = wrap_prompt(draft, 5, draft.len());
+        assert_eq!(rows.rows.len(), 2, "rows={:?}", rows.rows);
+        assert_eq!(rows.rows.concat(), "ab^Acde");
+        let (column, row) = rows.cursor.unwrap();
+        assert_eq!(row, 1);
+        assert_eq!(column, visit_unpadded_cells(&rows.rows[row], usize::MAX, |_, _| {}));
+    }
+
+    #[test]
+    fn bounded_draft_with_controls_stays_bounded_and_projects() {
+        let draft = "\u{1}".repeat(MAX_BYTES);
+        let rows = wrap_prompt(&draft, 43, draft.len());
+        assert!(!rows.rows.is_empty());
+        assert!(rows.rows.iter().all(|row| visit_unpadded_cells(row, usize::MAX, |_, _| {}) <= 43));
+        assert!(rows.rows.iter().all(|row| !row.chars().any(char::is_control)));
+        assert!(rows.rows[0].starts_with("^A"));
+        let (column, row) = rows.cursor.expect("visible cursor at the capped end");
+        assert_eq!(row, rows.rows.len() - 1);
+        assert_eq!(column, visit_unpadded_cells(&rows.rows[row], usize::MAX, |_, _| {}));
+    }
+
+    // -- C1 (UTF-8 `0xc2 0x80..=0x9f`) display projection -------------------
+    //
+    // A `&str` can only carry C1 controls as `U+0080..=U+009F`. A real
+    // terminal does not paint them as glyphs: the DCS/SOS/PM/APC string
+    // families swallow their payload until `BEL`, `ST` or end-of-input, `CSI`
+    // ends at its first final byte, and every other C1 scalar is a zero-width
+    // no-op. The display projection must consume them instead of turning them
+    // into a space cell and printing the hostile payload as visible text.
+
+    /// No control scalar (C0/C1/DEL) may reach a painted row.
+    fn assert_no_control_scalars(rows: &PromptRows) {
+        for row in &rows.rows {
+            assert!(
+                !row.chars().any(char::is_control),
+                "row carries a control scalar: {row:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn c1_dcs_sos_pm_apc_payloads_are_consumed_for_every_terminator() {
+        // DCS U+0090, SOS U+0098, PM U+009E, APC U+009F, each closed by the
+        // three terminators the C1 grammar recognizes: BEL, 7-bit ST
+        // (`ESC \`) and UTF-8 ST (U+009C).
+        for introducer in ['\u{90}', '\u{98}', '\u{9e}', '\u{9f}'] {
+            for terminator in ["\u{7}", "\u{1b}\\", "\u{9c}"] {
+                let draft = format!("a{introducer}0;evil{terminator}b");
+                let rows = wrap_prompt(&draft, 43, draft.len());
+                assert_eq!(
+                    rows.rows,
+                    ["ab"],
+                    "introducer={introducer:?} terminator={terminator:?}"
+                );
+                assert_eq!(
+                    rows.cursor,
+                    Some((2, 0)),
+                    "introducer={introducer:?} terminator={terminator:?}"
+                );
+                assert_no_control_scalars(&rows);
+                assert!(
+                    !rows.rows.iter().any(|row| row.contains("evil")),
+                    "payload leaked: {:?}",
+                    rows.rows
+                );
+            }
+        }
+        // The UTF-8 ST scalar on its own is a no-op, not a payload start.
+        assert_eq!(wrap_prompt("a\u{9c}0;evilb", 43, 12).rows, ["a0;evilb"]);
+    }
+
+    #[test]
+    fn unterminated_c1_string_families_are_consumed_to_end_of_input() {
+        // Fail closed: a string family (or OSC) with no terminator swallows
+        // the remainder of the bounded source.
+        for introducer in ['\u{90}', '\u{98}', '\u{9d}', '\u{9e}', '\u{9f}'] {
+            let draft = format!("a{introducer}0;evil");
+            let rows = wrap_prompt(&draft, 43, draft.len());
+            assert_eq!(rows.rows, ["a"], "introducer={introducer:?}");
+            assert_eq!(rows.cursor, Some((1, 0)), "introducer={introducer:?}");
+            assert_no_control_scalars(&rows);
+            assert!(!rows.rows.iter().any(|row| row.contains("evil")));
+        }
+        // A CSI introducer with no final byte is swallowed too.
+        let csi = "a\u{9b}1;2";
+        let rows = wrap_prompt(csi, 43, csi.len());
+        assert_eq!(rows.rows, ["a"]);
+        assert_eq!(rows.cursor, Some((1, 0)));
+    }
+
+    #[test]
+    fn standalone_c1_controls_and_string_terminators_are_dropped_inertly() {
+        for code in 0x80u32..=0x9f {
+            let ch = char::from_u32(code).unwrap();
+            let draft = format!("a{ch}b");
+            let rows = wrap_prompt(&draft, 43, draft.len());
+            assert_no_control_scalars(&rows);
+            match code {
+                // CSI consumes the following byte as its final byte.
+                0x9b => {
+                    assert_eq!(rows.rows, ["a"], "U+{code:04X}");
+                    assert_eq!(rows.cursor, Some((1, 0)), "U+{code:04X}");
+                }
+                // String families are unterminated here, so they eat `b`.
+                0x90 | 0x98 | 0x9d | 0x9e | 0x9f => {
+                    assert_eq!(rows.rows, ["a"], "U+{code:04X}");
+                    assert_eq!(rows.cursor, Some((1, 0)), "U+{code:04X}");
+                }
+                // Every remaining C1 scalar, including ST (U+009C), is a
+                // zero-width no-op: the following `b` stays visible.
+                _ => {
+                    assert_eq!(rows.rows, ["ab"], "U+{code:04X}");
+                    assert_eq!(rows.cursor, Some((2, 0)), "U+{code:04X}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_c1_prefixes_never_leak_payload_or_control_scalars() {
+        // Every one of these leaves only the leading `a`: the C1 introducer
+        // consumes to end-of-input and no payload or control scalar escapes.
+        for draft in [
+            "a\u{90}",           // DCS introducer at end of input
+            "a\u{90}\u{91}b",    // DCS payload begins with another C1
+            "a\u{9b}",           // CSI without a final byte
+            "a\u{9b}\u{7}b",     // BEL is not a CSI final; `b` is
+            "a\u{90}\u{1b}",     // bare ESC at end of input
+            "a\u{90}\u{1b}xb",   // ESC + `x` is not ST
+            "a\u{90}\u{9b}b",    // C1 CSI nested inside a DCS payload
+        ] {
+            let rows = wrap_prompt(draft, 43, draft.len());
+            assert_eq!(rows.rows, ["a"], "draft={draft:?}");
+            assert_eq!(rows.cursor, Some((1, 0)), "draft={draft:?}");
+            assert_no_control_scalars(&rows);
+            assert!(
+                !rows.rows.iter().any(|row| row.contains('0') || row.contains('x')),
+                "draft={draft:?} rows={:?}",
+                rows.rows
+            );
+        }
+        // Stacked ST scalars are inert no-ops and the following text survives.
+        assert_eq!(wrap_prompt("a\u{9c}\u{9c}b", 43, 8).rows, ["ab"]);
+    }
+
+    #[test]
+    fn c1_consumption_keeps_c0_caret_projection_and_cursor_offsets() {
+        // Byte layout: `a` | `C2 90` (DCS) | `07` (BEL terminator) | `b` | 界.
+        let draft = "a\u{90}\u{7}b\u{754c}";
+        for (offset, expected) in [
+            (0usize, Some((0, 0))),
+            (1, Some((1, 0))),
+            (3, Some((1, 0))),
+            (4, Some((1, 0))),
+            (5, Some((2, 0))),
+            (8, Some((4, 0))),
+        ] {
+            assert!(draft.is_char_boundary(offset), "offset={offset}");
+            assert_eq!(wrap_prompt(draft, 43, offset).cursor, expected, "offset={offset}");
+        }
+        for non_boundary in [2usize, 6, 7] {
+            assert!(!draft.is_char_boundary(non_boundary));
+            assert_eq!(wrap_prompt(draft, 43, non_boundary).cursor, None, "offset={non_boundary}");
+        }
+        let rows = wrap_prompt(draft, 43, draft.len());
+        assert_eq!(rows.rows, ["ab\u{754c}"]);
+        assert_no_control_scalars(&rows);
+
+        // C0 caret notation still applies after a consumed C1 string, and the
+        // literal draft bytes are untouched.
+        let mixed = "a\u{90}\u{7}\u{0c}b";
+        let rows = wrap_prompt(mixed, 43, mixed.len());
+        assert_eq!(rows.rows, ["a^Lb"]);
+        assert_eq!(rows.cursor, Some((4, 0)));
+        assert_eq!(mixed.len(), 6, "the source draft bytes are unchanged");
+    }
+
+    #[test]
+    fn bounded_huge_unterminated_c1_stays_bounded_and_projects() {
+        let mut draft = String::from("a\u{90}");
+        draft.push_str(&"p".repeat(MAX_BYTES));
+        let rows = wrap_prompt(&draft, 43, draft.len());
+        assert_eq!(rows.rows, ["a"]);
+        assert_eq!(rows.cursor, Some((1, 0)));
+        assert!(
+            rows.rows.iter().all(|row| visit_unpadded_cells(row, usize::MAX, |_, _| {}) <= 43),
+            "rows={:?}",
+            rows.rows
+        );
+        assert!(!rows.rows.iter().any(|row| row.contains('p')));
+        assert_no_control_scalars(&rows);
+        assert_eq!(bounded_source(&draft).len(), MAX_BYTES);
     }
 }
 
