@@ -270,22 +270,22 @@ impl ChatView {
         messages: &[ChatMessage],
         index: usize,
     ) -> std::collections::BTreeSet<String> {
-        let Some(message_id) = messages.get(index).and_then(|message| message.message_id.as_deref()) else {
+        let Some(message) = messages.get(index) else {
             return std::collections::BTreeSet::new();
         };
+        let message_id = message.message_id.as_deref();
         self.pending_permission_calls
             .iter()
             .filter(|call| {
-                messages.iter().enumerate().rev().find_map(|(_, message)| {
-                    let id = message.message_id.as_deref()?;
-                    let carries_call = message.parts.iter().any(|part| {
+                messages.iter().enumerate().rev().find_map(|(carrier_index, carrier)| {
+                    let carries_call = carrier.parts.iter().any(|part| {
                         matches!(
                             part,
                             ChatPart::ToolCall { id, .. } | ChatPart::ToolState { id, .. } if id == *call
                         )
                     });
-                    carries_call.then_some(id)
-                }) == Some(message_id)
+                    carries_call.then_some((carrier_index, carrier.message_id.as_deref()))
+                }) == Some((index, message_id))
             })
             .cloned()
             .collect()
@@ -3431,8 +3431,23 @@ fn typed_message_rows_with_prefix_spans_mode(
             // `ToolPart` -> `Shell`/`Read`/`Grep`/... (`routes/session/index.tsx
             // :2574-2650`). The model owns the icon column, label, per-tool
             // body and error row; the view never re-derives tool facts.
-            ChatPart::ToolCall { name, .. } => {
-                append_tool_rows(&mut rows, width, &crate::tui_entry::native_turn::native_tool_rows::tool_call_rows(width, name));
+            ChatPart::ToolCall { name, id } => {
+                let mut display = crate::tui_entry::native_turn::native_tool_rows::tool_display(
+                    width,
+                    name,
+                    "running",
+                    "",
+                    "",
+                    false,
+                );
+                if pending.contains(id) {
+                    display.mark_permission_pending();
+                }
+                append_tool_rows(
+                    &mut rows,
+                    width,
+                    &crate::tui_entry::native_turn::native_tool_rows::rows_for_display(width, &display),
+                );
             }
             ChatPart::ToolResult {
                 name,
@@ -6268,6 +6283,169 @@ mod tests {
             expanded.iter().any(|row| row.0.contains("clean-sibling")),
             "expanding the group restores the clean sibling: {expanded:?}"
         );
+    }
+
+    #[test]
+    fn msg003_idless_pending_call_marks_only_latest_carrier() {
+        let tool = |name: &str| ChatPart::ToolState {
+            name: name.to_owned(),
+            id: "c9".to_owned(),
+            status: "running".to_owned(),
+            args: String::new(),
+            output: String::new(),
+            is_error: false,
+            metadata: String::new(),
+        };
+        let older = ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![tool("older")],
+            ..ChatMessage::text(ChatRole::Assistant, "")
+        };
+        let latest = ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![tool("latest")],
+            ..ChatMessage::text(ChatRole::Assistant, "")
+        };
+        let mut view = ChatView::new();
+        view.set_pending_permission_calls(&["c9".to_owned()]);
+        let rows = view.render_typed_classified(80, 20, "ws", &[older, latest], "", false);
+        assert_eq!(
+            rows.iter()
+                .filter(|(_, class)| *class == ChatRowClass::ToolPermission)
+                .count(),
+            1,
+            "only the latest id-less carrier receives the pending warning: {rows:?}"
+        );
+    }
+
+    #[test]
+    fn msg003_stable_pending_call_keeps_latest_message_attribution() {
+        let mut older = ChatMessage::text(ChatRole::Assistant, "");
+        older.message_id = Some("m1".to_owned());
+        older.parts = vec![ChatPart::ToolState {
+            name: "older".to_owned(),
+            id: "c9".to_owned(),
+            status: "running".to_owned(),
+            args: String::new(),
+            output: String::new(),
+            is_error: false,
+            metadata: String::new(),
+        }, ChatPart::Text("older".to_owned())];
+        let mut latest = ChatMessage::text(ChatRole::Assistant, "");
+        latest.message_id = Some("m2".to_owned());
+        latest.parts = vec![ChatPart::ToolState {
+            name: "latest".to_owned(),
+            id: "c9".to_owned(),
+            status: "running".to_owned(),
+            args: String::new(),
+            output: String::new(),
+            is_error: false,
+            metadata: String::new(),
+        }, ChatPart::Text("latest".to_owned())];
+        let mut view = ChatView::new();
+        view.set_pending_permission_calls(&["c9".to_owned()]);
+        let messages = vec![older, latest];
+        assert_eq!(
+            view.pending_calls_for_message(&messages, 0),
+            std::collections::BTreeSet::new(),
+            "older stable carrier is not attributed the pending warning"
+        );
+        assert_eq!(
+            view.pending_calls_for_message(&messages, 1),
+            ["c9".to_owned()].into_iter().collect(),
+            "latest stable carrier receives the pending warning"
+        );
+    }
+
+    #[test]
+    fn msg003_idless_tool_call_pending_warning_reaches_typed_and_styled_paths() {
+        let mut message = ChatMessage::text(ChatRole::Assistant, "");
+        message.parts = vec![ChatPart::ToolCall {
+            name: "write".to_owned(),
+            id: "c9".to_owned(),
+        }];
+        let messages = vec![message];
+        let mut view = ChatView::new();
+        view.set_pending_permission_calls(&["c9".to_owned()]);
+        let typed = view.render_typed_classified(80, 20, "ws", &messages, "", false);
+        assert!(
+            typed.iter().any(|(_, class)| *class == ChatRowClass::ToolPermission),
+            "typed ToolCall pending warning: {typed:?}"
+        );
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let styled = view.render_styled(80, 20, "ws", &messages, "", false, &appearance);
+        assert!(
+            styled.iter().any(|(_, class, _)| *class == ChatRowClass::ToolPermission),
+            "styled ToolCall pending warning: {styled:?}"
+        );
+
+        view.set_pending_permission_calls(&["other".to_owned()]);
+        let ordinary = view.render_typed_classified(80, 20, "ws", &messages, "", false);
+        assert!(
+            !ordinary.iter().any(|(_, class)| *class == ChatRowClass::ToolPermission),
+            "unrelated ToolCall ID remains ordinary: {ordinary:?}"
+        );
+    }
+
+    #[test]
+    fn msg003_legacy_tool_call_is_static_across_spin_frames_and_pending_is_color_only() {
+        let mut message = ChatMessage::text(ChatRole::Assistant, "");
+        message.parts = vec![ChatPart::ToolCall {
+            name: "write".to_owned(),
+            id: "c9".to_owned(),
+        }];
+        let messages = vec![message];
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let frames = [None, Some(0), Some(1), Some(u64::MAX)];
+        let mut view = ChatView::new();
+        let mut typed_ordinary = None;
+        let mut styled_ordinary = None;
+        for frame in frames {
+            view.set_spin_frame(frame);
+            let typed = view.render_typed_classified(80, 20, "ws", &messages, "", false);
+            let styled = view.render_styled(80, 20, "ws", &messages, "", false, &appearance);
+            let typed_tool: Vec<_> = typed
+                .iter()
+                .filter(|(_, class)| matches!(class, ChatRowClass::ToolCall | ChatRowClass::ToolPermission))
+                .cloned()
+                .collect();
+            let styled_tool: Vec<_> = styled
+                .iter()
+                .filter(|(_, class, _)| matches!(class, ChatRowClass::ToolCall | ChatRowClass::ToolPermission))
+                .map(|(row, class, _)| (row.clone(), *class))
+                .collect();
+            if let Some(previous) = &typed_ordinary {
+                assert_eq!(&typed_tool, previous, "legacy ToolCall typed text is spin-invariant");
+            } else {
+                typed_ordinary = Some(typed_tool);
+            }
+            if let Some(previous) = &styled_ordinary {
+                assert_eq!(&styled_tool, previous, "legacy ToolCall styled text is spin-invariant");
+            } else {
+                styled_ordinary = Some(styled_tool);
+            }
+        }
+        view.set_pending_permission_calls(&["c9".to_owned()]);
+        view.set_spin_frame(Some(1));
+        let typed_pending = view.render_typed_classified(80, 20, "ws", &messages, "", false);
+        let styled_pending = view.render_styled(80, 20, "ws", &messages, "", false, &appearance);
+        let typed_pending_tool: Vec<_> = typed_pending
+            .iter()
+            .filter(|(_, class)| matches!(class, ChatRowClass::ToolCall | ChatRowClass::ToolPermission))
+            .cloned()
+            .collect();
+        let styled_pending_tool: Vec<_> = styled_pending
+            .iter()
+            .filter(|(_, class, _)| matches!(class, ChatRowClass::ToolCall | ChatRowClass::ToolPermission))
+            .map(|(row, class, _)| (row.clone(), *class))
+            .collect();
+        assert_eq!(typed_pending_tool.iter().map(|(row, _)| row).collect::<Vec<_>>(), typed_ordinary.as_ref().unwrap().iter().map(|(row, _)| row).collect::<Vec<_>>());
+        assert_eq!(styled_pending_tool.iter().map(|(row, _)| row).collect::<Vec<_>>(), styled_ordinary.as_ref().unwrap().iter().map(|(row, _)| row).collect::<Vec<_>>());
+        assert!(typed_pending_tool.iter().any(|(_, class)| *class == ChatRowClass::ToolPermission));
+        assert!(styled_pending_tool.iter().any(|(_, class)| *class == ChatRowClass::ToolPermission));
+        view.set_pending_permission_calls(&["other".to_owned()]);
+        let typed_other = view.render_typed_classified(80, 20, "ws", &messages, "", false);
+        assert!(typed_other.iter().all(|(_, class)| *class != ChatRowClass::ToolPermission));
     }
 
     #[test]
