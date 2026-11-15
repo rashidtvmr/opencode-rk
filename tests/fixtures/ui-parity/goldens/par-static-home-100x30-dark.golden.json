@@ -40,7 +40,7 @@
   "product": {
    "executable": "oc2",
    "name": "opencode-rk",
-   "sha256": "80125f7cd3824716541dfe7093ad7f10037375488a434410a96f5f6f66163ad3",
+   "sha256": "838c91d3e03bdaba11e02c3a9d1de3433f6bf70de35c4857d68dedbef7758502",
    "version": "oc2 0.1.0-alpha.1"
   },
   "theme": {

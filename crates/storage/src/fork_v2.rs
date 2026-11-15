@@ -543,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn parent_delete_removes_fork_descendants_but_keeps_payload_rows() {
+    fn parent_delete_keeps_fork_payloads() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = workspace(&dir.path().join("w.db"));
         let parent = SessionId::new();

@@ -718,7 +718,24 @@ pub struct BufferedResponsesBody {
     output_items: Vec<Value>,
 }
 impl BufferedResponsesBody {
+    /// Validate a non-streaming body whose output may become executable tool
+    /// calls. The envelope `status` must be present and terminal, so an
+    /// unmarked body can never smuggle a call past the execution boundary.
     pub fn parse(body: &str) -> Result<Self, ResponsesError> {
+        Self::parse_with(body, false)
+    }
+
+    /// Validate a non-streaming body from a *tool-free* request (compaction
+    /// continuation or summary): the request advertises no tools, so a
+    /// compatible server may omit the envelope `status`. The body is still
+    /// fail-closed: an explicit `null` or unknown status is rejected, and any
+    /// `function_call` item is rejected outright, so a tool-free body can never
+    /// yield an executable call even when the envelope status is absent.
+    pub fn parse_tool_free(body: &str) -> Result<Self, ResponsesError> {
+        Self::parse_with(body, true)
+    }
+
+    fn parse_with(body: &str, tool_free: bool) -> Result<Self, ResponsesError> {
         if body.len() > MAX_RESPONSES_BODY_BYTES {
             return Err(ResponsesError::ResponseTooLarge {
                 max: MAX_RESPONSES_BODY_BYTES,
@@ -726,20 +743,19 @@ impl BufferedResponsesBody {
         }
         let value: Value = serde_json::from_str(body)
             .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
-        // A non-streaming Responses body may omit the envelope `status`
-        // entirely (fixture providers and some compatible servers do). Treat an
-        // absent/null status as a completed response; a present status must be
-        // one of the three terminal values, so `in_progress` or an unknown
-        // status still fails closed instead of emitting deltas.
+        // A terminal envelope `status` is required before any output can be
+        // executed. A tool-free request may omit it entirely; an explicit
+        // `null` or unknown status is always rejected so a malformed body can
+        // never masquerade as a completed response.
         let kind = match value.get("status") {
-            None | Some(Value::Null) => "response.completed",
+            None if tool_free => "response.completed",
             Some(Value::String(status)) => match status.as_str() {
                 "completed" => "response.completed",
                 "incomplete" => "response.incomplete",
                 "failed" => "response.failed",
                 _ => return Err(ResponsesError::UnexpectedStreamEnd),
             },
-            Some(_) => return Err(ResponsesError::UnexpectedStreamEnd),
+            _ => return Err(ResponsesError::UnexpectedStreamEnd),
         };
         let mut parser = ResponsesStreamParser::new();
         let invalid = || ResponsesError::InvalidJson("invalid buffered Responses output".into());
@@ -817,6 +833,12 @@ impl BufferedResponsesBody {
                     }
                 }
                 Some("function_call") => {
+                    // A tool-free request advertises no tools, so a call in its
+                    // response is a protocol violation. Reject it rather than
+                    // let it reach the execution boundary.
+                    if tool_free {
+                        return Err(invalid());
+                    }
                     if kind == "response.incomplete" {
                         continue;
                     }
@@ -1333,7 +1355,9 @@ impl OpenAiResponsesClient {
             .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
         let value: Value = serde_json::from_str(text)
             .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
-        let parsed = BufferedResponsesBody::parse(text)?;
+        // Tool-free request: tolerate an absent envelope status, but never a
+        // call (see `parse_tool_free`).
+        let parsed = BufferedResponsesBody::parse_tool_free(text)?;
         Ok(CompletedResponse {
             text: extract_output_text(&value)?,
             usage: parsed.usage(),
@@ -1441,7 +1465,9 @@ impl OpenAiResponsesClient {
             .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
         let value: Value = serde_json::from_str(text)
             .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
-        let parsed = BufferedResponsesBody::parse(text)?;
+        // Tool-free request: tolerate an absent envelope status, but never a
+        // call (see `parse_tool_free`).
+        let parsed = BufferedResponsesBody::parse_tool_free(text)?;
         Ok(CompletedResponse {
             text: extract_output_text(&value)?,
             usage: parsed.usage(),

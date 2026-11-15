@@ -260,7 +260,7 @@ fn run_native_provider_t06() -> (i32, String, String) {
 // hashes the fixture re-binds. The workspace gate builds none of those, so the
 // test is ignored there and runs in the release-verification lane instead.
 #[test]
-#[ignore = "needs staged release artifact (OC2_TEST_NATIVE_LIBRARY + OC2_TEST_BUILD_JSON)"]
+#[ignore = "requires externally staged native library and build manifest"]
 fn t06_interactive_pty_submit_help_quit() {
     let (code, stdout, stderr) = run_native_provider_t06();
     assert_eq!(code, 0, "native provider fixture must exit 0 (stderr: {stderr})");

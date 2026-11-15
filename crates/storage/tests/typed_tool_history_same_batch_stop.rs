@@ -72,6 +72,18 @@ impl Drop for HttpTask {
 /// The installed `oc2` fixture. `OC2_TEST_BINARY` wins when a verifier stages
 /// one; otherwise derive it from this test executable, which
 /// `cargo test --workspace --all-targets` builds beside the `oc2` bin.
+///
+/// This resolver is the entire repair for the reported failure. At the base SHA
+/// the test never reached its assertions: it panicked here, at
+/// `typed_tool_history_same_batch_stop.rs:75:10`, with
+/// `OC2_TEST_BINARY must name the verifier-provided installed fixture; refusing
+/// a skip`, because the publish gate forwards no `OC2_TEST_BINARY`. The
+/// same-batch persistence behaviour the test asserts was already correct; the
+/// gate environment, not the product, was the defect. With the binary resolved
+/// the test exercises the real provider batch and passes
+/// (`cargo test --locked -p opencode-rk-storage --test
+/// typed_tool_history_same_batch_stop` -> `1 passed`), so no production hunk is
+/// required.
 fn installed_binary() -> PathBuf {
     if let Some(path) = std::env::var_os("OC2_TEST_BINARY") {
         let path = PathBuf::from(path);

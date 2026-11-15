@@ -69,3 +69,55 @@ fn ui_parity_goldens_match_rendered_cells() {
         .expect("harness summary must report checked=N");
     assert!(checked > 0, "harness checked no fixtures:\n{stdout}");
 }
+
+// Item 13 pinned-OpenCode comparison. Six par-static goldens were stale: their
+// composer metadata row still carried the `unset` placeholder, while the
+// renderer paints the upstream empty state. The row is not a local invention --
+// pinned upstream OpenCode 450e7b92412c780a7b5a75226bb8d49aaca24e22 renders
+// exactly `No provider selected` + `Connect a provider` when no model selection
+// exists:
+//
+//   packages/tui/src/context/local.tsx:398-417
+//     parsed: createMemo(() => {
+//       const value = currentSelection()
+//       if (!value) return { provider: "Connect a provider",
+//                            model: "No provider selected", reasoning: false }
+//       ...
+//   packages/tui/src/component/prompt/metadata.tsx:100-175
+//     text(): [...model, ...provider].join(" ")
+//             -> "No provider selected Connect a provider"
+//
+// So the renderer is correct and the goldens -- not the renderer -- were stale.
+// The six files were re-recorded with the repository's own recorder
+// (`tools/ui_parity/ui_parity.py --record --filter par-static-`); this test
+// pins the recorded row to the upstream contract so a future renderer
+// regression fails here as well as in `ui_parity_goldens_match_rendered_cells`.
+#[test]
+fn ui_parity_composer_metadata_matches_pinned_upstream() {
+    const COMPOSER_ROW: &str = "No provider selected Connect a provider";
+    // Exactly the six par-static fixtures that render the composer metadata row.
+    let fixtures = [
+        "par-static-dialog-model-120x40-dark",
+        "par-static-home-100x30-dark",
+        "par-static-home-60x20-dark",
+        "par-static-home-80x10-dark",
+        "par-static-home-80x24-dark",
+        "par-static-home-80x24-light",
+    ];
+    for id in fixtures {
+        let path = repo_root()
+            .join("tests/fixtures/ui-parity/goldens")
+            .join(format!("{id}.golden.json"));
+        let golden = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        assert!(
+            golden.contains(COMPOSER_ROW),
+            "{id}: composer metadata row must match pinned upstream \
+             `{COMPOSER_ROW}` (context/local.tsx:398-417 + prompt/metadata.tsx:100-175)"
+        );
+        assert!(
+            !golden.contains("┃  unset"),
+            "{id}: the stale `unset` placeholder must not remain in the recorded golden"
+        );
+    }
+}

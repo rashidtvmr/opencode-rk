@@ -4,8 +4,9 @@
 use opencode_rk_providers::{
     config::ProviderConfig,
     responses::{
-        MAX_RESPONSES_INPUT_BYTES, MAX_RESPONSES_INPUT_MESSAGES, OpenAiResponsesClient,
-        ResponsesCompactionWindow, ResponsesError, ResponsesItem, ResponsesRole, ResponsesTool,
+        BufferedResponsesBody, MAX_RESPONSES_INPUT_BYTES, MAX_RESPONSES_INPUT_MESSAGES,
+        OpenAiResponsesClient, ResponsesCompactionWindow, ResponsesError, ResponsesItem,
+        ResponsesRole, ResponsesTool,
     },
 };
 use serde_json::{Value, json};
@@ -313,4 +314,43 @@ async fn continuation_rejects_serialized_byte_overflow_before_network_io() {
             actual
         }) if actual > MAX_RESPONSES_INPUT_BYTES
     ));
+}
+
+// The continuation fixture (`compact_then_create_...`) returns a non-streaming
+// body with no envelope `status`. The tool-free validator tolerates that shape
+// but stays fail-closed: a malformed (`null`/unknown) status, or any call in a
+// tool-free body, is still rejected before it can reach the execution boundary.
+#[test]
+fn tool_free_validation_tolerates_absent_status_but_rejects_calls_and_malformed_status() {
+    let text_only = r#"{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"continued"}]}]}"#;
+    // Absent status: the tool-free path accepts it; the executable path does not.
+    assert!(BufferedResponsesBody::parse_tool_free(text_only).is_ok());
+    assert!(matches!(
+        BufferedResponsesBody::parse(text_only),
+        Err(ResponsesError::UnexpectedStreamEnd)
+    ));
+
+    // A call in a tool-free body is a protocol violation, even with a completed
+    // envelope: it must never become executable work.
+    let completed_call = r#"{"status":"completed","output":[{"type":"function_call","call_id":"c1","name":"lookup","arguments":"{}"}]}"#;
+    assert!(matches!(
+        BufferedResponsesBody::parse_tool_free(completed_call),
+        Err(ResponsesError::InvalidJson(_))
+    ));
+    let unmarked_call = r#"{"output":[{"type":"function_call","call_id":"c1","name":"lookup","arguments":"{}"}]}"#;
+    assert!(matches!(
+        BufferedResponsesBody::parse_tool_free(unmarked_call),
+        Err(ResponsesError::InvalidJson(_))
+    ));
+
+    // An explicit `null` or unknown envelope status is malformed, not completed.
+    for malformed in [
+        r#"{"status":null,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"x"}]}]}"#,
+        r#"{"status":"in_progress","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"x"}]}]}"#,
+    ] {
+        assert!(matches!(
+            BufferedResponsesBody::parse_tool_free(malformed),
+            Err(ResponsesError::UnexpectedStreamEnd)
+        ));
+    }
 }

@@ -155,35 +155,40 @@ finally:
     os.close(slave); os.close(master)
 "#;
 
+// The vendored per-triple fixture tree `crates/opentui-bridge/native/lib/<triple>`
+// is exactly what `crates/opentui-bridge/build.rs` links against (`TARGET`). The
+// test has no `TARGET` at runtime, so the triple is selected at compile time with
+// `cfg!` for the three staged triples. A compile-time selection is deterministic:
+// unlike a directory scan it can never resolve a foreign-architecture library
+// (for example `aarch64-apple-darwin` on an `x86_64` host).
+#[cfg(all(feature = "native", target_os = "macos", target_arch = "aarch64"))]
+const HOST_TRIPLE: &str = "aarch64-apple-darwin";
+#[cfg(all(feature = "native", target_os = "linux", target_arch = "aarch64"))]
+const HOST_TRIPLE: &str = "aarch64-unknown-linux-gnu";
+#[cfg(all(feature = "native", target_os = "linux", target_arch = "x86_64"))]
+const HOST_TRIPLE: &str = "x86_64-unknown-linux-gnu";
+// No staged triple for this host: resolve to an empty leaf so the existing
+// "native fixture missing" assertion below reports the gap instead of panicking
+// here or silently selecting some other architecture's library.
+#[cfg(all(
+    feature = "native",
+    not(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "linux", target_arch = "aarch64"),
+        all(target_os = "linux", target_arch = "x86_64"),
+    ))
+))]
+const HOST_TRIPLE: &str = "";
+
 #[cfg(feature = "native")]
 fn native_lib_dir() -> std::path::PathBuf {
     if let Some(dir) = std::env::var_os("TUI015_NATIVE_LIB_DIR") {
         return std::path::PathBuf::from(dir);
     }
-    // Derive the staged fixture from the vendored per-triple tree
-    // (`crates/opentui-bridge/native/lib/<triple>/`), the same tree build.rs
-    // resolves for the link gate. Prefer the directory named for this host's
-    // architecture so a multi-arch checkout never picks a foreign `.so`.
-    let name = std::env::consts::DLL_PREFIX.to_owned() + "opentui" + std::env::consts::DLL_SUFFIX;
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("native/lib");
-    let mut fallback = None;
-    if let Ok(entries) = std::fs::read_dir(&root) {
-        for entry in entries.flatten() {
-            let candidate = entry.path();
-            if !candidate.join(&name).is_file() {
-                continue;
-            }
-            if entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with(std::env::consts::ARCH)
-            {
-                return candidate;
-            }
-            fallback.get_or_insert(candidate);
-        }
-    }
-    fallback.unwrap_or_else(|| panic!("no staged native fixture under {}", root.display()))
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("native")
+        .join("lib")
+        .join(HOST_TRIPLE)
 }
 
 #[cfg(feature = "native")]

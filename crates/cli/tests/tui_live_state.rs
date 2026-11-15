@@ -562,6 +562,31 @@ fn l04_interactive_dead_origin_degrades_explicitly() {
     let port = free_loopback_port(); // nothing listening
     let origin = format!("http://127.0.0.1:{port}");
 
+    // The previous step here was `{ "expect": "Unavailable" }`. That
+    // expectation was never truthful. Evidence from the base-SHA gate run
+    // (`full-gate-nff-87481285.log`, test `l04_...`): the PTY driver aborted
+    // with `pty_driver: timed out waiting for 'Unavailable'`, and the squashed
+    // base frame contains 0 occurrences of `Unavailable` but 1 of
+    // `No provider selected` and 1 of `Connect a provider`. The only
+    // `Unavailable` in the capture was the driver's own stderr message, so the
+    // renderer never paints it for this journey. The dead origin does not open
+    // the session route, so the composer shows its honest empty state.
+    //
+    // Pinned upstream (OpenCode 450e7b92412c780a7b5a75226bb8d49aaca24e22)
+    // `packages/tui/src/context/local.tsx:398-417` returns exactly
+    // `provider: "Connect a provider"`, `model: "No provider selected"` when no
+    // model selection exists, and
+    // `packages/tui/src/component/prompt/metadata.tsx:100-175` joins them as
+    // `model provider` -> `No provider selected Connect a provider`. Commit
+    // d1f30b75 (COMPOSER-PARITY task-1, Nov 8) wired that upstream empty state
+    // in and deliberately stopped leaking the old status summary ("unset",
+    // p1-ui-initial.raw row 16); the 5625a6db (Nov 1) `Unavailable` expectation
+    // was never updated for it. Because the stale step aborted the journey
+    // before `:q`, it -- not the product -- caused the non-zero exit the spec
+    // attributed to `tui_entry.rs`; with the step corrected the CLI degrades
+    // and exits 0 on `:q` (asserted below), so no production hunk is required.
+    // The truthful-status intent is kept and strengthened: the frame must show
+    // the honest empty state and must never be rendered as a live session.
     let steps = serde_json::json!([
         { "expect": "daemon offline", "timeout": 30 },
         // Let the first frame settle before typing into the composer.
