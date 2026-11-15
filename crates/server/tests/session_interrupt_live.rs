@@ -341,7 +341,21 @@ fn read_bounded_request(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
                 "deadline",
             ));
         }
-        let n = stream.read(&mut buf)?;
+        let n = match stream.read(&mut buf) {
+            Ok(n) => n,
+            // The provider socket carries a short (20 ms) read timeout so a
+            // stalled peer can be abandoned. A partial request must not be
+            // treated as fatal: retry until the case deadline above.
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
         if n == 0 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,

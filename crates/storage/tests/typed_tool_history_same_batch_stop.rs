@@ -69,15 +69,28 @@ impl Drop for HttpTask {
     }
 }
 
+/// The installed `oc2` fixture. `OC2_TEST_BINARY` wins when a verifier stages
+/// one; otherwise derive it from this test executable, which
+/// `cargo test --workspace --all-targets` builds beside the `oc2` bin.
 fn installed_binary() -> PathBuf {
-    let path = std::env::var_os("OC2_TEST_BINARY")
-        .map(PathBuf::from)
-        .expect(
-            "OC2_TEST_BINARY must name the verifier-provided installed fixture; refusing a skip",
+    if let Some(path) = std::env::var_os("OC2_TEST_BINARY") {
+        let path = PathBuf::from(path);
+        assert!(
+            path.is_file(),
+            "verifier-provided installed binary is missing"
         );
+        return path;
+    }
+    let exe = std::env::current_exe().expect("current test executable");
+    let dir = exe
+        .parent()
+        .and_then(|deps| deps.parent())
+        .expect("test executable lives at <target>/<profile>/deps");
+    let path = dir.join(format!("oc2{}", std::env::consts::EXE_SUFFIX));
     assert!(
         path.is_file(),
-        "verifier-provided installed binary is missing"
+        "derived verifier-provided installed binary is missing: {}",
+        path.display()
     );
     path
 }

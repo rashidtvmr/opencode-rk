@@ -2,7 +2,7 @@ use std::{
     env,
     io::{Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
-    sync::{mpsc, Arc},
+    sync::{mpsc, Arc, OnceLock},
     thread,
     time::Duration,
 };
@@ -18,6 +18,15 @@ use opencode_rk_storage::Storage;
 use serde_json::{json, Value};
 use tempfile::tempdir;
 use tower::ServiceExt;
+
+/// Serializes tests that mutate process-global provider environment variables.
+/// `cargo test` runs tests in parallel threads, so without this one test's
+/// `OPENAI_BASE_URL`/`OPENAI_API_KEY` leak into another's provider turn.
+static ENV_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+fn env_lock() -> &'static tokio::sync::Mutex<()> {
+    ENV_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
 
 fn app() -> (axum::Router, tempfile::TempDir) {
     let dir = tempdir().expect("temporary server fixture");
@@ -283,6 +292,7 @@ async fn create_session(app: &axum::Router, title: &str) -> String {
 
 #[tokio::test]
 async fn session_turn_stream_forwards_deltas_before_completion_and_persists_once() {
+    let _env = env_lock().lock().await;
     let (provider_base, release_provider, provider_request) = spawn_streaming_openai_fixture();
     let _base_url = EnvGuard::set("OPENAI_BASE_URL", &provider_base);
     let _api_key = EnvGuard::set("OPENAI_API_KEY", "fixture-secret");
@@ -365,6 +375,7 @@ async fn session_turn_stream_forwards_deltas_before_completion_and_persists_once
 
 #[tokio::test]
 async fn session_turn_stream_reports_provider_failure_without_persisting_assistant() {
+    let _env = env_lock().lock().await;
     let (provider_base, provider_task) = spawn_failed_openai_fixture();
     let _base_url = EnvGuard::set("OPENAI_BASE_URL", &provider_base);
     let _api_key = EnvGuard::set("OPENAI_API_KEY", "fixture-secret");

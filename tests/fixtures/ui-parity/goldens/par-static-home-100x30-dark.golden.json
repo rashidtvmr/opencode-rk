@@ -40,7 +40,7 @@
   "product": {
    "executable": "oc2",
    "name": "opencode-rk",
-   "sha256": "37fe0235d835a69ef543c8733b3c5811dd9cb473cd544c8827aec8aea6bfb9e7",
+   "sha256": "80125f7cd3824716541dfe7093ad7f10037375488a434410a96f5f6f66163ad3",
    "version": "oc2 0.1.0-alpha.1"
   },
   "theme": {
@@ -699,7 +699,7 @@
      "n": 12
     }
    ],
-   "text": "             ┃  unset                                                           [Send]              ",
+   "text": "             ┃  No provider selected Connect a provider                         [Send]              ",
    "w": 100
   },
   {

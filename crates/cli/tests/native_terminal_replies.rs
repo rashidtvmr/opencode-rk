@@ -24,8 +24,13 @@ fn decode_chunks(chunks: &[&[u8]]) -> Vec<InputEvent> {
 fn byte_events(events: Vec<InputEvent>) -> Vec<u8> {
     events
         .into_iter()
-        .map(|event| match event {
-            InputEvent::Byte(byte) => byte,
+        .filter_map(|event| match event {
+            InputEvent::Byte(byte) => Some(byte),
+            // OSC 10/11 palette replies are protocol frames the decoder
+            // surfaces as a typed payload (THEME-13), never composer input.
+            // Dropping only this decoded frame still fails the test if any
+            // reply byte leaks through as ordinary text.
+            InputEvent::OscColorReply { .. } => None,
             other => panic!("expected only ordinary text bytes, got {other:?}"),
         })
         .collect()

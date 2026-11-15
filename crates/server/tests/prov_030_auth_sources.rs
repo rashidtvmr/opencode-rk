@@ -173,6 +173,29 @@ impl Drop for ChildGuard {
     }
 }
 
+/// The installed `oc2` fixture. `OC2_TEST_BINARY` wins when a verifier stages
+/// one; otherwise derive it from this test executable, which
+/// `cargo test --workspace --all-targets` builds beside the `oc2` bin.
+fn installed_binary() -> PathBuf {
+    if let Some(path) = std::env::var_os("OC2_TEST_BINARY") {
+        let path = PathBuf::from(path);
+        assert!(path.is_file(), "OC2_TEST_BINARY is not a file");
+        return path;
+    }
+    let exe = std::env::current_exe().expect("current test executable");
+    let dir = exe
+        .parent()
+        .and_then(|deps| deps.parent())
+        .expect("test executable lives at <target>/<profile>/deps");
+    let path = dir.join(format!("oc2{}", std::env::consts::EXE_SUFFIX));
+    assert!(
+        path.is_file(),
+        "derived fixture binary missing: {}",
+        path.display()
+    );
+    path
+}
+
 struct Server {
     child: Child,
     origin: String,
@@ -187,9 +210,7 @@ impl Server {
         ambient: Option<&str>,
         project: &Path,
     ) -> Self {
-        let binary =
-            PathBuf::from(std::env::var_os("OC2_TEST_BINARY").expect("OC2_TEST_BINARY required"));
-        assert!(binary.is_file(), "OC2_TEST_BINARY is not a file");
+        let binary = installed_binary();
         let home = tempfile::tempdir().expect("disposable HOME");
         let xdg = home.path().join("x");
         let data = home.path().join("d");

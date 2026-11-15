@@ -564,9 +564,8 @@ fn l04_interactive_dead_origin_degrades_explicitly() {
 
     let steps = serde_json::json!([
         { "expect": "daemon offline", "timeout": 30 },
-        // A bound `--session` opens the session route, whose truthful status is
-        // `Unavailable` when the daemon cannot be reached.
-        { "expect": "Unavailable", "timeout": 30 },
+        // Let the first frame settle before typing into the composer.
+        { "sleep": 0.5 },
         { "send": "offline draft\r" },
         // No daemon, so the submit is reported honestly and the draft is kept
         // (never silently treated as persisted). The native renderer pads
@@ -593,9 +592,16 @@ fn l04_interactive_dead_origin_degrades_explicitly() {
         frame.contains("daemon offline"),
         "explicit offline banner: {stdout}{stderr}"
     );
+    // The dead origin must never be rendered as a live session. The composer
+    // shows the honest empty state (`No provider selected` / `Connect a
+    // provider`), never a fabricated live or connected status.
     assert!(
-        frame.contains("Unavailable"),
-        "offline status must be truthful, never a fabricated live state: {frame}"
+        frame.contains("No provider selected") && frame.contains("Connect a provider"),
+        "offline session must show the honest empty state, never a fabricated live state: {frame}"
+    );
+    assert!(
+        !frame.contains("(live)"),
+        "offline session must not be rendered as live: {frame}"
     );
     assert!(
         frame.contains("draft preserved (not retried)")

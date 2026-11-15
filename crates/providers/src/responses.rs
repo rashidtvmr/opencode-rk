@@ -726,11 +726,20 @@ impl BufferedResponsesBody {
         }
         let value: Value = serde_json::from_str(body)
             .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
-        let kind = match value["status"].as_str() {
-            Some("completed") => "response.completed",
-            Some("incomplete") => "response.incomplete",
-            Some("failed") => "response.failed",
-            _ => return Err(ResponsesError::UnexpectedStreamEnd),
+        // A non-streaming Responses body may omit the envelope `status`
+        // entirely (fixture providers and some compatible servers do). Treat an
+        // absent/null status as a completed response; a present status must be
+        // one of the three terminal values, so `in_progress` or an unknown
+        // status still fails closed instead of emitting deltas.
+        let kind = match value.get("status") {
+            None | Some(Value::Null) => "response.completed",
+            Some(Value::String(status)) => match status.as_str() {
+                "completed" => "response.completed",
+                "incomplete" => "response.incomplete",
+                "failed" => "response.failed",
+                _ => return Err(ResponsesError::UnexpectedStreamEnd),
+            },
+            Some(_) => return Err(ResponsesError::UnexpectedStreamEnd),
         };
         let mut parser = ResponsesStreamParser::new();
         let invalid = || ResponsesError::InvalidJson("invalid buffered Responses output".into());

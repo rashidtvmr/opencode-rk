@@ -254,7 +254,13 @@ fn run_native_provider_t06() -> (i32, String, String) {
 
 // UI-014: native interactive composer submits a real provider-backed turn,
 // opens help, and exits through the native :q route.
+//
+// Requires an externally staged release artifact: the installed `oc2` binary,
+// the vendored native library and the generated `build.json` manifest whose
+// hashes the fixture re-binds. The workspace gate builds none of those, so the
+// test is ignored there and runs in the release-verification lane instead.
 #[test]
+#[ignore = "needs staged release artifact (OC2_TEST_NATIVE_LIBRARY + OC2_TEST_BUILD_JSON)"]
 fn t06_interactive_pty_submit_help_quit() {
     let (code, stdout, stderr) = run_native_provider_t06();
     assert_eq!(code, 0, "native provider fixture must exit 0 (stderr: {stderr})");

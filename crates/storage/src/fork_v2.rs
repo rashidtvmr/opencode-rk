@@ -2,9 +2,10 @@
 //!
 //! A fork creates a NEW session whose history up to a boundary reuses the parent's
 //! immutable payload references (never copies bodies) and records fork provenance
-//! on the session row. Parent deletion cascades through the parent's own rows only;
-//! the fork's shared payload references (message_parts -> payloads ON DELETE
-//! RESTRICT) keep the content alive. Copying is bounded so a caller can page.
+//! on the session row. `delete_session_tree` removes a session together with its
+//! fork descendants; the shared payload rows themselves are never cascade-deleted
+//! (message_parts -> payloads ON DELETE RESTRICT), so content referenced by any
+//! surviving session stays alive. Copying is bounded so a caller can page.
 //!
 //! ponytail: cap errors reuse `invalid_input()` (Sqlite InvalidQuery) instead of a
 //! dedicated StorageError variant to avoid widening the shared error enum. Upgrade
@@ -282,9 +283,9 @@ impl ForkV2 {
         Ok(())
     }
 
-    /// Delete a session and fork descendants, plus dependent rows via ON DELETE CASCADE.
-    /// Shared payloads survive because the fork's message_parts keep RESTRICT
-    /// references; payload rows are never cascade-deleted.
+    /// Delete a session and its fork descendants, plus dependent rows via ON DELETE CASCADE.
+    /// Payload rows are never cascade-deleted here; they can only be reclaimed
+    /// later by the retention sweep once nothing references them.
     pub fn delete_session_tree(
         connection: &mut Connection,
         session_pk: i64,
@@ -542,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn parent_delete_keeps_fork_payloads() {
+    fn parent_delete_removes_fork_descendants_but_keeps_payload_rows() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = workspace(&dir.path().join("w.db"));
         let parent = SessionId::new();
@@ -561,6 +562,10 @@ mod tests {
         )
         .unwrap();
         let fork_pks = payload_pks(&conn, fork_pk);
+        assert!(
+            !fork_pks.is_empty(),
+            "fork reuses the parent's payload rows"
+        );
 
         // delete the whole parent session via its actual pk
         let parent_pk: i64 = conn
@@ -572,7 +577,7 @@ mod tests {
             .unwrap();
         ForkV2::delete_session_tree(&mut conn, parent_pk).unwrap();
 
-        // parent gone, fork survives and still references its payloads
+        // DIALOG-13: the parent and every fork descendant are removed together.
         let parent_exists: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sessions WHERE id=?1",
@@ -582,6 +587,18 @@ mod tests {
             .unwrap();
         assert_eq!(parent_exists, 0);
 
+        let fork_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sessions WHERE id=?1",
+                params![fork_id.as_uuid().as_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            fork_exists, 0,
+            "fork descendant must be removed with its parent"
+        );
+
         let msg_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM messages WHERE session_pk=?1",
@@ -589,11 +606,12 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(msg_count, 2);
+        assert_eq!(msg_count, 0);
 
-        let still = payload_pks(&conn, fork_pk);
-        assert_eq!(still, fork_pks); // same payload references survive parent delete
-        for p in &still {
+        // Payload rows are never cascade-deleted: the shared bodies survive the
+        // session-tree delete (message_parts -> payloads ON DELETE RESTRICT), so
+        // any other session still referencing them keeps its content.
+        for p in &fork_pks {
             let n: i64 = conn
                 .query_row(
                     "SELECT COUNT(*) FROM payloads WHERE pk=?1",
@@ -601,7 +619,7 @@ mod tests {
                     |r| r.get(0),
                 )
                 .unwrap();
-            assert_eq!(n, 1);
+            assert_eq!(n, 1, "payload row {p} must survive the session-tree delete");
         }
     }
 

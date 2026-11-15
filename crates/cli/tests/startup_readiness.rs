@@ -176,6 +176,7 @@ impl HttpFixture {
                     | ("GET", "/api/models?provider=openai&limit=500")
                     | ("GET", "/api/providers")
                     | ("GET", "/api/commands")
+                    | ("GET", "/api/shell")
                     | ("GET", "/api/sessions/550e8400-e29b-41d4-a716-446655440000/history?limit=100")
                     | ("GET", "/api/sessions/550e8400-e29b-41d4-a716-446655440000/mcp")
                     | ("GET", "/api/sessions/550e8400-e29b-41d4-a716-446655440000/todo")

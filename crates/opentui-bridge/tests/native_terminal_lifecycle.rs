@@ -156,16 +156,45 @@ finally:
 "#;
 
 #[cfg(feature = "native")]
+fn native_lib_dir() -> std::path::PathBuf {
+    if let Some(dir) = std::env::var_os("TUI015_NATIVE_LIB_DIR") {
+        return std::path::PathBuf::from(dir);
+    }
+    // Derive the staged fixture from the vendored per-triple tree
+    // (`crates/opentui-bridge/native/lib/<triple>/`), the same tree build.rs
+    // resolves for the link gate. Prefer the directory named for this host's
+    // architecture so a multi-arch checkout never picks a foreign `.so`.
+    let name = std::env::consts::DLL_PREFIX.to_owned() + "opentui" + std::env::consts::DLL_SUFFIX;
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("native/lib");
+    let mut fallback = None;
+    if let Ok(entries) = std::fs::read_dir(&root) {
+        for entry in entries.flatten() {
+            let candidate = entry.path();
+            if !candidate.join(&name).is_file() {
+                continue;
+            }
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(std::env::consts::ARCH)
+            {
+                return candidate;
+            }
+            fallback.get_or_insert(candidate);
+        }
+    }
+    fallback.unwrap_or_else(|| panic!("no staged native fixture under {}", root.display()))
+}
+
+#[cfg(feature = "native")]
 fn run_case(case: &str) {
-    let native_dir = std::env::var("TUI015_NATIVE_LIB_DIR")
-        .expect("TUI015_NATIVE_LIB_DIR must name the staged native fixture directory");
+    let native_dir = native_lib_dir();
     let native_name =
         std::env::consts::DLL_PREFIX.to_owned() + "opentui" + std::env::consts::DLL_SUFFIX;
     assert!(
-        std::path::Path::new(&native_dir)
-            .join(&native_name)
-            .is_file(),
-        "native fixture missing at {native_dir}/{native_name}"
+        native_dir.join(&native_name).is_file(),
+        "native fixture missing at {}/{native_name}",
+        native_dir.display()
     );
     let output = Command::new("python3")
         .arg("-c")
@@ -175,7 +204,7 @@ fn run_case(case: &str) {
             std::env::current_exe().expect("current test executable"),
         )
         .env("TUI015_CASE", case)
-        .env("TUI015_NATIVE_LIB_DIR", native_dir)
+        .env("TUI015_NATIVE_LIB_DIR", &native_dir)
         .env("TUI015_NATIVE_LIB_NAME", &native_name)
         .output()
         .expect("python3 PTY supervisor");

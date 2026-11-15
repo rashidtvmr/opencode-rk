@@ -301,7 +301,12 @@ mod macos_pty {
                 home_generation,
                 &home_screen,
                 "missing nonmodal /connect composer draft",
-                |screen| screen.has_connect_draft() && !screen.contains_text("Connect a provider"),
+                // The Home composer legitimately paints the shared empty-state
+                // provider chip. Upstream's dialog-only search placeholder
+                // (`packages/tui/src/i18n/en.ts:96`, selected at
+                // 450e7b92412c780a7b5a75226bb8d49aaca24e22) supersedes the
+                // old chip-text predicate; see native_prompt_pane.rs:296.
+                |screen| screen.has_connect_draft() && !screen.is_provider_dialog(),
             );
             assert!(
                 draft.generation > home_generation,
@@ -330,7 +335,7 @@ mod macos_pty {
                 before_submit.screen.text()
             );
             assert!(
-                !before_submit.screen.contains_text("Connect a provider"),
+                !before_submit.screen.is_provider_dialog(),
                 "provider dialog opened before Enter\n{}",
                 before_submit.screen.text()
             );
@@ -662,7 +667,57 @@ mod macos_pty {
         }
 
         fn is_provider_dialog(&self) -> bool {
-            self.contains_text("Connect a provider")
+            // Start with complete border runs, rather than title text and
+            // isolated corners. The producer paints this enclosure in
+            // tui_entry.rs:7115-7172 and its provider rows at :12525-12531.
+            const FAMILIES: [(char, char, char, char, char, char); 4] = [
+                ('┌', '┐', '└', '┘', '─', '│'),
+                ('╭', '╮', '╰', '╯', '─', '│'),
+                ('┏', '┓', '┗', '┛', '━', '┃'),
+                ('╔', '╗', '╚', '╝', '═', '║'),
+            ];
+            for &(tl, tr, bl, br, horizontal, vertical) in &FAMILIES {
+                for top in 0..MAX_TERMINAL_ROWS {
+                    for left in 0..MAX_TERMINAL_COLS.saturating_sub(3) {
+                        for right in (left + 3)..MAX_TERMINAL_COLS {
+                            if !complete_border(&self.cells[top], left, right, tl, tr, horizontal) {
+                                continue;
+                            }
+                            for bottom in (top + 3)..MAX_TERMINAL_ROWS {
+                                if !complete_border(
+                                    &self.cells[bottom], left, right, bl, br, horizontal,
+                                ) || !(top + 1..bottom).all(|row| {
+                                    self.cells[row].get(left) == Some(&vertical)
+                                        && self.cells[row].get(right) == Some(&vertical)
+                                }) {
+                                    continue;
+                                }
+                                let Some(title) = (top + 1..bottom).find(|&row| {
+                                    self.cells[row].get(left) == Some(&vertical)
+                                        && self.cells[row].get(right) == Some(&vertical)
+                                        && self.cells[row]
+                                            .iter()
+                                            .collect::<String>()
+                                            .contains("Connect a provider")
+                                }) else {
+                                    continue;
+                                };
+                                if (title + 1..(title + 4).min(bottom)).any(|row| {
+                                    self.cells[row].get(left) == Some(&vertical)
+                                        && self.cells[row].get(right) == Some(&vertical)
+                                        && self.cells[row]
+                                            .iter()
+                                            .collect::<String>()
+                                            .contains("Search providers:")
+                                }) {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            false
         }
 
         fn write(&mut self, row: usize, col: usize, text: &str) -> Result<usize, String> {
@@ -714,6 +769,30 @@ mod macos_pty {
                 }
             }
         }
+    }
+
+    fn complete_border(
+        row: &[char],
+        left: usize,
+        right: usize,
+        corner_left: char,
+        corner_right: char,
+        horizontal: char,
+    ) -> bool {
+        right >= left + 3
+            && row.get(left) == Some(&corner_left)
+            && row.get(right) == Some(&corner_right)
+            && (left + 1..right).all(|column| row.get(column) == Some(&horizontal))
+    }
+
+    fn modal_rails(row: &[char]) -> Option<(usize, usize)> {
+        let mut rails = row
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &cell)| (cell == '│').then_some(index));
+        let left = rails.next()?;
+        let right = rails.next_back()?;
+        (left < right).then_some((left, right))
     }
 
     struct CompletedTerminalFrame {
@@ -1035,16 +1114,20 @@ mod macos_pty {
         assert!(observed.screen.has_connect_draft());
         assert!(!observed.screen.is_provider_dialog());
 
-        let modal = scan_terminal_frames(
-            b"\x1b[?2026h\x1b[2J\x1b[3;5HConnect a provider\x1b[4;7H\xE2\x94\x83  /connect \x1b[?2026l",
+        // Negative control: Home's provider chip must not masquerade as the
+        // provider dialog, even while a /connect draft is present.
+        let home_chip = scan_terminal_frames(
+            b"\x1b[?2026h\x1b[2J\x1b[3;5HNo provider selected  Connect a provider\x1b[4;7H\xE2\x94\x83  /connect \x1b[?2026l",
             0,
             TerminalScreen::default(),
             0,
             0,
             |screen| screen.has_connect_draft() && !screen.is_provider_dialog(),
         )
-        .expect("decode modal negative fixture");
-        assert!(modal.matched.is_none());
+        .expect("decode Home chip negative fixture");
+        let home_chip = home_chip.matched.expect("decoded Home chip fixture");
+        assert!(home_chip.screen.has_connect_draft());
+        assert!(!home_chip.screen.is_provider_dialog());
 
         let listing = scan_terminal_frames(
             b"\x1b[?2026h\x1b[2J\x1b[3;5HCommands /connect Connect provider\x1b[?2026l",
@@ -1057,6 +1140,17 @@ mod macos_pty {
         .expect("decode command-listing negative fixture");
         assert!(listing.matched.is_none());
 
+        let background_search = scan_terminal_frames(
+            b"\x1b[?2026h\x1b[2J\x1b[3;5Hbackground Search providers: stale\x1b[4;7H\xE2\x94\x83 /connect \x1b[?2026l",
+            0,
+            TerminalScreen::default(),
+            0,
+            0,
+            TerminalScreen::is_provider_dialog,
+        )
+        .expect("decode completed background-search negative fixture");
+        assert!(background_search.matched.is_none());
+
         let prefix = scan_terminal_frames(
             b"\x1b[?2026h\x1b[2J\x1b[4;7H\xE2\x94\x83 /connect-extra \x1b[?2026l",
             0,
@@ -1068,9 +1162,14 @@ mod macos_pty {
         .expect("decode command-prefix negative fixture");
         assert!(prefix.matched.is_none());
 
-        let provider_open = b"\x1b[?2026h\x1b[2J\x1b[3;5HConnect a provider";
+        // Positive control: only the actual provider modal's search field is
+        // accepted as dialog evidence.
+        // Captured modal geometry: top border, aligned side rails, title and
+        // search rows, then the bottom border. This mirrors the production
+        // provider box rather than merely repeating its labels.
+        let provider_open = b"\x1b[?2026h\x1b[2J\x1b[3;5H\xE2\x94\x8c\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x90\x1b[4;5H\xE2\x94\x82 Connect a provider     \xE2\x94\x82\x1b[5;5H\xE2\x94\x82                        \xE2\x94\x82\x1b[6;5H\xE2\x94\x82 Search providers:      \xE2\x94\x82\x1b[7;5H\xE2\x94\x82                        \xE2\x94\x82\x1b[8;5H\xE2\x94\x94\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x98\x1b[?2026l";
         let incomplete = scan_terminal_frames(
-            provider_open,
+            &provider_open[..provider_open.len() - b"\x1b[?2026l".len()],
             0,
             observed.screen.clone(),
             observed.generation,
@@ -1081,9 +1180,19 @@ mod macos_pty {
         assert!(incomplete.matched.is_none());
         assert!(incomplete.partial);
 
-        let provider = [provider_open.as_slice(), b"\x1b[?2026l"].concat();
+        let provider = provider_open;
+        let decoded_provider = scan_terminal_frames(
+            provider,
+            output.len(),
+            observed.screen.clone(),
+            observed.generation,
+            output.len(),
+            |_| false,
+        )
+        .expect("decode completed provider geometry");
+        assert!(decoded_provider.screen.contains_text("Search providers:"));
         let completed = scan_terminal_frames(
-            &provider,
+            provider,
             output.len(),
             observed.screen,
             observed.generation,
@@ -1094,6 +1203,174 @@ mod macos_pty {
         let provider_frame = completed.matched.expect("decoded provider dialog frame");
         assert!(provider_frame.generation > observed.generation);
         assert!(provider_frame.screen.is_provider_dialog());
+    }
+
+    fn enclosure_fixture(rows: &[&str], complete: bool) -> Vec<u8> {
+        let mut bytes = b"\x1b[?2026h\x1b[2J".to_vec();
+        for (index, row) in rows.iter().enumerate() {
+            bytes.extend_from_slice(format!("\x1b[{};5H{}", index + 3, row).as_bytes());
+        }
+        if complete {
+            bytes.extend_from_slice(b"\x1b[?2026l");
+        }
+        bytes
+    }
+
+    fn fixture_screen(bytes: &[u8]) -> TerminalScreen {
+        scan_terminal_frames(bytes, 0, TerminalScreen::default(), 0, 0, |_| true)
+            .expect("decode enclosure fixture")
+            .matched
+            .expect("complete enclosure fixture")
+            .screen
+    }
+
+    fn legacy_corner_only_predicate(screen: &TerminalScreen) -> bool {
+        screen.cells.iter().enumerate().any(|(title_row, row)| {
+            let Some((left, right)) = modal_rails(row) else { return false };
+            if !row.iter().collect::<String>().contains("Connect a provider") {
+                return false;
+            }
+            let search = (title_row + 1..(title_row + 4).min(MAX_TERMINAL_ROWS)).find(|&r| {
+                screen.cells[r].iter().collect::<String>().contains("Search providers:")
+                    && modal_rails(&screen.cells[r]) == Some((left, right))
+            });
+            let Some(search) = search else { return false };
+            let top = (0..title_row).rev().find(|&r| {
+                screen.cells[r].get(left) == Some(&'┌')
+                    && screen.cells[r].get(right) == Some(&'┐')
+            });
+            let bottom = ((search + 1)..MAX_TERMINAL_ROWS).find(|&r| {
+                screen.cells[r].get(left) == Some(&'└')
+                    && screen.cells[r].get(right) == Some(&'┘')
+            });
+            top.is_some() && bottom.is_some() && (top.unwrap() + 1..bottom.unwrap()).all(|r| {
+                screen.cells[r].get(left) == Some(&'│')
+                    && screen.cells[r].get(right) == Some(&'│')
+            })
+        })
+    }
+
+    #[test]
+    fn n1_blank_top_border_is_rejected_and_was_legacy_false_positive() {
+        let rows = [
+            "┌                        ┐",
+            "│ Connect a provider     │",
+            "│                        │",
+            "│ Search providers:      │",
+            "│                        │",
+            "└────────────────────────┘",
+        ];
+        let screen = fixture_screen(&enclosure_fixture(&rows, true));
+        assert!(legacy_corner_only_predicate(&screen));
+        assert!(!screen.is_provider_dialog());
+    }
+
+    #[test]
+    fn n2_blank_bottom_border_is_rejected_and_was_legacy_false_positive() {
+        let rows = [
+            "┌────────────────────────┐",
+            "│ Connect a provider     │",
+            "│                        │",
+            "│ Search providers:      │",
+            "│                        │",
+            "└                        ┘",
+        ];
+        let screen = fixture_screen(&enclosure_fixture(&rows, true));
+        assert!(legacy_corner_only_predicate(&screen));
+        assert!(!screen.is_provider_dialog());
+    }
+
+    #[test]
+    fn n3_gapped_top_border_is_rejected_and_was_legacy_false_positive() {
+        let rows = [
+            "┌───────────   ──────────┐",
+            "│ Connect a provider     │",
+            "│                        │",
+            "│ Search providers:      │",
+            "│                        │",
+            "└────────────────────────┘",
+        ];
+        let screen = fixture_screen(&enclosure_fixture(&rows, true));
+        assert!(legacy_corner_only_predicate(&screen));
+        assert!(!screen.is_provider_dialog());
+    }
+
+    #[test]
+    fn n4_split_panels_do_not_form_one_provider_dialog() {
+        let rows = [
+            "┌────────────────────────┐",
+            "│ Connect a provider     │",
+            "│                        │",
+            "└────────────────────────┘",
+            "┌────────────────────────┐",
+            "│ Search providers:      │",
+            "│                        │",
+            "└────────────────────────┘",
+        ];
+        assert!(!fixture_screen(&enclosure_fixture(&rows, true)).is_provider_dialog());
+    }
+
+    #[test]
+    fn n5_home_chip_box_keeps_connect_draft_but_is_not_provider_dialog() {
+        let rows = [
+            "┌────────────────────────┐",
+            "│ No provider selected   │",
+            "│ Connect a provider     │",
+            "└────────────────────────┘",
+            "┃ /connect               ",
+        ];
+        let screen = fixture_screen(&enclosure_fixture(&rows, true));
+        assert!(screen.has_connect_draft());
+        assert!(!screen.is_provider_dialog());
+    }
+
+    #[test]
+    fn n6_missing_interior_rail_rejects_provider_dialog() {
+        let rows = [
+            "┌────────────────────────┐",
+            "│ Connect a provider     │",
+            "                         │",
+            "│ Search providers:      │",
+            "│                        │",
+            "└────────────────────────┘",
+        ];
+        assert!(!fixture_screen(&enclosure_fixture(&rows, true)).is_provider_dialog());
+    }
+
+    #[test]
+    fn n7_missing_sync_terminator_is_partial_and_has_no_accepted_frame() {
+        let rows = [
+            "┌────────────────────────┐",
+            "│ Connect a provider     │",
+            "│                        │",
+            "│ Search providers:      │",
+            "│                        │",
+            "└────────────────────────┘",
+        ];
+        let trace = scan_terminal_frames(
+            &enclosure_fixture(&rows, false),
+            0,
+            TerminalScreen::default(),
+            0,
+            0,
+            TerminalScreen::is_provider_dialog,
+        )
+        .expect("decode incomplete enclosure fixture");
+        assert!(trace.matched.is_none());
+        assert!(trace.partial);
+    }
+
+    #[test]
+    fn positive_complete_provider_geometry_is_accepted() {
+        let rows = [
+            "┌────────────────────────┐",
+            "│ Connect a provider     │",
+            "│                        │",
+            "│ Search providers:      │",
+            "│                        │",
+            "└────────────────────────┘",
+        ];
+        assert!(fixture_screen(&enclosure_fixture(&rows, true)).is_provider_dialog());
     }
 
     fn strip_terminal_controls(text: &str) -> String {

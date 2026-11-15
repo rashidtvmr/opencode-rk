@@ -2,7 +2,7 @@ use std::{
     env,
     io::{Read, Write},
     net::TcpListener,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     thread,
 };
 
@@ -17,6 +17,15 @@ use opencode_rk_storage::Storage;
 use serde_json::{json, Value};
 use tempfile::tempdir;
 use tower::ServiceExt;
+
+/// Serializes tests that mutate process-global provider environment variables.
+/// `cargo test` runs tests in parallel threads, so without this one test's
+/// `OPENAI_BASE_URL`/`OPENAI_API_KEY` leak into another's provider turn.
+static ENV_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+fn env_lock() -> &'static tokio::sync::Mutex<()> {
+    ENV_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
 
 fn app() -> (axum::Router, tempfile::TempDir) {
     let dir = tempdir().expect("temporary server fixture");
@@ -142,6 +151,7 @@ fn spawn_openai_fixture() -> (String, thread::JoinHandle<String>) {
 
 #[tokio::test(flavor = "current_thread")]
 async fn session_turn_executes_provider_and_persists_both_messages() {
+    let _env = env_lock().lock().await;
     let (provider_base, provider_request) = spawn_openai_fixture();
     let _base_url = EnvGuard::set("OPENAI_BASE_URL", &provider_base);
     let _api_key = EnvGuard::set("OPENAI_API_KEY", "fixture-secret");
@@ -227,6 +237,7 @@ async fn session_turn_executes_provider_and_persists_both_messages() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn nonstream_turn_publishes_provider_usage_memory_and_unknown_when_absent() {
+    let _env = env_lock().lock().await;
     let root = tempdir().expect("memory fixture root");
     let instruction = root.path().join("AGENTS.md");
     std::fs::write(&instruction, "NONSTREAM_ACCOUNTING_MEMORY_SENTINEL").unwrap();
