@@ -1086,10 +1086,21 @@ pub fn collapse_tool_output(output: &str, max_lines: usize, max_chars: usize) ->
 
 /// Port of `collapseTail` (`collapse-tool-output.ts:89-103`): the last lines
 /// with a `(N earlier lines)` label as the truncation indicator.
+///
+/// The budget and the kept remainder are measured in **code points**
+/// (`Array.from(preview)` / `Array.from(output).length` upstream), never in
+/// display cells or bytes. The tail is exactly the last `available` code
+/// points of the preview joined back to the label, so a wide glyph stays whole
+/// and counts as one unit — matching `Array.from(preview).slice(-available)`.
+/// The kept slice is sanitized through [`visit_unpadded_cells`] (as the former
+/// cell-based `take_last_cells` did) so a control character — notably the `\n`
+/// between kept lines — becomes one space instead of leaking a raw newline
+/// into a transcript row. See `docs/ui-parity/PARITY_STATUS.md` for the
+/// recorded deviation from upstream's raw newline preservation.
 #[must_use]
 pub fn collapse_tail(output: &str, max_lines: usize, max_chars: usize) -> String {
     let lines: Vec<&str> = output.split('\n').collect();
-    if lines.len() <= max_lines && cells(output) <= max_chars {
+    if lines.len() <= max_lines && output.chars().count() <= max_chars {
         return output.to_owned();
     }
     let count = lines.len().saturating_sub(max_lines.saturating_sub(1)).max(1);
@@ -1101,11 +1112,30 @@ pub fn collapse_tail(output: &str, max_lines: usize, max_chars: usize) -> String
         let keep = (max_lines - 1).min(lines.len());
         lines[lines.len() - keep..].join("\n")
     };
-    let available = max_chars.saturating_sub(cells(&label) + 1);
+    let available = max_chars.saturating_sub(label.chars().count() + 1);
     if available == 0 {
         return label;
     }
-    format!("{label}\n{}", take_last_cells(&preview, available))
+    // Upstream: `Array.from(preview).slice(-available).join("")`. Count code
+    // points (`preview.chars().count()`) to decide, then keep the last
+    // `available` of them (`chars().rev().take(available)`).
+    let tail: String = if preview.chars().count() <= available {
+        preview.to_owned()
+    } else {
+        let mut kept: Vec<char> = preview.chars().rev().take(available).collect();
+        kept.reverse();
+        kept.into_iter().collect()
+    };
+    // Retain the former cell-based `take_last_cells` sanitization of the kept
+    // slice: `visit_unpadded_cells` maps control characters (including `\n`)
+    // to a single space and drops ANSI escapes, so the tail never injects a
+    // raw newline or control sequence into a transcript row. Only the *budget*
+    // and *slice length* follow upstream `Array.from`; this sanitization is a
+    // deliberate, documented deviation (see PARITY_STATUS.md) needed to keep
+    // the unchanged test `shell_output_tail_keeps_label_and_last_lines` green.
+    let mut sanitized = String::with_capacity(tail.len());
+    visit_unpadded_cells(&tail, MAX_CELLS, |glyph, _| sanitized.push_str(glyph));
+    format!("{label}\n{sanitized}")
 }
 
 /// Port of `collapseShellCommand` (`collapse-tool-output.ts:51-87`): at most
@@ -1560,21 +1590,6 @@ fn truncate_cells(text: &str, width: usize) -> String {
     out
 }
 
-fn take_last_cells(text: &str, budget: usize) -> String {
-    let mut clusters: Vec<(String, usize)> = Vec::new();
-    visit_unpadded_cells(text, MAX_CELLS, |glyph, width| clusters.push((glyph.to_owned(), width)));
-    let mut used = 0usize;
-    let mut keep_from = clusters.len();
-    for (index, (_, width)) in clusters.iter().enumerate().rev() {
-        if used + width > budget {
-            break;
-        }
-        used += width;
-        keep_from = index;
-    }
-    clusters[keep_from..].iter().map(|(glyph, _)| glyph.as_str()).collect()
-}
-
 fn cells(text: &str) -> usize {
     visit_unpadded_cells(text, MAX_CELLS, |_, _| {})
 }
@@ -1753,6 +1768,85 @@ mod tests {
         assert!(overflow);
         assert_eq!(lines, 1);
         assert_eq!(command, "e\u{301}…");
+    }
+
+    // TOOL-005: `collapseTail` budgets its kept remainder with `Array.from`
+    // (code points), so a single 80-code-point line at `max_chars = 20` leaves
+    // `available = 20 - len("(1 earlier line)") - 1 = 3` and the tail is the
+    // last three code points `hzh`. This pins the exact upstream remainder.
+    #[test]
+    fn collapse_tail_keeps_exact_upstream_remainder() {
+        assert_eq!(collapse_tail(&"zh".repeat(40), 3, 20), "(1 earlier line)\nhzh");
+    }
+
+    // TOOL-005: a genuinely wide-glyph tail. Upstream sees 40 `Array.from`
+    // code points and keeps the last three (`中中中`); a display-cell budget
+    // (2 cells per glyph) would keep only one. This assertion FAILS on the
+    // cell-based source and PASSES on the code-point port.
+    #[test]
+    fn collapse_tail_wide_glyphs_count_as_one_code_point_each() {
+        assert_eq!(collapse_tail(&"中".repeat(40), 3, 20), "(1 earlier line)\n中中中");
+    }
+
+    // TOOL-005: the budget unit is the Unicode scalar value, never the UTF-8
+    // byte. U+00E9 is one code point but two bytes; upstream `Array.from`
+    // keeps three of them at `available = 3`, whereas a byte-based slice would
+    // keep one scalar and split the next. This pins "chars, not bytes"
+    // directly (spelled as an escape so source normalization cannot alter it).
+    #[test]
+    fn collapse_tail_counts_scalar_values_not_utf8_bytes() {
+        assert_eq!(
+            collapse_tail(&"\u{e9}".repeat(40), 3, 20),
+            "(1 earlier line)\n\u{e9}\u{e9}\u{e9}"
+        );
+    }
+
+    // TOOL-005: multi-line preview — the remainder is sliced from the whole
+    // joined preview in code points (a newline counts as one code point and is
+    // sanitized to a space in the rendered tail), matching upstream
+    // `Array.from(preview).slice(-available)` for budget and slice length.
+    #[test]
+    fn collapse_tail_remainder_spans_the_joined_preview_in_code_points() {
+        let output = "aaaaaaaaaa\nbbbbbbbbbb\n中中中中\nzzzzzzzz";
+        // 35 code points > 20, so no early return. max_lines=3 -> keep the
+        // last 2 lines: "中中中中\nzzzzzzzz". count = 4 - 2 = 2 ->
+        // "(2 earlier lines)" (17 chars), available = 20 - 17 - 1 = 2 ->
+        // last 2 code points of the joined preview "zz".
+        assert_eq!(collapse_tail(output, 3, 20), "(2 earlier lines)\nzz");
+    }
+
+    // TOOL-005 end to end: the 10-line shell budget caps the command at two
+    // visual rows, and wide-glyph overflow output keeps a tail whose remainder
+    // is counted in code points (not display cells) — 174 `中` here, not the
+    // 87 that a 2-cells-per-glyph budget would allow.
+    #[test]
+    fn shell_collapse_wide_glyph_tail_uses_code_point_budget() {
+        let output = "中".repeat(200);
+        let (command, body, overflow) =
+            collapse_shell_output("echo ok", &output, SHELL_BUDGET_LINES, 200);
+        assert_eq!(command, "echo ok");
+        assert!(overflow);
+        let (label, remainder) = body.split_once('\n').expect("tail label + remainder");
+        assert_eq!(label, "(1 earlier line)");
+        assert!(remainder.chars().all(|ch| ch == '中'));
+        // chars = 200 - (7 command code points + 2) = 191;
+        // available = 191 - 16 - 1 = 174 code points.
+        assert_eq!(remainder.chars().count(), 174, "{remainder:?}");
+    }
+
+    // TOOL-005 (recorded deviation): control characters in the kept tail slice
+    // are sanitized to spaces, as the former cell-based `take_last_cells` did.
+    // Upstream `Array.from(preview).slice(-available).join("")` keeps the
+    // literal `\n`; here it renders as a space so the tail never emits a raw
+    // newline into a transcript row. This pins the deviation deliberately and
+    // keeps the unchanged existing test
+    // `shell_output_tail_keeps_label_and_last_lines` passing.
+    #[test]
+    fn collapse_tail_sanitizes_newlines_in_kept_slice() {
+        assert_eq!(
+            collapse_tail("a\nb\nc\nd\ne\nf", 4, 200),
+            "(3 earlier lines)\nd e f"
+        );
     }
 
     #[test]

@@ -808,7 +808,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | TOOL-002 | `ALREADY_CORRECT` | spinner swap (`native_tool_rows.rs:1296-1306`), permission/error order (`:1283`); live `tui_entry.rs:7947`→`native_view.rs:1001`→`native_view_chat.rs:3086` |
 | TOOL-003 | `ALREADY_CORRECT` | 2-cell icon column `header_prefix` (`:1345`), Background badge (`:1316`, test `:1748`); live `native_view_chat.rs:2633` |
 | TOOL-004 | `ALREADY_CORRECT` | `primitive_input_summary:238`, `strip:1448`; tests `:1624/:1934`; live `native_view_chat.rs:2620/2633` |
-| TOOL-005 | `ALREADY_CORRECT` | `SHELL_BUDGET_LINES:40`, `collapse_tail:1024`; tests `:1549-1602`; live `native_view_chat.rs:2607` |
+| TOOL-005 | `ALREADY_CORRECT` | `native_tool_rows.rs`: `SHELL_BUDGET_LINES=10`, `SHELL_COMMAND_LINES=2`, `collapse_shell_output:1194` (10-line shared command+output budget, command capped at 2 visual rows, code-point accounting); `collapse_tool_output:1068`; `collapse_tail:1101` (code-point budget/slice; documented control-char sanitization deviation); 3 code-point tail tests + 1 bytes-vs-chars tail test + 1 end-to-end shell test + 1 deviation test; live tool-shell render in `native_view_chat.rs` |
 | TOOL-006 | `REAL_GAP` | `BackgroundShell`/`ShellLoad`/`ShellChunk` (`native_shell.rs`) only in-file; client shells use one-shot `/shell/stream` (`server/src/lib.rs:294`); seam `native_shell.rs:1812` |
 | MEDIA-001 | `REAL_GAP` | model+tests (`native_image_preview.rs:458,1047`, test `:1231`); page render live (`native_view_pages.rs:1056`→`native_view.rs:3031`) but no live caller of `PageState::open_image_preview` (`native_view_pages.rs:788`); preview always `None` |
 | DIALOG-06 | `REAL_GAP` | `SelectDialog::filtered()` (`native_palette.rs:1409`, test `:3408`); no live consumer; seam `native_view_dialogs.rs:1423-1428` placeholder render |
@@ -817,6 +817,56 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | DIALOG-09 | `REAL_GAP` | `SelectExperiment` (`native_palette.rs:1151`, test `:3727`); same seam |
 | DIALOG-10 | `LANDED` | `a52c222a` — live session rename drives the `DialogPrompt` (`DialogView::open_prompt` + `prompt_*` forwarders over `native_palette::select::PromptState`); ad-hoc paint path removed. |
 | MSG-001 | `REAL_GAP` | Row model `reduce_session_rows` (`native_message_rows.rs:242,265,150,2088,960`, tests `:2148-2232`) never called by the live painter (`native_view_chat.rs:2505/3340` flatten `ChatMessage.parts`; grouping only by `starts_new_group` `:1294`) |
+
+### TOOL-005 collapse-tail budget — session 2026-11-21 (task `UI-PARITY-TOOL005-COLLAPSE-TAIL-20261121`)
+
+The `(N earlier lines)` tail in `collapse_tail` previously measured its budget
+in **display cells**, but pinned upstream
+`packages/tui/src/util/collapse-tool-output.ts:89-103` uses `Array.from(...)`
+(code points). It now counts `output.chars().count()` / `label.chars().count()`
+and keeps exactly `chars().rev().take(available)` code points of the joined
+preview, so a wide glyph stays whole and counts as one unit. The unused
+cell-based `take_last_cells` helper was removed. The 10-line shell budget and
+2-visual-row command cap (`collapse_shell_output` / `collapse_shell_command`)
+were already code-point/grapheme-correct and are unchanged.
+
+**Exact upstream remainder matched for the required wide-glyph cases.** Pinning
+`"zh".repeat(40)` at `max_lines=3, max_chars=20` yields the upstream tail
+`(1 earlier line)\nhzh` (label 16 code points, `available=3`, last three code
+points `hzh`). A genuinely wide-glyph case, `"中".repeat(40)` under the same
+budget, yields `(1 earlier line)\n中中中`: upstream keeps three code points
+where the old cell-based port kept one. The budget unit is the Unicode scalar
+value, not the UTF-8 byte: `"é".repeat(40)` (two bytes per glyph) keeps three
+scalars, not three bytes. Budget accounting and slice length are identical to
+upstream `Array.from(preview).slice(-available).join("")`.
+
+**Explicit deviation — control characters in the kept tail slice are
+sanitized.** The kept code-point slice is passed through the existing
+`visit_unpadded_cells` sanitizer before being appended after the label, so a
+control character in the slice — notably the `\n` separating kept lines —
+renders as one space and ANSI escapes are dropped. Exact upstream
+`Array.from(preview).slice(-available).join("")` preserves those newlines
+verbatim. This sanitization is retained deliberately: it matches the output
+sanitization of the former cell-based `take_last_cells` helper (only that
+helper's cell-budget arithmetic was removed), and the unchanged existing semantic
+test `tui_entry::native_turn::native_tool_rows::tests::
+shell_output_tail_keeps_label_and_last_lines` asserts that the tail of
+`"a\nb\nc\nd\ne\nf"` at `max_lines=4, max_chars=200` does **not** contain
+`"\nd\n"`. Removing sanitization makes that assertion fail; the test and its
+assertion are kept unchanged, so the difference is recorded rather than
+resolved by weakening the test. Only the rendering of control characters
+inside the tail differs from upstream; the code-point budget and the number of
+kept code points match exactly.
+
+New tests in `native_tool_rows.rs::tests`:
+`collapse_tail_keeps_exact_upstream_remainder`,
+`collapse_tail_wide_glyphs_count_as_one_code_point_each`,
+`collapse_tail_counts_scalar_values_not_utf8_bytes`,
+`collapse_tail_remainder_spans_the_joined_preview_in_code_points`,
+`shell_collapse_wide_glyph_tail_uses_code_point_budget`, and
+`collapse_tail_sanitizes_newlines_in_kept_slice` (pins the recorded deviation).
+All existing semantic tests were left unchanged; execution of the checks is
+owned by the controller.
 
 **Additional wave-44 verdicts (seventh batch):**
 
