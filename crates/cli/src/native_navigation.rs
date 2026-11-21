@@ -510,20 +510,43 @@ impl NavigationState {
         self.history.index = self.history.entries.len().checked_sub(1);
     }
 
+    /// Value-only view of [`Self::history_previous_visit`]. Kept as the
+    /// pre-existing accessor name so callers that only need the session
+    /// identity keep compiling; the backward walk itself lives in exactly one
+    /// place, so the two views can never disagree.
+    #[allow(dead_code)]
+    #[must_use]
+    pub fn history_previous(&self, open: &[SessionRef], closing: &SessionRef) -> Option<SessionRef> {
+        self.history_previous_visit(open, closing)
+            .and_then(|index| self.history.entries.get(index).cloned())
+    }
+
     /// Port of `moveSessionTabHistory` (`session-tabs-model.ts:158-176`) for
-    /// the backward direction used by close: walk history backwards for the
-    /// newest entry that is still open and is not the closing tab.
-    fn history_previous(&self, open: &[SessionRef], closing: &SessionRef) -> Option<SessionRef> {
+    /// the backward direction used by close: walk the chronological visit
+    /// history backwards from the selected visit for the newest entry that is
+    /// still open and is not the closing tab. Return its index so a committed
+    /// close can move the history cursor to that visit instead of appending a
+    /// synthetic one. Closed identities and the closing tab itself are skipped
+    /// at every depth; the walk never invents a fallback of its own.
+    fn history_previous_visit(
+        &self,
+        open: &[SessionRef],
+        closing: &SessionRef,
+    ) -> Option<usize> {
         let index = self.history.index?;
-        self.history.entries[..index.min(self.history.entries.len())]
+        let end = index.min(self.history.entries.len());
+        self.history.entries[..end]
             .iter()
+            .enumerate()
             .rev()
-            .find(|entry| *entry != closing && open.contains(entry))
-            .cloned()
+            .find(|(_, entry)| *entry != closing && open.iter().any(|tab| tab == *entry))
+            .map(|(index, _)| index)
     }
 
     /// Bounded in-memory history entries, oldest first. History is never
-    /// persisted, so it is empty after a restart restore.
+    /// persisted, so it is empty after a restart restore. Active close moves
+    /// the cursor backward to its selected successor; a subsequent new route
+    /// truncates the forward tail as in `recordSessionTabHistory`.
     #[must_use]
     pub fn history_entries(&self) -> &[SessionRef] {
         &self.history.entries
@@ -642,6 +665,15 @@ impl NavigationState {
             .iter()
             .position(|tab| &tab.session == session)
             .ok_or(NavRefusal::NoSuchTab)?;
+        // The production close transition preflights the successor, then
+        // commits via `close()` followed by `select_tab()`. Move the history
+        // cursor here when removing the focused tab so that selection of the
+        // preflighted historical successor is a no-op rather than a new visit.
+        // Background closes and closes from Home must leave history untouched.
+        let history_index = self
+            .active()
+            .filter(|tab| &tab.session == session)
+            .and_then(|_| self.close_successor_selection().1);
         // Removing marks the session cancelled so any late registration
         // becomes a no-op (`context/session-tabs.tsx:349-351`, the shared
         // `remove()` behind both close paths). The Rust model has no queued
@@ -660,6 +692,9 @@ impl NavigationState {
             self.closed.remove(0);
         }
         self.remove_tab(session);
+        if let Some(index) = history_index {
+            self.history.index = Some(index);
+        }
         Ok(CloseReceipt {
             session: session.clone(),
             daemon_work: self.work_state(session),
@@ -668,15 +703,16 @@ impl NavigationState {
 
     /// Close the focused tab. The successor is the newest still-open history
     /// entry, falling back to the right neighbor and then the left one
-    /// (`context/session-tabs.tsx:326-374` `previous.sessionID ?? closed.next`).
+    /// (`context/session-tabs.tsx:349-374` `previous.sessionID ?? closed.next`).
+    /// The committed [`Self::close`] moves the history cursor to that visit
+    /// before focus is routed, so later selections truncate the forward tail.
     /// The daemon work map is intentionally untouched.
     pub fn close_active(&mut self) -> Result<CloseReceipt, NavRefusal> {
         let session = self
             .active()
             .map(|tab| tab.session.clone())
             .ok_or(NavRefusal::NoTabOpen)?;
-        self.record_history(&session);
-        let successor = self.close_successor();
+        let successor = self.active_successor();
         let receipt = self.close(&session)?;
         // Upstream `remove()` routes the selected close to the chosen session,
         // otherwise to Home (`context/session-tabs.tsx:373`: `route.navigate(
@@ -690,23 +726,51 @@ impl NavigationState {
         Ok(receipt)
     }
 
-    /// Successor the focused tab's close should focus: the newest still-open
-    /// history entry, falling back to the right/left neighbor. This is the
-    /// same choice `close_active` makes, exposed so the fallible native close
-    /// transition can preflight the target before binding
+    /// Alias kept for the fallible native close transition, which preflights
+    /// the target before loading it. It is exactly the single successor
+    /// derivation [`NavigationState::active_successor`] exposes, so a
+    /// preflight can never pick a different tab than the actual close
     /// (`context/session-tabs.tsx:349-374`).
     #[must_use]
     pub fn close_successor(&self) -> Option<SessionRef> {
-        let session = self.active()?.session.clone();
-        let open: Vec<SessionRef> = self.tabs.iter().map(|tab| tab.session.clone()).collect();
-        self.history_previous(&open, &session)
-            .or_else(|| self.active_successor())
+        self.active_successor()
     }
 
-    /// Return the upstream close fallback without consulting history: the
-    /// right neighbor first, otherwise the left neighbor.
+    /// Successor the focused tab's close should focus: the newest still-open
+    /// history entry that is not the closing tab, falling back to the right
+    /// neighbor and then the left one (`context/session-tabs.tsx:349-374`).
+    /// This is the single pure successor derivation shared by
+    /// [`NavigationState::close_active`] and the fallible native close
+    /// transition, so the preflight and the close agree by construction.
+    ///
+    /// The backward walk consults the chronological visit history ported from
+    /// `recordSessionTabHistory`/`moveSessionTabHistory`
+    /// (`session-tabs-model.ts:147-176`), skipping entries that are closed or
+    /// are the closing tab itself.
     #[must_use]
     pub fn active_successor(&self) -> Option<SessionRef> {
+        self.close_successor_selection().0
+    }
+
+    /// Pure close-target derivation paired with the history cursor to select
+    /// after a successful close. Both the [`Self::active_successor`] preflight
+    /// and the committed close use this exact path, preventing target drift
+    /// between the preflight and the authenticated close transition.
+    fn close_successor_selection(&self) -> (Option<SessionRef>, Option<usize>) {
+        let Some(session) = self.active().map(|tab| tab.session.clone()) else {
+            return (None, None);
+        };
+        let open: Vec<SessionRef> = self.tabs.iter().map(|tab| tab.session.clone()).collect();
+        if let Some(index) = self.history_previous_visit(&open, &session) {
+            return (self.history.entries.get(index).cloned(), Some(index));
+        }
+        (self.right_then_left_successor(), None)
+    }
+
+    /// Positional fallback used only when history offers no still-open entry:
+    /// the right neighbor first, otherwise the left neighbor.
+    #[must_use]
+    fn right_then_left_successor(&self) -> Option<SessionRef> {
         let active = self.active()?.session.clone();
         let index = self.tabs.iter().position(|tab| tab.session == active)?;
         self.tabs
@@ -2347,6 +2411,680 @@ mod tests {
         first.switch(&s("x")).unwrap();
         assert_eq!(first.close_successor(), Some(s("y")), "right neighbor at the start");
         assert_eq!(NavigationState::new().close_successor(), None);
+    }
+
+    #[test]
+    fn active_close_prefers_previous_visited_open_tab() {
+        // `context/session-tabs.tsx:349-374`: the close successor is the
+        // newest still-open history entry (the previously visited tab), not
+        // the positional neighbor. Opening A,B,C and then visiting A before B
+        // makes A the previous visit, so closing B lands on A even though C is
+        // the right neighbor.
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.open(s("b"));
+        nav.open(s("c"));
+        nav.switch(&s("a")).unwrap();
+        nav.switch(&s("b")).unwrap();
+        assert_eq!(nav.active().unwrap().session, s("b"));
+        assert_eq!(
+            nav.active_successor(),
+            Some(s("a")),
+            "the previously visited tab beats the right neighbor"
+        );
+        assert_eq!(
+            nav.close_successor(),
+            Some(s("a")),
+            "the close preflight shares the one successor derivation"
+        );
+
+        nav.close_active().unwrap();
+        assert_eq!(nav.active().unwrap().session, s("a"));
+        nav.close_active().unwrap();
+        assert_eq!(nav.active().unwrap().session, s("c"));
+        nav.close_active().unwrap();
+        // With no still-open history entry and no neighbor, the route is Home
+        // (`context/session-tabs.tsx:373`).
+        assert!(nav.is_home(), "closing the last tab routes to Home");
+        assert_eq!(nav.tab_len(), 0);
+    }
+
+    #[test]
+    fn tab_19_repeated_visits_dedupe_consecutively_and_append_chronologically() {
+        // `recordSessionTabHistory` (`session-tabs-model.ts:147-156`):
+        // re-selecting the current entry is a no-op, a different tab appends.
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.open(s("b"));
+        nav.switch(&s("a")).unwrap();
+        assert_eq!(nav.history_entries(), &[s("a"), s("b"), s("a")]);
+        nav.switch(&s("a")).unwrap();
+        assert_eq!(
+            nav.history_entries(),
+            &[s("a"), s("b"), s("a")],
+            "a consecutive repeat does not grow the history"
+        );
+        nav.switch(&s("b")).unwrap();
+        assert_eq!(nav.history_entries(), &[s("a"), s("b"), s("a"), s("b")]);
+        // Closing B walks back past the closed identity to A.
+        nav.close_active().unwrap();
+        assert_eq!(nav.active().unwrap().session, s("a"));
+    }
+
+    #[test]
+    fn tab_19_close_successor_skips_closed_history_entries() {
+        // The backward walk only accepts entries that are still open
+        // (`moveSessionTabHistory`, `session-tabs-model.ts:158-176`).
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.open(s("b"));
+        nav.open(s("c"));
+        nav.switch(&s("a")).unwrap();
+        nav.switch(&s("c")).unwrap();
+        // Close B in the background: it stays in history but is no longer open.
+        nav.close(&s("b")).unwrap();
+        assert_eq!(nav.active().unwrap().session, s("c"));
+        assert_eq!(
+            nav.active_successor(),
+            Some(s("a")),
+            "the closed B entry is skipped in favour of the open A"
+        );
+        nav.close_active().unwrap();
+        assert_eq!(nav.active().unwrap().session, s("a"));
+    }
+
+    #[test]
+    fn tab_19_background_close_preserves_active_identity_draft_cursor_scroll_and_model() {
+        let mut nav = NavigationState::new();
+        for id in ["a", "b", "c"] {
+            nav.open(s(id));
+        }
+        nav.switch(&s("b")).unwrap();
+        nav.save_active_state("draft 世界".into(), 6, 9, Some("model-b".into()))
+            .unwrap();
+        nav.apply(DaemonEvent::WorkState {
+            session: s("c"),
+            state: WorkState::Running,
+        });
+        // Close C, which is not the active tab.
+        let receipt = nav.close(&s("c")).unwrap();
+        assert_eq!(receipt.session, s("c"));
+        assert_eq!(receipt.retained_work(), Some(WorkState::Running));
+        let active = nav.active().unwrap();
+        assert_eq!(active.session, s("b"), "identity is preserved");
+        assert_eq!(active.draft, "draft 世界");
+        assert_eq!(active.cursor, 6);
+        assert_eq!(active.scroll, 9);
+        assert_eq!(active.selected_model.as_deref(), Some("model-b"));
+        // Closing a tab never terminates daemon-owned work.
+        assert_eq!(nav.work_state(&s("c")), Some(WorkState::Running));
+    }
+
+    #[test]
+    fn tab_19_history_is_bounded_at_one_hundred_entries() {
+        // `session-tabs-model.ts:147-176`: the in-memory history is bounded to
+        // 100 entries, dropping the oldest from the front.
+        let mut nav = NavigationState::new();
+        let total = SESSION_TAB_HISTORY_LIMIT + 12;
+        for i in 0..total {
+            nav.open(s(&format!("s{i}")));
+        }
+        assert_eq!(nav.history_entries().len(), SESSION_TAB_HISTORY_LIMIT);
+        assert_eq!(
+            nav.history_entries().first(),
+            Some(&s("s12")),
+            "the oldest entries are dropped from the bounded window"
+        );
+        assert_eq!(
+            nav.history_entries().last(),
+            Some(&s(&format!("s{}", total - 1)))
+        );
+    }
+
+    #[test]
+    fn tab_19_orientation_change_preserves_identity_and_history() {
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.open(s("b"));
+        nav.switch(&s("a")).unwrap();
+        let before = nav.history_entries().to_vec();
+        nav.set_orientation(TabOrientation::Vertical);
+        assert_eq!(nav.active().unwrap().session, s("a"));
+        assert_eq!(nav.history_entries(), before.as_slice());
+        assert_eq!(nav.active_successor(), Some(s("b")));
+        nav.toggle_orientation();
+        assert_eq!(nav.orientation(), TabOrientation::Horizontal);
+        assert_eq!(nav.active().unwrap().session, s("a"));
+        assert_eq!(nav.history_entries(), before.as_slice());
+    }
+
+    // TAB-19 close-dispatch regression family. Production `tui_entry`
+    // preflights `close_successor()` before authenticated target loading
+    // (`close_tab_transition`), so every close regression asserts that the
+    // preflight and the actual `close_active()` route share the one pure
+    // successor derivation over the chronological visit history ported from
+    // `recordSessionTabHistory`/`moveSessionTabHistory`
+    // (`session-tabs-model.ts:147-176`, `context/session-tabs.tsx:349-374`,
+    // upstream test `session-tabs-model.test.ts:184-190`).
+
+    #[test]
+    fn close_tab_preflight_and_close_active_share_one_successor_derivation() {
+        // Whatever `close_successor()` reports before the daemon call is the
+        // tab `close_active()` actually focuses, in every fallback regime.
+        let mut nav = NavigationState::new();
+        for id in ["a", "b", "c"] {
+            nav.open(s(id));
+        }
+        nav.switch(&s("a")).unwrap();
+        nav.switch(&s("c")).unwrap();
+        assert_eq!(nav.close_successor(), Some(s("a")), "history beats neighbor");
+        nav.close_active().unwrap();
+        assert_eq!(nav.active().unwrap().session, s("a"));
+        assert_eq!(nav.close_successor(), Some(s("b")), "closed entries are skipped");
+        nav.close_active().unwrap();
+        assert_eq!(nav.active().unwrap().session, s("b"));
+
+        // Restored tabs carry no history: the positional neighbor regime.
+        let mut restored = NavigationState::new();
+        restored.restore_tabs(&PersistedTabs {
+            order: vec![s("x"), s("y")],
+            titles: Vec::new(),
+        });
+        assert_eq!(
+            restored.close_successor(),
+            Some(s("y")),
+            "no history: right neighbor"
+        );
+        restored.close_active().unwrap();
+        assert_eq!(restored.active().unwrap().session, s("y"));
+
+        // A single tab has no successor at all: the close routes Home.
+        let mut solo = NavigationState::new();
+        solo.open(s("only"));
+        assert_eq!(solo.close_successor(), None);
+        solo.close_active().unwrap();
+        assert!(solo.is_home());
+    }
+
+    #[test]
+    fn close_tab_preflight_is_pure_and_repeatable() {
+        // The preflight runs before authenticated target loading, so it must
+        // observe the state without mutating it and stay stable across calls.
+        let mut nav = NavigationState::new();
+        for id in ["a", "b", "c"] {
+            nav.open(s(id));
+        }
+        nav.switch(&s("a")).unwrap();
+        nav.switch(&s("b")).unwrap();
+        let history_before = nav.history_entries().to_vec();
+        let active_before = nav.active().unwrap().session.clone();
+        let first = nav.close_successor();
+        let second = nav.close_successor();
+        assert_eq!(first, second, "the preflight is repeatable");
+        assert_eq!(first, Some(s("a")));
+        assert_eq!(
+            nav.history_entries(),
+            history_before.as_slice(),
+            "the preflight does not rewrite history"
+        );
+        assert_eq!(
+            nav.active().unwrap().session,
+            active_before,
+            "the preflight does not move focus"
+        );
+        nav.close_active().unwrap();
+        assert_eq!(
+            nav.active().unwrap().session,
+            s("a"),
+            "the close lands on the preflighted target"
+        );
+    }
+
+    #[test]
+    fn close_tab_differential_sequence_lands_previous_visit_then_last_open_then_home() {
+        // The observable journey: open A,B,C; select A then B; the close
+        // walks A, then C, then Home (`session-tabs-model.test.ts:184-190`).
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.open(s("b"));
+        nav.open(s("c"));
+        nav.switch(&s("a")).unwrap();
+        nav.switch(&s("b")).unwrap();
+        assert_eq!(nav.active_successor(), Some(s("a")));
+        let first = nav.close_active().unwrap();
+        assert_eq!(first.session, s("b"));
+        assert_eq!(nav.active().unwrap().session, s("a"));
+        assert_eq!(nav.tab_len(), 2);
+        let second = nav.close_active().unwrap();
+        assert_eq!(second.session, s("a"));
+        assert_eq!(nav.active().unwrap().session, s("c"));
+        assert_eq!(nav.tab_len(), 1);
+        let third = nav.close_active().unwrap();
+        assert_eq!(third.session, s("c"));
+        assert!(nav.is_home(), "the final close routes Home");
+        assert_eq!(nav.tab_len(), 0);
+    }
+
+    #[test]
+    fn close_tab_lands_on_the_immediately_previous_visit_after_ping_pong() {
+        // Repeated visits append chronologically; a consecutive repeat is a
+        // no-op (`recordSessionTabHistory`, `session-tabs-model.ts:147-156`).
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.open(s("b"));
+        nav.switch(&s("a")).unwrap();
+        nav.switch(&s("b")).unwrap();
+        nav.switch(&s("a")).unwrap();
+        assert_eq!(
+            nav.history_entries(),
+            &[s("a"), s("b"), s("a"), s("b"), s("a")]
+        );
+        nav.switch(&s("a")).unwrap();
+        assert_eq!(
+            nav.history_entries(),
+            &[s("a"), s("b"), s("a"), s("b"), s("a")],
+            "a consecutive repeat does not grow the history"
+        );
+        nav.close_active().unwrap();
+        assert_eq!(
+            nav.active().unwrap().session,
+            s("b"),
+            "the immediately previous visit wins over the neighbor"
+        );
+    }
+
+    #[test]
+    fn tab_19_history_previous_accessor_shares_the_single_backward_walk() {
+        // The value-only accessor and `active_successor` must agree: they are
+        // two views of one walk, so a preflight can never observe a different
+        // predecessor than the close helper (`session-tabs-model.ts:158-176`).
+        let mut nav = NavigationState::new();
+        for id in ["a", "b", "c"] {
+            nav.open(s(id));
+        }
+        nav.switch(&s("a")).unwrap();
+        nav.switch(&s("c")).unwrap();
+        // B is background-closed: it stays in history but is no longer open.
+        nav.close(&s("b")).unwrap();
+        let open: Vec<SessionRef> = nav.tabs().iter().map(|tab| tab.session.clone()).collect();
+        assert_eq!(
+            nav.history_previous(&open, &s("c")),
+            Some(s("a")),
+            "the closed B visit is skipped at every depth"
+        );
+        assert_eq!(nav.history_previous(&open, &s("c")), nav.active_successor());
+        assert_eq!(nav.close_successor(), Some(s("a")));
+    }
+
+    #[test]
+    fn tab_19_history_tracks_routed_selection_not_daemon_facts() {
+        // `recordSessionTabHistory` observes routed selection only: renames,
+        // work transitions, unread marks and background closes must not append
+        // visits, while the next real route appends exactly one entry
+        // (`session-tabs-model.ts:147-156`).
+        let mut nav = NavigationState::new();
+        for id in ["a", "b", "c"] {
+            nav.open(s(id));
+        }
+        assert_eq!(nav.history_entries(), &[s("a"), s("b"), s("c")]);
+        nav.apply(DaemonEvent::Renamed {
+            session: s("b"),
+            title: "B".into(),
+            rev: 1,
+        });
+        nav.apply(DaemonEvent::WorkState {
+            session: s("c"),
+            state: WorkState::Running,
+        });
+        nav.mark_unread(&s("b"));
+        // Background close of A leaves identity and history untouched.
+        nav.close(&s("a")).unwrap();
+        assert_eq!(nav.active().unwrap().session, s("c"), "background close keeps focus");
+        assert_eq!(nav.history_entries(), &[s("a"), s("b"), s("c")]);
+        nav.switch(&s("b")).unwrap();
+        assert_eq!(nav.history_entries(), &[s("a"), s("b"), s("c"), s("b")]);
+    }
+
+    #[test]
+    fn active_close_moves_history_cursor_and_later_selection_truncates_forward_tail() {
+        let mut nav = NavigationState::new();
+        for id in ["a", "b", "c"] {
+            nav.open(s(id));
+        }
+        nav.switch(&s("a")).unwrap();
+        nav.switch(&s("b")).unwrap();
+        assert_eq!(nav.history_entries(), &[s("a"), s("b"), s("c"), s("a"), s("b")]);
+
+        nav.close_active().unwrap();
+        assert_eq!(nav.active().unwrap().session, s("a"));
+        // The close back-walk moved the cursor to A. A new C selection now
+        // drops the forward B visit and appends C, as recordSessionTabHistory.
+        nav.switch(&s("c")).unwrap();
+        assert_eq!(nav.history_entries(), &[s("a"), s("b"), s("c"), s("a"), s("c")]);
+    }
+
+    #[test]
+    fn staged_active_close_preserves_preflighted_history_cursor() {
+        // `close_tab_transition` commits a staged close, then selects the
+        // preflighted successor. That selection must recognize the cursor's
+        // historical visit instead of appending a duplicate visit.
+        let mut nav = NavigationState::new();
+        for id in ["a", "b", "c"] {
+            nav.open(s(id));
+        }
+        nav.switch(&s("a")).unwrap();
+        nav.switch(&s("b")).unwrap();
+        assert_eq!(nav.close_successor(), Some(s("a")));
+
+        let mut staged = nav.clone();
+        staged.close(&s("b")).unwrap();
+        staged.select_tab(&s("a")).unwrap();
+        assert_eq!(staged.active().unwrap().session, s("a"));
+        staged.switch(&s("c")).unwrap();
+        assert_eq!(
+            staged.history_entries(),
+            &[s("a"), s("b"), s("c"), s("a"), s("c")],
+            "a new selection truncates the forward B visit after the committed close"
+        );
+    }
+
+    #[test]
+    fn close_tab_successor_skips_closed_history_entries() {
+        // The backward walk only accepts entries that are still open
+        // (`moveSessionTabHistory`, `session-tabs-model.ts:158-176`); two
+        // background-closed entries are both skipped.
+        let mut nav = NavigationState::new();
+        for id in ["a", "b", "c", "d"] {
+            nav.open(s(id));
+        }
+        nav.switch(&s("a")).unwrap();
+        nav.switch(&s("d")).unwrap();
+        nav.close(&s("b")).unwrap();
+        nav.close(&s("c")).unwrap();
+        assert_eq!(
+            nav.active().unwrap().session,
+            s("d"),
+            "background closes keep focus"
+        );
+        assert_eq!(
+            nav.close_successor(),
+            Some(s("a")),
+            "both closed entries are skipped"
+        );
+        nav.close_active().unwrap();
+        assert_eq!(nav.active().unwrap().session, s("a"));
+    }
+
+    #[test]
+    fn close_tab_successor_skips_the_closing_identity_in_history() {
+        // The closing tab is excluded at every history depth, not only as the
+        // newest entry (`context/session-tabs.tsx:349-374`).
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.open(s("b"));
+        nav.switch(&s("a")).unwrap();
+        // History is [a, b, a]: the closing identity is the newest entry and
+        // an older one, yet the walk must land on b.
+        assert_eq!(
+            nav.close_successor(),
+            Some(s("b")),
+            "the closing identity is skipped at every depth"
+        );
+        nav.close_active().unwrap();
+        assert_eq!(nav.active().unwrap().session, s("b"));
+    }
+
+    #[test]
+    fn close_tab_background_close_keeps_history_position_and_next_successor() {
+        // Closing a background tab rewrites neither the history nor the
+        // focused tab's identity, and the next close still walks past the
+        // closed entry.
+        let mut nav = NavigationState::new();
+        for id in ["a", "b", "c"] {
+            nav.open(s(id));
+        }
+        nav.switch(&s("b")).unwrap();
+        nav.active_mut().unwrap().draft = "keep 世界".into();
+        let history_before = nav.history_entries().to_vec();
+        nav.close(&s("c")).unwrap();
+        assert_eq!(nav.active().unwrap().session, s("b"), "identity is preserved");
+        assert_eq!(nav.active().unwrap().draft, "keep 世界");
+        assert_eq!(
+            nav.history_entries(),
+            history_before.as_slice(),
+            "a background close does not rewrite history"
+        );
+        assert_eq!(
+            nav.close_successor(),
+            Some(s("a")),
+            "the closed entry is skipped on the next close"
+        );
+        nav.close_active().unwrap();
+        assert_eq!(nav.active().unwrap().session, s("a"));
+    }
+
+    #[test]
+    fn close_tab_background_close_preserves_cursor_for_next_chronological_walk() {
+        // A background close of a tab that sits inside the active tab's
+        // history must not move the history cursor. The next active close
+        // walks back from the same visit and skips the now-closed identity,
+        // landing on the newest still-open previously visited tab.
+        let mut nav = NavigationState::new();
+        for id in ["a", "b", "c"] {
+            nav.open(s(id));
+        }
+        nav.switch(&s("a")).unwrap();
+        nav.switch(&s("c")).unwrap();
+        assert_eq!(
+            nav.history_entries(),
+            &[s("a"), s("b"), s("c"), s("a"), s("c")]
+        );
+        let history_before = nav.history_entries().to_vec();
+
+        // "b" is background-closed: it stays in history but is no longer open.
+        nav.close(&s("b")).unwrap();
+        assert_eq!(
+            nav.active().unwrap().session,
+            s("c"),
+            "background close keeps focus"
+        );
+        assert_eq!(
+            nav.history_entries(),
+            history_before.as_slice(),
+            "a background close does not move the history cursor"
+        );
+        assert_eq!(
+            nav.close_successor(),
+            Some(s("a")),
+            "the walk skips the closed b and lands on the open a"
+        );
+        nav.close_active().unwrap();
+        assert_eq!(nav.active().unwrap().session, s("a"));
+    }
+
+    #[test]
+    fn close_tab_never_terminates_daemon_work_on_any_tab() {
+        // Closing a tab never kills daemon-owned work: neither the closed
+        // tab's own work nor any background tab's (`session-tabs.tsx:349-374`,
+        // the daemon work map is untouched by `remove()`).
+        let mut nav = NavigationState::new();
+        for id in ["a", "b", "c"] {
+            nav.open(s(id));
+        }
+        nav.apply(DaemonEvent::WorkState {
+            session: s("a"),
+            state: WorkState::Running,
+        });
+        nav.apply(DaemonEvent::WorkState {
+            session: s("c"),
+            state: WorkState::Running,
+        });
+        let receipt = nav.close_active().unwrap();
+        assert_eq!(receipt.session, s("c"));
+        assert_eq!(
+            receipt.retained_work(),
+            Some(WorkState::Running),
+            "the closed tab's own work is retained"
+        );
+        assert_eq!(
+            nav.work_state(&s("c")),
+            Some(WorkState::Running),
+            "the daemon keeps running the closed session"
+        );
+        assert_eq!(nav.active().unwrap().session, s("b"));
+        nav.close_active().unwrap();
+        assert_eq!(nav.active().unwrap().session, s("a"));
+        assert_eq!(
+            nav.work_state(&s("c")),
+            Some(WorkState::Running),
+            "work outlives every close"
+        );
+        nav.close_active().unwrap();
+        assert!(nav.is_home());
+        assert_eq!(nav.work_state(&s("a")), Some(WorkState::Running));
+        assert_eq!(nav.work_state(&s("c")), Some(WorkState::Running));
+    }
+
+    #[test]
+    fn close_tab_refused_switch_and_close_leave_state_untouched() {
+        // A failed unknown switch or close must not mutate history, focus or
+        // the successor derivation (`switch`/`close` refuse before mutating).
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.open(s("b"));
+        nav.switch(&s("a")).unwrap();
+        let history_before = nav.history_entries().to_vec();
+        assert_eq!(nav.switch(&s("ghost")), Err(NavRefusal::NoSuchTab));
+        assert_eq!(
+            nav.history_entries(),
+            history_before.as_slice(),
+            "a refused switch does not record history"
+        );
+        assert_eq!(
+            nav.active().unwrap().session,
+            s("a"),
+            "a refused switch does not move focus"
+        );
+        assert_eq!(nav.close_successor(), Some(s("b")));
+        nav.close_active().unwrap();
+        assert_eq!(nav.active().unwrap().session, s("b"));
+        assert_eq!(nav.close(&s("ghost")), Err(NavRefusal::NoSuchTab));
+        assert_eq!(
+            nav.active().unwrap().session,
+            s("b"),
+            "a refused close does not move focus"
+        );
+    }
+
+    #[test]
+    fn close_tab_last_tab_close_returns_home_and_further_close_refuses() {
+        // The last close routes Home (`context/session-tabs.tsx:373`) and a
+        // close with no tab open refuses without leaving Home.
+        let mut nav = NavigationState::new();
+        nav.open(s("only"));
+        nav.switch(&s("only")).unwrap();
+        assert_eq!(
+            nav.history_entries(),
+            &[s("only")],
+            "re-selecting the current entry is a no-op"
+        );
+        let receipt = nav.close_active().unwrap();
+        assert_eq!(receipt.session, s("only"));
+        assert!(nav.is_home(), "the last close routes Home");
+        assert_eq!(nav.tab_len(), 0);
+        assert_eq!(nav.close_active(), Err(NavRefusal::NoTabOpen));
+        assert!(nav.is_home());
+        assert_eq!(nav.close_successor(), None);
+    }
+
+    #[test]
+    fn close_tab_restored_tabs_without_history_fall_back_to_neighbors() {
+        // History is never persisted (`context/session-tabs.tsx:72-102`), so
+        // a restored strip closes through the positional neighbor regime and
+        // still skips its own closed entries before routing Home.
+        let mut restored = NavigationState::new();
+        restored.restore_tabs(&PersistedTabs {
+            order: vec![s("x"), s("y"), s("z")],
+            titles: Vec::new(),
+        });
+        assert!(
+            restored.history_entries().is_empty(),
+            "history is never persisted"
+        );
+        assert_eq!(restored.active().unwrap().session, s("x"));
+        assert_eq!(
+            restored.close_successor(),
+            Some(s("y")),
+            "no history: right neighbor"
+        );
+        restored.close_active().unwrap();
+        assert_eq!(restored.active().unwrap().session, s("y"));
+        assert_eq!(
+            restored.close_successor(),
+            Some(s("z")),
+            "the closed left entry is skipped, neighbor fallback"
+        );
+        restored.close_active().unwrap();
+        assert_eq!(restored.active().unwrap().session, s("z"));
+        restored.close_active().unwrap();
+        assert!(restored.is_home(), "the last close routes Home");
+    }
+
+    #[test]
+    fn close_tab_orientation_change_preserves_identity_history_and_successor() {
+        // Orientation is presentation-only: identity, history and the close
+        // successor survive both directions of the switch.
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.open(s("b"));
+        nav.switch(&s("a")).unwrap();
+        let history_before = nav.history_entries().to_vec();
+        nav.set_orientation(TabOrientation::Vertical);
+        assert_eq!(nav.active().unwrap().session, s("a"));
+        assert_eq!(nav.history_entries(), history_before.as_slice());
+        assert_eq!(nav.close_successor(), Some(s("b")));
+        nav.toggle_orientation();
+        assert_eq!(nav.orientation(), TabOrientation::Horizontal);
+        assert_eq!(nav.active().unwrap().session, s("a"));
+        nav.close_active().unwrap();
+        assert_eq!(
+            nav.active().unwrap().session,
+            s("b"),
+            "the close still lands on the same successor"
+        );
+    }
+
+    #[test]
+    fn close_tab_bounded_history_drops_oldest_and_close_walks_survivors() {
+        // The bounded window drops the oldest entries from the front
+        // (`session-tabs-model.ts:147-176`), and the close walk still finds
+        // the newest surviving open entry.
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.open(s("b"));
+        // 118 alternating switches append 118 entries: 120 total appends are
+        // bounded to the newest 100.
+        for i in 0..118 {
+            let next = if i % 2 == 0 { "a" } else { "b" };
+            nav.switch(&s(next)).unwrap();
+        }
+        assert_eq!(
+            nav.history_entries().len(),
+            SESSION_TAB_HISTORY_LIMIT,
+            "the history stays bounded"
+        );
+        assert_eq!(
+            nav.history_entries().first(),
+            Some(&s("a")),
+            "the oldest entries drop from the front"
+        );
+        assert_eq!(nav.history_entries().last(), Some(&s("b")));
+        nav.close_active().unwrap();
+        assert_eq!(
+            nav.active().unwrap().session,
+            s("a"),
+            "the newest surviving entry still wins"
+        );
     }
 
     #[test]
