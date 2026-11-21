@@ -9,6 +9,72 @@
   This is **not** captured-golden acceptance: no matched styled-cell/cursor
   captures were produced. Verdicts below are source-backed, not runtime-proven.
 
+## 2026-11-21 (re-verified 2026-11-22) — PAR-02 bridge inventory re-issued under the exact pin (PAR-24)
+
+Documentation-only task `UI-PARITY-PAR24-BRIDGE-INVENTORY-20261121` (base
+`6aee80ce8f6535eaf2806676ae3e416c87e7bf29`). `docs/ui-parity/PAR-02-bridge-api-inventory.md`
+was rebuilt from a direct on-disk read of `crates/opentui-bridge/src/*` at the
+exact pin (`450e7b92…` / OpenTUI `8d6065a3…`, compiled in at
+`native_identity.rs:34-40`): all ten kit capability rows plus the remaining
+exported modules now carry exact file/symbol/line evidence, live-consumer
+status and named tests. The historical "duplicate Secure Tunnel ID" connector
+limitation that blocked the original audit is treated as already handled and
+out of scope; no re-fix. No product code, policy or semantic test was changed;
+this is source inspection, so PAR-23 statuses remain `unverified`.
+
+The exact-pin evidence for this inventory is **in-repo**: the pin is compiled
+into the bridge crate at `crates/opentui-bridge/src/native_identity.rs:34-40`
+(`OPENCODE_COMMIT=450e7b92…`, `OPENTUI_COMMIT=8d6065a3…`,
+`OPENTUI_VERSION=0.6.8`, `ABI_VERSION=1`). The base SHA
+`6aee80ce8f6535eaf2806676ae3e416c87e7bf29` is the base named by the dispatch and
+is attested in-workspace by the lease record `.delivery-owner.json:1` (`"base"`
+field, alongside this exact task id and `refs/heads/recovery/feature-23`). The
+lease and the dispatch agree; the checkout's `git rev-parse HEAD` was **not**
+re-read because the worktree Git metadata directory
+(`/Users/mymac/Projects/opencode-rk/.git/worktrees/author-feature-23`) is outside
+this workspace's readable scope, so the base is labelled lease-attested rather
+than self-verified. What is *not* available in this workspace is the two
+task-cited gap-evidence files — `evidence/session-20261121/**` is absent — so the
+*gap claim* could not be cross-checked against those specific files; the
+inventory rests on the on-disk kit files plus direct bridge source inspection
+(noted in the inventory's §5).
+
+**Consumer-evidence correction (this task).** Direct source inspection found
+the boot-identity probe's production consumer at
+`tui_entry.rs:10082` — `verify_native_identity(native_identity::probe_installed(
+native_identity::HOST_TRIPLE))` inside `native_loop` (defined `:10060`, invoked
+`:20298` and `:20341`), gated by `#[cfg(feature = "native")]` at `:10079`.
+The `#[test]` at `tui_entry.rs:9923-9924`
+(`verified_artifact_passes_boot_with_identity`) and the probe test at
+`native_identity.rs:487/493` are test-only callers and do not qualify as
+consumers. The inventory applies the same scope-aware rule to every row: a symbol
+referenced only inside `#[cfg(test)]` is recorded as a test/equivalence pin, never
+as `CONSUMED`. This corrected the consumer evidence on the rows a grep-only pass
+had overstated — the bridge `TerminalInput` parser (only a test-only differential
+caller; the live input path is the CLI's own `TerminalInputDecoder`) and the bridge
+diff parse citation (`FilePatch::parse` is consumed at `native_diff_view.rs:472`;
+the `:2965` probe is inside `mod ffi08_tests`) — while `FrameController`/`Scene`/
+`Editor` remain at their existing `consumer not established` status (no production
+call site).
+The two earlier FFI-01 `REAL_GAP` rows below (wave-44 table; wave-81/112 residual
+table) that read "cli never calls `probe_installed`" are reconciled in place
+against this exact pin. A commit identifier `019ecafa` associated with that wiring
+is referenced elsewhere in this file; it is **not verified** by this documentation
+task (no Git history inspection was performed here) and is not relied on as
+evidence. Separately, the ABI row's **handle-ownership** half
+(`BridgeHandle`/`GenHandle`/`Arena`/`SharedResource`) is **not** claimed as
+consumed: no production CLI use exists, which matches the unchanged FFI-03
+`REAL_GAP` "`BridgeHandle` unused by cli" at `PARITY_STATUS.md:849`.
+
+Cross-reference line numbers in this note and in the PAR-02 inventory were
+re-resolved against this file's **current** bytes, because the section above
+shifts every row below it: FFI-03 `REAL_GAP` is at `:849` (the "Additional
+wave-44 verdicts (fifth batch)" heading is `:843`), the FFI-10 `ALREADY_CORRECT`
+re-verification row is at `:605`, and the stale wave-44 FFI-10 `REAL_GAP` row is
+at `:813`. An earlier pass of this task cited `:829`/`:585`/`:798`, which pointed
+at that heading, a blank line and the FFI-09 row respectively; those were stale
+offsets and are corrected here (and in `PAR-02-bridge-api-inventory.md`).
+
 ## Wave-112 (2026-11-07) — the last two "open" bounds were already met
 
 Re-checking the remaining rows the same way (read the live consumer, not the
@@ -662,7 +728,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 | PAR-21 | `ALREADY_CORRECT` | `support/upstream_view_parity.rs:4` frozen `upstream_layout_parity.rs` untouched; sibling file |
 | PAR-22 | `LANDED` (`f240367b`) | `--evidence-bundle` writes a SHA-bound bundle (`rust_sha`, spec/golden/fixture hashes, class counts, exact reproduction commands, per-fixture outcomes, installed-capture hashes) so a parity claim binds to the exact Rust revision under test; 5 focused selftest checks |
 | PAR-23 | `ALREADY_CORRECT` | Every checklist item `status:unverified_rust`; kit `rust_checks_passed:null` |
-| PAR-24 | `ALREADY_CORRECT` | Bridge sources present/inspectable (`native_identity.rs:36-38`, scene/highlight/terminal_input) |
+| PAR-24 | `ALREADY_CORRECT` (inventory re-issued 2026-11-21; cross-refs re-verified 2026-11-22) | Bridge-source inspection completed by direct on-disk read of `crates/opentui-bridge/src/*` under the exact pin: `docs/ui-parity/PAR-02-bridge-api-inventory.md`. Pin compiled in at `native_identity.rs:34-40` (`OPENCODE_COMMIT=450e7b92…`, `OPENTUI_COMMIT=8d6065a3…`, `OPENTUI_VERSION=0.6.8`, `ABI_VERSION=1`); artifact custody `native/artifacts.json:52-141`. The duplicate Secure Tunnel ID routing problem (original audit connector limitation: `audit-implementation.md:9`, `baseline.lock.json:45`) is treated as already handled and out of scope — no re-fix. Source inventory only; no captured-golden acceptance (PAR-23 stays `unverified`). |
 | THEME-02 | `ALREADY_CORRECT` | `prompt_pane.rs:119/:1288`; `theme_runtime.rs:938`; live `tui_entry.rs:8567` |
 | THEME-03 | `ALREADY_CORRECT` | `theme_runtime.rs:800,916,762`; tests `:3179,:3227`; live `tui_entry.rs:8567` |
 | THEME-04 | `ALREADY_CORRECT` | `theme_runtime.rs:762`; tests `:3537`+f3_*; live `tui_entry.rs:8567` |
@@ -778,7 +844,7 @@ This pass **finalizes** the following IDs and supersedes their earlier entries.
 
 | Item | Wave-44 verdict | Evidence / seam |
 | --- | --- | --- |
-| FFI-01 | `REAL_GAP` | cli never calls `probe_installed` (identity probe runs only in its own test `native_identity.rs:493`) |
+| FFI-01 | `REAL_GAP` (wave-44; **superseded**) | Wave-44 recorded "cli never calls `probe_installed` (identity probe runs only in its own test `native_identity.rs:493`)". That was true at wave-44 but is **contradicted by the exact pin**: production `native_loop` calls `verify_native_identity(native_identity::probe_installed(native_identity::HOST_TRIPLE))` at `tui_entry.rs:10082` (gated `#[cfg(feature = "native")]` at `:10079`, function defined `:10060`, invoked `:20298`/`:20341`). (A `019ecafa` landing commit is cited in the LANDED table below but is not verified by this documentation task, which performed no Git history inspection.) `native_identity.rs:493` is the test-only caller inside `installed_probe_identifies_the_exact_commit` (`:487`). This task's `PAR-02` inventory records the boot identity probe as `CONSUMED` on the production call; the wave-44 `REAL_GAP` verdict is stale. |
 | FFI-02 | `REAL_GAP` | `Scene`/`GenHandle` unused by cli; scene consumes handle/text internally |
 | FFI-03 | `REAL_GAP` | `BridgeHandle` unused by cli |
 | FFI-04 | `REAL_GAP` | cli renders via `safe_renderer::Renderer`, not `frame::FrameController` |
@@ -1001,7 +1067,7 @@ remain `UNCLEAR` pending a fresh trace check.)
 | PAR-10 | The live SSE consumer appends raw bytes to a draft `String` (`tui_entry.rs:917,920`) with no per-delta `stream_id`/`seq`, so `StreamAccumulator` (`native_transcript.rs:73`) / `TokenDelta` have no ordered-delta producer. |
 | PAR-19 | **stale (2026-11-07)** — the bounded-work model is consumed live by the diff viewer (`visible_chunk_range` + `placeholder_height`, `native_view_dialogs.rs:3722-3781` in both the split and virtual added-file branches). `relative_scroll_top` remains unused because that scroll area carries no virtual-root offset, making the raw `execute_scroll` already root-relative — an identity, not a missing producer. The remaining inline transcript patch is tail-anchored and bounded by `MAX_DIFF_LINES` plus the real `[diff truncated]` row. |
 | MSG-001 / MSG-002 / MSG-003 | The live styled painter (`native_view_chat.rs:3248`) iterates `ChatMessage`/`ChatPart` flat; there is no `SessionRow`→`StyledChatRow` adapter, so `reduce_session_rows` (`native_message_rows.rs:960`), `DisclosureState` (`:165`) and `partition_pending` (`:710`) have zero live callers. Live pending is keyed by bare call id (`native_view_chat.rs:219`), not message-scoped `PartRef`. |
-| FFI-01 | No artifact-pin verification step: `native_identity::identify` (`opentui-bridge/src/native_identity.rs:272`) has zero CLI callers, the live TUI never loads the pinned dylib, and vendored artifacts embed no commit string (`:13`) — a build-tooling seam, not live wiring. |
+| FFI-01 | **stale (2026-11-21); contradicted by the exact pin.** Production `native_loop` calls `native_identity::probe_installed` at `tui_entry.rs:10082` (gated `#[cfg(feature = "native")]` at `:10079`). (The `019ecafa` landing commit cited in the LANDED table is not verified by this documentation task, which performed no Git history inspection.) `identify` (`native_identity.rs:272`) is the lower-level helper that `probe_installed` itself calls at `:362`, so its lack of *direct* CLI callers is not evidence of "no artifact-pin verification step". This task's `PAR-02` inventory records the boot identity probe as `CONSUMED` on that production call. |
 | FFI-03 / FFI-04 / FFI-06 / FFI-07 / FFI-08 / FFI-11 | The bridge `scene`/`frame`/`markdown`/`highlight`/`diff` models have no CLI consumer: the live tree is not generational (`native_view.rs:5652`), `tui_paint.rs` paints directly with no `FrameController` ticket seam (`opentui-bridge/src/frame.rs:210`), live rows are re-derived per frame (`native_view_chat.rs:1044`), no grammar/query transport exists for highlight (`highlight.rs:1`), the live diff painter lacks the bridge diff parse/selection model (`native_diff_view.rs:119`), and live focus is `DialogView`-local (`tui_entry.rs:10666`) not `Scene`-keyed (`scene.rs:402`). Adopting any replaces the live render substrate. |
 | DIFF-001 / DIFF-003 | Split-mode arithmetic is correct (`native_diff_view.rs:600`) but has no live consumer: `resolve_view_mode` is only reached from unconsumed `build_*` fns and the live render hardcodes unified (`native_view_chat.rs:2707`); the added-file virtualization model (`native_diff_view.rs:1014-1076`) has zero callers and `AddedPatchChunk` (`:926-930`) carries no highlight field. Needs config/width threading + a `SplitRow→ChatRowClass` adapter + a diff-viewer component. |
 | THEME-14 | No syntax-style install/destroy API on the checked OpenTUI bridge ABI: `opentui-bridge/src/text.rs:7` records `syntaxStyleRegister` "intentionally absent"; `highlight.rs:18-29` binds no text-buffer style call; `native_identity.rs:85` `REQUIRED_SYMBOLS` has no syntax-style symbol; `safe_renderer.rs:906` `draw_text_styled` has no style-table parameter; `tui_entry.rs:4469` `native_paint` installs none. `SyntaxStyleArena` (`native_theme_runtime.rs:2374`) has no live sink/destroy target, so wiring it to the `Copy` `HighlightTheme` tables would be a no-op facade, not consumption of upstream `createSyntaxStyleMemo` (`packages/tui/src/context/theme.tsx:402-421`). Needs an operator-authorized ABI extension. |
