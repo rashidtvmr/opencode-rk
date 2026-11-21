@@ -624,6 +624,9 @@ pub fn tool_display(
 /// - A subagent in the same detached state uses
 ///   `isBackgroundSubagent(metadata, status)` (`index.tsx:3339-3341`) and paints
 ///   the `Background` `StatusBadge` (`:3320-3325`).
+/// - TOOL-012: `Glob` takes its count from `metadata.count` and `Grep` from
+///   `metadata.matches` (`index.tsx:3277-3305`), rendered with the upstream
+///   singular/plural suffix.
 ///
 /// Facts absent from `metadata_json` never change the display, so an ordinary
 /// completed row keeps its existing rendering.
@@ -632,6 +635,21 @@ pub fn apply_tool_metadata(mut display: ToolDisplay, metadata_json: &str) -> Too
     let Ok(Value::Object(meta)) = serde_json::from_str::<Value>(metadata_json) else {
         return display;
     };
+    // TOOL-012: the completed `Glob`/`Grep` rows take their authoritative count
+    // from the tool result metadata — `metadata.count` for `Glob` and
+    // `metadata.matches` for `Grep` (`routes/session/index.tsx:3277-3305`) —
+    // with the upstream singular/plural suffix. A count already derived from
+    // the input arguments is replaced, never duplicated.
+    if matches!(display.kind, ToolKind::Glob | ToolKind::Grep) {
+        let (verb, key) = if display.kind == ToolKind::Glob {
+            ("Glob", "count")
+        } else {
+            ("Grep", "matches")
+        };
+        if let Some(count) = meta.get(key).and_then(Value::as_u64) {
+            display.label = apply_match_count(&display.label, verb, count);
+        }
+    }
     // `Read` prints one `↳ Loaded <path>` row per loaded instruction file, but
     // only once the part completed (`routes/session/index.tsx:3211-3243`:
     // `if state.status !== "completed" return []`), keeping only string entries.
@@ -776,9 +794,47 @@ fn glob_label(
         label.push_str(&format!(" in {path}"));
     }
     if let Some(count) = number_field(args, count_key) {
-        label.push_str(&format!(" ({count} {noun}{})", if count == 1 { "" } else { "es" }));
+        label.push_str(&match_count_suffix(count, noun));
     }
     label
+}
+
+/// Upstream count suffix for `Glob`/`Grep`: ` (1 match)` / ` (2 matches)`.
+/// The plural is the regular `-es` form of the supplied noun (upstream spells
+/// both specialized counts with `match`/`matches`).
+fn match_count_suffix(count: u64, noun: &str) -> String {
+    let plural = if noun.ends_with('h') { format!("{noun}es") } else { format!("{noun}s") };
+    format!(" ({count} {})", if count == 1 { noun } else { plural.as_str() })
+}
+
+/// Drop a trailing ` (N match)` / ` (N matches)` suffix so a metadata-provided
+/// count replaces — rather than appends to — a count already derived from the
+/// input arguments.
+fn strip_match_count(label: &str) -> String {
+    let Some(start) = label.rfind(" (") else {
+        return label.to_owned();
+    };
+    let Some(inner) = label[start + 2..].strip_suffix(')') else {
+        return label.to_owned();
+    };
+    let mut parts = inner.split(' ');
+    if let (Some(number), Some(noun), None) = (parts.next(), parts.next(), parts.next()) {
+        if number.parse::<u64>().is_ok() && matches!(noun, "match" | "matches") {
+            return label[..start].to_owned();
+        }
+    }
+    label.to_owned()
+}
+
+/// Apply an authoritative `metadata.count` (`Glob`) / `metadata.matches`
+/// (`Grep`) to the row label (`routes/session/index.tsx:3277-3305`). Only a
+/// label that already carries the specialized `Glob "…"` / `Grep "…"` shape is
+/// updated, so a pending placeholder is never given a fabricated count.
+fn apply_match_count(label: &str, verb: &str, count: u64) -> String {
+    if !label.starts_with(verb) || !label[verb.len()..].starts_with(" \"") {
+        return label.to_owned();
+    }
+    format!("{}{}", strip_match_count(label), match_count_suffix(count, "match"))
 }
 
 fn read_label(args: &Option<Map<String, Value>>, state: ToolStatus) -> String {
@@ -904,13 +960,46 @@ fn todo_display(
     if todos.is_empty() {
         return ("⚙", "Cleared todos".to_owned());
     }
-    for (marker, content) in &todos {
-        body.push((format!("{marker} {content}"), ChatRowClass::ToolResult));
+    // TOOL-012: a completed non-empty list is the upstream `# Todos` block. The
+    // `#` is the block marker in this row model's fixed icon column and the
+    // label is `Todos`, so the header reads `# Todos` exactly once
+    // (`routes/session/index.tsx:3604-3640`).
+    for (marker, content, status) in &todos {
+        body.push((format!("{marker} {content}"), todo_row_class(*status)));
     }
-    ("#", "# Todos".to_owned())
+    ("#", "Todos".to_owned())
 }
 
-fn parse_todos(args: &Option<Map<String, Value>>) -> Vec<(&'static str, String)> {
+/// Parsed todo status (`util/todo.ts:19-29`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TodoRowStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Cancelled,
+}
+
+/// Row paint for one `TodoItem` (`component/todo-item.tsx:5-24`). The
+/// transcript's paint layer owns colors, so this reuses the classes whose
+/// mapped paint is exactly the upstream todo foreground/attribute:
+///
+/// - `in_progress` uses `theme.text.feedback.warning.base`, which is the
+///   `RetryNotice` warning foreground (selectable, no extra attribute);
+/// - `cancelled` uses muted text plus `TextAttributes.STRIKETHROUGH`, which is
+///   the `ToolDenied` muted + strikethrough paint;
+/// - completed and pending use plain muted text (`ToolResult`).
+///
+/// No retry/denial state is claimed: these rows only borrow the paint roles the
+/// fixed paint layer already exposes for this module's class set.
+fn todo_row_class(status: TodoRowStatus) -> ChatRowClass {
+    match status {
+        TodoRowStatus::InProgress => ChatRowClass::RetryNotice,
+        TodoRowStatus::Cancelled => ChatRowClass::ToolDenied,
+        TodoRowStatus::Completed | TodoRowStatus::Pending => ChatRowClass::ToolResult,
+    }
+}
+
+fn parse_todos(args: &Option<Map<String, Value>>) -> Vec<(&'static str, String, TodoRowStatus)> {
     array_field(args, "todos")
         .map(|items| {
             items
@@ -918,13 +1007,13 @@ fn parse_todos(args: &Option<Map<String, Value>>) -> Vec<(&'static str, String)>
                 .filter_map(|item| {
                     let item = item.as_object()?;
                     let content = item.get("content")?.as_str().filter(|text| !text.is_empty())?;
-                    let marker = match item.get("status").and_then(Value::as_str) {
-                        Some("completed") => "[✓]",
-                        Some("in_progress") => "[•]",
-                        Some("cancelled") => "[-]",
-                        _ => "[ ]",
+                    let (marker, status) = match item.get("status").and_then(Value::as_str) {
+                        Some("completed") => ("[✓]", TodoRowStatus::Completed),
+                        Some("in_progress") => ("[•]", TodoRowStatus::InProgress),
+                        Some("cancelled") => ("[-]", TodoRowStatus::Cancelled),
+                        _ => ("[ ]", TodoRowStatus::Pending),
                     };
-                    Some((marker, clip(content, MAX_FIELD_BYTES)))
+                    Some((marker, clip(content, MAX_FIELD_BYTES), status))
                 })
                 .collect()
         })
@@ -947,16 +1036,40 @@ fn question_display(
         })
         .unwrap_or_default();
     let answers = question_answers(output);
-    for (index, question) in questions.iter().enumerate() {
-        body.push((question.clone(), ChatRowClass::ToolResult));
-        let answer = answers
-            .as_ref()
-            .and_then(|answers| answers.get(index))
-            .filter(|entries| !entries.is_empty())
-            .map_or_else(|| "(no answer)".to_owned(), |entries| entries.join(", "));
-        body.push((format!("  {answer}"), ChatRowClass::ToolResult));
-    }
     let count = questions.len();
+    // TOOL-012: a completed answered question result is the upstream
+    // `# Questions` block (`routes/session/index.tsx:3650-3692`): the block
+    // title, then for each question the muted question text and the
+    // base-colored answer with a one-row gap between entries. A missing answer
+    // keeps the explicit `(no answer)` label. The inline label still reports
+    // the question count.
+    if state == ToolStatus::Completed && !questions.is_empty() {
+        body.push(("# Questions".to_owned(), ChatRowClass::ToolResult));
+        for (index, question) in questions.iter().enumerate() {
+            if index > 0 {
+                // `gap={1}` between question/answer groups.
+                body.push((String::new(), ChatRowClass::Text));
+            }
+            // Question text is muted; the answer is base-colored.
+            body.push((question.clone(), ChatRowClass::ToolResult));
+            let answer = answers
+                .as_ref()
+                .and_then(|answers| answers.get(index))
+                .filter(|entries| !entries.is_empty())
+                .map_or_else(|| "(no answer)".to_owned(), |entries| entries.join(", "));
+            body.push((format!("  {answer}"), ChatRowClass::Text));
+        }
+    } else {
+        for (index, question) in questions.iter().enumerate() {
+            body.push((question.clone(), ChatRowClass::ToolResult));
+            let answer = answers
+                .as_ref()
+                .and_then(|answers| answers.get(index))
+                .filter(|entries| !entries.is_empty())
+                .map_or_else(|| "(no answer)".to_owned(), |entries| entries.join(", "));
+            body.push((format!("  {answer}"), ChatRowClass::ToolResult));
+        }
+    }
     let label = if count == 0 && state.is_running() {
         "Asking questions…".to_owned()
     } else {
@@ -965,8 +1078,9 @@ fn question_display(
     ("→", label)
 }
 
-/// Answers from the completed question tool payload (`metadata.answers`,
-/// `index.tsx:3662-3675`); absent/foreign payloads yield no answer block.
+/// Answers from the completed question tool payload (upstream
+/// `metadata.answers`, `index.tsx:3662-3675`; the wire result carries the same
+/// `{"answers":[[...]]}` object); absent/foreign payloads yield no answer block.
 fn question_answers(output: &str) -> Option<Vec<Vec<String>>> {
     let value: Value = serde_json::from_str(output).ok()?;
     let answers = value.get("answers")?.as_array()?;
@@ -2538,5 +2652,200 @@ mod tests {
             capped.body.iter().filter(|(row, _)| row.contains("↳ Loaded")).count(),
             MAX_LOADED_ROWS
         );
+    }
+
+    /// TOOL-012: `metadata.count` (Glob) and `metadata.matches` (Grep) are the
+    /// authoritative match counts (`routes/session/index.tsx:3277-3305`) with
+    /// the singular/plural suffix; a count derived from the input arguments is
+    /// replaced, never duplicated.
+    #[test]
+    fn metadata_glob_grep_counts_use_singular_plural_suffix() {
+        let glob = tool_display(80, "glob", "completed", r#"{"pattern":"*.rs"}"#, "", false);
+        assert_eq!(glob.label, "Glob \"*.rs\"");
+        let one = apply_tool_metadata(glob, r#"{"count":1}"#);
+        assert_eq!(one.label, "Glob \"*.rs\" (1 match)");
+        let many = apply_tool_metadata(one, r#"{"count":2}"#);
+        assert_eq!(many.label, "Glob \"*.rs\" (2 matches)");
+        // Re-applying the same metadata (a live refresh) stays stable.
+        let again = apply_tool_metadata(many.clone(), r#"{"count":2}"#);
+        assert_eq!(again.label, "Glob \"*.rs\" (2 matches)");
+
+        // An argument-derived count is replaced by the metadata count.
+        let argumented = tool_display(
+            80,
+            "glob",
+            "completed",
+            r#"{"pattern":"*.rs","count":9}"#,
+            "",
+            false,
+        );
+        assert_eq!(argumented.label, "Glob \"*.rs\" (9 matches)");
+        let overridden = apply_tool_metadata(argumented, r#"{"count":2}"#);
+        assert_eq!(overridden.label, "Glob \"*.rs\" (2 matches)");
+
+        let grep = tool_display(
+            80,
+            "grep",
+            "completed",
+            r#"{"pattern":"fn main","matches":9}"#,
+            "",
+            false,
+        );
+        assert_eq!(grep.label, "Grep \"fn main\" (9 matches)");
+        let singular = apply_tool_metadata(grep, r#"{"matches":1}"#);
+        assert_eq!(singular.label, "Grep \"fn main\" (1 match)");
+
+        // The other tool's metadata key is ignored, and a pending placeholder
+        // never gains a fabricated count.
+        let foreign = apply_tool_metadata(
+            tool_display(80, "glob", "completed", r#"{"pattern":"*.rs"}"#, "", false),
+            r#"{"matches":4}"#,
+        );
+        assert_eq!(foreign.label, "Glob \"*.rs\"");
+        let running = apply_tool_metadata(
+            tool_display(80, "glob", "running", "{}", "", false),
+            r#"{"count":3}"#,
+        );
+        assert_eq!(running.label, "Finding files…");
+    }
+
+    /// TOOL-012: the completed todo list is the `# Todos` block, rendered
+    /// exactly once, with the upstream per-status foreground/strikethrough
+    /// (`component/todo-item.tsx:5-24`; `routes/session/index.tsx:3604-3640`).
+    #[test]
+    fn metadata_todo_block_renders_header_once_with_status_paint() {
+        let args = json!({"todos":[
+            {"content":"done","status":"completed"},
+            {"content":"doing","status":"in_progress"},
+            {"content":"dropped","status":"cancelled"},
+            {"content":"later","status":"pending"}
+        ]});
+        let rows = tool_state_rows(80, "todowrite", "completed", &args.to_string(), "", false);
+        let headers = rows.iter().filter(|(row, _)| row.contains("# Todos")).count();
+        assert_eq!(headers, 1, "# Todos appears exactly once: {rows:?}");
+        assert!(rows[0].0.contains("# Todos"), "header first: {rows:?}");
+        assert!(!rows[0].0.contains("# #"), "block marker not duplicated: {rows:?}");
+
+        let class_of = |needle: &str| {
+            rows.iter()
+                .find(|(row, _)| row.contains(needle))
+                .unwrap_or_else(|| panic!("missing row {needle}: {rows:?}"))
+                .1
+        };
+        // Muted, no attribute.
+        assert_eq!(class_of("[✓] done"), ChatRowClass::ToolResult);
+        // Warning foreground (the paint layer maps RetryNotice to warning).
+        assert_eq!(class_of("[•] doing"), ChatRowClass::RetryNotice);
+        // Muted plus strikethrough (the paint layer maps ToolDenied).
+        assert_eq!(class_of("[-] dropped"), ChatRowClass::ToolDenied);
+        assert_eq!(class_of("[ ] later"), ChatRowClass::ToolResult);
+    }
+
+    /// TOOL-012: the answered question result is the `# Questions` block with
+    /// the reading layout — muted question, base-colored answer, one-row gap
+    /// between entries and an explicit no-answer label
+    /// (`routes/session/index.tsx:3650-3692`).
+    #[test]
+    fn metadata_question_block_renders_answered_reading_layout() {
+        let args = json!({"questions":[{"question":"colour?"},{"question":"size?"}]});
+        let rows = tool_state_rows(
+            80,
+            "question",
+            "completed",
+            &args.to_string(),
+            r#"{"answers":[["blue"]]}"#,
+            false,
+        );
+        assert_eq!(
+            rows.iter().filter(|(row, _)| row.contains("# Questions")).count(),
+            1,
+            "# Questions appears exactly once: {rows:?}"
+        );
+        assert!(rows[0].0.contains("Asked 2 questions"), "{rows:?}");
+        let index_of = |needle: &str| {
+            rows.iter()
+                .position(|(row, _)| row.contains(needle))
+                .unwrap_or_else(|| panic!("missing row {needle}: {rows:?}"))
+        };
+        let title = index_of("# Questions");
+        let question = index_of("colour?");
+        let answer = index_of("blue");
+        let second = index_of("size?");
+        assert!(title < question, "block title precedes the entries: {rows:?}");
+        // Question rows are muted, answers are base-colored.
+        assert_eq!(rows[question].1, ChatRowClass::ToolResult);
+        assert_eq!(rows[answer].1, ChatRowClass::Text);
+        assert_eq!(rows[second].1, ChatRowClass::ToolResult);
+        // One-row gap between the two question/answer groups.
+        assert!(
+            rows[question + 1..second]
+                .iter()
+                .any(|(row, _)| row.trim().is_empty()),
+            "gap between groups: {rows:?}"
+        );
+        let no_answer = rows
+            .iter()
+            .find(|(row, _)| row.contains("(no answer)"))
+            .unwrap_or_else(|| panic!("missing no-answer row: {rows:?}"));
+        assert_eq!(no_answer.1, ChatRowClass::Text);
+
+        // Pending still reports the question count and has no answer block.
+        let running = tool_state_rows(80, "question", "running", &args.to_string(), "", false);
+        assert!(running[0].0.contains("Asked 2 questions"), "{running:?}");
+        assert!(!running.iter().any(|(row, _)| row.contains("# Questions")));
+    }
+
+    /// TOOL-012 end-to-end surface: read range/loaded rows and the web tool
+    /// rows stay driven by their real caller facts while metadata overlays the
+    /// match counts.
+    #[test]
+    fn execute_metadata_read_range_and_web_rows_render_per_source() {
+        let read = tool_state_rows(
+            80,
+            "read",
+            "completed",
+            r#"{"path":"src/a.rs","offset":10,"limit":5}"#,
+            "",
+            false,
+        );
+        assert!(read[0].0.contains("Read src/a.rs:10-14"), "{read:?}");
+        let loaded = apply_tool_metadata(
+            tool_display(80, "read", "completed", r#"{"path":"src/a.rs"}"#, "", false),
+            r#"{"loaded":["AGENTS.md"]}"#,
+        );
+        assert!(
+            rows_for_display(80, &loaded)
+                .iter()
+                .any(|(row, _)| row.contains("↳ Loaded AGENTS.md")),
+            "loaded instruction row renders: {:?}",
+            loaded.body
+        );
+
+        let fetch = tool_state_rows(
+            80,
+            "webfetch",
+            "completed",
+            r#"{"url":"https://example.com"}"#,
+            "",
+            false,
+        );
+        assert!(fetch[0].0.contains("WebFetch https://example.com"), "{fetch:?}");
+
+        let search = apply_tool_metadata(
+            tool_display(80, "websearch", "completed", r#"{"query":"rust"}"#, "", false),
+            r#"{"provider":"opencode"}"#,
+        );
+        assert_eq!(search.label, "Web Search via OpenCode \"rust\"");
+
+        let glob = apply_tool_metadata(
+            tool_display(80, "glob", "completed", r#"{"pattern":"*.rs"}"#, "", false),
+            r#"{"count":2}"#,
+        );
+        assert_eq!(glob.label, "Glob \"*.rs\" (2 matches)");
+        let grep = apply_tool_metadata(
+            tool_display(80, "grep", "completed", r#"{"pattern":"fn main"}"#, "", false),
+            r#"{"matches":1}"#,
+        );
+        assert_eq!(grep.label, "Grep \"fn main\" (1 match)");
     }
 }
