@@ -20,7 +20,9 @@ use crate::native_modal_layer::DialogRect;
 use crate::native_view_chat::ChatView;
 use crate::native_tabs::TabReservation;
 use crate::native_view_dialogs::DialogView;
-use crate::native_view_layout::{compose_frame, fit, Layout, RightPane};
+use crate::native_view_layout::{
+    compose_frame, fit, session_horizontal_inset, Layout, RightPane,
+};
 use crate::native_view_pages::{Page, PageRow, PageState};
 use crate::native_view_sessions::{SessionRow, SessionView};
 use crate::native_view_status::StatusView;
@@ -1166,7 +1168,9 @@ pub struct ViewPresentation {
     pub main_offset: u16,
     /// Main-column outer width in cells.
     pub main_width: u16,
-    /// Upstream view horizontal padding applied inside the main column.
+    /// Upstream view horizontal padding applied inside the main column:
+    /// `terminal width < 44 ? 1 : 2` (`routes/session/index.tsx:1513-1515`).
+    /// Keys on the full terminal width, never the remaining main-column width.
     pub main_padding: u16,
     /// Sidebar start cell, or `None` when the sidebar is not shown.
     pub sidebar_offset: Option<u16>,
@@ -2287,8 +2291,11 @@ impl NativeView {
     /// rows in the shell tab are deliberately not selectable.
     pub fn dock_hover(&mut self, x: u16, y: u16, draft: &str) -> bool {
         let Some((_, composer_y, _, _)) = self.composer_region(draft) else { return false; };
-        let Some(block) = self.dock_block_for(self.presentation().main_width.saturating_sub(4)) else { return false; };
-        let padding = (self.presentation().main_width / 2).min(2);
+        let inset = self.session_route_inset();
+        let Some(block) = self.dock_block_for(self.presentation().main_width.saturating_sub(2 * inset)) else { return false; };
+        // The same container padding the painted dock rows receive, so the
+        // pointer rectangle always matches the painted cells.
+        let padding = inset.min(self.presentation().main_width / 2);
         let body_y = composer_y.saturating_sub(block.height()).saturating_add(3);
         if y < body_y || y >= body_y.saturating_add(u16::try_from(block.body_rows).unwrap_or(u16::MAX))
             || x < self.tab_reservation.x_offset().saturating_add(padding) { return false; }
@@ -2720,9 +2727,10 @@ impl NativeView {
             return (base, None);
         };
         let width = usize::from(row_width);
-        // The padding `padded` will add in front of this row, and the interior
-        // width it fits the text into.
-        let padding = (width / 2).min(2);
+        // The padding the route inset adds in front of this row (LAY-02,
+        // degraded on tiny widths exactly like `padded_inset`), and the
+        // interior width it fits the text into.
+        let padding = usize::from(self.session_route_inset().min(row_width / 2));
         let interior = width.saturating_sub(2 * padding);
         let start = prompt_metadata_cells(&base).saturating_add(3);
         let cells = prompt_metadata_cells(&label);
@@ -2936,7 +2944,9 @@ impl NativeView {
                 rows: self.layout.rows,
                 main_offset: self.tab_reservation.x_offset(),
                 main_width: layout.session_width,
-                main_padding: 2,
+                // LAY-02: the route inset keys on the full terminal width,
+                // never on the pane width left beside the diff panel.
+                main_padding: session_horizontal_inset(self.layout.cols),
                 sidebar_offset: Some(layout.pane.x),
                 sidebar_width: layout.pane.width,
             };
@@ -2969,7 +2979,9 @@ impl NativeView {
             rows: self.layout.rows,
             main_offset: pane.main_offset,
             main_width: pane.main_width,
-            main_padding: 2,
+            // LAY-02 (`index.tsx:1513-1515`): the route inset flips 1 -> 2 at
+            // FULL terminal width 44, whatever the tab rail/sidebar left over.
+            main_padding: session_horizontal_inset(self.layout.cols),
             sidebar_offset,
             sidebar_width,
         }
@@ -2994,6 +3006,31 @@ impl NativeView {
     #[must_use]
     pub fn narrow_sidebar_overlay_open(&self) -> bool {
         self.sidebar_visible() && !self.sidebar_wide()
+    }
+
+    /// LAY-02 session-route horizontal inset (`routes/session/index.tsx:1513-1515`):
+    /// `dimensions().width < 44 ? 1 : 2`, keyed on the FULL terminal width so
+    /// the tab rail and the right sidebar shrinking the session column never
+    /// move the predicate. Every session-route padding consumer derives from
+    /// this one value, so the painted frame, the geometry projection and the
+    /// pointer rectangles cannot disagree.
+    fn session_route_inset(&self) -> u16 {
+        session_horizontal_inset(self.layout.cols)
+    }
+
+    /// Horizontal cell budget of the session content column: the main-column
+    /// width minus the route inset on both sides (`routes/session/index.tsx:
+    /// 1513-1516`) and the transcript's own scrollbar reservation
+    /// (`:1527-1537`) while the bar is shown. `chat_message_rows`, the rendered
+    /// anchor capture/restore and `render_content` all measure text through
+    /// this one value so pagination wraps exactly like the painted frame.
+    fn session_content_width(&self) -> u16 {
+        self.presentation()
+            .main_width
+            .saturating_sub(2 * self.session_route_inset())
+            .saturating_sub(crate::native_view_layout::transcript_scrollbar_reservation(
+                self.scrollbar_enabled,
+            ))
     }
 
     fn session_body_height(&self) -> usize {
@@ -3044,14 +3081,18 @@ impl NativeView {
         // Upstream child sessions replace the main composer with return-parent UI.
         if self.parent_session { return None; }
         if self.session_route {
+            // LAY-02: the route inset (1 below the 44-column terminal
+            // boundary, else 2) owns the composer box placement, so the
+            // region, the painted frame and the cursor projection agree.
+            let inset = self.session_route_inset();
             // The dock takes its rows out of the shared body budget, exactly
             // like the composer slot sharing the scrollbox (`index.tsx:1591-1611`).
-            let dock_height = self.painted_dock_height(width.saturating_sub(4));
+            let dock_height = self.painted_dock_height(width.saturating_sub(2 * inset));
             let body_height = self.session_body_height().saturating_sub(dock_height);
             // Shared with the actual ChatComposer renderer; Home's legacy
             // rail remains a separate layout path.
             let layout = crate::native_view_chat::session_composer_layout(
-                usize::from(width - 4),
+                usize::from(width.saturating_sub(2 * inset)),
                 body_height,
                 draft,
                 &self.box_appearance,
@@ -3060,7 +3101,7 @@ impl NativeView {
             );
             let composer_height = layout.height;
             Some((
-                self.tab_reservation.x_offset().saturating_add(2),
+                self.tab_reservation.x_offset().saturating_add(inset),
                 // The shared body budget includes the header; the composer
                 // starts immediately after its remaining transcript rows, and
                 // the dock rows spliced above it push it back down by their
@@ -3069,7 +3110,7 @@ impl NativeView {
                     .saturating_sub(composer_height)
                     .saturating_add(dock_height)
                     .saturating_add(usize::from(self.tab_reservation.y_offset())) as u16,
-                width - 4,
+                width.saturating_sub(2 * inset),
                 composer_height as u16,
             ))
         } else {
@@ -3110,7 +3151,11 @@ impl NativeView {
     /// The same cell rectangle drives both drawing and pointer admission.
     pub fn session_prompt_rail(&self, draft: &str) -> bool {
         self.session_route && crate::native_view_chat::session_composer_layout(
-            usize::from(self.presentation().main_width.saturating_sub(4)),
+            usize::from(
+                self.presentation()
+                    .main_width
+                    .saturating_sub(2 * self.session_route_inset()),
+            ),
             self.session_body_height(), draft, &self.box_appearance, self.layout.cols, self.layout.rows,
         ).rail
     }
@@ -3906,12 +3951,12 @@ impl NativeView {
     pub fn preview_strip_hit(&self, draft: &str) -> Option<(u16, u16, u16, u16)> {
         let count = self.preview_strip_painted?;
         let (left, top, width, _) = self.composer_region(draft)?;
-        Some((
-            left.saturating_add((width / 2).min(2)),
-            top.saturating_sub(count),
-            width,
-            count,
-        ))
+        // The strip rows are composed by the same `padded_inset` container
+        // pass as the composer, so the painted strip's first cell is exactly
+        // the composer region's left edge. Adding a second fixed two-cell
+        // gutter here would desync the click rectangle below the 44-column
+        // boundary (and already missed the painted row at wide widths).
+        Some((left, top.saturating_sub(count), width, count))
     }
 
     /// CP-38 strip rows: one framed cell per visible preview (failed decodes
@@ -4538,7 +4583,7 @@ impl NativeView {
     /// Exact styled transcript height for a bounded message batch. Used by
     /// history pagination to preserve a rendered-row anchor across eviction.
     pub fn chat_message_rows(&self, messages: &[crate::native_view_chat::ChatMessage]) -> usize {
-        let width = self.presentation().main_width.saturating_sub(4) as usize;
+        let width = usize::from(self.session_content_width());
         self.chat
             .styled_message_rows(width, messages, &self.box_appearance)
     }
@@ -4547,7 +4592,7 @@ impl NativeView {
         &self,
         entries: &[(String, crate::native_view_chat::ChatMessage)],
     ) -> Option<crate::native_view_chat::RenderedChatAnchor> {
-        let width = self.presentation().main_width.saturating_sub(4) as usize;
+        let width = usize::from(self.session_content_width());
         let ids = entries.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
         let messages = entries
             .iter()
@@ -4562,7 +4607,7 @@ impl NativeView {
         entries: &[(String, crate::native_view_chat::ChatMessage)],
         anchor: &crate::native_view_chat::RenderedChatAnchor,
     ) -> bool {
-        let width = self.presentation().main_width.saturating_sub(4) as usize;
+        let width = usize::from(self.session_content_width());
         let ids = entries.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
         let messages = entries
             .iter()
@@ -4614,10 +4659,14 @@ impl NativeView {
         }
         let presentation = self.presentation();
         let width = presentation.main_width;
+        // LAY-02: the session route's own horizontal inset (1 below the
+        // 44-column terminal boundary, else 2) applied by every consumer of
+        // the session body below.
+        let route_inset = self.session_route_inset();
         // The shown transcript scrollbar reserves the upstream two cells
-        // (viewport `paddingRight` 1 + track 1) on top of the view's own 2+2
-        // padding, so text never runs under the track.
-        let inner_width = width.saturating_sub(if self.scrollbar_enabled { 6 } else { 4 });
+        // (viewport `paddingRight` 1 + track 1) on top of the route's own
+        // 1+1/2+2 inset, so text never runs under the track.
+        let inner_width = self.session_content_width();
         let is_chat = matches!(self.pages.page(), Page::Chat | Page::Theme);
         let mut center = if !is_chat {
             let (left, top, panel_width, panel_height) = self.page_panel().unwrap();
@@ -4741,12 +4790,13 @@ impl NativeView {
             let dock = if has_permission {
                 None
             } else {
-                self.dock_block_for(width.saturating_sub(4))
+                self.dock_block_for(width.saturating_sub(2 * route_inset))
             };
             let queue_rows = if has_permission || !self.dock.queue_visible() {
                 Vec::new()
             } else {
-                self.queued_prompts.render_rows(width.saturating_sub(4) as usize)
+                self.queued_prompts
+                    .render_rows(width.saturating_sub(2 * route_inset) as usize)
             };
             let queue_height = queue_rows.len();
             // MSG-009: the staged revert card is part of the transcript foot
@@ -4757,7 +4807,7 @@ impl NativeView {
             } else {
                 self.session_revert
                     .as_ref()
-                    .map(|card| card.render_rows(width.saturating_sub(4) as usize))
+                    .map(|card| card.render_rows(width.saturating_sub(2 * route_inset) as usize))
                     .unwrap_or_default()
             };
             let revert_height = revert_rows.len();
@@ -4800,7 +4850,9 @@ impl NativeView {
                     .extend(rows.iter().map(|(_, class, _)| *class));
                 self.chat_text_bounds
                     .extend(rows.iter().map(|(_, _, bounds)| {
-                        bounds.map(|(left, width)| (left.saturating_add(2), width))
+                        // The bounds address unpadded row cells; shift by the
+                        // route inset the container padding adds in front.
+                        bounds.map(|(left, width)| (left.saturating_add(route_inset), width))
                     }));
                 rows.into_iter()
                     .map(|(text, _, _)| text)
@@ -4820,7 +4872,8 @@ impl NativeView {
                 ) };
                 self.chat_row_classes.extend(rows.iter().map(|(_, class, _)| *class));
                 self.chat_text_bounds.extend(rows.iter().map(|(_, _, bounds)|
-                    bounds.map(|(left, width)| (left.saturating_add(2), width))));
+                    // Same route-inset shift as the typed path above.
+                    bounds.map(|(left, width)| (left.saturating_add(route_inset), width))));
                 rows.into_iter().map(|(text, _, _)| text).collect()
             };
             // The upstream scrollbox starts with a spacer, rather than a
@@ -4855,7 +4908,7 @@ impl NativeView {
                 let mut revert_texts = Vec::with_capacity(revert_rows.len());
                 let mut revert_classes = Vec::with_capacity(revert_rows.len());
                 for (text, class) in revert_rows {
-                    revert_texts.push(padded(&text, width));
+                    revert_texts.push(padded_inset(&text, width, route_inset));
                     revert_classes.push(class);
                 }
                 self.chat_row_classes
@@ -4877,7 +4930,9 @@ impl NativeView {
             // bottom-anchored.
             if let Some(block) = dock.as_ref() {
                 let insert = body.len().saturating_sub(prompt.height);
-                let dock_padding = (width / 2).min(2);
+                // The same container padding the final `padded_inset` pass
+                // applies to these spliced rows, so span/hit columns match.
+                let dock_padding = route_inset.min(width / 2);
                 let x_shift = u32::from(self.tab_reservation.x_offset())
                     .saturating_add(u32::from(dock_padding));
                 let y_shift = u32::from(self.tab_reservation.y_offset());
@@ -4951,7 +5006,7 @@ impl NativeView {
                 let mut queue_texts = Vec::with_capacity(queue_rows.len());
                 let mut queue_classes = Vec::with_capacity(queue_rows.len());
                 for (text, class) in queue_rows {
-                    queue_texts.push(padded(&text, width));
+                    queue_texts.push(padded_inset(&text, width, route_inset));
                     queue_classes.push(class);
                 }
                 self.chat_row_classes.splice(insert..insert, queue_classes);
@@ -4987,7 +5042,7 @@ impl NativeView {
                     .splice(spans_at..spans_at, std::iter::repeat_n(Vec::new(), strip.len()));
                 body.splice(
                     insert..insert,
-                    strip.iter().map(|row| padded(row, width)).collect::<Vec<_>>(),
+                    strip.iter().map(|row| padded_inset(row, width, route_inset)).collect::<Vec<_>>(),
                 );
                 self.preview_strip_painted =
                     u16::try_from(strip.len()).ok();
@@ -5010,15 +5065,16 @@ impl NativeView {
                         width
                     };
                     // Markdown spans address painted cells, so they move with
-                    // the container padding `padded` adds in front of the text.
+                    // the container padding the route inset adds in front of
+                    // the text (degraded on tiny widths exactly like the pad).
                     if let Some(spans) = self.chat_markdown_spans.get_mut(index) {
-                        let padding = (row_width / 2).min(2);
+                        let padding = route_inset.min(row_width / 2);
                         for span in spans.iter_mut() {
                             span.start = span.start.saturating_add(padding);
                             span.end = span.end.saturating_add(padding);
                         }
                     }
-                    padded(&line, row_width)
+                    padded_inset(&line, row_width, route_inset)
                 })
                 .collect();
             self.chat_row_classes.resize(body.len(), crate::native_view_chat::ChatRowClass::Blank);
@@ -5038,8 +5094,9 @@ impl NativeView {
                         .saturating_sub(self.chat.scroll_offset());
                     self.transcript_scrollbar = Some(TranscriptScrollbar {
                         // Track on the transcript's right edge: content ends at
-                        // `width - 4` and reserves one padding cell before it.
-                        x: width.saturating_sub(3),
+                        // `width - 2 * route_inset` and reserves one padding
+                        // cell before it.
+                        x: width.saturating_sub(route_inset.saturating_add(1)),
                         y: u16::try_from(self.chat.transcript_first_row()).unwrap_or(u16::MAX),
                         height: u16::try_from(viewport).unwrap_or(u16::MAX),
                         total_rows: total,
@@ -5049,7 +5106,11 @@ impl NativeView {
                 }
             }
             if let Some(rows) = permission_rows {
-                body.extend(rows.iter().take(15).map(|row| padded(row, width)));
+                body.extend(
+                    rows.iter()
+                        .take(15)
+                        .map(|row| padded_inset(row, width, route_inset)),
+                );
                 self.chat_row_classes.extend(std::iter::repeat_n(
                     crate::native_view_chat::ChatRowClass::Metadata, rows.len().min(15)));
                 self.chat_text_bounds.extend(std::iter::repeat_n(None, rows.len().min(15)));
@@ -5074,7 +5135,7 @@ impl NativeView {
                     let rows: Vec<crate::native_shell::FooterRow> =
                         diag.into_iter().chain(hint).collect();
                     let extra: Vec<String> =
-                        rows.iter().map(|row| padded(&row.text, width)).collect();
+                        rows.iter().map(|row| padded_inset(&row.text, width, route_inset)).collect();
                     let classes: Vec<crate::native_view_chat::ChatRowClass> =
                         rows.iter().map(footer_row_class).collect();
                     let count = extra.len();
@@ -5092,11 +5153,19 @@ impl NativeView {
                 }
                 let (footer, live) = self.composer_footer_row(width, inner_width, prompt.rail, busy);
                 let row = body.len();
-                body.push(padded(&footer, width));
+                // The footer row is `padded_inset`, so its text starts at the
+                // route inset (degraded on tiny rows). Publish that same left
+                // edge with the hit rect instead of a fixed 0/lip offset.
+                let footer_padding = route_inset.min(width / 2);
+                body.push(padded_inset(&footer, width, route_inset));
                 if prompt.rail {
                     let cells = prompt_metadata_cells(&footer).min(usize::from(u16::MAX)) as u16;
                     if cells > 0 {
-                        self.prompt_footer_hit = Some((0, u16::try_from(row).unwrap_or(u16::MAX), cells));
+                        self.prompt_footer_hit = Some((
+                            footer_padding,
+                            u16::try_from(row).unwrap_or(u16::MAX),
+                            cells,
+                        ));
                     }
                 }
                 if let Some((x, cells)) = live {
@@ -7963,11 +8032,12 @@ mod composer_metadata_regression_tests {
         let draft = "123456789012345678901234567890";
         let frame = view.render_typed(draft, &[], false, &[]);
         let (left, top, _, height) = view.composer_region(draft).unwrap();
-        assert_eq!(height, 7);
-        assert!(frame[usize::from(top + 1)].contains("1234567890123"));
-        assert!(frame[usize::from(top + 2)].contains("4567890123456"));
-        assert!(frame[usize::from(top + 3)].contains("7890"));
-        assert_eq!(view.chat_cursor(draft, draft.len()), Some((left + 6, top + 3)));
+        // LAY-02: at 20 columns the route inset is 1, so the composer box is
+        // 18 cells and the rail text budget is 18 - 1 - 2*1 = 15.
+        assert_eq!(height, 6);
+        assert!(frame[usize::from(top + 1)].contains("123456789012345"));
+        assert!(frame[usize::from(top + 2)].contains("678901234567890"));
+        assert_eq!(view.chat_cursor(draft, draft.len()), Some((left + 2 + 15, top + 2)));
         let multiline = "one\ntwo";
         let _ = view.render_typed(multiline, &[], false, &[]);
         let (left, top, _, _) = view.composer_region(multiline).unwrap();
@@ -8123,6 +8193,20 @@ mod context_pointer_regression {
 
 fn padded(line: &str, width: u16) -> String {
     let padding = (width / 2).min(2);
+    format!(
+        "{}{}{}",
+        " ".repeat(padding as usize),
+        fit(line, width.saturating_sub(padding.saturating_mul(2))),
+        " ".repeat(padding as usize)
+    )
+}
+
+/// Session-route sibling of [`padded`]: the container padding is the LAY-02
+/// route inset (`routes/session/index.tsx:1513-1515`, full terminal width
+/// `< 44 ? 1 : 2`) instead of the fixed two cells. Tiny widths degrade the
+/// padding exactly like `padded` so every row stays cell-exact.
+fn padded_inset(line: &str, width: u16, inset: u16) -> String {
+    let padding = inset.min(width / 2);
     format!(
         "{}{}{}",
         " ".repeat(padding as usize),
@@ -8425,9 +8509,12 @@ mod tests {
         let frame = view.render_typed(draft, &[], false, &[]);
         let (left, top, _, height) = view.composer_region(draft).unwrap();
         assert_eq!(height, 6, "two wrapped input rows plus four chrome rows");
-        assert!(frame[usize::from(top + 1)].contains("alpha beta gamma"));
-        assert!(frame[usize::from(top + 2)].contains("delta epsilon"));
-        assert_eq!(view.chat_cursor(draft, draft.len()), Some((left + 2 + 13, top + 2)));
+        // LAY-02: at 28 columns the route inset is 1, so the composer box is
+        // 26 cells and the rail text budget is 26 - 1 - 2*1 = 23 — the first
+        // wrapped row now carries `delta` too.
+        assert!(frame[usize::from(top + 1)].contains("alpha beta gamma delta"));
+        assert!(frame[usize::from(top + 2)].contains("epsilon"));
+        assert_eq!(view.chat_cursor(draft, draft.len()), Some((left + 2 + 7, top + 2)));
     }
 
     #[test]
@@ -11881,6 +11968,363 @@ mod state_group_live_tests {
                 .iter()
                 .any(|class| *class == crate::native_view_chat::ChatRowClass::FooterError),
             "live error row must be classed FooterError (error fg)"
+        );
+    }
+}
+
+/// LAY-02 route-inset boundary: the session route's horizontal inset flips
+/// 1 -> 2 exactly at the 44-column FULL terminal width
+/// (`routes/session/index.tsx:1513-1515`, `paddingLeft/right:
+/// dimensions().width < 44 ? 1 : 2`). The predicate keys on the terminal
+/// width — never on the main-column width a tab rail or sidebar leaves —
+/// and every session-route consumer (painted frame cells, composer region,
+/// cursor projection, send/pointer rectangles) must derive from that one
+/// value so the painted frame and the geometry projection cannot disagree.
+#[cfg(test)]
+mod route_inset_boundary_tests {
+    use super::*;
+
+    /// The predicate itself, observed through the shared helper and the
+    /// published presentation: 1 cell below 44 full terminal columns, 2 from
+    /// 44 up, including the degenerate 0/1/2-column viewports.
+    #[test]
+    fn route_inset_flips_exactly_at_the_44_column_terminal_boundary() {
+        for (cols, expected) in [(0u16, 1u16), (1, 1), (2, 1), (43, 1), (44, 2)] {
+            let mut view = NativeView::new(cols, 24);
+            view.set_session_route(true);
+            assert_eq!(
+                view.session_route_inset(),
+                expected,
+                "inset helper at {cols} columns"
+            );
+            assert_eq!(
+                view.presentation().main_padding,
+                expected,
+                "presentation main_padding at {cols} columns"
+            );
+        }
+    }
+
+    /// Degenerate viewports exercise the saturating half of the inset math:
+    /// the painted frame never exceeds the terminal width and the container
+    /// padding degrades to the largest pad that fits instead of underflowing.
+    #[test]
+    fn tiny_viewports_keep_the_inset_rows_finite_and_cell_exact() {
+        for cols in [1u16, 2] {
+            let mut view = NativeView::new(cols, 6);
+            view.set_session_route(true);
+            let rows = view.render_typed("draft", &[], false, &[]);
+            assert_eq!(rows.len(), 6, "frame height at {cols} columns");
+            for row in &rows {
+                let mut cells = 0usize;
+                crate::native_view_layout::visit_unpadded_cells(
+                    row,
+                    usize::from(u16::MAX),
+                    |_, cell| cells += cell,
+                );
+                assert_eq!(
+                    cells,
+                    usize::from(cols),
+                    "cell-exact {cols}-column row: {row:?}"
+                );
+            }
+        }
+        assert_eq!(padded_inset("x", 0, 2), "");
+        assert_eq!(padded_inset("x", 1, 2), "x");
+        assert_eq!(padded_inset("x", 2, 2), "  ");
+        assert_eq!(padded_inset("x", 3, 2), " x ");
+        let mut zero = NativeView::new(0, 6);
+        zero.set_session_route(true);
+        assert!(zero.render_typed("draft", &[], false, &[]).is_empty());
+        assert_eq!(zero.session_route_inset(), 1);
+    }
+
+    /// Transcript measurement is keyed on the same route inset: the
+    /// pagination row count and the rendered anchor capture/restore must
+    /// measure at `terminal - 2 * inset` (plus the scrollbar reservation when
+    /// shown), never the old fixed `terminal - 4`. A message body that wraps
+    /// differently at the fixed width makes a stale hardcoded width visible.
+    #[test]
+    fn chat_measurement_and_anchor_use_the_route_inset_width() {
+        use crate::native_view_chat::{ChatMessage, ChatRole};
+
+        for (cols, inset) in [(43u16, 1u16), (44, 2)] {
+            let mut view = NativeView::new(cols, 24);
+            view.set_session_route(true);
+            let content = usize::from(cols - 2 * inset);
+            for len in [12usize, 31, 47, 73] {
+                let message = ChatMessage::text(ChatRole::Assistant, "w".repeat(len));
+                let messages = [message];
+                let expected =
+                    view.chat
+                        .styled_message_rows(content, &messages, &view.box_appearance);
+                assert_eq!(
+                    view.chat_message_rows(&messages),
+                    expected,
+                    "rows measured at {content} content cells ({cols} terminal, len {len})"
+                );
+            }
+
+            let entries = vec![(
+                "entry-0".to_owned(),
+                ChatMessage::text(ChatRole::User, "w".repeat(47)),
+            )];
+            let anchor = view
+                .chat_rendered_anchor(&entries)
+                .expect("same measured width captures the rendered anchor");
+            assert_eq!(anchor.id, "entry-0");
+            assert!(
+                view.restore_chat_rendered_anchor(&entries, &anchor),
+                "anchor restore uses the same route-inset width at {cols} columns"
+            );
+        }
+    }
+
+    /// Selection bounds are expressed in painted frame cells, so the route
+    /// inset in front of the transcript must be folded into the published
+    /// interval. The bound must land exactly on the painted text cell rather
+    /// than a fixed 2-cell gutter.
+    #[test]
+    fn chat_selection_bounds_include_the_route_inset() {
+        use crate::native_view_chat::{ChatMessage, ChatRole};
+
+        for (cols, inset) in [(43u16, 1u16), (44, 2)] {
+            let mut view = NativeView::new(cols, 24);
+            view.set_session_route(true);
+            let frame = view.render_typed(
+                "",
+                &[ChatMessage::text(ChatRole::User, "needle")],
+                false,
+                &[],
+            );
+            let row = frame
+                .iter()
+                .position(|line| line.contains("needle"))
+                .expect("user card paints the marker");
+            let (left, width) = view.chat_text_bounds()[row]
+                .expect("selectable card text keeps its painted interval");
+            let prefix = &frame[row][..frame[row].find("needle").expect("marker byte")];
+            let painted = crate::native_view_layout::visit_unpadded_cells(
+                prefix,
+                usize::from(cols),
+                |_, _| {},
+            );
+            assert_eq!(
+                usize::from(left),
+                painted,
+                "selection starts at the painted text cell at {cols} columns"
+            );
+            assert!(width > 0, "selection interval stays non-empty at {cols}");
+            assert!(
+                usize::from(left) >= usize::from(inset),
+                "selection never starts left of the route inset at {cols}"
+            );
+        }
+    }
+
+    /// At both sides of the boundary the painted frame, the composer region,
+    /// the caret projection and the send/pointer rectangles agree on the
+    /// same inset: the rail border paints exactly on the region's left edge
+    /// and every composer row stays cell-exact to the terminal width.
+    #[test]
+    fn composer_frame_region_cursor_and_send_agree_on_the_inset_at_43_and_44() {
+        for (cols, inset) in [(43u16, 1u16), (44, 2)] {
+            let mut view = NativeView::new(cols, 24);
+            view.set_session_route(true);
+            // The rail footer publishes the location slot, so a live workspace
+            // is what makes the footer hit real. The in-box metadata row is a
+            // separate surface, set here too so the frame carries both.
+            view.set_workspace("/Users/example/project".into());
+            view.set_composer_agent(Some("builder".into()), None);
+            view.set_composer_model("fixture-model", "fixture-provider");
+            view.preview_items = vec![crate::native_paste::PreviewItem {
+                uri: "data:image/png;base64,AAAA".to_owned(),
+                failed: false,
+            }];
+            let draft = "draft";
+            let rows = view.render_typed(draft, &[], false, &[]);
+            assert_eq!(rows.len(), 24, "full frame at {cols} columns");
+            let (left, top, width, height) = view.composer_region(draft).expect("composer region");
+            assert_eq!(
+                (left, width),
+                (inset, cols - 2 * inset),
+                "composer box owns exactly the inset-subtracted column range at {cols}"
+            );
+            assert!(
+                usize::from(top) + usize::from(height) <= rows.len(),
+                "composer region inside the frame at {cols}"
+            );
+            // The lip row is the one composer row without the rail border, so
+            // the invariant is: no rail border sits left of the region's left
+            // edge, and the border that does paint sits exactly on it.
+            let mut bordered = 0usize;
+            for index in top..top + height {
+                let row = &rows[usize::from(index)];
+                if let Some(border) = row.chars().position(|cell| cell == '┃') {
+                    assert_eq!(
+                        border, usize::from(left),
+                        "rail border column at {cols} row {index}: {row:?}"
+                    );
+                    bordered += 1;
+                }
+                let mut cells = 0usize;
+                crate::native_view_layout::visit_unpadded_cells(
+                    row,
+                    usize::from(u16::MAX),
+                    |_, cell| cells += cell,
+                );
+                assert_eq!(cells, usize::from(cols), "cell-exact composer row at {cols}: {row:?}");
+            }
+            assert!(
+                bordered > 0,
+                "the rail border paints inside the composer region at {cols}"
+            );
+            assert!(
+                rows[usize::from(top + 1)].contains(draft),
+                "editor row renders the draft after border + inset at {cols}: {:?}",
+                rows[usize::from(top + 1)]
+            );
+            // The caret projection shares the same region and inset.
+            let (caret_x, caret_y) = view.chat_cursor(draft, draft.len()).expect("caret");
+            assert!(
+                caret_x >= left
+                    && caret_x < left.saturating_add(width)
+                    && caret_y >= top
+                    && caret_y < top.saturating_add(height),
+                "caret ({caret_x},{caret_y}) inside the composer region at {cols}"
+            );
+            // The send button and its pointer rectangle live inside the box,
+            // and the hit test agrees with the region edges.
+            let (sx, sy, sw) = view.send_button_region(draft).expect("send button region");
+            assert_eq!(sw, 6, "send button width at {cols}");
+            assert!(
+                sx >= left
+                    && sx.saturating_add(sw) <= left.saturating_add(width)
+                    && sy >= top
+                    && sy < top.saturating_add(height),
+                "send button ({sx},{sy}) inside the composer region at {cols}"
+            );
+            assert!(
+                view.send_button_hit(draft, sx, sy),
+                "hit agrees with the region at {cols}"
+            );
+            assert!(
+                !view.send_button_hit(draft, sx.saturating_sub(1), sy),
+                "the cell left of the button misses at {cols}"
+            );
+            assert!(
+                !view.send_button_hit(draft, sx.saturating_add(sw), sy),
+                "the cell right of the button misses at {cols}"
+            );
+            assert!(
+                view.set_send_pointer(draft, sx, sy),
+                "entering the button transitions the pointer at {cols}"
+            );
+            // The composer footer pointer rectangle begins exactly where the
+            // painted footer text begins: one route-inset cell in, not a fixed
+            // 0/lip column.
+            let (fx, fy, fcells) = view.prompt_footer_hit().expect("composer footer hit");
+            assert_eq!(fx, inset, "footer hit starts on the route inset at {cols}");
+            assert!(fcells > 0, "footer hit spans the painted text at {cols}");
+            assert!(
+                !view.set_prompt_footer_hover(fx.saturating_sub(1), fy),
+                "the cell left of the footer text misses at {cols}"
+            );
+            assert!(
+                view.set_prompt_footer_hover(fx, fy),
+                "the first painted footer cell hovers at {cols}"
+            );
+            // The preview strip shares the container pass, so its click
+            // rectangle starts on the same composer left edge as the border.
+            let (px, py, _, _) = view.preview_strip_hit(draft).expect("preview strip hit");
+            assert_eq!(px, left, "strip hit starts at the composer left edge at {cols}");
+            assert!(py < top, "the strip sits above the composer box at {cols}");
+        }
+    }
+
+    /// A wide terminal with narrow remaining content: a 60-cell vertical tab
+    /// rail at 100 columns leaves a 40-cell main column, but the inset
+    /// predicate still keys on the FULL 100-column terminal and stays 2 —
+    /// the composer, its painted border and the pointer rectangles all keep
+    /// the wide inset at the tab-shifted absolute columns.
+    #[test]
+    fn wide_terminal_narrow_main_column_keeps_the_full_terminal_inset() {
+        let mut view = NativeView::new(100, 30);
+        view.set_session_route(true);
+        view.set_tab_reservation(crate::native_tabs::TabReservation {
+            orientation: Some(crate::native_tabs::TabOrientation::Vertical),
+            width: 60,
+            ..Default::default()
+        });
+        let presentation = view.presentation();
+        assert_eq!(presentation.main_offset, 60, "tab rail offset");
+        assert_eq!(presentation.main_width, 40, "narrow remaining main column");
+        assert_eq!(
+            presentation.main_padding, 2,
+            "the inset keys on the 100-column terminal, never the 40-cell column"
+        );
+        let draft = "draft";
+        let rows = view.render_typed(draft, &[], false, &[]);
+        assert_eq!(rows.len(), 30, "full shifted frame");
+        let (left, top, width, height) = view.composer_region(draft).expect("composer region");
+        assert_eq!(
+            (left, width),
+            (62, 36),
+            "tab offset + wide inset on the left edge, box width subtracts both insets"
+        );
+        assert_eq!(
+            usize::from(view.session_content_width()),
+            usize::from(width),
+            "transcript measurement also subtracts the full-terminal inset from the 40-cell column"
+        );
+        assert!(
+            usize::from(top) + usize::from(height) <= rows.len(),
+            "composer region inside the shifted frame"
+        );
+        let mut bordered = 0usize;
+        for index in top..top + height {
+            let row = &rows[usize::from(index)];
+            if let Some(border) = row.chars().position(|cell| cell == '┃') {
+                assert_eq!(
+                    border, usize::from(left),
+                    "rail border at the tab-shifted absolute column {left}: {row:?}"
+                );
+                bordered += 1;
+            }
+            let mut cells = 0usize;
+            crate::native_view_layout::visit_unpadded_cells(
+                row,
+                usize::from(u16::MAX),
+                |_, cell| cells += cell,
+            );
+            assert_eq!(cells, 100, "cell-exact shifted composer row: {row:?}");
+        }
+        assert!(bordered > 0, "the rail border paints inside the shifted region");
+        assert!(
+            rows[usize::from(top + 1)].contains(draft),
+            "editor row renders the draft after border + inset: {:?}",
+            rows[usize::from(top + 1)]
+        );
+        let (caret_x, caret_y) = view.chat_cursor(draft, draft.len()).expect("caret");
+        assert!(
+            caret_x >= left
+                && caret_x < left.saturating_add(width)
+                && caret_y >= top
+                && caret_y < top.saturating_add(height),
+            "caret ({caret_x},{caret_y}) inside the shifted composer region"
+        );
+        let (sx, sy, sw) = view.send_button_region(draft).expect("send button region");
+        assert!(
+            sx >= left
+                && sx.saturating_add(sw) <= left.saturating_add(width)
+                && sy >= top
+                && sy < top.saturating_add(height),
+            "send button ({sx},{sy}) inside the shifted composer region"
+        );
+        assert!(view.send_button_hit(draft, sx, sy), "hit agrees with the region");
+        assert!(
+            !view.send_button_hit(draft, sx.saturating_sub(1), sy),
+            "the cell left of the button misses"
         );
     }
 }
