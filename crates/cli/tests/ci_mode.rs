@@ -261,7 +261,21 @@ fn request(s: &mut TcpStream) -> Vec<u8> {
     loop {
         assert!(Instant::now() < d, "provider request deadline");
         let mut x = [0; 4096];
-        let n = s.read(&mut x).expect("provider request read");
+        let n = match s.read(&mut x) {
+            Ok(n) => n,
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                // A slow CI child may not have sent the whole request yet. The
+                // listener is nonblocking (and a read timeout is set), so a read
+                // with no bytes ready returns WouldBlock/TimedOut instead of
+                // blocking. Retry until the existing deadline expires.
+                thread::sleep(Duration::from_millis(10));
+                continue;
+            }
+            Err(e) => panic!("provider request read: {e}"),
+        };
         assert!(n > 0, "provider request ended early");
         assert!(b.len() <= MAX.saturating_sub(n), "provider request bound");
         b.extend_from_slice(&x[..n]);
