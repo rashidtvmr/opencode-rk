@@ -369,6 +369,25 @@ fn spawn_openai_fixture() -> (String, ProviderTask) {
     )
 }
 
+/// Restore Cargo's native dynamic-library search path that `env_clear`
+/// removes from the fixture children. Without it dyld cannot locate
+/// libopentui.dylib and the child dies before emitting any JSONL.
+fn set_native_library_path(command: &mut Command) {
+    #[cfg(target_os = "macos")]
+    {
+        // Cargo supplies its native search paths to the test process.
+        // env_clear deliberately removes them from the fixture children,
+        // so restore only the pinned repository library directory.
+        let library_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../opentui-bridge/native/lib")
+            .join(format!("{}-apple-darwin", std::env::consts::ARCH));
+        assert!(library_dir.join("libopentui.dylib").is_file());
+        command.env("DYLD_LIBRARY_PATH", library_dir);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = command;
+}
+
 fn start_daemon(home: &TestHome, extra: &[(&str, &str)]) -> (String, String) {
     assert!(
         home.fixture.borrow().is_none(),
@@ -390,6 +409,7 @@ fn start_daemon(home: &TestHome, extra: &[(&str, &str)]) -> (String, String) {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    set_native_library_path(&mut c);
     for &(key, value) in extra {
         assert!(matches!(key, "OPENAI_BASE_URL" | "OPENAI_API_KEY"));
         c.env(key, value);
@@ -473,6 +493,7 @@ fn ci_command(home: &TestHome, _: &str, extra: &[(&str, &str)]) -> Command {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    set_native_library_path(&mut c);
     for &(key, value) in extra {
         assert!(matches!(key, "OPENAI_BASE_URL" | "OPENAI_API_KEY"));
         c.env(key, value);
