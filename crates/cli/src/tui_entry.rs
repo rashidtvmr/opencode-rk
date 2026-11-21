@@ -10354,6 +10354,11 @@ fn native_loop(
             model_load = native_setup::ModelLoad::start(&snapshot.origin, auth, &provider_id).ok();
         }
     }
+    // UIKIT-PROVIDER-DISPLAY: fill provider display labels from the CURRENT
+    // provider rows (never a stale snapshot) and re-derive the startup selection
+    // by exact qualified identity, so a real `/api/providers` name is shown even
+    // when `/api/models` omitted `provider_name`. Identity is never changed.
+    selected = native_setup::reenrich_selection(&mut models, &providers, selected.as_ref());
     let mut transcript = NativeChatHistory::default();
     // In-flight turn worker wrapped with the binding identity it was
     // launched under: events apply only while session AND generation still
@@ -10872,7 +10877,7 @@ fn native_loop(
     if let Some(model) = &selected {
         view.set_model(Some(model.qualified()));
         // The native setup catalogue currently admits only the OpenAI adapter.
-        view.set_composer_model(&model.name, &model.provider_id);
+        view.set_composer_model(&model.name, model.provider_display());
         sync_composer_agent(
             &mut view,
             live_agent_selected.as_deref(),
@@ -11641,21 +11646,29 @@ fn native_loop(
                             native_setup::dialog_rows_state(&models, &filter_input, &model_picker).len(),
                         );
                     }
+                    // UIKIT-PROVIDER-DISPLAY: refresh provider display labels
+                    // from the CURRENT registry and re-derive the selection by
+                    // exact identity, so a provider rename/removal updates the
+                    // picker rows and the selected metadata instead of retaining
+                    // a stale name (identity is unchanged).
+                    let had_selection = selected.is_some();
+                    selected = native_setup::reenrich_selection(&mut models, &providers, selected.as_ref());
                     if selected.is_none() {
-                        if let Some(model) = native_setup::selected(&models) {
-                            selected = Some(model.clone());
-                            view.set_model(Some(model.qualified()));
-                            view.set_composer_model(&model.name, &model.provider_id);
-                            sync_composer_agent(
-                                &mut view,
-                                live_agent_selected.as_deref(),
-                                native_setup::variant_for(&model).as_deref(),
-                            );
-                            if dialog == native_setup::Dialog::Provider
-                                && model.provider_id == loaded_provider
-                            {
-                                dialog = native_setup::Dialog::None;
-                            }
+                        selected = native_setup::selected(&models);
+                    }
+                    if let Some(model) = selected.as_ref() {
+                        view.set_model(Some(model.qualified()));
+                        view.set_composer_model(&model.name, model.provider_display());
+                        sync_composer_agent(
+                            &mut view,
+                            live_agent_selected.as_deref(),
+                            native_setup::variant_for(model).as_deref(),
+                        );
+                        if !had_selection
+                            && dialog == native_setup::Dialog::Provider
+                            && model.provider_id == loaded_provider
+                        {
+                            dialog = native_setup::Dialog::None;
                         }
                     }
                 }
@@ -12659,7 +12672,7 @@ fn native_loop(
                         format!(
                             "{} {} — {}{}",
                             if index == active { ">" } else { " " },
-                            model.qualified(),
+                            model.display_qualified(),
                             model.name,
                             suffix
                         )
@@ -18239,6 +18252,22 @@ fn native_loop(
                                     {
                                         row.2 = provider_url.clone();
                                     }
+                                    // UIKIT-PROVIDER-DISPLAY: the provider rows
+                                    // just changed; refresh display labels from
+                                    // the CURRENT registry and re-derive the
+                                    // selection by exact identity so the picker
+                                    // rows and selected metadata never retain a
+                                    // stale name (identity is unchanged).
+                                    selected = native_setup::reenrich_selection(&mut models, &providers, selected.as_ref());
+                                    if let Some(model) = selected.as_ref() {
+                                        view.set_model(Some(model.qualified()));
+                                        view.set_composer_model(&model.name, model.provider_display());
+                                        sync_composer_agent(
+                                            &mut view,
+                                            live_agent_selected.as_deref(),
+                                            native_setup::variant_for(model).as_deref(),
+                                        );
+                                    }
                                     model_load = Some(load);
                                     setup_error = None;
                                     filter_input = format!("{provider_id}/");
@@ -18312,7 +18341,7 @@ fn native_loop(
                                     let value = (option != "default").then_some(option.as_str());
                                     match native_setup::save_variant(&model, value) {
                                         Ok(()) => {
-                                            view.set_composer_model(&model.name, &model.provider_id);
+                                            view.set_composer_model(&model.name, model.provider_display());
                                             sync_composer_agent(
                                                 &mut view,
                                                 live_agent_selected.as_deref(),
@@ -18341,7 +18370,7 @@ fn native_loop(
                                         // Confirmed local config write:
                                         // honest live model status update.
                                         view.set_model(selected.as_ref().map(|m| m.qualified()));
-                                        view.set_composer_model(&model.name, &model.provider_id);
+                                        view.set_composer_model(&model.name, model.provider_display());
                                         sync_composer_agent(
                                             &mut view,
                                             live_agent_selected.as_deref(),
@@ -18871,7 +18900,7 @@ fn native_loop(
                                     view.set_chat_scroll_offset(0);
                                     if let Some(model) = selected.as_ref() {
                                         view.set_model(Some(model.qualified()));
-                                        view.set_composer_model(&model.name, &model.provider_id);
+                                        view.set_composer_model(&model.name, model.provider_display());
                                         sync_composer_agent(
                                             &mut view,
                                             live_agent_selected.as_deref(),
@@ -19674,7 +19703,7 @@ fn commit_child_route(
     *selected = target_model.as_deref().and_then(|qualified| models.iter().find(|model| model.qualified() == qualified).cloned());
     if let Some(model) = selected.as_ref() {
         view.set_model(Some(model.qualified()));
-        view.set_composer_model(&model.name, &model.provider_id);
+        view.set_composer_model(&model.name, model.provider_display());
         sync_composer_agent(
             view,
             agent_selected,
@@ -19941,6 +19970,14 @@ fn apply_close_tab_result(
         *selected = result.selected_model.as_deref().and_then(|qualified| {
             models.iter().find(|model| model.qualified() == qualified).cloned()
         });
+        // UIKIT-PROVIDER-DISPLAY: a tab select/close/reopen changes the selected
+        // model, so the composer metadata must be re-published from the exact
+        // selected identity (provider display label included) instead of leaving
+        // the previous tab's labels on screen. Identity is unchanged.
+        if let Some(model) = selected.as_ref() {
+            view.set_model(Some(model.qualified()));
+            view.set_composer_model(&model.name, model.provider_display());
+        }
     }
 }
 
@@ -20555,7 +20592,7 @@ mod tab_binding_tests {
         let mut selected = None;
         let mut route = true;
         let mut compact_worker = None;
-        let models = [native_setup::Model { id: "target".into(), name: "Target".into(), provider_id: "fixture".into(), context_window: None, free: false, cost: None, variants: Vec::new() }];
+        let models = [native_setup::Model { id: "target".into(), name: "Target".into(), provider_id: "fixture".into(), context_window: None, free: false, cost: None, variants: Vec::new(), provider_name: None, provider_registry_name: None }];
         apply_close_tab_result(result, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut selected, &models, &mut route, &mut compact_worker);
         assert_eq!(live.as_ref().unwrap().session_id, B, "Send reads its session identity from live");
         assert_eq!(generation, 5);
@@ -20602,7 +20639,7 @@ mod tab_binding_tests {
         let mut selected = None;
         let mut route = false;
         let mut compact_worker = None;
-        let models = [native_setup::Model { id: "target".into(), name: "Target".into(), provider_id: "fixture".into(), context_window: None, free: false, cost: None, variants: Vec::new() }];
+        let models = [native_setup::Model { id: "target".into(), name: "Target".into(), provider_id: "fixture".into(), context_window: None, free: false, cost: None, variants: Vec::new(), provider_name: None, provider_registry_name: None }];
         apply_close_tab_result(result, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut selected, &models, &mut route, &mut compact_worker);
         assert_eq!(live.as_ref().map(|s| s.session_id.as_str()), Some(B));
         assert_eq!(generation, 5);
@@ -20748,7 +20785,7 @@ mod tab_binding_tests {
         let mut cursor = 0;
         let mut route = true;
         let mut completion = crate::native_completion::Completion::default();
-        let models = vec![native_setup::Model { id: "child".into(), name: "Child".into(), provider_id: "fixture".into(), context_window: None, free: false, cost: None, variants: Vec::new() }];
+        let models = vec![native_setup::Model { id: "child".into(), name: "Child".into(), provider_id: "fixture".into(), context_window: None, free: false, cost: None, variants: Vec::new(), provider_name: None, provider_registry_name: None }];
         let mut selected = None;
         let snapshot = LiveSnapshot { origin: "http://127.0.0.1:1".into(), session_id: A.into(), title: "A".into(), state: "idle".into(), updated_at: String::new(), message_count: 0, last_text: None, history: vec![], typed_history: vec![], raw_history: vec![], history_next_before: None, history_children: 0, parent_session: true, parent_session_id: Some(B.into()), directory: None, session_titles: vec![], session_project_labels: vec![], session_vcs: vec![], session_revert: None, session_revert_boundary: None, session_idle_at: None, session_viewed_at: None };
         commit_child_route(snapshot, "child draft".into(), 2, 8, 13, Some("fixture/child".into()), &models, &mut selected, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut route, &mut completion, None);
@@ -20810,6 +20847,114 @@ mod tab_binding_tests {
         assert_eq!(navigation.active().unwrap().session.0, A);
         assert_eq!(navigation.active().unwrap().draft, original);
         assert!(fixture.requests.lock().unwrap().is_empty());
+    }
+
+    // UIKIT-PROVIDER-DISPLAY F3: the shared tab select/close/reopen helper must
+    // re-publish the composer metadata from the exact selected identity, so a
+    // model-changing tab selection shows the target provider display label
+    // instead of leaving the previous tab's labels on screen. Identity is
+    // unchanged (`qualified()` still drives submission/recents).
+    #[test]
+    fn tab_selection_republishes_composer_metadata_with_provider_display_label() {
+        let mut view = crate::native_view::NativeView::new(100, 32);
+        view.set_session_route(true);
+        // Previous tab's labels, which must be replaced by the target's.
+        view.set_composer_model("Old Model", "Old Provider");
+        let mut live = None;
+        let mut history = None;
+        let mut generation = 4;
+        let mut draft = String::new();
+        let mut cursor = 0;
+        let mut selected = None;
+        let mut route = true;
+        let mut compact_worker = None;
+        let models = vec![native_setup::Model {
+            id: "target".into(),
+            name: "Target Model".into(),
+            provider_id: "acme".into(),
+            context_window: None,
+            free: false,
+            cost: None,
+            variants: Vec::new(),
+            provider_name: Some("Example Provider".into()),
+            provider_registry_name: None,
+        }];
+        apply_close_tab_result(
+            CloseTabResult {
+                snapshot: None,
+                draft: String::new(),
+                cursor: 0,
+                scroll: 0,
+                selected_model: Some("acme/target".into()),
+                generation: 5,
+                home: false,
+            },
+            &mut view,
+            &mut live,
+            &mut history,
+            &mut generation,
+            &mut draft,
+            &mut cursor,
+            &mut selected,
+            &models,
+            &mut route,
+            &mut compact_worker,
+        );
+        // Exact identity is preserved.
+        assert_eq!(selected.as_ref().unwrap().qualified(), "acme/target");
+        let frame = view.render_typed("draft", &[], false, &[]).join("\n");
+        assert!(frame.contains("Target Model"), "composer shows the target model: {frame}");
+        assert!(
+            frame.contains("Example Provider"),
+            "composer shows the target provider display label: {frame}"
+        );
+        assert!(!frame.contains("Old Provider"), "previous tab labels are replaced: {frame}");
+    }
+
+    // UIKIT-PROVIDER-DISPLAY F4: a real multi-byte provider label longer than the
+    // downstream byte bound is bounded by the display helper, so the composer
+    // setter accepts it instead of clearing the whole selected metadata.
+    #[test]
+    fn oversized_multibyte_provider_label_keeps_selected_metadata_visible() {
+        let wide = "供".repeat(200); // 600 UTF-8 bytes
+        let body = format!(
+            r#"{{"models":[{{"provider_id":"acme","id":"x","name":"AcmeModel","provider_name":"{wide}"}}]}}"#
+        );
+        let models = native_setup::catalogue(&body).unwrap();
+        let model = &models[0];
+        // The display helper bounds the label to the downstream byte limit and
+        // truncates on a character boundary (valid UTF-8).
+        assert!(model.provider_display().len() <= 256, "{} bytes", model.provider_display().len());
+        assert!(model.provider_display().chars().count() < 200);
+        assert_eq!(model.qualified(), "acme/x");
+        let mut view = crate::native_view::NativeView::new(100, 32);
+        view.set_session_route(true);
+        view.set_composer_model(&model.name, model.provider_display());
+        let frame = view.render_typed("draft", &[], false, &[]).join("\n");
+        // The setter accepted the bounded label: the model label survives (an
+        // over-limit provider string would have cleared the metadata entirely).
+        assert!(frame.contains("AcmeModel"), "selected metadata survives: {frame}");
+        assert!(!frame.contains("Connect a provider"), "metadata is not cleared: {frame}");
+    }
+
+    // UIKIT-PROVIDER-DISPLAY CP-05: the composer metadata row paints the model
+    // label directly followed by the provider *display* label with a single
+    // space and no separator dot (`metadata.tsx:56-71`; the model node is
+    // followed by the provider node). Identity is unaffected.
+    #[test]
+    fn composer_metadata_paints_model_then_provider_display_without_a_dot() {
+        let mut view = crate::native_view::NativeView::new(100, 32);
+        view.set_session_route(true);
+        view.set_composer_model("Example Model", "Example Provider");
+        let frame = view.render_typed("draft", &[], false, &[]).join("\n");
+        assert!(
+            frame.contains("Example Model Example Provider"),
+            "model then provider separated by one space: {frame}"
+        );
+        assert!(
+            !frame.contains("Example Model · Example Provider"),
+            "no separator dot between model and provider: {frame}"
+        );
     }
 }
 
@@ -21340,6 +21485,8 @@ mod command_consumption_tests {
             free: false,
             cost: None,
             variants: Vec::new(),
+            provider_name: None,
+            provider_registry_name: None,
         }];
         let mut route = true;
         let mut compact_worker = None;

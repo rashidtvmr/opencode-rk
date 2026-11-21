@@ -51,6 +51,19 @@ pub(super) struct Model {
     /// `variants[].id` (`ModelInfo.variants`, `dialog-variant.tsx:9-42`). Drives
     /// the post-select transition (`dialog-model.tsx:25-38`).
     pub variants: Vec<String>,
+    /// Optional human-readable provider display label from the catalogue
+    /// entry's `provider_name` (`dialog-model.tsx:120,141` shows
+    /// `provider?.name ?? model.providerID`). Bounded and control-character
+    /// filtered at assignment; `None` when absent/empty/malformed.
+    /// Presentation only: it never participates in `qualified()` and therefore
+    /// never changes provider/model identity, recents or submission.
+    pub provider_name: Option<String>,
+    /// Live provider display label from the `/api/providers` registry, refreshed
+    /// on every enrichment pass so a provider rename updates the label instead
+    /// of retaining a stale one. A catalogue-provided `provider_name` is honored
+    /// ahead of this; `provider_display()` falls back to the exact
+    /// `provider_id` when neither is available. Presentation only.
+    pub provider_registry_name: Option<String>,
 }
 
 /// Local daemon quota projection. `None` means no applicable allowance.
@@ -83,9 +96,30 @@ mod usage_limit_tests {
 
 impl Model {
     pub fn qualified(&self) -> String { format!("{}/{}", self.provider_id, self.id) }
+    /// Provider label for display and search: the catalogue-provided display
+    /// name when present, then the live registry name, otherwise the exact
+    /// `provider_id` (`dialog-model.tsx:120,141` `provider?.name ??
+    /// model.providerID`).
+    pub fn provider_display(&self) -> &str {
+        self.provider_name
+            .as_deref()
+            .filter(|name| !name.is_empty())
+            .or_else(|| {
+                self.provider_registry_name
+                    .as_deref()
+                    .filter(|name| !name.is_empty())
+            })
+            .unwrap_or(&self.provider_id)
+    }
+    /// Presentation form of `qualified()`: the provider *display* label plus
+    /// the exact model id. Identity (`qualified()`) is unchanged and still
+    /// drives submission, recents and persisted configuration.
+    pub fn display_qualified(&self) -> String {
+        format!("{}/{}", self.provider_display(), self.id)
+    }
     pub fn matches(&self, query: &str) -> bool {
         let query = query.trim().to_lowercase();
-        query.is_empty() || [self.id.to_lowercase(), self.name.to_lowercase(), self.qualified().to_lowercase()]
+        query.is_empty() || [self.id.to_lowercase(), self.name.to_lowercase(), self.qualified().to_lowercase(), self.provider_display().to_lowercase()]
             .iter()
             .any(|value| value.contains(&query) || fuzzy_contains(value, &query))
     }
@@ -94,6 +128,72 @@ impl Model {
 fn fuzzy_contains(value: &str, query: &str) -> bool {
     let mut remaining = value.chars();
     query.chars().all(|needle| remaining.by_ref().any(|candidate| candidate == needle))
+}
+
+/// Maximum UTF-8 byte length of a provider display label. Kept strictly at the
+/// downstream `NativeView::set_composer_model` bound (256 bytes) so a
+/// multi-byte label is truncated here instead of making the setter reject the
+/// whole selected metadata. `bounded_provider_name` truncates on a character
+/// boundary, so the result is always valid UTF-8 and `<= MAX_PROVIDER_NAME_BYTES`.
+const MAX_PROVIDER_NAME_BYTES: usize = 256;
+
+/// Bound and sanitize a provider display label: drop control characters, cap
+/// the UTF-8 byte length, trim, and treat an empty result as absent. Applied to
+/// both the catalogue `provider_name` and the live `/api/providers` registry so
+/// a display label is always safe to paint, bounded, and never fabricated.
+fn bounded_provider_name(raw: &str) -> Option<String> {
+    let mut bounded = String::new();
+    for ch in raw.chars().filter(|c| !c.is_control()) {
+        if bounded.len() + ch.len_utf8() > MAX_PROVIDER_NAME_BYTES {
+            break;
+        }
+        bounded.push(ch);
+    }
+    let trimmed = bounded.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+}
+
+/// Resolve the bounded registry display label for one provider id. The picker
+/// sentinel `custom` is not a configured provider and never contributes a label.
+fn registry_name_for(provider_id: &str, providers: &[(String, String, String)]) -> Option<String> {
+    providers
+        .iter()
+        .find(|row| row.0 == provider_id && row.0 != "custom")
+        .and_then(|(_, name, _)| bounded_provider_name(name))
+}
+
+/// Fill provider display labels from the live provider registry
+/// (`/api/providers` rows as `(id, name, base_url)`). This runs on every
+/// catalogue load/refresh and recomputes the registry label from scratch, so a
+/// provider rename is picked up and a removed provider falls back to its exact
+/// id rather than retaining a stale label. A catalogue-provided `provider_name`
+/// is honored ahead of the registry label (`provider_display()`). Identity is
+/// never touched.
+pub(super) fn enrich_provider_names(models: &mut [Model], providers: &[(String, String, String)]) {
+    for model in models.iter_mut() {
+        model.provider_registry_name = registry_name_for(&model.provider_id, providers);
+    }
+}
+
+/// Production ordering helper: enrich `models` from the CURRENT provider
+/// registry, then re-derive the selected model by exact qualified identity so
+/// its display label reflects the current facts (initial load, rename or
+/// removal) while provider/model identity is unchanged. A `None` selection
+/// stays `None`; a selection no longer catalogued still has its registry label
+/// refreshed from the current rows.
+pub(super) fn reenrich_selection(
+    models: &mut [Model],
+    providers: &[(String, String, String)],
+    selected: Option<&Model>,
+) -> Option<Model> {
+    enrich_provider_names(models, providers);
+    let current = selected?;
+    if let Some(refreshed) = models.iter().find(|row| row.qualified() == current.qualified()) {
+        return Some(refreshed.clone());
+    }
+    let mut fallback = current.clone();
+    fallback.provider_registry_name = registry_name_for(&fallback.provider_id, providers);
+    Some(fallback)
 }
 
 /// Rows are catalogue indices, never arbitrary query text.
@@ -421,6 +521,7 @@ pub(super) fn catalogue(body: &str) -> Result<Vec<Model>, String> {
             continue;
         };
         let name = entry["name"].as_str().unwrap_or(id);
+        let provider_name = entry["provider_name"].as_str().and_then(bounded_provider_name);
         let costs = entry["cost"].as_array();
         let free = costs
             .map(|cost| !cost.is_empty() && cost.iter().all(|row| row["input"].as_f64() == Some(0.0)))
@@ -465,6 +566,8 @@ pub(super) fn catalogue(body: &str) -> Result<Vec<Model>, String> {
                 free,
                 cost,
                 variants,
+                provider_name,
+                provider_registry_name: None,
             });
         }
     }
@@ -770,17 +873,17 @@ mod picker_tests {
 
     fn fixture_models() -> Vec<Model> {
         vec![
-            Model { id: "x".into(), name: "Acme X".into(), provider_id: "acme".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
-            Model { id: "gpt-5.6".into(), name: "Fallback".into(), provider_id: "openai".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
+            Model { id: "x".into(), name: "Acme X".into(), provider_id: "acme".into(), context_window: None, free: false, cost: None, variants: Vec::new(), provider_name: None, provider_registry_name: None },
+            Model { id: "gpt-5.6".into(), name: "Fallback".into(), provider_id: "openai".into(), context_window: None, free: false, cost: None, variants: Vec::new(), provider_name: None, provider_registry_name: None },
         ]
     }
 
     #[test]
     fn picker_rows_orders_recents_first_for_empty_query() {
         let models = vec![
-            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
-            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
-            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
+            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new(), provider_name: None, provider_registry_name: None },
+            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new(), provider_name: None, provider_registry_name: None },
+            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new(), provider_name: None, provider_registry_name: None },
         ];
         let picker = pickers::ModelPickerState::open(&[]);
         let recents = vec![("p".to_owned(), "c".to_owned()), ("p".to_owned(), "a".to_owned())];
@@ -792,9 +895,9 @@ mod picker_tests {
     #[test]
     fn dialog_rows_resolve_recents_first_index_to_committed_model() {
         let models = vec![
-            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
-            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
-            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
+            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new(), provider_name: None, provider_registry_name: None },
+            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new(), provider_name: None, provider_registry_name: None },
+            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new(), provider_name: None, provider_registry_name: None },
         ];
         let recents = vec![("p".to_owned(), "c".to_owned())];
         // Empty query -> recents-first picker order, not raw catalogue order.
@@ -818,9 +921,9 @@ mod picker_tests {
     #[test]
     fn dialog12_rows_hold_the_frozen_at_open_favorites_snapshot() {
         let models = vec![
-            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
-            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
-            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() },
+            Model { id: "a".into(), name: "A".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new(), provider_name: None, provider_registry_name: None },
+            Model { id: "b".into(), name: "B".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new(), provider_name: None, provider_registry_name: None },
+            Model { id: "c".into(), name: "C".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new(), provider_name: None, provider_registry_name: None },
         ];
         // Dialog opens while `c` is favorite: order freezes as c, a, b.
         let at_open = pickers::ModelPickerState::open(&[("p".to_owned(), "c".to_owned())]);
@@ -846,11 +949,11 @@ mod picker_tests {
     // named variants (upstream `ModelInfo.variants.length > 0`).
     #[test]
     fn dialog12_detail_row_paints_price_context_and_reasoning() {
-        let priced = Model { id: "x".into(), name: "X".into(), provider_id: "p".into(), context_window: Some(2_000_000), free: false, cost: Some(ModelCost { input: 5.0, output: 10.0 }), variants: vec!["thinking".into()] };
+        let priced = Model { id: "x".into(), name: "X".into(), provider_id: "p".into(), context_window: Some(2_000_000), free: false, cost: Some(ModelCost { input: 5.0, output: 10.0 }), variants: vec!["thinking".into()], provider_name: None, provider_registry_name: None };
         let detail = model_detail_row(&priced);
         assert_eq!(detail.amount, "$5/$10");
         assert_eq!(detail.facts, vec!["2M".to_owned(), "Reasoning".to_owned()]);
-        let free = Model { id: "y".into(), name: "Y".into(), provider_id: "p".into(), context_window: Some(200_000), free: true, cost: Some(ModelCost { input: 0.0, output: 0.0 }), variants: Vec::new() };
+        let free = Model { id: "y".into(), name: "Y".into(), provider_id: "p".into(), context_window: Some(200_000), free: true, cost: Some(ModelCost { input: 0.0, output: 0.0 }), variants: Vec::new(), provider_name: None, provider_registry_name: None };
         let detail = model_detail_row(&free);
         assert_eq!(detail.amount, "Free");
         assert_eq!(detail.facts, vec!["200K".to_owned()]);
@@ -860,7 +963,7 @@ mod picker_tests {
         // keeps the non-empty "0", so the fact list is never empty
         // (`model-options.tsx:64-69,117-121`; `limit.context` is a required
         // number in `ModelInfo`).
-        let bare = Model { id: "z".into(), name: "Z".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new() };
+        let bare = Model { id: "z".into(), name: "Z".into(), provider_id: "p".into(), context_window: None, free: false, cost: None, variants: Vec::new(), provider_name: None, provider_registry_name: None };
         let detail = model_detail_row(&bare);
         assert!(detail.amount.is_empty());
         assert_eq!(detail.facts, vec!["0".to_owned()]);
@@ -900,12 +1003,265 @@ mod picker_tests {
         assert!(find("z").variants.is_empty());
     }
 
+    // UIKIT-PROVIDER-DISPLAY: a catalogue-provided `provider_name` is a
+    // presentation label only. Identity (`qualified()`), and therefore
+    // submission/recents/persisted config, stays the exact provider/model id
+    // (`dialog-model.tsx:120,141` `provider?.name ?? model.providerID`).
+    #[test]
+    fn catalogue_provider_name_is_display_only_and_identity_is_unchanged() {
+        let models = catalogue(r#"{"models":[
+            {"provider_id":"acme","id":"x","name":"X","provider_name":"Acme Corp"},
+            {"provider_id":"beta","id":"x","name":"Other X"}
+        ]}"#).unwrap();
+        let acme = models.iter().find(|m| m.provider_id == "acme").unwrap();
+        assert_eq!(acme.provider_display(), "Acme Corp");
+        assert_eq!(acme.qualified(), "acme/x");
+        assert_eq!(acme.display_qualified(), "Acme Corp/x");
+        // Constructor coherence: the catalogue fill sets the catalogue label and
+        // leaves the live registry label unset until enrichment runs.
+        assert_eq!(acme.provider_name.as_deref(), Some("Acme Corp"));
+        assert_eq!(acme.provider_registry_name, None);
+        // A missing `provider_name` degrades to the exact provider id.
+        let beta = models.iter().find(|m| m.provider_id == "beta").unwrap();
+        assert_eq!(beta.provider_display(), "beta");
+        assert_eq!(beta.qualified(), "beta/x");
+        assert_eq!(beta.display_qualified(), "beta/x");
+        assert_eq!(beta.provider_name, None);
+        // Duplicate model ids across providers keep distinct identity and labels.
+        assert_ne!(acme.qualified(), beta.qualified());
+        assert_ne!(acme.provider_display(), beta.provider_display());
+    }
+
+    #[test]
+    fn catalogue_provider_name_is_sanitized_and_bounded() {
+        let models = catalogue(r#"{"models":[
+            {"provider_id":"acme","id":"a","name":"A","provider_name":"  Ac\u0007me  "},
+            {"provider_id":"beta","id":"b","name":"B","provider_name":"\u0000\u0007"},
+            {"provider_id":"gamma","id":"c","name":"C","provider_name":"   "}
+        ]}"#).unwrap();
+        let find = |p: &str| models.iter().find(|m| m.provider_id == p).unwrap();
+        // Control characters are dropped and whitespace trimmed; an all-control
+        // or blank name degrades to the exact provider id (never fabricated).
+        assert_eq!(find("acme").provider_display(), "Acme");
+        assert_eq!(find("beta").provider_display(), "beta");
+        assert_eq!(find("gamma").provider_display(), "gamma");
+        // An oversized ASCII name is capped at the byte bound.
+        let long = "P".repeat(300);
+        let body = format!(r#"{{"models":[{{"provider_id":"delta","id":"d","name":"D","provider_name":"{long}"}}]}}"#);
+        let models = catalogue(&body).unwrap();
+        assert_eq!(models[0].provider_display().len(), MAX_PROVIDER_NAME_BYTES);
+        // A multi-byte name is truncated on a character boundary to at most the
+        // byte bound, so the downstream `NativeView::set_composer_model` byte
+        // check accepts it instead of clearing the selected metadata.
+        let wide = "供".repeat(200); // 3 bytes each -> 600 bytes
+        let body = format!(r#"{{"models":[{{"provider_id":"epsilon","id":"e","name":"E","provider_name":"{wide}"}}]}}"#);
+        let models = catalogue(&body).unwrap();
+        let label = models[0].provider_display();
+        assert!(label.len() <= MAX_PROVIDER_NAME_BYTES, "{} bytes", label.len());
+        assert!(label.chars().count() < 200);
+        assert!(label.chars().all(|c| c == '供'));
+        assert!(std::str::from_utf8(label.as_bytes()).is_ok());
+        // A malformed (non-string) `provider_name` is ignored, not fabricated.
+        let models = catalogue(r#"{"models":[{"provider_id":"zeta","id":"f","name":"F","provider_name":42}]}"#).unwrap();
+        assert_eq!(models[0].provider_display(), "zeta");
+    }
+
+    // UIKIT-PROVIDER-DISPLAY: the live `/api/providers` registry fills a
+    // provider label when `/api/models` omitted `provider_name`, and every
+    // enrichment pass recomputes from the CURRENT rows so a rename/removal is
+    // reflected instead of retaining a stale label. Identity never changes.
+    #[test]
+    fn enrich_provider_names_honors_catalogue_and_refreshes_registry_renames() {
+        let mut models = catalogue(r#"{"models":[
+            {"provider_id":"acme","id":"x","name":"X","provider_name":"Catalogue Acme"},
+            {"provider_id":"beta","id":"y","name":"Y"}
+        ]}"#).unwrap();
+        let registry = vec![
+            ("acme".to_owned(), "Registry Acme".to_owned(), String::new()),
+            ("beta".to_owned(), "Beta Inc".to_owned(), String::new()),
+        ];
+        enrich_provider_names(&mut models, &registry);
+        // A catalogue-provided name is honored ahead of the registry label.
+        assert_eq!(models.iter().find(|m| m.provider_id == "acme").unwrap().provider_display(), "Catalogue Acme");
+        // A missing catalogue name is filled from the live registry.
+        assert_eq!(models.iter().find(|m| m.provider_id == "beta").unwrap().provider_display(), "Beta Inc");
+        // A provider rename refreshes the registry label on the next pass...
+        let renamed = vec![("beta".to_owned(), "Beta Renamed".to_owned(), String::new())];
+        enrich_provider_names(&mut models, &renamed);
+        assert_eq!(models.iter().find(|m| m.provider_id == "beta").unwrap().provider_display(), "Beta Renamed");
+        // ...and a provider removed from the registry degrades to its exact id
+        // rather than retaining a stale label.
+        enrich_provider_names(&mut models, &[]);
+        assert_eq!(models.iter().find(|m| m.provider_id == "beta").unwrap().provider_display(), "beta");
+        // Identity is never changed by enrichment.
+        assert_eq!(models.iter().find(|m| m.provider_id == "beta").unwrap().qualified(), "beta/y");
+    }
+
+    #[test]
+    fn enrich_provider_names_sanitizes_registry_labels_and_ignores_custom_sentinel() {
+        let mut models = catalogue(r#"{"models":[{"provider_id":"acme","id":"x","name":"X"}]}"#).unwrap();
+        enrich_provider_names(&mut models, &[("acme".to_owned(), "A\u{7}c\u{0}me".to_owned(), String::new())]);
+        assert_eq!(models[0].provider_display(), "Acme");
+        let mut models = catalogue(r#"{"models":[{"provider_id":"acme","id":"x","name":"X"}]}"#).unwrap();
+        enrich_provider_names(&mut models, &[("acme".to_owned(), "\u{0}\u{7}".to_owned(), String::new())]);
+        assert_eq!(models[0].provider_display(), "acme");
+        // The picker sentinel `custom` is not a configured provider and never
+        // contributes a label.
+        let mut models = catalogue(r#"{"models":[{"provider_id":"custom","id":"x","name":"X"}]}"#).unwrap();
+        enrich_provider_names(&mut models, &[("custom".to_owned(), "Other — custom".to_owned(), String::new())]);
+        assert_eq!(models[0].provider_display(), "custom");
+    }
+
+    // UIKIT-PROVIDER-DISPLAY: the display precedence is catalogue name, then the
+    // live registry name, then the exact provider id, and an empty value at each
+    // level is skipped so a blank catalogue name still surfaces the registry
+    // label instead of a blank or fabricated one. Identity is never derived from
+    // the display label.
+    #[test]
+    fn provider_display_skips_empty_labels_and_falls_back_in_order() {
+        let base = Model {
+            id: "x".into(), name: "X".into(), provider_id: "acme".into(),
+            context_window: None, free: false, cost: None, variants: Vec::new(),
+            provider_name: None, provider_registry_name: None,
+        };
+        // No labels -> the exact provider id.
+        assert_eq!(base.provider_display(), "acme");
+        // Registry only -> the registry label.
+        let registry = Model { provider_registry_name: Some("Registry".into()), ..base.clone() };
+        assert_eq!(registry.provider_display(), "Registry");
+        // Catalogue only -> the catalogue label.
+        let cat_label = Model { provider_name: Some("Catalogue".into()), ..base.clone() };
+        assert_eq!(cat_label.provider_display(), "Catalogue");
+        // Catalogue wins over the registry label.
+        let both = Model { provider_name: Some("Catalogue".into()), provider_registry_name: Some("Registry".into()), ..base.clone() };
+        assert_eq!(both.provider_display(), "Catalogue");
+        // A blank catalogue label falls through to the registry, not a blank.
+        let blank = Model { provider_name: Some(String::new()), provider_registry_name: Some("Registry".into()), ..base.clone() };
+        assert_eq!(blank.provider_display(), "Registry");
+        // A blank registry label degrades to the exact provider id.
+        let blank_registry = Model { provider_name: None, provider_registry_name: Some(String::new()), ..base.clone() };
+        assert_eq!(blank_registry.provider_display(), "acme");
+        // Identity is unaffected by any display label.
+        assert_eq!(both.qualified(), "acme/x");
+        assert_eq!(both.display_qualified(), "Catalogue/x");
+    }
+
+    // UIKIT-PROVIDER-DISPLAY production ordering: the loop clones `selected`
+    // before the provider registry is fetched/merged, so the startup render must
+    // re-derive the selection from the enriched rows by exact identity to show a
+    // real `/api/providers` name when `/api/models` omitted `provider_name`.
+    #[test]
+    fn reenrich_selection_refreshes_a_pre_enrichment_clone_by_exact_identity() {
+        let mut models = catalogue(r#"{"models":[{"provider_id":"acme","id":"x","name":"X"}]}"#).unwrap();
+        // Startup: `selected` is cloned before the registry is known.
+        let stale = selected_with_sources(&models, None, None).unwrap();
+        assert_eq!(stale.provider_display(), "acme");
+        let providers = vec![("acme".to_owned(), "Example Provider".to_owned(), String::new())];
+        let refreshed = reenrich_selection(&mut models, &providers, Some(&stale)).unwrap();
+        assert_eq!(refreshed.provider_display(), "Example Provider");
+        assert_eq!(refreshed.qualified(), "acme/x");
+        // A rename later refreshes again; identity is stable.
+        let renamed = vec![("acme".to_owned(), "Example Renamed".to_owned(), String::new())];
+        let refreshed = reenrich_selection(&mut models, &renamed, Some(&refreshed)).unwrap();
+        assert_eq!(refreshed.provider_display(), "Example Renamed");
+        assert_eq!(refreshed.qualified(), "acme/x");
+        // No selection stays no selection.
+        assert!(reenrich_selection(&mut models, &renamed, None).is_none());
+    }
+
+    // UIKIT-PROVIDER-DISPLAY: a catalogue refresh can drop the selected model
+    // (`models.retain(...)` in the live loop) while the selection is still held.
+    // The re-enrichment must then refresh the held selection's registry label
+    // from the CURRENT rows (and degrade to the exact id when the provider is
+    // gone) instead of retaining a stale name. Identity is unchanged.
+    #[test]
+    fn reenrich_selection_refreshes_a_selection_absent_from_the_catalogue() {
+        let mut models = catalogue(r#"{"models":[{"provider_id":"acme","id":"x","name":"X"}]}"#).unwrap();
+        // A selection cloned before the refresh, no longer catalogued, carrying a
+        // stale registry label.
+        let gone = Model {
+            id: "gone".into(), name: "Gone".into(), provider_id: "acme".into(),
+            context_window: None, free: false, cost: None, variants: Vec::new(),
+            provider_name: None, provider_registry_name: Some("Stale Name".into()),
+        };
+        let providers = vec![("acme".to_owned(), "Example Provider".to_owned(), String::new())];
+        let refreshed = reenrich_selection(&mut models, &providers, Some(&gone)).unwrap();
+        assert_eq!(refreshed.qualified(), "acme/gone");
+        assert_eq!(refreshed.provider_display(), "Example Provider");
+        // A later removal of the provider degrades to the exact id, not the
+        // stale label, and identity stays stable.
+        let refreshed = reenrich_selection(&mut models, &[], Some(&refreshed)).unwrap();
+        assert_eq!(refreshed.provider_display(), "acme");
+        assert_eq!(refreshed.qualified(), "acme/gone");
+    }
+
+    #[test]
+    fn provider_display_name_participates_in_search_without_changing_identity() {
+        let models = catalogue(r#"{"models":[
+            {"provider_id":"acme","id":"x","name":"Example Model","provider_name":"Example Provider"}
+        ]}"#).unwrap();
+        let model = &models[0];
+        // Upstream searches `["title","category"]`; the provider display name is
+        // the category, so it participates in search.
+        assert!(model.matches("Example Provider"));
+        assert!(model.matches("example provider"));
+        // The exact provider *id* still matches (identity is preserved).
+        assert!(model.matches("acme"));
+        assert!(model.matches("Example Model"));
+        assert!(model.matches("acme/x"));
+        assert!(!model.matches("nonexistent"));
+        assert_eq!(model.qualified(), "acme/x");
+        // The live registry label participates once enriched when the catalogue
+        // omitted `provider_name`.
+        let mut enriched = catalogue(r#"{"models":[{"provider_id":"acme","id":"x","name":"Example Model"}]}"#).unwrap();
+        enrich_provider_names(&mut enriched, &[("acme".to_owned(), "Registry Provider".to_owned(), String::new())]);
+        assert!(enriched[0].matches("Registry Provider"));
+        assert_eq!(enriched[0].qualified(), "acme/x");
+    }
+
+    // UIKIT-PROVIDER-DISPLAY: the picker search path (`visible_rows`, used by
+    // the model dialog) finds a row by its provider display label, and a
+    // provider rename/removal refreshes that searchability from the CURRENT
+    // registry rows without changing identity or the catalogue order.
+    #[test]
+    fn picker_search_finds_by_provider_display_label_and_refreshes() {
+        let mut models = catalogue(r#"{"models":[
+            {"provider_id":"acme","id":"x","name":"Example Model"},
+            {"provider_id":"beta","id":"y","name":"Other Model"}
+        ]}"#).unwrap();
+        // Before enrichment the provider id is the only provider text.
+        assert_eq!(visible_rows(&models, "Example Provider"), Vec::<usize>::new());
+        assert_eq!(visible_rows(&models, "acme"), vec![0]);
+        enrich_provider_names(
+            &mut models,
+            &[("acme".to_owned(), "Example Provider".to_owned(), String::new())],
+        );
+        assert_eq!(visible_rows(&models, "Example Provider"), vec![0]);
+        assert_eq!(visible_rows(&models, "example provider"), vec![0]);
+        // A rename refreshes searchability; the old label no longer matches.
+        enrich_provider_names(
+            &mut models,
+            &[("acme".to_owned(), "Renamed Provider".to_owned(), String::new())],
+        );
+        assert_eq!(visible_rows(&models, "Example Provider"), Vec::<usize>::new());
+        assert_eq!(visible_rows(&models, "Renamed Provider"), vec![0]);
+        // A provider removed from the registry degrades to the exact id.
+        enrich_provider_names(&mut models, &[]);
+        assert_eq!(visible_rows(&models, "Renamed Provider"), Vec::<usize>::new());
+        assert_eq!(visible_rows(&models, "acme"), vec![0]);
+        // Identity and catalogue order are unchanged by enrichment.
+        assert_eq!(models[0].qualified(), "acme/x");
+        assert_eq!(models[1].qualified(), "beta/y");
+    }
+
     #[test]
     fn post_select_dialog_opens_variant_picker_only_when_variants_exist() {
         let with_variants = Model {
             id: "x".into(), name: "X".into(), provider_id: "p".into(),
             context_window: None, free: false, cost: None,
             variants: vec!["default".into(), "thinking".into()],
+            provider_name: None,
+            provider_registry_name: None,
         };
         let no_variants = Model { variants: Vec::new(), ..with_variants.clone() };
         assert_eq!(post_select_dialog(&with_variants), pickers::ModelSelectionDialog::VariantPicker);
@@ -921,6 +1277,8 @@ mod picker_tests {
         let model = |id: &str| Model {
             id: id.into(), name: id.into(), provider_id: "p".into(),
             context_window: None, free: false, cost: None, variants: Vec::new(),
+            provider_name: None,
+            provider_registry_name: None,
         };
         // A new favorite is prepended (upstream `toggleFavorite`).
         assert_eq!(toggle_favorite_at(&state, &model("a")), Ok(true));
@@ -940,6 +1298,8 @@ mod picker_tests {
         let model = Model {
             id: "a".into(), name: "A".into(), provider_id: "p".into(),
             context_window: None, free: false, cost: None, variants: Vec::new(),
+            provider_name: None,
+            provider_registry_name: None,
         };
         assert_eq!(save_variant_at(&state, &model, Some("thinking")), Ok(()));
         assert_eq!(variant_for_at(Some(&state), "p", "a"), Some("thinking".to_owned()));
@@ -1097,7 +1457,7 @@ mod picker_tests {
         assert_eq!(models[index].qualified(), "9router/route/model-1158");
         assert_eq!(visible_rows(&models, "9router/route/model-1158"), vec![index]);
     }
-    fn models() -> Vec<Model> { vec![Model { id: "j-model".into(), name: "Jöhn 🚀".into(), provider_id: "openai".into(),context_window:None, free:false, cost:None, variants:Vec::new() }, Model { id: "k-model".into(), name: "Kappa".into(), provider_id: "openai".into(),context_window:None, free:false, cost:None, variants:Vec::new() }] }
+    fn models() -> Vec<Model> { vec![Model { id: "j-model".into(), name: "Jöhn 🚀".into(), provider_id: "openai".into(),context_window:None, free:false, cost:None, variants:Vec::new(), provider_name:None, provider_registry_name:None }, Model { id: "k-model".into(), name: "Kappa".into(), provider_id: "openai".into(),context_window:None, free:false, cost:None, variants:Vec::new(), provider_name:None, provider_registry_name:None }] }
     #[test] fn query_is_utf8_and_jk_are_search_text() {
         let m = models();
         assert_eq!(visible_rows(&m, "öhn"), vec![0]);
