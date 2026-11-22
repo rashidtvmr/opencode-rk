@@ -3524,6 +3524,14 @@ pub(crate) fn create_turn_stream_with_message(
                                             Ok::<Bytes, Infallible>(ndjson(json!({
                                                 "type": "assistant_message",
                                                 "message": message,
+                                                // The producing model of this turn travels with its usage so the
+                                                // UI resolves the denominator from the turn's own identity
+                                                // (`packages/tui/src/util/session.ts:46-66`), never from the
+                                                // currently selected model. An unqualified model yields `null`.
+                                                "model": state.qualified_model.split_once('/').map(|(provider, model_id)| json!({
+                                                    "id": model_id,
+                                                    "providerID": provider,
+                                                })),
                                                 "reasoning_summary": persisted_summary,
                                                 "usage": state.provider.usage(),
                                                 "stop_reason": stop_reason,

@@ -10199,6 +10199,27 @@ fn crash_paint_recover(
     catches <= CRASH_PAINT_CATCH_LIMIT
 }
 
+/// Resolve the context denominator from the usage-bearing producer identity
+/// only (`packages/tui/src/util/session.ts:46-66` `contextUsage(model, usage)`).
+/// An unknown producer identity, a producer absent from the catalogue, or a
+/// missing/zero exact limit yields `None`: the measured token total is still
+/// displayed but no percentage is fabricated. The selected UI model is never
+/// a fallback — it is display state, not usage authority.
+#[cfg(feature = "native")]
+fn usage_context_window(
+    models: &[native_setup::Model],
+    model: &Option<opencode_rk_providers::router::ModelRef>,
+) -> Option<u64> {
+    let model = model.as_ref()?;
+    models
+        .iter()
+        .find(|candidate| {
+            candidate.provider_id == model.provider_id && candidate.id == model.model_id
+        })
+        .and_then(|candidate| candidate.context_window)
+        .filter(|window| *window > 0)
+}
+
 fn native_loop(
     memory: &[MemoryFile],
     mut live: Option<LiveSnapshot>,
@@ -11908,7 +11929,7 @@ fn native_loop(
                         }
                         native_turn::Event::ReasoningDelta(delta) => transcript.reasoning_event(&delta,false),
                         native_turn::Event::ReasoningFinal(summary) => transcript.reasoning_event(&summary,true),
-                        native_turn::Event::Usage {input,output,cached,reasoning} => {
+                        native_turn::Event::Usage {input,output,cached,reasoning,model} => {
                             // SIDE-04: this event is the last eligible assistant
                             // message's usage, so the five-class sidebar uses it
                             // directly. Wire `input` is inclusive of cached, so
@@ -11919,7 +11940,18 @@ fn native_loop(
                                     input, output, cached, reasoning,
                                 ),
                             ));
-                            view.set_usage(input,output,cached,reasoning);
+                            // The denominator belongs to the turn's own producer
+                            // model (`util/session.ts:46-66`). An unknown identity
+                            // or absent/zero limit keeps the measured total and
+                            // omits the percentage; the selected UI model is never
+                            // substituted.
+                            view.set_usage_for_window(
+                                input,
+                                output,
+                                cached,
+                                reasoning,
+                                usage_context_window(&models, &model),
+                            );
                             // SIDE-03: this live turn now owns the Context row
                             // for this binding, so the history-load selector is
                             // suppressed until the binding changes.
@@ -12898,7 +12930,10 @@ fn native_loop(
             }
         }
         view.set_box_appearance(appearance.style.clone());
-        view.set_context_window(selected.as_ref().and_then(|model|model.context_window));
+        // The frame's selected model is display state, not usage authority.
+        // The inert render setter keeps a later frame from clobbering the
+        // denominator established by the usage-producing turn.
+        view.set_render_context_window(selected.as_ref().and_then(|model|model.context_window));
         // SIDE-05: obtain the daemon's local quota snapshot. Missing data is a
         // genuine unlimited/unknown state and hides the Limit contribution.
         view.set_limit(None);
@@ -23672,5 +23707,76 @@ mod provider_method_parse_tests {
         let items = list.as_array().unwrap();
         let methods = ordered_provider_methods(items, "anthropic");
         assert_eq!(methods, vec![("api-key".to_owned(), "key".to_owned(), "API key".to_owned())]);
+    }
+}
+
+/// P11 — the displayed context percentage is bound to the model that PRODUCED
+/// the usage (`packages/tui/src/util/session.ts:46-66` `contextUsage`), never
+/// to the currently selected UI model. Unknown producer identity, a producer
+/// missing from the catalogue, or an absent/zero exact limit all yield `None`
+/// so the measured token total renders without an invented percentage.
+#[cfg(all(test, feature = "native"))]
+mod p11_usage_context_window_tests {
+    use super::*;
+    use opencode_rk_providers::router::ModelRef;
+
+    fn m(id: &str, provider: &str, window: Option<u64>) -> native_setup::Model {
+        native_setup::Model {
+            id: id.to_owned(),
+            name: id.to_owned(),
+            provider_id: provider.to_owned(),
+            context_window: window,
+            free: false,
+            cost: None,
+            variants: Vec::new(),
+            provider_name: None,
+            provider_registry_name: None,
+        }
+    }
+
+    fn mr(provider: &str, model: &str) -> ModelRef {
+        ModelRef { provider_id: provider.to_owned(), model_id: model.to_owned() }
+    }
+
+    #[test]
+    fn usage_context_window_exact_match_returns_window() {
+        let models = vec![
+            m("gpt-4", "openai", Some(8192)),
+            m("claude-3", "anthropic", Some(200000)),
+        ];
+        let exact = mr("anthropic", "claude-3");
+        assert_eq!(usage_context_window(&models, &Some(exact)), Some(200000));
+    }
+
+    #[test]
+    fn usage_context_window_unknown_model_returns_none() {
+        let models = vec![m("gpt-4", "openai", Some(8192))];
+        let unknown = mr("anthropic", "claude-3");
+        assert_eq!(usage_context_window(&models, &Some(unknown)), None);
+        assert_eq!(usage_context_window(&models, &None), None);
+    }
+
+    #[test]
+    fn usage_context_window_zero_window_returns_none() {
+        let models = vec![m("gpt-4", "openai", Some(0))];
+        let matched = mr("openai", "gpt-4");
+        assert_eq!(usage_context_window(&models, &Some(matched)), None);
+    }
+
+    #[test]
+    fn usage_context_window_duplicate_provider_discriminates_by_id() {
+        let models = vec![
+            m("gpt-3.5", "openai", Some(4096)),
+            m("gpt-4", "openai", Some(8192)),
+        ];
+        let target = mr("openai", "gpt-4");
+        assert_eq!(usage_context_window(&models, &Some(target)), Some(8192));
+    }
+
+    #[test]
+    fn usage_context_window_no_selected_fallback_when_catalog_lacks_model() {
+        let catalog = vec![m("gpt-3.5", "openai", Some(4096))];
+        let producer_identity = mr("anthropic", "claude-3");
+        assert_eq!(usage_context_window(&catalog, &Some(producer_identity)), None);
     }
 }

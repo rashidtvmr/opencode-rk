@@ -1479,13 +1479,28 @@ impl NativeView {
 
     pub fn set_context_window(&mut self, window: Option<u64>) {
         self.context_window = window;
-        self.status.set_context_window(window);
+        // The selected model is display state, not usage authority. A late
+        // context-window call records the window for the next `set_usage`, but
+        // must not rebind the denominator of usage already observed from a
+        // producer. The render loop uses `set_render_context_window` for exactly
+        // this reason.
+        self.status.set_render_context_window(window);
+    }
+
+    /// Frame-selected metadata must not replace a usage producer's limit
+    /// (`packages/tui/src/util/session.ts:46-66` `contextUsage`). The frame's
+    /// `selected` model is display state, not usage authority.
+    pub fn set_render_context_window(&mut self, window: Option<u64>) {
+        self.status.set_render_context_window(window);
     }
 
     /// Update the sidebar's selected-model allowance projection.
     pub fn set_limit(&mut self, limit: Option<crate::native_view_status::native_sidebar::LimitSection>) {
         self.status.set_limit(limit);
     }
+    /// Display-only setter retained for test/legacy callers. New production
+    /// code must use [`Self::set_usage_for_window`], which carries a
+    /// usage-bearing window rather than the selected-derived `self.context_window`.
     pub fn set_usage(
         &mut self,
         input: u64,
@@ -1493,8 +1508,22 @@ impl NativeView {
         cached: Option<u64>,
         reasoning: Option<u64>,
     ) {
-        self.status
-            .set_usage(input, output, cached, reasoning, self.context_window);
+        self.set_usage_for_window(input, output, cached, reasoning, self.context_window);
+    }
+
+    /// Record provider usage together with the exact denominator of the model
+    /// that produced it (`util/session.ts:46-66` `contextUsage`). The live-turn
+    /// wiring passes the producer's window (or `None` when unknown/zero); later
+    /// render frames must not replace it.
+    pub fn set_usage_for_window(
+        &mut self,
+        input: u64,
+        output: u64,
+        cached: Option<u64>,
+        reasoning: Option<u64>,
+        window: Option<u64>,
+    ) {
+        self.status.set_usage(input, output, cached, reasoning, window);
     }
 
     /// Compatibility shim for the first layout handoff.  Busy state is

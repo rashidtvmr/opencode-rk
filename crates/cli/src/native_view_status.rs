@@ -77,6 +77,53 @@ mod measured_context_regression {
         view.clear_usage();
         assert!(view.render(120, 30).iter().any(|row| row == "context: Unavailable"));
     }
+
+    /// P11: the per-frame selected-model notification is display state, not
+    /// usage authority. A render frame must never rebind the context
+    /// denominator established by the usage-producing model. The measured
+    /// total and the producer's exact limit (or its absence) survive any
+    /// number of later frames carrying a different selected model.
+    #[test]
+    fn render_frames_never_clobber_usage_producer_window() {
+        let mut view = StatusView::default();
+        // Usage arrives from a producer whose catalog limit is 50K.
+        view.set_usage(10_000, 0, None, None, Some(50_000));
+        assert_eq!(view.usage_status_label().as_deref(), Some("10.0K (20%)"));
+
+        // The render loop calls set_render_context_window every frame with the
+        // currently selected model's limit. That notification must be inert:
+        // the producer's 50K denominator is never replaced.
+        for selected in [Some(200_000), None, Some(1_000_000), Some(8_192)] {
+            view.set_render_context_window(selected);
+            assert_eq!(
+                view.usage_status_label().as_deref(),
+                Some("10.0K (20%)"),
+                "selected-model render frame must not replace the usage producer window",
+            );
+        }
+        assert!(view
+            .render(120, 30)
+            .iter()
+            .any(|row| row == "context: used=10000 window=50000"));
+
+        // An unknown producer (no exact limit) keeps the measured total with
+        // NO fabricated percentage, even when render frames report a limit.
+        let mut unknown = StatusView::default();
+        unknown.set_usage(250, 250, None, None, None);
+        assert_eq!(unknown.usage_status_label().as_deref(), Some("500"));
+        for selected in [Some(200_000), Some(8_192), None] {
+            unknown.set_render_context_window(selected);
+            assert_eq!(
+                unknown.usage_status_label().as_deref(),
+                Some("500"),
+                "selected model must not fabricate a percentage denominator",
+            );
+        }
+        assert!(unknown
+            .render(120, 30)
+            .iter()
+            .any(|row| row == "context: used=500 window=unreported"));
+    }
 }
 
 /// Maximum MCP entries accepted from one snapshot (daemon registry cap).
@@ -1235,12 +1282,23 @@ impl StatusView {
     /// Update only the observed model limit, retaining the provider usage
     /// tuple when it arrived before model selection was reconciled.
     pub fn set_context_window(&mut self, window: Option<u64>) {
+        // This API remains the explicit late-confirmation/retraction seam for
+        // callers that have confirmed the same usage model. The render loop
+        // must use set_render_context_window instead, because its currently
+        // selected model is not usage authority and must not replace the
+        // denominator established by the usage-producing turn.
         self.context = self
             .usage
             .map(|(input, output, _, _)| {
                 (input.saturating_add(output), window.filter(|window| *window > 0))
             });
     }
+
+    /// Render-time selected-model notification. Selection is display state,
+    /// not usage authority; it must never infer or replace a usage denominator.
+    /// The context row therefore keeps whatever the usage producer established
+    /// (its own exact limit, or `unreported` when unknown/absent/zero).
+    pub fn set_render_context_window(&mut self, _window: Option<u64>) {}
 
     pub fn set_usage(&mut self,input:u64,output:u64,cached:Option<u64>,reasoning:Option<u64>,window:Option<u64>) {
         // CP-17: all five provider classes zero means *no assistant usage*,

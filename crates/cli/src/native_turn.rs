@@ -8,6 +8,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::native_assistant_facts::{created_at_ms, turn_duration_ms, AssistantFacts};
+use opencode_rk_providers::router::ModelRef;
 
 /// Per-tool transcript rows for the 14 tool specializations and the
 /// generic/plugin/MCP fallback (see the module docs for upstream pins).
@@ -31,7 +32,17 @@ fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
 
 #[derive(Debug, PartialEq)]
 pub enum Event {
-    Usage {input:u64,output:u64,cached:Option<u64>,reasoning:Option<u64>},
+    Usage {
+        input: u64,
+        output: u64,
+        cached: Option<u64>,
+        reasoning: Option<u64>,
+        /// Identity of the model that actually produced the turn
+        /// (`assistant_message.model`). Carried with the usage so the caller
+        /// resolves the context denominator from the producer, never from the
+        /// currently selected UI model. `None` when the frame omits it.
+        model: Option<ModelRef>,
+    },
     User { text: Option<String> },
     Delta { text: String, seq: u64 },
     ReasoningDelta(String),
@@ -277,7 +288,25 @@ impl TurnWorker {
                         if value["type"]=="assistant_message" {
                             if let Some(usage)=value.get("usage") {
                                 if let (Some(input),Some(output))=(usage["input_tokens"].as_u64(),usage["output_tokens"].as_u64()) {
-                                    tx.send(Event::Usage {input,output,cached:usage["cached_tokens"].as_u64(),reasoning:usage["reasoning_tokens"].as_u64()})
+                                    // The frame's own producer identity
+                                    // (`assistant_message.model`) travels with
+                                    // the usage so the caller resolves the exact
+                                    // limit from the turn's producer, never from
+                                    // the currently selected UI model. An absent
+                                    // or malformed identity stays `None`.
+                                    let model = value.get("model").and_then(|model| {
+                                        Some(ModelRef {
+                                            provider_id: model.get("providerID")?.as_str()?.to_owned(),
+                                            model_id: model.get("id")?.as_str()?.to_owned(),
+                                        })
+                                    });
+                                    tx.send(Event::Usage {
+                                        input,
+                                        output,
+                                        cached: usage["cached_tokens"].as_u64(),
+                                        reasoning: usage["reasoning_tokens"].as_u64(),
+                                        model,
+                                    })
                                         .await.map_err(|_|"UI closed".to_owned())?;
                                 }
                             }
@@ -667,7 +696,7 @@ mod native_error_tests {
         .await;
         assert_eq!(
             null_surface[0],
-            Event::Usage { input: 10, output: 4, cached: None, reasoning: None }
+            Event::Usage { input: 10, output: 4, cached: None, reasoning: None, model: None }
         );
         assert!(
             matches!(null_surface.last(), Some(Event::Assistant { .. })),
@@ -683,8 +712,46 @@ mod native_error_tests {
         .await;
         assert_eq!(
             explicit_zero[0],
-            Event::Usage { input: 7, output: 2, cached: Some(0), reasoning: Some(0) }
+            Event::Usage { input: 7, output: 2, cached: Some(0), reasoning: Some(0), model: None }
         );
+    }
+
+    /// The usage frame's own `model` projection must reach the UI event as a
+    /// structured producer identity. This is the exact wire shape the server
+    /// emits (`assistant_message.model.{providerID,id}`), decoded through the
+    /// real chunked HTTP harness so a regression in either side is caught:
+    /// a missing/malformed `model` must stay `None`, never a selected-model
+    /// fallback.
+    #[tokio::test]
+    async fn native_usage_event_parses_producer_model_through_real_http_harness() {
+        let events = mock_turn(
+            201,
+            concat!(
+                r#"{"type":"assistant_message","usage":{"input_tokens":50000,"output_tokens":50000},"model":{"providerID":"acme","id":"producer"},"message":{"body":{"text":"done"}}}"#,
+                "\n",
+            ),
+        )
+        .await;
+        assert!(matches!(
+            events.first(),
+            Some(Event::Usage { input: 50000, output: 50000, model: Some(model), .. })
+                if model.provider_id == "acme" && model.model_id == "producer"
+        ));
+
+        // A frame that omits `model` must keep the identity unknown so the
+        // caller cannot fabricate a denominator from the selected model.
+        let no_model = mock_turn(
+            201,
+            concat!(
+                r#"{"type":"assistant_message","usage":{"input_tokens":10,"output_tokens":2},"message":{"body":{"text":"done"}}}"#,
+                "\n",
+            ),
+        )
+        .await;
+        assert!(matches!(
+            no_model.first(),
+            Some(Event::Usage { input: 10, output: 2, model: None, .. })
+        ));
     }
 
     #[tokio::test]
