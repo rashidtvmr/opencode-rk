@@ -26,6 +26,15 @@ fn main() {
         return;
     }
 
+    // Cargo puts the profile directory (`target/<profile>`) on the dynamic
+    // loader search path when it runs a test or benchmark binary, but a native
+    // library located through `rustc-link-search` is not added there. Without
+    // this staging step a test binary that links the bridge dynamically cannot
+    // start (`Library not loaded: @rpath/libopentui.dylib`). The installed
+    // product is unaffected: it ships `lib/` beside `bin/` and resolves the
+    // library through the executable rpath emitted below.
+    stage_shared_library(&libdir);
+
     let rpath = match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
         Ok("macos") if libdir.join("libopentui.dylib").is_file() => "@loader_path/../lib",
         Ok("linux") if libdir.join("libopentui.so").is_file() => "$ORIGIN/../lib",
@@ -35,6 +44,54 @@ fn main() {
     // Both oc2 and the compatibility binary are built from this crate. Cargo
     // passes the argument directly to rustc, so `$ORIGIN` is not shell-expanded.
     println!("cargo:rustc-link-arg-bins=-Wl,-rpath,{rpath}");
+}
+
+/// Copy the vendored shared native library beside the build outputs.
+///
+/// Two consumers need different locations in the build tree:
+///
+/// * Test/bench binaries run from `<target>/<profile>/deps`; cargo puts the
+///   profile directory (and `deps`) on the dynamic loader search path, but the
+///   native library lives under `crates/opentui-bridge/native/lib/<triple>` and
+///   is only reachable through `rustc-link-search`, which is not part of that
+///   path.
+/// * `oc2`/`opencode-rk` at `<target>/<profile>/` resolve the library through
+///   their `@loader_path/../lib` rpath, which in the build tree is `<target>/lib`
+///   (the analogue of the installed `<prefix>/lib` beside `<prefix>/bin`).
+///   Tests that spawn those binaries with a sanitized environment rely on it.
+///
+/// Staging into both directories keeps the installed layout unchanged while
+/// letting every workspace target resolve the library. A static archive needs
+/// neither copy, so this is only reached for a shared artifact.
+fn stage_shared_library(libdir: &Path) {
+    let name = match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
+        Ok("macos") => "libopentui.dylib",
+        Ok("linux") => "libopentui.so",
+        Ok("windows") => "opentui.dll",
+        _ => return,
+    };
+    let source = libdir.join(name);
+    if !source.is_file() {
+        return;
+    }
+    // `OUT_DIR` is `<target>/<profile>/build/<pkg>-<hash>/out`; four parents
+    // up is the profile directory cargo searches when it runs the binary.
+    // (`nth(3)` is `<target>/<profile>/build`, which no loader looks in.)
+    let Some(profile_dir) = std::env::var_os("OUT_DIR")
+        .map(PathBuf::from)
+        .and_then(|out| out.ancestors().nth(4).map(Path::to_path_buf))
+    else {
+        return;
+    };
+    // Best effort: a failure here must not fail the build, because the
+    // installed binary resolves the library through its own rpath.
+    let _ = std::fs::copy(&source, profile_dir.join(name));
+    if let Some(target_dir) = profile_dir.parent() {
+        let lib = target_dir.join("lib");
+        if std::fs::create_dir_all(&lib).is_ok() {
+            let _ = std::fs::copy(&source, lib.join(name));
+        }
+    }
 }
 
 /// Put the source revision into every CLI binary, including non-native builds.

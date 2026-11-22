@@ -58,11 +58,17 @@ fn binary() -> PathBuf {
         return path;
     }
     let exe = std::env::current_exe().expect("current test executable");
-    let dir = exe
-        .parent()
-        .and_then(|deps| deps.parent())
-        .expect("test executable lives at <target>/<profile>/deps");
-    let path = dir.join(format!("oc2{}", std::env::consts::EXE_SUFFIX));
+    // The test executable's directory is not fixed: a plain `cargo test` puts it
+    // in `<target>/<profile>/deps`, while `--all-targets` (which the acceptance
+    // gate runs) places it under `<target>/<profile>/build/<pkg>/<hash>/out`.
+    // Walk up until the directory that actually holds the `oc2` bin.
+    let name = format!("oc2{}", std::env::consts::EXE_SUFFIX);
+    let path = exe
+        .ancestors()
+        .skip(1)
+        .map(|dir| dir.join(&name))
+        .find(|candidate| candidate.is_file())
+        .unwrap_or_else(|| exe.with_file_name(&name));
     assert!(
         path.is_file(),
         "derived installed binary missing: {}",

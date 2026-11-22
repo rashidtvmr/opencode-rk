@@ -758,6 +758,7 @@ mod admission_lane_tests {
 
     #[test]
     fn normal_finish_does_not_mark_explicit_cancellation() {
+        let _admission_test_lock = hold_admission_test_lock();
         let owner = TurnExecutionPermit::acquire(fresh()).unwrap().owner();
         let mut cancelled = owner.explicit_cancellation_receiver();
         owner.finish();
@@ -766,6 +767,7 @@ mod admission_lane_tests {
 
     #[test]
     fn explicit_cancel_marks_private_cancellation_signal() {
+        let _admission_test_lock = hold_admission_test_lock();
         let owner = TurnExecutionPermit::acquire(fresh()).unwrap().owner();
         let mut cancelled = owner.explicit_cancellation_receiver();
         owner.cancel_explicit();
