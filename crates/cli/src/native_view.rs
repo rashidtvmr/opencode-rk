@@ -12284,6 +12284,66 @@ mod route_inset_boundary_tests {
         assert_eq!(widths, vec![41, 40], "the 43->44 inset flip narrows the composer by one cell per side");
     }
 
+    /// LAY-02 end-to-end observable at the exact breakpoint: the published
+    /// route inset flips 1 -> 2 between 43 and 44 FULL terminal columns, and
+    /// every row the composer paints (prompt and footer included) still has
+    /// exactly `cols` cells, so nothing spills past the right edge even though
+    /// the box narrows by one column on each side. The immediate neighbours
+    /// 42/45 are swept too so an off-by-one breakpoint is visible. This pins
+    /// the user-visible contract behind the single-`main_padding` authority:
+    /// a consumer that kept a literal 2 / `width - 4` would break one of these
+    /// equalities at 43 or 44.
+    #[test]
+    fn lay_02_inset_flip_keeps_prompt_footer_within_view() {
+        let mut observed = Vec::new();
+        for (cols, expected_inset) in [(42u16, 1u16), (43, 1), (44, 2), (45, 2)] {
+            let mut view = NativeView::new(cols, 14);
+            view.set_session_route(true);
+            let presentation = view.presentation();
+            assert_eq!(
+                presentation.main_padding, expected_inset,
+                "LAY-02 published inset at {cols} columns"
+            );
+            assert_eq!(
+                view.session_route_inset(),
+                presentation.main_padding,
+                "inset helper reads the one published value at {cols}"
+            );
+            let (left, _, width, _) =
+                view.composer_region("draft").expect("composer region at {cols}");
+            assert_eq!(left, expected_inset, "composer left edge is the inset at {cols}");
+            assert_eq!(
+                width,
+                cols.saturating_sub(2 * expected_inset),
+                "composer width subtracts both published insets at {cols}"
+            );
+            assert!(
+                usize::from(left) + usize::from(width) <= usize::from(cols),
+                "composer/prompt stays inside the {cols}-column view"
+            );
+            let rows = view.render_typed("draft", &[], false, &[]);
+            for row in &rows {
+                let mut cells = 0usize;
+                crate::native_view_layout::visit_unpadded_cells(
+                    row,
+                    usize::from(u16::MAX),
+                    |_, cell| cells += cell,
+                );
+                assert_eq!(
+                    cells,
+                    usize::from(cols),
+                    "painted prompt/footer row fits {cols}: {row:?}"
+                );
+            }
+            observed.push((cols, presentation.main_padding, width));
+        }
+        assert_eq!(
+            observed,
+            vec![(42, 1, 40), (43, 1, 41), (44, 2, 40), (45, 2, 41)],
+            "the 43->44 inset flip narrows the composer despite the wider terminal"
+        );
+    }
+
     /// Degenerate viewports exercise the saturating half of the inset math:
     /// the painted frame never exceeds the terminal width and the container
     /// padding degrades to the largest pad that fits instead of underflowing.
