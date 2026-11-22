@@ -3011,11 +3011,13 @@ impl NativeView {
     /// LAY-02 session-route horizontal inset (`routes/session/index.tsx:1513-1515`):
     /// `dimensions().width < 44 ? 1 : 2`, keyed on the FULL terminal width so
     /// the tab rail and the right sidebar shrinking the session column never
-    /// move the predicate. Every session-route padding consumer derives from
-    /// this one value, so the painted frame, the geometry projection and the
-    /// pointer rectangles cannot disagree.
+    /// move the predicate. This reads the SAME published value that
+    /// [`Self::presentation`] exposes as [`ViewPresentation::main_padding`], so
+    /// the composer's `width - 2 * inset` math, the painted frame, the geometry
+    /// projection and the pointer rectangles cannot disagree — there is exactly
+    /// one inset authority for the session route.
     fn session_route_inset(&self) -> u16 {
-        session_horizontal_inset(self.layout.cols)
+        self.presentation().main_padding
     }
 
     /// Horizontal cell budget of the session content column: the main-column
@@ -12002,6 +12004,53 @@ mod route_inset_boundary_tests {
                 expected,
                 "presentation main_padding at {cols} columns"
             );
+        }
+    }
+
+    /// LAY-02 single-source guard: the composer box geometry — the former site
+    /// of a literal `width - 4` inset — is derived from the SAME published
+    /// `presentation().main_padding` at the 43/44 boundary. The box left edge
+    /// starts at the inset, its width subtracts both insets, and the prompt and
+    /// footer rows stay inside the viewport. If any consumer regressed to a
+    /// hardcoded 1/2/4, this assertion on the published authority catches it.
+    #[test]
+    fn composer_geometry_uses_published_main_padding_at_43_and_44() {
+        for (cols, inset) in [(43u16, 1u16), (44, 2)] {
+            let mut view = NativeView::new(cols, 12);
+            view.set_session_route(true);
+            let padding = view.presentation().main_padding;
+            assert_eq!(padding, inset, "main_padding at {cols} columns");
+            assert_eq!(
+                view.session_route_inset(),
+                padding,
+                "composer inset reads the published main_padding at {cols}"
+            );
+            let draft = "draft";
+            let rows = view.render_typed(draft, &[], false, &[]);
+            let (left, top, width, height) =
+                view.composer_region(draft).expect("composer region");
+            assert_eq!(
+                (left, width),
+                (padding, cols.saturating_sub(2 * padding)),
+                "composer box derives its left and width from main_padding at {cols}"
+            );
+            assert!(
+                usize::from(left) + usize::from(width) <= usize::from(cols),
+                "composer stays inside the {cols}-column view"
+            );
+            assert!(
+                usize::from(top) + usize::from(height) <= rows.len(),
+                "composer/prompt rows stay inside the {cols}-row view"
+            );
+            for row in &rows {
+                let mut cells = 0usize;
+                crate::native_view_layout::visit_unpadded_cells(
+                    row,
+                    usize::from(u16::MAX),
+                    |_, cell| cells += cell,
+                );
+                assert_eq!(cells, usize::from(cols), "cell-exact row at {cols}: {row:?}");
+            }
         }
     }
 
