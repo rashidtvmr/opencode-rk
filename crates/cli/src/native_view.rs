@@ -20,9 +20,7 @@ use crate::native_modal_layer::DialogRect;
 use crate::native_view_chat::ChatView;
 use crate::native_tabs::TabReservation;
 use crate::native_view_dialogs::DialogView;
-use crate::native_view_layout::{
-    compose_frame, fit, session_horizontal_inset, Layout, RightPane,
-};
+use crate::native_view_layout::{compose_frame, fit, Layout, RightPane};
 use crate::native_view_pages::{Page, PageRow, PageState};
 use crate::native_view_sessions::{SessionRow, SessionView};
 use crate::native_view_status::StatusView;
@@ -2946,7 +2944,7 @@ impl NativeView {
                 main_width: layout.session_width,
                 // LAY-02: the route inset keys on the full terminal width,
                 // never on the pane width left beside the diff panel.
-                main_padding: session_horizontal_inset(self.layout.cols),
+                main_padding: crate::native_view_layout::session_horizontal_inset(self.layout.cols),
                 sidebar_offset: Some(layout.pane.x),
                 sidebar_width: layout.pane.width,
             };
@@ -2981,7 +2979,7 @@ impl NativeView {
             main_width: pane.main_width,
             // LAY-02 (`index.tsx:1513-1515`): the route inset flips 1 -> 2 at
             // FULL terminal width 44, whatever the tab rail/sidebar left over.
-            main_padding: session_horizontal_inset(self.layout.cols),
+            main_padding: crate::native_view_layout::session_horizontal_inset(self.layout.cols),
             sidebar_offset,
             sidebar_width,
         }
@@ -3027,9 +3025,13 @@ impl NativeView {
     /// anchor capture/restore and `render_content` all measure text through
     /// this one value so pagination wraps exactly like the painted frame.
     fn session_content_width(&self) -> u16 {
-        self.presentation()
+        // LAY-02: derive the content width from the SAME published presentation
+        // that owns `main_padding`, so measuring text and the painted frame use
+        // one inset authority and `presentation()` is computed only once.
+        let presentation = self.presentation();
+        presentation
             .main_width
-            .saturating_sub(2 * self.session_route_inset())
+            .saturating_sub(2 * presentation.main_padding)
             .saturating_sub(crate::native_view_layout::transcript_scrollbar_reservation(
                 self.scrollbar_enabled,
             ))
@@ -3076,17 +3078,23 @@ impl NativeView {
     /// from route and bounded draft rows, never from visible text matching.
     pub fn composer_region(&self, draft: &str) -> Option<(u16, u16, u16, u16)> {
         let height = self.render_height();
-        let width = self.presentation().main_width;
+        // LAY-02 single source: read main_width AND main_padding from one
+        // published presentation so the composer box and the painted frame
+        // cannot disagree about the route inset (1 below terminal width 44,
+        // else 2). `session_route_inset()` exposes this same value to the
+        // other session-route consumers.
+        let presentation = self.presentation();
+        let width = presentation.main_width;
         if height == 0 || width <= 4 || !matches!(self.pages.page(), Page::Chat | Page::Theme) {
             return None;
         }
         // Upstream child sessions replace the main composer with return-parent UI.
         if self.parent_session { return None; }
         if self.session_route {
-            // LAY-02: the route inset (1 below the 44-column terminal
-            // boundary, else 2) owns the composer box placement, so the
-            // region, the painted frame and the cursor projection agree.
-            let inset = self.session_route_inset();
+            // LAY-02: the published main_padding owns the composer box
+            // placement, so the region, the painted frame and the cursor
+            // projection all derive from the same inset authority.
+            let inset = presentation.main_padding;
             // The dock takes its rows out of the shared body budget, exactly
             // like the composer slot sharing the scrollbox (`index.tsx:1591-1611`).
             let dock_height = self.painted_dock_height(width.saturating_sub(2 * inset));
@@ -3151,13 +3159,13 @@ impl NativeView {
     }
 
     /// The same cell rectangle drives both drawing and pointer admission.
+    /// LAY-02: read `main_width` and `main_padding` from ONE published
+    /// presentation so the rail geometry cannot disagree with the composer
+    /// box about the session route's 1/2-column inset.
     pub fn session_prompt_rail(&self, draft: &str) -> bool {
+        let presentation = self.presentation();
         self.session_route && crate::native_view_chat::session_composer_layout(
-            usize::from(
-                self.presentation()
-                    .main_width
-                    .saturating_sub(2 * self.session_route_inset()),
-            ),
+            usize::from(presentation.main_width.saturating_sub(2 * presentation.main_padding)),
             self.session_body_height(), draft, &self.box_appearance, self.layout.cols, self.layout.rows,
         ).rail
     }
@@ -4663,8 +4671,10 @@ impl NativeView {
         let width = presentation.main_width;
         // LAY-02: the session route's own horizontal inset (1 below the
         // 44-column terminal boundary, else 2) applied by every consumer of
-        // the session body below.
-        let route_inset = self.session_route_inset();
+        // the session body below. Read it from the single published
+        // presentation already computed above — `session_route_inset()`
+        // exposes this same value to consumers without a presentation in hand.
+        let route_inset = presentation.main_padding;
         // The shown transcript scrollbar reserves the upstream two cells
         // (viewport `paddingRight` 1 + track 1) on top of the route's own
         // 1+1/2+2 inset, so text never runs under the track.
@@ -12126,6 +12136,152 @@ mod route_inset_boundary_tests {
                 assert_eq!(cells, usize::from(cols), "cell-exact row at {cols}: {row:?}");
             }
         }
+    }
+
+    /// LAY-02 full-terminal-width invariant: the inset is keyed on the WHOLE
+    /// terminal width (`dimensions().width < 44 ? 1 : 2`), never on the narrower
+    /// session column left beside a vertical tab rail. A wide viewport whose
+    /// tab rail shrinks `main_width` must still publish inset 2, and a 43/44
+    /// boundary viewport must not shift its inset just because a rail is
+    /// installed. This guards the predicate input that the whole composer math
+    /// depends on.
+    #[test]
+    fn route_inset_keys_on_full_width_not_the_narrowed_session_column() {
+        use crate::native_tabs::{TabOrientation, TabReservation};
+
+        for (cols, expected) in [(43u16, 1u16), (44, 2), (148, 2)] {
+            let mut view = NativeView::new(cols, 30);
+            view.set_session_route(true);
+            let rail = TabReservation::for_view(TabOrientation::Vertical, cols, 30);
+            view.set_tab_reservation(rail);
+            // At 148 the vertical rail really narrows the session column
+            // (`main_width == cols - rail width`), so the two widths differ.
+            assert!(
+                cols != 148 || view.presentation().main_width < cols,
+                "the wide case must actually narrow the session column"
+            );
+            assert_eq!(
+                view.presentation().main_padding,
+                expected,
+                "presentation inset keys on full terminal width {cols}"
+            );
+            assert_eq!(
+                view.session_route_inset(),
+                expected,
+                "composer inset authority keys on full terminal width {cols}"
+            );
+        }
+    }
+
+    /// LAY-02 observable: crossing 43 -> 44 flips the published inset 1 -> 2,
+    /// and the flip is consumed by the composer box width (41 -> 40), so the
+    /// prompt/footer columns shrink rather than overflowing the view. Reading
+    /// geometry back from `composer_region` (not from the inset helper) proves
+    /// the composer math is driven by `presentation().main_padding`.
+    #[test]
+    fn composer_width_shrinks_when_the_inset_flips_from_43_to_44() {
+        let mut measured = Vec::new();
+        for (cols, inset, expected_width) in [(43u16, 1u16, 41u16), (44, 2, 40)] {
+            let mut view = NativeView::new(cols, 14);
+            view.set_session_route(true);
+            let presentation = view.presentation();
+            assert_eq!(presentation.main_padding, inset, "published inset at {cols}");
+            assert_eq!(
+                presentation.main_width.saturating_sub(2 * presentation.main_padding),
+                expected_width,
+                "main_width minus the two published insets at {cols}"
+            );
+            let draft = "draft";
+            let (left, _, width, _) =
+                view.composer_region(draft).expect("composer region at {cols}");
+            assert_eq!(
+                (left, width),
+                (inset, expected_width),
+                "composer box consumes the published inset at {cols}"
+            );
+            let rows = view.render_typed(draft, &[], false, &[]);
+            for row in &rows {
+                let mut cells = 0usize;
+                crate::native_view_layout::visit_unpadded_cells(
+                    row,
+                    usize::from(u16::MAX),
+                    |_, cell| cells += cell,
+                );
+                assert_eq!(cells, usize::from(cols), "prompt/footer row fits {cols}: {row:?}");
+            }
+            measured.push(width);
+        }
+        assert_eq!(measured, vec![41, 40], "the inset flip narrows the composer one cell");
+    }
+
+    /// LAY-02 single-authority sweep across the breakpoint neighbours: the
+    /// published [`ViewPresentation::main_padding`] is the one inset value that
+    /// drives every session-route geometry consumer. For each width the inset
+    /// helper, the composer box's left edge and its width must all agree with
+    /// that published value, and the strict `< 44` predicate must hold at both
+    /// immediate neighbours of the flip (42/43 -> 1, 44/45 -> 2). If any
+    /// consumer regressed to a literal 1/2/4, one of these equalities breaks.
+    #[test]
+    fn lay_02_inset_authority_sweep_at_breakpoint_neighbours() {
+        for (cols, inset) in [(42u16, 1u16), (43, 1), (44, 2), (45, 2)] {
+            let mut view = NativeView::new(cols, 16);
+            view.set_session_route(true);
+            let published = view.presentation().main_padding;
+            assert_eq!(published, inset, "published inset at {cols} columns");
+            assert_eq!(
+                view.session_route_inset(),
+                published,
+                "every consumer reads the single published inset at {cols}"
+            );
+            let (left, _, width, _) =
+                view.composer_region("draft").expect("composer region at {cols}");
+            assert_eq!(left, published, "composer left edge is the published inset at {cols}");
+            assert_eq!(
+                width,
+                view.presentation().main_width - 2 * published,
+                "composer width derives from the published inset at {cols}"
+            );
+            assert!(
+                usize::from(left) + usize::from(width) <= usize::from(cols),
+                "composer/prompt stays inside the {cols}-column view"
+            );
+        }
+    }
+
+    /// LAY-02 observable at the exact breakpoint: the published inset flips
+    /// 1 -> 2 between 43 and 44 full terminal columns, and the composer box
+    /// that carries the prompt/footer rows is narrowed by that SAME published
+    /// inset on both sides, so it never spills outside the view. Reading the
+    /// geometry back from `composer_region` proves the composer math is driven
+    /// by `presentation().main_padding`, not a literal 2 / `width - 4`.
+    #[test]
+    fn lay_02_published_inset_narrows_composer_at_43_and_44() {
+        let mut widths = Vec::new();
+        for (cols, inset) in [(43u16, 1u16), (44, 2)] {
+            let mut view = NativeView::new(cols, 16);
+            view.set_session_route(true);
+            let presentation = view.presentation();
+            assert_eq!(presentation.main_padding, inset, "published inset at {cols} columns");
+            assert_eq!(
+                view.session_route_inset(),
+                presentation.main_padding,
+                "every consumer reads the one published inset at {cols}"
+            );
+            let (left, _, width, _) =
+                view.composer_region("draft").expect("composer region at {cols}");
+            assert_eq!(left, inset, "composer left edge is the published inset at {cols}");
+            assert_eq!(
+                width,
+                presentation.main_width.saturating_sub(2 * presentation.main_padding),
+                "composer width subtracts both published insets at {cols}"
+            );
+            assert!(
+                usize::from(left) + usize::from(width) <= usize::from(cols),
+                "composer/prompt stays inside the {cols}-column view"
+            );
+            widths.push(width);
+        }
+        assert_eq!(widths, vec![41, 40], "the 43->44 inset flip narrows the composer by one cell per side");
     }
 
     /// Degenerate viewports exercise the saturating half of the inset math:

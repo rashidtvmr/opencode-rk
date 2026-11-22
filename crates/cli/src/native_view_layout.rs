@@ -2369,7 +2369,19 @@ mod tests {
     /// the session column minus the 4 inset cells (`index.tsx:260`).
     #[test]
     fn lay_02_route_horizontal_inset_switches_between_43_and_44() {
-        for (width, inset) in [(1u16, 1u16), (43, 1), (44, 2), (120, 2), (200, 2)] {
+        // Cover both neighbours of the flip as well: the predicate is a strict
+        // `< 44`, so 42/43 stay at 1 and 44/45 jump to 2. Including the
+        // immediate neighbours makes an off-by-one breakpoint visible even if
+        // the 43/44 pair alone were ever special-cased.
+        for (width, inset) in [
+            (1u16, 1u16),
+            (42, 1),
+            (43, 1),
+            (44, 2),
+            (45, 2),
+            (120, 2),
+            (200, 2),
+        ] {
             assert_eq!(
                 session_horizontal_inset(width),
                 inset,
