@@ -737,6 +737,20 @@ impl StatusView {
     #[must_use]
     pub fn usage_status_label(&self) -> Option<String> {
         let (used, window) = self.context?;
+        // CP-17: an all-five-classes-zero observation is *no assistant usage*,
+        // not a measured `0`. Upstream `contextUsage`
+        // (`packages/tui/src/util/session.ts:44-63`) returns `undefined` for
+        // `tokens <= 0` and the right-footer `formatContextUsage` row is gated
+        // on that observation (`component/prompt/footer.tsx:38-46`), so no
+        // usage row is painted. Keep a single blank cell so the `/context` hit
+        // region stays geometrically stable (the measured-zero hitbox is an
+        // existing semantic contract), but render no visible usage text at
+        // all — never the fabricated `0` row.
+        if self.usage.is_some_and(|(input, output, cached, reasoning)| {
+            native_sidebar::classes_from_wire(input, output, cached, reasoning).total() == 0
+        }) {
+            return Some(" ".to_owned());
+        }
         // Upstream `formatContextUsage` (`util/session.ts:63-66`) renders the
         // footer token count through `Locale.number` (`util/locale.ts:19-27`),
         // i.e. compact `1.0K`/`1.2M` units rather than grouped thousands. The
@@ -1229,6 +1243,17 @@ impl StatusView {
     }
 
     pub fn set_usage(&mut self,input:u64,output:u64,cached:Option<u64>,reasoning:Option<u64>,window:Option<u64>) {
+        // CP-17: all five provider classes zero means *no assistant usage*,
+        // not a measured zero. Upstream `contextUsage`
+        // (`packages/tui/src/util/session.ts:44-63`) returns `undefined` for
+        // `tokens <= 0` and the right-footer `formatContextUsage` row is gated
+        // on that observation (`component/prompt/footer.tsx:38-46`). The
+        // measured tuple is retained so the `/context` hit region stays stable,
+        // but `usage_status_label` then paints a blank cell (no visible `0`
+        // row). Drop any stale five-class projection so the sidebar cannot
+        // revive a `0 tokens` row from an earlier binding. A real positive
+        // total still paints the label (with or without a known window).
+        let absent = native_sidebar::classes_from_wire(input, output, cached, reasoning).total() == 0;
         self.usage=Some((input,output,cached,reasoning));
         // input/output are the authoritative measured totals; cached/reasoning
         // are subsets of input/output (`None` = unreported, never a fabricated
@@ -1236,6 +1261,9 @@ impl StatusView {
         // A missing model limit is not a zero window: keep the measured total
         // visible and omit only the percentage until the limit is known.
         self.context=Some((input.saturating_add(output),window.filter(|limit|*limit>0)));
+        if absent {
+            self.sidebar_classes = None;
+        }
     }
     pub fn clear_usage(&mut self) {self.usage=None;self.context=None;}
 
@@ -1987,6 +2015,41 @@ mod tests {
         let rows = view.render_sidebar(120, 30);
         assert!(!rows.iter().any(|row| row == "Context" || row.contains("unreported")));
         assert!(!rows.iter().any(|row| row.contains("Input 0") || row.contains("Output 0")));
+    }
+
+    /// CP-17: all five provider token classes zero is *no assistant usage*,
+    /// not a measured zero. `set_usage` must clear to a hidden row: the
+    /// right-footer usage label and the sidebar token row paint nothing, even
+    /// when a context window or a stale five-class projection was previously
+    /// set, while the measured tuple is retained for a stable `/context` hit.
+    #[test]
+    fn absent_usage_and_context_limit_all_zero_clears_to_hidden_row() {
+        let mut view = StatusView::default();
+        // A prior binding/live turn carried real usage and five classes.
+        view.set_usage(120, 30, Some(40), Some(10), Some(200_000));
+        view.set_usage_classes(Some(native_sidebar::classes_from_wire(120, 30, Some(40), Some(10))));
+        assert!(view.usage_status_label().as_deref().is_some_and(|label| label.starts_with("150 ")));
+        assert!(view.render(120, 30).iter().any(|r| *r == "context: used=150 window=200000"));
+        assert!(view.render_sidebar(120, 30).iter().any(|r| r == "Context" || r.contains("150 tokens")));
+
+        // No assistant usage: every class zero (cached/reasoning absent or
+        // explicit zero), keep the known window — still no visible usage row.
+        view.set_usage(0, 0, None, None, Some(200_000));
+        let hidden = view.usage_status_label();
+        assert!(hidden.as_deref().is_some_and(|label| label.trim().is_empty()),
+            "footer usage cell is blank, not a fabricated zero: {hidden:?}");
+        assert!(!hidden.as_deref().is_some_and(|label| label.contains('0') || label.contains("Context")));
+        assert!(!view.render_sidebar(120, 30).iter().any(|r| r == "Context" || r.contains("0 tokens")));
+
+        // A real positive total paints the label again.
+        view.set_usage(10, 4, None, None, None);
+        assert_eq!(view.usage_status_label().as_deref(), Some("14"));
+        assert!(view.render_sidebar(120, 30).iter().any(|r| r == "Context"));
+
+        // Explicit provider zeros for all subsets are equally absent.
+        view.set_usage(0, 0, Some(0), Some(0), None);
+        assert!(view.usage_status_label().as_deref().is_some_and(|label| label.trim().is_empty()));
+        assert!(!view.render_sidebar(120, 30).iter().any(|r| r == "Context" || r.contains("0 tokens")));
     }
 
     #[test]

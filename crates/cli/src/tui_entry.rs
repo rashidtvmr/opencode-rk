@@ -789,6 +789,65 @@ fn publishable_queued_prompts(
         .collect()
 }
 
+/// CP-17: retract every usage projection for the current binding when the
+/// history selector finds no eligible assistant usage. Upstream renders the
+/// right-footer `formatContextUsage` row only when a usage observation exists
+/// (`packages/tui/src/util/session.ts:44-63`,
+/// `component/prompt/footer.tsx:38-46`); with no assistant usage there must be
+/// no visible usage row, never a fabricated `0`. `set_usage(0,0,None,None)`
+/// clears to the hidden zero row in `StatusView::set_usage` (blank footer cell,
+/// stable `/context` hit), `set_usage_classes(None)` drops any five-class
+/// projection left by a prior live turn or history snapshot, and
+/// `set_context_window(None)` clears the prior binding's model limit so it
+/// cannot leak into the next binding's live usage.
+#[cfg(feature = "native")]
+fn retract_binding_usage(view: &mut crate::native_view::NativeView) {
+    view.set_context_window(None);
+    view.set_usage(0, 0, None, None);
+    view.set_usage_classes(None);
+}
+
+#[cfg(all(test, feature = "native"))]
+mod cp17_usage_clear_tests {
+    use super::retract_binding_usage;
+
+    /// RED before: the history-derived usage block had no `else`, so a binding
+    /// with no assistant usage kept a stale/zero usage row. GREEN after:
+    /// retracting blanks the footer usage cell and drops the sidebar token row,
+    /// and a fresh binding uses its own model limit (no stale percentage).
+    #[test]
+    fn cp17_no_assistant_usage_retracts_footer_and_sidebar_rows() {
+        let mut view = crate::native_view::NativeView::new(150, 32);
+        // A prior binding/live turn carried real usage, a limit and five classes.
+        view.set_context_window(Some(200_000));
+        view.set_usage(120, 30, Some(40), Some(10));
+        view.set_usage_classes(Some(
+            crate::native_view_status::native_sidebar::classes_from_wire(
+                120, 30, Some(40), Some(10),
+            ),
+        ));
+        let row = view.render("draft", &[], false, &[]).pop().unwrap();
+        assert!(row.contains("150"), "precondition: measured usage painted: {row:?}");
+        assert!(view.context_usage_region().is_some());
+
+        // No eligible assistant usage for the new binding: retract all three.
+        retract_binding_usage(&mut view);
+        let row = view.render("draft", &[], false, &[]).pop().unwrap();
+        assert!(!row.contains("150"), "stale usage retracted: {row:?}");
+        assert!(!row.contains("0%"), "stale limit/percentage retracted: {row:?}");
+        // The hidden zero keeps a stable click target rather than a zero row.
+        assert!(view.context_usage_region().is_some());
+
+        // A fresh binding with its own limit paints the new usage and percent,
+        // proving the prior binding's window was cleared by the retraction.
+        view.set_context_window(Some(1_000));
+        view.set_usage(50, 50, None, None);
+        let row = view.render("draft", &[], false, &[]).pop().unwrap();
+        assert!(row.contains("100"), "fresh usage painted: {row:?}");
+        assert!(row.contains("10%"), "fresh limit painted: {row:?}");
+    }
+}
+
 #[cfg(feature = "native")]
 fn composer_pointer_event(
     event: native_input_decoder::InputEvent,
@@ -13114,23 +13173,36 @@ fn native_loop(
         // whose model is absent from the catalogue yields no percentage, never
         // an invented one.
         if usage_live_generation != Some(binding_generation) {
-            if let Some(snapshot) = live.as_ref() {
-                if let Some(usage) = crate::native_chat_projection::last_assistant_usage(
+            // CP-17: derive history usage when a snapshot exists, else retract.
+            // The original nested `if let Some(snapshot)` skipped retraction
+            // while `live` was `None` (e.g. a freshly bound session before its
+            // snapshot loads), leaving a stale/zero row visible in that window.
+            let history_usage = live.as_ref().and_then(|snapshot| {
+                crate::native_chat_projection::last_assistant_usage(
                     &snapshot.raw_history,
                     snapshot.session_revert_boundary.as_deref(),
-                ) {
-                    let limit = usage.provider.as_deref().and_then(|provider| {
-                        usage.model.as_deref().and_then(|model| {
-                            models
-                                .iter()
-                                .find(|entry| entry.provider_id == provider && entry.id == model)
-                                .and_then(|entry| entry.context_window)
-                        })
-                    });
-                    view.set_context_window(limit);
-                    view.set_usage(usage.input, usage.output, usage.cached, usage.reasoning);
-                    view.set_usage_classes(Some(usage.classes()));
-                }
+                )
+            });
+            if let Some(usage) = history_usage {
+                let limit = usage.provider.as_deref().and_then(|provider| {
+                    usage.model.as_deref().and_then(|model| {
+                        models
+                            .iter()
+                            .find(|entry| entry.provider_id == provider && entry.id == model)
+                            .and_then(|entry| entry.context_window)
+                    })
+                });
+                view.set_context_window(limit);
+                view.set_usage(usage.input, usage.output, usage.cached, usage.reasoning);
+                view.set_usage_classes(Some(usage.classes()));
+            } else {
+                // CP-17: no eligible assistant usage for this binding (no live
+                // snapshot yet, no assistant message, or a revert/compaction
+                // boundary that excludes the older ones). Retract any
+                // usage/context/classes left by a previous binding so the footer
+                // shows no visible usage row instead of a stale or fabricated
+                // zero row.
+                retract_binding_usage(&mut view);
             }
         }
 
