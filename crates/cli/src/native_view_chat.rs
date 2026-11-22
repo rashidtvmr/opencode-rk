@@ -4414,7 +4414,7 @@ impl ChatView {
         busy: bool,
         appearance: &crate::native_box_style::BoxAppearance,
     ) -> Vec<StyledChatRow> {
-        self.render_styled_mode(width, height, workspace, messages, draft, busy, appearance, true, self.markdown_mode).0
+        self.render_styled_mode(width, height, workspace, messages, draft, busy, appearance, true, self.markdown_mode, false).0
     }
 
     #[must_use]
@@ -4422,7 +4422,7 @@ impl ChatView {
         &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
         draft: &str, busy: bool, appearance: &crate::native_box_style::BoxAppearance,
     ) -> (Vec<StyledChatRow>, Vec<Vec<ChatRunSpan>>) {
-        self.render_styled_mode(width, height, workspace, messages, draft, busy, appearance, true, self.markdown_mode)
+        self.render_styled_mode(width, height, workspace, messages, draft, busy, appearance, true, self.markdown_mode, false)
     }
 
     pub(crate) fn render_styled_with_spans_mode(
@@ -4430,7 +4430,10 @@ impl ChatView {
         draft: &str, busy: bool, appearance: &crate::native_box_style::BoxAppearance,
         markdown_mode: crate::markdown_runs::MarkdownMode,
     ) -> (Vec<StyledChatRow>, Vec<Vec<ChatRunSpan>>) {
-        self.render_styled_mode(width, height, workspace, messages, draft, busy, appearance, true, markdown_mode)
+        // LAY-15: the live transcript render reserves one blank row directly
+        // above the composer for the "Jump to latest" / history-loading line,
+        // unconditionally (including when no jump action is present).
+        self.render_styled_mode(width, height, workspace, messages, draft, busy, appearance, true, markdown_mode, true)
     }
 
     /// MSG-001/002: per-message render plan for the live styled path. Routes
@@ -4580,7 +4583,7 @@ impl ChatView {
         &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
         busy: bool, appearance: &crate::native_box_style::BoxAppearance,
     ) -> Vec<StyledChatRow> {
-        self.render_styled_mode(width, height, workspace, messages, "", busy, appearance, false, self.markdown_mode).0
+        self.render_styled_mode(width, height, workspace, messages, "", busy, appearance, false, self.markdown_mode, false).0
     }
 
     #[must_use]
@@ -4588,7 +4591,7 @@ impl ChatView {
         &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
         busy: bool, appearance: &crate::native_box_style::BoxAppearance,
     ) -> (Vec<StyledChatRow>, Vec<Vec<ChatRunSpan>>) {
-        self.render_styled_mode(width, height, workspace, messages, "", busy, appearance, false, self.markdown_mode)
+        self.render_styled_mode(width, height, workspace, messages, "", busy, appearance, false, self.markdown_mode, false)
     }
 
     pub(crate) fn render_styled_without_prompt_with_spans_mode(
@@ -4596,13 +4599,14 @@ impl ChatView {
         busy: bool, appearance: &crate::native_box_style::BoxAppearance,
         markdown_mode: crate::markdown_runs::MarkdownMode,
     ) -> (Vec<StyledChatRow>, Vec<Vec<ChatRunSpan>>) {
-        self.render_styled_mode(width, height, workspace, messages, "", busy, appearance, false, markdown_mode)
+        self.render_styled_mode(width, height, workspace, messages, "", busy, appearance, false, markdown_mode, false)
     }
 
     fn render_styled_mode(
         &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
         draft: &str, busy: bool, appearance: &crate::native_box_style::BoxAppearance,
         show_prompt: bool, markdown_mode: crate::markdown_runs::MarkdownMode,
+        reserve_action_row: bool,
     ) -> (Vec<StyledChatRow>, Vec<Vec<ChatRunSpan>>) {
         let requested_scroll = self.scroll.get();
         let height = height.min(MAX_VIEW_ROWS);
@@ -4654,7 +4658,26 @@ impl ChatView {
         // Upstream paints no transcript-header row (`routes/session/index.tsx`
         // renders the transcript directly between the tab strip and the
         // composer), so the whole body above the composer is transcript.
-        let transcript_h = body_h;
+        // LAY-15: the session always reserves one blank row directly below the
+        // transcript — the "Jump to latest" / history-loading line
+        // (`routes/session/index.tsx:1570`, `docs/ui-parity/.../audit-layout.md`).
+        // That row exists even when NO jump action is present, so keep it out
+        // of the transcript viewport: the row at `body_h - 1` stays blank for
+        // every scroll/message state. The composer's own rows (and the
+        // `composer_region` hit geometry) are untouched because the reservation
+        // comes out of the transcript allocation, never the composer's.
+        // LAY-15 is a property of the LIVE styled path only (`native_view.rs`
+        // renders through `render_styled_with_spans_mode`). The plain-styled
+        // helpers (`render_styled` / `render_styled_with_spans`) are also used
+        // to compute exact rendered-row anchors over the whole viewport, so
+        // they must keep the unreserved transcript geometry. `reserve_action_row`
+        // carries that distinction from the public entrypoints.
+        let reserved_action_rows = if show_prompt && reserve_action_row {
+            usize::from(crate::native_view_layout::SESSION_RESERVED_ACTION_ROWS)
+        } else {
+            0
+        };
+        let transcript_h = body_h.saturating_sub(reserved_action_rows);
         let target = self.scroll.get().saturating_add(transcript_h);
         // MSG-001/002: per-message render plan from the same session grouping
         // reducer the history projection uses. A message can anchor more than
@@ -4840,6 +4863,26 @@ impl ChatView {
             tool_owners[first + index] = tool;
             group_owners[first + index] = group;
         }
+        // LAY-15: restate the reserved-row invariant in screen order after the
+        // visible transcript slice is painted. Normally the reservation above
+        // (`transcript_h = body_h - reserved_action_rows`) already leaves
+        // `rows[body_h - 1]` blank, but restating it makes the guarantee hold
+        // regardless of the header offset (`first`) or how many rows the
+        // visible slice contributes, so no scroll/jump/message state can let
+        // transcript text reclaim the action row directly above the composer.
+        if show_prompt && reserved_action_rows > 0 && body_h > 0 {
+            let reserved = body_h - 1;
+            rows[reserved] = (String::new(), ChatRowClass::Blank);
+            // Clear any per-row metadata too, so the action row is inert in
+            // every state: no stray markdown spans, text bounds or click/hit
+            // owners may survive on a row upstream keeps but leaves blank.
+            bounds[reserved] = None;
+            row_spans[reserved].clear();
+            owners[reserved] = None;
+            child_owners[reserved] = None;
+            tool_owners[reserved] = None;
+            group_owners[reserved] = None;
+        }
         self.message_owners.replace(owners);
         self.child_owners.replace(child_owners);
         self.tool_owners.replace(tool_owners);
@@ -4874,7 +4917,7 @@ impl ChatView {
         show_prompt: bool,
     ) -> Vec<StyledChatRow> {
         let scroll = self.scroll.get();
-        let mut rows = self.render_styled_mode(width, height, workspace, &[], draft, busy, appearance, show_prompt, self.markdown_mode).0;
+        let mut rows = self.render_styled_mode(width, height, workspace, &[], draft, busy, appearance, show_prompt, self.markdown_mode, false).0;
         self.scroll.set(scroll);
         let body = rows.iter().position(|(_, class, _)| *class == ChatRowClass::Composer).unwrap_or(rows.len());
         let first = usize::from(body > 0);

@@ -8458,6 +8458,80 @@ mod tests {
         assert_eq!(sidebar_title_attr(&mut view), crate::native_ui_style::ATTR_BOLD);
     }
 
+    /// LAY-15: upstream reserves one row directly below the transcript for the
+    /// history-loading / "Jump to latest" line, and that row exists even when no
+    /// jump action is present (`routes/session/index.tsx:1570`;
+    /// `docs/ui-parity/opencode-ui-parity-kit/audit-layout.md`). The live
+    /// transcript render must keep that blank row above the composer regardless
+    /// of jump state. Here no jump action is installed at all: with a transcript
+    /// that fully fills the body, the row immediately above the composer must
+    /// still be blank (before the reservation it would be transcript text).
+    #[test]
+    fn lay_15_reserved_blank_row_survives_without_jump_action() {
+        let mut view = super::NativeView::new(80, 24);
+        view.set_session_route(true);
+        // One long assistant message yields contiguous content rows with no
+        // blank group separators, so a full body really pushes text down to the
+        // composer when the action row is not reserved.
+        let text = (0..80)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let message = crate::native_view_chat::ChatMessage::text(
+            crate::native_view_chat::ChatRole::Assistant,
+            text,
+        );
+        let _ = view.render_typed("", &[message], false, &[]);
+
+        let classes = view.chat_row_classes();
+        let composer_start = classes
+            .iter()
+            .position(|class| *class == crate::native_view_chat::ChatRowClass::Composer)
+            .expect("composer row painted in the live transcript render");
+        assert!(composer_start > 0, "a row exists above the composer");
+        assert_eq!(
+            classes[composer_start - 1],
+            crate::native_view_chat::ChatRowClass::Blank,
+            "LAY-15: one blank row stays reserved directly above the composer with no jump action: {classes:?}"
+        );
+    }
+
+    /// LAY-15 ("regardless of jump state"): the reserved blank row must also
+    /// survive when a jump action is logically active. Scrolling the transcript
+    /// away from the tail is what makes the shell frame show "Jump to latest";
+    /// the live transcript render reserves the row unconditionally (it is not
+    /// gated on scroll/jump state), so the row directly above the composer must
+    /// still be blank here.
+    #[test]
+    fn lay_15_reserved_blank_row_survives_when_scrolled_away_from_tail() {
+        let mut view = super::NativeView::new(80, 24);
+        view.set_session_route(true);
+        let text = (0..80)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let message = crate::native_view_chat::ChatMessage::text(
+            crate::native_view_chat::ChatRole::Assistant,
+            text,
+        );
+        // Non-zero scroll offset => "away from bottom" jump action upstream,
+        // yet the reserved row above the composer must stay blank.
+        view.scroll_up(5);
+        let _ = view.render_typed("", &[message], false, &[]);
+
+        let classes = view.chat_row_classes();
+        let composer_start = classes
+            .iter()
+            .position(|class| *class == crate::native_view_chat::ChatRowClass::Composer)
+            .expect("composer row painted in the live transcript render");
+        assert!(composer_start > 0, "a row exists above the composer");
+        assert_eq!(
+            classes[composer_start - 1],
+            crate::native_view_chat::ChatRowClass::Blank,
+            "LAY-15: reserved blank row stays above the composer while scrolled away from tail: {classes:?}"
+        );
+    }
+
     #[test]
     fn explicit_outline_prompt_wraps_and_tracks_cursor_through_resize() {
         let mut appearance = crate::native_box_style::BoxAppearance::default();
