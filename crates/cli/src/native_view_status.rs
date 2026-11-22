@@ -2052,6 +2052,35 @@ mod tests {
         assert!(!view.render_sidebar(120, 30).iter().any(|r| r == "Context" || r.contains("0 tokens")));
     }
 
+    /// CP-17 core observable in isolation: a fresh view with all five classes
+    /// zero and no known window paints no visible footer usage text (only the
+    /// blank, hit-stable cell) and no sidebar token row — never a fabricated
+    /// `0` / `0%` row. Upstream `contextUsage` returns `undefined` for
+    /// `tokens <= 0`, so no right-footer usage row is gated on.
+    #[test]
+    fn absent_usage_from_fresh_view_never_paints_zero_row() {
+        let mut view = StatusView::default();
+        view.set_usage(0, 0, None, None, None);
+        let label = view.usage_status_label();
+        assert!(
+            label.as_deref().is_some_and(|label| label.trim().is_empty()),
+            "no visible zero label: {label:?}"
+        );
+        // The observable is a *hidden* row, never a fabricated `0` / `0%`:
+        // the hit-stable cell carries no digit and no percent sign at all.
+        assert!(
+            !label.as_deref().is_some_and(|s| s.chars().any(|c| c.is_ascii_digit())),
+            "footer usage cell contains no zero/digit: {label:?}"
+        );
+        assert!(
+            !label.as_deref().is_some_and(|s| s.contains('%')),
+            "footer usage cell contains no fabricated percent: {label:?}"
+        );
+        let sidebar = view.render_sidebar(120, 30).join("\n");
+        assert!(!sidebar.contains("0 tokens"), "no fabricated zero token row: {sidebar:?}");
+        assert!(!sidebar.contains("Context"), "context section stays hidden: {sidebar:?}");
+    }
+
     #[test]
     fn unconfirmed_connection_never_renders_connected() {
         let view = StatusView::default();

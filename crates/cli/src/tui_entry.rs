@@ -846,6 +846,33 @@ mod cp17_usage_clear_tests {
         assert!(row.contains("100"), "fresh usage painted: {row:?}");
         assert!(row.contains("10%"), "fresh limit painted: {row:?}");
     }
+
+    /// CP-17: the rendered right footer must show *no* usage row at all when
+    /// every provider token class is zero — not a fabricated `0`/`0%` row.
+    /// A blank cell is retained only to keep the `/context` hit region stable,
+    /// as the pre-existing hitbox contract requires.
+    #[test]
+    fn cp17_all_zero_classes_render_no_footer_usage_row() {
+        let mut view = crate::native_view::NativeView::new(150, 32);
+        view.set_context_window(Some(200_000));
+        view.set_usage(0, 0, Some(0), Some(0));
+        view.set_usage_classes(Some(
+            crate::native_view_status::native_sidebar::UsageClasses::default(),
+        ));
+        let row = view.render("draft", &[], false, &[]).pop().unwrap();
+        assert!(!row.contains("0%"), "no zero percent: {row:?}");
+        assert!(!row.contains("0 ("), "no fabricated zero usage token: {row:?}");
+        assert!(view.context_usage_region().is_some(), "stable hit retained");
+
+        // A positive class total paints the row again (with the known limit).
+        view.set_context_window(Some(1_000));
+        view.set_usage(50, 50, None, None);
+        view.set_usage_classes(Some(
+            crate::native_view_status::native_sidebar::classes_from_wire(50, 50, None, None),
+        ));
+        let row = view.render("draft", &[], false, &[]).pop().unwrap();
+        assert!(row.contains("100 (10%)"), "real usage restored: {row:?}");
+    }
 }
 
 #[cfg(feature = "native")]
