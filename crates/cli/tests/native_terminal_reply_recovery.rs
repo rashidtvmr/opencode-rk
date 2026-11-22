@@ -27,6 +27,9 @@ fn feed(
 }
 
 fn bytes(events: Vec<InputEvent>) -> Vec<u8> {
+    // Keep this conversion exhaustive: only ordinary bytes are valid output
+    // for the recovery assertions, and every protocol/key event is a test
+    // failure rather than silently discarded.
     events
         .into_iter()
         .map(|event| match event {
