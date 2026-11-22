@@ -8571,6 +8571,119 @@ mod tests {
         );
     }
 
+    /// LAY-15: the reserved blank row is a property of the live composer state,
+    /// so it must also survive with a non-empty draft (an active prompt, still
+    /// with no jump action). The draft exercises the active-composer scaffold —
+    /// including the rail metadata row and send affordance — without which a
+    /// reservation that only holds for an empty draft would be incomplete.
+    #[test]
+    fn lay_15_reserved_blank_row_survives_with_active_composer_and_no_jump() {
+        let mut view = super::NativeView::new(80, 24);
+        view.set_session_route(true);
+        let text = (0..80)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let message = crate::native_view_chat::ChatMessage::text(
+            crate::native_view_chat::ChatRole::Assistant,
+            text,
+        );
+        let frame = view.render_typed("a live draft", &[message], false, &[]);
+
+        let classes = view.chat_row_classes();
+        let composer_start = classes
+            .iter()
+            .position(|class| *class == crate::native_view_chat::ChatRowClass::Composer)
+            .expect("composer row painted in the live transcript render");
+        assert!(composer_start > 0, "a row exists above the composer");
+        assert_eq!(
+            classes[composer_start - 1],
+            crate::native_view_chat::ChatRowClass::Blank,
+            "LAY-15: one blank row stays reserved above an active composer with no jump action: {classes:?}"
+        );
+        assert!(
+            frame[composer_start - 1].trim().is_empty(),
+            "LAY-15: the reserved row carries no transcript text above an active composer: {:?}",
+            frame[composer_start - 1]
+        );
+    }
+
+    /// LAY-15: the reserved blank row above the composer must be present in
+    /// every viewport size when no jump action exists. A full transcript is
+    /// used at each height so that, before the reservation, the row would be
+    /// transcript text rather than an incidental blank from a short render.
+    /// Covering several layouts pins the guarantee to the render contract, not
+    /// to a single terminal geometry.
+    #[test]
+    fn lay_15_reserved_blank_row_present_at_every_viewport_size_without_jump() {
+        for (cols, rows) in [(100u16, 20u16), (80, 24), (160, 40)] {
+            let mut view = super::NativeView::new(cols, rows);
+            view.set_session_route(true);
+            let text = (0..120)
+                .map(|i| format!("line {i}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let message = crate::native_view_chat::ChatMessage::text(
+                crate::native_view_chat::ChatRole::Assistant,
+                text,
+            );
+            let frame = view.render_typed("", &[message], false, &[]);
+            let classes = view.chat_row_classes();
+            let composer_start = classes
+                .iter()
+                .position(|class| *class == crate::native_view_chat::ChatRowClass::Composer)
+                .unwrap_or_else(|| panic!("composer painted at {cols}x{rows}: {classes:?}"));
+            assert!(composer_start > 0, "a transcript row above composer at {cols}x{rows}");
+            assert_eq!(
+                classes[composer_start - 1],
+                crate::native_view_chat::ChatRowClass::Blank,
+                "LAY-15: reserved blank row above composer at {cols}x{rows}: {classes:?}"
+            );
+            // At wide geometries the docked sidebar paints its own border/text
+            // into every frame row, including the reserved one, so the frame
+            // text assertion is meaningful only when no sidebar is docked. The
+            // row-class invariant above still holds in every geometry.
+            if view.presentation().sidebar_offset.is_none() {
+                assert!(
+                    frame[composer_start - 1].trim().is_empty(),
+                    "LAY-15: reserved row carries no transcript text at {cols}x{rows}: {:?}",
+                    frame[composer_start - 1]
+                );
+            }
+        }
+    }
+
+    /// LAY-15: the strongest "no jump action" case is an empty transcript —
+    /// there is literally no history to jump to or load. Upstream still keeps
+    /// the action row (`routes/session/index.tsx:1570`), so the live render must
+    /// reserve the blank row directly above the composer even with zero
+    /// messages. The reservation is unconditional in `render_styled_mode`
+    /// (independent of scroll/message state), so this holds with no action.
+    #[test]
+    fn lay_15_reserved_blank_row_survives_empty_transcript_without_jump() {
+        let mut view = super::NativeView::new(80, 24);
+        view.set_session_route(true);
+        // Empty typed transcript: no messages produce a jump/loading action.
+        let frame = view.render_typed("", &[], false, &[]);
+
+        let classes = view.chat_row_classes();
+        let composer_start = classes
+            .iter()
+            .position(|class| *class == crate::native_view_chat::ChatRowClass::Composer)
+            .expect("composer row painted in the live transcript render");
+        assert!(composer_start > 0, "a row exists above the composer");
+        assert_eq!(
+            classes[composer_start - 1],
+            crate::native_view_chat::ChatRowClass::Blank,
+            "LAY-15: blank row stays reserved above composer with an empty transcript: {classes:?}"
+        );
+        assert!(
+            frame[composer_start - 1].trim().is_empty(),
+            "LAY-15: reserved row above an empty transcript carries no text: {:?}",
+            frame[composer_start - 1]
+        );
+    }
+
     #[test]
     fn explicit_outline_prompt_wraps_and_tracks_cursor_through_resize() {
         let mut appearance = crate::native_box_style::BoxAppearance::default();
