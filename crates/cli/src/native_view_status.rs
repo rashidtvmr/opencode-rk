@@ -2081,6 +2081,38 @@ mod tests {
         assert!(!sidebar.contains("Context"), "context section stays hidden: {sidebar:?}");
     }
 
+    /// CP-17: retracting to *no assistant usage* is stable across repeated
+    /// provider observations, and a known context window alone can never
+    /// revive a fabricated `0`/`0%` row. Every all-zero pass keeps the footer
+    /// cell blank (hit-stable) and the sidebar token row hidden; a single real
+    /// token restores both surfaces.
+    #[test]
+    fn absent_usage_retraction_is_stable_with_known_window() {
+        let mut view = StatusView::default();
+        for _ in 0..3 {
+            // A known window must not turn all-zero classes into `0 (0%)`.
+            view.set_usage(0, 0, Some(0), Some(0), Some(200_000));
+            let label = view.usage_status_label();
+            assert!(
+                label.as_deref().is_some_and(|label| label.trim().is_empty()),
+                "footer cell stays blank across retracts: {label:?}"
+            );
+            assert!(
+                !label.as_deref().is_some_and(|s| s.chars().any(|c| c.is_ascii_digit()) || s.contains('%')),
+                "no fabricated zero/percent across retracts: {label:?}"
+            );
+            assert!(
+                !view.render_sidebar(120, 30).iter().any(|r| r == "Context" || r.contains("0 tokens")),
+                "sidebar stays hidden across retracts"
+            );
+        }
+
+        // One real token restores the footer label and the sidebar row.
+        view.set_usage(1, 0, None, None, None);
+        assert_eq!(view.usage_status_label().as_deref(), Some("1"));
+        assert!(view.render_sidebar(120, 30).iter().any(|r| r == "Context" || r.contains("1 tokens")));
+    }
+
     #[test]
     fn unconfirmed_connection_never_renders_connected() {
         let view = StatusView::default();
