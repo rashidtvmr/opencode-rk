@@ -3481,6 +3481,62 @@ mod surface_paint_regressions {
         );
     }
 
+    /// F18: the live chat producer carries `markup.list` for ordered and
+    /// unordered markers into `ChatRunSpan`, and the cell painter resolves it
+    /// to `markdown.listItem` (`packages/theme/src/tui/syntax.ts:61`).
+    /// Ordered markers must not switch to `markdown.listEnumeration`.
+    #[test]
+    fn f18_list_markers_paint_markdown_list_item_on_the_live_path() {
+        use crate::markdown_runs::LIST;
+        use crate::native_view_chat::{ChatMessage, ChatRole};
+        let semantic = crate::native_theme_runtime::RuntimeTheme::builtin_default(
+            crate::native_theme_runtime::ThemeMode::Dark,
+        )
+        .semantic
+        .expect("shipped V2 asset resolves");
+        let markdown = &semantic.markdown;
+        let mut view = crate::native_view::NativeView::new(120, 40);
+        view.set_session_route(true);
+        let messages = vec![ChatMessage::text(
+            ChatRole::Assistant,
+            "- one\n- two\n\n1. first\n2. second",
+        )];
+        let lines = view.render_typed("draft", &messages, false, &[]);
+        let spans = view.chat_markdown_spans().to_vec();
+        for (marker, marker_cells) in [("- one", 2usize), ("1. first", 3)] {
+            let index = lines
+                .iter()
+                .position(|line| line.contains(marker))
+                .unwrap_or_else(|| panic!("{marker} painted: {lines:?}"));
+            let at = lines[index].find(marker).expect("marker text in row");
+            let marker_span = spans[index]
+                .iter()
+                .find(|span| usize::from(span.start) == at && span.flags & LIST != 0)
+                .unwrap_or_else(|| panic!("{marker} list run in {:?}", spans[index]));
+            assert_eq!(
+                usize::from(marker_span.end),
+                at + marker_cells,
+                "marker width for {marker}"
+            );
+        }
+        // The cell loop's paint resolution, not a private re-mapping.
+        assert_eq!(
+            super::markdown_run_paint_color(markdown, Some(&semantic.syntax), LIST, false),
+            Some(markdown.list_item.rgba),
+            "markup.list paints markdown.listItem"
+        );
+        assert_ne!(
+            markdown.list_item.rgba, markdown.list_enumeration.rgba,
+            "listItem and listEnumeration stay distinct tokens"
+        );
+        assert_ne!(
+            super::markdown_run_color(markdown, None, LIST).map(|color| color.rgba),
+            Some(markdown.list_enumeration.rgba),
+            "markers never use markdown.listEnumeration"
+        );
+        assert_eq!(super::run_attributes(LIST), 0, "listItem is color-only");
+    }
+
     /// THEME-08 repair: a fenced block keeps the `markdown.code` base paint on
     /// non-token cells. Upstream colors the whole block
     /// (`packages/theme/src/tui/syntax.ts:63`,

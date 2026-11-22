@@ -2610,9 +2610,10 @@ fn flow_options(mode: crate::markdown_runs::MarkdownMode) -> crate::native_markd
 }
 
 /// Map one upstream `markup.*` role (`packages/theme/src/tui/syntax.ts:46-71`)
-/// onto the transcript's style bits. Roles whose upstream styling is a color
-/// only (list markers, rules, quotes, strikethrough) carry no bit here; the
-/// paint layer owns those colors.
+/// onto the transcript's style bits. Color-only roles (`markup.list` markers,
+/// rules, quotes, strikethrough) still carry a bit so the paint layer selects
+/// their `markdown.*` token: `markup.list` resolves to `markdown.listItem` for
+/// ordered and unordered markers alike (`syntax.ts:61`).
 fn flow_role_flags(role: crate::native_markdown_flow::MarkdownRole) -> u32 {
     use crate::markdown_runs::{
         BOLD, CODE, CODE_BLOCK, HEADING, HEADING1, ITALIC, LINK, LINK_TEXT, LIST, QUOTE, RULE,
@@ -9391,6 +9392,48 @@ mod footer_v3_consumer_tests {
         );
         // Blocks are separated by the source's blank lines, exactly once.
         assert_eq!(texts[1], "", "one blank row between heading and list: {texts:?}");
+    }
+
+    /// F18: both GFM marker kinds carry `markup.list` through the real
+    /// `ChatRunSpan` producer that the painter consumes. Upstream maps every
+    /// `markup.list` marker to `markdown.listItem`
+    /// (`packages/theme/src/tui/syntax.ts:61`), so ordered markers share the
+    /// unordered marker's run flag/token and are not a separate
+    /// `markdown.listEnumeration` consumer.
+    #[test]
+    fn f18_ordered_and_unordered_list_markers_emit_list_run_spans() {
+        use crate::markdown_runs::{MarkdownMode, LIST};
+        let text = "- one\n- two\n\n1. first\n2. second";
+        let mut rows = Vec::new();
+        let spans = push_block_markdown(
+            &mut rows, 40, text, "", ChatRowClass::AssistantCard, MarkdownMode::Rendered,
+        );
+        // The marker run covers the marker glyphs plus the separating space
+        // (`render_list`: `"{marker} "`).
+        for (marker, marker_cells) in [("- one", 2usize), ("- two", 2), ("1. first", 3), ("2. second", 3)]
+        {
+            let row = rows
+                .iter()
+                .position(|(row, _)| row.as_str() == marker)
+                .unwrap_or_else(|| panic!("{marker} painted: {rows:?}"));
+            let row_spans = spans
+                .iter()
+                .find(|(index, _)| *index == row)
+                .map(|(_, spans)| spans)
+                .unwrap_or_else(|| panic!("{marker} carries style spans"));
+            let marker_span = row_spans
+                .iter()
+                .find(|span| usize::from(span.start) == 0 && span.flags & LIST != 0)
+                .unwrap_or_else(|| panic!("{marker} marker run: {row_spans:?}"));
+            assert_eq!(
+                usize::from(marker_span.end), marker_cells,
+                "marker width for {marker}"
+            );
+            assert_eq!(
+                marker_span.flags, LIST,
+                "marker carries only the list role flag for {marker}"
+            );
+        }
     }
 
     #[test]

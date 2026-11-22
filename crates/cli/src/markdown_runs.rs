@@ -924,4 +924,40 @@ mod tests {
             "**unfinished `tick and *star"
         );
     }
+
+    /// F18: `LIST` is the single color-only role bit for `markup.list`
+    /// (`packages/theme/src/tui/syntax.ts:61` -> `markdown.listItem`). It must
+    /// stay disjoint from every other run bit so the painter can select the
+    /// token unambiguously for both ordered and unordered markers.
+    #[test]
+    fn f18_list_role_bit_is_distinct_from_every_other_run_flag() {
+        let others = [
+            BOLD,
+            ITALIC,
+            CODE,
+            CODE_BLOCK,
+            HEADING,
+            HEADING1,
+            LINK,
+            LINK_TEXT,
+            QUOTE,
+            RULE,
+            STRIKE,
+            SYN_COMMENT,
+            SYN_KEYWORD,
+            SYN_STRING,
+            SYN_NUMBER,
+            SYN_FUNCTION,
+            SYN_TYPE,
+            SYN_CONSTANT,
+            SYN_PROPERTY,
+            CHIP_ACCENT,
+            CHIP_NAME,
+        ];
+        assert_ne!(LIST, 0);
+        for other in others {
+            assert_eq!(LIST & other, 0, "LIST collides with {other:#x}");
+        }
+        assert_eq!(LIST & SYN_MASK, 0, "a list marker is not a code token");
+    }
 }

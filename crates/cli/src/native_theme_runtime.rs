@@ -3829,6 +3829,49 @@ fn theme08_markdown_roles_match_upstream_tokens() {
     }
 }
 
+/// F18: the pinned syntax table maps every `markup.list` marker — ordered and
+/// unordered alike — onto `markdown.listItem` with no attribute
+/// (`packages/theme/src/tui/syntax.ts:61`). `markdown.listEnumeration` is
+/// resolved from the theme document but is not a marker consumer, so a marker
+/// must never resolve to it.
+#[test]
+fn f18_markup_list_maps_to_markdown_list_item() {
+    let dark = dark_semantic_palette();
+    let rules = dark.syntax_rules();
+    let list = rules
+        .iter()
+        .find(|rule| rule.scope.len() == 1 && rule.scope[0] == "markup.list")
+        .expect("markup.list rule present");
+    assert_eq!(list.attributes, 0, "list markers are color-only");
+    assert_eq!(
+        list.foreground.rgba, dark.markdown.list_item.rgba,
+        "markup.list = markdown.listItem"
+    );
+    assert_ne!(
+        list.foreground.rgba, dark.markdown.list_enumeration.rgba,
+        "markup.list must not resolve to markdown.listEnumeration"
+    );
+    // Exactly one marker rule, so ordered markers cannot select a different
+    // token through a second, invented `markdown.listEnumeration` consumer.
+    assert_eq!(
+        rules
+            .iter()
+            .filter(|rule| rule.scope.iter().any(|scope| *scope == "markup.list"))
+            .count(),
+        1
+    );
+    let light = light_semantic_palette();
+    let light_list = light
+        .syntax_rules()
+        .into_iter()
+        .find(|rule| rule.scope.len() == 1 && rule.scope[0] == "markup.list")
+        .expect("markup.list rule present in light mode");
+    assert_eq!(
+        light_list.foreground.rgba, light.markdown.list_item.rgba,
+        "light markup.list = markdown.listItem"
+    );
+}
+
 #[test]
 fn theme08_categorical_ordering_and_extmark_colors_match() {
     let dark = dark_semantic_palette();
