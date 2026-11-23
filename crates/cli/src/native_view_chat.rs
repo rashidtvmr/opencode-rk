@@ -6660,6 +6660,41 @@ mod tests {
         assert!(user_spans.iter().flatten().all(|span| span.flags & (crate::markdown_runs::BOLD | crate::markdown_runs::CODE) == 0));
     }
 
+    /// LAY-15: the live styled entry point named by the UI-parity contract
+    /// (`render_styled_with_spans_mode`) reserves exactly one blank action row
+    /// directly above the composer even with no jump action present (empty
+    /// transcript, tail position). This pins the guarantee at the exact seam
+    /// the controller checks, independently of the higher-level
+    /// `NativeView::render_typed` path.
+    #[test]
+    fn lay_15_live_styled_mode_reserves_blank_action_row_without_jump() {
+        let view = ChatView::new();
+        let (rows, spans) = view.render_styled_with_spans_mode(
+            40, 12, "ws", &[], "", false,
+            &crate::native_box_style::BoxAppearance::default(),
+            crate::markdown_runs::MarkdownMode::Rendered,
+        );
+        let composer_start = rows
+            .iter()
+            .position(|(_, class, _)| *class == ChatRowClass::Composer)
+            .expect("composer row painted by the live styled render");
+        assert!(composer_start > 0, "a reserved row exists above the composer");
+        assert_eq!(
+            rows[composer_start - 1].1,
+            ChatRowClass::Blank,
+            "LAY-15: the row directly above the composer is reserved blank with no jump action: {rows:?}"
+        );
+        assert!(
+            rows[composer_start - 1].0.trim().is_empty(),
+            "LAY-15: the reserved row carries no transcript text: {:?}",
+            rows[composer_start - 1].0
+        );
+        assert!(
+            spans[composer_start - 1].is_empty(),
+            "LAY-15: the reserved row carries no style spans"
+        );
+    }
+
     /// MSG-005: a user card with skill/file chips renders one accent label +
     /// muted name per chip through the LIVE styled path, and the chip rows
     /// carry the `CHIP_ACCENT`/`CHIP_NAME` run spans the painter consumes
