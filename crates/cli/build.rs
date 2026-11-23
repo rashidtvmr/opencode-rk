@@ -83,13 +83,23 @@ fn stage_shared_library(libdir: &Path) {
     else {
         return;
     };
-    // Best effort: a failure here must not fail the build, because the
-    // installed binary resolves the library through its own rpath.
-    let _ = std::fs::copy(&source, profile_dir.join(name));
+    // A silent failure here is not recoverable by a later rebuild: cargo caches
+    // the successful build, so the staged copy is never retried and every test
+    // binary then dies with `Library not loaded: @rpath/libopentui.dylib`
+    // (observed when the disk filled mid-build, costing a whole publication
+    // postcheck). The copy is cheap and must be correct, so report it.
+    let staged = profile_dir.join(name);
+    if let Err(exc) = std::fs::copy(&source, &staged) {
+        panic!("could not stage {} beside the test binaries at {}: {exc}", name, staged.display());
+    }
     if let Some(target_dir) = profile_dir.parent() {
         let lib = target_dir.join("lib");
-        if std::fs::create_dir_all(&lib).is_ok() {
-            let _ = std::fs::copy(&source, lib.join(name));
+        if let Err(exc) = std::fs::create_dir_all(&lib) {
+            panic!("could not create {}: {exc}", lib.display());
+        }
+        let installed = lib.join(name);
+        if let Err(exc) = std::fs::copy(&source, &installed) {
+            panic!("could not stage {} at {}: {exc}", name, installed.display());
         }
     }
 }
