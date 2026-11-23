@@ -219,8 +219,12 @@ class GuardianTests(unittest.TestCase):
             finally:
                 if proc.poll() is None:proc.kill();proc.wait(timeout=3)
                 if started.exists():
+                    # Darwin raises EPERM for a group that has already exited or
+                    # whose pgid was recycled, exactly as process_guard.py
+                    # documents. Cleanup must not turn a passing test into an
+                    # error; the assertion above is what decides the outcome.
                     try:os.killpg(int(started.read_text()),signal.SIGKILL)
-                    except ProcessLookupError:pass
+                    except (ProcessLookupError,PermissionError,ValueError):pass
 
     def test_successful_command_reaps_background_children(self):
         with tempfile.TemporaryDirectory() as d:
