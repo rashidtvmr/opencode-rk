@@ -90,6 +90,26 @@ impl ModalPresentation {
     }
 }
 
+/// CP-15: owned editor-selection fact produced by the host editor
+/// integration. The rail's [`crate::native_status_rail::EditorContext`]
+/// borrows its path/ranges at paint time, so the producer stores owned bytes
+/// here. `None` is an explicit "no editor observation" (oc2 has no host editor
+/// selection event yet): it paints no file slot and never invents a path/range.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EditorFact {
+    path: String,
+    ranges: Vec<crate::native_status_rail::EditorRange>,
+    state: crate::native_status_rail::EditorState,
+}
+
+/// Producer tuple for [`NativeView::set_editor_selection`]:
+/// `(path, ranges, state)` observed from the host editor integration.
+pub type EditorSelectionFact = (
+    String,
+    Vec<crate::native_status_rail::EditorRange>,
+    crate::native_status_rail::EditorState,
+);
+
 pub struct NativeView {
     layout: Layout,
     sessions: SessionView,
@@ -193,6 +213,10 @@ pub struct NativeView {
     /// (`prompt/footer.tsx:22-28` `subagents()`); painted in the prompt footer
     /// row as `N subagent(s)`.
     live_subagents: usize,
+    /// CP-15: live editor-selection fact for the `prompt.footer.file` rail
+    /// slot. `None` until the host editor integration reports a selection;
+    /// never synthesized from the composer draft or the transcript.
+    rail_editor: Option<EditorFact>,
     /// Live `command.palette.show` shortcut (`footer.tsx:110-120`): the
     /// `{key} commands` hint. Set from the resolved keymap, never guessed.
     rail_command_shortcut: Option<String>,
@@ -1376,6 +1400,7 @@ impl NativeView {
             composer_display: crate::native_prompt_pane::PromptDisplay::default(),
             prompt_surface: crate::native_composer::PromptSurface::new(),
             live_subagents: 0,
+            rail_editor: None,
             live_first_child: None,
             live_footer_hit: None,
             prompt_footer_hit: None,
@@ -1787,6 +1812,44 @@ impl NativeView {
         self.live_first_child = first.filter(|_| running > 0);
     }
 
+    /// CP-15: install the observed editor-selection fact for the composer's
+    /// `prompt.footer.file` rail slot. `None` is an explicit no-selection
+    /// producer: it renders no file label and never invents a path or range.
+    /// The caller passes exactly what the host editor integration reported;
+    /// this view only projects the confirmed tuple at paint time.
+    pub fn set_editor_selection(&mut self, fact: Option<EditorSelectionFact>) {
+        self.rail_editor = fact.map(|(path, ranges, state)| EditorFact {
+            path,
+            ranges,
+            state,
+        });
+    }
+
+    /// Alias using the rail's `EditorContext` vocabulary. Same producer as
+    /// [`Self::set_editor_selection`], kept so either integration spelling is
+    /// unambiguous.
+    pub fn set_editor_context(&mut self, fact: Option<EditorSelectionFact>) {
+        self.set_editor_selection(fact);
+    }
+
+    /// CP-16: real shell-record count from the acknowledged `GET /api/shell`
+    /// listing held by the Shell dock. Zero means no listing was observed —
+    /// never a fabricated count.
+    #[must_use]
+    pub fn live_shell_count(&self) -> usize {
+        self.live_shell_rows.len()
+    }
+
+    /// Borrow the retained editor fact as the rail's selection context.
+    fn rail_editor_context(&self) -> Option<crate::native_status_rail::EditorContext<'_>> {
+        let fact = self.rail_editor.as_ref()?;
+        Some(crate::native_status_rail::EditorContext {
+            path: &fact.path,
+            ranges: &fact.ranges,
+            state: fact.state,
+        })
+    }
+
     /// Resolved footer shortcut hints (`footer.tsx:99-120`): the `commands`
     /// (`command.palette.show`) and `agents` (`agent.cycle`) key labels. Pass
     /// `None` when the keymap entry is unbound so no hint is fabricated.
@@ -2003,7 +2066,7 @@ impl NativeView {
     pub fn set_prompt_footer_hover(&mut self, x: u16, y: u16) -> bool {
         let hovered = self.prompt_footer_hit.is_some_and(|(left, top, width)|
             x >= left && x < left.saturating_add(width) && y == top);
-        let live = hovered && self.live_subagent_label().is_some();
+        let live = hovered && self.live_footer_counts_label().is_some();
         let location = hovered && !self.prompt_surface.is_busy();
         if self.footer_live_hovered == live && self.footer_location_hovered == location { return false; }
         self.footer_live_hovered = live;
@@ -2020,8 +2083,37 @@ impl NativeView {
             .flatten()
     }
 
-    fn live_subagent_label(&self) -> Option<String> {
-        crate::native_status::subagent_label(self.live_subagents)
+    /// CP-15/CP-16: the `prompt.footer` rail facts — real, caller-confirmed
+    /// live counts (running children from `/children`, shell records from
+    /// `GET /api/shell`) and the observed editor-selection file slot. The
+    /// shared shell footer deliberately does NOT carry these fields: the
+    /// rail's `Live`/`EditorFile` spans map to `RailSlot::Footer`/`File`, so
+    /// feeding them there would paint the facts a second time in the
+    /// statusline row. This single producer feeds the in-body composer footer
+    /// row instead (`footer.tsx` plugin slot, not the shared shell statusline).
+    fn composer_footer_facts(&self) -> crate::native_status_rail::RailFacts<'_> {
+        crate::native_status_rail::RailFacts {
+            subagents: self.live_subagents,
+            shells: self.live_shell_count(),
+            editor: self.rail_editor_context(),
+            live_hovered: self.footer_live_hovered,
+            ..crate::native_status_rail::RailFacts::new(usize::from(self.layout.cols))
+        }
+    }
+
+    /// CP-15/CP-16: the combined live-count span projected from
+    /// [`Self::composer_footer_facts`] through the rail's `Live` segment —
+    /// never a hardcoded `0/0` and never a fabricated count. Both zero means
+    /// no fact was observed, so the rail emits no `Live` span and no label is
+    /// painted (never a fabricated `0 subagents · 0 shells`).
+    fn live_footer_counts_label(&self) -> Option<String> {
+        let spans = crate::native_status_rail::rail_spans(&self.composer_footer_facts());
+        let text: String = spans
+            .iter()
+            .filter(|span| span.segment == crate::native_status_rail::RailSegment::Live)
+            .map(|span| span.text.as_str())
+            .collect();
+        (!text.is_empty()).then_some(text)
     }
 
     /// Install the retained `/children` facts: the footer count/navigation
@@ -2714,12 +2806,25 @@ impl NativeView {
             live_hovered: self.footer_live_hovered,
             location_hovered: self.footer_location_hovered,
             // Same budget the caller's `footer_directory` fallback used.
+            // Live counts / editor facts ride `composer_footer_facts()` and
+            // paint in the composer footer row, not this Status slot.
             location_width: usize::from(self.layout.cols.saturating_sub(4)),
             ..crate::native_status_rail::RailFacts::new(usize::from(self.layout.cols))
         };
         crate::native_status_rail::slot_text(
             &crate::native_status_rail::rail_spans(&facts),
             crate::native_status_rail::RailSlot::Status,
+        )
+    }
+
+    /// CP-15: text of the `prompt.footer.file` rail slot. The editor selection
+    /// is a distinct rail fact (`index.tsx:1968-1981`): a confirmed selection
+    /// paints its file/selection label, an explicit `None` producer paints
+    /// nothing. Never derived from the composer draft or the transcript.
+    fn composer_editor_text(&self) -> String {
+        crate::native_status_rail::slot_text(
+            &crate::native_status_rail::rail_spans(&self.composer_footer_facts()),
+            crate::native_status_rail::RailSlot::File,
         )
     }
 
@@ -2750,7 +2855,15 @@ impl NativeView {
         } else {
             self.composer_metadata()
         };
-        let Some(label) = self.live_subagent_label().filter(|_| !self.shell_mode) else {
+        // CP-15: the editor-file slot is a distinct rail fact. Paint a
+        // confirmed selection fact in the same footer row; an explicit `None`
+        // producer contributes nothing, so no path/range is ever fabricated.
+        let base = match self.composer_editor_text() {
+            editor if editor.is_empty() => base,
+            editor if base.is_empty() => editor,
+            editor => format!("{base} · {editor}"),
+        };
+        let Some(label) = self.live_footer_counts_label().filter(|_| !self.shell_mode) else {
             return (base, None);
         };
         let width = usize::from(row_width);
@@ -5855,12 +5968,17 @@ impl NativeView {
         // in the `right` right-aligned term (oc2 extension; upstream has no
         // such cell), so the rail never overwrites it.
         let facts = crate::native_status_rail::RailFacts {
-            // Live subagent/shell counts are painted by the in-body
-            // `composer_footer_row` (`prompt.footer` slot) with the child
-            // navigation hit contract; this shared shell footer adds only the
-            // usage/cost status list and the `commands`/`agents` hints.
+            // Live subagent/shell counts and the editor file slot are painted
+            // by the in-body `composer_footer_row` (`prompt.footer` slot) via
+            // `composer_footer_facts()`, with the child-navigation hit
+            // contract. This shared shell footer adds only the usage/cost
+            // status list and the `commands`/`agents` hints. Feeding live
+            // counts here would paint them a second time: the rail's `Live`
+            // span maps to `RailSlot::Footer`, so it survives
+            // `footer_statusline_text` and lands in the statusline row too.
             subagents: 0,
             shells: 0,
+            editor: None,
             usage: &usage_rows,
             command_shortcut: self.rail_command_shortcut.as_deref(),
             agent_shortcut: self.rail_agent_shortcut.as_deref(),
@@ -11236,6 +11354,187 @@ mod live_footer_tests {
             .take(usize::from(cells))
             .collect();
         assert_eq!(painted, "3 subagents", "frame row: {:?}", frame[usize::from(y)]);
+    }
+}
+
+#[cfg(test)]
+mod footer_facts_tests {
+    use super::*;
+    use crate::native_status_rail::{EditorRange, EditorState};
+
+    const ROOT: &str = "11111111-1111-1111-1111-111111111111";
+
+    fn live_children_status() -> crate::native_children::live::Status {
+        let mut status = crate::native_children::live::Status::default();
+        status
+            .apply(
+                ROOT,
+                &serde_json::json!({ "children": [
+                    {
+                        "session_id": "22222222-2222-2222-2222-222222222222",
+                        "parent_id": ROOT,
+                        "description": "first child",
+                        "agent": "explore",
+                        "state": "running"
+                    },
+                    {
+                        "session_id": "33333333-3333-3333-3333-333333333333",
+                        "parent_id": ROOT,
+                        "description": "second child",
+                        "agent": "build",
+                        "state": "running"
+                    }
+                ] }),
+            )
+            .expect("fixture children listing");
+        status
+    }
+
+    /// The in-body composer footer row, located by the live-count hit that
+    /// same row publishes. Counts and the editor file slot paint HERE (the
+    /// `prompt.footer` rail slots), never in the shared shell statusline.
+    fn composer_footer_row(view: &NativeView, frame: &[String]) -> String {
+        let (_, y, _) = view.live_footer_hit().expect("live label admitted");
+        frame[usize::from(y)].clone()
+    }
+
+    /// CP-16: the footer's live-count producer reads the retained `/children`
+    /// status and the acknowledged `GET /api/shell` listing — never a
+    /// hardcoded zero. A shell status transition leaves the count unchanged
+    /// (upstream `footer.tsx:29-35` counts records by identity, not status).
+    #[test]
+    fn cp16_footer_paints_live_children_and_shell_counts_from_view_state() {
+        let mut view = NativeView::new(120, 32);
+        view.set_session_route(true);
+        view.set_workspace("/fixture/project".to_owned());
+
+        // No producer facts: no fabricated counts anywhere in the frame.
+        assert_eq!(view.live_shell_count(), 0);
+        let frame = view.render_typed("", &[], false, &[]);
+        let all = frame.join("\n");
+        assert!(!all.contains("subagent"), "no children observed: {all}");
+        assert_eq!(view.live_footer_hit(), None);
+
+        // Real facts: two running children (the live navigation status) and
+        // two daemon shell records.
+        view.set_live_children_status(&live_children_status());
+        assert_eq!(view.live_subagents, 2, "two running children were observed");
+        view.set_live_shell_rows(
+            vec![
+                crate::native_shell::ShellEntry::new("s1", "cargo test", "running"),
+                crate::native_shell::ShellEntry::new("s2", "tail -f log", "completed"),
+            ],
+            &[],
+        );
+        assert_eq!(view.live_shell_count(), 2);
+        let frame = view.render_typed("", &[], false, &[]);
+        let row = composer_footer_row(&view, &frame);
+        assert!(row.contains("2 subagents · 2 shells"), "live counts: {row:?}");
+        assert_eq!(row.matches("2 subagents").count(), 1, "single paint: {row:?}");
+        assert_eq!(
+            frame.join("\n").matches("2 subagents").count(),
+            1,
+            "counts must not be painted twice in one frame"
+        );
+        // The shared shell statusline must stay count-free: the rail's `Live`
+        // span maps to `RailSlot::Footer`, so feeding live counts into that
+        // footer would duplicate the label here (the prior regression).
+        let shared = frame.last().expect("statusline row");
+        assert!(!shared.contains("subagent"), "no double paint: {shared:?}");
+        assert!(!shared.contains("shell"), "no double paint: {shared:?}");
+
+        // A shell transitioning running -> completed is still the same record.
+        view.set_live_shell_rows(
+            vec![
+                crate::native_shell::ShellEntry::new("s1", "cargo test", "completed"),
+                crate::native_shell::ShellEntry::new("s2", "tail -f log", "completed"),
+            ],
+            &[],
+        );
+        assert_eq!(view.live_shell_count(), 2);
+        let frame = view.render_typed("", &[], false, &[]);
+        let row = composer_footer_row(&view, &frame);
+        assert!(
+            row.contains("2 shells"),
+            "a status transition never changes the count: {row:?}"
+        );
+
+        // Retraction: losing the daemon listing clears the count honestly.
+        view.set_live_shell_rows(Vec::new(), &[]);
+        assert_eq!(view.live_shell_count(), 0);
+        let frame = view.render_typed("", &[], false, &[]);
+        let row = composer_footer_row(&view, &frame);
+        assert!(!row.contains("shell"), "retracted shells: {row:?}");
+        assert!(row.contains("2 subagents"), "children remain: {row:?}");
+
+        // The editor selection rides the same footer rail: a confirmed fact
+        // paints its file/selection label, a retracted one paints nothing.
+        view.set_editor_selection(Some((
+            "/fixture/project/src/app.tsx".to_owned(),
+            vec![EditorRange {
+                start_line: 3,
+                start_character: 0,
+                end_line: 3,
+                end_character: 8,
+            }],
+            EditorState::Attached,
+        )));
+        // Upstream `index.tsx:246-250`: non-`index.*` files render their
+        // basename (`app.tsx`), not a directory-qualified path; the single
+        // range on line 3 yields the `#3` selection suffix.
+        let frame = view.render_typed("", &[], false, &[]);
+        let row = composer_footer_row(&view, &frame);
+        assert!(row.contains("app.tsx#3"), "editor fact: {row:?}");
+        assert_eq!(row.matches("app.tsx#3").count(), 1, "single paint: {row:?}");
+    }
+
+    /// CP-15: the editor-file rail slot follows the producer. An explicit
+    /// `None` paints nothing; a confirmed `(path, ranges, state)` tuple paints
+    /// the file/selection label; retraction removes it.
+    #[test]
+    fn cp15_footer_editor_slot_follows_the_selection_producer() {
+        let mut view = NativeView::new(120, 32);
+        view.set_session_route(true);
+        view.set_workspace("/fixture/project".to_owned());
+
+        view.set_editor_selection(None);
+        let frame = view.render_typed("", &[], false, &[]);
+        let all = frame.join("\n");
+        assert!(!all.contains("index.tsx"), "no editor fact: {all}");
+        assert!(!all.contains("#7-9"), "no selection: {all}");
+
+        let range = EditorRange {
+            start_line: 7,
+            start_character: 2,
+            end_line: 9,
+            end_character: 4,
+        };
+        view.set_editor_selection(Some((
+            "/fixture/project/src/index.tsx".to_owned(),
+            vec![range],
+            EditorState::Pending,
+        )));
+        let frame = view.render_typed("", &[], false, &[]);
+        // No live counts -> no hit, so locate the row by the editor label.
+        let row = frame
+            .iter()
+            .find(|row| row.contains("index.tsx"))
+            .expect("editor label painted")
+            .clone();
+        assert!(row.contains("src/index.tsx"), "editor path: {row:?}");
+        assert!(row.contains("#7-9"), "selection label: {row:?}");
+        assert_eq!(
+            frame.join("\n").matches("src/index.tsx").count(),
+            1,
+            "the file slot paints once, not in the shared statusline"
+        );
+
+        // The alias setter is the same producer, so it can retract just as well.
+        view.set_editor_context(None);
+        let frame = view.render_typed("", &[], false, &[]);
+        let all = frame.join("\n");
+        assert!(!all.contains("index.tsx"), "retracted editor fact: {all}");
+        assert!(!all.contains("#7-9"), "retracted selection: {all}");
     }
 }
 

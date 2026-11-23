@@ -10707,6 +10707,12 @@ fn native_loop(
     // every frame and turn event below. Fetches use the existing bounded
     // authenticated client; the facade itself never performs IO.
     let mut view = crate::native_view::NativeView::new(cols as u16, rows as u16);
+    // CP-15: oc2 has no host editor-selection event in this build, so the
+    // `prompt.footer.file` producer is wired explicitly to `None`. This is an
+    // honest no-selection observation: the rail paints no file/selection label
+    // and never invents one. A future editor integration installs the real
+    // `(path, ranges, state)` tuple through the same setter.
+    view.set_editor_selection(None);
     // Built-in footer `commands`/`agents` hints (`prompt/footer.tsx:99-120`):
     // the palette opens on the hardcoded Ctrl-P byte (`16 =>` below), so the
     // live `commands` key label is `ctrl+p`; `agent.cycle` (shift+tab,
