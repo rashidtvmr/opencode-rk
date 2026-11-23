@@ -18290,14 +18290,14 @@ fn native_loop(
                     },
                 };
                 let command = text.trim();
-                // Typed commands never close a tab: upstream's
-                // `session.tab.close` has no slash alias (keybind
-                // `<leader>w` only — see `native_process_exit_route`), so the
-                // only typed terminal command here is the exit word. It
-                // terminates the client globally, exactly like the upstream
-                // `app.exit` action, regardless of how many tabs are open
-                // (a Home/root window with no tab must still exit).
-                if matches!(dialog, native_setup::Dialog::None) && native_process_exit_route(command) {
+                // Immediately after trim, before any close-tab branch or
+                // provider send: a global-exit spelling terminates the client
+                // exactly like upstream `app.exit` (and its `quit`/`q` aliases
+                // plus the submitted bare words). Dialogs own their own submit
+                // handling and never reach this gate. Typed commands do NOT
+                // close tabs: upstream's `session.tab.close` has no slash alias
+                // (keybind `<leader>w` only — see `native_close_tab_route`).
+                if matches!(dialog, native_setup::Dialog::None) && native_process_exit_command(command) {
                     break;
                 }
                 if !matches!(dialog, native_setup::Dialog::None) {
@@ -19786,7 +19786,7 @@ fn configured_command_input(text: &str) -> Option<(&str, &str)> {
 /// unsupported command is never "recognized" here. (`/exit`, `/quit`,
 /// `/q`, bare `exit`/`quit` and `:q`/`:quit` exit the client before
 /// dispatch, so their draft never renders again and needs no
-/// consumption — see `native_process_exit_route`.)
+/// consumption — see `native_process_exit_command`.)
 #[cfg(feature = "native")]
 #[cfg(feature = "native")]
 fn is_recognized_local_command(command: &str) -> bool {
@@ -19828,38 +19828,59 @@ fn consume_local_command_with_cursor(
     }
 }
 
-/// Slash surface of upstream `app.exit`: the command is registered as
-/// `slash: { name: "exit", aliases: ["quit", "q"] }`
-/// (`packages/tui/src/app.tsx:1176-1181`), so `/exit`, `/quit` and `/q` all
-/// run the same `exit()` action. Recognized here so a user-configured command
-/// can never shadow the built-in exit route and the Commands page has a local
-/// handler for it.
-#[cfg(feature = "native")]
-fn native_exit_route(command: &str) -> bool {
-    matches!(command, "/exit" | "/quit" | "/q")
-}
-
-/// Every spelling that terminates the CLIENT globally, at the selected pin
-/// `450e7b92412c780a7b5a75226bb8d49aaca24e22`:
-/// - slash surface `/exit`, `/quit`, `/q` — `app.tsx:1176-1181` above;
-/// - bare `exit`, `quit`, `:q` typed into the prompt and submitted —
-///   `packages/tui/src/component/prompt/index.tsx:1128`
-///   (`trimmed === "exit" || trimmed === "quit" || trimmed === ":q"`),
-///   mirrored by `isExitCommand` in `packages/tui/src/mini/prompt.shared.ts:71-76`;
-/// - `:quit`, retained as an approved native extension (same action).
-///
-/// Tab close is NOT an exit spelling. Upstream exposes it only as
-/// `session.tab.close` bound to `<leader>w`
-/// (`packages/tui/src/config/keybind.ts:119`); the command has no `slash`
-/// entry (`packages/tui/src/app.tsx:878-884`), so no typed command closes a
-/// tab. Tabs close through that key binding, the tab context menu and the
-/// middle-click tab gesture, all of which preserve reopen/daemon work.
+/// Slash/vim route surface of upstream `app.exit`: the command is registered
+/// as `slash: { name: "exit", aliases: ["quit", "q"] }`
+/// (`packages/tui/src/app.tsx:1176-1181`), so `/exit`, `/quit` and `/q` all run
+/// the same `exit()` action. `:q` is additionally a bare submitted exit word
+/// (`prompt/index.tsx:1128`); `:quit` is an approved native extension of the
+/// same action. Trims so a clicked/selected route is whitespace-tolerant; an
+/// argument-bearing invocation never matches.
 #[cfg(feature = "native")]
 fn native_process_exit_route(command: &str) -> bool {
-    matches!(
-        command,
-        "/exit" | "/quit" | "/q" | "exit" | "quit" | ":q" | ":quit"
-    )
+    matches!(command.trim(), ":q" | ":quit" | "/exit" | "/quit" | "/q")
+}
+
+/// Bare exit words typed into the prompt and submitted, upstream
+/// `packages/tui/src/component/prompt/index.tsx:1128`
+/// (`trimmed === "exit" || trimmed === "quit" || trimmed === ":q"`), mirrored
+/// by `isExitCommand` in `packages/tui/src/mini/prompt.shared.ts:71-76`. Trims
+/// to match the upstream `trimmed` comparison. `:q` is shared with the route
+/// surface; `:quit` stays route-only.
+#[cfg(feature = "native")]
+fn native_exit_word(command: &str) -> bool {
+    matches!(command.trim(), "exit" | "quit" | ":q")
+}
+
+/// Union of every global-exit spelling at pin
+/// `450e7b92412c780a7b5a75226bb8d49aaca24e22`: the slash/vim route surface
+/// plus the bare submitted words. This is the predicate the real submit
+/// dispatcher uses to terminate the CLIENT before any close-tab or provider
+/// send, regardless of how many tabs are open (a root window with no tab must
+/// still exit).
+#[cfg(feature = "native")]
+fn native_process_exit_command(command: &str) -> bool {
+    native_process_exit_route(command) || native_exit_word(command)
+}
+
+/// A typed command that closes a tab. Upstream exposes tab close only as
+/// `session.tab.close` bound to `<leader>w`
+/// (`packages/tui/src/config/keybind.ts:119`). Therefore NO typed command
+/// closes a tab: `/exit` terminates the client globally instead. Tabs close
+/// through the key binding, the tab context menu and the middle-click gesture,
+/// all of which preserve reopen/daemon work. Kept as an explicit predicate so
+/// `native_exit_route` has one dispatch seam for "local exit/close command".
+#[cfg(feature = "native")]
+fn native_close_tab_route(_command: &str) -> bool {
+    false
+}
+
+/// Single dispatch predicate for the exit/close local-command surface.
+/// Delegates to the global-exit union OR the (empty) typed close-tab surface,
+/// so a user-configured command can never shadow a built-in exit route and the
+/// Commands page has a local handler for it.
+#[cfg(feature = "native")]
+fn native_exit_route(command: &str) -> bool {
+    native_process_exit_command(command) || native_close_tab_route(command)
 }
 
 #[cfg(feature = "native")]
@@ -21577,18 +21598,39 @@ mod command_consumption_tests {
     /// words `exit`, `quit`, `:q`
     /// (`packages/tui/src/component/prompt/index.tsx:1128`, mirrored in
     /// `packages/tui/src/mini/prompt.shared.ts:71-76`); `:quit` is the
-    /// approved native extension of the same action. The previous version of
-    /// this test asserted that `/exit` closed a tab and must NOT exit — that
-    /// encoded the installed defect (root-window `/exit` closed a tab and the
-    /// app never terminated).
+    /// approved native extension of the same action. The previous assertion
+    /// that `/exit` closed a tab and must NOT exit encoded the installed
+    /// defect (root-window `/exit` closed a tab and the app never terminated).
+    ///
+    /// SCOPE: this checks helper-level alias recognition only — the
+    /// predicates classify spellings. It is NOT child-process, palette, PTY
+    /// or installed-journey runtime coverage.
     #[test]
-    fn every_exit_spelling_terminates_client_and_tab_close_stays_separate() {
-        for spelling in ["/exit", "/quit", "/q", "exit", "quit", ":q", ":quit"] {
+    fn native_exit_helpers_recognize_full_alias_set_and_keep_tab_close_separate() {
+        // Union predicate: every slash/vim alias and every bare exit word.
+        for spelling in ["/exit", "/quit", "/q", ":q", ":quit", "exit", "quit"] {
             assert!(
-                super::native_process_exit_route(spelling),
-                "{spelling} must terminate the client globally"
+                super::native_process_exit_command(spelling),
+                "{spelling} must be recognized as a client exit"
+            );
+            assert!(
+                super::native_exit_route(spelling),
+                "{spelling} must pass the local-command exit seam"
             );
         }
+        // Whitespace tolerance matches upstream's `trimmed` comparison.
+        for padded in ["  exit  ", "\t/q\n", " quit "] {
+            assert!(
+                super::native_process_exit_command(padded),
+                "{padded:?} must be recognized after trimming"
+            );
+        }
+        // No typed command closes a tab; `/new` creates a session and is not
+        // an exit spelling.
+        assert!(!super::native_close_tab_route("/exit"));
+        assert!(!super::native_close_tab_route("/new"));
+        assert!(!super::native_process_exit_command("/new"));
+        assert!(!super::native_exit_route("/new"));
         for not_exit in [
             "/close",
             "/tab",
@@ -21600,10 +21642,21 @@ mod command_consumption_tests {
             "/not-a-command",
         ] {
             assert!(
-                !super::native_process_exit_route(not_exit),
-                "{not_exit} must not terminate the client"
+                !super::native_process_exit_command(not_exit),
+                "{not_exit} must not be an exit spelling"
             );
         }
+        // The bare-word helper is exactly `exit | quit | :q` (trimmed); the
+        // route surface carries the slash and `:quit` spellings.
+        assert!(super::native_exit_word("exit"));
+        assert!(super::native_exit_word("quit"));
+        assert!(super::native_exit_word(":q"));
+        assert!(!super::native_exit_word("/exit"));
+        assert!(!super::native_exit_word(":quit"));
+        assert!(super::native_process_exit_route("/exit"));
+        assert!(super::native_process_exit_route(":quit"));
+        assert!(!super::native_process_exit_route("exit"));
+
         // Tab close is a SEPARATE action with no typed command: upstream's
         // `session.tab.close` has no `slash` entry (`app.tsx:878-884`) and is
         // bound to `<leader>w` (`config/keybind.ts:119`). The navigation
