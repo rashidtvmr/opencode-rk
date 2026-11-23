@@ -4870,18 +4870,25 @@ impl ChatView {
         // regardless of the header offset (`first`) or how many rows the
         // visible slice contributes, so no scroll/jump/message state can let
         // transcript text reclaim the action row directly above the composer.
-        if show_prompt && reserved_action_rows > 0 && body_h > 0 {
-            let reserved = body_h - 1;
-            rows[reserved] = (String::new(), ChatRowClass::Blank);
-            // Clear any per-row metadata too, so the action row is inert in
-            // every state: no stray markdown spans, text bounds or click/hit
-            // owners may survive on a row upstream keeps but leaves blank.
-            bounds[reserved] = None;
-            row_spans[reserved].clear();
-            owners[reserved] = None;
-            child_owners[reserved] = None;
-            tool_owners[reserved] = None;
-            group_owners[reserved] = None;
+        if show_prompt && reserved_action_rows > 0 && body_h >= reserved_action_rows {
+            // Blank the whole reserved band directly above the composer. At
+            // today's `SESSION_RESERVED_ACTION_ROWS == 1` this is exactly the
+            // single action row the UI-parity contract checks, so behavior is
+            // unchanged; iterating the full band keeps the invariant true if
+            // upstream ever widens the reservation, independent of the header
+            // offset or how many rows the visible transcript slice paints.
+            for reserved in (body_h - reserved_action_rows)..body_h {
+                rows[reserved] = (String::new(), ChatRowClass::Blank);
+                // Clear any per-row metadata too, so the action row is inert in
+                // every state: no stray markdown spans, text bounds or click/hit
+                // owners may survive on a row upstream keeps but leaves blank.
+                bounds[reserved] = None;
+                row_spans[reserved].clear();
+                owners[reserved] = None;
+                child_owners[reserved] = None;
+                tool_owners[reserved] = None;
+                group_owners[reserved] = None;
+            }
         }
         self.message_owners.replace(owners);
         self.child_owners.replace(child_owners);
