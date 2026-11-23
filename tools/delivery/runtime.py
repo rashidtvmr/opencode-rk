@@ -455,17 +455,28 @@ def prompt_for(payload):
                 "A response that is not pure JSON at the JSON parser entry point is rejected as a "
                 "runtime failure (agent must return exactly one complete JSON response). "
                 "Emit ONLY the JSON object.\n")
+    # Models that narrate their work emit the prose *after* doing it, so a
+    # contract stated only before the task body is easy to lose: a real
+    # rejection began "I have completed a thorough diff-first review ... {JSON}"
+    # with the reasoning itself already correct.  Restate the contract at the
+    # recency-weighted end of the prompt, where it applies to the actual answer.
+    closing = ("\nREMINDER BEFORE YOU ANSWER: the task instructions above are finished. "
+               "Do the work silently, then reply with the JSON object alone. "
+               "The first character of your reply must be '{' and the last must be '}'. "
+               "Put the evidence you gathered into the finding strings, not into prose "
+               "around the object.\n")
     if stage == "review":
         return header + envelope + ("Independent diff-first review. You are not the author. Do not edit anything. "
                          "Inspect DELIVERY_REVIEW.diff and the real implementation and tests. "
                          "Check wiring, security, failure handling and requirement coverage. "
                          "Respond with one JSON object only: {\"verdict\":\"APPROVE\" or \"NEEDS_FIX\","
                          "\"findings\":[\"specific evidence\"]}. Reject incomplete or untested claims. "
-                         + ("You are the security evaluator.\n" if payload.get("security_review") else "\n"))
+                         + ("You are the security evaluator.\n" if payload.get("security_review") else "\n")
+                         + closing)
     if stage == "diagnose":
         return header + envelope + ("Read only. Diagnose repeated failures, do not change code. Return JSON "
                          "{\"diagnosis\":\"root cause\",\"approach\":\"materially different repair strategy\"}.\n"
-                         + "Observed failures:\n" + payload.get("report", ""))
+                         + "Observed failures:\n" + payload.get("report", "") + closing)
     return header + ("Implement the complete behavior and meaningful tests within the grant. "
                      "Do not return only a proposal. Use read, search and edit tools. "
                      "Read applicable AGENTS.md but this scoped task does not authorize nested delegation. "
