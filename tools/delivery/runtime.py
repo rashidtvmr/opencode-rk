@@ -415,6 +415,12 @@ def structured_response(text, stage):
     try:
         value = json.loads(text.strip(), object_pairs_hook=unique)
     except (ValueError, RecursionError) as exc:
+        # The exact message is a frozen contract (test_runtime_output_contract),
+        # and on Python 3.9 the chained exception is the only place the observed
+        # text can ride along.  The verdict text is not retained anywhere else,
+        # so without this a rejection cannot be diagnosed.  The verdict still has
+        # to parse exactly; nothing here relaxes that.
+        exc.args = exc.args + ("responded_text=%r" % text.strip()[:2000],)
         raise Failure("agent must return exactly one complete JSON response", "runtime") from exc
     if not isinstance(value, dict):
         raise Failure("structured response must be an object", "runtime")
