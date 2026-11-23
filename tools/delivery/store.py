@@ -10,6 +10,10 @@ import uuid
 
 from .model import digest, overlaps, task as validate_task
 
+
+class WorkspaceSlotContention(ValueError):
+    """A live competing reservation owns this explicit slot/path."""
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tasks(
@@ -35,6 +39,23 @@ CREATE TABLE IF NOT EXISTS routes(agent TEXT PRIMARY KEY, failures INTEGER NOT N
 CREATE TABLE IF NOT EXISTS publications(id TEXT PRIMARY KEY, task TEXT NOT NULL,
  before_sha TEXT NOT NULL, candidate_sha TEXT NOT NULL, state TEXT NOT NULL,
  evidence TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS publication_history(job_id TEXT NOT NULL, task TEXT NOT NULL,
+ before_sha TEXT NOT NULL, candidate_sha TEXT NOT NULL, state TEXT NOT NULL,
+ evidence TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL,
+ PRIMARY KEY(job_id, state));
+CREATE TABLE IF NOT EXISTS workspace_reservations(
+ task TEXT PRIMARY KEY REFERENCES tasks(id),
+ job TEXT NOT NULL,
+ token TEXT NOT NULL,
+ generation INTEGER NOT NULL,
+ lease_until REAL NOT NULL,
+ base TEXT NOT NULL,
+ feature_ref TEXT NOT NULL UNIQUE,
+ path TEXT NOT NULL UNIQUE,
+ created REAL NOT NULL,
+ updated REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS reservation_job ON workspace_reservations(job, token);
 """
 
 
@@ -95,7 +116,14 @@ class Store:
                     raise ValueError("task specification is immutable: " + s["id"])
                 for grant in s["paths"]:
                     if any(overlaps(grant, p) for p in cfg["protected_paths"]):
-                        raise ValueError("task overlaps protected policy/evaluator path: " + grant)
+                        scoped = cfg.get("retained_package_authorization")
+                        retained = s.get("retained_package")
+                        if (not scoped or not retained or s["id"] != scoped.get("task_id") or
+                                retained.get("workspace") != scoped.get("workspace") or retained.get("common_git_dir") != scoped.get("common_git_dir") or
+                                retained.get("base") != scoped.get("base") or retained.get("source_head") != scoped.get("source_head") or
+                                retained.get("feature_ref") != scoped.get("feature_ref") or retained.get("files") != scoped.get("files") or retained.get("custody") != scoped.get("custody") or
+                                grant not in scoped.get("paths", [])):
+                            raise ValueError("task overlaps protected policy/evaluator path: " + grant)
                 if any(overlaps(p, sec) for p in s["paths"] for sec in cfg["security_paths"]):
                     s["security_review"] = True
                 combined[s["id"]] = s
@@ -147,7 +175,20 @@ class Store:
                 if not d or d[0] != "accepted":
                     return None
             # Grant belongs to an unfinished TASK, not to a permanent named lane.
-            for other in cx.execute("SELECT id,spec,state FROM tasks WHERE id!=? AND state NOT IN ('pending','accepted','blocked','cancelled')", (tid,)):
+            #
+            # Only stages that can write granted paths contend for them.  `review`,
+            # `test`, `prepare`, `publish` and `postcheck` run in isolated worktrees
+            # and fail closed on any HEAD change or new file (jobs.py), so a long
+            # review must not block a disjoint implement that merely names the same
+            # file.  `engine.eligible_tasks` applies the same rule; this is the
+            # atomic enforcement of it.
+            writers = {"implement", "diagnose"}
+            # `ready` tasks hold nothing yet; only claimed (`running`/`paused`)
+            # writers can contend.  Treating ready as a holder deadlocks chains of
+            # ready tasks with overlapping paths, since none of them can ever win.
+            for other in cx.execute("SELECT id,spec,state,stage FROM tasks WHERE id!=? AND state IN ('running','paused')", (tid,)):
+                if stage not in writers or other["stage"] not in writers:
+                    continue
                 if any(overlaps(a, b) for a in spec["paths"] for b in json.loads(other["spec"])["paths"]):
                     return None
             jid = uuid.uuid4().hex
@@ -272,6 +313,129 @@ class Store:
             cx.execute("UPDATE tasks SET state='cancelled',generation=generation+1,updated=? WHERE id=? AND state!='accepted'", (time.time(), tid))
             self.event(cx, "task.cancelled", {}, tid)
 
+    def reserve_workspace(self, tid, jid, token, generation, lease_seconds, base, feature_ref, path):
+        now = time.time()
+        lease_until = now + lease_seconds
+        with self.connection(write=True) as cx:
+            task = cx.execute("SELECT id,state,generation FROM tasks WHERE id=?", (tid,)).fetchone()
+            if not task:
+                raise ValueError("unknown task")
+            if task["generation"] != generation:
+                raise ValueError("task generation mismatch")
+            job = cx.execute("SELECT id,task,token,state,generation,lease_until FROM jobs WHERE id=?", (jid,)).fetchone()
+            if not job or job["task"] != tid or job["token"] != token or job["state"] != "running":
+                raise ValueError("job lease invalid")
+            if job["generation"] != generation or job["lease_until"] <= now:
+                raise ValueError("job lease expired or stale")
+            # handle conflicting reservations for same ref/path, and always
+            # consider this task's own prior (possibly expired, possibly
+            # ref/path-shifted) reservation so a re-implement can replace it.
+            for row in cx.execute("SELECT * FROM workspace_reservations WHERE feature_ref=? OR path=? OR task=?", (feature_ref, str(path), tid)):
+                if row["task"] == tid and row["job"] == jid and row["token"] == token and row["generation"] == generation:
+                    cx.execute("UPDATE workspace_reservations SET lease_until=?,base=?,feature_ref=?,path=?,updated=? WHERE task=?",
+                               (lease_until, base, feature_ref, str(path), now, tid))
+                    self.event(cx, "workspace.reserved", {"job": jid, "ref": feature_ref, "path": str(path)}, tid)
+                    return dict(cx.execute("SELECT * FROM workspace_reservations WHERE task=?", (tid,)).fetchone())
+                if row["lease_until"] > now:
+                    other_task = cx.execute("SELECT state,generation FROM tasks WHERE id=?", (row["task"],)).fetchone()
+                    other_job = cx.execute("SELECT state,generation,lease_until,token FROM jobs WHERE id=?", (row["job"],)).fetchone()
+                    live = bool(other_task and other_job and other_task["state"] not in {"accepted", "cancelled", "blocked", "paused"}
+                                and other_task["generation"] == row["generation"] == other_job["generation"]
+                                and other_job["state"] == "running" and other_job["lease_until"] > now and other_job["token"] == row["token"])
+                    if live and not (row["task"] == tid):
+                        raise WorkspaceSlotContention("workspace slot already reserved")
+                    if live and row["task"] == tid and row["job"] != jid:
+                        # A second live lease for the same task may not steal or
+                        # replace the owner's retained workspace.  Reentry is
+                        # legal only after the prior lease/job is provably
+                        # inactive; the stale row is then removed below.
+                        raise WorkspaceSlotContention("workspace slot already reserved by a live task lease")
+                # remove stale/conflicting row for replacement in same tx
+                cx.execute("DELETE FROM workspace_reservations WHERE task=? AND feature_ref=? AND path=?", (row["task"], row["feature_ref"], row["path"]))
+                if row["task"] != tid:
+                    cx.execute("DELETE FROM workspace_reservations WHERE task=?", (row["task"],))
+            existing = cx.execute("SELECT * FROM workspace_reservations WHERE task=?", (tid,)).fetchone()
+            if existing:
+                if existing["feature_ref"] != feature_ref or existing["path"] != str(path):
+                    raise ValueError("task already has a different workspace reservation")
+                cx.execute("UPDATE workspace_reservations SET lease_until=?,base=?,job=?,token=?,generation=?,updated=? WHERE task=?",
+                           (lease_until, base, jid, token, generation, now, tid))
+            else:
+                cx.execute("INSERT INTO workspace_reservations(task,job,token,generation,lease_until,base,feature_ref,path,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                           (tid, jid, token, generation, lease_until, base, feature_ref, str(path), now, now))
+            self.event(cx, "workspace.reserved", {"job": jid, "ref": feature_ref, "path": str(path)}, tid)
+            return dict(cx.execute("SELECT * FROM workspace_reservations WHERE task=?", (tid,)).fetchone())
+
+    @contextlib.contextmanager
+    def workspace_mutation(self, tid, jid, token, feature_ref=None, path=None, base=None):
+        """Hold the Store write transaction across the Git mutation boundary.
+
+        The SQLite write lock serializes reservation validation with lease
+        revocation/replacement. A revocation that arrives while this context is
+        held waits; it cannot invalidate the already-admitted critical section.
+        Wall-clock expiry is checked at entry. Git mutation and owner metadata
+        writes must complete before the transaction is released.
+        """
+        now = time.time()
+        with self.connection(write=True) as cx:
+            row = cx.execute(
+                "SELECT r.*, t.generation AS task_generation, j.state AS job_state, "
+                "j.lease_until AS job_lease_until, j.generation AS job_generation "
+                "FROM workspace_reservations r JOIN tasks t ON t.id=r.task "
+                "JOIN jobs j ON j.id=r.job WHERE r.task=?", (tid,)
+            ).fetchone()
+            if not row:
+                raise ValueError("workspace reservation missing")
+            if row["job"] != jid or row["token"] != token:
+                raise ValueError("workspace reservation owner mismatch")
+            if (row["generation"] != row["task_generation"] or
+                    row["generation"] != row["job_generation"]):
+                raise ValueError("workspace reservation generation mismatch")
+            if (row["job_state"] != "running" or row["job_lease_until"] <= now or
+                    row["lease_until"] <= now):
+                raise ValueError("workspace reservation lease expired")
+            if feature_ref and row["feature_ref"] != feature_ref:
+                raise ValueError("workspace reservation ref mismatch")
+            if path and str(row["path"]) != str(pathlib.Path(path).resolve()):
+                raise ValueError("workspace reservation path mismatch")
+            if base and row["base"] != base:
+                raise ValueError("workspace reservation base mismatch")
+            self.event(cx, "workspace.mutation.begin", {"job": jid, "ref": row["feature_ref"], "path": row["path"]}, tid)
+            yield dict(row)
+            self.event(cx, "workspace.mutation.commit", {"job": jid, "ref": row["feature_ref"], "path": row["path"]}, tid)
+
+    def workspace_reservation(self, tid, jid=None, token=None):
+        with self.connection() as cx:
+            row = cx.execute("SELECT * FROM workspace_reservations WHERE task=?", (tid,)).fetchone()
+            if not row:
+                return None
+            if jid is not None and row["job"] != jid:
+                return None
+            if token is not None and row["token"] != token:
+                return None
+            return dict(row)
+
+    def require_workspace_reservation(self, tid, jid, token, feature_ref=None, path=None, base=None):
+        now = time.time()
+        with self.connection() as cx:
+            row = cx.execute("SELECT r.*, t.state AS task_state, t.generation AS task_generation, j.state AS job_state, j.lease_until AS job_lease_until FROM workspace_reservations r JOIN tasks t ON t.id=r.task JOIN jobs j ON j.id=r.job WHERE r.task=?", (tid,)).fetchone()
+            if not row:
+                raise ValueError("workspace reservation missing")
+            if row["job"] != jid or row["token"] != token:
+                raise ValueError("workspace reservation owner mismatch")
+            if row["generation"] != row["task_generation"] or row["generation"] != cx.execute("SELECT generation FROM jobs WHERE id=?", (jid,)).fetchone()["generation"]:
+                raise ValueError("workspace reservation generation mismatch")
+            if row["job_state"] != "running" or row["job_lease_until"] <= now or row["lease_until"] <= now:
+                raise ValueError("workspace reservation lease expired")
+            if feature_ref and row["feature_ref"] != feature_ref:
+                raise ValueError("workspace reservation ref mismatch")
+            if path and str(row["path"]) != str(pathlib.Path(path).resolve()):
+                raise ValueError("workspace reservation path mismatch")
+            if base and row["base"] != base:
+                raise ValueError("workspace reservation base mismatch")
+            return dict(row)
+
+
     def publish_intent(self, jid, tid, before, candidate, evidence):
         with self.connection(write=True) as cx:
             cx.execute("INSERT OR IGNORE INTO publications VALUES(?,?,?,?,?,?,?,?)",
@@ -282,6 +446,23 @@ class Store:
     def publication(self, jid, state=None):
         with self.connection(write=state is not None) as cx:
             if state:
+                row = cx.execute("SELECT task,candidate_sha FROM publications WHERE id=?", (jid,)).fetchone()
                 cx.execute("UPDATE publications SET state=?,updated=? WHERE id=?", (state, time.time(), jid))
+                if row:
+                    # Retain the complete publication state sequence in the
+                    # append-only journal.  The row is a current-state index;
+                    # landed must remain observable after verified supersedes
+                    # it, especially for fresh postcheck evidence.
+                    self.event(cx, "publication." + state,
+                                {"job": jid, "candidate": row["candidate_sha"], "state": state}, row["task"])
+                    # Keep a queryable immutable state row as well as the
+                    # mutable current-state index.  Existing callers continue
+                    # to address the exact job id; diagnostics can now prove
+                    # landed -> verified rather than seeing only the final
+                    # verified snapshot.
+                    cx.execute(
+                        "INSERT OR REPLACE INTO publication_history(job_id,task,before_sha,candidate_sha,state,evidence,created,updated) "
+                        "SELECT ?,task,before_sha,candidate_sha,state,evidence,created,updated FROM publications WHERE id=?",
+                        (jid, jid))
             r = cx.execute("SELECT * FROM publications WHERE id=?", (jid,)).fetchone()
             return dict(r) if r else None

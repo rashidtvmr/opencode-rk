@@ -53,9 +53,22 @@ def environment(agent=False, forward=()):
     return env
 
 
+def bounded_wait(seconds, deadline):
+    """Cap a cleanup wait by the caller's remaining budget; never negative."""
+    if deadline is None:
+        return seconds
+    return max(0.0, min(seconds, deadline - time.monotonic()))
+
+
 def run(argv, cwd, *, valid=lambda: True, timeout=900, max_bytes=2097152, env=None, log=None,
-        capture_file=False, cancel_signal=signal.SIGTERM):
-    """Continuously drain output, fence orphaned work, bound memory, reap own group."""
+        capture_file=False, cancel_signal=signal.SIGTERM, deadline=None):
+    """Continuously drain output, fence orphaned work, bound memory, reap own group.
+
+    When `deadline` (a monotonic timestamp) is supplied, the post-timeout cleanup
+    waits are capped by the remaining budget so the caller's wall-clock bound
+    stays strict; a group that cannot be reaped within budget is abandoned and
+    fenced by the owner-death guardian once this process closes its stdin.
+    """
     if not valid():
         raise Failure("job lease is no longer valid", "cancelled")
     # Some CLIs exit before asynchronously flushing a large pipe write. A private
@@ -122,15 +135,26 @@ def run(argv, cwd, *, valid=lambda: True, timeout=900, max_bytes=2097152, env=No
             if log:
                 pathlib.Path(log).parent.mkdir(parents=True, exist_ok=True)
                 pathlib.Path(log).write_text(redact(tail.decode("utf-8", "replace")), encoding="utf-8")
-            with contextlib.suppress(ProcessLookupError):
+            # Cleanup is best-effort: Darwin can report EPERM for a group that
+            # already exited or whose pgid was recycled, and a cleanup failure
+            # must never replace the intended Failure with a crash.
+            with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(proc.pid, cancel_signal)
             try:
-                proc.wait(timeout=2)
+                proc.wait(timeout=bounded_wait(2, deadline))
             except subprocess.TimeoutExpired:
-                with contextlib.suppress(ProcessLookupError):
+                with contextlib.suppress(ProcessLookupError, PermissionError):
                     os.killpg(proc.pid, signal.SIGKILL)
-                proc.wait(timeout=5)
-            with contextlib.suppress(ProcessLookupError):
+                try:
+                    proc.wait(timeout=bounded_wait(5, deadline))
+                except subprocess.TimeoutExpired:
+                    # A group that survives SIGKILL (e.g. Darwin EPERM) is
+                    # abandoned rather than crashing the worker. The intended
+                    # Failure is still raised, so the job is failed, never
+                    # silently accepted; the owner-death guardian fences any
+                    # survivor once this process closes its stdin and exits.
+                    pass
+            with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(proc.pid, signal.SIGKILL)
             raise Failure(reason, "cancelled" if not valid() else
                           "output_limit" if "capture limit" in reason else "timeout")
@@ -150,11 +174,19 @@ def run(argv, cwd, *, valid=lambda: True, timeout=900, max_bytes=2097152, env=No
             proc.stdin.close()
         if proc.poll() is None:
             try:
-                proc.wait(timeout=2)
+                proc.wait(timeout=bounded_wait(2, deadline))
             except subprocess.TimeoutExpired:
-                with contextlib.suppress(ProcessLookupError):
+                with contextlib.suppress(ProcessLookupError, PermissionError):
                     os.killpg(proc.pid, signal.SIGKILL)
-                proc.wait(timeout=5)
+                try:
+                    proc.wait(timeout=bounded_wait(5, deadline))
+                except subprocess.TimeoutExpired:
+                    # A group that survives SIGKILL (e.g. Darwin EPERM) is
+                    # abandoned rather than crashing the worker. The intended
+                    # Failure is still raised, so the job is failed, never
+                    # silently accepted; the owner-death guardian fences any
+                    # survivor once this process closes its stdin and exits.
+                    pass
         if proc.stdout:
             proc.stdout.close()
         if capture is not None:
@@ -179,16 +211,25 @@ def json_values(text):
         i += end
 
 
-def inventory(executable, cwd, required=(), valid=lambda: True, forward_env=()):
+def inventory(executable, cwd, required=(), valid=lambda: True, forward_env=(), deadline=None):
     """Bounded inventory reads tolerate the installed CLI's partial JSON output.
 
     Only complete agent records are usable. A missing record in a partial CLI
-    dump is not proof that an authorized route was removed.
+    dump is not proof that an authorized route was removed. When `deadline` (a
+    monotonic timestamp) is supplied, every read is bounded by the remaining
+    budget so the caller's wall-clock bound is strict.
     """
     by_id = {}
     for attempt in range(3):
-        result = run([executable, "debug", "agents"], cwd, valid=valid, timeout=30,
-                     max_bytes=8388608, env=environment(agent=True, forward=forward_env), capture_file=True)
+        budget = 30
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            budget = max(0.0, min(30, remaining))
+        result = run([executable, "debug", "agents"], cwd, valid=valid, timeout=budget,
+                     max_bytes=8388608, env=environment(agent=True, forward=forward_env), capture_file=True,
+                     deadline=deadline)
         if result["returncode"] or result["truncated"]:
             raise Failure("OpenCode agent inventory failed or exceeded the output bound", "runtime")
         for value in json_values(result["output"]):
@@ -202,6 +243,14 @@ def inventory(executable, cwd, required=(), valid=lambda: True, forward_env=()):
         if attempt < 2:
             time.sleep(0.2)
     raise Failure("required agents were not observed in bounded OpenCode inventory reads", "runtime")
+
+
+# The owner-configured step budget (for example 60) is a research-agent
+# default. A measured implement job exhausted that budget on read-only
+# exploration (104 read/grep/glob calls, zero `edit` calls) and produced no
+# candidate, so an implementation role gets at least this many steps. An
+# owner-configured budget above the floor is always preserved.
+IMPLEMENT_STEP_FLOOR = 200
 
 
 def agent_definition(cfg, route):
@@ -437,6 +486,16 @@ def agent(payload, cfg, workspace, route, valid, log):
     else:
         exe = cfg["runtime"]["executable"]
         definition = agent_definition(cfg, route)
+        # Implementation roles must read, edit and self-check inside one job.
+        # Raise only the floor; reviews/diagnoses (read-only) keep the owner
+        # budget, and an owner budget above the floor is never lowered.
+        if editable:
+            try:
+                configured_steps = int(definition.get("steps"))
+            except (TypeError, ValueError):
+                configured_steps = 0
+            if configured_steps < IMPLEMENT_STEP_FLOOR:
+                definition["steps"] = IMPLEMENT_STEP_FLOOR
         # Bind the route's exact model identity before dispatch; the CLI then
         # reports ModelUnavailableError instead of silently switching to a
         # foreign default provider when the location catalog misses this model.
@@ -451,14 +510,55 @@ def agent(payload, cfg, workspace, route, valid, log):
             "The trusted controller executes tests and decides acceptance."
         )
         with overlay(workspace, route, payload["task"]["paths"], editable, definition) as expected:
-            inv = inventory(exe, workspace, required=(route,), valid=valid,
-                            forward_env=cfg["runtime"].get("forward_env", []))
-            actual = inv.get(route)
-            if not actual:
-                raise Failure("authorized agent is unavailable: " + route, "runtime")
-            rules = actual.get("permissions", [])
-            if not isinstance(rules, list) or rules[-len(expected):] != expected:
-                raise Failure("effective agent permissions do not match the scoped overlay", "authority")
+            # The installed CLI's background service reloads a project's config
+            # asynchronously, so the freshly written overlay can lag the first
+            # inventory read (a previously seen project keeps its cached rules
+            # for a few seconds).  Poll within a bounded budget until the exact
+            # scoped block is observed; a stale or partial read is never
+            # accepted.  The installed CLI appends its own built-in rules after
+            # the project overlay (for example browser/skill denies) and
+            # de-duplicates any that the overlay already declares, so the exact
+            # scoped overlay must appear contiguously and in order and every
+            # rule after it must be deny-only, so an appended rule can never
+            # broaden the effective authority.
+            size = len(expected)
+            deadline = time.monotonic() + 30.0
+            last_error = "effective agent permissions do not match the scoped overlay"
+            rules = None
+            while True:
+                # A revoked lease must stop the poll immediately, not after the
+                # whole budget: cancellation is not a transient inventory error.
+                if not valid():
+                    raise Failure("job lease is no longer valid", "cancelled")
+                try:
+                    inv = inventory(exe, workspace, required=(route,), valid=valid,
+                                    forward_env=cfg["runtime"].get("forward_env", []),
+                                    deadline=deadline)
+                except Failure as exc:
+                    if exc.kind == "cancelled":
+                        raise
+                    last_error = str(exc)
+                    inv = {}
+                actual = inv.get(route)
+                if not actual:
+                    last_error = "authorized agent is unavailable: " + route
+                else:
+                    candidate = actual.get("permissions", [])
+                    if not isinstance(candidate, list):
+                        last_error = "effective agent permissions do not match the scoped overlay"
+                    else:
+                        matches = [i for i in range(len(candidate) - size + 1)
+                                   if candidate[i:i + size] == expected]
+                        if matches:
+                            rules = candidate
+                            break
+                if time.monotonic() >= deadline:
+                    raise Failure(last_error, "authority")
+                time.sleep(0.5)
+            matches = [i for i in range(len(rules) - size + 1) if rules[i:i + size] == expected]
+            for rule in rules[matches[-1] + size:]:
+                if not isinstance(rule, dict) or rule.get("effect") != "deny":
+                    raise Failure("effective agent permissions were broadened after the scoped overlay", "authority")
             isolation = ["--standalone"] if cfg["runtime"].get("standalone", False) else []
             result = run([exe, "run", *isolation, "--agent", route, "--model", model,
                           "--format", "json", "--auto", prompt],

@@ -10,7 +10,10 @@ import sys
 
 
 def terminate(proc, first_signal):
-    with contextlib.suppress(ProcessLookupError):
+    # Best-effort group termination. Darwin can report EPERM for a group that
+    # has already exited or whose pgid was recycled; a cleanup failure must
+    # never crash the guardian and turn a successful command into a failure.
+    with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(proc.pid, first_signal)
     try:
         proc.wait(timeout=0.8)

@@ -8,6 +8,7 @@ import fcntl
 import json
 import os
 import pathlib
+import re
 import signal
 import subprocess
 import sys
@@ -64,9 +65,17 @@ def _setup(repo, state, raw):
     if oldcfg and model.digest(oldcfg) != model.digest(cfg):
         if store.jobs({"running", "finished"}) or store.meta("publication_barrier") or store.meta("stop_new_publications"):
             raise ValueError("cannot change workflow while jobs need reconciliation")
-        # Config changes invalidate live approvals, not completed delivery history.
+        # Idle config reconciliation: preserve historical candidate/base/workspace/
+        # author/changed_paths and negative report history; invalidate stale
+        # approvals/checks and requeue candidates for review on the new config.
         with store.connection(write=True) as cx:
-            cx.execute("UPDATE tasks SET state='pending',stage='implement',generation=generation+1,reviews='[]',candidate=NULL,base=NULL,updated=? WHERE state NOT IN ('accepted','cancelled','blocked')", (time.time(),))
+            cx.execute(
+                "UPDATE tasks SET generation=generation+1,updated=?,eligible_at=0,"
+                "reviews='[]',"
+                "stage=CASE WHEN candidate IS NOT NULL AND base IS NOT NULL THEN 'review' ELSE stage END,"
+                "state=CASE WHEN candidate IS NOT NULL AND base IS NOT NULL AND state NOT IN ('accepted','cancelled','blocked') THEN 'ready' ELSE state END "
+                "WHERE state NOT IN ('accepted','cancelled','blocked')",
+                (time.time(),))
             store.event(cx, "workflow.changed", {"old": model.digest(oldcfg), "new": model.digest(cfg)})
     if not store.meta("policy_base_sha"):
         store.meta("policy_base_sha", git.head(cfg["branch"]))
@@ -122,9 +131,13 @@ def consume(store):
         if task["state"] == "cancelled":
             values = {"state": "cancelled", "report": "result ignored after cancellation"}
         elif kind in {"candidate", "prepared"}:
-            values = {"state": "ready", "stage": "review", "base": result["base"], "candidate": result["candidate"],
-                      "workspace": result["workspace"], "reviews": "[]", "changed_paths": json.dumps(result["changed_paths"]),
-                      "author": result.get("author", task["author"]), "eligible_at": 0}
+            required = ("base", "candidate", "workspace", "changed_paths")
+            if any(key not in result for key in required):
+                values = {"state": "blocked", "report": "malformed candidate result: missing " + ",".join(k for k in required if k not in result), "reviews": "[]"}
+            else:
+                values = {"state": "ready", "stage": "review", "base": result["base"], "candidate": result["candidate"],
+                          "workspace": result["workspace"], "reviews": "[]", "changed_paths": json.dumps(result["changed_paths"]),
+                          "author": result.get("author", task["author"]), "eligible_at": 0}
         elif kind == "review":
             if result.get("candidate") != task["candidate"] or result.get("reviewer") == task["author"]:
                 values = {"state": "blocked", "report": "review identity/candidate mismatch"}
@@ -142,6 +155,14 @@ def consume(store):
                 values = {"state": "blocked", "report": "test evidence is for the wrong candidate"}
             else:
                 values = {"state": "ready", "stage": "prepare", "eligible_at": 0}
+        elif kind == "recheck":
+            # A landed candidate whose postchecks have not verified yet.  This is
+            # the normal result of a `postcheck` job, and of `publish` when the
+            # merge already happened: re-run the postchecks, never re-merge.
+            # Without this branch the result fell through to the generic
+            # failure path, which dereferences `base` on a result that has none.
+            values = {"state": "ready", "stage": "postcheck",
+                      "report": p.get("report", ""), "eligible_at": 0}
         elif kind == "unchanged":
             values = {"state": "ready", "stage": "publish", "eligible_at": 0}
         elif kind == "stale":
@@ -155,7 +176,18 @@ def consume(store):
             values = {"state": "ready", "stage": "implement", "attempt": 0, "diagnoses": task["diagnoses"]+1,
                       "report": "Independent diagnosis: "+result["diagnosis"]+"\nNew approach: "+result["approach"], "eligible_at": 0}
         elif kind == "wait":
-            values = {"state": "ready", "stage": job["stage"], "report": reason, "eligible_at": time.time()+5}
+            # A slot/route-starved task is not a failure, but retrying it every
+            # 5s produced 201 attempts in 90 minutes, each consuming a route slot
+            # and a provider request.  Back off using the wait count embedded in
+            # the report (no schema change, attempts still never consumed).
+            prior = 0
+            match = re.search(r"\[wait (\d+)\]", task["report"] or "")
+            if match:
+                prior = int(match.group(1))
+            waits = prior + 1
+            values = {"state": "ready", "stage": job["stage"],
+                      "report": "%s [wait %d]" % (reason, waits),
+                      "eligible_at": time.time()+min(2**min(waits, 7), 120)}
         elif kind in {"interrupted", "suspended", "timeout", "git", "failure", "cancelled", "ambiguous"} and job["stage"] == "publish" and store.publication(job["id"]):
             reconciliation = executors.reconcile_publication(store, job, lambda: True)
             if reconciliation["kind"] == "accepted":
@@ -190,13 +222,20 @@ def consume(store):
         if job["route"]:
             with store.connection(write=True) as cx:
                 cx.execute("INSERT OR IGNORE INTO routes(agent) VALUES(?)", (job["route"],))
-                if kind == "runtime":
+                # A route-side failure (quota exhausted, revoked key, transport
+                # error, malformed agent output) must penalise that route, not
+                # reset it.  Clearing the penalty here re-selected a dead route
+                # on the very next dispatch and re-blocked the task each time.
+                # Only a genuinely successful result clears route health.
+                if result.get("kind") in {"candidate", "review", "tested", "prepared",
+                                          "unchanged", "landed", "verified", "accepted"}:
+                    cx.execute("UPDATE routes SET failures=0,unavailable_until=0 WHERE agent=?", (job["route"],))
+                elif result.get("kind") not in {"interrupted", "cancelled", "suspended",
+                                                 "conflict", "wait", "stale", "git", "tested_unchanged"}:
                     row = cx.execute("SELECT failures FROM routes WHERE agent=?", (job["route"],)).fetchone()
                     n = row[0]+1
                     cx.execute("UPDATE routes SET failures=?,unavailable_until=?,last_error=? WHERE agent=?",
                                (n, time.time()+min(300, 5*(2**min(n,6))), reason[-1000:], job["route"]))
-                elif kind not in {"interrupted", "cancelled", "suspended"}:
-                    cx.execute("UPDATE routes SET failures=0,unavailable_until=0 WHERE agent=?", (job["route"],))
 
 
 def eligible_tasks(store, publish):
@@ -206,10 +245,26 @@ def eligible_tasks(store, publish):
     active = store.jobs({"running"})
     stop = store.meta("stop_new_publications") or store.meta("publication_barrier") or {}
     turn = store.meta("integration_turn")
-    if turn and (turn not in byid or byid[turn]["state"] in {"accepted", "blocked", "cancelled", "paused"}):
+    # The turn is meaningful only while its task is actually integrating.  A task
+    # can sit `ready` at `prepare` after a rewind or a conflict and never release
+    # it, and then every prepare/publish/postcheck fleet-wide is skipped while
+    # nothing runs.  Release it unless the holder still owns a live integration
+    # job.  `claim` writes the turn in the same step that creates the job, so an
+    # absent job here means the holder genuinely stopped, not a transient gap.
+    integrating = {j["task"] for j in active
+                   if j["stage"] in {"prepare", "publish", "postcheck"}}
+    if turn and (turn not in byid
+                 or byid[turn]["state"] in {"accepted", "blocked", "cancelled", "paused"}
+                 or byid[turn]["stage"] not in {"prepare", "publish", "postcheck"}
+                 or turn not in integrating):
         store.meta("integration_turn", "")
         turn = None
-    holds = [t for t in rows if t["state"] in {"ready", "running", "paused"}]
+    # Only a task that actually holds a grant can contend for it.  `ready` tasks
+    # have not claimed anything yet, so treating them as holders deadlocks a
+    # chain of ready tasks that name overlapping paths: each waits on the others
+    # and none is ever offered to `store.claim`, which is what really serializes
+    # writers atomically.
+    holds = [t for t in rows if t["state"] in {"running", "paused"}]
     eligible = []
     for row in rows:
         if row["state"] not in {"pending", "ready"} or row["eligible_at"] > time.time():
@@ -227,7 +282,16 @@ def eligible_tasks(store, publish):
             continue
         if row["state"] == "pending" and len(holds) >= cfg["max_wip"]:
             continue
-        if any(other["id"] != row["id"] and any(model.overlaps(a,b) for a in spec["paths"] for b in json.loads(other["spec"])["paths"]) for other in holds):
+        # Only stages that can write granted paths contend for them. `review` and
+        # `test` run in an isolated worktree and fail closed on any HEAD change or
+        # new file (jobs.py), so a long review must not serialize a disjoint
+        # implement that merely names the same file.
+        writers = {"implement", "diagnose"}
+        if row["stage"] in writers and any(
+                other["id"] != row["id"] and other["stage"] in writers
+                and any(model.overlaps(a, b) for a in spec["paths"]
+                        for b in json.loads(other["spec"])["paths"])
+                for other in holds):
             continue
         eligible.append(row)
     # Downstream work earns priority, but no role owns a fixed reservation.
