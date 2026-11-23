@@ -485,7 +485,13 @@ def worker(state, jid, token):
             raise Failure("workflow changed after job dispatch", "authority")
         result=executors.stage(store,job)
     except Failure as exc:
-        result={"kind":exc.kind,"error":runtime.redact(str(exc))[-16000:]}
+        # `str(exc)` alone discards the chained cause, which is where the
+        # observed model text lives when a structured verdict fails to parse.
+        # Keep the bounded cause so the recorded failure can be diagnosed.
+        detail = str(exc)
+        if exc.__cause__ is not None:
+            detail += " | cause: " + str(exc.__cause__)[:4000]
+        result={"kind":exc.kind,"error":runtime.redact(detail)[-16000:]}
     except Exception as exc:
         result={"kind":"failure","error":type(exc).__name__+": "+runtime.redact(str(exc))[-8000:]}
     return 0 if store.finish(jid,token,result) else 2
