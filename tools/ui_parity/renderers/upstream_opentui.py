@@ -74,12 +74,15 @@ SCENARIO_CONTRACTS = {
   "home-command-palette-v1": {"search_text": "new", "expected_visible": "New session"},
   "form-permission-v1": {
       "search_text": "", "reply_count": 1, "reply_status": 204,
-      # The selected decision travels under the `reply` key. Neither the pinned
-      # TUI client nor the local CLI ever sends a `decision` key
-      # (native_permissions.rs:565 posts `{ "reply": reply, "scope": scope }`;
-      # crates/server/src/lib.rs:690-693 accepts reply once|always|reject), so
-      # asserting `decision` would reject every genuine capture.
-      "reply_body_contains": '"reply":"always"',
+      # The selected decision travels under the `decision` key. That is the
+      # pinned upstream wire shape end to end: the TUI calls
+      # `data.session.permission.reply({ decision: value })`
+      # (`routes/session/permission.tsx:136-140`), the generated client posts
+      # `body: { decision, message }` (`client/src/promise/generated/client.ts:1676-1685`),
+      # and the endpoint declares `payload: Schema.Struct({ decision: Permission.Reply })`
+      # (`protocol/src/groups/permission.ts:142-148`), whose handler forwards
+      # `reply: ctx.payload.decision` (`server/src/handlers/permission.ts:71-84`).
+      "reply_body_contains": '"decision":"always"',
       "reply_path_contains": ("/permission/", "/reply"),
       "stages": PERMISSION_STAGES,
       # FORM-001: the prompt paints the option set (ported upstream labels,
@@ -88,11 +91,25 @@ SCENARIO_CONTRACTS = {
       # permission_always_lines). The swap must be a swap: the rules body is
       # absent before the option cycles and gone again after the reply.
       "initial_visible": ["Permission required", "Allow once", "Always allow", "Reject"],
-      "initial_selected_visible": ["→ Allow once"],
-      "always_selected_visible": ["→ Always allow"],
+      # Upstream distinguishes the focused option by BACKGROUND, never by a
+      # glyph: `routes/session/permission.tsx:565-590` paints the label
+      # unchanged and sets `backgroundColor` to
+      # `theme.background.action.primary.focused` for `store.selected` and
+      # `...primary.base` for the rest. (The mini footer does the same at
+      # `mini/footer.permission.tsx:42-70`; `test/mini/footer.view.test.tsx:2463`
+      # asserts the focused span's `bg`.) So the focused option is MEASURED as
+      # the one whose cell background differs from its siblings'.
+      "option_labels": ["Allow once", "Always allow", "Reject"],
+      "selected_option_initial": "Allow once",
+      "selected_option_always": "Always allow",
+      # Only the sentence discriminates the swap. The request's own resource
+      # list is already painted as `- echo oracle` bullets in the INITIAL frame
+      # (`permissionPresentation` renders `resources`), so a bullet cannot mark
+      # the swap; it is checked for presence only.
       "always_body_visible": [
-          "This will always allow the following patterns for this project.", "- echo oracle",
+          "This will always allow the following patterns for this project.",
       ],
+      "always_rules_visible": ["- echo oracle"],
       "prompt_visible_after_reply": ["Permission required", "Allow once", "Always allow", "Reject"],
       "option_order": ["Allow once", "Always allow", "Reject"],
   },
@@ -100,7 +117,13 @@ SCENARIO_CONTRACTS = {
       "search_text": "", "reply_count": 0,
       "required_initial_visible": ["[ ] Staging"],
       "required_selected_visible": ["[✓] Staging"],
-      "required_visible": ["Answer required"],
+      # The journey clears the required multiselect (real space, real space), so
+      # the field holds an EMPTY LIST, not `undefined`. Upstream discriminates the
+      # two: `undefined` yields "Answer required", while a required empty
+      # multiselect yields "Select at least one option"
+      # (`util/form.ts:73-75`; the Rust port matches at
+      # native_view_dialogs.rs:4908-4920).
+      "required_visible": ["Select at least one option"],
       "optional_visible": ["Optional: (not answered)"], "stages": FORM_STAGES,
   },
 }
@@ -162,14 +185,14 @@ class WrapperError(Exception):
     """The capture run failed; the denied or failed state is reported for repair."""
 
 
-def _stage_text(frames: list) -> dict:
-    """Map unique named stages to joined row text; refuse unmeasurable frames."""
-    text_by_stage = {}
+def _stage_rows(frames: list) -> dict:
+    """Map unique named stages to their styled rows; refuse unmeasurable frames."""
+    rows_by_stage = {}
     for frame in frames:
         if not isinstance(frame, dict) or not isinstance(frame.get("stage"), str) or not frame["stage"]:
             raise WrapperError("production_result_unmeasurable_stage")
         stage = frame["stage"]
-        if stage in text_by_stage:
+        if stage in rows_by_stage:
             raise WrapperError(f"production_result_duplicate_stage: {stage}")
         screen = frame.get("screen")
         rows = screen.get("rows") if isinstance(screen, dict) else None
@@ -192,8 +215,47 @@ def _stage_text(frames: list) -> dict:
                 cursor += span["n"]
             if cursor != width:
                 raise WrapperError("production_result_unmeasurable_styles")
-        text_by_stage[stage] = "\n".join(row["text"] for row in rows)
-    return text_by_stage
+        rows_by_stage[stage] = rows
+    return rows_by_stage
+
+
+def _stage_text(rows_by_stage: dict) -> dict:
+    """Stage name -> joined row text, for the text-only journey assertions."""
+    return {stage: "\n".join(row["text"] for row in rows)
+            for stage, rows in rows_by_stage.items()}
+
+
+def _option_background(row: dict, label: str) -> str:
+    """The single background painted under `label` in this row, or "" if the
+    label is missing or straddles more than one background."""
+    text = row["text"]
+    start = text.find(label)
+    if start < 0:
+        return ""
+    end = start + len(label)
+    backgrounds = set()
+    cursor = 0
+    for span in row["spans"]:
+        span_start, cursor = cursor, cursor + span["n"]
+        if cursor > start and span_start < end:
+            backgrounds.add(span["bg"])
+    return backgrounds.pop() if len(backgrounds) == 1 else ""
+
+
+def _require_selected_option(rows: list, labels: list, selected: str, code: str) -> None:
+    """Fail unless `selected` is the ONLY option painted on its background.
+
+    The options may share one inline row (`routes/session/permission.tsx:565-590`
+    paints them side by side) or occupy their own rows, so each label is located
+    independently and its background read from wherever it was painted.
+    """
+    backgrounds = {}
+    for label in labels:
+        found = {_option_background(row, label) for row in rows if label in row["text"]}
+        backgrounds[label] = found.pop() if len(found) == 1 else ""
+    chosen = backgrounds.get(selected, "")
+    if not chosen or any(backgrounds[label] == chosen for label in labels if label != selected):
+        raise WrapperError(code)
 
 
 def _validate_form_journey(text_by_stage: dict, contract: dict) -> None:
@@ -236,16 +298,17 @@ def _validate_form_journey(text_by_stage: dict, contract: dict) -> None:
             raise WrapperError("form_optional_control_missing")
 
 
-def _validate_permission_journey(replies: list, text_by_stage: dict, contract: dict) -> None:
+def _validate_permission_journey(replies: list, rows_by_stage: dict, contract: dict) -> None:
     """Permission journey (FORM-001): the prompt paints its option set, the
     rules body is NOT pre-painted before the option cycles, the always-body swap
     is observed while the prompt is still open (the body differs from the
     initial frame and shows the rules it will persist), exactly one successful
-    reply carries the selected decision under the real `reply` key on the
+    reply carries the selected decision under the real `decision` key on the
     permission reply route, and the open prompt is gone after the reply."""
     for stage in contract["stages"]:
-        if stage not in text_by_stage:
+        if stage not in rows_by_stage:
             raise WrapperError(f"production_result_unmeasurable_stage: {stage}")
+    text_by_stage = _stage_text(rows_by_stage)
     initial = text_by_stage["permission_initial"]
     for marker in contract["initial_visible"]:
         if marker not in initial:
@@ -253,9 +316,14 @@ def _validate_permission_journey(replies: list, text_by_stage: dict, contract: d
     positions = [initial.find(marker) for marker in contract["option_order"]]
     if any(position < 0 for position in positions) or positions != sorted(positions):
         raise WrapperError("permission_initial_option_order")
-    if any(marker not in initial for marker in contract["initial_selected_visible"]):
-        raise WrapperError("permission_initial_selected_option")
-    # The swap must be a swap: the persisted-rules body is not pre-painted.
+    _require_selected_option(rows_by_stage["permission_initial"], contract["option_labels"],
+                             contract["selected_option_initial"],
+                             "permission_initial_selected_option")
+    # The swap must be a swap: the persisted-rules SENTENCE is not pre-painted.
+    # Only the sentence discriminates the two stages — the request's own
+    # resources are already painted as `- <resource>` bullets in the initial
+    # frame (`permissionPresentation` renders them), so a bullet is not a marker
+    # of the swap.
     if any(marker in text_by_stage["permission_initial"] for marker in contract["always_body_visible"]):
         raise WrapperError("permission_always_body_pre_painted")
     # FORM-001 core: the body must actually change when `always` is selected.
@@ -263,12 +331,13 @@ def _validate_permission_journey(replies: list, text_by_stage: dict, contract: d
     if always_body == initial:
         raise WrapperError("permission_body_swap_not_observed")
     # Body markers first: a frame missing the rules body reports the body
-    # defect (permission_always_body_missing) rather than the option arrow.
-    for marker in contract["always_body_visible"]:
+    # defect (permission_always_body_missing) rather than the focused option.
+    for marker in contract["always_body_visible"] + contract["always_rules_visible"]:
         if marker not in always_body:
             raise WrapperError(f"permission_always_body_missing: {marker!r}")
-    if any(marker not in always_body for marker in contract["always_selected_visible"]):
-        raise WrapperError("permission_always_option_not_selected")
+    _require_selected_option(rows_by_stage["permission_always_body"], contract["option_labels"],
+                             contract["selected_option_always"],
+                             "permission_always_option_not_selected")
     reply = replies[0]
     if not isinstance(reply, dict) or reply.get("status") != contract["reply_status"]:
         raise WrapperError(f"permission_reply_not_successful: {replies!r}")
@@ -283,10 +352,10 @@ def _validate_permission_journey(replies: list, text_by_stage: dict, contract: d
         body = json.loads(reply.get("body", ""))
     except (TypeError, json.JSONDecodeError):
         raise WrapperError(f"permission_reply_not_successful: {replies!r}") from None
-    if not isinstance(body, dict) or body.get("reply") != "always" or "decision" in body \
-            or set(body) - {"reply", "scope"}:
-        raise WrapperError(f"permission_reply_not_successful: {replies!r}")
-    if body.get("scope", "always") != "always":
+    # `{ decision, message? }` is the whole pinned payload schema; any other key
+    # is outside it (`protocol/src/groups/permission.ts:142-148`).
+    if not isinstance(body, dict) or body.get("decision") != "always" \
+            or set(body) - {"decision", "message"}:
         raise WrapperError(f"permission_reply_not_successful: {replies!r}")
     if any(marker not in text_by_stage["permission_always_body"]
            for marker in contract["always_body_visible"]):
@@ -294,7 +363,8 @@ def _validate_permission_journey(replies: list, text_by_stage: dict, contract: d
     # Replying resolves the request: neither its option prompt nor its rules
     # body may remain on the measured surface.
     submitted = text_by_stage["permission_submitted"]
-    if any(marker in submitted for marker in contract["always_body_visible"] + contract["prompt_visible_after_reply"]):
+    if any(marker in submitted for marker in
+           contract["always_body_visible"] + contract["prompt_visible_after_reply"]):
         raise WrapperError("permission_prompt_still_open")
 
 
@@ -309,7 +379,8 @@ def validate_dialog_postconditions(result: dict) -> None:
     frames = result.get("frames")
     if not isinstance(frames, list) or not frames:
         raise WrapperError("production_result_unmeasurable_frames")
-    text_by_stage = _stage_text(frames)
+    rows_by_stage = _stage_rows(frames)
+    text_by_stage = _stage_text(rows_by_stage)
     expected_stages = contract.get("stages", ())
     for stage in expected_stages:
         if stage not in text_by_stage:
@@ -319,7 +390,7 @@ def validate_dialog_postconditions(result: dict) -> None:
     if scenario == "form-multiselect-v1":
         _validate_form_journey(text_by_stage, contract)
     if scenario == "form-permission-v1":
-        _validate_permission_journey(replies, text_by_stage, contract)
+        _validate_permission_journey(replies, rows_by_stage, contract)
     # Stage timeline last: the journeys are stage-keyed and already require
     # every expected stage above, so a content defect is reported by its own
     # code while a reordered (but content-valid) timeline is still refused.
@@ -638,12 +709,18 @@ def run_capture(bun: str, oracle: Path, source_text: str, request: dict,
         shutil.rmtree(tmp, ignore_errors=True)
     if proc.returncode:
         raise WrapperError(f"capture exited {proc.returncode}: {proc.stderr.strip()[-2000:]} stdout={proc.stdout.strip()[-2000:]}")
+    # Fail-closed: the child must emit EXACTLY one JSON object on stdout.
+    # OpenTUI's native exit handler paints a terminal-restoration frame on
+    # stdout as the process exits (the renderer is already destroyed by then),
+    # so the payload is the ONLY line that begins with `{`; any second such
+    # line is a protocol violation rather than a line to pick between.
+    payloads = [line for line in proc.stdout.splitlines() if line.lstrip().startswith("{")]
+    if len(payloads) != 1:
+        raise WrapperError(
+            f"capture must emit exactly one JSON object, saw {len(payloads)}; "
+            f"stdout={proc.stdout.strip()[-2000:]}")
     try:
-        # Fail-closed: the child must emit EXACTLY one JSON object on stdout.
-        # `json.loads` tolerates surrounding whitespace only; any other leading
-        # or trailing bytes are a protocol violation, never silently sliced
-        # away, because the payload is the measured production evidence.
-        result = json.loads(proc.stdout)
+        result = json.loads(payloads[0])
     except json.JSONDecodeError as error:
         raise WrapperError(f"capture did not emit JSON: {error}; stdout={proc.stdout.strip()[-2000:]}") from error
     if not isinstance(result, dict):

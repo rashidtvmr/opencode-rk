@@ -323,6 +323,15 @@ const requestPath = (url: unknown): string => {
   try { return new URL(value, "http://localhost").pathname } catch { return value.split("?")[0] }
 }
 
+const requestQuery = (url: unknown, name: string): string | null => {
+  const request = url as any
+  const value = typeof url === "string" ? url
+    : typeof request?.url === "string" ? request.url
+    : typeof request?.pathname === "string" ? request.pathname
+    : String(url)
+  try { return new URL(value, "http://localhost").searchParams.get(name) } catch { return null }
+}
+
 const requestMethod = (input: unknown, original: unknown): string => {
   for (const candidate of [input, original]) {
     if (!candidate || typeof candidate !== "object") continue
@@ -346,6 +355,36 @@ const requestBodyText = async (input: unknown, original: unknown): Promise<strin
 
 const rowText = (frame: any): string =>
   (frame.screen.rows as any[]).map((row: any) => row.text).join("\n")
+
+// The single background painted under `label` in one row, or "" when the label
+// is absent or straddles more than one background.
+const optionBackground = (row: any, label: string): string => {
+  const start = row.text.indexOf(label)
+  if (start < 0) return ""
+  const end = start + label.length
+  const backgrounds = new Set<string>()
+  let cursor = 0
+  for (const span of row.spans as any[]) {
+    const spanStart = cursor
+    cursor += span.n
+    if (cursor > start && spanStart < end) backgrounds.add(span.bg)
+  }
+  return backgrounds.size === 1 ? [...backgrounds][0] : ""
+}
+
+const OPTION_LABELS = ["Allow once", "Always allow", "Reject"]
+
+// Which option the app painted as focused, read from the background it paints
+// rather than from a glyph upstream never emits. Returns "" unless exactly one
+// label carries a distinct background.
+const selectedOption = (rows: any[]): string => {
+  const row = rows.find((candidate: any) => OPTION_LABELS.every((label) => candidate.text.includes(label)))
+  if (!row) return ""
+  const backgrounds = OPTION_LABELS.map((label) => [label, optionBackground(row, label)] as const)
+  const focused = backgrounds.filter(([, bg], index) =>
+    bg && backgrounds.filter(([, other], otherIndex) => otherIndex !== index && other === bg).length === 0)
+  return focused.length === 1 ? focused[0][0] : ""
+}
 
 const countMarker = (frame: any, marker: string): number =>
   (frame.screen.rows as any[]).reduce(
@@ -372,10 +411,26 @@ async function runDialogFlow(request: any, fixture: any, cols: number, rows: num
   // URL and body shapes are normalized: the client may hand us a URL object or
   // a string, and a Request or a plain init object.
   const originalFetch = globalThis.fetch
-  const notFound = (url: any) => new Response(
-    JSON.stringify({ error: "not_found", path: requestPath(url) }),
-    { status: 404, headers: { "content-type": "application/json" } },
-  )
+  const notFound = (url: any) => {
+    if (process.env.OC2_TRACE_404) console.error("UNROUTED", requestPath(url))
+    return new Response(
+      JSON.stringify({ error: "not_found", path: requestPath(url) }),
+      { status: 404, headers: { "content-type": "application/json" } },
+    )
+  }
+  // The multiselect form the journey drives. `Form.Info` requires
+  // `{ id, sessionID, title, fields }` (`schema/src/form.ts:136-140`), and a
+  // multiselect field carries `options: [{ value, label, description? }]`
+  // (`schema/src/form.ts:92-100`). One definition feeds both the live event and
+  // the list endpoint so the store cannot hold two different shapes.
+  const formInfo = () => ({
+    id: "frm_oracle", sessionID, title: "Choose targets", fields: [
+      { key: "targets", type: "multiselect", title: "Targets", required: true, minItems: 1,
+        options: [{ value: "staging", label: "Staging", description: "Deploy to staging" }] },
+      { key: "optional", type: "multiselect", title: "Optional", required: false,
+        options: [{ value: "logs", label: "Logs", description: "Include logs" }] },
+    ],
+  })
   // Route the dialog journey's own requests. `null` means "not this capture's
   // request", so each transport below decides how to answer it.
   const route = async (url: any, input: any): Promise<Response | null> => {
@@ -393,15 +448,39 @@ async function runDialogFlow(request: any, fixture: any, cols: number, rows: num
       location: { directory: "/tmp/oracle", project: { id: "proj_test", directory: "/tmp/oracle" } },
       time: { created: 0, updated: 0 }, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0,
     } }), { headers: { "content-type": "application/json" } })
+    // The dialog only surfaces for a session the app considers active, and the
+    // base router answers `/api/session/active` with `{}`
+    // (packages/tui/test/fixture/tui-client.ts:139). That leaves the app on the
+    // "New session" empty state where no permission prompt can paint, so this
+    // one response is authored here; `packages/tui/test/cli/tui/data.test.tsx:1333`
+    // shows the shape it needs for an active session.
+    if (path === "/api/session/active") return new Response(JSON.stringify({
+      data: { [sessionID]: { type: "running" } },
+    }), { headers: { "content-type": "application/json" } })
+    // The pending form must also be LISTED: the mounted app re-syncs
+    // `data.session.form.sync(sessionID)` right after mount
+    // (`routes/session/index.tsx:343`), and that sync REPLACES the store with
+    // whatever `GET /api/session/:sessionID/form` returns
+    // (`client/src/solid/data.ts:1870`). The fixture answers that endpoint with
+    // `{ data: [] }` (`packages/tui/test/fixture/tui-client.ts:150`), which would
+    // erase the form the event just added. Same object as the event below, so
+    // the two paths cannot disagree.
+    if (path === `/api/session/${sessionID}/form`) return new Response(JSON.stringify({ data: [formInfo()] }), { headers: { "content-type": "application/json" } })
     if (path.includes(`/api/session/${sessionID}/message`)) return new Response(JSON.stringify({ data: [], cursor: {} }), { headers: { "content-type": "application/json" } })
     if (path.includes(`/api/session/${sessionID}/inbox`)) return new Response(JSON.stringify({ data: [] }), { headers: { "content-type": "application/json" } })
     return null
   }
-  // The fixture's `fetch` option is the transport the mounted app uses, and it
-  // is hermetic: an unrouted request is answered with an explicit 404 instead
-  // of `undefined` (an opaque client failure that would mask the stage under
-  // test) and never reaches the network.
-  const fixtureFetch = async (url: any, input: any) => (await route(url, input)) ?? notFound(url)
+  // This override runs *before* the fixture's own router
+  // (`createFetch(override, events)` calls `override` first,
+  // packages/tui/test/fixture/tui-client.ts:72-77), and the mounted app reaches
+  // it through a real `Bun.serve` (`test/fixture/app.ts` -> `calls.fetch`). So
+  // answering an unauthored path here — with a 404, or even a 204 — shadows
+  // `/api/event` (the live SSE stream), `/api/location`, `/api/plugin`,
+  // `/api/fs/list`, `/api/session/active` and the rest of the base router, and
+  // the app never gets `permission.asked`: every dialog capture then times out
+  // with `permission_prompt_not_observed`. Decline instead; the base router
+  // serves those and still keeps the capture hermetic.
+  const fixtureFetch = async (url: any, input: any) => (await route(url, input)) ?? undefined
   // Some production code paths call `globalThis.fetch` directly rather than the
   // injected option, so the same router is installed there for the duration of
   // the flow. Everything outside the dialog journey keeps the transport that
@@ -493,6 +572,16 @@ async function runDialogFlow(request: any, fixture: any, cols: number, rows: num
       await settle()
       trace[trace.length - 1].measured_cursor = setup.captureSpans().cursor ?? [0, 0]
     }
+    // `pressKey` resolves a name only against `KeyCodes` (RETURN/TAB/ESCAPE/...)
+    // and otherwise treats the string as RAW BYTES
+    // (`@opentui/core/testing.js:104-122`), so "tab" would arrive as `t`,`a`,`b`.
+    // The dedicated presser emits the real TAB byte.
+    const pressTab = async () => {
+      trace.push({ input: "key", name: "tab" })
+      setup.mockInput.pressTab()
+      await settle()
+      trace[trace.length - 1].measured_cursor = setup.captureSpans().cursor ?? [0, 0]
+    }
     // Bounded stage waits: a stage that never paints is a precise failure with
     // the attempted trigger attached, never a silent hang or a skipped frame.
     const waitFrame = async (predicate: (frame: string) => boolean, code: string, detail: any, ms = 12000) => {
@@ -520,7 +609,7 @@ async function runDialogFlow(request: any, fixture: any, cols: number, rows: num
       // The pinned upstream fixture event consumes the public session event
       // envelope. Supplies its permission properties directly through the real
       // subscription path; data is controlled fixture input, not a state override.
-      emit({ id: "evt_permission", type: "permission.asked", properties: {
+      emit({ id: "evt_permission", created: 0, type: "permission.asked", data: {
         id: "per_oracle", sessionID, type: "shell", action: "shell", title: "Run shell command",
         resources: ["echo oracle"], save: ["echo oracle"],
       } })
@@ -531,11 +620,20 @@ async function runDialogFlow(request: any, fixture: any, cols: number, rows: num
       // The initial option must be the pinned upstream's actual default, not a
       // frame that merely contains the option labels in a different order.
       const permissionRows = permission.screen.rows.map((row: any) => row.text)
-      if (!permissionRows.some((line: string) => line.includes("→ Allow once")))
+      // Upstream never marks the focused option with a glyph: it paints the
+      // label unchanged and moves the BACKGROUND to
+      // `theme.background.action.primary.focused` for `store.selected`
+      // (`routes/session/permission.tsx:565-590`; the mini footer does the same
+      // at `mini/footer.permission.tsx:42-70`). The focused option is therefore
+      // measured as the only label on that background.
+      if (selectedOption(permission.screen.rows) !== "Allow once")
         fail("permission_initial_selected_option", permissionRows)
-      if (permissionRows.findIndex((line: string) => line.includes("Allow once")) < 0
-          || permissionRows.findIndex((line: string) => line.includes("Always allow")) <= permissionRows.findIndex((line: string) => line.includes("Allow once"))
-          || permissionRows.findIndex((line: string) => line.includes("Reject")) <= permissionRows.findIndex((line: string) => line.includes("Always allow")))
+      // The options share one inline footer row, so order is a text position
+      // within the joined frame, not a row index.
+      const initialText = permissionRows.join("\n")
+      const optionPositions = OPTION_LABELS.map((label) => initialText.indexOf(label))
+      if (optionPositions.some((position) => position < 0)
+          || optionPositions.some((position, index) => index > 0 && position <= optionPositions[index - 1]))
         fail("permission_initial_option_order", permissionRows)
       // Option set: the ported labels (`permission.tsx`, native_permissions.rs:159-161)
       // with save rules present, so `always` is offered (FORM-001).
@@ -557,17 +655,18 @@ async function runDialogFlow(request: any, fixture: any, cols: number, rows: num
       const alwaysBody = capture("permission_always_body")
       if (rowText(alwaysBody) === rowText(permission))
         fail("permission_body_swap_not_observed", { initial: rowText(permission) })
-      if (!alwaysBody.screen.rows.some((row: any) => row.text.includes("→ Always allow")))
+      if (selectedOption(alwaysBody.screen.rows) !== "Always allow")
         fail("permission_always_option_not_selected", alwaysBody.screen.rows.map((row: any) => row.text))
       if (!alwaysBody.screen.rows.some((row: any) => row.text.includes("This will always allow the following patterns for this project."))
           || !alwaysBody.screen.rows.some((row: any) => row.text.includes("- echo oracle")))
         fail("permission_always_body_missing", alwaysBody.screen.rows.map((r: any) => r.text))
       await pressEnter()
-      // The selected decision travels under the `reply` key; no client sends a
-      // `decision` key (native_permissions.rs:565 posts { reply, scope };
-      // crates/server/src/lib.rs:690-693 accepts reply once|always|reject).
+
       await waitCondition(() => replies.length >= 1, "permission_reply_not_observed", { dispatched: "enter" })
-      if (replies.length !== 1 || replies[0].status !== 204 || !replies[0].body.includes('"reply":"always"'))
+      // `{ decision, message? }` is the pinned upstream payload schema
+      // (`protocol/src/groups/permission.ts:142-148`); the TUI sends
+      // `decision` and the handler forwards it as `reply`.
+      if (replies.length !== 1 || replies[0].status !== 204 || !replies[0].body.includes('"decision":"always"'))
         fail("permission_reply_not_successful", replies)
       if (!replies[0].path.includes("/permission/") || !replies[0].path.includes("/reply"))
         fail("permission_reply_path_invalid", replies[0].path)
@@ -592,13 +691,7 @@ async function runDialogFlow(request: any, fixture: any, cols: number, rows: num
     // Upstream form wire shape per our ported server (`form.created` ->
     // {"form": FormInfo}, event_http.rs:110; fields carry key/type/title/
     // required/options[{value,label,description}] — crates/contracts/src/lib.rs:507-526).
-    emit({ id: "evt_form", type: "form.created", properties: { form: {
-      id: "frm_oracle", sessionID, title: "Choose targets", fields: [
-        { key: "targets", type: "multiselect", title: "Targets", required: true, minItems: 1,
-          options: [{ value: "staging", label: "Staging", description: "Deploy to staging" }] },
-        { key: "optional", type: "multiselect", title: "Optional", required: false,
-          options: [{ value: "logs", label: "Logs", description: "Include logs" }] },
-      ] } } })
+    emit({ id: "evt_form", created: 0, type: "form.created", data: { form: formInfo() } })
     await waitFrame((f: string) => f.includes("Choose targets"),
       "form_prompt_not_observed", { event: "form.created", sessionID })
     await settle()
@@ -610,13 +703,16 @@ async function runDialogFlow(request: any, fixture: any, cols: number, rows: num
     // the second deselects it, and `storeAnswer` normalizes the empty list away
     // (form.tsx:257-267), so the required list ends unanswered. The two
     // intermediate frames make the round-trip observable.
-    await press("space")
+    // `pressKey` accepts a `KeyCodes` name or raw bytes; "space" is not a
+    // KeyCodes member, so the raw space byte is what actually reaches the app's
+    // keymap (`@opentui/core/testing.js:104-122`).
+    await press(" ")
     const selected = capture("form_required_selected")
     if (rowText(selected) === rowText(initial))
       fail("form_required_toggle_not_observed", { initial: rowText(initial) })
     if (!selected.screen.rows.some((row: any) => row.text.includes("[✓] Staging")))
       fail("form_required_check_not_painted", selected.screen.rows.map((r: any) => r.text))
-    await press("space")
+    await press(" ")
     const cleared = capture("form_required_cleared")
     if (rowText(cleared) !== rowText(initial))
       fail("form_required_toggle_not_reversible", { cleared: rowText(cleared), initial: rowText(initial) })
@@ -624,10 +720,10 @@ async function runDialogFlow(request: any, fixture: any, cols: number, rows: num
     // the PRE-submit review surface: it already marks the required field with
     // the error color (audit-messages.md §8 "review ... marks invalid/required/
     // missing external acknowledgements using error color").
-    await press("tab")
-    await press("tab")
+    await pressTab()
+    await pressTab()
     const review = capture("form_review")
-    const reviewCount = countMarker(review, "Answer required")
+    const reviewCount = countMarker(review, "Select at least one option")
     if (reviewCount < 1)
       fail("form_required_error_missing", { stage: "form_review", rows: review.screen.rows.map((r: any) => r.text) })
     if (!review.screen.rows.some((row: any) => row.text.includes("Optional: (not answered)")))
@@ -640,12 +736,12 @@ async function runDialogFlow(request: any, fixture: any, cols: number, rows: num
     // strictly more of the marker than the pre-submit review frame. A no-op
     // Enter leaves the counts equal and fails here.
     await pressEnter()
-    await waitFrame((f: string) => f.split("Answer required").length - 1 > reviewCount,
+    await waitFrame((f: string) => f.split("Select at least one option").length - 1 > reviewCount,
       "form_submit_attempt_not_observed", { review_count: reviewCount, dispatched: "enter" })
     const submitted = capture("form_submit_error")
-    if (countMarker(submitted, "Answer required") <= reviewCount)
+    if (countMarker(submitted, "Select at least one option") <= reviewCount)
       fail("form_submit_attempt_not_observed", {
-        review_count: reviewCount, submit_count: countMarker(submitted, "Answer required"),
+        review_count: reviewCount, submit_count: countMarker(submitted, "Select at least one option"),
         rows: submitted.screen.rows.map((r: any) => r.text),
       })
     if (replies.length !== 0)

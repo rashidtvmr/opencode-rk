@@ -116,7 +116,10 @@ FORM_STAGES = (
 # The ported upstream always-body wording (`util/permission.ts:154-160` via
 # permission_always_lines, native_permissions.rs:182-188).
 ALWAYS_BODY_MARKER = "This will always allow the following patterns for this project."
-REQUIRED_MARKER = "Answer required"
+# The journey CLEARS the required multiselect, so its answer is an empty list,
+# not `undefined`; upstream discriminates the two and this case reads "Select at
+# least one option" (`util/form.ts:73-75`).
+REQUIRED_MARKER = "Select at least one option"
 OPTIONAL_MARKER = "Optional: (not answered)"
 
 
@@ -157,15 +160,52 @@ def _dialog_request(scenario, **overrides):
     return request
 
 
-def _screen(rows):
-    return {"rows": [{"text": text, "w": len(text), "spans": [
-        {"c": 0, "n": len(text), "fg": "#ffffff", "bg": "#000000", "attrs": []}
-    ] if text else []} for text in rows]}
+SELECTED_BG = "#fab283"
+UNSELECTED_BG = "#1e1e1e"
+OPTION_LABELS = ("Allow once", "Always allow", "Reject")
 
 
-def _flow(scenario, frames, replies=None):
+def _screen(rows, selected=None):
+    """Styled rows for the validator unit tests.
+
+    Upstream marks the focused permission option with a background, never a
+    glyph (`routes/session/permission.tsx:565-590`), so a fixture row that
+    should read as focused carries `selected` and gets that option's cells
+    painted on `SELECTED_BG` while its siblings stay on `UNSELECTED_BG`.
+    """
+    built = []
+    for text in rows:
+        if not text:
+            built.append({"text": text, "w": 0, "spans": []})
+            continue
+        spans, cursor = [], 0
+        option_row = any(label in text for label in OPTION_LABELS)
+        if selected and selected in text:
+            start = text.find(selected)
+            end = start + len(selected)
+            if start:
+                spans.append({"c": 0, "n": start, "fg": "#eeeeee", "bg": UNSELECTED_BG, "attrs": []})
+            spans.append({"c": start, "n": end - start, "fg": "#0a0a0a", "bg": SELECTED_BG, "attrs": []})
+            if end < len(text):
+                spans.append({"c": end, "n": len(text) - end, "fg": "#eeeeee", "bg": UNSELECTED_BG, "attrs": []})
+        elif option_row:
+            # An unpainted sibling option still sits on the unfocused action
+            # background, so it is never confused with the focused one.
+            spans.append({"c": 0, "n": len(text), "fg": "#eeeeee", "bg": UNSELECTED_BG, "attrs": []})
+        else:
+            spans.append({"c": 0, "n": len(text), "fg": "#ffffff", "bg": "#000000", "attrs": []})
+        built.append({"text": text, "w": len(text), "spans": spans})
+    return {"rows": built}
+
+
+def _flow(scenario, frames, replies=None, focus=None):
     """A production flow payload with the measured-identity envelope the
-    validator requires, built entirely from in-file literals."""
+    validator requires, built entirely from in-file literals.
+
+    `focus` maps a stage to the option that stage paints as focused, so the
+    hand-written frames carry the same background marking a real capture has.
+    """
+    focus = focus or {}
     return {
         "schema": "oc2.ui-parity.screen.flow/v1",
         "evidence_class": "production_flow",
@@ -175,7 +215,7 @@ def _flow(scenario, frames, replies=None):
         # must carry it too.
         "viewport": {"cols": 80, "rows": 24},
         "replies": [] if replies is None else replies,
-        "frames": [{"stage": stage, "screen": _screen(rows)} for stage, rows in frames],
+        "frames": [{"stage": stage, "screen": _screen(rows, focus.get(stage))} for stage, rows in frames],
         "provenance": {"bun_version": BUN_RUNTIME, "verified_files": {"src/app.tsx": "0" * 64}},
     }
 
@@ -205,35 +245,35 @@ FORM_SELECTED = [
 FORM_REVIEW = [
     "Choose targets",
     "Targets  Optional  Submit",
-    "Targets: Answer required",
+    "Targets: Select at least one option",
     "Optional: (not answered)",
     "⇆ tab enter submit esc dismiss",
 ]
 FORM_SUBMIT_ERROR = [
     "Choose targets",
     "Targets  Optional  Submit",
-    "Targets: Answer required",
+    "Targets: Select at least one option",
     "Optional: (not answered)",
-    "⇆ tab enter submit esc dismiss              Answer required",
+    "⇆ tab enter submit esc dismiss   Select at least one option",
 ]
 
 PERMISSION_INITIAL = [
     "Permission required",
     "$ echo oracle",
-    "→ Allow once",
-    "  Always allow",
-    "  Reject",
+    "Allow once",
+    "Always allow",
+    "Reject",
     "ctrl+f fullscreen ⇆ select enter confirm",
 ]
 PERMISSION_ALWAYS_BODY = [
     "Permission required",
     ALWAYS_BODY_MARKER,
     "- echo oracle",
-    # The real `l` cycle moves the arrow onto Always allow; the genuine
-    # capture test asserts the same "→ Always allow" on production bytes.
-    "  Allow once",
-    "→ Always allow",
-    "  Reject",
+    # The real `l` cycle moves the focused BACKGROUND onto Always allow; the
+    # genuine capture test measures the same thing on production bytes.
+    "Allow once",
+    "Always allow",
+    "Reject",
     "ctrl+f fullscreen ⇆ select enter confirm",
 ]
 PERMISSION_SUBMITTED = [
@@ -241,11 +281,15 @@ PERMISSION_SUBMITTED = [
     "commands",
 ]
 
-# The real wire body: the decision travels under `reply` (with an optional
-# `scope`). `{"reply":"always","scope":"always"}` is what the local CLI posts
-# (native_permissions.rs:565); both it and the bare `{"reply":"always"}` shape
-# are genuine and must be accepted.
-PERMISSION_REPLY_BODY = '{"reply":"always","scope":"always"}'
+# The real wire body: the pinned upstream TUI posts `{ decision, message? }`
+# (`routes/session/permission.tsx:136-140` -> generated client
+# `client/src/promise/generated/client.ts:1676-1685` -> endpoint schema
+# `protocol/src/groups/permission.ts:142-148`). The handler then forwards
+# `reply: ctx.payload.decision` internally (`server/src/handlers/permission.ts:71-84`),
+# which is why the local Rust port also uses the word `reply` in its own body
+# struct — but the wire key the pinned app sends, and the one a genuine capture
+# measures, is `decision`.
+PERMISSION_REPLY_BODY = '{"decision":"always"}'
 PERMISSION_REPLY_PATH = "/api/session/ses_oracle_dialog/permission/per_oracle/reply"
 
 
@@ -269,7 +313,10 @@ def _permission_flow(**overrides):
         ("permission_submitted", list(PERMISSION_SUBMITTED)),
     ]
     replies = [{"path": PERMISSION_REPLY_PATH, "body": PERMISSION_REPLY_BODY, "status": 204}]
-    flow = _flow("form-permission-v1", frames, replies=replies)
+    flow = _flow("form-permission-v1", frames, replies=replies, focus={
+        "permission_initial": "Allow once",
+        "permission_always_body": "Always allow",
+    })
     flow.update(overrides)
     return flow
 
@@ -307,9 +354,13 @@ def _authentic_flow(scenario):
         # Same cumulative-at-capture discipline: initial is before any key;
         # selected after the first space; cleared after the second; review after
         # both tabs; submit_error after Enter (two spaces, two tabs, one Enter).
+        # The adapter presses the RAW space byte (a "space" name is not a
+        # KeyCodes member) and uses the dedicated pressTab presser for TAB
+        # (`@opentui/core/testing.js:104-122`), so the measured trace records
+        # exactly what reached the keymap.
         trace_keys = (
-            [], ["space"], ["space", "space"],
-            ["space", "space", "tab", "tab"], ["space", "space", "tab", "tab", "enter"],
+            [], [" "], [" ", " "],
+            [" ", " ", "tab", "tab"], [" ", " ", "tab", "tab", "enter"],
         )
     else:
         raise AssertionError(f"no authentic flow for scenario {scenario!r}")
@@ -397,19 +448,25 @@ class DialogRequestContract(unittest.TestCase):
         # ... and selecting `always` swaps the body to the persisted rules.
         self.assertIn(ALWAYS_BODY_MARKER, contract["always_body_visible"])
 
-    def test_permission_contract_uses_the_reply_wire_key_not_decision(self):
+    def test_permission_contract_uses_the_decision_wire_key(self):
         contract = self.mod.SCENARIO_CONTRACTS["form-permission-v1"]
-        self.assertIn('"reply":"always"', contract["reply_body_contains"])
-        self.assertNotIn("decision", contract["reply_body_contains"])
-        # No scenario contract may fabricate the non-existent `decision` key.
-        self.assertNotIn("decision", json.dumps(self.mod.SCENARIO_CONTRACTS))
+        self.assertIn('"decision":"always"', contract["reply_body_contains"])
+        # `reply` is the internal handler field, not the wire key the pinned TUI
+        # sends (`routes/session/permission.tsx:136-140`).
+        self.assertNotIn('"reply"', contract["reply_body_contains"])
 
     def test_permission_contract_declares_save_rule_and_option_order(self):
         contract = self.mod.SCENARIO_CONTRACTS["form-permission-v1"]
-        self.assertIn("- echo oracle", contract["always_body_visible"])
+        self.assertIn("- echo oracle", contract["always_rules_visible"])
+        # Only the sentence discriminates the swap; the request's own resources
+        # are already bullets in the initial frame.
+        self.assertNotIn("- echo oracle", contract["always_body_visible"])
         self.assertEqual(contract["option_order"], ["Allow once", "Always allow", "Reject"])
-        self.assertEqual(contract["initial_selected_visible"], ["→ Allow once"])
-        self.assertEqual(contract["always_selected_visible"], ["→ Always allow"])
+        # Upstream marks focus with a BACKGROUND, not a glyph
+        # (`routes/session/permission.tsx:565-590`).
+        self.assertEqual(contract["option_labels"], ["Allow once", "Always allow", "Reject"])
+        self.assertEqual(contract["selected_option_initial"], "Allow once")
+        self.assertEqual(contract["selected_option_always"], "Always allow")
 
     def test_permission_contract_declares_prompt_dismissal_markers(self):
         contract = self.mod.SCENARIO_CONTRACTS["form-permission-v1"]
@@ -499,17 +556,36 @@ class CaptureStdoutContract(unittest.TestCase):
     def test_exactly_one_json_object_is_accepted(self):
         self.assertEqual(self._run('{"schema":"probe"}\n'), {"schema": "probe"})
 
-    def test_surrounding_bytes_are_refused_not_sliced(self):
-        for stdout in ('noise {"schema":"probe"}', '{"schema":"probe"} trailing', '{"a":1}{"b":2}'):
+    def test_a_terminal_restoration_line_before_the_payload_is_tolerated(self):
+        # OpenTUI's native exit handler paints a terminal-restoration frame on
+        # stdout after the payload (the renderer is already destroyed), so the
+        # payload is the only line beginning with `{` and non-JSON noise lines
+        # around it are not evidence.
+        stdout = "Native scene output cancelled at process exit\n{\"schema\":\"probe\"}\n"
+        self.assertEqual(self._run(stdout), {"schema": "probe"})
+
+    def test_exactly_one_json_line_is_required(self):
+        # Fail-closed on the payload itself: two candidate objects are a protocol
+        # violation, never a choice to make.
+        for stdout in ('{"a":1}\n{"b":2}\n', '{"a":1}\nnoise\n{"b":2}\n'):
+            with self.subTest(stdout=stdout):
+                with self.assertRaises(self.mod.WrapperError) as caught:
+                    self._run(stdout)
+                self.assertIn("exactly one JSON object", str(caught.exception))
+
+    def test_malformed_json_line_is_refused(self):
+        for stdout in ('{"schema":"probe"} trailing\n', '{"a":1}{"b":2}\n'):
             with self.subTest(stdout=stdout):
                 with self.assertRaises(self.mod.WrapperError) as caught:
                     self._run(stdout)
                 self.assertIn("did not emit JSON", str(caught.exception))
 
-    def test_non_object_json_is_refused(self):
-        with self.assertRaises(self.mod.WrapperError) as caught:
-            self._run('[1, 2, 3]')
-        self.assertIn("non-object", str(caught.exception))
+    def test_non_json_stdout_is_refused(self):
+        for stdout in ('[1, 2, 3]\n', 'noise {"schema":"probe"}\n', ''):
+            with self.subTest(stdout=stdout):
+                with self.assertRaises(self.mod.WrapperError) as caught:
+                    self._run(stdout)
+                self.assertIn("exactly one JSON object", str(caught.exception))
 
     def test_nonzero_exit_is_refused_before_parsing(self):
         proc = unittest.mock.MagicMock(returncode=2, stdout='{"schema":"probe"}', stderr="boom")
@@ -561,9 +637,10 @@ class DialogPostconditionContract(unittest.TestCase):
         self.reject(flow, "form_required_check_not_painted")
 
     def test_permission_flow_accepts_every_genuine_reply_body_shape(self):
-        # The local CLI posts {reply, scope}; the bare {reply} shape is genuine
-        # too. Both must be accepted.
-        for body in (PERMISSION_REPLY_BODY, '{"reply":"always"}'):
+        # The pinned payload is `{ decision, message? }`: the TUI omits the
+        # message unless a rejection reason was typed, and a rejection carries
+        # one (`routes/session/permission.tsx:136-140`). Both must be accepted.
+        for body in (PERMISSION_REPLY_BODY, '{"decision":"always","message":"why"}'):
             with self.subTest(body=body):
                 flow = _permission_flow()
                 flow["replies"][0]["body"] = body
@@ -606,7 +683,7 @@ class DialogPostconditionContract(unittest.TestCase):
 
     def test_permission_reply_route_and_wire_shape_are_both_required(self):
         # The reply must travel on the real permission endpoint AND carry the
-        # real `reply` key with the selected `always` decision. A correctly
+        # real `decision` key with the selected `always` reply. A correctly
         # keyed body on the wrong route (or vice versa) is not production
         # evidence and must be refused with the reply code.
         flow = _permission_flow()
@@ -737,13 +814,14 @@ class DialogPostconditionContract(unittest.TestCase):
     def test_permission_reply_not_successful_rejected(self):
         flow = _permission_flow(); flow["replies"][0]["status"] = 200
         self.reject(flow, "permission_reply_not_successful")
-        # The `decision` key is not a key any client sends: a payload that only
-        # carries it must be refused rather than accepted as "always".
-        flow = _permission_flow(); flow["replies"][0]["body"] = '{"decision":"always"}'
+        # `reply` is the internal handler field, not the wire key
+        # (`protocol/src/groups/permission.ts:142-148`): a payload that carries
+        # only `reply` is outside the pinned schema and must be refused.
+        flow = _permission_flow(); flow["replies"][0]["body"] = '{"reply":"always"}'
         self.reject(flow, "permission_reply_not_successful")
-        flow = _permission_flow(); flow["replies"][0]["body"] = '{"reply":"once"}'
+        flow = _permission_flow(); flow["replies"][0]["body"] = '{"decision":"once"}'
         self.reject(flow, "permission_reply_not_successful")
-        flow = _permission_flow(); flow["replies"][0]["body"] = '{"reply":"reject"}'
+        flow = _permission_flow(); flow["replies"][0]["body"] = '{"decision":"reject"}'
         self.reject(flow, "permission_reply_not_successful")
         flow = _permission_flow(); flow["replies"][0]["path"] = ""
         self.reject(flow, "permission_reply_not_successful")
@@ -758,12 +836,12 @@ class DialogPostconditionContract(unittest.TestCase):
                 flow = _permission_flow(); flow["replies"][0]["path"] = path
                 self.reject(flow, "permission_reply_not_successful")
         for body in (
-            # A foreign scope, the non-existent `decision` key, and arbitrary
-            # extra keys are all outside the production reply wire shape: only
-            # `reply` (plus the optional `scope`) may travel.
-            '{"reply":"always","scope":"session"}',
-            '{"reply":"always","decision":"always"}',
-            '{"reply":"always","sessionID":"ses_x"}',
+            # The pinned payload schema is exactly `{ decision, message? }`; a
+            # foreign key, a second decision spelling, or a non-JSON body is
+            # outside it and must be refused.
+            '{"decision":"always","scope":"session"}',
+            '{"decision":"always","reply":"always"}',
+            '{"decision":"always","sessionID":"ses_x"}',
             "not-json",
         ):
             with self.subTest(body=body):
@@ -779,7 +857,7 @@ class DialogPostconditionContract(unittest.TestCase):
 
         no_rules = _permission_flow()
         next(f for f in no_rules["frames"] if f["stage"] == "permission_always_body")["screen"]["rows"] = _screen(
-            ["Permission required", "→ Allow once", "  Always allow", "  Reject"]
+            ["Permission required", "Allow once", "Always allow", "Reject"], "Allow once"
         )["rows"]
         self.reject(no_rules, "permission_always_body_missing")
 
@@ -792,7 +870,7 @@ class DialogPostconditionContract(unittest.TestCase):
         flow = _permission_flow()
         next(f for f in flow["frames"] if f["stage"] == "permission_always_body")["screen"]["rows"] = _screen(
             ["Permission required", ALWAYS_BODY_MARKER, "echo oracle",
-             "  Allow once", "→ Always allow", "  Reject"])["rows"]
+             "Allow once", "Always allow", "Reject"], "Always allow")["rows"]
         self.reject(flow, "permission_always_body_missing")
 
     def test_permission_rules_body_must_not_be_pre_painted(self):
@@ -800,24 +878,27 @@ class DialogPostconditionContract(unittest.TestCase):
         # persisted-rules body, the journey never observed the option change.
         flow = _permission_flow()
         next(f for f in flow["frames"] if f["stage"] == "permission_initial")["screen"]["rows"] = _screen(
-            [PERMISSION_INITIAL[0], ALWAYS_BODY_MARKER, *PERMISSION_INITIAL[1:]])["rows"]
+            [PERMISSION_INITIAL[0], ALWAYS_BODY_MARKER, *PERMISSION_INITIAL[1:]], "Allow once")["rows"]
         self.reject(flow, "permission_always_body_pre_painted")
 
     def test_permission_selected_option_is_measured(self):
+        # Upstream marks focus by background (`routes/session/permission.tsx:565-590`),
+        # so a frame that paints every option on ONE background has no measured
+        # focus and must be refused.
+        unmarked = ["Permission required", "Allow once", "Always allow", "Reject"]
         flow = _permission_flow()
-        next(f for f in flow["frames"] if f["stage"] == "permission_initial")["screen"]["rows"] = _screen(
-            ["Permission required", "  Allow once", "  Always allow", "  Reject"])["rows"]
+        next(f for f in flow["frames"] if f["stage"] == "permission_initial")["screen"]["rows"] = _screen(unmarked)["rows"]
         self.reject(flow, "permission_initial_selected_option")
         flow = _permission_flow()
         next(f for f in flow["frames"] if f["stage"] == "permission_always_body")["screen"]["rows"] = _screen(
-            ["Permission required", ALWAYS_BODY_MARKER, "- echo oracle", "→ Allow once", "Always allow"])["rows"]
+            ["Permission required", ALWAYS_BODY_MARKER, "- echo oracle", *unmarked[1:]])["rows"]
         self.reject(flow, "permission_always_option_not_selected")
 
     def test_permission_option_order_is_pinned(self):
         flow = _permission_flow()
         initial = next(f for f in flow["frames"] if f["stage"] == "permission_initial")
         initial["screen"]["rows"] = _screen([
-            "Permission required", "→ Always allow", "  Allow once", "  Reject"])["rows"]
+            "Permission required", "Always allow", "Allow once", "Reject"], "Always allow")["rows"]
         self.reject(flow, "permission_initial_option_order")
 
     def test_permission_initial_option_set_is_required(self):
@@ -915,9 +996,12 @@ class DialogMainPathContract(unittest.TestCase):
         self.assertTrue(spy.called)
         self.assertEqual(spy.call_count, 1)
 
-    def test_main_fails_closed_on_a_decision_keyed_permission_reply(self):
+    def test_main_fails_closed_on_a_reply_keyed_permission_reply(self):
+        # `reply` is the internal handler field; the wire key is `decision`
+        # (`protocol/src/groups/permission.ts:142-148`), so a payload carrying
+        # only `reply` is not the pinned schema.
         bad = _permission_flow()
-        bad["replies"][0]["body"] = '{"decision":"always"}'
+        bad["replies"][0]["body"] = '{"reply":"always"}'
         code, out, err = self._run_main(json.dumps(_dialog_request("form-permission-v1")), bad)
         self.assertEqual(code, 3)
         self.assertIn("permission_reply_not_successful", err)
@@ -929,7 +1013,7 @@ class DialogMainPathContract(unittest.TestCase):
         # option change, so main() must refuse it with the exact code.
         bad = _permission_flow()
         next(f for f in bad["frames"] if f["stage"] == "permission_initial")["screen"]["rows"] = _screen(
-            [PERMISSION_INITIAL[0], ALWAYS_BODY_MARKER, *PERMISSION_INITIAL[1:]])["rows"]
+            [PERMISSION_INITIAL[0], ALWAYS_BODY_MARKER, *PERMISSION_INITIAL[1:]], "Allow once")["rows"]
         code, out, err = self._run_main(json.dumps(_dialog_request("form-permission-v1")), bad)
         self.assertEqual(code, 3)
         self.assertIn("permission_always_body_pre_painted", err)
@@ -1073,13 +1157,17 @@ class GenuineDialogCaptureContract(unittest.TestCase):
     def test_permission_capture_shows_the_form_001_body_swap(self):
         flow = self.flows["form-permission-v1"]
         stages = _stage_text(flow)
-        for marker in ("Permission required", "Allow once", "Always allow", "Reject", "→ Allow once"):
+        for marker in ("Permission required", "Allow once", "Always allow", "Reject"):
             self.assertIn(marker, stages["permission_initial"])
+        # Focus is a background, not a glyph (`routes/session/permission.tsx:565-590`):
+        # the genuine bytes carry it as a distinct cell background, so the text
+        # must contain the label without any arrow decoration.
+        self.assertNotIn("→", stages["permission_initial"])
         # The swap must be a swap: the rules body is absent before the cycle...
         self.assertNotIn(ALWAYS_BODY_MARKER, stages["permission_initial"])
         # ...present while the prompt is still open after `l`...
         self.assertNotEqual(stages["permission_always_body"], stages["permission_initial"])
-        self.assertIn("→ Always allow", stages["permission_always_body"])
+        self.assertNotIn("→", stages["permission_always_body"])
         self.assertIn(ALWAYS_BODY_MARKER, stages["permission_always_body"])
         self.assertIn("- echo oracle", stages["permission_always_body"])
         # ...and gone once the reply resolved the prompt.
@@ -1093,8 +1181,8 @@ class GenuineDialogCaptureContract(unittest.TestCase):
         self.assertEqual(reply["status"], 204)
         self.assertIn("/permission/", reply["path"])
         self.assertIn("/reply", reply["path"])
-        self.assertIn('"reply":"always"', reply["body"])
-        self.assertNotIn('"decision"', reply["body"])
+        self.assertIn('"decision":"always"', reply["body"])
+        self.assertNotIn('"reply"', reply["body"])
 
     def test_permission_capture_actions_are_measured_replay(self):
         flow = self.flows["form-permission-v1"]
@@ -1159,7 +1247,7 @@ class GenuineDialogCaptureContract(unittest.TestCase):
             self.assertEqual(screen["actions_cursor_after_source"], "measured_per_dispatch")
         actions = flow["frames"][-1]["screen"]["actions"]
         self.assertEqual(
-            [action["key"] for action in actions], ["space", "space", "tab", "tab", "enter"])
+            [action["key"] for action in actions], [" ", " ", "tab", "tab", "enter"])
         for action in actions:
             self.assertTrue(action["applied"])
             self.assertIn("cursor_after", action)
@@ -1327,10 +1415,14 @@ class DialogAdapterSourceContract(unittest.TestCase):
         self.assertNotIn("return undefined", dialog)
         self.assertIn("status: 404", dialog)
         # The fixture transport is hermetic (404, never the network)...
+        # The override must DECLINE what it does not author: it runs before the
+        # fixture's own router (`tui-client.ts:72-77`), so a 404 here would
+        # starve `/api/event` and every bootstrap the app needs.
         self.assertIn(
-            "const fixtureFetch = async (url: any, input: any) => (await route(url, input)) ?? notFound(url)",
+            "const fixtureFetch = async (url: any, input: any) => (await route(url, input)) ?? undefined",
             dialog,
         )
+        self.assertNotIn("?? notFound(url)\n  // Some production code paths", dialog)
         # ...while the global transport delegates anything it does not own.
         self.assertIn("const globalFetch", dialog)
         self.assertIn("await originalFetch(url, input)", dialog)
@@ -1338,8 +1430,8 @@ class DialogAdapterSourceContract(unittest.TestCase):
     def test_multiselect_journey_toggles_through_the_real_keymap(self):
         # Two real space presses (select then deselect) and two real tabs into
         # the review tab, then a real Enter; no modifier-only key press.
-        self.assertEqual(self.source.count('await press("space")'), 2)
-        self.assertEqual(self.source.count('await press("tab")'), 2)
+        self.assertEqual(self.source.count('await press(" ")'), 2)
+        self.assertEqual(self.source.count("await pressTab()"), 2)
         self.assertIn("await pressEnter()", self.source)
         self.assertIn("setup.mockInput.pressKey", self.source)
         self.assertIn("setup.mockInput.pressEnter", self.source)
@@ -1386,7 +1478,7 @@ class DialogAdapterSourceContract(unittest.TestCase):
 
     def test_form_submit_wait_uses_the_occurrence_differential(self):
         # The readiness gate itself is the differential, not a bare marker.
-        self.assertIn('f.split("Answer required").length - 1 > reviewCount', self.source)
+        self.assertIn('f.split("Select at least one option").length - 1 > reviewCount', self.source)
 
     def test_dialog_flow_fails_closed_on_its_postconditions(self):
         for code in ("waitForFrame", "permission_prompt_not_observed", "permission_initial_selected_option",
@@ -1408,11 +1500,12 @@ class DialogAdapterSourceContract(unittest.TestCase):
         self.assertNotIn(OPENTUI_COMMIT, self.source)
         self.assertNotIn("a2013c73", self.source)
 
-    def test_dialog_flow_asserts_the_reply_wire_key(self):
-        # The decision key is `reply`; the adapter must assert it and must never
-        # fabricate the non-existent `decision` key.
-        self.assertIn('"reply":"always"', self.source)
-        self.assertNotIn('"decision"', self.source)
+    def test_dialog_flow_asserts_the_decision_wire_key(self):
+        # The wire key is `decision` (`protocol/src/groups/permission.ts:142-148`);
+        # the adapter must assert it and must never assert the internal `reply`
+        # field as if it were the wire key.
+        self.assertIn('"decision":"always"', self.source)
+        self.assertNotIn('"reply":"always"', self.source)
 
     def test_dialog_flow_records_measured_cursor_per_dispatch(self):
         self.assertIn("measured_cursor", self.source)
