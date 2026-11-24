@@ -48,21 +48,17 @@ fn main() {
 
 /// Copy the vendored shared native library beside the build outputs.
 ///
-/// Two consumers need different locations in the build tree:
+/// Two consumers need different locations in the build tree: a test binary in
+/// `<target>/<profile>/deps` and the `oc2` binary one level up both resolve
+/// `@loader_path/../lib`, which is `<target>/<profile>/lib` for the first and
+/// `<target>/lib` for the second; the profile directory itself is also on the
+/// loader search path. Cargo never copies the vendored library under
+/// `crates/opentui-bridge/native/lib/<triple>` to any of them, and
+/// `rustc-link-search` is not one of those paths.
 ///
-/// * Test/bench binaries run from `<target>/<profile>/deps`; cargo puts the
-///   profile directory (and `deps`) on the dynamic loader search path, but the
-///   native library lives under `crates/opentui-bridge/native/lib/<triple>` and
-///   is only reachable through `rustc-link-search`, which is not part of that
-///   path.
-/// * `oc2`/`opencode-rk` at `<target>/<profile>/` resolve the library through
-///   their `@loader_path/../lib` rpath, which in the build tree is `<target>/lib`
-///   (the analogue of the installed `<prefix>/lib` beside `<prefix>/bin`).
-///   Tests that spawn those binaries with a sanitized environment rely on it.
-///
-/// Staging into both directories keeps the installed layout unchanged while
-/// letting every workspace target resolve the library. A static archive needs
-/// neither copy, so this is only reached for a shared artifact.
+/// Staging every destination keeps the installed `<prefix>/lib` layout valid
+/// while letting every workspace target resolve the library. A static archive
+/// needs none of the copies, so this is only reached for a shared artifact.
 fn stage_shared_library(libdir: &Path) {
     let name = match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
         Ok("macos") => "libopentui.dylib",
@@ -74,12 +70,16 @@ fn stage_shared_library(libdir: &Path) {
     if !source.is_file() {
         return;
     }
-    // `OUT_DIR` is `<target>/<profile>/build/<pkg>-<hash>/out`; four parents
-    // up is the profile directory cargo searches when it runs the binary.
-    // (`nth(3)` is `<target>/<profile>/build`, which no loader looks in.)
+    // `OUT_DIR` is `<target>/<profile>/build/<pkg>-<hash>/out`.  `ancestors()`
+    // yields self first, so the indices are 0 = `out`, 1 = `<pkg>-<hash>`,
+    // 2 = `build`, 3 = `<target>/<profile>`.  Three is the profile directory
+    // cargo puts on the loader search path when it runs a test binary.
+    // Staging one level higher (`<target>`) puts the library where no loader
+    // looks, and test/bench binaries then abort with
+    // `Library not loaded: @rpath/libopentui.dylib`.
     let Some(profile_dir) = std::env::var_os("OUT_DIR")
         .map(PathBuf::from)
-        .and_then(|out| out.ancestors().nth(4).map(Path::to_path_buf))
+        .and_then(|out| out.ancestors().nth(3).map(Path::to_path_buf))
     else {
         return;
     };
@@ -88,18 +88,24 @@ fn stage_shared_library(libdir: &Path) {
     // binary then dies with `Library not loaded: @rpath/libopentui.dylib`
     // (observed when the disk filled mid-build, costing a whole publication
     // postcheck). The copy is cheap and must be correct, so report it.
-    let staged = profile_dir.join(name);
-    if let Err(exc) = std::fs::copy(&source, &staged) {
-        panic!("could not stage {} beside the test binaries at {}: {exc}", name, staged.display());
-    }
+    // Three consumers resolve `@loader_path/../lib` from three different
+    // directories, so three copies are required:
+    //   * `<target>/<profile>/deps/oc2-*`  -> `<target>/<profile>/lib/`
+    //   * `<target>/<profile>/oc2`         -> `<target>/lib/`
+    //   * a loader that searches the profile directory itself
+    //     -> `<target>/<profile>/`
+    let mut destinations = vec![profile_dir.join(name), profile_dir.join("lib").join(name)];
     if let Some(target_dir) = profile_dir.parent() {
-        let lib = target_dir.join("lib");
-        if let Err(exc) = std::fs::create_dir_all(&lib) {
-            panic!("could not create {}: {exc}", lib.display());
+        destinations.push(target_dir.join("lib").join(name));
+    }
+    for destination in destinations {
+        if let Some(parent) = destination.parent() {
+            if let Err(exc) = std::fs::create_dir_all(parent) {
+                panic!("could not create {}: {exc}", parent.display());
+            }
         }
-        let installed = lib.join(name);
-        if let Err(exc) = std::fs::copy(&source, &installed) {
-            panic!("could not stage {} at {}: {exc}", name, installed.display());
+        if let Err(exc) = std::fs::copy(&source, &destination) {
+            panic!("could not stage {} at {}: {exc}", name, destination.display());
         }
     }
 }
