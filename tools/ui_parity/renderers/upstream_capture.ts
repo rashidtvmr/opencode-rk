@@ -1,7 +1,9 @@
-// This file is copied into the pinned upstream workspace's `packages/tui/`
-// directory by tools/ui_parity/renderers/upstream_opentui.py before it is run,
-// so bare `@opentui/*` imports resolve against that package's node_modules and
-// the fixture import is relative to packages/tui/.
+// This file is executed with `bun --eval <source>` from the pinned upstream
+// workspace's `packages/tui/` directory by
+// tools/ui_parity/renderers/upstream_opentui.py (no staging write / copy: the
+// exact source bytes travel as an argv element), so bare `@opentui/*` imports
+// resolve against that package's node_modules and the fixture import is
+// relative to packages/tui/.
 //
 // Evidence classes:
 //  - `production_flow`: the real pinned upstream app mounted through its own
@@ -216,6 +218,10 @@ function channelFields(setup: TestRendererSetup, trace: any[]) {
   }
 }
 
+// Only the home flow lives in this map. The dialog scenarios are dispatched to
+// runDialogFlow by main(); deliberately NOT listed here, so if a dialog
+// scenario ever reached the home flow it would fail closed as
+// unsupported_scenario instead of running the wrong journey.
 const SCENARIOS: Record<string, { search_text: string; expected_visible: string; home_marker: string }> = {
   "home-command-palette-v1": { search_text: "new", expected_visible: "New session", home_marker: "Ask anything" },
 }
@@ -296,6 +302,378 @@ async function runProductionFlow(request: any, fixture: any, cols: number, rows:
   }
 }
 
+// Production form/permission checkpoint. The requests are injected through the
+// fixture's real event stream using the upstream SSE event envelope (id/type/
+// properties — the same wire shape our ported server publishes in
+// crates/server/src/event_http.rs:124), then driven through the mounted
+// upstream handlers and their actual keymap. No component is mounted directly:
+// the dialog is produced by the pinned app reacting to a real `permission.asked`
+// / `form.created` event, and every frame is the real renderer output.
+//
+// Fail-closed capability probes: every fixture-API member this flow relies on
+// beyond the proven home-flow surface (the events channel, mockInput's enter
+// dispatch, the fetch-option transport) is verified before use. A missing
+// capability is a precise diagnostic — never a silent wrong capture.
+const requestPath = (url: unknown): string => {
+  const request = url as any
+  const value = typeof url === "string" ? url
+    : typeof request?.pathname === "string" ? request.pathname
+    : typeof request?.url === "string" ? request.url
+    : String(url)
+  try { return new URL(value, "http://localhost").pathname } catch { return value.split("?")[0] }
+}
+
+const requestMethod = (input: unknown, original: unknown): string => {
+  for (const candidate of [input, original]) {
+    if (!candidate || typeof candidate !== "object") continue
+    const method = (candidate as any).method
+    if (typeof method === "string") return method.toUpperCase()
+  }
+  return "GET"
+}
+
+const requestBodyText = async (input: unknown, original: unknown): Promise<string> => {
+  for (const candidate of [input, original]) {
+    if (!candidate || typeof candidate !== "object") continue
+    const request = candidate as any
+    if (typeof request.clone === "function") {
+      try { return await request.clone().text() } catch { /* try the other fetch argument */ }
+    }
+    if (typeof request.body === "string") return request.body
+  }
+  return ""
+}
+
+const rowText = (frame: any): string =>
+  (frame.screen.rows as any[]).map((row: any) => row.text).join("\n")
+
+const countMarker = (frame: any, marker: string): number =>
+  (frame.screen.rows as any[]).reduce(
+    (total: number, row: any) => total + (row.text.split(marker).length - 1), 0)
+
+async function runDialogFlow(request: any, fixture: any, cols: number, rows: number) {
+  // Fail closed on state/event replay exactly like the home flow: the dialog
+  // journey is produced by the events THIS flow injects, so a request that
+  // smuggles its own events/state must be refused rather than silently ignored
+  // (the wrapper already denies it for production requests; a directly-run
+  // adapter must not become the weaker path).
+  if (request.events?.length || Object.keys(request.state_overrides ?? {}).length) {
+    fail("unsupported_state_events", "state/event replay is not supported by this checkpoint")
+  }
+  const scenario = String(request.scenario)
+  if (scenario !== "form-permission-v1" && scenario !== "form-multiselect-v1") {
+    fail("unsupported_scenario", scenario)
+  }
+  const measured = await verifyIdentity(request)
+  const replies: any[] = []
+  const sessionID = "ses_oracle_dialog"
+  // The reply/cancel mutation is recorded from the real client request and
+  // answered with the no-content response the pinned client treats as success.
+  // URL and body shapes are normalized: the client may hand us a URL object or
+  // a string, and a Request or a plain init object.
+  const originalFetch = globalThis.fetch
+  const notFound = (url: any) => new Response(
+    JSON.stringify({ error: "not_found", path: requestPath(url) }),
+    { status: 404, headers: { "content-type": "application/json" } },
+  )
+  // Route the dialog journey's own requests. `null` means "not this capture's
+  // request", so each transport below decides how to answer it.
+  const route = async (url: any, input: any): Promise<Response | null> => {
+    const path = requestPath(url)
+    if (/^\/api\/session\/[^/]+\/permission\/[^/]+\/reply$/.test(path)) {
+      replies.push({ method: requestMethod(input, url), path, body: await requestBodyText(input, url), status: 204 })
+      return new Response(null, { status: 204 })
+    }
+    if (path.endsWith("/cancel")) {
+      replies.push({ method: requestMethod(input, url), path, body: await requestBodyText(input, url), status: 204 })
+      return new Response(null, { status: 204 })
+    }
+    if (path === `/api/session/${sessionID}`) return new Response(JSON.stringify({ data: {
+      id: sessionID, projectID: "proj_test", title: "Oracle dialog", model: { providerID: "demo", id: "model" },
+      location: { directory: "/tmp/oracle", project: { id: "proj_test", directory: "/tmp/oracle" } },
+      time: { created: 0, updated: 0 }, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0,
+    } }), { headers: { "content-type": "application/json" } })
+    if (path.includes(`/api/session/${sessionID}/message`)) return new Response(JSON.stringify({ data: [], cursor: {} }), { headers: { "content-type": "application/json" } })
+    if (path.includes(`/api/session/${sessionID}/inbox`)) return new Response(JSON.stringify({ data: [] }), { headers: { "content-type": "application/json" } })
+    return null
+  }
+  // The fixture's `fetch` option is the transport the mounted app uses, and it
+  // is hermetic: an unrouted request is answered with an explicit 404 instead
+  // of `undefined` (an opaque client failure that would mask the stage under
+  // test) and never reaches the network.
+  const fixtureFetch = async (url: any, input: any) => (await route(url, input)) ?? notFound(url)
+  // Some production code paths call `globalThis.fetch` directly rather than the
+  // injected option, so the same router is installed there for the duration of
+  // the flow. Everything outside the dialog journey keeps the transport that
+  // was already installed, so the capture never takes over unrelated requests.
+  const globalFetch = async (url: any, input: any) => {
+    const routed = await route(url, input)
+    if (routed) return routed
+    if (typeof originalFetch === "function") {
+      try { return await originalFetch(url, input) } catch { /* fall through to the explicit 404 */ }
+    }
+    return notFound(url)
+  }
+  // Install before the fixture module is imported/mounted so no startup request
+  // can slip past the interceptor. A locked/non-writable global is tolerated:
+  // the `fetch` option below still transports every request.
+  let installed = false
+  try {
+    globalThis.fetch = globalFetch as any
+    installed = true
+  } catch { /* fall back to the injected fetch option only */ }
+  const restoreFetch = () => {
+    if (!installed) return
+    try { globalThis.fetch = originalFetch } catch { /* nothing further to restore */ }
+  }
+  let setup: any
+  const { createAppFixture } = await import("./test/fixture/app.ts")
+  if (typeof createAppFixture !== "function") {
+    restoreFetch()
+    fail("fixture_entry_missing_createAppFixture", "test/fixture/app.ts")
+  }
+  try {
+    setup = await createAppFixture({
+      width: cols, height: rows, config: { animations: false } as any,
+      args: { sessionID } as any,
+      // The fixture's `fetch` option is the transport the mounted app uses; it
+      // routes through the shared router above so either transport records the
+      // same mutation exactly once.
+      fetch: async (url: any, input: any) => fixtureFetch(url, input),
+    })
+  } catch (error) {
+    restoreFetch()
+    fail("fixture_mount_failed", { message: String((error as any)?.stack ?? error) })
+  }
+  try {
+    await Promise.race([setup.ready, sleep(8000)])
+    // Capability probes (fail closed, precise codes).
+    if (typeof setup?.events?.emit !== "function") {
+      fail("fixture_events_channel_missing", { available_keys: Object.keys(setup ?? {}) })
+    }
+    const mock = setup?.mockInput
+    if (typeof mock?.pressKey !== "function" || typeof mock?.pressEnter !== "function") {
+      fail("fixture_mock_input_missing", { pressKey: typeof mock?.pressKey, pressEnter: typeof mock?.pressEnter })
+    }
+    if (typeof setup?.waitForFrame !== "function" || typeof setup?.waitForVisualIdle !== "function"
+        || typeof setup?.captureSpans !== "function"
+        || typeof (setup as any)?.[Symbol.asyncDispose] !== "function") {
+      fail("fixture_renderer_helpers_missing", {
+        "waitForFrame": typeof setup?.waitForFrame,
+        "waitForVisualIdle": typeof setup?.waitForVisualIdle,
+        "captureSpans": typeof setup?.captureSpans,
+        // Teardown is part of the measured contract: the flow's disposal must
+        // be a real capability too, otherwise a later TypeError would report a
+        // misleading crash instead of this precise diagnostic.
+        "asyncDispose": typeof (setup as any)?.[Symbol.asyncDispose],
+      })
+    }
+    const settle = async () => { await setup.waitForVisualIdle(); await sleep(60) }
+    const trace: any[] = []
+    const capture = (stage: string) => {
+      const screen = normalizeFrame(setup.captureSpans(), fixture.id, request.theme)
+      // Same cursor provenance declaration as the home flow: the cursor is the
+      // renderer's own captured frame cursor, not an inferred position.
+      screen.cursor_source = "renderer_captured_frame"
+      Object.assign(screen, channelFields(setup, trace))
+      return { stage, screen }
+    }
+    // Every dispatched key is recorded with its own measured cursor snapshot
+    // (the same per-dispatch protocol the home flow emits), so the action
+    // channel is a real replay trace and never a fabricated one.
+    const press = async (name: string, modifiers?: Record<string, boolean>) => {
+      trace.push({ input: "key", name, ...(modifiers ?? {}) })
+      setup.mockInput.pressKey(name, modifiers as any)
+      await settle()
+      trace[trace.length - 1].measured_cursor = setup.captureSpans().cursor ?? [0, 0]
+    }
+    const pressEnter = async () => {
+      trace.push({ input: "key", name: "enter" })
+      setup.mockInput.pressEnter()
+      await settle()
+      trace[trace.length - 1].measured_cursor = setup.captureSpans().cursor ?? [0, 0]
+    }
+    // Bounded stage waits: a stage that never paints is a precise failure with
+    // the attempted trigger attached, never a silent hang or a skipped frame.
+    const waitFrame = async (predicate: (frame: string) => boolean, code: string, detail: any, ms = 12000) => {
+      let done = false
+      const timer: any = setTimeout(() => { if (!done) fail(code, detail) }, ms)
+      timer.unref?.()
+      try {
+        await setup.waitForFrame(predicate)
+      } catch (error) {
+        fail(code, { ...detail, wait_error: String((error as any)?.message ?? error) })
+      } finally {
+        done = true
+        clearTimeout(timer)
+      }
+    }
+    const waitCondition = async (predicate: () => boolean, code: string, detail: any, ms = 4000) => {
+      const deadline = Date.now() + ms
+      while (!predicate()) {
+        if (Date.now() > deadline) fail(code, detail)
+        await sleep(50)
+      }
+    }
+    const emit = (event: any) => setup.events.emit(event)
+    if (scenario === "form-permission-v1") {
+      // The pinned upstream fixture event consumes the public session event
+      // envelope. Supplies its permission properties directly through the real
+      // subscription path; data is controlled fixture input, not a state override.
+      emit({ id: "evt_permission", type: "permission.asked", properties: {
+        id: "per_oracle", sessionID, type: "shell", action: "shell", title: "Run shell command",
+        resources: ["echo oracle"], save: ["echo oracle"],
+      } })
+      await waitFrame((f: string) => f.includes("Permission required"),
+        "permission_prompt_not_observed", { event: "permission.asked", sessionID })
+      await settle()
+      const permission = capture("permission_initial")
+      // The initial option must be the pinned upstream's actual default, not a
+      // frame that merely contains the option labels in a different order.
+      const permissionRows = permission.screen.rows.map((row: any) => row.text)
+      if (!permissionRows.some((line: string) => line.includes("→ Allow once")))
+        fail("permission_initial_selected_option", permissionRows)
+      if (permissionRows.findIndex((line: string) => line.includes("Allow once")) < 0
+          || permissionRows.findIndex((line: string) => line.includes("Always allow")) <= permissionRows.findIndex((line: string) => line.includes("Allow once"))
+          || permissionRows.findIndex((line: string) => line.includes("Reject")) <= permissionRows.findIndex((line: string) => line.includes("Always allow")))
+        fail("permission_initial_option_order", permissionRows)
+      // Option set: the ported labels (`permission.tsx`, native_permissions.rs:159-161)
+      // with save rules present, so `always` is offered (FORM-001).
+      for (const marker of ["Permission required", "Allow once", "Always allow", "Reject"]) {
+        if (!permission.screen.rows.some((row: any) => row.text.includes(marker)))
+          fail("permission_initial_missing", { marker, rows: permission.screen.rows.map((r: any) => r.text) })
+      }
+      // The swap must be a swap: the persisted-rules body is not pre-painted.
+      if (permission.screen.rows.some((row: any) => row.text.includes("This will always allow the following patterns for this project.")))
+        fail("permission_always_body_pre_painted", permission.screen.rows.map((r: any) => r.text))
+      // FORM-001 "changing selected option changes the body": arrow-right / `l`
+      // cycles the selected option (audit-messages.md §8: "Arrow-left/h and
+      // arrow-right/l cycle options; Enter confirms"; ported at
+      // native_permissions.rs:640-655), so selecting `always` swaps the body to
+      // the rules it will persist (`util/permission.ts:154-160` via
+      // permission_always_lines). The swap frame is captured BEFORE Enter:
+      // capturing after Enter would only show the post-submit surface.
+      await press("l")
+      const alwaysBody = capture("permission_always_body")
+      if (rowText(alwaysBody) === rowText(permission))
+        fail("permission_body_swap_not_observed", { initial: rowText(permission) })
+      if (!alwaysBody.screen.rows.some((row: any) => row.text.includes("→ Always allow")))
+        fail("permission_always_option_not_selected", alwaysBody.screen.rows.map((row: any) => row.text))
+      if (!alwaysBody.screen.rows.some((row: any) => row.text.includes("This will always allow the following patterns for this project."))
+          || !alwaysBody.screen.rows.some((row: any) => row.text.includes("- echo oracle")))
+        fail("permission_always_body_missing", alwaysBody.screen.rows.map((r: any) => r.text))
+      await pressEnter()
+      // The selected decision travels under the `reply` key; no client sends a
+      // `decision` key (native_permissions.rs:565 posts { reply, scope };
+      // crates/server/src/lib.rs:690-693 accepts reply once|always|reject).
+      await waitCondition(() => replies.length >= 1, "permission_reply_not_observed", { dispatched: "enter" })
+      if (replies.length !== 1 || replies[0].status !== 204 || !replies[0].body.includes('"reply":"always"'))
+        fail("permission_reply_not_successful", replies)
+      if (!replies[0].path.includes("/permission/") || !replies[0].path.includes("/reply"))
+        fail("permission_reply_path_invalid", replies[0].path)
+      await settle()
+      const submitted = capture("permission_submitted")
+      // Replying resolves the request: the open prompt (and its always body)
+      // must be gone from the painted surface.
+      if (submitted.screen.rows.some((row: any) =>
+          ["Permission required", "Allow once", "Always allow", "Reject",
+           "This will always allow the following patterns for this project."]
+            .some((marker: string) => row.text.includes(marker))))
+        fail("permission_prompt_still_open", submitted.screen.rows.map((r: any) => r.text))
+      // Snapshot the recorded replies at return time: the teardown below runs
+      // in `finally` after this object is built, and a disposal-triggered
+      // cancel must not be counted as a journey mutation (it would otherwise
+      // mutate the same array before `main` serializes the result).
+      return { schema: "oc2.ui-parity.screen.flow/v1", evidence_class: "production_flow", fixture_id: fixture.id,
+        scenario, viewport: { cols, rows }, requested_theme: request.theme, requested_pins: request.pins,
+        requested_clock_ms: request.clock_ms, events_replayed: false, provenance: measured,
+        frames: [permission, alwaysBody, submitted], replies: [...replies] }
+    }
+    // Upstream form wire shape per our ported server (`form.created` ->
+    // {"form": FormInfo}, event_http.rs:110; fields carry key/type/title/
+    // required/options[{value,label,description}] — crates/contracts/src/lib.rs:507-526).
+    emit({ id: "evt_form", type: "form.created", properties: { form: {
+      id: "frm_oracle", sessionID, title: "Choose targets", fields: [
+        { key: "targets", type: "multiselect", title: "Targets", required: true, minItems: 1,
+          options: [{ value: "staging", label: "Staging", description: "Deploy to staging" }] },
+        { key: "optional", type: "multiselect", title: "Optional", required: false,
+          options: [{ value: "logs", label: "Logs", description: "Include logs" }] },
+      ] } } })
+    await waitFrame((f: string) => f.includes("Choose targets"),
+      "form_prompt_not_observed", { event: "form.created", sessionID })
+    await settle()
+    const initial = capture("form_initial")
+    if (!initial.screen.rows.some((row: any) => row.text.includes("[ ] Staging")))
+      fail("form_required_initial_check_missing", initial.screen.rows.map((row: any) => row.text))
+    // Real space toggle on the focused required multiselect (`form.tsx:753-755`
+    // via native_view_dialogs.rs:5820): the first space selects the only option,
+    // the second deselects it, and `storeAnswer` normalizes the empty list away
+    // (form.tsx:257-267), so the required list ends unanswered. The two
+    // intermediate frames make the round-trip observable.
+    await press("space")
+    const selected = capture("form_required_selected")
+    if (rowText(selected) === rowText(initial))
+      fail("form_required_toggle_not_observed", { initial: rowText(initial) })
+    if (!selected.screen.rows.some((row: any) => row.text.includes("[✓] Staging")))
+      fail("form_required_check_not_painted", selected.screen.rows.map((r: any) => r.text))
+    await press("space")
+    const cleared = capture("form_required_cleared")
+    if (rowText(cleared) !== rowText(initial))
+      fail("form_required_toggle_not_reversible", { cleared: rowText(cleared), initial: rowText(initial) })
+    // Tab past the untouched optional field into the review tab, then capture
+    // the PRE-submit review surface: it already marks the required field with
+    // the error color (audit-messages.md §8 "review ... marks invalid/required/
+    // missing external acknowledgements using error color").
+    await press("tab")
+    await press("tab")
+    const review = capture("form_review")
+    const reviewCount = countMarker(review, "Answer required")
+    if (reviewCount < 1)
+      fail("form_required_error_missing", { stage: "form_review", rows: review.screen.rows.map((r: any) => r.text) })
+    if (!review.screen.rows.some((row: any) => row.text.includes("Optional: (not answered)")))
+      fail("form_optional_control_missing", { stage: "form_review", rows: review.screen.rows.map((r: any) => r.text) })
+    // Enter on the review tab attempts the submit (`form.tsx:513-534` via
+    // native_view_dialogs.rs:6034). The empty required field blocks it and the
+    // current validation error is painted at the footer's opposite side
+    // (audit-messages.md §8) — validation waits until the matching submit point
+    // (FORM-006), so this occurrence is NEW: the post-Enter frame must contain
+    // strictly more of the marker than the pre-submit review frame. A no-op
+    // Enter leaves the counts equal and fails here.
+    await pressEnter()
+    await waitFrame((f: string) => f.split("Answer required").length - 1 > reviewCount,
+      "form_submit_attempt_not_observed", { review_count: reviewCount, dispatched: "enter" })
+    const submitted = capture("form_submit_error")
+    if (countMarker(submitted, "Answer required") <= reviewCount)
+      fail("form_submit_attempt_not_observed", {
+        review_count: reviewCount, submit_count: countMarker(submitted, "Answer required"),
+        rows: submitted.screen.rows.map((r: any) => r.text),
+      })
+    if (replies.length !== 0)
+      fail("form_reply_unexpectedly_observed", replies)
+    if (!submitted.screen.rows.some((row: any) => row.text.includes("Optional: (not answered)")))
+      fail("form_optional_control_missing", { stage: "form_submit_error", rows: submitted.screen.rows.map((r: any) => r.text) })
+    // Same snapshot discipline as the permission flow: the blocked submit
+    // already verified `replies.length === 0` above, and a teardown-time
+    // cancel must not mutate the serialized evidence.
+    return { schema: "oc2.ui-parity.screen.flow/v1", evidence_class: "production_flow", fixture_id: fixture.id,
+      scenario, viewport: { cols, rows }, requested_theme: request.theme, requested_pins: request.pins,
+      requested_clock_ms: request.clock_ms, events_replayed: false, provenance: measured,
+      frames: [initial, selected, cleared, review, submitted], replies: [...replies] }
+  } finally {
+    // Restore the process-wide transport before teardown so the mount's own
+    // disposal cannot be the last caller of the capture handler.
+    restoreFetch()
+    // The measured evidence (frames plus the reply snapshot) was already
+    // produced before this `finally` runs. A teardown failure must not convert
+    // a successful, measured capture into a protocol failure that hides those
+    // bytes: disposal is best-effort, and its presence was already checked by
+    // the fail-closed capability probe above.
+    try {
+      await setup[Symbol.asyncDispose]()
+    } catch { /* best-effort teardown; evidence already captured */ }
+  }
+}
+
 async function main() {
   const input = await new Response(Bun.stdin).text()
   const request = JSON.parse(input || "{}")
@@ -317,7 +695,13 @@ async function main() {
     setup.renderer.start()
     frame = setup.captureSpans(); setup.renderer.destroy()
   } else if (request.production === true) {
-    console.log(JSON.stringify(await runProductionFlow(request, fixture, cols, rows)))
+    // The home command-palette flow and the dialog flows are distinct
+    // production checkpoints; an unknown scenario is refused by the wrapper
+    // before launch (SUPPORTED_SCENARIOS), so this dispatch is exhaustive.
+    const result = request.scenario === "home-command-palette-v1"
+      ? await runProductionFlow(request, fixture, cols, rows)
+      : await runDialogFlow(request, fixture, cols, rows)
+    console.log(JSON.stringify(result))
     return
   } else {
     const { createAppFixture } = await import("./test/fixture/app.ts")

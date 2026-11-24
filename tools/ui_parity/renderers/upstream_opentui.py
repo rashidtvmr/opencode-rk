@@ -56,9 +56,53 @@ SCHEMA_REQUEST = "oc2.ui-parity.request/v1"
 EXPECTED_UPSTREAM_COMMIT = "450e7b92412c780a7b5a75226bb8d49aaca24e22"
 EXPECTED_OPENTUI_COMMIT = "8d6065a3e60039d16c6ee697692dcfbc46d3c786"
 EXPECTED_BUN_RUNTIME = "1.4.4"  # manifest reference_runtime.bun
-SUPPORTED_SCENARIOS = {"home-command-palette-v1"}
+SUPPORTED_SCENARIOS = {"home-command-palette-v1", "form-permission-v1", "form-multiselect-v1"}
+# Scenarios that run the production dialog flow (permission prompt / required
+# multiselect form) instead of the home command-palette flow.
+DIALOG_SCENARIOS = {"form-permission-v1", "form-multiselect-v1"}
+# Stage names the production dialog flow must emit for each scenario. Missing
+# stages are unmeasurable (the postcondition cannot be checked), never skipped.
+# `permission_always_body` is the FORM-001 body-swap frame captured while the
+# prompt is still open (after the option cycles to `always`, before Enter);
+# `permission_submitted` is the post-reply frame. `form_review` is the
+# PRE-submit review surface: the review tab already marks the required field
+# (audit-messages.md §8), which is what makes the post-Enter submit-point
+# validation error a *new* observable occurrence rather than a pre-existing one.
+PERMISSION_STAGES = ("permission_initial", "permission_always_body", "permission_submitted")
+FORM_STAGES = ("form_initial", "form_required_selected", "form_required_cleared", "form_review", "form_submit_error")
 SCENARIO_CONTRACTS = {
-    "home-command-palette-v1": {"search_text": "new", "expected_visible": "New session"},
+  "home-command-palette-v1": {"search_text": "new", "expected_visible": "New session"},
+  "form-permission-v1": {
+      "search_text": "", "reply_count": 1, "reply_status": 204,
+      # The selected decision travels under the `reply` key. Neither the pinned
+      # TUI client nor the local CLI ever sends a `decision` key
+      # (native_permissions.rs:565 posts `{ "reply": reply, "scope": scope }`;
+      # crates/server/src/lib.rs:690-693 accepts reply once|always|reject), so
+      # asserting `decision` would reject every genuine capture.
+      "reply_body_contains": '"reply":"always"',
+      "reply_path_contains": ("/permission/", "/reply"),
+      "stages": PERMISSION_STAGES,
+      # FORM-001: the prompt paints the option set (ported upstream labels,
+      # native_permissions.rs:159-161), and selecting `always` swaps the body to
+      # the rules it will persist (`util/permission.ts:154-160` via
+      # permission_always_lines). The swap must be a swap: the rules body is
+      # absent before the option cycles and gone again after the reply.
+      "initial_visible": ["Permission required", "Allow once", "Always allow", "Reject"],
+      "initial_selected_visible": ["→ Allow once"],
+      "always_selected_visible": ["→ Always allow"],
+      "always_body_visible": [
+          "This will always allow the following patterns for this project.", "- echo oracle",
+      ],
+      "prompt_visible_after_reply": ["Permission required", "Allow once", "Always allow", "Reject"],
+      "option_order": ["Allow once", "Always allow", "Reject"],
+  },
+  "form-multiselect-v1": {
+      "search_text": "", "reply_count": 0,
+      "required_initial_visible": ["[ ] Staging"],
+      "required_selected_visible": ["[✓] Staging"],
+      "required_visible": ["Answer required"],
+      "optional_visible": ["Optional: (not answered)"], "stages": FORM_STAGES,
+  },
 }
 REQUEST_BUDGET_BYTES = 1_048_576
 MAX_TIMEOUT_S = 120
@@ -116,6 +160,171 @@ class StageDenied(Exception):
 
 class WrapperError(Exception):
     """The capture run failed; the denied or failed state is reported for repair."""
+
+
+def _stage_text(frames: list) -> dict:
+    """Map unique named stages to joined row text; refuse unmeasurable frames."""
+    text_by_stage = {}
+    for frame in frames:
+        if not isinstance(frame, dict) or not isinstance(frame.get("stage"), str) or not frame["stage"]:
+            raise WrapperError("production_result_unmeasurable_stage")
+        stage = frame["stage"]
+        if stage in text_by_stage:
+            raise WrapperError(f"production_result_duplicate_stage: {stage}")
+        screen = frame.get("screen")
+        rows = screen.get("rows") if isinstance(screen, dict) else None
+        if not isinstance(rows, list) or any(
+                not isinstance(row, dict) or not isinstance(row.get("text"), str) for row in rows):
+            raise WrapperError("production_result_unmeasurable_rows")
+        for row in rows:
+            width, spans = row.get("w"), row.get("spans")
+            if isinstance(width, bool) or not isinstance(width, int) or width < 0 or not isinstance(spans, list):
+                raise WrapperError("production_result_unmeasurable_styles")
+            cursor = 0
+            for span in spans:
+                if not isinstance(span, dict) or span.get("c") != cursor \
+                        or isinstance(span.get("n"), bool) or not isinstance(span.get("n"), int) \
+                        or span["n"] <= 0 or not re.fullmatch(r"#[0-9a-fA-F]{6}", str(span.get("fg", ""))) \
+                        or not re.fullmatch(r"#[0-9a-fA-F]{6}", str(span.get("bg", ""))) \
+                        or not isinstance(span.get("attrs"), list) \
+                        or not all(isinstance(attr, str) for attr in span["attrs"]):
+                    raise WrapperError("production_result_unmeasurable_styles")
+                cursor += span["n"]
+            if cursor != width:
+                raise WrapperError("production_result_unmeasurable_styles")
+        text_by_stage[stage] = "\n".join(row["text"] for row in rows)
+    return text_by_stage
+
+
+def _validate_form_journey(text_by_stage: dict, contract: dict) -> None:
+    """Required-multiselect journey (FORM-003 multiselect slice + FORM-006
+    validation timing): the real space toggle round-trip is observable (selected
+    differs from initial, cleared restores it exactly), the pre-submit review
+    tab already marks the required field (audit-messages.md §8 "marks
+    invalid/required/missing external acknowledgements using error color"), and
+    the blocked submit is DECISIVE: the submit-point validation error is painted
+    only at the matching submit point (FORM-006; `util/form.ts:72-110` +
+    `form.tsx:513-534` as ported in native_view_dialogs.rs:6034-6057), so the
+    post-Enter frame must contain strictly MORE occurrences of the required
+    marker than the pre-submit review frame. A no-op Enter — or a review surface
+    that never reached the submit point — leaves the counts equal and fails."""
+    for stage in contract["stages"]:
+        if stage not in text_by_stage:
+            raise WrapperError(f"production_result_unmeasurable_stage: {stage}")
+    initial = text_by_stage["form_initial"]
+    selected = text_by_stage["form_required_selected"]
+    cleared = text_by_stage["form_required_cleared"]
+    if selected == initial:
+        raise WrapperError("form_required_toggle_not_observed")
+    if not any(marker in initial for marker in contract["required_initial_visible"]) \
+            or not any(marker in selected for marker in contract["required_selected_visible"]):
+        raise WrapperError("form_required_check_not_painted")
+    if cleared != initial:
+        raise WrapperError("form_required_toggle_not_reversible")
+    review = text_by_stage["form_review"]
+    submitted = text_by_stage["form_submit_error"]
+    for required in contract["required_visible"]:
+        if required not in review:
+            raise WrapperError("form_required_error_missing: form_review")
+        if submitted.count(required) <= review.count(required):
+            raise WrapperError(
+                f"form_submit_attempt_not_observed: {required!r} "
+                f"review={review.count(required)} submitted={submitted.count(required)}"
+            )
+    for optional in contract["optional_visible"]:
+        if optional not in review or optional not in submitted:
+            raise WrapperError("form_optional_control_missing")
+
+
+def _validate_permission_journey(replies: list, text_by_stage: dict, contract: dict) -> None:
+    """Permission journey (FORM-001): the prompt paints its option set, the
+    rules body is NOT pre-painted before the option cycles, the always-body swap
+    is observed while the prompt is still open (the body differs from the
+    initial frame and shows the rules it will persist), exactly one successful
+    reply carries the selected decision under the real `reply` key on the
+    permission reply route, and the open prompt is gone after the reply."""
+    for stage in contract["stages"]:
+        if stage not in text_by_stage:
+            raise WrapperError(f"production_result_unmeasurable_stage: {stage}")
+    initial = text_by_stage["permission_initial"]
+    for marker in contract["initial_visible"]:
+        if marker not in initial:
+            raise WrapperError(f"permission_initial_missing: {marker!r}")
+    positions = [initial.find(marker) for marker in contract["option_order"]]
+    if any(position < 0 for position in positions) or positions != sorted(positions):
+        raise WrapperError("permission_initial_option_order")
+    if any(marker not in initial for marker in contract["initial_selected_visible"]):
+        raise WrapperError("permission_initial_selected_option")
+    # The swap must be a swap: the persisted-rules body is not pre-painted.
+    if any(marker in text_by_stage["permission_initial"] for marker in contract["always_body_visible"]):
+        raise WrapperError("permission_always_body_pre_painted")
+    # FORM-001 core: the body must actually change when `always` is selected.
+    always_body = text_by_stage["permission_always_body"]
+    if always_body == initial:
+        raise WrapperError("permission_body_swap_not_observed")
+    # Body markers first: a frame missing the rules body reports the body
+    # defect (permission_always_body_missing) rather than the option arrow.
+    for marker in contract["always_body_visible"]:
+        if marker not in always_body:
+            raise WrapperError(f"permission_always_body_missing: {marker!r}")
+    if any(marker not in always_body for marker in contract["always_selected_visible"]):
+        raise WrapperError("permission_always_option_not_selected")
+    reply = replies[0]
+    if not isinstance(reply, dict) or reply.get("status") != contract["reply_status"]:
+        raise WrapperError(f"permission_reply_not_successful: {replies!r}")
+    path = reply.get("path")
+    if not isinstance(path, str):
+        raise WrapperError(f"permission_reply_not_successful: {replies!r}")
+    # Constrain to the actual API endpoint; arbitrary paths containing these
+    # fragments do not prove a production permission reply.
+    if not re.fullmatch(r"/api/session/[^/]+/permission/[^/]+/reply", path):
+        raise WrapperError(f"permission_reply_not_successful: {replies!r}")
+    try:
+        body = json.loads(reply.get("body", ""))
+    except (TypeError, json.JSONDecodeError):
+        raise WrapperError(f"permission_reply_not_successful: {replies!r}") from None
+    if not isinstance(body, dict) or body.get("reply") != "always" or "decision" in body \
+            or set(body) - {"reply", "scope"}:
+        raise WrapperError(f"permission_reply_not_successful: {replies!r}")
+    if body.get("scope", "always") != "always":
+        raise WrapperError(f"permission_reply_not_successful: {replies!r}")
+    if any(marker not in text_by_stage["permission_always_body"]
+           for marker in contract["always_body_visible"]):
+        raise WrapperError("permission_always_body_missing")
+    # Replying resolves the request: neither its option prompt nor its rules
+    # body may remain on the measured surface.
+    submitted = text_by_stage["permission_submitted"]
+    if any(marker in submitted for marker in contract["always_body_visible"] + contract["prompt_visible_after_reply"]):
+        raise WrapperError("permission_prompt_still_open")
+
+
+def validate_dialog_postconditions(result: dict) -> None:
+    scenario = result.get("scenario")
+    contract = SCENARIO_CONTRACTS.get(scenario)
+    if contract is None:
+        raise WrapperError(f"production_result_unknown_scenario: {scenario!r}")
+    replies = result.get("replies")
+    if not isinstance(replies, list):
+        raise WrapperError("production_result_unmeasurable_replies")
+    frames = result.get("frames")
+    if not isinstance(frames, list) or not frames:
+        raise WrapperError("production_result_unmeasurable_frames")
+    text_by_stage = _stage_text(frames)
+    expected_stages = contract.get("stages", ())
+    for stage in expected_stages:
+        if stage not in text_by_stage:
+            raise WrapperError(f"production_result_unmeasurable_stage: {stage}")
+    if len(replies) != contract.get("reply_count"):
+        raise WrapperError(f"form_reply_unexpectedly_observed: {len(replies)} {replies!r}")
+    if scenario == "form-multiselect-v1":
+        _validate_form_journey(text_by_stage, contract)
+    if scenario == "form-permission-v1":
+        _validate_permission_journey(replies, text_by_stage, contract)
+    # Stage timeline last: the journeys are stage-keyed and already require
+    # every expected stage above, so a content defect is reported by its own
+    # code while a reordered (but content-valid) timeline is still refused.
+    if [frame["stage"] for frame in frames] != list(expected_stages):
+        raise WrapperError("production_result_stage_order")
 
 
 def _deny(reason: str):
@@ -428,11 +637,15 @@ def run_capture(bun: str, oracle: Path, source_text: str, request: dict,
         shutil.rmtree(home, ignore_errors=True)
         shutil.rmtree(tmp, ignore_errors=True)
     if proc.returncode:
-        raise WrapperError(f"capture exited {proc.returncode}: {proc.stderr.strip()[-2000:]}")
+        raise WrapperError(f"capture exited {proc.returncode}: {proc.stderr.strip()[-2000:]} stdout={proc.stdout.strip()[-2000:]}")
     try:
+        # Fail-closed: the child must emit EXACTLY one JSON object on stdout.
+        # `json.loads` tolerates surrounding whitespace only; any other leading
+        # or trailing bytes are a protocol violation, never silently sliced
+        # away, because the payload is the measured production evidence.
         result = json.loads(proc.stdout)
     except json.JSONDecodeError as error:
-        raise WrapperError(f"capture did not emit JSON: {error}") from error
+        raise WrapperError(f"capture did not emit JSON: {error}; stdout={proc.stdout.strip()[-2000:]}") from error
     if not isinstance(result, dict):
         raise WrapperError("capture emitted non-object JSON")
     return result
@@ -458,6 +671,8 @@ def validate_production_result(result: dict) -> None:
         )
     if not provenance.get("verified_files"):
         raise WrapperError("production result carries no verified production files")
+    if result.get("scenario") in DIALOG_SCENARIOS:
+        validate_dialog_postconditions(result)
 
 
 def read_stdin_payload(reader) -> str:
