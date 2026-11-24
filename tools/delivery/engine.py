@@ -212,6 +212,13 @@ def consume(store):
         elif job["stage"] == "diagnose":
             values = {"state":"blocked", "diagnoses":task["diagnoses"]+1,
                       "report":"Independent diagnosis failed: "+reason, "reviews":"[]"}
+        elif kind == "test":
+            # A focused check failed during prepare/publish.  That is a defect in
+            # the candidate, not in the pipeline, so the task returns to an author
+            # with the failing check attached.  Routed through the same attempt
+            # budget as any other product failure, but never reported as a
+            # generic/authority block that no one can act on.
+            values = failure_values(task, cfg, "Focused check failed: "+reason, "product")
         elif kind == "regression":
             values = failure_values(task, cfg, "Post-merge regression: "+reason, "test")
         elif kind == "ambiguous":

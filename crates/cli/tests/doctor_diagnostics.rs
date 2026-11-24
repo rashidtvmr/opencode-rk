@@ -136,7 +136,11 @@ fn ops_010_t03_connectivity_passes_on_loopback_and_fails_cleanly_when_unavailabl
     .spawn()
     .expect("spawn doctor against loopback fixture");
 
-    let deadline = Instant::now() + Duration::from_secs(2);
+    // Readiness wait only.  The doctor child has to start, resolve its endpoint
+    // and complete one connect+request; a busy machine running several cargo
+    // test suites concurrently can exceed a 2s accept window even though the
+    // doctor probe itself is correct.  The assertion below is unchanged.
+    let deadline = Instant::now() + Duration::from_secs(20);
     let mut accepted = false;
     while Instant::now() < deadline {
         match listener.accept() {
