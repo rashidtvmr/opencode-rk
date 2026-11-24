@@ -5512,6 +5512,86 @@ mod dialog20_toast_hover_tests {
     }
 }
 
+/// THEME-16: the `terminal.copy` preference drives the two selection-copy
+/// sites: `select` copies on left release, `manual` copies on right press only,
+/// win32 defaults to `manual`, and the legacy experimental flag overrides.
+#[cfg(all(test, feature = "native"))]
+mod theme16_selection_copy_tests {
+    use super::{copy_selection_to_clipboard, selection_cell_set, selection_copy_disabled};
+    use crate::native_text_selection::TextSelection;
+
+    fn dragged_selection() -> TextSelection {
+        let mut selection = TextSelection::default();
+        selection.set_rows(&["hello world".to_owned()], 0, 0, 20);
+        assert!(selection.press(0, 0));
+        selection.drag(4, 0);
+        selection.release();
+        selection
+    }
+
+    #[test]
+    fn theme16_terminal_copy_preference_drives_both_copy_sites() {
+        // `select`: copy on left release, never on right press.
+        assert!(!selection_copy_disabled(Some("select"), None, false));
+        let mut select_mode = dragged_selection();
+        assert_eq!(select_mode.copy_for_input_kind(2, false).as_deref(), Some("hello"));
+        assert!(!select_mode.spans().is_empty(), "copied cells keep their highlight/paint");
+        assert_eq!(dragged_selection().copy_for_input_kind(5, false), None);
+
+        // `manual`: right press only, never left release.
+        assert!(selection_copy_disabled(Some("manual"), None, false));
+        assert_eq!(dragged_selection().copy_for_input_kind(2, true), None);
+        assert_eq!(dragged_selection().copy_for_input_kind(5, true).as_deref(), Some("hello"));
+
+        // The env flag remains an override in both directions.
+        assert!(selection_copy_disabled(Some("select"), Some("true"), false));
+        assert!(!selection_copy_disabled(Some("manual"), Some("false"), false));
+
+        // Absent value: platform default (manual on win32, select elsewhere).
+        assert!(selection_copy_disabled(None, None, true), "win32 default manual");
+        assert!(!selection_copy_disabled(None, None, false), "select elsewhere");
+    }
+
+    #[test]
+    fn theme16_selected_cells_are_painted_from_their_span_cells() {
+        // A real selection yields one accent cell per selected grid cell.
+        let selection = dragged_selection();
+        let spans = selection.spans();
+        assert_eq!(spans.len(), 5, "cells 0..=4 are selected");
+        let cells = selection_cell_set(&spans, 20);
+        for x in 0..=4 {
+            assert!(cells.contains(&(0, x)), "cell ({x}) must paint selected");
+        }
+        assert!(!cells.contains(&(0, 5)), "unselected cell must not paint selected");
+
+        // Off-screen span widths are clipped to the visible viewport.
+        let clipped = selection_cell_set(&[(9, 18, 4)], 20);
+        assert!(clipped.contains(&(9, 18)) && clipped.contains(&(9, 19)));
+        assert!(!clipped.contains(&(9, 20)) && !clipped.contains(&(9, 21)));
+    }
+
+    #[test]
+    fn theme16_copy_path_surfaces_the_copy_toast() {
+        // Both copy sites funnel through `copy_selection_to_clipboard`, so the
+        // same "Copied to clipboard" feedback is shown whether the copy came
+        // from copy-on-release (`select`) or right-press (`manual`). Asserting
+        // the shared helper directly keeps the toast from drifting between the
+        // two callers. An in-memory sink exercises the exact path without
+        // emitting raw OSC 52 escape bytes onto the test harness's stdout.
+        use crate::native_toast::{Toast, ToastVariant};
+        let mut toast = Toast::new();
+        let mut sink = Vec::new();
+        copy_selection_to_clipboard("hello", &mut toast, &mut sink).expect("OSC 52 frame write");
+        let frame = String::from_utf8(sink).expect("OSC 52 frame is text");
+        assert!(frame.starts_with("\x1b]52;c;"), "copy writes an OSC 52 frame");
+        assert!(frame.ends_with('\x07'), "OSC 52 frame is BEL terminated");
+        let shown = toast.current().expect("copy toast must be visible");
+        assert_eq!(shown.message, "Copied to clipboard");
+        assert_eq!(shown.variant, ToastVariant::Info);
+        assert!(shown.title.is_none());
+    }
+}
+
 /// Enter (CR/LF) closes an open message menu. The option it confirms is
 /// bound by the follow-up effect dispatch; this slice closes only.
 #[cfg(feature = "native")]
@@ -5952,6 +6032,56 @@ fn selection_clipboard_frame(text: &str) -> String {
     }
     output.push('\x07');
     output
+}
+
+/// THEME-16: the single selection-copy path. Both copy sites (pointer release
+/// and Ctrl+C/manual) write the OSC 52 frame and surface the same copy toast
+/// through this helper, so the toast cannot drift between them. The output sink
+/// is injected so tests can exercise the exact path with an in-memory buffer
+/// instead of emitting raw escape bytes to the terminal (which would pollute a
+/// test harness's stdout).
+#[cfg(feature = "native")]
+fn copy_selection_to_clipboard<W: std::io::Write>(
+    text: &str,
+    toast: &mut crate::native_toast::Toast,
+    out: &mut W,
+) -> Result<(), std::io::Error> {
+    let frame = selection_clipboard_frame(text);
+    out.write_all(frame.as_bytes())?;
+    out.flush()?;
+    toast.show(crate::native_toast::ToastOptions::new(
+        crate::native_toast::ToastVariant::Info,
+        "Copied to clipboard",
+    ));
+    Ok(())
+}
+
+/// THEME-16: resolve whether copy-on-select is disabled from the live
+/// `terminal.copy` preference (`select` = copy on release, `manual` = right
+/// press only, win32 defaults to manual) with the legacy experimental flag as
+/// an override. Both selection-copy sites use this single resolution.
+#[cfg(feature = "native")]
+fn selection_copy_disabled(
+    configured: Option<&str>,
+    env_override: Option<&str>,
+    windows: bool,
+) -> bool {
+    let platform_default = crate::native_ui_preferences::TerminalCopy::from_config(configured, windows)
+        .copy_on_select_disabled();
+    crate::native_text_selection::copy_on_select_disabled(env_override, platform_default)
+}
+
+/// THEME-16: map selection highlight spans `(row, x, width)` to the exact
+/// screen cells the painter recolors with the primary accent, clipping to the
+/// visible viewport so an off-screen span cannot paint a clipped cell.
+#[cfg(feature = "native")]
+fn selection_cell_set(spans: &[(u32, u32, u32)], cols: u32) -> std::collections::BTreeSet<(u32, u32)> {
+    spans
+        .iter()
+        .flat_map(|&(row, start, width)| {
+            (start..start.saturating_add(width).min(cols)).map(move |x| (row, x))
+        })
+        .collect()
 }
 
 /// Home-row role by position over the known Home structure (logo block,
@@ -6593,13 +6723,7 @@ fn native_paint(
     let rows = renderer.rows();
     let presentation = ctx.presentation;
     use crate::native_theme_runtime::Slot;
-    let selected_cells: std::collections::BTreeSet<(u32, u32)> = ctx
-        .selection
-        .iter()
-        .flat_map(|&(row, start, width)| {
-            (start..start.saturating_add(width).min(renderer.cols())).map(move |x| (row, x))
-        })
-        .collect();
+    let selected_cells = selection_cell_set(&ctx.selection, renderer.cols());
     let background = paint_color(ctx.palette, Slot::Background);
     let panel = paint_color(ctx.palette, Slot::BackgroundPanel);
     // THEME-06: the modal surface paints the contextual `@dialog` view's
@@ -16146,7 +16270,11 @@ fn native_loop(
                     }
                 }
                 if matches!(kind, 2 | 5 | 6) {
-                    let disable_copy = crate::native_text_selection::copy_on_select_disabled(
+                    // THEME-16: the live `terminal.copy` preference drives
+                    // copy-on-release (select) vs right-press-only (manual);
+                    // the legacy experimental flag remains an override.
+                    let disable_copy = selection_copy_disabled(
+                        preferences.terminal_copy.as_deref(),
                         env::var("OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT")
                             .ok()
                             .as_deref(),
@@ -16154,10 +16282,9 @@ fn native_loop(
                     );
                     let copied = selection.copy_for_input_kind(kind, disable_copy);
                     if let Some(text) = copied {
-                        let frame = selection_clipboard_frame(&text);
                         let mut stdout = std::io::stdout().lock();
-                        stdout.write_all(frame.as_bytes())?;
-                        stdout.flush()?;
+                        copy_selection_to_clipboard(&text, &mut toast, &mut stdout)?;
+                        needs_paint = true;
                     } else if kind == 2
                         && message_menu.is_none()
                         && !view.dialogs.is_open()
@@ -16861,7 +16988,8 @@ fn native_loop(
             // the highlight when copy-on-select is off; a failed copy on a real
             // multi-cell selection clears and propagates, exactly like the
             // copy-on-select branch.
-            let copy_on_select = !crate::native_text_selection::copy_on_select_disabled(
+            let copy_on_select = !selection_copy_disabled(
+                preferences.terminal_copy.as_deref(),
                 env::var("OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT")
                     .ok()
                     .as_deref(),
@@ -16889,10 +17017,8 @@ fn native_loop(
                 // highlight and click history, only repaint.
                 crate::native_text_selection::CtrlCKeyAction::Retain => {
                     if let Some(text) = selection.selected_text() {
-                        let frame = selection_clipboard_frame(&text);
                         let mut stdout = std::io::stdout().lock();
-                        stdout.write_all(frame.as_bytes())?;
-                        stdout.flush()?;
+                        copy_selection_to_clipboard(&text, &mut toast, &mut stdout)?;
                         crate::native_debug::event(
                             "ui.selection_copy",
                             serde_json::json!({"bytes":text.len()}),

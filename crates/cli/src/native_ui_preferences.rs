@@ -55,6 +55,40 @@ pub enum PromptWidth {
     Fixed(u16),
 }
 
+/// THEME-16: the resolved `terminal.copy` policy that drives selection copy
+/// (`packages/tui/src/util/selection.ts` + `ui/dialog.tsx:205-213`). `Select`
+/// copies on left release (copy-on-select), `Manual` copies only on right press.
+/// Upstream's win32 default is `Manual`; elsewhere it is `Select`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalCopy {
+    Select,
+    Manual,
+}
+
+impl TerminalCopy {
+    /// Resolve the raw `terminal.copy` value. Only the two upstream literals are
+    /// meaningful; an absent or unknown value resolves to the platform default
+    /// (`Manual` on win32, `Select` elsewhere).
+    pub fn from_config(value: Option<&str>, windows: bool) -> Self {
+        match value {
+            Some("manual") => TerminalCopy::Manual,
+            Some("select") => TerminalCopy::Select,
+            _ => {
+                if windows {
+                    TerminalCopy::Manual
+                } else {
+                    TerminalCopy::Select
+                }
+            }
+        }
+    }
+
+    /// `true` when copy-on-select is disabled, i.e. only a right press copies.
+    pub fn copy_on_select_disabled(self) -> bool {
+        matches!(self, TerminalCopy::Manual)
+    }
+}
+
 /// Values read from the ordered TUI config files and OpenTUI's `kv.json` state.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UiPreferences {
@@ -87,6 +121,11 @@ pub struct UiPreferences {
     /// `CursorConfig`; the caller parses it with
     /// [`crate::native_theme_runtime::CursorConfig::from_json`] (THEME-14).
     pub cursor: Option<Value>,
+    /// THEME-16: raw `terminal.copy` value (`"select"` / `"manual"`) from the
+    /// merged config files. Resolved with [`TerminalCopy::from_config`] beside
+    /// the legacy `OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT` flag at both
+    /// selection-copy sites.
+    pub terminal_copy: Option<String>,
     /// `tui.animations` (`config/index.tsx:250` `animations?: boolean`,
     /// consumed as `config.animations ?? true`). `None` means the config did
     /// not set it, so the caller resolves to the upstream default `true`.
@@ -562,11 +601,12 @@ impl UiPreferences {
         let mut prompt_paste = None;
         let mut configured_theme = None;
         let mut cursor: Option<Value> = None;
+        let mut terminal_copy: Option<String> = None;
         let mut animations: Option<bool> = None;
         let mut keybinds: Option<Value> = None;
         let mut diagnostics = Vec::new();
         for path in config_paths {
-            let loaded = (|| -> Result<Option<(Option<PromptWidth>, Option<String>, Option<String>, Option<Value>, Option<bool>, Option<Value>)>, String> {
+            let loaded = (|| -> Result<Option<(Option<PromptWidth>, Option<String>, Option<String>, Option<Value>, Option<String>, Option<bool>, Option<Value>)>, String> {
                 let Some(text) = budget.read(path, MAX_CONFIG_BYTES, "TUI config")? else {
                     return Ok(None);
                 };
@@ -645,6 +685,14 @@ impl UiPreferences {
                 // caller parses it with the theme runtime's `CursorConfig`
                 // (validated there, THEME-14).
                 let cursor = object.get("cursor").cloned();
+                // THEME-16: `terminal.copy` (`"select"` | `"manual"`). Stored
+                // raw like `cursor`; `TerminalCopy::from_config` resolves it
+                // with the win32 default at the two selection-copy sites.
+                let terminal_copy = object
+                    .get("terminal")
+                    .and_then(|terminal| terminal.get("copy"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
                 // TAB-23: raw `keybinds` overrides (`config/index.tsx:78`
                 // `TuiKeybind.KeybindOverrides`). Raw like `cursor`;
                 // per-entry validation happens in the
@@ -660,11 +708,11 @@ impl UiPreferences {
                         })
                     })
                     .transpose()?;
-                Ok(Some((width, paste, theme, cursor, animations, keybinds)))
+                Ok(Some((width, paste, theme, cursor, terminal_copy, animations, keybinds)))
             })();
 
             match loaded {
-                Ok(Some((width, paste, theme, cursor_value, animations_value, keybinds_value))) => {
+                Ok(Some((width, paste, theme, cursor_value, terminal_copy_value, animations_value, keybinds_value))) => {
                     if let Some(width) = width {
                         prompt_width = Some(width);
                     }
@@ -676,6 +724,9 @@ impl UiPreferences {
                     }
                     if cursor_value.is_some() {
                         cursor = cursor_value;
+                    }
+                    if terminal_copy_value.is_some() {
+                        terminal_copy = terminal_copy_value;
                     }
                     if animations_value.is_some() {
                         animations = animations_value;
@@ -746,6 +797,7 @@ impl UiPreferences {
                 .map(|width| width.clamp(5, 72) as u16),
             onboarding_dismissed,
             cursor,
+            terminal_copy,
             animations,
             session_all_projects,
             keybinds,
@@ -1893,6 +1945,67 @@ mod tests {
         let empty = UiPreferences::load(&[], &dir.join("missing-kv.json")).unwrap();
         assert_eq!(empty.cursor, None);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// THEME-16: `terminal.copy` is surfaced raw from the last config file and
+    /// resolves to select/manual with a win32-manual default; absent or unknown
+    /// values fall back to that platform default.
+    #[test]
+    fn terminal_copy_is_surfaced_and_resolves_the_copy_policy() {
+        let dir = std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "opencode-ui-termcopy-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let global = dir.join("global.json");
+        let project = dir.join("project.json");
+        fs::write(&global, r#"{"terminal":{"copy":"select"}}"#).unwrap();
+        fs::write(&project, r#"{"terminal":{"copy":"manual"}}"#).unwrap();
+        let prefs = UiPreferences::load(&[global, project], &dir.join("missing-kv.json")).unwrap();
+        assert_eq!(prefs.terminal_copy.as_deref(), Some("manual"), "later config wins");
+        assert_eq!(
+            TerminalCopy::from_config(prefs.terminal_copy.as_deref(), false),
+            TerminalCopy::Manual
+        );
+        assert!(TerminalCopy::from_config(prefs.terminal_copy.as_deref(), false)
+            .copy_on_select_disabled());
+
+        let empty = UiPreferences::load(&[], &dir.join("missing-kv.json")).unwrap();
+        assert_eq!(empty.terminal_copy, None);
+        assert_eq!(TerminalCopy::from_config(None, false), TerminalCopy::Select);
+        assert_eq!(TerminalCopy::from_config(None, true), TerminalCopy::Manual, "win32 default manual");
+        assert_eq!(TerminalCopy::from_config(Some("bogus"), false), TerminalCopy::Select, "unknown falls back");
+        assert_eq!(TerminalCopy::from_config(Some("select"), true), TerminalCopy::Select);
+        assert_eq!(TerminalCopy::from_config(Some("manual"), false), TerminalCopy::Manual);
+        assert!(!TerminalCopy::from_config(Some("select"), false).copy_on_select_disabled());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// THEME-16: the resolved `terminal.copy` policy composes with the legacy
+    /// `OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT` flag exactly as both live
+    /// selection-copy sites do. An explicit truthy flag forces manual mode even
+    /// when config says `select`; an explicit falsy flag forces copy-on-select
+    /// even when config says `manual`; an absent flag defers to the config /
+    /// platform default.
+    #[test]
+    fn terminal_copy_selection_policy_composes_with_the_env_override() {
+        let resolve = |raw: Option<&str>, env: Option<&str>, windows: bool| {
+            crate::native_text_selection::copy_on_select_disabled(
+                env,
+                TerminalCopy::from_config(raw, windows).copy_on_select_disabled(),
+            )
+        };
+        // No override: the config / platform default drives both sites.
+        assert!(!resolve(Some("select"), None, false));
+        assert!(resolve(Some("manual"), None, false));
+        assert!(resolve(None, None, true), "win32 default is manual");
+        assert!(!resolve(None, None, false), "select elsewhere");
+        // The env flag overrides in both directions, at both sites.
+        assert!(resolve(Some("select"), Some("true"), false));
+        assert!(resolve(Some("select"), Some("1"), false));
+        assert!(!resolve(Some("manual"), Some("false"), true));
+        assert!(!resolve(Some("manual"), Some("0"), true));
     }
 
     /// TAB-23: the raw `keybinds` object is surfaced from the last config file
