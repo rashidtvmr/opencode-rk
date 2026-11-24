@@ -13107,4 +13107,153 @@ mod route_inset_boundary_tests {
             "the cell left of the button misses"
         );
     }
+
+    /// LAY-02 / CP-04 / PAR-14 direct probe contract, in one sweep: at every
+    /// boundary width the published inset, the composer box edges, the actually
+    /// painted frame cells, the U+2503 rail border column and the caret/send
+    /// rectangles all agree. The inset flips 1 -> 2 exactly at FULL terminal
+    /// width 44 (never at the narrower tab-rail/sidebar column), every painted
+    /// row is cell-exact to the whole terminal width (saturating on tiny
+    /// viewports), and the composer box — when it fits — is inset on both sides
+    /// by that one value. Expectations are derived from the published inset so
+    /// a consumer that regressed to a literal 2 / `width - 4` breaks an
+    /// equality rather than a hand-copied constant.
+    #[test]
+    fn route_inset_probe_contract_across_boundary_widths() {
+        let draft = "draft";
+        for (cols, expected_inset) in [(0u16, 1u16), (1, 1), (2, 1), (43, 1), (44, 2)] {
+            let mut view = NativeView::new(cols, 24);
+            view.set_session_route(true);
+            assert_eq!(
+                view.session_route_inset(),
+                expected_inset,
+                "inset helper at {cols}"
+            );
+            assert_eq!(
+                view.presentation().main_padding,
+                expected_inset,
+                "published presentation inset keys on full terminal width {cols}"
+            );
+
+            let rows = view.render_typed(draft, &[], false, &[]);
+            if cols == 0 {
+                assert!(rows.is_empty(), "zero-width frame paints no rows");
+                continue;
+            }
+            for row in &rows {
+                let mut cells = 0usize;
+                crate::native_view_layout::visit_unpadded_cells(
+                    row,
+                    usize::from(u16::MAX),
+                    |_, cell| cells += cell,
+                );
+                assert_eq!(cells, usize::from(cols), "cell-exact row at {cols}: {row:?}");
+            }
+
+            // The composer box is suppressed on tiny viewports (`width <= 4`).
+            // Where it exists its left edge and width come from the published
+            // inset with saturating math, so the painted frame cannot disagree
+            // with the geometry projection at the 43/44 boundary.
+            let Some((left, top, width, height)) = view.composer_region(draft) else {
+                continue;
+            };
+            let pad = expected_inset.min(cols / 2);
+            assert_eq!(left, pad, "composer left edge at {cols}");
+            assert_eq!(
+                width,
+                cols.saturating_sub(2 * pad),
+                "composer width at {cols}"
+            );
+
+            // The actual U+2503 rail border paints exactly on the region's left
+            // edge — this is the rendered cell, not just the metadata box.
+            let mut bordered = 0usize;
+            for index in top..top + height {
+                let row = &rows[usize::from(index)];
+                if let Some(border) = row.chars().position(|cell| cell == '┃') {
+                    assert_eq!(
+                        border,
+                        usize::from(left),
+                        "U+2503 border column at {cols} row {index}: {row:?}"
+                    );
+                    bordered += 1;
+                }
+            }
+            assert!(
+                bordered > 0,
+                "the rail border paints inside the composer region at {cols}"
+            );
+
+            // The caret projection and the send pointer rectangle share the
+            // same inset-derived box, and the hit test agrees with its edges.
+            let (caret_x, caret_y) = view.chat_cursor(draft, draft.len()).expect("caret");
+            assert!(
+                caret_x >= left
+                    && caret_x < left.saturating_add(width)
+                    && caret_y >= top
+                    && caret_y < top.saturating_add(height),
+                "caret ({caret_x},{caret_y}) inside the composer region at {cols}"
+            );
+            let (sx, sy, sw) = view.send_button_region(draft).expect("send button region");
+            assert!(
+                sx >= left
+                    && sx.saturating_add(sw) <= left.saturating_add(width)
+                    && sy >= top
+                    && sy < top.saturating_add(height),
+                "send button ({sx},{sy}) inside the composer region at {cols}"
+            );
+            assert!(view.send_button_hit(draft, sx, sy), "send hit agrees at {cols}");
+            assert!(
+                !view.send_button_hit(draft, sx.saturating_sub(1), sy),
+                "the cell left of the send button misses at {cols}"
+            );
+        }
+
+        // Wide terminal whose remaining content column is narrow: a 60-cell
+        // vertical tab rail at 100 columns leaves a 40-cell main column, yet
+        // the inset predicate still keys on the FULL 100-column terminal (2),
+        // and the border/caret follow the tab-shifted absolute columns.
+        let mut wide = NativeView::new(100, 30);
+        wide.set_session_route(true);
+        wide.set_tab_reservation(crate::native_tabs::TabReservation {
+            orientation: Some(crate::native_tabs::TabOrientation::Vertical),
+            width: 60,
+            ..Default::default()
+        });
+        let presentation = wide.presentation();
+        assert_eq!(presentation.main_offset, 60, "tab rail offset");
+        assert_eq!(presentation.main_width, 40, "narrow remaining main column");
+        assert_eq!(
+            presentation.main_padding, 2,
+            "inset keys on the 100-column terminal, not the 40-cell column"
+        );
+        let rows = wide.render_typed(draft, &[], false, &[]);
+        let (left, top, width, height) = wide.composer_region(draft).expect("composer region");
+        assert_eq!(
+            (left, width),
+            (62, 36),
+            "tab offset + wide inset on the left, box subtracts both insets"
+        );
+        let mut bordered = 0usize;
+        for index in top..top + height {
+            let row = &rows[usize::from(index)];
+            if let Some(border) = row.chars().position(|cell| cell == '┃') {
+                assert_eq!(
+                    border,
+                    usize::from(left),
+                    "U+2503 border at the tab-shifted column {left}: {row:?}"
+                );
+                bordered += 1;
+            }
+        }
+        assert!(bordered > 0, "the rail border paints inside the shifted region");
+        let (caret_x, caret_y) = wide.chat_cursor(draft, draft.len()).expect("caret");
+        assert!(
+            caret_x >= left
+                && caret_x < left.saturating_add(width)
+                && caret_y >= top
+                && caret_y < top.saturating_add(height),
+            "caret ({caret_x},{caret_y}) inside the shifted composer region"
+        );
+    }
 }
