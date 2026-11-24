@@ -545,8 +545,29 @@ pub fn palette_from_json<'v>(
     Ok(out)
 }
 
+/// Detect a V2 semantic theme document: any document that publishes a V2
+/// structural/semantic key and no legacy `theme` table. The legacy shape
+/// publishes only `$schema`/`defs`/`theme`, so the two never collide. A V2
+/// document that omits the shared `base` block (modes only), or that is already
+/// mode-selected (upstream `selectThemeMode` merges `base` into the requested
+/// mode and drops the mode/`base` keys, leaving the semantic sections at the
+/// root), still routes to the V2 resolver instead of the legacy `theme` table.
+fn is_v2_document(object: &Map<String, Value>) -> bool {
+    if object.contains_key("theme") {
+        return false;
+    }
+    const V2_STRUCTURAL_KEYS: [&str; 13] = [
+        "base", "hue", "light", "dark", "background", "text", "border",
+        "scrollbar", "categorical", "syntax", "markdown", "diff", "@dialog",
+    ];
+    V2_STRUCTURAL_KEYS
+        .iter()
+        .any(|key| object.contains_key(*key))
+}
+
 /// Resolve from a whole upstream theme asset object
-/// (`{"$schema":…, "defs":{…}, "theme":{…}}`).
+/// (`{"$schema":…, "defs":{…}, "theme":{…}}` for a legacy document, or a V2
+/// semantic document with `base`/mode blocks or already mode-selected).
 ///
 /// # Errors
 ///
@@ -555,8 +576,8 @@ pub fn palette_from_asset(asset: &Value, mode: ThemeMode) -> Result<Palette, Pal
     let object = asset.as_object().ok_or(PaletteError::NotAnObject {
         context: "theme asset",
     })?;
-    if object.contains_key("base") {
-        return v2_theme_from_asset(asset, mode).map(|theme| theme.palette);
+    if is_v2_document(object) {
+        return v2_palette_from_asset(asset, mode).map(|(_, palette, _)| palette);
     }
     let defs = object.get("defs").cloned().unwrap_or(Value::Null);
     let theme = object
@@ -739,7 +760,13 @@ fn semantic_from_json(
 const V2_STEPS: [u16; 9] = [100, 200, 300, 400, 500, 600, 700, 800, 900];
 const V2_STATES: [&str; 5] = ["disabled", "pressed", "focused", "selected", "hovered"];
 const V2_MAX_HUES: usize = 128;
-const V2_DEFAULT_ASSET: &str = include_str!("../assets/opencode-v2.json");
+/// Bounded recursive merge / reference work on a V2 document: maximum JSON
+/// nesting, total tree nodes and near-serialized byte length. A document that
+/// exceeds any bound fails closed before recursion can amplify it.
+const V2_MAX_JSON_DEPTH: usize = 64;
+const V2_MAX_DOCUMENT_NODES: usize = 16_384;
+const V2_MAX_DOCUMENT_BYTES: usize = MAX_CONFIG_JSON_BYTES;
+const V2_DEFAULT_ASSET: &str = include_str!("native_theme_assets/opencode-v2.json");
 /// Temporary "new-designs" theme asset (upstream
 /// `packages/tui/src/theme/assets/v2/opencode2.json`, imported at
 /// `packages/tui/src/theme/index.ts:5` and lazily parsed as the named
@@ -1219,51 +1246,237 @@ pub struct V2Theme {
     pub semantic: SemanticPalette,
 }
 
-/// Resolve one V2 theme document through the existing palette boundary.
-pub fn v2_theme_from_asset(asset: &Value, mode: ThemeMode) -> Result<V2Theme, PaletteError> {
+/// Bound total V2 document size, tree depth, node count and per-container
+/// fan-out before recursive merge/reference work. The near-serialized byte
+/// count and node/depth limits are independent: a document fails closed at the
+/// first bound crossed, so an adversarial input cannot amplify recursion.
+fn check_v2_document_bounds(root: &Map<String, Value>) -> Result<(), PaletteError> {
+    fn escaped_string_len(text: &str) -> usize {
+        2 + text.chars().map(|character| match character {
+            '"' | '\\' | '\u{0008}' | '\u{000c}' | '\n' | '\r' | '\t' => 2,
+            character if character <= '\u{001f}' => 6,
+            character => character.len_utf8(),
+        }).sum::<usize>()
+    }
+
     let invalid = |message: String| PaletteError::V2Invalid { message };
-    let root = asset.as_object().ok_or_else(|| invalid("document is not an object".into()))?;
-    let modes = ["light", "dark"].into_iter().filter(|name| root.contains_key(*name)).collect::<Vec<_>>();
-    if modes.is_empty() { return Err(invalid("document provides no modes".into())); }
-    if root.len() > MAX_MAP_KEYS { return Err(PaletteError::TooManyKeys { context: "v2 document" }); }
-    let available = modes
-        .iter()
-        .map(|name| if *name == "dark" { ThemeMode::Dark } else { ThemeMode::Light })
+    if root.len() > MAX_MAP_KEYS {
+        return Err(PaletteError::TooManyKeys { context: "v2 document" });
+    }
+    let mut pending = root.values().map(|value| (value, 1usize)).collect::<Vec<_>>();
+    let mut node_count = 1usize;
+    let mut encoded_len = 2usize;
+    for key in root.keys() {
+        if key.len() > MAX_KEY_BYTES {
+            return Err(PaletteError::KeyTooLong { key: key.clone() });
+        }
+        encoded_len = encoded_len.saturating_add(escaped_string_len(key) + 1);
+    }
+    encoded_len = encoded_len.saturating_add(root.len().saturating_sub(1));
+    while let Some((value, depth)) = pending.pop() {
+        node_count = node_count.saturating_add(1);
+        if node_count > V2_MAX_DOCUMENT_NODES {
+            return Err(invalid("document exceeds node limit".into()));
+        }
+        if depth > V2_MAX_JSON_DEPTH {
+            return Err(invalid("document exceeds JSON nesting limit".into()));
+        }
+        match value {
+            Value::Object(map) => {
+                if map.len() > MAX_MAP_KEYS {
+                    return Err(invalid("document object exceeds key limit".into()));
+                }
+                encoded_len = encoded_len.saturating_add(2 + map.len().saturating_sub(1));
+                for (key, child) in map {
+                    if key.len() > MAX_KEY_BYTES {
+                        return Err(PaletteError::KeyTooLong { key: key.clone() });
+                    }
+                    encoded_len = encoded_len.saturating_add(escaped_string_len(key) + 1);
+                    pending.push((child, depth + 1));
+                }
+            }
+            Value::Array(items) => {
+                if items.len() > MAX_MAP_KEYS {
+                    return Err(invalid("document array exceeds item limit".into()));
+                }
+                encoded_len = encoded_len.saturating_add(2 + items.len().saturating_sub(1));
+                pending.extend(items.iter().map(|item| (item, depth + 1)));
+            }
+            Value::String(token) => {
+                if token.len() > MAX_KEY_BYTES.max(MAX_COLOR_TOKEN_BYTES) {
+                    return Err(invalid("document token exceeds size limit".into()));
+                }
+                encoded_len = encoded_len.saturating_add(escaped_string_len(token));
+            }
+            Value::Number(number) => {
+                encoded_len = encoded_len.saturating_add(number.to_string().len());
+            }
+            Value::Bool(value) => encoded_len = encoded_len.saturating_add(if *value { 4 } else { 5 }),
+            Value::Null => encoded_len = encoded_len.saturating_add(4),
+        }
+        if encoded_len > V2_MAX_DOCUMENT_BYTES {
+            return Err(invalid(format!(
+                "document exceeds {V2_MAX_DOCUMENT_BYTES} byte limit"
+            )));
+        }
+    }
+    if encoded_len > V2_MAX_DOCUMENT_BYTES {
+        return Err(invalid(format!(
+            "document exceeds {V2_MAX_DOCUMENT_BYTES} byte limit"
+        )));
+    }
+    Ok(())
+}
+
+/// Select the mode a V2 document renders and merge the shared `base` block
+/// with the selected mode block, applying upstream contextual action-state
+/// precedence and structural expansion. A missing requested mode selects the
+/// first available mode in `[light, dark]` order while preserving the request.
+/// An already mode-selected document (no `light`/`dark` and no `base` key)
+/// publishes the merged view directly at the root.
+fn v2_select_and_merge(
+    root: &Map<String, Value>,
+    mode: ThemeMode,
+) -> Result<(ThemeMode, Value), PaletteError> {
+    let invalid = |message: String| PaletteError::V2Invalid { message };
+    check_v2_document_bounds(root)?;
+    let available = [ThemeMode::Light, ThemeMode::Dark]
+        .into_iter()
+        .filter(|candidate| root.contains_key(candidate.key()))
         .collect::<Vec<_>>();
+    if available.is_empty() {
+        // Upstream `selectThemeMode` merges `base` into the requested mode and
+        // drops the mode/`base` keys, so the whole document IS the merged view.
+        // A document that still carries `base` but no mode block is not
+        // selectable and fails closed.
+        if root.contains_key("base") {
+            return Err(invalid("document provides no modes".into()));
+        }
+        let mut merged = Value::Object(root.clone());
+        v2_expand_theme_tokens(&mut merged);
+        return Ok((mode, merged));
+    }
+    for candidate in [ThemeMode::Light, ThemeMode::Dark] {
+        if root.contains_key(candidate.key()) && !root[candidate.key()].is_object() {
+            return Err(invalid(format!("{} mode is not an object", candidate.key())));
+        }
+    }
     let selected_mode = select_theme_mode(&available, mode);
     let selected = selected_mode.key();
-    let base = root.get("base").and_then(Value::as_object).cloned().unwrap_or_default();
-    let selected_obj = root.get(selected).and_then(Value::as_object).ok_or_else(|| invalid("selected mode is not an object".into()))?;
+    let base = match root.get("base") {
+        None => Map::new(),
+        Some(Value::Object(base)) => base.clone(),
+        Some(_) => return Err(invalid("base is not an object".into())),
+    };
+    let selected_obj = root
+        .get(selected)
+        .and_then(Value::as_object)
+        .ok_or_else(|| invalid("selected mode is not an object".into()))?;
     let mut merged = v2_merge(Value::Object(base.clone()), Value::Object(selected_obj.clone()));
     v2_apply_contextual_actions(&mut merged, &Value::Object(base), &Value::Object(selected_obj.clone()));
+    // Upstream expands the merged document before any resolver reads it
+    // (`expandTheme` runs after `selectThemeMode`'s merge; audit T06): fill the
+    // derived soft-text and action/formfield-state references so `text.muted`
+    // falls back to `$text.base`, `text.faint` to `$text.muted`, and
+    // unspecified states to their variant base instead of failing as a missing
+    // semantic role. Fill-only is idempotent (the dialog path expands again)
+    // and never changes a value the document defines explicitly.
+    v2_expand_theme_tokens(&mut merged);
+    Ok((selected_mode, merged))
+}
+
+/// Semantic sections whose presence in the merged view means a V2 document
+/// publishes the optional semantic projection. A published projection must
+/// resolve completely: a broken semantic role fails the document instead of
+/// silently degrading to the core palette. A document that publishes none of
+/// these renders its ten core slots with `semantic: None`.
+const V2_SEMANTIC_SECTIONS: [&str; 4] = ["categorical", "syntax", "markdown", "diff"];
+
+/// Whether the merged base+selected-mode view of `asset` publishes the
+/// semantic projection ([`V2_SEMANTIC_SECTIONS`]). Checked on the merged view
+/// because a section may live in the shared `base` block or the selected mode.
+fn v2_publishes_semantic(asset: &Value, mode: ThemeMode) -> bool {
+    let Some(root) = asset.as_object() else {
+        return false;
+    };
+    let Ok((_, merged)) = v2_select_and_merge(root, mode) else {
+        return false;
+    };
+    merged.as_object().is_some_and(|object| {
+        V2_SEMANTIC_SECTIONS
+            .iter()
+            .any(|key| object.contains_key(*key))
+    })
+}
+
+/// Resolve only the ten core [`Slot`]s of a V2 document for `mode`, plus the
+/// contextual `@dialog` palette. The optional semantic projections
+/// (`syntax`/`markdown`/`diff`/`categorical`) are not required here, so a
+/// document that publishes the core roles resolves even if a semantic role is
+/// broken; a missing core role or a bounded reference/hue failure (including
+/// inside a published `@dialog` override) fails closed.
+fn v2_palette_from_asset(
+    asset: &Value,
+    mode: ThemeMode,
+) -> Result<(ThemeMode, Palette, Palette), PaletteError> {
+    let root = asset
+        .as_object()
+        .ok_or_else(|| PaletteError::V2Invalid { message: "document is not an object".into() })?;
+    let (selected_mode, merged) = v2_select_and_merge(root, mode)?;
+    let mut resolver = V2Resolver::new(merged.clone());
+    resolver.compile_hues()?;
+    let palette = resolver.palette()?;
+    let dialog = v2_dialog_palette(&merged, palette.clone())?;
+    Ok((selected_mode, palette, dialog))
+}
+
+/// Resolve one V2 theme document through the existing palette boundary,
+/// including its full typed semantic projection.
+pub fn v2_theme_from_asset(asset: &Value, mode: ThemeMode) -> Result<V2Theme, PaletteError> {
+    let root = asset
+        .as_object()
+        .ok_or_else(|| PaletteError::V2Invalid { message: "document is not an object".into() })?;
+    let (selected_mode, merged) = v2_select_and_merge(root, mode)?;
     let mut resolver = V2Resolver::new(merged.clone());
     resolver.compile_hues()?;
     let palette = resolver.palette()?;
     let semantic = resolver.semantic()?;
-
-    // Upstream `resolveExpandedTheme` publishes a reactive `surface("dialog")`
-    // (`resolve.ts:79`). `expandTheme` expands the document-level `@dialog`
-    // token block over the already-selected base (`expand.ts:10-15`); the
-    // override may originate in the document's shared `base` because
-    // `selectThemeMode` merges `base`+selected (`select.ts:16`), which our
-    // `merged` already reflects. `contextualize` (`resolve.ts:95-107`) then
-    // merges the override and rebuilds action-state precedence. Layout-only
-    // keys stay absent, so the expansion only injects `$…` reference strings
-    // and never changes the value the base resolver would produce.
-    let dialog = if let Some(override_tokens) = merged.get("@dialog").cloned() {
-        let mut context_base = merged;
-        if let Some(root) = context_base.as_object_mut() { root.remove("@dialog"); }
-        let mut contextual = v2_merge(context_base.clone(), override_tokens);
-        v2_expand_theme_tokens(&mut contextual);
-        v2_apply_contextual_actions(&mut contextual, &context_base, &Value::Null);
-        let mut dialog_resolver = V2Resolver::new(contextual);
-        dialog_resolver.compile_hues()?;
-        dialog_resolver.palette()?
-    } else {
-        palette
-    };
+    let dialog = v2_dialog_palette(&merged, palette.clone())?;
 
     Ok(V2Theme { selected_mode, requested_mode: mode, palette, dialog, semantic })
+}
+
+/// Upstream `resolveExpandedTheme` publishes a reactive `surface("dialog")`
+/// (`resolve.ts:79`). `expandTheme` expands the document-level `@dialog` token
+/// block over the already-selected base (`expand.ts:10-15`); the override may
+/// originate in the document's shared `base` because `selectThemeMode` merges
+/// `base`+selected (`select.ts:16`), which the passed `merged` already reflects.
+/// `contextualize` (`resolve.ts:95-107`) then merges the override and rebuilds
+/// action-state precedence with the upstream chain
+/// `over[key] ?? over.base ?? base[key] ?? base.base` — the `@dialog` override
+/// is the surface, so its explicit state keys beat the underlying document's
+/// (`surface explicit state -> surface.base -> base explicit state ->
+/// base.base`). References resolve inside the contextual merged document.
+/// Without an override the dialog view is the base `fallback`.
+///
+/// # Errors
+///
+/// [`PaletteError`] when the contextual document is unusable: bounded
+/// reference/hue failures inside the override fail closed.
+fn v2_dialog_palette(merged: &Value, fallback: Palette) -> Result<Palette, PaletteError> {
+    let Some(override_tokens) = merged.get("@dialog").cloned() else {
+        return Ok(fallback);
+    };
+    let mut context_base = merged.clone();
+    if let Some(root) = context_base.as_object_mut() {
+        root.remove("@dialog");
+    }
+    let mut contextual = v2_merge(context_base.clone(), override_tokens.clone());
+    v2_expand_theme_tokens(&mut contextual);
+    v2_apply_contextual_actions(&mut contextual, &context_base, &override_tokens);
+    let mut dialog_resolver = V2Resolver::new(contextual);
+    dialog_resolver.compile_hues()?;
+    dialog_resolver.palette()
 }
 
 /// Action variants rebuilt with upstream `contextualActions` precedence.
@@ -1331,20 +1544,58 @@ fn v2_merge(base: Value, over: Value) -> Value {
 }
 
 /// Upstream `expandTheme`/`expandTokens` (`packages/theme/src/tui/expand.ts:10-24`):
-/// fill the derived action-state and soft-text references (`$…`) the resolver
-/// reads. Layout-only keys (`padding`, colors, `gap`) pass through untouched.
-/// The dialog sensor only rebuilds action precedence, so the injection never
-/// changes a value the base resolver would already compute; it exists to keep
-/// the contextual view faithful to the upstream shape.
+/// fill the derived action-state, formfield-state, feedback-muted and soft-text
+/// references (`$…`) the resolver reads. Layout-only keys (`padding`, colors,
+/// `gap`) pass through untouched. The injection is fill-only so it never
+/// changes a value the document defines explicitly and is idempotent (the
+/// dialog path expands again).
 fn v2_expand_theme_tokens(definition: &mut Value) {
     let Some(root) = definition.as_object_mut() else { return };
     if let Some(text) = root.get_mut("text").and_then(Value::as_object_mut) {
         if !text.contains_key("muted") && text.contains_key("base") { text.insert("muted".into(), Value::String("$text.base".into())); }
         if !text.contains_key("faint") && (text.contains_key("muted") || text.contains_key("base")) { text.insert("faint".into(), Value::String("$text.muted".into())); }
         v2_expand_actions(text.get_mut("action"), "text.action");
+        v2_expand_formfield(text.get_mut("formfield"), "text.formfield");
+        v2_expand_feedback_muted(text.get_mut("feedback"), "text.feedback");
     }
     if let Some(background) = root.get_mut("background").and_then(Value::as_object_mut) {
         v2_expand_actions(background.get_mut("action"), "background.action");
+        v2_expand_formfield(background.get_mut("formfield"), "background.formfield");
+        v2_expand_feedback_muted(background.get_mut("feedback"), "background.feedback");
+    }
+}
+
+/// Upstream formfield state expansion (`expand.ts` state fallback): a
+/// formfield record is a single `{base, $state…}` object (unlike the three
+/// action variants), and each absent `$state` gains a `$<path>.base` reference
+/// when the record publishes a `base`. Fill-only: an explicit state is never
+/// overridden and a record without `base` is left untouched, so a reference to
+/// a state of a base-less formfield fails closed as a missing target instead
+/// of inventing a color.
+fn v2_expand_formfield(formfield: Option<&mut Value>, path: &str) {
+    let Some(formfield) = formfield.and_then(Value::as_object_mut) else { return };
+    if !formfield.contains_key("base") { return; }
+    for state in V2_STATES {
+        let key = format!("${state}");
+        if !formfield.contains_key(&key) {
+            formfield.insert(key, Value::String(format!("${path}.base")));
+        }
+    }
+}
+
+/// Upstream feedback muted expansion (`expand.ts`): each feedback role's
+/// optional `muted` variant falls back to that role's own `base`
+/// (`$text.feedback.<role>.base` / `$background.feedback.<role>.base`) when
+/// the document does not publish it. Fill-only; non-object roles and roles
+/// without `base` are left untouched, so an explicit muted variant wins.
+fn v2_expand_feedback_muted(feedback: Option<&mut Value>, path: &str) {
+    let Some(feedback) = feedback.and_then(Value::as_object_mut) else { return };
+    for (role, value) in feedback.iter_mut() {
+        let Some(map) = value.as_object_mut() else { continue };
+        if !map.contains_key("base") { continue; }
+        if !map.contains_key("muted") {
+            map.insert("muted".into(), Value::String(format!("${path}.{role}.base")));
+        }
     }
 }
 
@@ -1375,14 +1626,33 @@ impl V2Resolver {
     fn new(mode: Value) -> Self { Self { mode, hues: HashMap::new() } }
 
     fn compile_hues(&mut self) -> Result<(), PaletteError> {
-        let map = self.mode.get("hue").and_then(Value::as_object).ok_or_else(|| PaletteError::V2Invalid { message: "mode hue map missing".into() })?;
-        if map.len() > V2_MAX_HUES { return Err(PaletteError::TooManyKeys { context: "v2 hues" }); }
-        let names = map.keys().cloned().collect::<Vec<_>>();
+        // A document that publishes only literal core roles (no `hue` scales)
+        // still resolves its palette; a `hue` key that is present but not an
+        // object is malformed. A reference to a hue that is not published still
+        // fails closed in `resolve_color_chain`, so this relaxation never
+        // invents a color for a missing scale.
+        let names = match self.mode.get("hue") {
+            None => Vec::new(),
+            Some(Value::Object(map)) => {
+                if map.len() > V2_MAX_HUES {
+                    return Err(PaletteError::TooManyKeys { context: "v2 hues" });
+                }
+                map.keys().cloned().collect::<Vec<_>>()
+            }
+            Some(_) => {
+                return Err(PaletteError::V2Invalid {
+                    message: "mode hue map is not an object".into(),
+                });
+            }
+        };
         for name in names { self.resolve_hue(&name, &mut Vec::new())?; }
         Ok(())
     }
 
     fn resolve_hue(&mut self, name: &str, stack: &mut Vec<String>) -> Result<Vec<HueColor>, PaletteError> {
+        if name.len() > MAX_KEY_BYTES {
+            return Err(PaletteError::KeyTooLong { key: name.to_owned() });
+        }
         if let Some(hue) = self.hues.get(name) { return Ok(hue.clone()); }
         if stack.len() >= MAX_ALIAS_DEPTH { return Err(PaletteError::V2Invalid { message: "hue alias depth exceeded".into() }); }
         if stack.iter().any(|seen| seen == name) { return Err(PaletteError::V2Invalid { message: format!("hue alias cycle at {name}") }); }
@@ -1390,6 +1660,9 @@ impl V2Resolver {
         stack.push(name.to_owned());
         let values = if let Some(alias) = raw.as_str() {
             let target = alias.strip_prefix("$hue.").ok_or_else(|| PaletteError::V2Invalid { message: "invalid hue alias".into() })?;
+            if target.len() > MAX_KEY_BYTES || target.contains('.') {
+                return Err(PaletteError::V2Invalid { message: "invalid hue alias target".into() });
+            }
             self.resolve_hue(target, stack)?.into_iter().map(|color| HueColor { rgba: color.rgba, provenance: Some(HueSource { hue: name.to_owned(), step: color.provenance.map_or(100, |p| p.step) }) }).collect()
         } else {
             let object = raw.as_object().ok_or_else(|| PaletteError::V2Invalid { message: format!("hue {name} is not an object") })?;
@@ -1408,22 +1681,54 @@ impl V2Resolver {
     }
 
     fn resolve_color(&self, value: &Value, context: &Value, depth: usize) -> Result<HueColor, PaletteError> {
+        self.resolve_color_chain(value, context, depth, &mut Vec::new())
+    }
+
+    fn resolve_color_chain(
+        &self,
+        value: &Value,
+        context: &Value,
+        depth: usize,
+        references: &mut Vec<String>,
+    ) -> Result<HueColor, PaletteError> {
         if depth > MAX_ALIAS_DEPTH { return Err(PaletteError::V2Invalid { message: "token reference depth exceeded".into() }); }
         let token = value.as_str().ok_or_else(|| PaletteError::V2Invalid { message: "token is not a string".into() })?;
+        if token.len() > MAX_KEY_BYTES.max(MAX_COLOR_TOKEN_BYTES) {
+            return Err(PaletteError::V2Invalid { message: "color token exceeds size limit".into() });
+        }
         if token == "transparent" { return Ok(HueColor::literal([0, 0, 0, 0])); }
         if token.starts_with('#') { return parse_color(token).map(HueColor::literal).map_err(|_| PaletteError::V2Invalid { message: "invalid hex color".into() }); }
         let target = token.strip_prefix('$').ok_or_else(|| PaletteError::V2Invalid { message: format!("invalid color token {token}") })?;
         if let Some(rest) = target.strip_prefix("hue.") {
             if let Some((name, step)) = rest.rsplit_once('.') {
-                let step: u16 = step.parse().map_err(|_| PaletteError::V2Invalid { message: "invalid hue step".into() })?;
-                if let Some(index) = V2_STEPS.iter().position(|candidate| *candidate == step) {
-                    return self.hues.get(name).and_then(|scale| scale.get(index)).cloned().ok_or_else(|| PaletteError::V2Invalid { message: format!("missing hue reference {target}") });
+                if name.len() > MAX_KEY_BYTES {
+                    return Err(PaletteError::V2Invalid { message: "hue name exceeds size limit".into() });
                 }
+                let step: u16 = step.parse().map_err(|_| PaletteError::V2Invalid { message: "invalid hue step".into() })?;
+                return V2_STEPS
+                    .iter()
+                    .position(|candidate| *candidate == step)
+                    .and_then(|index| self.hues.get(name).and_then(|scale| scale.get(index)))
+                    .cloned()
+                    .ok_or_else(|| PaletteError::V2Invalid { message: format!("missing hue reference {target}") });
             }
+            return Err(PaletteError::V2Invalid { message: format!("invalid hue reference {target}") });
+        }
+        if references.iter().any(|seen| seen == target) {
+            // A repeated target inside the bounded reference chain means the
+            // token reference walked back into itself: fail closed with a
+            // depth-bound diagnostic (the chain is bounded by MAX_ALIAS_DEPTH).
+            return Err(PaletteError::V2Invalid { message: format!("token reference depth exceeded by cycle at {target}") });
+        }
+        if references.len() >= MAX_ALIAS_DEPTH {
+            return Err(PaletteError::V2Invalid { message: "token reference depth exceeded".into() });
         }
         let mut current = context;
         for segment in target.split('.') { current = current.get(segment).ok_or_else(|| PaletteError::V2Invalid { message: format!("missing reference {target}") })?; }
-        self.resolve_color(current, context, depth + 1)
+        references.push(target.to_owned());
+        let result = self.resolve_color_chain(current, context, depth + 1, references);
+        references.pop();
+        result
     }
 
     fn palette(&self) -> Result<Palette, PaletteError> {
@@ -1834,16 +2139,37 @@ impl RuntimeTheme {
     /// [`PaletteError`] when the asset shape or any core role is unusable
     /// for `mode`.
     pub fn from_asset(name: &str, asset: &Value, mode: ThemeMode) -> Result<Self, PaletteError> {
-        if asset.as_object().is_some_and(|object| object.contains_key("base")) {
-            let resolved = v2_theme_from_asset(asset, mode)?;
-            return Ok(Self {
-                name: name.to_owned(),
-                mode: resolved.selected_mode,
-                requested_mode: resolved.requested_mode,
-                palette: resolved.palette,
-                dialog: resolved.dialog,
-                semantic: Some(resolved.semantic),
-            });
+        if asset.as_object().is_some_and(is_v2_document) {
+            return match v2_theme_from_asset(asset, mode) {
+                Ok(resolved) => Ok(Self {
+                    name: name.to_owned(),
+                    mode: resolved.selected_mode,
+                    requested_mode: resolved.requested_mode,
+                    palette: resolved.palette,
+                    dialog: resolved.dialog,
+                    semantic: Some(resolved.semantic),
+                }),
+                Err(error) => {
+                    // A document that publishes the semantic projection
+                    // (`categorical`/`syntax`/`markdown`/`diff`) must resolve
+                    // it completely: a broken semantic role fails closed
+                    // instead of silently degrading to `semantic: None`. Only
+                    // a document that publishes no semantic section renders
+                    // core-only.
+                    if v2_publishes_semantic(asset, mode) {
+                        return Err(error);
+                    }
+                    let (selected_mode, palette, dialog) = v2_palette_from_asset(asset, mode)?;
+                    Ok(Self {
+                        name: name.to_owned(),
+                        mode: selected_mode,
+                        requested_mode: mode,
+                        palette,
+                        dialog,
+                        semantic: None,
+                    })
+                }
+            };
         }
         let object = asset.as_object().ok_or(PaletteError::NotAnObject {
             context: "theme asset",
@@ -4331,6 +4657,318 @@ fn theme14_cursor_wire_matches_abi_ids_and_leaves_shape_unchanged_when_absent() 
         CursorState { focused: true, disabled: true },
     );
     assert_eq!(color, hex("#141414"));
+}
+
+// ── UIKIT-V2-THEME-RESOLVER: mode-selected document + boundary coverage ──
+// The immutable owner probe (theme-v2-probe.py) resolves an already-selected
+// V2 document through the runtime palette boundary. Upstream `selectThemeMode`
+// merges base into the requested mode and drops the mode/`base` keys, leaving
+// the semantic sections at the root; the base code keyed V2 detection on the
+// shared `base` key alone and fell through to the legacy `theme` table, failing
+// with `NotAnObject { context: "theme" }`. These tests pin the corrected path.
+
+fn selected_v2_document(mode: ThemeMode) -> Value {
+    // Read the same bytes the production loader reads (V2_DEFAULT_ASSET),
+    // not a parallel copy that could drift silently.
+    let asset: Value = serde_json::from_str(V2_DEFAULT_ASSET)
+        .expect("shipped asset parses");
+    let root = asset.as_object().expect("shipped asset is an object");
+    let (_, merged) = v2_select_and_merge(root, mode).expect("merge succeeds");
+    assert!(!merged.as_object().unwrap().contains_key("base"));
+    merged
+}
+
+#[test]
+fn v2_selected_document_resolves_through_both_boundaries_in_both_modes() {
+    for (mode, background, primary, dialog_background) in [
+        (ThemeMode::Dark, "#0a0a0a", "#fab283", "#141414"),
+        (ThemeMode::Light, "#ffffff", "#3b7dd8", "#fafafa"),
+    ] {
+        let selected = selected_v2_document(mode);
+        let core = palette_from_asset(&selected, mode).expect("core palette resolves");
+        assert_eq!(core.get(Slot::Background), hex(background), "{mode} background");
+        assert_eq!(core.get(Slot::Primary), hex(primary), "{mode} primary");
+
+        let theme = RuntimeTheme::from_asset("selected-v2", &selected, mode)
+            .expect("typed theme resolves");
+        assert!(theme.semantic.is_some(), "{mode} semantic projection present");
+        assert_eq!(theme.mode, mode);
+        assert_eq!(theme.palette.get(Slot::Background), hex(background));
+        assert_eq!(theme.dialog.get(Slot::Background), hex(dialog_background));
+        assert_ne!(theme.dialog.get(Slot::Background), theme.palette.get(Slot::Background));
+    }
+}
+
+#[test]
+fn v2_hand_built_selected_document_resolves_through_public_boundaries() {
+    // The immutable owner probe builds an ALREADY-SELECTED V2 document by hand
+    // (upstream `selectThemeMode` merges base into the requested mode and drops
+    // the mode/`base` keys, leaving the semantic sections at the root) and
+    // resolves it through the public palette boundary. The base code keyed V2
+    // detection on the shared `base` key alone, so this document fell through
+    // to the legacy `theme` table with `NotAnObject { context: "theme" }`.
+    // Pin that exact scenario using only public APIs and a minimal document,
+    // so a future regression in `is_v2_document` cannot silently reintroduce
+    // the misroute even if the shipped-asset tests keep passing.
+    let document = json!({
+        "$schema": "https://opencode.ai/theme.json",
+        "hue": {
+            "gray": {
+                "100": "#ffffff", "200": "#eeeeee", "300": "#b5b5b5",
+                "400": "#808080", "500": "#4c4c4c", "600": "#1e1e1e",
+                "700": "#141414", "800": "#0a0a0a", "900": "#030303"
+            },
+            "neutral": "$hue.gray"
+        },
+        "background": {
+            "base": "$hue.neutral.800",
+            "raised": { "base": "$hue.neutral.700", "high": "$hue.neutral.600" },
+            "action": { "primary": { "base": "transparent", "$focused": "$hue.neutral.200" } }
+        },
+        "text": {
+            "base": "$hue.neutral.200",
+            "muted": "$hue.neutral.400",
+            "feedback": {
+                "error": { "base": "#e06c75" },
+                "warning": { "base": "#f5a742" },
+                "success": { "base": "#7fd88f" }
+            }
+        },
+        "border": { "base": "#484848" }
+    });
+    assert!(!document.as_object().unwrap().contains_key("base"));
+    assert!(!document.as_object().unwrap().contains_key("theme"));
+
+    let palette = palette_from_asset(&document, ThemeMode::Dark)
+        .expect("selected document resolves through the core palette boundary");
+    assert_eq!(palette.get(Slot::Background), hex("#0a0a0a"));
+    assert_eq!(palette.get(Slot::BackgroundPanel), hex("#141414"));
+    assert_eq!(palette.get(Slot::BackgroundElement), hex("#1e1e1e"));
+    assert_eq!(palette.get(Slot::Primary), hex("#eeeeee"));
+    assert_eq!(palette.get(Slot::Error), hex("#e06c75"));
+
+    let theme = RuntimeTheme::from_asset("selected", &document, ThemeMode::Dark)
+        .expect("selected document resolves through the typed runtime boundary");
+    assert_eq!(theme.mode, ThemeMode::Dark);
+    assert_eq!(theme.palette.get(Slot::Background), hex("#0a0a0a"));
+    assert_eq!(theme.dialog.get(Slot::Background), hex("#0a0a0a"));
+    // No semantic sections are published, so the typed view degrades to the
+    // core palette without failing the document.
+    assert!(theme.semantic.is_none());
+}
+
+#[test]
+fn v2_detection_keeps_legacy_assets_on_the_legacy_path() {
+    let text = crate::native_theme_assets::lookup("opencode").expect("legacy asset");
+    let value: Value = serde_json::from_str(text).expect("legacy JSON parses");
+    assert!(!is_v2_document(value.as_object().unwrap()));
+    for mode in [ThemeMode::Dark, ThemeMode::Light] {
+        assert!(palette_from_asset(&value, mode).is_ok(), "legacy {mode} palette resolves");
+        let theme = RuntimeTheme::from_asset("opencode", &value, mode).expect("legacy theme loads");
+        assert!(theme.semantic.is_some(), "legacy semantic roles migrate in {mode}");
+    }
+}
+
+#[test]
+fn v2_one_mode_document_falls_back_and_preserves_requested_preference() {
+    // Upstream `selectThemeMode` (`select.ts:8-24`): a document that publishes
+    // only one mode renders that mode while the caller's requested preference
+    // is preserved for a later dual-mode selection. The available mode is
+    // chosen from `[light, dark]` order, never guessed from the request
+    // (audit T07/T12).
+    let mut doc: Value = serde_json::from_str(V2_DEFAULT_ASSET)
+        .expect("shipped asset parses");
+    doc.as_object_mut()
+        .expect("shipped asset is an object")
+        .remove("light"); // leave only the dark mode block
+    assert!(!doc.as_object().unwrap().contains_key("light"));
+
+    let theme = RuntimeTheme::from_asset("one-mode", &doc, ThemeMode::Light)
+        .expect("one-mode document resolves");
+    assert_eq!(theme.mode, ThemeMode::Dark, "renders the only published mode");
+    assert_eq!(theme.requested_mode, ThemeMode::Light, "preference preserved");
+    assert_eq!(theme.palette.get(Slot::Background), hex("#0a0a0a"));
+    assert_eq!(theme.palette.get(Slot::Primary), hex("#fab283"));
+    assert!(theme.semantic.is_some(), "dark semantic projection resolves fully");
+}
+
+#[test]
+fn v2_invalid_references_steps_and_shapes_fail_closed() {
+    let shipped: Value = serde_json::from_str(V2_DEFAULT_ASSET)
+        .expect("shipped asset parses");
+
+    // Every hue step outside 100..900 or non-numeric fails closed; no heuristic
+    // snapping onto a nearby published step.
+    for token in ["$hue.neutral.0", "$hue.neutral.foo", "$hue.neutral.1000"] {
+        let mut doc = shipped.clone();
+        doc["base"]["background"]["base"] = Value::String(token.into());
+        assert!(palette_from_asset(&doc, ThemeMode::Dark).is_err(), "{token} fails closed");
+    }
+    // Missing targets fail closed.
+    let mut missing = shipped.clone();
+    missing["base"]["background"]["base"] = Value::String("$background.nonexistent".into());
+    assert!(palette_from_asset(&missing, ThemeMode::Dark).is_err());
+
+    // A cyclic semantic reference fails the typed boundary but not the ten-slot
+    // core boundary (which never reads the syntax projection).
+    let mut cyclic = shipped.clone();
+    cyclic["base"]["syntax"]["keyword"] = Value::String("$syntax.function".into());
+    cyclic["base"]["syntax"]["function"] = Value::String("$syntax.keyword".into());
+    assert!(palette_from_asset(&cyclic, ThemeMode::Dark).is_ok());
+    assert!(RuntimeTheme::from_asset("cyclic", &cyclic, ThemeMode::Dark).is_err());
+
+    // No published mode and a non-object document both fail closed.
+    assert!(palette_from_asset(&json!({ "base": { "hue": {} } }), ThemeMode::Dark).is_err());
+    assert!(palette_from_asset(&json!("bad"), ThemeMode::Dark).is_err());
+}
+
+#[test]
+fn v2_structural_expansion_and_contextual_references_resolve() {
+    let mut doc: Value = serde_json::from_str(V2_DEFAULT_ASSET)
+        .expect("shipped asset parses");
+    // Repoint a core slot at an expanded formfield state, and the dialog border
+    // at an expanded feedback-muted variant, so the fill-only expansion is
+    // observable through resolved RGBA. The per-mode `border` layer overrides
+    // `base.border` (the light document pins `#b8b8b8`), so it has to be
+    // repointed too or the reference below is never consulted in light mode.
+    for layer in ["base", "light", "dark"] {
+        doc[layer]["border"] = json!({ "base": "$background.formfield.$hovered" });
+    }
+    doc["base"]["@dialog"]["border"] = json!({ "base": "$text.feedback.error.muted" });
+    for (mode, formfield_base, error) in [
+        (ThemeMode::Dark, "#0a0a0a", "#e06c75"),
+        (ThemeMode::Light, "#ffffff", "#d1383d"),
+    ] {
+        let theme = RuntimeTheme::from_asset("expansion", &doc, mode).expect("resolves");
+        assert_eq!(theme.palette.get(Slot::Border), hex(formfield_base), "{mode} formfield state");
+        assert_eq!(theme.dialog.get(Slot::Border), hex(error), "{mode} feedback muted in dialog");
+    }
+}
+
+#[test]
+fn v2_dialog_action_state_precedence_surface_beats_base() {
+    let shipped: Value = serde_json::from_str(V2_DEFAULT_ASSET)
+        .expect("shipped asset parses");
+
+    // surface explicit state beats the base document's explicit state.
+    let mut doc = shipped.clone();
+    doc["base"]["@dialog"]["background"]["action"] =
+        json!({ "primary": { "$focused": "#123456" } });
+    let theme = RuntimeTheme::from_asset("dialog", &doc, ThemeMode::Dark).expect("resolves");
+    assert_eq!(theme.dialog.get(Slot::Primary), hex("#123456"));
+    assert_eq!(theme.palette.get(Slot::Primary), hex("#fab283"), "root palette unchanged");
+
+    // surface.base beats the base document's explicit state.
+    let mut base_only = doc.clone();
+    base_only["base"]["@dialog"]["background"]["action"] =
+        json!({ "primary": { "base": "#234567" } });
+    let theme = RuntimeTheme::from_asset("dialog", &base_only, ThemeMode::Dark).expect("resolves");
+    assert_eq!(theme.dialog.get(Slot::Primary), hex("#234567"));
+}
+
+#[test]
+fn v2_core_only_document_resolves_without_semantic_projection() {
+    let doc = json!({
+        "base": {
+            "background": {
+                "base": "#0a0a0a",
+                "raised": { "base": "#141414", "high": "#1e1e1e" },
+                "action": { "primary": { "base": "#333333", "$focused": "#444444" } }
+            },
+            "text": {
+                "base": "#eeeeee",
+                "muted": "#808080",
+                "feedback": {
+                    "error": { "base": "#e06c75" },
+                    "warning": { "base": "#f5a742" },
+                    "success": { "base": "#7fd88f" }
+                }
+            },
+            "border": { "base": "#484848" },
+            "@dialog": { "background": { "base": "$background.raised.high" } }
+        },
+        "dark": { "hue": {} }
+    });
+    let theme = RuntimeTheme::from_asset("core-only", &doc, ThemeMode::Dark)
+        .expect("core-only document resolves");
+    assert!(theme.semantic.is_none(), "no semantic section is published");
+    assert_eq!(theme.palette.get(Slot::Background), hex("#0a0a0a"));
+    assert_eq!(theme.dialog.get(Slot::Background), hex("#1e1e1e"));
+}
+
+#[test]
+fn v2_document_depth_bound_fails_closed() {
+    let mut nested = json!({});
+    for _ in 0..(V2_MAX_JSON_DEPTH + 2) {
+        nested = json!({ "x": nested });
+    }
+    let mut doc = json!({ "base": {}, "dark": {} });
+    doc["dark"]["deep"] = nested;
+    assert!(palette_from_asset(&doc, ThemeMode::Dark).is_err(), "deep nesting fails closed");
+}
+
+#[test]
+fn v2_bundled_asset_is_the_required_exact_bytes() {
+    // The production loader reads V2_DEFAULT_ASSET. Pin those bytes to the
+    // kit-verified copy of the pinned upstream default document
+    // (packages/tui/src/theme/assets/v2/opencode.json at 450e7b9,
+    // SHA256 2673cbe2e68c6eb8ae5477f6f06fd1676331084385017acbd3f367107bebe9f1,
+    // recorded in the kit source-map.json) so a later edit cannot silently
+    // drift the bytes actually loaded in production away from those tested.
+    assert_eq!(
+        V2_DEFAULT_ASSET.as_bytes(),
+        include_str!("../assets/opencode-v2.json").as_bytes(),
+        "bundled production V2 asset must equal the pinned exact-byte asset"
+    );
+    assert!(V2_DEFAULT_ASSET.ends_with('\n'), "required asset ends with a newline");
+    let parsed: Value = serde_json::from_str(V2_DEFAULT_ASSET).expect("bundled asset parses");
+    assert!(parsed.get("$schema").is_some());
+    assert!(parsed.get("base").is_some());
+    assert!(parsed.get("light").is_some());
+    assert!(parsed.get("dark").is_some());
+}
+
+#[test]
+fn v2_core_roles_preserve_all_hex_forms_and_alpha() {
+    // Upstream accepts #RGB, #RGBA, #RRGGBB and #RRGGBBAA; `transparent` is
+    // alpha 0. The V2 loader must resolve each through the REAL palette path
+    // and preserve RGBA verbatim (audit THEME-07: alpha 0 is data, never
+    // silently painted opaque). This exercises hex parsing through the same
+    // `palette_from_asset` boundary the painter relies on, not `parse_color`
+    // in isolation.
+    let base_doc = json!({
+        "base": {
+            "background": {
+                "base": "#aabbcc",
+                "raised": { "base": "#111111", "high": "#222222" },
+                "action": { "primary": { "base": "#333333", "$focused": "#444444" } }
+            },
+            "text": {
+                "base": "#eeeeee",
+                "muted": "#808080",
+                "feedback": {
+                    "error": { "base": "#e06c75" },
+                    "warning": { "base": "#f5a742" },
+                    "success": { "base": "#7fd88f" }
+                }
+            },
+            "border": { "base": "#484848" }
+        },
+        "dark": { "hue": {} }
+    });
+    for (token, expected) in [
+        ("#abc", [0xaa, 0xbb, 0xcc, 0xff]),
+        ("#abcd", [0xaa, 0xbb, 0xcc, 0xdd]),
+        ("#aabbcc", [0xaa, 0xbb, 0xcc, 0xff]),
+        ("#aabbccdd", [0xaa, 0xbb, 0xcc, 0xdd]),
+        ("transparent", [0, 0, 0, 0]),
+    ] {
+        let mut doc = base_doc.clone();
+        doc["base"]["background"]["base"] = json!(token);
+        let palette = palette_from_asset(&doc, ThemeMode::Dark)
+            .unwrap_or_else(|error| panic!("{token} failed to resolve: {error}"));
+        assert_eq!(palette.get(Slot::Background), expected, "{token} RGBA");
+    }
 }
 }
 

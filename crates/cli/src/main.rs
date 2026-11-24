@@ -103,6 +103,8 @@ mod native_theme;
 mod native_theme_assets;
 #[cfg(feature = "native")]
 mod native_theme_runtime;
+#[cfg(feature = "native")]
+mod native_semantic_palette;
 mod markdown_runs;
 mod native_timeline;
 mod native_transcript;
