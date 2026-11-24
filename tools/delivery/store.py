@@ -102,7 +102,15 @@ class Store:
             if value is not None:
                 cx.execute("INSERT OR REPLACE INTO meta VALUES(?,?)", (key, json.dumps(value)))
             row = cx.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
-            return json.loads(row[0]) if row else None
+            if not row:
+                return None
+            try:
+                return json.loads(row[0])
+            except ValueError:
+                # A bare scalar written straight into the table (as a plain
+                # `sha` was) is still that value, not a corrupt record. Returning
+                # it keeps a legacy row from wedging every caller of this key.
+                return row[0]
 
     def admit(self, specs, cfg):
         parsed = [validate_task(s) for s in specs]

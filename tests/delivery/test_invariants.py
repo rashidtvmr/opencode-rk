@@ -66,6 +66,16 @@ class StoreTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.s=Store(self.tmp.name);self.c=cfg()
     def tearDown(self):self.tmp.cleanup()
 
+    def test_meta_tolerates_a_bare_scalar_row(self):
+        # `policy_base_sha` was once written as a bare sha instead of a JSON
+        # string. Every publish reads it through `store.meta`, so a plain row
+        # there blocked all publication with JSONDecodeError. The value is still
+        # that key's value; only its encoding differs.
+        with self.s.connection(write=True) as cx:
+            cx.execute("INSERT OR REPLACE INTO meta VALUES(?,?)",
+                       ("policy_base_sha","a7382eaf51438a5d05050925dcaf7b686f158fae"))
+        self.assertEqual(self.s.meta("policy_base_sha"), "a7382eaf51438a5d05050925dcaf7b686f158fae")
+
     def test_idempotent_import(self):
         self.s.admit([spec()],self.c);self.s.admit([spec()],self.c)
         self.assertEqual(len(self.s.tasks()),1)
