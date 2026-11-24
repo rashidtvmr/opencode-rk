@@ -844,8 +844,23 @@ def _ensure_isolated_worktree(store, job, remote, revision, valid, suffix=""):
     try:
         Git(repo, valid).run("worktree", "add", "--detach", str(path), revision)
     except Failure:
-        if str(remote) != str(repo):
-            Git(repo, valid).run("fetch", "--quiet", "--no-tags", "--no-write-fetch-head", str(remote), revision)
+        # Candidates are committed into the shared object database, so the
+        # revision is normally already present.  Only a genuinely absent object
+        # needs a fetch, and only from a path that still exists: the recorded
+        # author workspace is routinely reclaimed after publication, and trying
+        # to fetch from the deleted path turned a missing-object error into a
+        # FileNotFoundError that was reported as a route failure.
+        if Git(repo, valid).try_run("cat-file", "-e", revision + "^{commit}")["returncode"] != 0:
+            if str(remote) != str(repo) and pathlib.Path(str(remote)).exists():
+                try:
+                    Git(repo, valid).run("fetch", "--quiet", "--no-tags", "--no-write-fetch-head", str(remote), revision)
+                except Failure:
+                    # `upload-pack` only serves advertised refs, so a bare sha is
+                    # rejected even when the object exists. Ask for every head.
+                    Git(repo, valid).run("fetch", "--quiet", "--no-tags", "--no-write-fetch-head", str(remote),
+                                         "+refs/heads/*:refs/delivery-fetch/*")
+            if Git(repo, valid).try_run("cat-file", "-e", revision + "^{commit}")["returncode"] != 0:
+                raise Failure("candidate revision is neither present locally nor fetchable", "authority")
         Git(repo, valid).run("worktree", "add", "--detach", str(path), revision)
     entry = _registered_worktree_entry(repo, path)
     if not entry or not _repo_identity_matches(repo, path):
@@ -865,6 +880,20 @@ def _ensure_isolated_worktree(store, job, remote, revision, valid, suffix=""):
     }, sort_keys=True))
     return path
 
+
+def _fetch_source(recorded_workspace, repo):
+    """Pick a fetch source that still exists.
+
+    The recorded author workspace is temporary and is routinely reclaimed once
+    it is no longer needed. Publication used it unconditionally as its fetch
+    source, so a reclaimed workspace surfaced as FileNotFoundError and was
+    recorded as a provider route failure that stopped dispatch. A candidate
+    authored in a managed worktree already lives in the source repository's
+    shared object database, so that is the safe fallback.
+    """
+    if recorded_workspace and pathlib.Path(recorded_workspace).is_dir():
+        return recorded_workspace
+    return repo
 
 def create_workspace(store, job, remote, revision, valid, suffix=""):
     if shutil.disk_usage(store.root).free < store.meta("config")["min_free_bytes"]:
@@ -1437,7 +1466,7 @@ def publish(store, job, p, cfg, valid, logs):
         guards = checks(source, cfg["guard_checks"], cfg, valid, logs/"guards", cache_root=build_cache)
     except Failure as exc:
         raise Failure("canonical guard blocks publication: " + str(exc), "wait") from exc
-    workspace = create_workspace(store, job, p["workspace"], p["candidate"], valid)
+    workspace = create_workspace(store, job, _fetch_source(p.get("workspace"), repo), p["candidate"], valid)
     git = Git(workspace, valid)
     check_scope(git, p["base"], p["task"], cfg)
     with publication_lock(repo, job, valid):

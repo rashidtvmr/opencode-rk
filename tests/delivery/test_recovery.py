@@ -30,6 +30,21 @@ class RecoveryTests(fixtures.RepositoryFixture):
         job=self.store.claim('A','publish',None,p,20)
         return base,sha,candidate_dir,job
 
+    def test_reclaimed_author_workspace_is_not_a_fetch_source(self):
+        """Publication must not depend on the temporary author workspace.
+
+        A managed author workspace is a worktree of the source repository, so the
+        candidate commit is already in the shared object database. Publication
+        used the recorded workspace path as its fetch source unconditionally; a
+        reclaimed path raised FileNotFoundError, which was recorded as a provider
+        route failure and stopped dispatch.
+        """
+        base,sha,directory,job=self.prepared()
+        self.assertEqual(jobs._fetch_source(str(directory),self.repo),str(directory))
+        subprocess.check_call(['rm','-rf',str(directory)])
+        self.assertFalse(pathlib.Path(directory).exists())
+        self.assertEqual(jobs._fetch_source(str(directory),self.repo),self.repo)
+
     def test_crash_after_merge_rechecks_without_duplicate_merge(self):
         base,sha,directory,job=self.prepared()
         self.store.publish_intent(job['id'],'A',base,sha,{'trusted_fixture':'simulated interruption after validated publication'})
