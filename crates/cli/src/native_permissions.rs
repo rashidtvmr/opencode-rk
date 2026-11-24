@@ -562,7 +562,13 @@ pub fn permission_reply_payload(
     scope: &str,
     message: Option<&str>,
 ) -> serde_json::Value {
-    let mut payload = serde_json::json!({ "reply": reply, "scope": scope });
+    // Wire shape of `session.permission.reply`: `{ decision, message? }`
+    // (`packages/protocol/src/groups/permission.ts:142-148`; the generated
+    // client posts `decision`, `packages/client/src/promise/generated/
+    // client.ts:1676-1685`, and the server handler forwards it internally as
+    // `reply`, `packages/server/src/handlers/permission.ts:71-84`). `scope` is
+    // this port's extension.
+    let mut payload = serde_json::json!({ "decision": reply, "scope": scope });
     if let Some(message) = message.filter(|message| !message.is_empty()) {
         payload["message"] = serde_json::Value::String(message.to_string());
     }
@@ -1192,7 +1198,7 @@ mod f002r2_payload_tests {
     #[test]
     fn f002r2_payload_reject_with_message_carries_the_reason() {
         let payload = permission_reply_payload("reject", "once", Some("do x instead"));
-        assert_eq!(payload["reply"], "reject");
+        assert_eq!(payload["decision"], "reject");
         assert_eq!(payload["scope"], "once");
         assert_eq!(payload["message"], "do x instead");
     }
@@ -1201,7 +1207,7 @@ mod f002r2_payload_tests {
     fn f002r2_payload_reject_without_message_omits_the_key() {
         for message in [None, Some("")] {
             let payload = permission_reply_payload("reject", "once", message);
-            assert_eq!(payload["reply"], "reject");
+            assert_eq!(payload["decision"], "reject");
             assert!(
                 payload.get("message").is_none(),
                 "an absent/empty reason must omit the key entirely, got {payload}"
@@ -1213,6 +1219,6 @@ mod f002r2_payload_tests {
     #[test]
     fn f002r2_payload_approve_is_the_historical_two_key_body() {
         let payload = permission_reply_payload("once", "once", None);
-        assert_eq!(payload, serde_json::json!({"reply":"once","scope":"once"}));
+        assert_eq!(payload, serde_json::json!({"decision":"once","scope":"once"}));
     }
 }

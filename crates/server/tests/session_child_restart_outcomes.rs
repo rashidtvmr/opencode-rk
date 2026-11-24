@@ -98,7 +98,7 @@ async fn completed_child_history_survives_registry_restart_without_replay_or_old
         |v| v["data"].as_array().is_some_and(|rows| !rows.is_empty())).await;
     let request_id = permission["data"][0]["id"].as_str().unwrap().to_owned();
     let approved = app.clone().oneshot(request("POST", format!("/api/session/{parent_id}/permission/{request_id}/reply"),
-        json!({"reply":"once"}))).await.unwrap();
+        json!({"decision":"once"}))).await.unwrap();
     assert_eq!(approved.status(), StatusCode::NO_CONTENT);
     let parent_body = tokio::time::timeout(Duration::from_secs(8), parent_body).await.unwrap().unwrap();
     let parent_events: Vec<Value> = parent_body.split(|byte| *byte == b'\n').filter(|line| !line.is_empty())

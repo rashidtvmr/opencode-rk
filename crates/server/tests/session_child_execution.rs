@@ -71,10 +71,10 @@ async fn background_child_stop_retry_real_tool_and_durable_detail() {
     let permission = poll(&app,format!("/api/session/{}/permission",parent.id), |v| v["data"].as_array().is_some_and(|rows| !rows.is_empty())).await;
     let request_id = permission["data"][0]["id"].as_str().unwrap();
     assert_eq!(permission["data"][0]["action"],"task");
-    let denied = app.clone().oneshot(request("POST",format!("/api/session/{}/permission/{request_id}/reply",foreign.id),json!({"reply":"once"}))).await.unwrap();
+    let denied = app.clone().oneshot(request("POST",format!("/api/session/{}/permission/{request_id}/reply",foreign.id),json!({"decision":"once"}))).await.unwrap();
     assert_eq!(denied.status(), StatusCode::NOT_FOUND);
     assert_eq!(fixture.child_requests.load(Ordering::SeqCst),0);
-    let approved = app.clone().oneshot(request("POST",format!("/api/session/{}/permission/{request_id}/reply",parent.id),json!({"reply":"once"}))).await.unwrap();
+    let approved = app.clone().oneshot(request("POST",format!("/api/session/{}/permission/{request_id}/reply",parent.id),json!({"decision":"once"}))).await.unwrap();
     assert_eq!(approved.status(), StatusCode::NO_CONTENT);
     let listing = poll(&app,format!("/api/sessions/{}/children",parent.id), |v| v["children"][0]["state"] == "running").await;
     let child = listing["children"][0]["session_id"].as_str().unwrap().to_owned();
@@ -110,7 +110,7 @@ async fn background_child_stop_retry_real_tool_and_durable_detail() {
     let denied_body = tokio::spawn(async move { to_bytes(response.into_body(),1024*1024).await.unwrap() });
     let permission = poll(&app,format!("/api/session/{}/permission",denied_parent.id), |v| v["data"].as_array().is_some_and(|rows| !rows.is_empty())).await;
     let request_id = permission["data"][0]["id"].as_str().unwrap();
-    let reply = app.clone().oneshot(request("POST",format!("/api/session/{}/permission/{request_id}/reply",denied_parent.id),json!({"reply":"reject"}))).await.unwrap();
+    let reply = app.clone().oneshot(request("POST",format!("/api/session/{}/permission/{request_id}/reply",denied_parent.id),json!({"decision":"reject"}))).await.unwrap();
     assert_eq!(reply.status(),StatusCode::NO_CONTENT);
     tokio::time::timeout(Duration::from_secs(8),denied_body).await.unwrap().unwrap();
     let listing = value(app.clone().oneshot(request("GET",format!("/api/sessions/{}/children",denied_parent.id),json!({}))).await.unwrap()).await;

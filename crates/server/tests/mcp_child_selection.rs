@@ -146,7 +146,7 @@ async fn child_provider_inherits_parent_mcp_exclusions() {
     assert!(parent_tools.iter().any(|tool| tool["name"].as_str().is_some_and(|name| name.ends_with("_beta_probe"))));
     let permission = poll(&app, format!("/api/session/{}/permission", parent.id), |v| v["data"].as_array().is_some_and(|rows| rows.iter().any(|row| row["source"]["callID"] == "parent_task"))).await;
     let permission_id = permission["data"].as_array().unwrap().iter().find(|row| row["source"]["callID"] == "parent_task").unwrap()["id"].as_str().unwrap();
-    assert_eq!(app.clone().oneshot(request("POST", format!("/api/session/{}/permission/{permission_id}/reply", parent.id), json!({"reply":"once"}))).await.unwrap().status(), StatusCode::NO_CONTENT);
+    assert_eq!(app.clone().oneshot(request("POST", format!("/api/session/{}/permission/{permission_id}/reply", parent.id), json!({"decision":"once"}))).await.unwrap().status(), StatusCode::NO_CONTENT);
     let child_request = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let body = seen_rx.recv().await.unwrap();

@@ -638,9 +638,18 @@ async fn list_session_permissions(
     Ok(Json(json!({"data":data})))
 }
 
+/// Pinned upstream request body for `session.permission.reply`:
+/// `payload: Schema.Struct({ decision: Permission.Reply, message?: String })`
+/// (`packages/protocol/src/groups/permission.ts:142-148`; the generated client
+/// posts `{ decision, message }`,
+/// `packages/client/src/promise/generated/client.ts:1676-1685`). `scope` is this
+/// port's extension — upstream's `Permission.Reply` carries only
+/// `once|always|reject` (`packages/schema/src/permission.ts:42`) — and `reply`
+/// stays accepted as an alias for in-repo callers that predate the correction.
 #[derive(Deserialize)]
 struct PermissionReplyBody {
-    reply: String,
+    #[serde(alias = "reply")]
+    decision: String,
     scope: Option<String>,
     message: Option<String>,
 }
@@ -687,10 +696,10 @@ async fn reply_session_permission(
     if pending.id != request_id || pending.session_id != owner.session_id.to_string() {
         return Err(ApiFailure::not_found("permission request not found"));
     }
-    let allow=match body.reply.as_str() {"once"|"always"=>true,"reject"=>false,_=>return Err(ApiFailure::bad_request("invalid permission reply"))};
-    let scope=body.scope.as_deref().unwrap_or(if body.reply=="always" {"always"} else {"once"});
+    let allow=match body.decision.as_str() {"once"|"always"=>true,"reject"=>false,_=>return Err(ApiFailure::bad_request("invalid permission reply"))};
+    let scope=body.scope.as_deref().unwrap_or(if body.decision=="always" {"always"} else {"once"});
     let scope=if scope=="turn" {"once"} else {scope};
-    if !matches!(scope,"once"|"session"|"always") || body.reply=="once"&&scope!="once" {return Err(ApiFailure::bad_request("invalid permission scope"));}
+    if !matches!(scope,"once"|"session"|"always") || body.decision=="once"&&scope!="once" {return Err(ApiFailure::bad_request("invalid permission scope"));}
     if !owner.reply_scoped_with_message(&request_id,allow,scope,body.message.as_deref()).map_err(ApiFailure::bad_request)? {return Err(ApiFailure::not_found("permission request not found"));}
     Ok(StatusCode::NO_CONTENT)
 }

@@ -111,7 +111,7 @@ async fn child_stop_settles_when_provider_hangs_between_rounds() {
     let parent_body = tokio::spawn(async move { to_bytes(response.into_body(), 1024 * 1024).await.unwrap() });
     let permission = poll(&app, format!("/api/session/{}/permission", parent.id), |v| v["data"].as_array().is_some_and(|rows| !rows.is_empty())).await;
     let request_id = permission["data"][0]["id"].as_str().unwrap();
-    let approved = app.clone().oneshot(request("POST", format!("/api/session/{}/permission/{request_id}/reply", parent.id), json!({"reply":"once"}))).await.unwrap();
+    let approved = app.clone().oneshot(request("POST", format!("/api/session/{}/permission/{request_id}/reply", parent.id), json!({"decision":"once"}))).await.unwrap();
     assert_eq!(approved.status(), StatusCode::NO_CONTENT);
 
     let listing = poll(&app, format!("/api/sessions/{}/children", parent.id), |v| v["children"].as_array().is_some_and(|rows| rows.first().is_some_and(|row| row["state"] == "running")) ).await;

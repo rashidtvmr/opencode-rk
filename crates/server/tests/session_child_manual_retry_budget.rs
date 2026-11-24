@@ -140,7 +140,7 @@ async fn child_manual_retry_budget_counts_only_admitted_generations_and_exhausts
     let permission = poll(&app, format!("/api/session/{}/permission", parent.id),
         |v| v["data"].as_array().is_some_and(|rows| !rows.is_empty())).await;
     let permission_id = permission["data"][0]["id"].as_str().unwrap();
-    let approved = app.clone().oneshot(request("POST", format!("/api/session/{}/permission/{permission_id}/reply", parent.id), json!({"reply":"once"}))).await.unwrap();
+    let approved = app.clone().oneshot(request("POST", format!("/api/session/{}/permission/{permission_id}/reply", parent.id), json!({"decision":"once"}))).await.unwrap();
     assert_eq!(approved.status(), StatusCode::NO_CONTENT);
     let listing = poll(&app, format!("/api/sessions/{}/children", parent.id), |v| v["children"][0]["state"] == "running").await;
     let child = listing["children"][0]["session_id"].as_str().unwrap().to_owned();

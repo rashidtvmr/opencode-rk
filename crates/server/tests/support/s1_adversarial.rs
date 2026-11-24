@@ -950,7 +950,7 @@ impl Fixture {
             "POST",
             format!("/api/session/{session}/permission/{request}/reply"),
             token,
-            Some(json!({"reply":reply})),
+            Some(json!({"decision":reply})),
         )
         .await
     }

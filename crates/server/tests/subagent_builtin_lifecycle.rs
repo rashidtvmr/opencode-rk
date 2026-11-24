@@ -177,7 +177,7 @@ async fn delegate(app: &Router, parent: &opencode_rk_contracts::SessionId, marke
     let body = tokio::spawn(async move { to_bytes(response.into_body(),1024*1024).await.unwrap() });
     let (permission, _) = poll(app, format!("/api/session/{}/permission",parent), |v| v["data"].as_array().is_some_and(|rows| !rows.is_empty())).await;
     let request_id = permission["data"][0]["id"].as_str().unwrap().to_owned();
-    let approved = app.clone().oneshot(request(Method::POST, format!("/api/session/{}/permission/{request_id}/reply",parent), json!({"reply":"once"}))).await.unwrap();
+    let approved = app.clone().oneshot(request(Method::POST, format!("/api/session/{}/permission/{request_id}/reply",parent), json!({"decision":"once"}))).await.unwrap();
     assert_eq!(approved.status(), StatusCode::NO_CONTENT);
     let body = tokio::time::timeout(Duration::from_secs(10),body).await.unwrap().unwrap();
     let events: Vec<Value> = body.split(|byte| *byte == b'\n').filter(|line| !line.is_empty())
@@ -198,7 +198,7 @@ async fn approve_child_write(app: &Router, parent: &opencode_rk_contracts::Sessi
     let request_id = permissions["data"].as_array().unwrap().iter()
         .find(|row| row["action"] == "Subagent: write").unwrap()["id"].as_str().unwrap();
     let response = app.clone().oneshot(request(Method::POST,
-        format!("/api/session/{parent}/permission/{request_id}/reply"), json!({"reply":"once"}))).await.unwrap();
+        format!("/api/session/{parent}/permission/{request_id}/reply"), json!({"decision":"once"}))).await.unwrap();
     assert_eq!(response.status(), StatusCode::NO_CONTENT, "parent must approve the child's exact write request: {permissions}");
 }
 

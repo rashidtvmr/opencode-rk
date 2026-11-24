@@ -141,7 +141,7 @@ async fn session_interrupt_cancels_held_child_stream_without_retry() {
     let parent_body = tokio::spawn(async move { to_bytes(response.into_body(), 1024 * 1024).await.unwrap() });
     let permission = poll(&app, format!("/api/session/{}/permission", parent.id), |v| v["data"].as_array().is_some_and(|rows| !rows.is_empty())).await.0;
     let permission_id = permission["data"][0]["id"].as_str().unwrap();
-    let approved = app.clone().oneshot(request(Method::POST, format!("/api/session/{}/permission/{permission_id}/reply", parent.id), json!({"reply":"once"}))).await.unwrap();
+    let approved = app.clone().oneshot(request(Method::POST, format!("/api/session/{}/permission/{permission_id}/reply", parent.id), json!({"decision":"once"}))).await.unwrap();
     assert_eq!(approved.status(), StatusCode::NO_CONTENT);
     let child = poll(&app, format!("/api/sessions/{}/children", parent.id), |v| v["children"].as_array().is_some_and(|rows| rows.len() == 1 && rows[0]["state"] == "running")).await.0;
     let child_id = child["children"][0]["session_id"].as_str().unwrap().to_owned();
@@ -188,7 +188,7 @@ async fn session_interrupt_cancels_child_before_provider_headers_without_retry()
     let parent_body = tokio::spawn(async move { to_bytes(response.into_body(), 1024 * 1024).await.unwrap() });
     let permission = poll(&app, format!("/api/session/{}/permission", parent.id), |v| v["data"].as_array().is_some_and(|rows| !rows.is_empty())).await.0;
     let permission_id = permission["data"][0]["id"].as_str().unwrap();
-    let approved = app.clone().oneshot(request(Method::POST, format!("/api/session/{}/permission/{permission_id}/reply", parent.id), json!({"reply":"once"}))).await.unwrap();
+    let approved = app.clone().oneshot(request(Method::POST, format!("/api/session/{}/permission/{permission_id}/reply", parent.id), json!({"decision":"once"}))).await.unwrap();
     assert_eq!(approved.status(), StatusCode::NO_CONTENT);
     let child = poll(&app, format!("/api/sessions/{}/children", parent.id), |v| v["children"].as_array().is_some_and(|rows| rows.len() == 1 && rows[0]["state"] == "running")).await.0;
     let child_id = child["children"][0]["session_id"].as_str().unwrap().to_owned();
@@ -392,7 +392,7 @@ async fn delegate(app: &Router, parent: &opencode_rk_contracts::SessionId, marke
         .oneshot(request(
             Method::POST,
             format!("/api/session/{}/permission/{request_id}/reply", parent),
-            json!({"reply": "once"}),
+            json!({"decision": "once"}),
         ))
         .await
         .unwrap();

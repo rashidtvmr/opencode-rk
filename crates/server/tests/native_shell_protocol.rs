@@ -134,7 +134,7 @@ async fn native_shell_waits_for_approval_executes_once_and_hydrates_typed_histor
         app.clone(),
         "POST",
         &format!("/api/session/{id}/permission/{request_id}/reply"),
-        json!({"reply":"once"}),
+        json!({"decision":"once"}),
     )
     .await;
     assert_eq!(reply.status(), StatusCode::NO_CONTENT);
@@ -166,7 +166,7 @@ async fn native_shell_waits_for_approval_executes_once_and_hydrates_typed_histor
         app.clone(),
         "POST",
         &format!("/api/session/{id}/permission/{request_id}/reply"),
-        json!({"reply":"once"}),
+        json!({"decision":"once"}),
     )
     .await;
     assert!(
@@ -238,7 +238,7 @@ async fn native_shell_rejection_is_side_effect_free() {
             "/api/session/{id}/permission/{}/reply",
             permission["id"].as_str().unwrap()
         ),
-        json!({"reply":"reject"}),
+        json!({"decision":"reject"}),
     )
     .await;
     assert_eq!(reply.status(), StatusCode::NO_CONTENT);
@@ -343,7 +343,7 @@ async fn shell_large_output_is_durably_bounded_without_losing_terminal_ack() {
             "/api/session/{id}/permission/{}/reply",
             permission["id"].as_str().unwrap()
         ),
-        json!({"reply":"once"}),
+        json!({"decision":"once"}),
     )
     .await;
     let bytes = tokio::time::timeout(Duration::from_secs(5), body)
@@ -420,7 +420,7 @@ async fn bounded_message_page_hydrates_its_own_tool_records() {
                 "/api/session/{id}/permission/{}/reply",
                 permission["id"].as_str().unwrap()
             ),
-            json!({"reply":"once"}),
+            json!({"decision":"once"}),
         )
         .await;
         assert_eq!(reply.status(), StatusCode::NO_CONTENT);

@@ -404,7 +404,7 @@ async fn run_command(
             .oneshot(request(
                 Method::POST,
                 format!("/api/session/{}/permission/{id}/reply", harness.session_id),
-                json!({"reply":reply}),
+                json!({"decision":reply}),
             ))
             .await
             .expect("real broker reply route");

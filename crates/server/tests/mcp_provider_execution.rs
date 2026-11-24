@@ -119,7 +119,7 @@ async fn scenario(mode: &'static str, app_root: &std::path::Path) {
     }
     if mode == "toggle" { assert_eq!(call(&app, "PUT", &format!("/api/sessions/{id}/mcp/fixture"), json!({"included":false})).await.0, StatusCode::OK); }
     let reply = if mode == "reject" { "reject" } else { "once" };
-    assert_eq!(call(&app, "POST", &format!("/api/session/{id}/permission/{request_id}/reply"), json!({"reply":reply})).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(call(&app, "POST", &format!("/api/session/{id}/permission/{request_id}/reply"), json!({"decision":reply})).await.0, StatusCode::NO_CONTENT);
     let _ = tokio::time::timeout(Duration::from_secs(10), turn).await.unwrap().unwrap();
     let continuation = tokio::time::timeout(Duration::from_secs(10), seen.recv()).await.unwrap().unwrap();
     assert!(continuation["input"].as_array().unwrap().iter().any(|v| v["type"] == "function_call_output" && v["call_id"] == "call_execution"));

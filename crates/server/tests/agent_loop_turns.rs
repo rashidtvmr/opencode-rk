@@ -299,7 +299,7 @@ async fn reply_once_through_endpoint(
                             "/api/session/{session_id}/permission/{request_id}/reply"
                         ))
                         .header("content-type", "application/json")
-                        .body(Body::from(json!({"reply": "once"}).to_string()))
+                        .body(Body::from(json!({"decision": "once"}).to_string()))
                         .unwrap(),
                 )
                 .await

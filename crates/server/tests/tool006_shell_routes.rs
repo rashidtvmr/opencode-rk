@@ -64,7 +64,7 @@ async fn approve_shell(app: axum::Router, session: impl std::fmt::Display) {
                     request(
                         "POST",
                         &format!("/api/session/{session}/permission/{request_id}/reply"),
-                        r#"{"reply":"once"}"#,
+                        r#"{"decision":"once"}"#,
                     ),
                 )
                 .await

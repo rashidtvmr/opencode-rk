@@ -80,7 +80,7 @@ async fn wait_no_subagent_pending(app: &Router, parent: &str) {
         rows.iter().all(|row| !row["action"].as_str().is_some_and(|action| action.starts_with("Subagent: "))))).await;
 }
 async fn reply(app: &Router, session: &str, request_id: &str, kind: &str) -> StatusCode {
-    app.clone().oneshot(request("POST", format!("/api/session/{session}/permission/{request_id}/reply"), json!({"reply":kind}))).await.unwrap().status()
+    app.clone().oneshot(request("POST", format!("/api/session/{session}/permission/{request_id}/reply"), json!({"decision":kind}))).await.unwrap().status()
 }
 async fn approve_parent_task(app: &Router, parent: &str) {
     let body = poll(app, format!("/api/session/{parent}/permission"), |v| v["data"].as_array().is_some_and(|rows| rows.iter().any(|row| row["action"] == "task"))).await;

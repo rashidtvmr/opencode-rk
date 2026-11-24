@@ -123,7 +123,7 @@ async fn foreground_child_starts_when_root_lanes_saturated() {
     }).await.expect("second root must be admitted and held in its provider request");
 
     // Both root lanes are now occupied. Approval must still start the child.
-    let approved = app.clone().oneshot(request("POST", format!("/api/session/{}/permission/{request_id}/reply", parent.id), json!({"reply":"once"}))).await.unwrap();
+    let approved = app.clone().oneshot(request("POST", format!("/api/session/{}/permission/{request_id}/reply", parent.id), json!({"decision":"once"}))).await.unwrap();
     assert_eq!(approved.status(), StatusCode::NO_CONTENT);
     tokio::time::timeout(Duration::from_secs(4), async {
         loop {
