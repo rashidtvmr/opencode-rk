@@ -70,17 +70,11 @@ fn stage_shared_library(libdir: &Path) {
     if !source.is_file() {
         return;
     }
-    // `OUT_DIR` is `<target>/<profile>/build/<pkg>-<hash>/out`.  `ancestors()`
-    // yields self first, so the indices are 0 = `out`, 1 = `<pkg>-<hash>`,
-    // 2 = `build`, 3 = `<target>/<profile>`.  Three is the profile directory
-    // cargo puts on the loader search path when it runs a test binary.
-    // Staging one level higher (`<target>`) puts the library where no loader
-    // looks, and test/bench binaries then abort with
-    // `Library not loaded: @rpath/libopentui.dylib`.
-    let Some(profile_dir) = std::env::var_os("OUT_DIR")
-        .map(PathBuf::from)
-        .and_then(|out| out.ancestors().nth(3).map(Path::to_path_buf))
-    else {
+    // `OUT_DIR` is `<target>/<profile>/build/<pkg>-<hash>/out`.
+    let Some(out_dir) = std::env::var_os("OUT_DIR").map(PathBuf::from) else {
+        return;
+    };
+    let Some(profile_dir) = out_dir.ancestors().nth(3).map(Path::to_path_buf) else {
         return;
     };
     // A silent failure here is not recoverable by a later rebuild: cargo caches
@@ -88,13 +82,18 @@ fn stage_shared_library(libdir: &Path) {
     // binary then dies with `Library not loaded: @rpath/libopentui.dylib`
     // (observed when the disk filled mid-build, costing a whole publication
     // postcheck). The copy is cheap and must be correct, so report it.
-    // Three consumers resolve `@loader_path/../lib` from three different
-    // directories, so three copies are required:
-    //   * `<target>/<profile>/deps/oc2-*`  -> `<target>/<profile>/lib/`
-    //   * `<target>/<profile>/oc2`         -> `<target>/lib/`
-    //   * a loader that searches the profile directory itself
-    //     -> `<target>/<profile>/`
-    let mut destinations = vec![profile_dir.join(name), profile_dir.join("lib").join(name)];
+    //
+    // Four kinds of CLI binary each resolve `@loader_path/../lib` from a
+    // different directory, so four copies are required:
+    //   * `<target>/<profile>/deps/oc2-*`                -> `<target>/<profile>/lib/`
+    //   * `<target>/<profile>/oc2`                       -> `<target>/lib/`
+    //   * `<OUT_DIR>/oc2-*` (cargo's `--out-dir` tests)   -> `<OUT_DIR>/../lib/`
+    //   * a loader that searches the profile directory    -> `<target>/<profile>/`
+    let mut destinations = vec![
+        profile_dir.join(name),
+        profile_dir.join("lib").join(name),
+        out_dir.join("..").join("lib").join(name),
+    ];
     if let Some(target_dir) = profile_dir.parent() {
         destinations.push(target_dir.join("lib").join(name));
     }
