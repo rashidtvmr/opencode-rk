@@ -19,24 +19,12 @@
   },
   "routes": [
     {
-      "agent": "vyce-deepseek-v41",
-      "max_parallel": 8
+      "agent": "opencode-go-hy4-flash-free",
+      "max_parallel": 3
     },
     {
-      "agent": "9router-river-glm-5-3-flash",
-      "max_parallel": 40
-    },
-    {
-      "agent": "9router-vyce-deepseek-v4.1-free-combined",
-      "max_parallel": 40
-    },
-    {
-      "agent": "9router-th-free",
-      "max_parallel": 40
-    },
-    {
-      "agent": "xkiro-mimo-v2-6-flash",
-      "max_parallel": 40
+      "agent": "general",
+      "max_parallel": 12
     }
   ],
   "use_recovery_capability": true,
