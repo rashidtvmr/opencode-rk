@@ -1773,6 +1773,36 @@ def _authorized_canonical_token(root: pathlib.Path) -> str:
     raise TransitionError("controller canonical-write authority is unavailable or mismatched")
 
 
+def reject_expired_pending(root: pathlib.Path, capability_id: str, expected_digest: str,
+                           operator: str, reason: str) -> dict:
+    """Close an expired PENDING capability so its slot can be reused safely.
+
+    Before this repair an expired observer capability could neither activate nor
+    archive: ``activate`` refused it for expiry, ``archive`` accepted only
+    APPLIED/REJECTED, and ``recover`` only reopened ARMED records. That wedged
+    the single capability slot indefinitely. Rejection is allowed only for the
+    exact expired PENDING record, with an explicit operator and audit reason;
+    it grants no ref or source authority.
+    """
+    if not capability_id or not expected_digest or not operator or not reason.strip():
+        raise TransitionError("reject-expired-pending requires id, digest, operator and reason")
+    with locked(state_dir(root) / "state.lock"):
+        record = load_cap(root)
+        digest = capability_digest(record)
+        if record.get("capabilityId") != capability_id or digest != expected_digest:
+            raise TransitionError("expired capability identity/digest mismatch")
+        if record.get("status") != "PENDING":
+            raise TransitionError(f"only PENDING capabilities may be rejected, is {record.get('status')}")
+        if not capability_expired(record):
+            raise TransitionError("capability has not expired; activation or normal review still applies")
+        record["status"] = "REJECTED"
+        record["rejectedAt"] = now()
+        record["rejectedBy"] = operator
+        record["rejectionReason"] = reason.strip()
+        write_cap(cap_path(root), record)
+        return record
+
+
 def archive_capability(root: pathlib.Path) -> pathlib.Path:
     with locked(state_dir(root) / "state.lock"):
         cap = cap_path(root)
@@ -2372,6 +2402,11 @@ def main(argv: list[str]) -> int:
                 raise TransitionError("prepare-retained-checkpoint requires <root> <proposal-json>")
             record = prepare_retained_checkpoint(root, pathlib.Path(argv[3]).resolve(), os.environ.get("USER", "unknown"))
             print(f"CHECKPOINT-PENDING {record['capabilityId']} candidate={record['checkpoint']['candidateSha']}")
+        elif cmd == "reject-expired-pending":
+            if len(argv) < 7:
+                raise TransitionError("reject-expired-pending requires <root> <id> <digest> <operator> <reason>")
+            record = reject_expired_pending(root, argv[3], argv[4], argv[5], argv[6])
+            print(f"CAPABILITY-REJECTED {record['capabilityId']}")
         elif cmd == "archive":
             archived = archive_capability(root)
             print(f"CAPABILITY-ARCHIVED {archived}")
