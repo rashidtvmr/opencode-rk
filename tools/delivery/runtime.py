@@ -23,6 +23,14 @@ SECRET = re.compile(r'(?i)((?:authorization|api[_-]?key|password|secret|bearer|a
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
+# The guardian is passed to the interpreter with `-c` rather than executed from
+# its own path.  A controller may be running out of a worktree that is removed
+# while a long check is still live; resolving `__file__` at call time then made
+# every check in that job die with FileNotFoundError, which set
+# `stop_new_publications` and idled the whole fleet.  Reading the source at
+# import keeps the command independent of where this module was loaded from.
+GUARD_SOURCE = pathlib.Path(__file__).with_name("process_guard.py").read_text(encoding="utf-8")
+
 class Failure(RuntimeError):
     def __init__(self, message, kind="failure"):
         super().__init__(message)
@@ -78,7 +86,7 @@ def run(argv, cwd, *, valid=lambda: True, timeout=900, max_bytes=2097152, env=No
         with tempfile.TemporaryFile() as command_spec:
             command_spec.write(json.dumps({"argv": list(argv), "cancel_signal": int(cancel_signal)}).encode())
             command_spec.seek(0)
-            guarded = [sys.executable, str(pathlib.Path(__file__).with_name("process_guard.py")), str(command_spec.fileno())]
+            guarded = [sys.executable, "-c", GUARD_SOURCE, str(command_spec.fileno())]
             proc = subprocess.Popen(guarded, cwd=str(cwd), env=env if env is not None else environment(),
                                     stdout=capture if capture is not None else subprocess.PIPE,
                                     stderr=subprocess.STDOUT, stdin=subprocess.PIPE,
