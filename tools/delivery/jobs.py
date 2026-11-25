@@ -56,6 +56,20 @@ class Git:
         else:
             bound.update({"GIT_WORK_TREE": str(self.root),
                           "GIT_INDEX_FILE": str(gitdir / "index")})
+        # Commit identity and gc suppression come from the environment, never
+        # from `git config`.  Every managed workspace is a linked worktree of the
+        # same repository, so all of them write the one shared `.git/config`;
+        # with several jobs starting at once, concurrent `git config` calls raced
+        # on `.git/config.lock` and failed a job with `could not lock config
+        # file ... File exists`.  Environment settings are per-invocation and
+        # cannot collide.
+        bound.update({"GIT_AUTHOR_NAME": "OpenCode-RK Delivery",
+                      "GIT_AUTHOR_EMAIL": "delivery@localhost.invalid",
+                      "GIT_COMMITTER_NAME": "OpenCode-RK Delivery",
+                      "GIT_COMMITTER_EMAIL": "delivery@localhost.invalid",
+                      "GIT_CONFIG_COUNT": "1",
+                      "GIT_CONFIG_KEY_0": "gc.auto",
+                      "GIT_CONFIG_VALUE_0": "0"})
         result = runtime.run(["git", *args], self.root, valid=self.valid, timeout=timeout,
                              max_bytes=8388608, env=bound)
         if result["truncated"]:
@@ -787,12 +801,11 @@ def _ensure_author_worktree(store, job, revision, valid):
             if not entry or not _repo_identity_matches(repo, path):
                 raise Failure("provisioned worktree is not exactly registered", "authority")
             git = Git(path, valid)
-            git.run("config", "user.name", "OpenCode-RK Delivery")
-            git.run("config", "user.email", "delivery@localhost.invalid")
             # Linked worktrees share the repository config.  Never redirect
             # core.hooksPath here: doing so disables the canonical Recovery
-            # Mode reference-transaction hook for every worktree.
-            git.run("config", "gc.auto", "0")
+            # Mode reference-transaction hook for every worktree.  Identity and
+            # gc suppression come from the environment for the same reason:
+            # concurrent `git config` writes collide on `.git/config.lock`.
             # Some Git versions defer materializing the linked worktree index.
             # Seed only that private index from the requested base before the
             # worker runs; never use the canonical index or a broad reset.
@@ -866,11 +879,6 @@ def _ensure_isolated_worktree(store, job, remote, revision, valid, suffix=""):
     if not entry or not _repo_identity_matches(repo, path):
         raise Failure("isolated worktree is not exactly registered", "authority")
     git = Git(path, valid)
-    git.run("config", "user.name", "OpenCode-RK Delivery")
-    git.run("config", "user.email", "delivery@localhost.invalid")
-    # Shared-Git worktrees inherit the repository hook configuration; keep the
-    # mandatory reference-transaction guard installed.
-    git.run("config", "gc.auto", "0")
     isolated_gitdir = pathlib.Path(git.run("rev-parse", "--absolute-git-dir"))
     if not isolated_gitdir.joinpath("index").exists():
         git.run("read-tree", revision)
@@ -917,12 +925,9 @@ def create_workspace(store, job, remote, revision, valid, suffix=""):
     root.mkdir(exist_ok=False)
     git = Git(root, valid)
     git.run("init", "--quiet", "--template=")
-    git.run("config", "user.name", "OpenCode-RK Delivery")
-    git.run("config", "user.email", "delivery@localhost.invalid")
     git.run("config", "core.hooksPath", str(store.root / "empty-hooks"))
     git.run("fetch", "--quiet", "--no-tags", "--no-write-fetch-head", str(remote), revision)
     git.run("checkout", "--quiet", "--detach", revision)
-    git.run("config", "gc.auto", "0")
     (root / ".git" / "delivery-owner.json").write_text(json.dumps({"job": job["id"], "token": job["token"]}))
     return root
 
