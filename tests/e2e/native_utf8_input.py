@@ -102,7 +102,7 @@ def run(binary, library, manifest, artifacts):
         master, slave = pty.openpty(); saved_attrs = termios.tcgetattr(master); import fcntl; fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH",24,80,0,0))
         daemon = launch(install/"bin"/"oc2", root, env, master, slave); os.close(slave); slave = None
         d = descriptor(root/"data", port, daemon, time.monotonic()+TIMEOUT); descriptors.append(d)
-        read_until(master, time.monotonic()+TIMEOUT, captures, b"OpenCode", 0, screen, lambda: home_ready(screen, "UTF8 fixture"))
+        read_until(master, time.monotonic()+TIMEOUT, captures, b"Ask anything", 0, screen, lambda: home_ready(screen, "UTF8 fixture"))
         raw_seen.append(not (termios.tcgetattr(master)[3] & termios.ICANON))
         write_fragments(master); os.write(master, b"\r")
         read_until(master, time.monotonic()+TIMEOUT, captures, ASSISTANT.encode(), len(captures), screen, lambda: screen.contains(ASSISTANT))
@@ -115,7 +115,7 @@ def run(binary, library, manifest, artifacts):
         daemon = None; os.close(master); master = None
         master, slave = pty.openpty(); second_saved_attrs = termios.tcgetattr(master); fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH",24,80,0,0)); daemon = launch(install/"bin"/"oc2", root, env, master, slave, resume_id); os.close(slave); slave=None
         d2 = descriptor(root/"data", port, daemon, time.monotonic()+TIMEOUT); descriptors.append(d2); state.restart_generation=1; screen=TerminalScreen(); start=len(captures)
-        read_until(master, time.monotonic()+TIMEOUT, captures, b"OpenCode", start, screen, lambda: session_ready(screen,resume_id,"UTF8 fixture") and screen.contains(ASSISTANT))
+        read_until(master, time.monotonic()+TIMEOUT, captures, b"Ask anything", start, screen, lambda: session_ready(screen,resume_id,"UTF8 fixture") and screen.contains(ASSISTANT))
         if persisted_session_id(d2, ASSISTANT) != resume_id: raise AssertionError("restart changed session identity")
         raw_seen.append(not (termios.tcgetattr(master)[3] & termios.ICANON))
         for byte in RESUMED.encode("utf-8"): os.write(master, bytes([byte])); time.sleep(.008)

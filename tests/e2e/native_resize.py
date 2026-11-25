@@ -213,7 +213,7 @@ def run(binary, library, manifest, artifacts):
         token = descriptor_value.get("auth_token", "")
         if not isinstance(token, str) or len(token) != 64 or not re.fullmatch(r"[0-9a-fA-F]{64}", token):
             raise AssertionError("descriptor auth token is not a 64-hex capability")
-        read_until(master, time.monotonic() + TIMEOUT, captured, b"OpenCode", 0,
+        read_until(master, time.monotonic() + TIMEOUT, captured, b"Ask anything", 0,
                     initial_screen, lambda: home_ready(initial_screen,"Resize fixture"))
         raw_mode_seen = not bool(termios.tcgetattr(master)[3] & termios.ICANON)
         controlling_terminal_seen = os.tcgetpgrp(master) == child.pid

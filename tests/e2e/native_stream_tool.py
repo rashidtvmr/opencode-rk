@@ -333,7 +333,7 @@ def run(binary, library, manifest, artifacts):
         daemon = subprocess.Popen([str(install / "bin" / "oc2"), "--data-dir", str(root / "data")], cwd=root / "project", env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True, close_fds=True)
         os.close(slave); slave = None
         d = descriptor(root / "data", port, daemon, time.monotonic() + FIXTURE_TIMEOUT); descriptors.append(d)
-        start = len(captures); read_until(master, time.monotonic() + FIXTURE_TIMEOUT, captures, b"native Home", start, screen, lambda:home_ready(screen,"stream fixture"))
+        start = len(captures); read_until(master, time.monotonic() + FIXTURE_TIMEOUT, captures, b"Ask anything", start, screen, lambda:home_ready(screen,"stream fixture"))
         os.write(master, (FIRST + "\r").encode())
         read_until(master, time.monotonic() + FIXTURE_TIMEOUT, captures, PARTIAL.encode(), start, screen, lambda: screen.contains(PARTIAL))
         if state.phase != "waiting_partial_observation" or not state.stream_request_seen.is_set():
@@ -366,7 +366,7 @@ def run(binary, library, manifest, artifacts):
         state.restart_generation = 1
         screen = TerminalScreen(80, 24)
         start = len(captures)
-        read_until(master, time.monotonic() + FIXTURE_TIMEOUT, captures, b"OpenCode", start, screen, lambda: session_ready(screen,resume_id,"stream fixture") and screen.contains(FIRST))
+        read_until(master, time.monotonic() + FIXTURE_TIMEOUT, captures, b"Ask anything", start, screen, lambda: session_ready(screen,resume_id,"stream fixture") and screen.contains(FIRST))
         if persisted_session_id(d2, SECOND_FINAL) != resume_id: raise AssertionError("restart changed session identity")
         os.write(master, (RESUMED + "\r").encode())
         read_until(master, time.monotonic() + FIXTURE_TIMEOUT, captures, RESUME.encode(), start, screen, lambda: screen.contains(RESUME))

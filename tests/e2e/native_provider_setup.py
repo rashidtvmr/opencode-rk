@@ -150,7 +150,11 @@ HOME_LOGO = tuple(row.replace("_", " ").replace("^", "▀").replace("~", "▀") 
 ))
 
 def model_ready(screen, model_label):
-    return screen.picker_closed() and re.search(r"(?:^|[\s·│║┃])"+re.escape(model_label)+r"\s+openai(?=$|[\s│║┃·])",screen.text(),re.MULTILINE) is not None
+    # Upstream renders the catalog/provider display name (`provider?.name ??
+    # providerID`), which is normally capitalized (for example "OpenAI"), not
+    # the lowercase provider id. Matching the id case-sensitively made every
+    # installed Home gate time out on an otherwise correct frame.
+    return screen.picker_closed() and re.search(r"(?:^|[\s·│║┃])"+re.escape(model_label)+r"\s+openai(?=$|[\s│║┃·])",screen.text(),re.MULTILINE | re.IGNORECASE) is not None
 
 def home_ready(screen, model_label=None):
     return all(screen.contains(row) for row in HOME_LOGO) and screen.contains("Ask anything") and (model_label is None or model_ready(screen, model_label))
@@ -609,7 +613,7 @@ def run_ui(exe, env, root, first, captures, daemon_port, descriptor_records, aut
             if saved.get("type") != "api" or saved.get("key") != KEY:
                 raise AssertionError("provider setup persisted the wrong API auth schema")
             start = len(buf); os.write(master, MODEL.encode()+b"\r")
-            read_until(master, time.monotonic()+20, buf, MODEL.encode(), start, screen, lambda: screen.has_model_status() and screen.picker_closed())
+            read_until(master, time.monotonic()+20, buf, "Non-default fixture".encode(), start, screen, lambda: screen.has_model_status() and screen.picker_closed())
             if not screen.has_model_status(): raise AssertionError("selected model is not in current status projection")
         start = len(buf); os.write(master, PROMPTS[0 if first else 1].encode()+b"\r")
         read_until(master, time.monotonic()+20, buf, b"G2 first response" if first else b"G2 resumed response", start, screen, lambda: screen.has_assistant("G2 first response" if first else "G2 resumed response"))
@@ -663,6 +667,9 @@ def self_check():
     assert not observed.has_model_status()
     observed.feed(b"\x1b[2J\x1b[2;1HNon-default fixture openai")
     assert observed.has_model_status()
+    capitalized = TerminalScreen()
+    capitalized.feed(b"\x1b[2J\x1b[2;1HNon-default fixture OpenAI")
+    assert capitalized.has_model_status()  # catalog display name, not provider id
     observed.feed(b"\x1b[3;1HSelect model")
     assert not observed.has_model_status()  # picker text cannot impersonate selection
     # API-key prompt contract: assert the current dialog body, not merely its

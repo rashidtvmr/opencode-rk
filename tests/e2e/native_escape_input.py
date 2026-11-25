@@ -247,7 +247,7 @@ def run(binary, library, manifest, artifacts):
         descriptor_value = descriptor(root / "data", port, child, time.monotonic() + TIMEOUT)
         if descriptor_value.get("schema_version") != 1:
             raise RuntimeError("unexpected daemon descriptor schema")
-        read_until(master, time.monotonic() + TIMEOUT, captures, b"OpenCode", 0,
+        read_until(master, time.monotonic() + TIMEOUT, captures, b"Ask anything", 0,
                     screen, lambda: home_ready(screen, "Escape fixture"))
         raw_seen = not bool(termios.tcgetattr(master)[3] & termios.ICANON)
         # Seed, fragmented CSI/SS3 arrows, cursor report, Kitty Unicode 'c',
