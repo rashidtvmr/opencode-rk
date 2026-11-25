@@ -3763,6 +3763,108 @@ mod surface_paint_regressions {
                 "borderless Home must not retain rail or edge cells: {text:?}");
         }
     }
+
+    // LAY-10: drive the SAME `NativeView::tabs_visible()` the live loop calls,
+    // build a real `RailFrame`, paint through `native_paint` and inspect the
+    // snapshot. The 149-column case is the production threshold regression:
+    // the rail makes the panel fullscreen, tabs hide, and the painter must
+    // receive `None` so no stale rail cells survive the frame.
+    #[test]
+    fn lay10_live_frame_hides_rail_only_while_panel_fullscreen() {
+        use crate::native_navigation::SessionRef;
+        use crate::native_tab_rail::{RailFrame, RailInput};
+        use crate::native_tabs::TabFlags;
+
+        fn snapshot(cols: u16, rows: u16, fullscreen_requested: bool) -> (bool, String) {
+            // The bridge's renderer claim is process-global and single-owner
+            // (`opentui-bridge/src/handle.rs:41-53`); serialize renderer-creating
+            // tests so parallel test threads cannot race it.
+            let _renderer_lock = renderer_test_lock();
+            let shell = TabReservation::for_view_with_width(
+                TabOrientation::Vertical, cols, rows, TabReservation::VERTICAL_WIDTH,
+            );
+            let mut view = crate::native_view::NativeView::new(cols, rows);
+            view.set_session_route(true);
+            view.set_tab_reservation(shell);
+            assert!(view.toggle_diff_panel(None, fullscreen_requested));
+
+            // The exact decision `native_loop` makes before building the rail.
+            let tabs_visible = view.tabs_visible();
+            let presentation = view.presentation();
+            let lines: Vec<String> = vec![" ".repeat(usize::from(cols)); usize::from(rows)];
+
+            let inputs = vec![RailInput {
+                session: SessionRef("lay10-session".to_owned()),
+                title: "LAY10RAIL".to_owned(),
+                detail: "project".to_owned(),
+                flags: TabFlags { active: true, ..Default::default() },
+                marquee_offset: 0,
+                unread: false,
+                spinner_frame: None,
+            }];
+            let rail = RailFrame::render(&inputs, shell.width, rows, 0, None);
+            let strip = TabStrip::render(&[], TabOrientation::Horizontal, cols, 1, 0);
+            let mut renderer = NativeRenderer::create_memory(u32::from(cols), u32::from(rows))
+                .expect("memory renderer");
+            native_paint(&mut renderer, &lines, PaintCtx {
+                palette: crate::native_theme_runtime::Palette::opencode_dark(),
+                dialog: crate::native_theme_runtime::RuntimeTheme::builtin_default(
+                    crate::native_theme_runtime::ThemeMode::Dark,
+                ).dialog,
+                markdown: None, semantic: None, diff: None,
+                presentation,
+                modal_rows: None,
+                modal: view.modal_presentation(),
+                sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
+                chat_row_classes: Vec::new(),
+                hovered_row: None,
+                chat_markdown_spans: Vec::new(),
+                selection: Vec::new(),
+                appearance: crate::native_box_style::BoxAppearance::default(),
+                modal_box: crate::native_box_style::BoxId::Dialog,
+                loading: None, home: false, rail_prompt: false,
+                composer: None, composer_agent_color: None, completion: None,
+                action_states: Vec::new(),
+                context_usage_styles: Vec::new(),
+                sidebar_span_styles: Vec::new(),
+                ui_regions: Vec::new(),
+                modal_underlay_rows: Vec::new(),
+                page_panel: None, logo: None,
+                // LAY-10: the painter receives the tab shell only while tabs
+                // are visible, exactly as `native_loop` supplies it.
+                tabs: if tabs_visible { Some(strip) } else { None },
+                animations: true, title_renaming: None,
+                vertical_rail: if tabs_visible { Some(rail) } else { None },
+                compact_tooltip: None, context_menu: None,
+                chrome: Vec::new(), toast: None,
+                transcript_scrollbar: None, sidebar_scrollbar: None,
+                scrollbar_track: Rgba::rgb(10, 10, 10),
+                scrollbar_thumb: Rgba::rgb(72, 72, 72),
+            }).expect("paint native frame");
+            (tabs_visible, renderer.snapshot_text().expect("native text snapshot"))
+        }
+
+        // 150 columns: rail 42 leaves 108 — exactly split-capable, so the panel
+        // docks, tabs stay visible, and the rail title is painted.
+        let (docked_visible, docked_frame) = snapshot(150, 40, false);
+        assert!(docked_visible, "a docked panel keeps the tabs");
+        assert!(docked_frame.contains("LAY10RAIL"),
+            "the docked frame must paint the rail title: {docked_frame:?}");
+
+        // 149 columns: rail 42 leaves 107 — below the split minimum, so the
+        // panel is forced fullscreen WITH the rail present. The shared decision
+        // hides the tabs, the painter gets `None`, and no rail title is painted.
+        let (hidden_visible, hidden_frame) = snapshot(149, 40, false);
+        assert!(!hidden_visible, "a fullscreen panel hides the tabs");
+        assert!(!hidden_frame.contains("LAY10RAIL"),
+            "the fullscreen frame must hide the rail title: {hidden_frame:?}");
+
+        // Explicit fullscreen at a wide viewport also hides the rail.
+        let (explicit_visible, explicit_frame) = snapshot(150, 40, true);
+        assert!(!explicit_visible, "an explicit fullscreen panel hides the tabs");
+        assert!(!explicit_frame.contains("LAY10RAIL"),
+            "the explicit fullscreen frame must hide the rail title: {explicit_frame:?}");
+    }
 }
 
 /// Content rows of a rendered modal block: the last non-blank rendered row
@@ -13160,6 +13262,14 @@ fn native_loop(
             );
         }
         view.set_tab_reservation(tab_reservation);
+        // LAY-10 (`app.tsx:615-619`): `tabsVisible = tabsAvailable &&
+        // !fullscreenPanel`. Resolve this once per frame, before the rail is
+        // built, through the same method the live-view tests call. It reads the
+        // authoritative fullscreen fact for the *current* shell reservation, so
+        // a docked panel keeps the tabs and only a fullscreen panel hides them;
+        // recomputing every frame means a resize that re-docks the panel brings
+        // the tabs back without any sticky state.
+        let tabs_visible = view.tabs_visible();
         // A pending permission decision is the "!" attention flag upstream
         // derives from `permission.list(session).length > 0`, and a pending
         // question is "?" from `form.list(session).length > 0`
@@ -13307,7 +13417,9 @@ fn native_loop(
         // `session-tabs.tsx:1241-1278`: a hovered compact rail entry opens the
         // four-row title/detail tooltip to the right of the rail; drag and an
         // open context menu suppress it.
-        let (frame_rail, frame_tooltip) = if effective_orientation == TabOrientation::Vertical {
+        // LAY-10: with tabs hidden no rail (and no tooltip) is built at all, so
+        // the painter receives `None` and skips the rail paint entirely.
+        let (frame_rail, frame_tooltip) = if tabs_visible && effective_orientation == TabOrientation::Vertical {
             let rail_inputs = rail_inputs_for_navigation(&navigation, &tab_inputs);
             let rail = crate::native_tab_rail::RailFrame::render_cells_with_search_hover(&rail_inputs, tab_reservation.width, viewport.1, rendered_rail.as_ref().map_or(0, |r| r.scroll_cells), tab_hovered.as_ref(), navigation.active().is_none(), rail_search_hovered);
             let tooltip = if tab_reservation.width < crate::native_tab_rail::COMPACT_BREAKPOINT
@@ -13835,7 +13947,9 @@ fn native_loop(
                     } else {
                         view.home_logo_region(draft_echo)
                     },
-            tabs: Some(frame_tabs.clone()),
+            // LAY-10: hidden tabs paint neither the strip nor the rail; the
+            // fullscreen panel owns the whole frame.
+            tabs: if tabs_visible { Some(frame_tabs.clone()) } else { None },
             semantic: theme.semantic.clone(),
             animations,
             title_renaming: Some(Box::new({
@@ -13844,7 +13958,7 @@ fn native_loop(
                     inflight.as_ref() == Some(session)
                 }
             })),
-            vertical_rail: frame_rail.clone(),
+            vertical_rail: if tabs_visible { frame_rail.clone() } else { None },
             compact_tooltip: frame_tooltip,
             toast: toast_frame,
             chrome: chrome_frames,
@@ -13870,8 +13984,10 @@ fn native_loop(
         let paint_panicked = paint_outcome.is_err();
         let paint_result = paint_outcome.unwrap_or_else(|_| Ok(()));
         paint_result?;
-            rendered_tabs = Some(frame_tabs);
-            rendered_rail = frame_rail;
+            // LAY-10: keep the hit-test mirrors in sync with what was actually
+            // painted — no stale rail/strip cells survive a fullscreen frame.
+            rendered_tabs = if tabs_visible { Some(frame_tabs) } else { None };
+            rendered_rail = if tabs_visible { frame_rail } else { None };
             needs_paint = false;
             // DIALOG-20 crash half: recover AFTER the frame bookkeeping so the
             // repaint flag survives the `needs_paint = false` reset above —

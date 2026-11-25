@@ -3019,6 +3019,22 @@ impl NativeView {
             == crate::native_pane_resize::PanelPresentation::Fullscreen
     }
 
+    /// LAY-10 (`app.tsx:615-619`): `tabsVisible = tabsAvailable && !fullscreenPanel`.
+    /// The tab shell (horizontal strip or vertical rail) hides *only* while the
+    /// live diff panel is fullscreen; a docked panel keeps it. The live loop
+    /// resolves this once per frame, before it builds the rail, through this
+    /// same method the live-view tests call — so an inverted condition in the
+    /// painter cannot hide behind a re-implemented test expression. It is
+    /// computed from current state every frame, so a resize that re-docks the
+    /// panel naturally brings the tabs back with no sticky bookkeeping.
+    #[must_use]
+    pub fn tabs_visible(&self) -> bool {
+        crate::native_pane_resize::tabs_visible(
+            self.tab_reservation.orientation.is_some(),
+            self.diff_panel_fullscreen(),
+        )
+    }
+
     #[must_use]
     pub fn diff_panel_patch(&self) -> Option<&str> {
         self.diff_panel.patch.as_deref()
@@ -8564,6 +8580,56 @@ mod live_diff_panel_tests {
         view.toggle_diff_panel(None, false);
         assert!(view.diff_panel_fullscreen());
         assert_eq!(view.presentation().main_width, 0);
+    }
+
+    // LAY-10: the live loop and the paint tests both read `tabs_visible()`, so
+    // this asserts the shared decision, not a re-implemented expression. With a
+    // 42-cell rail, 150 columns leave the 108 needed to dock the panel (tabs
+    // stay); 149 columns force fullscreen (tabs hide). Explicit fullscreen
+    // hides them at any width, and closing the panel restores them.
+    #[test]
+    fn lay10_tabs_visible_only_while_panel_is_docked() {
+        use crate::native_tabs::TabOrientation;
+        let shell = |cols: u16, rows: u16| {
+            TabReservation::for_view_with_width(
+                TabOrientation::Vertical, cols, rows, TabReservation::VERTICAL_WIDTH,
+            )
+        };
+
+        // 150 columns: rail 42 leaves 108 — exactly split-capable. Docked,
+        // so the shell is visible and the session column is still painted.
+        let docked_shell = shell(150, 40);
+        let mut docked = NativeView::new(150, 40);
+        docked.set_session_route(true);
+        docked.set_tab_reservation(docked_shell);
+        assert!(docked.toggle_diff_panel(None, false));
+        assert!(!docked.diff_panel_fullscreen());
+        assert!(docked.tabs_visible());
+        assert!(docked.presentation().main_width > 0);
+
+        // 149 columns: rail 42 leaves 107 — below the split minimum, so the
+        // panel is forced fullscreen and the shell hides.
+        let hidden_shell = shell(149, 40);
+        let mut hidden = NativeView::new(149, 40);
+        hidden.set_session_route(true);
+        hidden.set_tab_reservation(hidden_shell);
+        assert!(hidden.toggle_diff_panel(None, false));
+        assert!(hidden.diff_panel_fullscreen());
+        assert!(!hidden.tabs_visible());
+        assert_eq!(hidden.presentation().main_width, 0);
+
+        // Explicit fullscreen at a wide viewport also hides the shell.
+        let mut explicit = NativeView::new(150, 40);
+        explicit.set_session_route(true);
+        explicit.set_tab_reservation(docked_shell);
+        assert!(explicit.toggle_diff_panel(None, true));
+        assert!(!explicit.tabs_visible());
+
+        // Closing the panel restores tabs regardless of viewport width.
+        explicit.close_diff_panel();
+        assert!(explicit.tabs_visible());
+        hidden.close_diff_panel();
+        assert!(hidden.tabs_visible());
     }
 }
 
