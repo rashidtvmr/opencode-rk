@@ -8802,6 +8802,57 @@ mod tests {
         );
     }
 
+    /// LAY-15: the reserved blank row above the composer is unconditional on
+    /// jump state *and* on busy/streaming state. This is the strongest live-path
+    /// case: a busy (history-loading / streaming) assistant turn whose text
+    /// fills the body, with an empty draft and the transcript at the tail, so
+    /// no jump action is installed. The row directly above the composer must
+    /// still be reserved, carry no streaming/transcript text, and carry no
+    /// markdown run spans — nothing may reclaim it for content in any of the
+    /// three observable dimensions (row class, frame text, styled spans).
+    /// The reservation lives in `render_styled_with_spans_mode` and is restated
+    /// in screen order after the visible slice is painted, so it holds here.
+    #[test]
+    fn lay_15_reserved_blank_row_survives_busy_turn_without_jump_action() {
+        let mut view = super::NativeView::new(80, 24);
+        view.set_session_route(true);
+        let text = (0..80)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let message = crate::native_view_chat::ChatMessage::text(
+            crate::native_view_chat::ChatRole::Assistant,
+            text,
+        );
+        // Busy (streaming/history-loading), empty draft, tail position: no jump
+        // action is present, yet the reserved row above the composer must hold.
+        let frame = view.render_typed("", &[message], true, &[]);
+
+        let classes = view.chat_row_classes();
+        let composer_start = classes
+            .iter()
+            .position(|class| *class == crate::native_view_chat::ChatRowClass::Composer)
+            .expect("composer row painted in the live transcript render");
+        assert!(composer_start > 0, "a row exists above the composer");
+        let reserved = composer_start - 1;
+        assert_eq!(
+            classes[reserved],
+            crate::native_view_chat::ChatRowClass::Blank,
+            "LAY-15: the reserved row stays blank during a busy turn with no jump action: {classes:?}"
+        );
+        assert!(
+            frame[reserved].trim().is_empty(),
+            "LAY-15: the reserved row carries no streaming text during a busy turn: {:?}",
+            frame[reserved]
+        );
+        assert!(
+            view.chat_markdown_spans()
+                .get(reserved)
+                .map_or(true, |spans| spans.is_empty()),
+            "LAY-15: the reserved row carries no markdown spans during a busy turn"
+        );
+    }
+
     #[test]
     fn explicit_outline_prompt_wraps_and_tracks_cursor_through_resize() {
         let mut appearance = crate::native_box_style::BoxAppearance::default();
