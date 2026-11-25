@@ -24,7 +24,7 @@
     },
     {
       "agent": "general",
-      "max_parallel": 12
+      "max_parallel": 4
     }
   ],
   "use_recovery_capability": true,
