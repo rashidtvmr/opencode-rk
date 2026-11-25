@@ -50,6 +50,11 @@ use crate::native_prompt_pane::{
 use crate::native_transcript::{TranscriptLine, render_lines, strip_ansi};
 use std::cell::{Cell, RefCell};
 
+/// TOOL-008: one model-catalogue row used to resolve a subagent row's
+/// `provider/model` reference to its display name. Kept as a short alias so the
+/// per-view catalogue and the render threading stay readable.
+type ModelLabel = crate::tui_entry::native_turn::native_tool_rows::ModelLabel;
+
 /// Max rows a single view will scroll up from the tail. Bounds both the
 /// stored scroll state and the per-render wrap walk, so a hostile or
 /// repeated `scroll_up` can never force an unbounded scan.
@@ -207,6 +212,17 @@ pub struct ChatView {
     transcript_verbosity: crate::native_message_rows::Verbosity,
     transcript_grouping: crate::native_message_rows::Grouping,
     transcript_thinking: crate::native_message_rows::ThinkingMode,
+    /// TOOL-008: model catalogue used to resolve a subagent row's
+    /// `provider/model` reference to its catalog display name
+    /// (`subagentModelLabel(value, models)`, `packages/tui/src` at the selected
+    /// OpenCode pin). Each view owns its catalogue (like
+    /// `pending_permission_calls`) and seeds it from the immutable CLI catalog
+    /// snapshot built with `Catalog::from_cache_or_bundled`, so the shipped app
+    /// resolves known models with no extra wiring. [`ChatView::set_model_catalog`]
+    /// replaces the seed with a caller-supplied catalogue — e.g. the live
+    /// `/api/models` list via `ModelLabel::from_models_json(body)` — and an
+    /// empty catalogue keeps the raw-reference fallback.
+    model_catalog: Vec<ModelLabel>,
 }
 
 impl Default for ChatView {
@@ -236,12 +252,28 @@ impl Default for ChatView {
             transcript_verbosity: crate::native_message_rows::Verbosity::Medium,
             transcript_grouping: crate::native_message_rows::Grouping::Auto,
             transcript_thinking: crate::native_message_rows::ThinkingMode::Hide,
+            // TOOL-008: seed from the immutable CLI catalog snapshot so every
+            // fresh view (and every reset through `ChatView::default`) resolves
+            // known model names, with no extra wiring required.
+            model_catalog: crate::tui_entry::native_turn::native_tool_rows::default_model_catalog()
+                .to_vec(),
         }
     }
 }
 
 impl ChatView {
     pub fn set_active_session_id(&self, id: &str) { *self.active_session_id.borrow_mut() = id.to_owned(); }
+
+    /// TOOL-008: set this view's model catalogue used to resolve subagent model
+    /// references to their catalog display name. The catalogue is owned by this
+    /// view and threaded into every tool-row render path, so parallel views
+    /// never share mutable state. A fresh view is seeded from the immutable CLI
+    /// catalog snapshot; this replaces it with a caller-supplied catalogue —
+    /// e.g. the live `/api/models` list via `ModelLabel::from_models_json(body)`
+    /// — and an empty catalogue keeps the raw `provider/model` fallback.
+    pub fn set_model_catalog(&mut self, catalog: Vec<ModelLabel>) {
+        self.model_catalog = catalog;
+    }
 
     /// Resolve the live `session.verbosity`, `session.grouping`, and
     /// `session.thinking` settings. Defaults match the pinned TUI.
@@ -1342,7 +1374,7 @@ fn boxed_message_rows(
     separator: bool,
     appearance: &crate::native_box_style::BoxAppearance,
 ) -> Vec<StyledChatRow> {
-    boxed_message_rows_spans(width, message, separator, appearance, &mut Vec::new(), &mut Vec::new())
+    boxed_message_rows_spans(width, message, separator, appearance, &mut Vec::new(), &mut Vec::new(), &[])
 }
 
 /// MSG-005: chip rows painted under a user card. Skills render first, then
@@ -1495,8 +1527,9 @@ fn boxed_message_rows_spans(
     appearance: &crate::native_box_style::BoxAppearance,
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
     child_out: &mut Vec<(usize, String)>,
+    models: &[ModelLabel],
 ) -> Vec<StyledChatRow> {
-    boxed_message_rows_spans_mode(width, message, separator, appearance, spans_out, child_out, &mut Vec::new(), crate::markdown_runs::MarkdownMode::Rendered, &std::collections::BTreeSet::new(), Some(0), true, crate::native_diff_view::DiffViewPreference::Auto)
+    boxed_message_rows_spans_mode(width, message, separator, appearance, spans_out, child_out, &mut Vec::new(), crate::markdown_runs::MarkdownMode::Rendered, &std::collections::BTreeSet::new(), Some(0), true, crate::native_diff_view::DiffViewPreference::Auto, models)
 }
 
 fn boxed_message_rows_spans_mode(
@@ -1510,6 +1543,7 @@ fn boxed_message_rows_spans_mode(
     spin: Option<u64>,
     tps_enabled: bool,
     diff_view: crate::native_diff_view::DiffViewPreference,
+    models: &[ModelLabel],
 ) -> Vec<StyledChatRow> {
     use crate::native_box_style::BoxId;
     let id = if message.role == ChatRole::Tool
@@ -1542,7 +1576,7 @@ fn boxed_message_rows_spans_mode(
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
         let mut typed_tools = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(wrap.min(width), message, separator, None, &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view);
+        let typed = typed_message_rows_with_prefix_spans_mode(wrap.min(width), message, separator, None, &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view, models);
         let mut rows: Vec<StyledChatRow> = typed
             .into_iter()
             .map(|(text, class)| (text, class, Some((0, width.min(u16::MAX as usize) as u16))))
@@ -1584,7 +1618,7 @@ fn boxed_message_rows_spans_mode(
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
         let mut typed_tools = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, Some(""), &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, Some(""), &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view, models);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
         {
@@ -1625,7 +1659,7 @@ fn boxed_message_rows_spans_mode(
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
         let mut typed_tools = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view, models);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 + 2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit) {
@@ -1670,7 +1704,7 @@ fn boxed_message_rows_spans_mode(
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
         let mut typed_tools = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view, models);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
@@ -1722,7 +1756,7 @@ fn boxed_message_rows_spans_mode(
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
         let mut typed_tools = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view);
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view, models);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
@@ -3312,13 +3346,14 @@ fn typed_message_rows_with_prefix(
     separator: bool,
     prefix: Option<&str>,
 ) -> Vec<(String, ChatRowClass)> {
-    typed_message_rows_with_prefix_spans(width, message, separator, prefix, &mut Vec::new(), &mut Vec::new())
+    typed_message_rows_with_prefix_spans(width, message, separator, prefix, &mut Vec::new(), &mut Vec::new(), &[])
 }
 
 fn typed_message_rows_with_prefix_spans(
     width: usize, message: &ChatMessage, separator: bool, prefix: Option<&str>,
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
     child_out: &mut Vec<(usize, String)>,
+    models: &[ModelLabel],
 ) -> Vec<(String, ChatRowClass)> {
     typed_message_rows_with_prefix_spans_mode(
         width, message, separator, prefix, spans_out, child_out, &mut Vec::new(),
@@ -3328,6 +3363,7 @@ fn typed_message_rows_with_prefix_spans(
         Some(0),
         true,
         crate::native_diff_view::DiffViewPreference::Auto,
+        models,
     )
 }
 
@@ -3342,6 +3378,7 @@ fn typed_message_rows_with_prefix_spans_mode(
     spin: Option<u64>,
     tps_enabled: bool,
     diff_view: crate::native_diff_view::DiffViewPreference,
+    models: &[ModelLabel],
 ) -> Vec<(String, ChatRowClass)> {
     let mut rows: Vec<(String, ChatRowClass)> = Vec::new();
     if separator {
@@ -3433,13 +3470,14 @@ fn typed_message_rows_with_prefix_spans_mode(
             // :2574-2650`). The model owns the icon column, label, per-tool
             // body and error row; the view never re-derives tool facts.
             ChatPart::ToolCall { name, id } => {
-                let mut display = crate::tui_entry::native_turn::native_tool_rows::tool_display(
+                let mut display = crate::tui_entry::native_turn::native_tool_rows::tool_display_with_models(
                     width,
                     name,
                     "running",
                     "",
                     "",
                     false,
+                    models,
                 );
                 if pending.contains(id) {
                     display.mark_permission_pending();
@@ -3455,7 +3493,17 @@ fn typed_message_rows_with_prefix_spans_mode(
                 output,
                 is_error,
             } => {
-                append_tool_rows(&mut rows, width, &crate::tui_entry::native_turn::native_tool_rows::tool_result_rows(width, name, output, *is_error));
+                append_tool_rows(
+                    &mut rows,
+                    width,
+                    &crate::tui_entry::native_turn::native_tool_rows::tool_result_rows_with_models(
+                        width,
+                        name,
+                        output,
+                        *is_error,
+                        models,
+                    ),
+                );
             }
             ChatPart::ToolState {
                 name,
@@ -3474,7 +3522,15 @@ fn typed_message_rows_with_prefix_spans_mode(
                 let tool_state_index = tool_state_count;
                 tool_state_count += 1;
                 let mut display = crate::tui_entry::native_turn::native_tool_rows::apply_tool_metadata(
-                    crate::tui_entry::native_turn::native_tool_rows::tool_display(width, name, status, args, output, *is_error),
+                    crate::tui_entry::native_turn::native_tool_rows::tool_display_with_models(
+                        width,
+                        name,
+                        status,
+                        args,
+                        output,
+                        *is_error,
+                        models,
+                    ),
                     metadata,
                 );
                 // TOOL-002 live join (`routes/session/index.tsx:2793-2799`):
@@ -4369,6 +4425,7 @@ impl ChatView {
                     self.spin_frame.get(),
                     self.tps_enabled(),
                     self.diff_view,
+                    &self.model_catalog,
                 );
                 if let Some((gid,kind,size,expanded)) = header {
                     if !expanded { rows.clear(); }
@@ -4782,6 +4839,7 @@ impl ChatView {
                         self.spin_frame.get(),
                         self.tps_enabled(),
                         self.diff_view,
+                        &self.model_catalog,
                     );
                     let mut dense = vec![Vec::new(); message_rows.len()];
                     for (row, spans) in message_spans {
@@ -4976,6 +5034,7 @@ impl ChatView {
                 Some(0),
                 self.tps_enabled(),
                 self.diff_view,
+                &self.model_catalog,
             ).len()
         }).sum()
     }
@@ -5062,6 +5121,31 @@ impl ChatView {
         Some(self.toggle_group(&session, &gid, kind))
     }
 
+    /// TOOL-008: count the painted rows for one message using THIS view's model
+    /// catalogue. The real render threads `&self.model_catalog` into
+    /// `typed_message_rows_with_prefix_spans_mode`, so scroll-anchor
+    /// bookkeeping must thread the same catalogue: a display name can wrap to a
+    /// different number of rows than its raw `provider/model` reference, and
+    /// counting with `&[]` here would drift the anchor's intra-message offset
+    /// away from the painted projection.
+    fn catalog_message_rows(
+        &self,
+        width: usize,
+        message: &ChatMessage,
+        separator: bool,
+        appearance: &crate::native_box_style::BoxAppearance,
+    ) -> Vec<StyledChatRow> {
+        boxed_message_rows_spans(
+            width,
+            message,
+            separator,
+            appearance,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &self.model_catalog,
+        )
+    }
+
     /// Anchor the last currently visible transcript row to a message and an
     /// intra-message rendered-row offset. The caller supplies the same full
     /// projection that is painted, preserving group-boundary semantics.
@@ -5075,7 +5159,7 @@ impl ChatView {
         let mut total = 0usize;
         let mut spans = Vec::with_capacity(messages.len());
         for (index, message) in messages.iter().enumerate() {
-            let rows = boxed_message_rows(width, message, starts_styled_group(index, messages), appearance).len();
+            let rows = self.catalog_message_rows(width, message, starts_styled_group(index, messages), appearance).len();
             spans.push((total, rows));
             total = total.saturating_add(rows);
         }
@@ -5102,7 +5186,7 @@ impl ChatView {
         let mut total = 0usize;
         let mut anchor_start = None;
         for (index, message) in messages.iter().enumerate() {
-            let rows = boxed_message_rows(width, message, starts_styled_group(index, messages), appearance).len();
+            let rows = self.catalog_message_rows(width, message, starts_styled_group(index, messages), appearance).len();
             if ids.get(index).map(String::as_str) == Some(anchor.id.as_str()) {
                 anchor_start = Some((total, rows));
             }
@@ -8253,6 +8337,191 @@ mod tests {
         assert!(
             !rows.iter().any(|(row, _)| row.starts_with("        ")),
             "body rows must not be double-indented: {rows:?}"
+        );
+    }
+
+    /// TOOL-008: the live `/api/models` catalogue reaches the rendered subagent
+    /// row. A raw body is parsed by the same validated producer path
+    /// (`ModelLabel::from_models_json`), installed on this `ChatView` through
+    /// `set_model_catalog`, then observed through the real typed render path —
+    /// a known model paints its catalog name and an unknown model paints the
+    /// raw `provider/model` reference. The catalogue is per-view state, so this
+    /// test cannot race other tests that render their own views.
+    #[test]
+    fn styled_subagent_row_uses_installed_catalog_and_raw_fallback() {
+        let body = r#"{"models":[
+            {"provider_id":"openai","model_id":"gpt-5","name":"GPT-5"},
+            {"provider_id":"anthropic","model_id":"claude","name":"Claude Sonnet"}
+        ]}"#;
+        let subagent = |model: &str| ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![ChatPart::ToolState {
+                name: "subagent".to_owned(),
+                id: "call-1".to_owned(),
+                status: "completed".to_owned(),
+                args: serde_json::json!({
+                    "agent": "build", "description": "x", "model": model
+                })
+                .to_string(),
+                output: String::new(),
+                is_error: false,
+                metadata: String::new(),
+            }],
+            agent: None,
+            model: None,
+            assistant_facts: None,
+            message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
+        };
+
+        // Clear the default catalogue to exercise the no-catalogue fallback
+        // in isolation (per-view state, no process-global mutation).
+        let mut view = ChatView::new();
+        view.set_model_catalog(Vec::new());
+        let before = view.render_typed_classified(
+            100, 24, "ws", &[subagent("openai/gpt-5")], "", false,
+        );
+        assert!(
+            before.iter().any(|(row, _)| row.contains("openai/gpt-5")),
+            "no catalogue -> raw reference: {before:?}"
+        );
+
+        // Install the live catalogue; the same reference now paints its name.
+        view.set_model_catalog(ModelLabel::from_models_json(body));
+        let after = view.render_typed_classified(
+            100,
+            24,
+            "ws",
+            &[
+                subagent("openai/gpt-5"),
+                subagent("anthropic/claude#thinking"),
+                subagent("9router/unlisted"),
+            ],
+            "",
+            false,
+        );
+        let joined = after
+            .iter()
+            .map(|(row, _)| row.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("GPT-5"), "catalog name missing: {joined:?}");
+        assert!(
+            joined.contains("Claude Sonnet (thinking)"),
+            "catalog name + variant missing: {joined:?}"
+        );
+        assert!(
+            joined.contains("9router/unlisted"),
+            "unknown model raw fallback missing: {joined:?}"
+        );
+        assert!(
+            !joined.contains("openai/gpt-5"),
+            "known model must not show the raw reference: {joined:?}"
+        );
+    }
+
+    /// TOOL-008: the catalogue is per-view state, so installing it on one view
+    /// never leaks into another view rendering concurrently.
+    #[test]
+    fn subagent_catalog_is_isolated_per_view() {
+        let message = |model: &str| ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![ChatPart::ToolState {
+                name: "subagent".to_owned(),
+                id: "call-1".to_owned(),
+                status: "completed".to_owned(),
+                args: serde_json::json!({
+                    "agent": "build", "description": "x", "model": model
+                })
+                .to_string(),
+                output: String::new(),
+                is_error: false,
+                metadata: String::new(),
+            }],
+            agent: None,
+            model: None,
+            assistant_facts: None,
+            message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
+        };
+        let render = |view: &ChatView| -> String {
+            view.render_typed_classified(100, 24, "ws", &[message("prov/same")], "", false)
+                .into_iter()
+                .map(|(row, _)| row)
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let mut named = ChatView::new();
+        named.set_model_catalog(vec![ModelLabel {
+            reference: "prov/same".into(),
+            name: "Named Model".into(),
+        }]);
+        let mut plain = ChatView::new();
+        plain.set_model_catalog(Vec::new());
+
+        assert!(render(&named).contains("Named Model"));
+        assert!(render(&plain).contains("prov/same"));
+        assert!(!render(&plain).contains("Named Model"));
+    }
+
+    /// TOOL-008 secondary regression: scroll-anchor row bookkeeping counts the
+    /// SAME catalog-aware projection that is painted, so a display name
+    /// differing from its raw reference cannot drift the anchor offset.
+    #[test]
+    fn anchor_row_count_uses_the_view_catalog() {
+        let message = ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![ChatPart::ToolState {
+                name: "subagent".to_owned(),
+                id: "call-1".to_owned(),
+                status: "completed".to_owned(),
+                args: serde_json::json!({
+                    "agent": "build", "description": "x", "model": "prov/wide"
+                })
+                .to_string(),
+                output: String::new(),
+                is_error: false,
+                metadata: String::new(),
+            }],
+            agent: None,
+            model: None,
+            assistant_facts: None,
+            message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
+        };
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let mut view = ChatView::new();
+        view.set_model_catalog(Vec::new());
+
+        let raw = view
+            .catalog_message_rows(100, &message, false, &appearance)
+            .into_iter()
+            .map(|(text, _, _)| text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(raw.contains("prov/wide"), "no catalog -> raw: {raw:?}");
+
+        view.set_model_catalog(vec![ModelLabel {
+            reference: "prov/wide".into(),
+            name: "Catalog Wide Name".into(),
+        }]);
+        let named = view
+            .catalog_message_rows(100, &message, false, &appearance)
+            .into_iter()
+            .map(|(text, _, _)| text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            named.contains("Catalog Wide Name"),
+            "anchor count must use the catalog: {named:?}"
+        );
+        assert!(
+            !named.contains("prov/wide"),
+            "anchor count must not fall back to the raw reference: {named:?}"
         );
     }
 

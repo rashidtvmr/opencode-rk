@@ -27,8 +27,13 @@
 //!
 //! This module is pure display: it parses only caller-supplied tool arguments
 //! and output, never invents metadata, percentages or success. Rows carry the
-//! existing [`ChatRowClass`] so the paint layer keeps owning colors; no new
-//! dependencies and no IO.
+//! existing [`ChatRowClass`] so the paint layer keeps owning colors, and there
+//! are no new dependencies. Row rendering itself never does IO. The one
+//! exception is a one-time, bounded, non-panicking read of the CLI's model
+//! catalogue to seed [`default_model_catalog`] (TOOL-008): a subagent model
+//! reference resolves to its catalog display name when the model is known and
+//! keeps the raw `provider/model` reference otherwise, mirroring upstream
+//! `subagentModelLabel(value, models)` at the selected OpenCode pin.
 
 use crate::native_view_chat::ChatRowClass;
 use crate::native_view_layout::visit_unpadded_cells;
@@ -425,7 +430,39 @@ pub fn tool_state_rows_spin(
     is_error: bool,
     spin: Option<u64>,
 ) -> Vec<ToolRow> {
-    rows(width, &tool_display(width, name, status, args_json, output, is_error), spin)
+    tool_state_rows_spin_with_models(
+        width,
+        name,
+        status,
+        args_json,
+        output,
+        is_error,
+        spin,
+        &[],
+    )
+}
+
+/// [`tool_state_rows_spin`] with the model catalogue threaded through
+/// (TOOL-008). A subagent model reference resolves to its catalog display name
+/// when `models` contains it and keeps the raw `provider/model` fallback
+/// otherwise. An empty `models` slice is the no-catalogue path and is exactly
+/// equivalent to [`tool_state_rows_spin`].
+#[must_use]
+pub fn tool_state_rows_spin_with_models(
+    width: usize,
+    name: &str,
+    status: &str,
+    args_json: &str,
+    output: &str,
+    is_error: bool,
+    spin: Option<u64>,
+    models: &[ModelLabel],
+) -> Vec<ToolRow> {
+    rows(
+        width,
+        &tool_display_with_models(width, name, status, args_json, output, is_error, models),
+        spin,
+    )
 }
 
 /// Render a call event that carries no result yet (`ChatPart::ToolCall`).
@@ -445,8 +482,24 @@ pub fn tool_call_rows_spin(width: usize, name: &str, spin: Option<u64>) -> Vec<T
 /// shell specialization already budgets its own command/output pair.
 #[must_use]
 pub fn tool_result_rows(width: usize, name: &str, output: &str, is_error: bool) -> Vec<ToolRow> {
+    tool_result_rows_with_models(width, name, output, is_error, &[])
+}
+
+/// [`tool_result_rows`] with the model catalogue threaded through so every
+/// tool-row entry point consults the same catalogue (TOOL-008). An unpaired
+/// result carries no `args`/model, so there is no subagent label to resolve;
+/// the parameter exists so this path stays consistent with the call/state
+/// paths, and an empty slice keeps the raw-reference fallback.
+#[must_use]
+pub fn tool_result_rows_with_models(
+    width: usize,
+    name: &str,
+    output: &str,
+    is_error: bool,
+    models: &[ModelLabel],
+) -> Vec<ToolRow> {
     let status = if is_error { "error" } else { "completed" };
-    let mut display = tool_display(width, name, status, "", output, is_error);
+    let mut display = tool_display_with_models(width, name, status, "", output, is_error, models);
     if display.status == ToolStatus::Completed && display.body.is_empty() {
         let clean = strip(output);
         if !clean.trim().is_empty() {
@@ -466,7 +519,8 @@ pub fn tool_result_rows(width: usize, name: &str, output: &str, is_error: bool) 
     rows(width, &display, None)
 }
 
-/// Build the per-tool display model from caller facts only.
+/// Build the per-tool display model from caller facts only. Without a model
+/// catalogue a subagent model reference keeps the raw `provider/model` fallback.
 #[must_use]
 pub fn tool_display(
     width: usize,
@@ -475,6 +529,21 @@ pub fn tool_display(
     args_json: &str,
     output: &str,
     is_error: bool,
+) -> ToolDisplay {
+    tool_display_with_models(width, name, status, args_json, output, is_error, &[])
+}
+
+/// [`tool_display`] with the live model catalogue threaded through so a
+/// subagent model reference resolves to its catalog display name (TOOL-008).
+#[must_use]
+pub fn tool_display_with_models(
+    width: usize,
+    name: &str,
+    status: &str,
+    args_json: &str,
+    output: &str,
+    is_error: bool,
+    models: &[ModelLabel],
 ) -> ToolDisplay {
     let canonical = canonical_tool_name(name);
     let kind = tool_kind(name);
@@ -556,7 +625,7 @@ pub fn tool_display(
             };
             ("←", label)
         }
-        ToolKind::Subagent => subagent_display(&args, state),
+        ToolKind::Subagent => subagent_display(&args, state, models),
         ToolKind::Execute => execute_display(state),
         ToolKind::Patch => {
             let label = patch_label(&args);
@@ -872,6 +941,7 @@ fn titlecase(text: &str) -> String {
 fn subagent_display(
     args: &Option<Map<String, Value>>,
     state: ToolStatus,
+    models: &[ModelLabel],
 ) -> (&'static str, String) {
     let continuation = str_field(args, "sessionID").is_some();
     let agent = str_field(args, "agent")
@@ -901,20 +971,220 @@ fn subagent_display(
     label.push_str(" — ");
     label.push_str(description.as_deref().unwrap_or("Subagent"));
     if let Some(model) = str_field(args, "model") {
-        label.push_str(&format!(" · {}", subagent_model_label(&model)));
+        label.push_str(&format!(" · {}", subagent_model_label(&model, models)));
     }
     (icon, label)
 }
 
-/// `subagentModelLabel` without the model catalog: when the display name is
-/// unknown upstream falls back to the raw `provider/model` reference.
+/// One model-catalogue row used to resolve a subagent `provider/model`
+/// reference to its display name, mirroring upstream `subagentModelLabel(value,
+/// models)` (`packages/tui/src` at pin
+/// `450e7b92412c780a7b5a75226bb8d49aaca24e22`). `reference` is the fully
+/// qualified `providerID/id` (the form `native_setup::Model::qualified()` and
+/// the daemon's `/api/models` emit); `name` is the display label painted when
+/// the reference is known. Only those two strings are carried so every render
+/// layer can build a catalogue without depending on the CLI's private model
+/// types.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelLabel {
+    pub reference: String,
+    pub name: String,
+}
+
+// Bounds mirrored from the live `/api/models` parser (`native_setup::catalogue`)
+// so a corrupt/hostile body cannot seed unbounded names into a view: 8 MiB
+// body, 5000 entries, 256-byte fields, control characters rejected.
+const MAX_CATALOG_BYTES: usize = 8 * 1024 * 1024;
+const MAX_CATALOG_MODELS: usize = 5000;
+const MAX_CATALOG_FIELD_BYTES: usize = 256;
+
+/// A usable provider id: non-empty, ASCII alphanumeric/`-`/`_`, at most 128
+/// bytes (`native_setup::catalogue`). Rejecting other shapes keeps identity
+/// identical to the live parser.
+fn catalog_provider_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// A usable model id or display name (`native_setup::catalogue`): non-empty,
+/// at most 256 UTF-8 bytes and free of control characters.
+fn catalog_field(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_CATALOG_FIELD_BYTES
+        && !value.chars().any(char::is_control)
+}
+
+impl ModelLabel {
+    /// Parse a live `/api/models` body (`{"models":[{provider_id,
+    /// id|model_id, name}, ...]}`) with the same bounds/validation the producer
+    /// uses. A malformed body yields no labels, so the raw-reference fallback
+    /// applies and no name is invented. When `name` is absent it defaults to
+    /// the model id, exactly like `native_setup::catalogue`, so a known live
+    /// model without a display name still resolves to a name instead of
+    /// silently falling back to its raw reference.
+    #[must_use]
+    pub fn from_models_json(body: &str) -> Vec<Self> {
+        if body.len() > MAX_CATALOG_BYTES {
+            return Vec::new();
+        }
+        let Ok(Value::Object(root)) = serde_json::from_str::<Value>(body) else {
+            return Vec::new();
+        };
+        let Some(Value::Array(entries)) = root.get("models") else {
+            return Vec::new();
+        };
+        if entries.len() > MAX_CATALOG_MODELS {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for entry in entries.iter().take(MAX_CATALOG_MODELS) {
+            let Some(entry) = entry.as_object() else {
+                continue;
+            };
+            let provider = entry
+                .get("provider_id")
+                .and_then(Value::as_str)
+                .unwrap_or("openai");
+            if !catalog_provider_id(provider) {
+                continue;
+            }
+            let Some(id) = entry
+                .get("model_id")
+                .and_then(Value::as_str)
+                .or_else(|| entry.get("id").and_then(Value::as_str))
+            else {
+                continue;
+            };
+            // The live producer defaults a missing name to the id; mirror it.
+            let name = entry
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or(id);
+            if !catalog_field(id) || !catalog_field(name) {
+                continue;
+            }
+            let reference = format!("{provider}/{id}");
+            if out.iter().any(|row: &Self| row.reference == reference) {
+                continue;
+            }
+            out.push(Self {
+                reference,
+                name: name.to_owned(),
+            });
+        }
+        out
+    }
+}
+
+/// CLI data directory, mirroring `tui_entry::resolve_cli_data_dir` (kept local
+/// so this display module has no dependency on that private helper).
+fn cli_data_dir() -> Option<std::path::PathBuf> {
+    if let Some(home) = std::env::var_os("OPENCODE_RK_HOME") {
+        return Some(std::path::PathBuf::from(home));
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return Some(std::path::PathBuf::from(home).join(".local/share/opencode-rk"));
+    }
+    if let Some(home) = std::env::var_os("USERPROFILE") {
+        return Some(std::path::PathBuf::from(home).join(".opencode-rk"));
+    }
+    None
+}
+
+/// Immutable production model catalogue (TOOL-008). Built once from the SAME
+/// producer the CLI uses — `opencode_rk_catalog::Catalog::from_cache_or_bundled`
+/// — so a synced, valid cache resolves its real models while a missing or
+/// corrupt cache falls back to the bundled floor. Every fresh
+/// [`crate::native_view_chat::ChatView`] seeds its per-view catalogue from this
+/// snapshot, so a shipped subagent row resolves a known model to its display
+/// name without any caller wiring. There is no process-global *mutable*
+/// catalogue: a view may override its own copy with a caller-supplied catalogue
+/// (e.g. the live `/api/models` list) through
+/// [`crate::native_view_chat::ChatView::set_model_catalog`].
+static DEFAULT_MODEL_CATALOG: std::sync::OnceLock<Vec<ModelLabel>> = std::sync::OnceLock::new();
+
+/// The default subagent catalogue used to seed every fresh `ChatView`. Parses
+/// the cache-or-bundled catalog through the real catalog producer with a
+/// bounded cache read. Each provider's models are enumerated with the same
+/// bounded `Catalog::search` (`limit: 500`, clamped by the producer) the CLI
+/// itself uses for its `?limit=500` model fetch; per-provider counts in
+/// models.dev stay well below that cap. `ModelSummary` carries the raw provider
+/// and model ids (the same `providerID/id` form a subagent reference uses), so
+/// lookups key on those ids rather than a resolved display id. A missing or
+/// empty catalogue is honest: with no known models the raw-reference fallback
+/// applies — no name is ever invented.
 #[must_use]
-pub fn subagent_model_label(value: &str) -> String {
+pub fn default_model_catalog() -> &'static [ModelLabel] {
+    DEFAULT_MODEL_CATALOG.get_or_init(|| {
+        let cached = cli_data_dir().and_then(|dir| {
+            crate::native_ui_preferences::read_bounded(
+                &dir.join("catalog/models.dev.api.json"),
+                MAX_CATALOG_BYTES,
+                "models.dev provider catalog",
+            )
+            .ok()
+            .flatten()
+        });
+        let catalog = opencode_rk_catalog::Catalog::from_cache_or_bundled(
+            cached.as_deref().map(str::as_bytes),
+        )
+        .unwrap_or_default();
+        let mut out: Vec<ModelLabel> = Vec::new();
+        for provider in catalog.providers() {
+            if out.len() >= MAX_CATALOG_MODELS {
+                break;
+            }
+            // `Catalog::search` compares the raw provider map key, which is the
+            // id the daemon emits and the form `ProviderSummary::id` carries
+            // for virtually every provider; use that id directly.
+            let models = catalog
+                .search(&opencode_rk_catalog::CatalogQuery {
+                    provider: Some(provider.id.as_str().to_owned()),
+                    limit: 500,
+                    ..opencode_rk_catalog::CatalogQuery::default()
+                })
+                .unwrap_or_default();
+            for model in models {
+                if out.len() >= MAX_CATALOG_MODELS {
+                    break;
+                }
+                let reference = format!(
+                    "{}/{}",
+                    model.provider_id.as_str(),
+                    model.model_id.as_str()
+                );
+                if out.iter().any(|row: &ModelLabel| row.reference == reference) {
+                    continue;
+                }
+                out.push(ModelLabel {
+                    reference,
+                    name: model.name,
+                });
+            }
+        }
+        out
+    })
+}
+
+/// Upstream `subagentModelLabel(value, models)`: resolve the `provider/model`
+/// reference against `models` and show the catalog *name* when the model is
+/// known, falling back to the raw `provider/model` reference when it is not. A
+/// `#variant` suffix is preserved in either case. An empty catalogue is the
+/// pre-TOOL-008 path and keeps the raw-reference fallback exactly.
+#[must_use]
+pub fn subagent_model_label(value: &str, models: &[ModelLabel]) -> String {
     let (reference, variant) = value.split_once('#').unwrap_or((value, ""));
+    let base = models
+        .iter()
+        .find(|entry| entry.reference == reference)
+        .map_or_else(|| reference.to_owned(), |entry| entry.name.clone());
     if variant.is_empty() {
-        reference.to_owned()
+        base
     } else {
-        format!("{reference} ({variant})")
+        format!("{base} ({variant})")
     }
 }
 
@@ -2226,24 +2496,136 @@ mod tests {
         }
     }
 
-    // TOOL-008: a missing model override adds NO model label; an explicit
-    // override shows the provider/model reference with its variant suffix
-    // (`subagentModelLabel`, `index.tsx` subagent tool rows).
+    // TOOL-008: a missing model override adds NO model label. With the live
+    // catalogue threaded in, a known model reference resolves to its catalog
+    // display name (variant preserved), while an unknown reference keeps the
+    // raw `provider/model` fallback (`subagentModelLabel(value, models)`,
+    // `index.tsx` subagent tool rows).
     #[test]
     fn subagent_missing_model_override_adds_no_model_label() {
         let plain = label("subagent", "completed", json!({"agent": "build", "description": "x"}));
         assert!(!plain.label.contains('·'), "{}", plain.label);
-        assert_eq!(subagent_model_label("openai/gpt-5"), "openai/gpt-5");
-        let explicit = label(
+
+        // No catalogue (the plain `tool_display` path) keeps the raw-reference
+        // fallback, preserving the pre-TOOL-008 contract.
+        assert_eq!(subagent_model_label("openai/gpt-5", &[]), "openai/gpt-5");
+
+        let catalog = [ModelLabel {
+            reference: "openai/gpt-5".into(),
+            name: "GPT-5".into(),
+        }];
+        let known = tool_display_with_models(
+            80,
             "subagent",
             "completed",
-            json!({"agent": "build", "description": "x", "model": "openai/gpt-5#high"}),
+            &json!({"agent": "build", "description": "x", "model": "openai/gpt-5#high"}).to_string(),
+            "",
+            false,
+            &catalog,
+        );
+        assert_eq!(known.label, "Build Subagent — x · GPT-5 (high)");
+        let unknown = tool_display_with_models(
+            80,
+            "subagent",
+            "completed",
+            &json!({"agent": "build", "description": "x", "model": "9router/unlisted#high"}).to_string(),
+            "",
+            false,
+            &catalog,
+        );
+        assert_eq!(unknown.label, "Build Subagent — x · 9router/unlisted (high)");
+    }
+
+    // TOOL-008: `subagentModelLabel(value, models)` resolves a known reference
+    // to its catalog name and keeps the raw reference for an unknown one; a
+    // `#variant` suffix survives either case (`packages/tui/src`).
+    #[test]
+    fn subagent_model_label_resolves_known_and_falls_back_unknown() {
+        let catalog = [
+            ModelLabel { reference: "openai/gpt-5".into(), name: "GPT-5".into() },
+            ModelLabel { reference: "9router/dsv41".into(), name: "DeepSeek V4.1 Free".into() },
+        ];
+        assert_eq!(subagent_model_label("openai/gpt-5", &catalog), "GPT-5");
+        assert_eq!(subagent_model_label("openai/gpt-5#high", &catalog), "GPT-5 (high)");
+        assert_eq!(subagent_model_label("9router/dsv41#fast", &catalog), "DeepSeek V4.1 Free (fast)");
+        assert_eq!(subagent_model_label("9router/unlisted", &catalog), "9router/unlisted");
+        assert_eq!(subagent_model_label("9router/unlisted#high", &catalog), "9router/unlisted (high)");
+        // No catalog: exact pre-TOOL-008 fallback with the variant preserved.
+        assert_eq!(subagent_model_label("anthropic/claude#thinking", &[]), "anthropic/claude (thinking)");
+    }
+
+    // TOOL-008: the live `/api/models` catalogue is parsed with the same
+    // bounded validation the producer uses. A missing `name` defaults to the
+    // model id (as `native_setup::catalogue` does), malformed bodies invent no
+    // names, and custom providers are covered when present in the body.
+    #[test]
+    fn subagent_model_label_from_live_catalogue() {
+        let body = r#"{"models":[
+            {"provider_id":"openai","model_id":"gpt-5","name":"GPT-5"},
+            {"provider_id":"9router","id":"dsv41","name":"DeepSeek V4.1 Free"},
+            {"provider_id":"anthropic","model_id":"claude"}
+        ]}"#;
+        let catalog = ModelLabel::from_models_json(body);
+        assert_eq!(catalog.len(), 3);
+        assert_eq!(subagent_model_label("openai/gpt-5", &catalog), "GPT-5");
+        assert_eq!(
+            subagent_model_label("9router/dsv41#fast", &catalog),
+            "DeepSeek V4.1 Free (fast)"
+        );
+        // Missing name defaults to the model id, never the raw fallback.
+        assert_eq!(subagent_model_label("anthropic/claude", &catalog), "claude");
+        assert_eq!(subagent_model_label("9router/unlisted", &catalog), "9router/unlisted");
+        // A malformed/oversized body must not invent catalogue names.
+        assert!(ModelLabel::from_models_json("not json").is_empty());
+        assert_eq!(
+            subagent_model_label("openai/gpt-5", &ModelLabel::from_models_json("not json")),
+            "openai/gpt-5"
+        );
+    }
+
+    // TOOL-008: the production seed is an immutable, stable snapshot built
+    // from the real cache-or-bundled producer. It never asserts a non-empty
+    // catalogue (a fresh install with no synced cache legitimately has no
+    // known models), and it never invents a name for an unknown reference.
+    #[test]
+    fn default_catalog_is_stable_and_never_invents_names() {
+        let seed = default_model_catalog();
+        assert_eq!(default_model_catalog().len(), seed.len());
+        for row in seed.iter().take(8) {
+            assert_eq!(subagent_model_label(&row.reference, seed), row.name);
+        }
+        assert_eq!(
+            subagent_model_label("tool008-probe/unlisted-model", seed),
+            "tool008-probe/unlisted-model"
+        );
+    }
+
+    // TOOL-008 secondary: every tool-row entry point consults the same
+    // catalogue. The spinner and result wrappers have explicit with_models
+    // variants so a subagent row resolves its name there too.
+    #[test]
+    fn subagent_catalogue_reaches_result_and_spinner_row_paths() {
+        let catalog = [ModelLabel {
+            reference: "openai/gpt-5".into(),
+            name: "GPT-5".into(),
+        }];
+        let args = r#"{"agent":"build","description":"x","model":"openai/gpt-5"}"#;
+
+        let spinner = tool_state_rows_spin_with_models(
+            80, "subagent", "completed", args, "", false, None, &catalog,
         );
         assert!(
-            explicit.label.ends_with("\u{b7} openai/gpt-5 (high)"),
-            "{}",
-            explicit.label
+            spinner.iter().any(|(row, _)| row.contains("GPT-5")),
+            "spinner row must resolve the catalog name: {spinner:?}"
         );
+        let plain = tool_state_rows_spin(80, "subagent", "completed", args, "", false, None);
+        assert!(
+            !plain.iter().any(|(row, _)| row.contains("GPT-5")),
+            "wrapper without a catalogue must not invent a name: {plain:?}"
+        );
+        // The unpaired-result overload accepts a catalogue without panicking
+        // (it carries no args/model, so it cannot paint a model label).
+        let _ = tool_result_rows_with_models(80, "subagent", "", false, &catalog);
     }
 
     // TOOL-009: `metadata.error` recolors the ROOT row to error even when the
