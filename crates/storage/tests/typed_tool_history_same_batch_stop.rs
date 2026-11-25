@@ -125,10 +125,7 @@ fn read_provider_request(stream: &mut TcpStream) -> Vec<u8> {
             !remaining.is_zero(),
             "provider request exceeded its absolute fixture deadline"
         );
-        stream
-            .set_read_timeout(Some(remaining.min(SOCKET_TIMEOUT)))
-            .expect("provider read timeout");
-        let count = stream.read(&mut buffer).expect("read provider request");
+        let count = read_chunk(stream, &mut buffer, deadline, "provider request");
         if count == 0 {
             break;
         }
@@ -285,6 +282,35 @@ fn provider_round(calls: &[(&str, &str, &str)], text: &str) -> Vec<u8> {
     ).into_bytes()
 }
 
+/// Read one chunk, retrying a socket read timeout.
+///
+/// `set_read_timeout` makes an idle socket return `WouldBlock` (or `TimedOut`)
+/// rather than blocking. On a busy machine the peer may simply not have written
+/// yet, so a timeout is not a failure; only the caller's absolute deadline ends
+/// the wait. Treating the timeout as fatal made this fixture fail under load
+/// while passing in isolation.
+fn read_chunk(stream: &mut TcpStream, buffer: &mut [u8], deadline: Instant, what: &str) -> usize {
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        assert!(
+            !remaining.is_zero(),
+            "{what} exceeded its absolute fixture deadline"
+        );
+        stream
+            .set_read_timeout(Some(remaining.min(SOCKET_TIMEOUT)))
+            .expect("fixture read timeout");
+        match stream.read(buffer) {
+            Ok(count) => return count,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            Err(error) => panic!("read {what}: {error}"),
+        }
+    }
+}
+
 fn read_http_response(stream: &mut TcpStream) -> Vec<u8> {
     let deadline = Instant::now() + DEADLINE;
     let mut bytes = Vec::new();
@@ -295,10 +321,7 @@ fn read_http_response(stream: &mut TcpStream) -> Vec<u8> {
             !remaining.is_zero(),
             "HTTP response exceeded its absolute fixture deadline"
         );
-        stream
-            .set_read_timeout(Some(remaining.min(SOCKET_TIMEOUT)))
-            .expect("daemon read timeout");
-        let count = stream.read(&mut buffer).expect("read daemon response");
+        let count = read_chunk(stream, &mut buffer, deadline, "daemon response");
         if count == 0 {
             break;
         }
