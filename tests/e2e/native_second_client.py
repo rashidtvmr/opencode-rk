@@ -47,7 +47,7 @@ HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
 KEY = golden.KEY
 FIRST = golden.FIRST
 NATIVE_MODEL_LABEL = "stream fixture"
-NATIVE_MODEL_METADATA = NATIVE_MODEL_LABEL + " openai"
+NATIVE_MODEL_METADATA = NATIVE_MODEL_LABEL + " OpenAI"
 
 
 def sha256(path):
@@ -217,7 +217,7 @@ def run_second_client(state, binary):
                 sys.executable,
                 "-c",
                 terminal_exec,
-                str(binary),
+                str(root / "install" / "bin" / "oc2"),
                 "--data-dir",
                 str(data),
                 "--session",
