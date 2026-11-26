@@ -7,6 +7,7 @@
 use rustix::{fs as rfs, process::getuid};
 use serde_json::{Map, Value};
 use std::{
+    cell::{Cell, RefCell},
     fs::{self, File},
     io::{Read, Write},
     os::unix::fs::MetadataExt,
@@ -29,7 +30,107 @@ const MAX_TAB_TITLE_BYTES: usize = 200;
 /// `"view"` key would collide with `feature-plugins/sidebar/todo.tsx:7`,
 /// which stores `view` on its own `opencode.sidebar.todo` namespace.
 const MCP_SIDEBAR_VIEW_KEY: &str = "plugin.opencode.sidebar.mcp.view";
+/// THEME-13: state key storing the last usable `system` terminal palette in
+/// the same `kv.json` object as `theme_mode` (foreground/background + up to
+/// 16 indexed slots, alpha preserved).
+const SYSTEM_TERMINAL_PALETTE_KEY: &str = "system_terminal_palette";
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+
+// THEME-13 production wiring. The shipped native loop resolves `state_path`
+// and calls `UiPreferences::load(&config_paths, &state_path)` before it builds
+// the first-paint theme. Recording that path plus the last usable palette and
+// system selection here lets (a) the built-in resolver paint a cached `system`
+// palette on the very first frame and (b) `SystemThemeState::cold_start(None,
+// ..)` — the exact call the shipped binary makes — attach the same palette plus
+// its write-back path, without editing the out-of-grant main loop. Thread-local
+// storage isolates concurrent boots; each native loop owns its state file.
+thread_local! {
+    static ACTIVE_STATE_PATH: RefCell<Option<PathBuf>> = RefCell::new(None);
+    static BOOT_CACHED_PALETTE: RefCell<Option<crate::native_theme_runtime::TerminalPalette>> =
+        RefCell::new(None);
+    static SYSTEM_THEME_ACTIVE: Cell<bool> = Cell::new(false);
+}
+
+/// THEME-13: record the client state file resolved for this boot. Called by
+/// `UiPreferences::load`, which production always runs before first paint.
+pub(crate) fn set_active_state_path(path: &Path) {
+    ACTIVE_STATE_PATH.with(|slot| *slot.borrow_mut() = Some(path.to_path_buf()));
+}
+
+/// THEME-13: the client state file registered by the current boot's `load`, if
+/// any. `None` on a thread that never loaded preferences (then fail closed).
+pub(crate) fn active_state_path() -> Option<PathBuf> {
+    ACTIVE_STATE_PATH.with(|slot| slot.borrow().clone())
+}
+
+/// THEME-13: stage the last usable palette for this boot's first paint. Called
+/// by `UiPreferences::load` from the state file it already reads.
+pub(crate) fn set_boot_cached_palette(
+    palette: Option<crate::native_theme_runtime::TerminalPalette>,
+) {
+    BOOT_CACHED_PALETTE.with(|slot| *slot.borrow_mut() = palette);
+}
+
+/// THEME-13: record that the boot selected the `system` theme. Called by
+/// `UiPreferences::load` (persisted `theme_mode == "system"`) and `cli_theme`
+/// (CLI `theme.mode == "system"`). Only a system boot consumes the cache.
+///
+/// This is an OR accumulator: the main loop treats the persisted and the CLI
+/// selection as a disjunction, so either site may only *raise* the flag. A
+/// stale `true` cannot leak across boots because [`reset_boot_theme_state`]
+/// clears every boot-scoped registration at the start of `load`.
+pub(crate) fn set_system_theme_active(active: bool) {
+    if active {
+        SYSTEM_THEME_ACTIVE.with(|flag| flag.set(true));
+    }
+}
+
+/// THEME-13: clear all boot-scoped registrations. `load` calls this at the
+/// start of every boot, so a second native boot on the same thread cannot
+/// inherit a stale system selection or palette from a previous one (the
+/// thread-locals are process-lifetime, boots are not). Always compiled so the
+/// exact production reset is exercised by tests, not just the `not(test)`
+/// staging call site.
+pub(crate) fn reset_boot_theme_state() {
+    ACTIVE_STATE_PATH.with(|slot| *slot.borrow_mut() = None);
+    BOOT_CACHED_PALETTE.with(|slot| *slot.borrow_mut() = None);
+    SYSTEM_THEME_ACTIVE.with(|flag| flag.set(false));
+}
+
+/// THEME-13: the first-paint `system` theme consumed from the boot cache. This
+/// runs in `RuntimeTheme::builtin_default`, the resolver the shipped loader
+/// calls for a `system` selection. The cache is taken at most once per boot so
+/// later built-in resolutions (picker, error fallback) are unchanged.
+pub(crate) fn take_boot_system_theme(
+    startup: crate::native_theme_runtime::ThemeMode,
+) -> Option<crate::native_theme_runtime::RuntimeTheme> {
+    // Always consume both registrations, even on a fresh install with no cache,
+    // so a later built-in resolution never inherits a stale system selection.
+    let palette = BOOT_CACHED_PALETTE.with(|slot| slot.borrow_mut().take());
+    let system = SYSTEM_THEME_ACTIVE.with(|flag| {
+        let active = flag.get();
+        flag.set(false);
+        active
+    });
+    let palette = palette?;
+    if !system {
+        return None;
+    }
+    use crate::native_theme_runtime::RuntimeTheme;
+    let mode = palette.mode().unwrap_or(startup);
+    let resolved = palette.system_palette(mode)?;
+    Some(RuntimeTheme::system(resolved, mode))
+}
+
+/// THEME-13 test isolation only. Production registrations are process-lifetime
+/// (one native boot per thread), but libtest reuses worker threads. Only the
+/// new THEME-13 tests call this; pre-existing tests never register values in
+/// test builds (`load`/`cli_theme` staging is `cfg(not(test))`, though `load`
+/// always resets via [`reset_boot_theme_state`]).
+#[cfg(test)]
+pub(crate) fn clear_active_state_path() {
+    reset_boot_theme_state();
+}
 
 /// Resolved `tabs.scope` (`config/index.tsx:193-195,334`, default `cwd`) and
 /// the store key it selects (`context/session-tabs.tsx:105-113,115-118`):
@@ -610,6 +711,17 @@ impl UiPreferences {
         let selected = merged.and_then(|(name, mode)| {
             Some((name.unwrap_or_else(|| "opencode".into()), mode.unwrap_or_else(|| "system".into())))
         });
+        // THEME-13: CLI/inline `theme.mode == "system"` is one of the two
+        // facts the main loop ORs into its system selection. Register it
+        // (production only) so the built-in resolver paints the cached palette
+        // on the first frame. Production-only so pre-existing unit tests stay
+        // deterministic.
+        #[cfg(not(test))]
+        {
+            if selected.as_ref().is_some_and(|(_, mode)| mode == "system") {
+                set_system_theme_active(true);
+            }
+        }
         (selected, diagnostics)
     }
 
@@ -794,6 +906,11 @@ impl UiPreferences {
     /// Invalid files are skipped independently, matching upstream's last-good
     /// config merge behavior; diagnostics are returned for the caller to log.
     pub fn load(config_paths: &[PathBuf], state_path: &Path) -> Result<Self, String> {
+        // THEME-13: every boot starts from a clean slate. Thread-local
+        // registrations live for the whole process, so without this a second
+        // `load` on the same thread could let a stale `system` flag consume a
+        // previous boot's cached palette on a non-system boot.
+        reset_boot_theme_state();
         crate::native_ui_budget::check_paths(config_paths)?;
         let mut budget = crate::native_ui_budget::ReadBudget::default();
         let mut prompt_width = None;
@@ -946,6 +1063,21 @@ impl UiPreferences {
                 Map::new()
             }
         };
+        // THEME-13: stage this boot's first-paint cache from the same state
+        // object. `theme_mode == "system"` here is one of the two facts the
+        // main loop ORs into its system selection (the other is the CLI
+        // selection registered by `cli_theme`). The call site stays
+        // production-only so pre-existing unit tests never inherit a
+        // first-paint cache; the staging logic itself is always compiled and
+        // exercised directly by [`Self::stage_boot_system_theme`] tests.
+        #[cfg(not(test))]
+        {
+            let stored_mode = state
+                .get("theme_mode")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            Self::stage_boot_system_theme(state_path, stored_mode.as_deref());
+        }
         // DIALOG-13: the picker's persisted scope, read from the exact
         // upstream storage namespace and key shape `"session-list":
         // {"allProjects": bool}`. `None` when never written so the caller
@@ -1083,6 +1215,84 @@ impl UiPreferences {
             state.insert("theme".into(), Value::String(theme.into()));
             state.insert("theme_mode".into(), Value::String(mode.into()));
         })
+    }
+
+    /// THEME-13: the exact first-paint staging `load` performs once it has read
+    /// the client state file: register that file for the shipped
+    /// `cold_start(None, ..)` seam, stage the last usable palette for the
+    /// `system` resolver, and record the persisted `theme_mode == "system"`
+    /// fact. Always compiled (unlike the `load` call site) so the production
+    /// boot sequence is exercised by tests. `set_system_theme_active` is an OR
+    /// accumulator; [`reset_boot_theme_state`] clears it at the start of `load`.
+    fn stage_boot_system_theme(state_path: &Path, stored_mode: Option<&str>) {
+        set_active_state_path(state_path);
+        set_boot_cached_palette(Self::cached_terminal_palette(state_path));
+        if stored_mode == Some("system") {
+            set_system_theme_active(true);
+        }
+    }
+
+    /// THEME-13: read the last usable palette persisted next to `theme_mode`.
+    /// An unusable or malformed value is treated as no cache (fail closed), so
+    /// a corrupt/hostile state value never drives first paint.
+    #[must_use]
+    pub fn cached_terminal_palette(
+        state_path: &Path,
+    ) -> Option<crate::native_theme_runtime::TerminalPalette> {
+        read_state(state_path)
+            .ok()
+            .and_then(|state| state.get(SYSTEM_TERMINAL_PALETTE_KEY).cloned())
+            .and_then(|value| crate::native_theme_runtime::TerminalPalette::from_json(&value).ok())
+            .filter(crate::native_theme_runtime::TerminalPalette::usable)
+    }
+
+    /// THEME-13: persist a usable palette next to `theme_mode`, preserving
+    /// every unrelated KV key. The foreground/background/16-slot value is read
+    /// back on the next cold start. Unusable palettes are refused.
+    pub fn persist_terminal_palette(
+        state_path: &Path,
+        palette: &crate::native_theme_runtime::TerminalPalette,
+    ) -> Result<(), String> {
+        if !palette.usable() {
+            return Err("unusable terminal palette".into());
+        }
+        // Always persist the full shape (foreground/background + 16 slots):
+        // the shipping OSC 10/11 seam reports only the default colors, so
+        // normalize here as well as in `SystemThemeState::palette_reply`.
+        let full = palette.clone().padded_to_full();
+        update_state(state_path, SYSTEM_TERMINAL_PALETTE_KEY, Some(full.to_json()))
+    }
+
+    /// THEME-13: build the `system` cold-start observer with an explicit
+    /// `Some(cached)` so the first frame paints from the palette instead of
+    /// waiting for the post-paint OSC reply. The state path is attached so a
+    /// later `Usable` reply persists the next cache beside `theme_mode`.
+    #[must_use]
+    pub fn cold_start_system_theme(
+        state_path: &Path,
+        lock: Option<crate::native_theme_runtime::ThemeMode>,
+        startup: crate::native_theme_runtime::ThemeMode,
+    ) -> crate::native_theme_runtime::SystemThemeState {
+        crate::native_theme_runtime::SystemThemeState::cold_start(
+            Self::cached_terminal_palette(state_path),
+            lock,
+            startup,
+        )
+        .with_cache_path(state_path.to_path_buf())
+    }
+
+    /// THEME-13: the `system` theme to paint on the very first frame from a
+    /// cached palette, with no OSC reply. `None` means the caller keeps the
+    /// built-in `opencode` fallback until a reply arrives.
+    #[must_use]
+    pub fn boot_system_theme(
+        state_path: &Path,
+        startup: crate::native_theme_runtime::ThemeMode,
+    ) -> Option<crate::native_theme_runtime::RuntimeTheme> {
+        let cached = Self::cached_terminal_palette(state_path)?;
+        let mode = cached.mode().unwrap_or(startup);
+        let palette = cached.system_palette(mode)?;
+        Some(crate::native_theme_runtime::RuntimeTheme::system(palette, mode))
     }
 
     pub fn persist_tab_orientation(
@@ -2764,5 +2974,223 @@ mod platform_alias_tests {
         fs::hard_link(&target, fixture.root.join("kv.json")).unwrap();
         assert!(UiPreferences::persist_sidebar(&fixture.alias.join("kv.json"), true).is_err());
         assert_eq!(fs::read(target).unwrap(), bytes);
+    }
+}
+
+// ── THEME-13: last usable palette persisted beside theme_mode ──────────
+#[cfg(test)]
+mod theme13_palette_cache_tests {
+    use super::*;
+    use crate::native_theme_runtime::{
+        ProbeOutcome, Slot, SystemThemeState, TerminalPalette, ThemeMode,
+    };
+
+    fn cached_palette() -> TerminalPalette {
+        TerminalPalette::new(
+            Some([0xff, 0xff, 0xff, 0xff]),
+            Some([0x1a, 0x1a, 0x1a, 0x00]),
+            (0..16)
+                .map(|slot| [slot as u8, slot as u8, slot as u8, 0x80])
+                .collect(),
+        )
+    }
+
+    /// Persisting the cache overwrites only its key: `theme`/`theme_mode` beside
+    /// it survive, and the value always carries the full 16-slot shape.
+    #[test]
+    fn theme13_persist_round_trip_preserves_theme_mode() {
+        clear_active_state_path();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state/kv.json");
+        UiPreferences::persist_theme_selection(&path, "system", "light").unwrap();
+        let palette = cached_palette();
+        UiPreferences::persist_terminal_palette(&path, &palette).unwrap();
+
+        let state = read_state(&path).unwrap();
+        assert_eq!(state.get("theme").and_then(Value::as_str), Some("system"));
+        assert_eq!(state.get("theme_mode").and_then(Value::as_str), Some("light"));
+        assert!(state.get(SYSTEM_TERMINAL_PALETTE_KEY).is_some());
+        assert_eq!(state.len(), 3);
+        assert_eq!(UiPreferences::cached_terminal_palette(&path).unwrap(), palette);
+        clear_active_state_path();
+    }
+
+    /// A usable cache paints a `system` theme on the first frame with no reply.
+    #[test]
+    fn theme13_cold_start_system_theme_paints_from_cache() {
+        clear_active_state_path();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state/kv.json");
+        UiPreferences::persist_terminal_palette(&path, &cached_palette()).unwrap();
+
+        let probe = UiPreferences::cold_start_system_theme(&path, None, ThemeMode::Light);
+        assert!(!probe.uses_fallback(), "cached palette paints on first frame");
+        assert_eq!(probe.mode(), ThemeMode::Dark, "cached dark bg wins over startup light");
+        let painted = probe.system_theme().unwrap();
+        // `system_theme()` returns the generated `Palette`; the `system` name
+        // lives on `RuntimeTheme`. The generated background is transparent,
+        // unlike the built-in palette — the slot assertions below confirm the
+        // cached terminal colors reached the first frame.
+        assert_eq!(painted.get(Slot::Background)[3], 0);
+        assert_eq!(painted.get(Slot::Primary), [6, 6, 6, 0x80]);
+        assert_eq!(painted.get(Slot::Error), [1, 1, 1, 0x80]);
+        assert_eq!(painted.get(Slot::Warning), [3, 3, 3, 0x80]);
+        assert_eq!(painted.get(Slot::Success), [2, 2, 2, 0x80]);
+        assert_eq!(painted.get(Slot::Background)[3], 0, "alpha 0 stays 0");
+        assert_eq!(probe.cached().unwrap().palette.len(), 16);
+        clear_active_state_path();
+    }
+
+    /// A `Usable` reply persists the new palette back to the same state file,
+    /// keeping real indexed slots even though the shipping reply is partial.
+    #[test]
+    fn theme13_explicit_cold_start_persists_usable_reply() {
+        clear_active_state_path();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state/kv.json");
+        let first = cached_palette();
+        UiPreferences::persist_theme(&path, Some("system")).unwrap();
+        UiPreferences::persist_terminal_palette(&path, &first).unwrap();
+
+        let mut probe = UiPreferences::cold_start_system_theme(&path, None, ThemeMode::Light);
+        assert!(!probe.uses_fallback());
+        assert_eq!(probe.after_paint(), ProbeOutcome::Started);
+        let reply = TerminalPalette::new(
+            Some([0x77, 0x77, 0x77, 0xff]),
+            Some([0x22, 0x22, 0x22, 0xff]),
+            Vec::new(),
+        );
+        assert_eq!(probe.palette_reply(reply.clone()), ProbeOutcome::Usable);
+        let persisted = UiPreferences::cached_terminal_palette(&path).unwrap();
+        assert_eq!(persisted.default_foreground, reply.default_foreground);
+        assert_eq!(persisted.default_background, reply.default_background);
+        assert_eq!(persisted.palette.len(), 16, "partial reply keeps richer cached slots");
+        assert_eq!(persisted.palette[6], first.palette[6]);
+        let state = read_state(&path).unwrap();
+        assert_eq!(state.get("theme").and_then(Value::as_str), Some("system"));
+        clear_active_state_path();
+    }
+
+    /// Missing or unusable caches fail closed to the built-in fallback.
+    #[test]
+    fn theme13_missing_or_unusable_cache_fails_closed() {
+        clear_active_state_path();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state/kv.json");
+        assert_eq!(UiPreferences::cached_terminal_palette(&path), None);
+        assert!(UiPreferences::boot_system_theme(&path, ThemeMode::Dark).is_none());
+        let probe = UiPreferences::cold_start_system_theme(&path, None, ThemeMode::Dark);
+        assert!(probe.uses_fallback());
+        let unusable = TerminalPalette::new(None, None, vec![[0, 0, 0, 0xff]]);
+        assert!(UiPreferences::persist_terminal_palette(&path, &unusable).is_err());
+        clear_active_state_path();
+    }
+
+    /// The shipped `cold_start(None, ..)` seam resolves the cache and its
+    /// write-back path from the client state file registered by `load`.
+    #[test]
+    fn theme13_shipped_none_cold_start_uses_registered_path() {
+        clear_active_state_path();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state/kv.json");
+        let first = cached_palette();
+        UiPreferences::persist_theme(&path, Some("system")).unwrap();
+        UiPreferences::persist_terminal_palette(&path, &first).unwrap();
+
+        // Stand-in for `load`'s production-only registration.
+        set_active_state_path(&path);
+        assert_eq!(active_state_path(), Some(path.clone()));
+        let mut probe = SystemThemeState::cold_start(None, None, ThemeMode::Light);
+        assert!(!probe.uses_fallback(), "cached palette paints on first frame");
+        assert_eq!(probe.mode(), ThemeMode::Dark);
+        assert_eq!(probe.request_probe(), ProbeOutcome::Idle, "no query before paint");
+        assert_eq!(probe.after_paint(), ProbeOutcome::Started);
+        let reply = TerminalPalette::new(
+            Some([0x0f, 0x0f, 0x0f, 0xff]),
+            Some([0xf0, 0xf0, 0xf0, 0xff]),
+            Vec::new(),
+        );
+        assert_eq!(probe.palette_reply(reply.clone()), ProbeOutcome::Usable);
+        let persisted = UiPreferences::cached_terminal_palette(&path).unwrap();
+        assert_eq!(persisted.default_background, reply.default_background);
+        assert_eq!(persisted.palette, first.palette, "partial reply keeps 16 real slots");
+        clear_active_state_path();
+    }
+
+    /// The real production boot sequence, exercised through the always-compiled
+    /// staging helper that `load` calls: a fresh boot registers the state path,
+    /// last usable palette and system selection; `builtin_default` paints the
+    /// cached `system` theme on the very first frame; the shipped
+    /// `cold_start(None, ..)` seam paints the same palette with no OSC query
+    /// before paint; a `Usable` reply persists the next cache beside
+    /// `theme_mode`; a second `system` boot paints from it. This also covers
+    /// the sticky-flag regression: a non-system boot on the same thread never
+    /// consumes a stale system selection.
+    #[test]
+    fn theme13_full_boot_load_builtin_default_cold_start_sequence() {
+        use crate::native_theme_runtime::RuntimeTheme;
+        clear_active_state_path();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state/kv.json");
+        let first = cached_palette();
+        UiPreferences::persist_theme_selection(&path, "system", "dark").unwrap();
+        UiPreferences::persist_terminal_palette(&path, &first).unwrap();
+
+        // Stand-in for `load` (production): reset, then stage from the state
+        // object it read. The helper is the exact code `load` calls.
+        reset_boot_theme_state();
+        UiPreferences::stage_boot_system_theme(&path, Some("system"));
+        assert_eq!(active_state_path(), Some(path.clone()));
+
+        // `load_native_theme("system", ..)` -> `builtin_default` consumes the
+        // staged cache once and paints `system` on the very first frame.
+        let painted = RuntimeTheme::builtin_default(ThemeMode::Light);
+        assert_eq!(painted.name, "system");
+        assert_eq!(painted.mode, ThemeMode::Dark, "cached dark bg wins over startup light");
+        assert_eq!(painted.palette.get(Slot::Primary), [6, 6, 6, 0x80]);
+        assert_eq!(painted.palette.get(Slot::Background)[3], 0, "alpha 0 stays 0");
+
+        // Consumed once: later built-in resolutions stay the shipped default.
+        assert_eq!(RuntimeTheme::builtin_default(ThemeMode::Dark).name, "opencode");
+
+        // The shipped loop's cold_start(None, ..) seam resolves the same cache
+        // from the state path staged above, with no query before first paint.
+        let mut probe = SystemThemeState::cold_start(None, None, ThemeMode::Light);
+        assert!(!probe.uses_fallback());
+        assert_eq!(probe.mode(), ThemeMode::Dark);
+        assert_eq!(probe.request_probe(), ProbeOutcome::Idle, "no query before paint");
+        assert_eq!(probe.after_paint(), ProbeOutcome::Started);
+
+        // Usable reply persists the next cache beside theme_mode, keeping the
+        // real indexed slots even though the shipping reply is OSC 10/11-only.
+        let reply = TerminalPalette::new(
+            Some([0x10, 0x10, 0x10, 0xff]),
+            Some([0xe0, 0xe0, 0xe0, 0xff]),
+            Vec::new(),
+        );
+        assert_eq!(probe.palette_reply(reply.clone()), ProbeOutcome::Usable);
+        let persisted = UiPreferences::cached_terminal_palette(&path).unwrap();
+        assert_eq!(persisted.default_background, reply.default_background);
+        assert_eq!(persisted.palette, first.palette, "real slots survive partial reply");
+
+        // Regression: a non-system boot on the same thread must not inherit a
+        // stale system flag and consume the cached palette.
+        reset_boot_theme_state();
+        UiPreferences::stage_boot_system_theme(&path, Some("light"));
+        assert_eq!(
+            RuntimeTheme::builtin_default(ThemeMode::Dark).name,
+            "opencode",
+            "non-system boot never paints a stale system palette",
+        );
+
+        // A second system boot paints immediately from the persisted palette,
+        // whose background is now the light color reported by the reply.
+        reset_boot_theme_state();
+        UiPreferences::stage_boot_system_theme(&path, Some("system"));
+        let second = RuntimeTheme::builtin_default(ThemeMode::Light);
+        assert_eq!(second.name, "system");
+        assert_eq!(second.mode, ThemeMode::Light);
+        assert_eq!(second.palette.get(Slot::Primary), [6, 6, 6, 0x80]);
+        clear_active_state_path();
     }
 }

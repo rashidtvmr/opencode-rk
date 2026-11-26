@@ -40,7 +40,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
@@ -2056,6 +2056,15 @@ impl RuntimeTheme {
     /// opencode.json`) resolved in `mode`.
     #[must_use]
     pub fn builtin_default(mode: ThemeMode) -> Self {
+        // THEME-13: the shipped native loop resolves its first-paint theme
+        // through this resolver for a `system` boot. `UiPreferences::load`
+        // stages the last usable palette (and the system selection) earlier in
+        // the same boot; consume them here so the very first frame paints the
+        // cached `system` palette with no OSC reply. Consumed once, so later
+        // built-in resolutions stay the shipped default.
+        if let Some(theme) = crate::native_ui_preferences::take_boot_system_theme(mode) {
+            return theme;
+        }
         let v2 = serde_json::from_str::<Value>(V2_DEFAULT_ASSET)
             .ok()
             .and_then(|asset| v2_theme_from_asset(&asset, mode).ok());
@@ -2537,6 +2546,156 @@ impl TerminalPalette {
         }
         Some(Palette::from_rgba_table(table))
     }
+
+    /// THEME-13: normalize to the full cache shape (foreground/background +
+    /// all 16 indexed slots). Missing slots use the bounded ANSI defaults the
+    /// painter would apply anyway, so a persisted/replayed value always carries
+    /// every slot. Already-present slots (including alpha 0) stay verbatim.
+    #[must_use]
+    pub fn padded_to_full(self) -> Self {
+        let mut palette = self.palette;
+        while palette.len() < usize::from(TERMINAL_PALETTE_SIZE) {
+            palette.push(ansi_to_rgba(palette.len()));
+        }
+        Self {
+            default_foreground: self.default_foreground,
+            default_background: self.default_background,
+            palette,
+        }
+    }
+
+    /// THEME-13: build a palette from decoded terminal replies. OSC 4 indexed
+    /// colors are placed at their actual `0..16` index (out-of-range indexes
+    /// are ignored); any genuinely missing slot uses the bounded ANSI default.
+    #[must_use]
+    pub fn from_osc_replies(
+        default_foreground: Option<[u8; 4]>,
+        default_background: Option<[u8; 4]>,
+        indexed: &[(u16, [u8; 4])],
+    ) -> Self {
+        let mut slots: Vec<Option<[u8; 4]>> = vec![None; usize::from(TERMINAL_PALETTE_SIZE)];
+        for &(index, color) in indexed {
+            if let Some(slot) = slots.get_mut(usize::from(index)) {
+                *slot = Some(color);
+            }
+        }
+        let palette = slots
+            .into_iter()
+            .enumerate()
+            .map(|(index, slot)| slot.unwrap_or_else(|| ansi_to_rgba(index)))
+            .collect();
+        Self {
+            default_foreground,
+            default_background,
+            palette,
+        }
+    }
+
+    /// THEME-13: encode the cache value beside `theme_mode`. Exactly the
+    /// foreground/background/16-slot shape is written; alpha is preserved.
+    #[must_use]
+    pub fn to_json(&self) -> Value {
+        let color = |value: Option<[u8; 4]>| match value {
+            Some([r, g, b, a]) => serde_json::json!([r, g, b, a]),
+            None => Value::Null,
+        };
+        let palette = self
+            .palette
+            .iter()
+            .map(|&[r, g, b, a]| serde_json::json!([r, g, b, a]))
+            .collect::<Vec<_>>();
+        serde_json::json!({
+            "foreground": color(self.default_foreground),
+            "background": color(self.default_background),
+            "palette": palette,
+        })
+    }
+
+    /// THEME-13: strict, fail-closed decode of a cached palette. Any unknown
+    /// key, non-object root, non-integer/out-of-range channel, null slot, or
+    /// more than 16 slots is refused, so a corrupt/hostile persisted value
+    /// never drives first paint.
+    pub fn from_json(value: &Value) -> Result<Self, String> {
+        let object = value.as_object().ok_or("palette must be an object")?;
+        if object.len() != 3
+            || !object.contains_key("foreground")
+            || !object.contains_key("background")
+            || !object.contains_key("palette")
+        {
+            return Err("palette must carry exactly foreground/background/palette".into());
+        }
+        let color = |key: &str| -> Result<Option<[u8; 4]>, String> {
+            match object.get(key).expect("key presence checked above") {
+                Value::Null => Ok(None),
+                Value::Array(items) => {
+                    let mut out = [0u8; 4];
+                    if items.len() != 4 {
+                        return Err(format!("{key} must have exactly 4 channels"));
+                    }
+                    for (index, item) in items.iter().enumerate() {
+                        let channel = item.as_u64().ok_or("color channels must be integers")?;
+                        if channel > 255 {
+                            return Err("color channel out of range".into());
+                        }
+                        out[index] = channel as u8;
+                    }
+                    Ok(Some(out))
+                }
+                _ => Err(format!("{key} must be null or a 4-channel array")),
+            }
+        };
+        let default_foreground = color("foreground")?;
+        let default_background = color("background")?;
+        let slots = object
+            .get("palette")
+            .and_then(Value::as_array)
+            .ok_or("palette must be an array")?;
+        if slots.len() > usize::from(TERMINAL_PALETTE_SIZE) {
+            return Err("at most 16 palette slots".into());
+        }
+        let mut palette = Vec::with_capacity(slots.len());
+        for slot in slots {
+            let items = slot.as_array().ok_or("palette slots cannot be null")?;
+            if items.len() != 4 {
+                return Err("palette slot must have exactly 4 channels".into());
+            }
+            let mut color = [0u8; 4];
+            for (index, item) in items.iter().enumerate() {
+                let channel = item.as_u64().ok_or("color channels must be integers")?;
+                if channel > 255 {
+                    return Err("color channel out of range".into());
+                }
+                color[index] = channel as u8;
+            }
+            palette.push(color);
+        }
+        Ok(Self {
+            default_foreground,
+            default_background,
+            palette,
+        })
+    }
+}
+
+/// THEME-13: the OSC query frame emitted after first paint: OSC 10/11 for the
+/// default foreground/background followed by OSC 4;0..15 for the indexed
+/// colors (`getPalette({ size: 16 })` upstream). Never emitted before paint.
+///
+/// NOTE: the shipped `tui_entry.rs` loop still emits its OSC 10/11-only
+/// `system_palette_query_frame` and applies replies with
+/// `TerminalPalette::new(fg, bg, Vec::new())`. Wiring this frame and
+/// [`SystemThemeState::palette_osc4_reply`] into that loop (plus decoding OSC 4
+/// in `native_input_decoder.rs`) is required for the terminal's real 16 indexed
+/// colors and is outside this package's write grant; until then a fresh
+/// install caches bounded ANSI-placeholder slots for 0..15.
+#[must_use]
+pub fn osc_palette_query_frame() -> Vec<u8> {
+    let mut frame = Vec::with_capacity(96);
+    frame.extend_from_slice(b"\x1b]10;?\x07\x1b]11;?\x07");
+    for index in 0..TERMINAL_PALETTE_SIZE {
+        frame.extend_from_slice(format!("\x1b]4;{index};?\x07").as_bytes());
+    }
+    frame
 }
 
 /// Probe state machine outcomes.
@@ -2563,17 +2722,46 @@ pub struct SystemThemeState {
     probing: bool,
     queued: bool,
     startup: ThemeMode,
+    /// THEME-13: client state file (`kv.json`, holding `theme_mode`). When set,
+    /// every `Usable` reply is persisted here as the last usable palette for
+    /// the next cold start. Attached by [`Self::with_cache_path`] or, for the
+    /// shipped `cold_start(None, ..)` seam, resolved from the client state path
+    /// that `UiPreferences::load` registered earlier in the same boot.
+    cache_path: Option<PathBuf>,
 }
 
 impl SystemThemeState {
     /// Cold start: never blocks. Uses the cached palette when usable,
     /// otherwise the caller renders the built-in `opencode` fallback.
+    ///
+    /// THEME-13 keeps two disjoint seams independent:
+    /// - `cold_start(Some(cached), ..)` is self-contained: the caller already
+    ///   resolved the palette and owns where a later `Usable` reply is written
+    ///   (normally by attaching the file with [`Self::with_cache_path`]).
+    /// - `cold_start(None, ..)` is the shipped native-loop seam. It resolves
+    ///   both the cache and its write-back path from the client state file that
+    ///   `UiPreferences::load` registered earlier that same boot. On a thread
+    ///   that never loaded preferences the behavior is unchanged.
+    ///
+    /// An unusable cache fails closed to the built-in `opencode` fallback, and
+    /// no OSC query starts before [`Self::after_paint`].
     #[must_use]
     pub fn cold_start(
         cached: Option<TerminalPalette>,
         lock: Option<ThemeMode>,
         startup: ThemeMode,
     ) -> Self {
+        let (cached, cache_path) = match cached {
+            Some(explicit) => (Some(explicit), None),
+            None => {
+                let path = crate::native_ui_preferences::active_state_path();
+                let cached = path.as_ref().and_then(|path| {
+                    crate::native_ui_preferences::UiPreferences::cached_terminal_palette(path)
+                });
+                (cached, path)
+            }
+        };
+        // An unusable cache fails closed to the built-in `opencode` fallback.
         let palette = cached.filter(TerminalPalette::usable);
         let inferred = palette.as_ref().and_then(TerminalPalette::mode);
         Self {
@@ -2584,7 +2772,18 @@ impl SystemThemeState {
             probing: false,
             queued: false,
             startup,
+            cache_path,
         }
+    }
+
+    /// THEME-13: attach the client state file that holds `theme_mode`. When
+    /// set, every `Usable` reply writes the real foreground/background/indexed
+    /// palette back beside `theme_mode`, so the next cold start paints from it.
+    /// Persistence is best-effort and never blocks painting.
+    #[must_use]
+    pub fn with_cache_path(mut self, path: PathBuf) -> Self {
+        self.cache_path = Some(path);
+        self
     }
 
     #[must_use]
@@ -2636,19 +2835,69 @@ impl SystemThemeState {
 
     /// Apply a palette reply. An unusable reply is ignored; a queued refresh
     /// starts immediately afterwards (upstream `finally` behaviour).
+    ///
+    /// THEME-13: a shipping OSC 10/11-only reply reports just the default
+    /// foreground/background. Real indexed slots already held (from a cache or
+    /// an OSC 4 batch) are retained rather than erased, missing slots are
+    /// normalized with the bounded ANSI defaults, and the resulting full
+    /// palette is persisted beside `theme_mode` for the next cold start.
     pub fn palette_reply(&mut self, colors: TerminalPalette) -> ProbeOutcome {
         self.probing = false;
         if !colors.usable() {
             return self.settle();
         }
+        let colors = match self.palette.as_ref() {
+            Some(previous) if previous.palette.len() > colors.palette.len() => {
+                let mut slots = colors.palette.clone();
+                slots.extend(previous.palette.iter().skip(slots.len()).copied());
+                TerminalPalette::new(
+                    colors.default_foreground,
+                    colors.default_background,
+                    slots,
+                )
+            }
+            _ => colors,
+        };
+        let colors = colors.padded_to_full();
         let inferred = colors.mode();
         self.mode = self.lock.or(inferred).unwrap_or(self.mode);
+        // THEME-13: a `Usable` reply becomes the last usable palette for the
+        // next cold start. Best-effort: the live palette still updates when the
+        // state file is unavailable.
+        if let Some(path) = self.cache_path.as_deref() {
+            let _ = crate::native_ui_preferences::UiPreferences::persist_terminal_palette(
+                path, &colors,
+            );
+        }
         self.palette = Some(colors);
         match self.settle() {
             ProbeOutcome::Idle => ProbeOutcome::Usable,
             ProbeOutcome::Started => ProbeOutcome::Started,
             other => other,
         }
+    }
+
+    /// THEME-13: apply a combined OSC 10/11 + OSC 4 reply batch. Indexed
+    /// colors are placed at their actual 0..16 slots before flowing through
+    /// [`Self::palette_reply`], so mode inference, the live system theme and
+    /// the next-boot cache all use the terminal's real colors. Indexes outside
+    /// 0..16 are ignored.
+    ///
+    /// NOTE: the shipped loop currently calls [`Self::palette_reply`] with an
+    /// OSC 10/11-only palette; wiring this batch entry point to a decoded OSC 4
+    /// reply lives in `tui_entry.rs`/`native_input_decoder.rs` (outside this
+    /// package's write grant).
+    pub fn palette_osc4_reply(
+        &mut self,
+        foreground: Option<[u8; 4]>,
+        background: Option<[u8; 4]>,
+        indexed: &[(u16, [u8; 4])],
+    ) -> ProbeOutcome {
+        self.palette_reply(TerminalPalette::from_osc_replies(
+            foreground,
+            background,
+            indexed,
+        ))
     }
 
     /// The query failed/aborted: clear the in-flight flag, honour any queue.
@@ -5120,5 +5369,247 @@ mod theme10_new_designs_gate {
             .expect("opencode2 resolves while gated");
         assert_eq!(n_2.name, "opencode2");
         assert_ne!(n_2.palette, d_open.palette);
+    }
+}
+
+// ── THEME-13: cached-palette cold start + persistence ──────────────────
+#[cfg(test)]
+mod theme13_palette_cache_tests {
+    use super::*;
+    use serde_json::json;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+
+    fn hex(token: &str) -> [u8; 4] {
+        parse_color(token).expect("test hex token")
+    }
+
+    fn temp_dir() -> std::path::PathBuf {
+        let id = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "oc-theme13-rt-{}-{id}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn full_palette() -> TerminalPalette {
+        TerminalPalette::new(
+            Some(hex("#ffffff")),
+            Some(hex("#101010")),
+            (0..16u16).map(|index| [index as u8, 0, 0, 0x80]).collect(),
+        )
+    }
+
+    /// The literal THEME-13 mechanism: a cached palette passed as
+    /// `cold_start(Some(cached), ..)` paints a `system` theme on the very first
+    /// frame (no OSC reply, no blocking wait), and a later `Usable` reply is
+    /// persisted beside `theme_mode` without erasing the real indexed slots.
+    #[test]
+    fn theme13_some_cache_paints_first_frame_and_persists_reply() {
+        crate::native_ui_preferences::clear_active_state_path();
+        let dir = temp_dir();
+        let path = dir.join("state/kv.json");
+        crate::native_ui_preferences::UiPreferences::persist_theme(&path, Some("system")).unwrap();
+        crate::native_ui_preferences::UiPreferences::persist_terminal_palette(&path, &full_palette())
+            .unwrap();
+
+        let mut probe = SystemThemeState::cold_start(Some(full_palette()), None, ThemeMode::Light)
+            .with_cache_path(path.clone());
+        assert!(!probe.uses_fallback(), "cached palette paints on first frame");
+        let first = probe.system_theme().expect("system palette on first frame");
+        assert_eq!(first.get(Slot::Primary), [6, 0, 0, 0x80]);
+        assert_eq!(first.get(Slot::Error), [1, 0, 0, 0x80]);
+        assert_eq!(first.get(Slot::Warning), [3, 0, 0, 0x80]);
+        assert_eq!(first.get(Slot::Success), [2, 0, 0, 0x80]);
+        assert_eq!(first.get(Slot::Background)[3], 0, "alpha 0 stays 0");
+        assert_eq!(probe.mode(), ThemeMode::Dark, "cached dark bg wins over startup light");
+        assert_eq!(probe.request_probe(), ProbeOutcome::Idle, "no query before paint");
+
+        assert_eq!(probe.after_paint(), ProbeOutcome::Started);
+        // Shipping OSC 10/11-only reply: updates fg/bg, keeps 16 real slots.
+        assert_eq!(
+            probe.palette_reply(TerminalPalette::new(
+                Some(hex("#000000")),
+                Some(hex("#fefefe")),
+                Vec::new(),
+            )),
+            ProbeOutcome::Usable,
+        );
+        let retained = probe.cached().expect("palette retained on reply");
+        assert_eq!(retained.palette.len(), 16);
+        assert_eq!(retained.palette[6], [6, 0, 0, 0x80], "real accent slot survives");
+        assert_eq!(retained.default_background, Some(hex("#fefefe")));
+        let persisted = crate::native_ui_preferences::UiPreferences::cached_terminal_palette(&path)
+            .expect("reply persisted next to theme_mode");
+        assert_eq!(persisted.default_background, Some(hex("#fefefe")));
+        assert_eq!(persisted.palette[6], [6, 0, 0, 0x80]);
+
+        // Next cold start paints immediately with the persisted real palette;
+        // its background is now the light `#fefefe` reported by the reply.
+        let second = SystemThemeState::cold_start(Some(persisted), None, ThemeMode::Light);
+        assert!(!second.uses_fallback());
+        assert_eq!(second.mode(), ThemeMode::Light);
+
+        std::fs::remove_dir_all(dir).unwrap();
+        crate::native_ui_preferences::clear_active_state_path();
+    }
+
+    /// The codec is bounded and fail-closed: only the exact three-key shape is
+    /// accepted, channels are integers 0..255, at most 16 slots, alpha 0 kept.
+    #[test]
+    fn theme13_palette_codec_is_bounded_and_fail_closed() {
+        let palette = TerminalPalette::new(
+            Some(hex("#ffffff")),
+            Some(hex("#0a0a0a")),
+            vec![hex("#000000"), hex("#800000"), hex("#008000")],
+        );
+        let encoded = palette.to_json();
+        assert_eq!(TerminalPalette::from_json(&encoded).unwrap(), palette);
+        assert_eq!(encoded["palette"].as_array().map_or(0, Vec::len), 3);
+
+        let mut wrong_channels = encoded.clone();
+        wrong_channels["palette"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!([1, 2, 3, 4, 5]));
+        assert!(TerminalPalette::from_json(&wrong_channels).is_err());
+
+        let mut unknown = encoded.clone();
+        unknown["extra"] = json!(1);
+        assert!(TerminalPalette::from_json(&unknown).is_err(), "unknown key refused");
+
+        let mut too_large = encoded.clone();
+        too_large["foreground"] = json!([0, 0, 0, 256]);
+        assert!(TerminalPalette::from_json(&too_large).is_err());
+
+        let mut negative = encoded.clone();
+        negative["background"] = json!([0, 0, 0, -1]);
+        assert!(TerminalPalette::from_json(&negative).is_err());
+
+        assert!(TerminalPalette::from_json(&json!([])).is_err(), "root must be an object");
+        let too_many = json!({
+            "foreground": null,
+            "background": null,
+            "palette": (0..20).map(|_| json!([0, 0, 0, 255])).collect::<Vec<_>>(),
+        });
+        assert!(TerminalPalette::from_json(&too_many).is_err(), "at most 16 slots");
+        let float_channel = json!({
+            "foreground": [0, 0, 0, 1.5],
+            "background": null,
+            "palette": [],
+        });
+        assert!(TerminalPalette::from_json(&float_channel).is_err(), "integer channels only");
+        let null_slot = json!({
+            "foreground": null,
+            "background": null,
+            "palette": [null],
+        });
+        assert!(TerminalPalette::from_json(&null_slot).is_err(), "slots cannot be null");
+
+        let transparent = TerminalPalette::new(
+            Some([1, 2, 3, 0]),
+            Some([4, 5, 6, 0]),
+            vec![[7, 8, 9, 0]],
+        );
+        assert_eq!(
+            TerminalPalette::from_json(&transparent.to_json()).unwrap(),
+            transparent,
+            "alpha 0 preserved through the codec"
+        );
+    }
+
+    /// The 16-color query frame and the indexed-reply decoder are bounded.
+    #[test]
+    fn theme13_osc_query_and_reply_decode_are_bounded() {
+        let frame = osc_palette_query_frame();
+        assert!(frame.starts_with(b"\x1b]10;?\x07\x1b]11;?\x07"));
+        assert!(frame.ends_with(b"\x1b]4;15;?\x07"));
+        assert_eq!(frame.iter().filter(|byte| **byte == 7).count(), 18, "10/11 + 16 queries");
+
+        let replies = [(3u16, [0x12u8, 0x34, 0x56, 0x80]), (99, [1, 2, 3, 4])];
+        let decoded = TerminalPalette::from_osc_replies(
+            Some(hex("#ffffff")),
+            Some(hex("#0a0a0a")),
+            &replies,
+        );
+        assert_eq!(decoded.palette.len(), 16);
+        assert_eq!(decoded.palette[3], [0x12, 0x34, 0x56, 0x80]);
+        assert_eq!(decoded.palette[0], ansi_to_rgba(0), "missing slot keeps ANSI default");
+        assert_eq!(decoded.palette[15], ansi_to_rgba(15), "indexes bounded to 0..16");
+        assert_eq!(decoded.default_foreground, Some(hex("#ffffff")));
+        assert!(decoded.usable());
+    }
+
+    /// Real indexed OSC 4 slots drive the accent roles, survive a later partial
+    /// reply, and are persisted for the next cold start with full 16-slot shape.
+    #[test]
+    fn theme13_osc4_slots_survive_partial_reply_and_cold_start() {
+        crate::native_ui_preferences::clear_active_state_path();
+        let dir = temp_dir();
+        let path = dir.join("state/kv.json");
+
+        let mut probe = SystemThemeState::cold_start(None, None, ThemeMode::Dark)
+            .with_cache_path(path.clone());
+        assert!(probe.uses_fallback(), "fresh install has no cache");
+        assert_eq!(probe.after_paint(), ProbeOutcome::Started);
+        let indexed = (0..16u16).map(|index| (index, [index as u8, 0, 0, 0x80])).collect::<Vec<_>>();
+        assert_eq!(
+            probe.palette_osc4_reply(Some(hex("#ffffff")), Some(hex("#101010")), &indexed),
+            ProbeOutcome::Usable,
+        );
+        let live = probe.system_theme().expect("live system theme");
+        assert_eq!(live.get(Slot::Primary), [6, 0, 0, 0x80]);
+        assert_eq!(live.get(Slot::Error), [1, 0, 0, 0x80]);
+        assert_eq!(live.get(Slot::Warning), [3, 0, 0, 0x80]);
+        assert_eq!(live.get(Slot::Success), [2, 0, 0, 0x80]);
+
+        // A later OSC 10/11-only reply updates fg/bg but keeps the real slots.
+        assert_eq!(probe.request_probe(), ProbeOutcome::Started);
+        assert_eq!(
+            probe.palette_reply(TerminalPalette::new(
+                Some(hex("#000000")),
+                Some(hex("#eeeeee")),
+                Vec::new(),
+            )),
+            ProbeOutcome::Usable,
+        );
+        let persisted = crate::native_ui_preferences::UiPreferences::cached_terminal_palette(&path)
+            .expect("persisted palette");
+        assert_eq!(persisted.palette.len(), 16);
+        assert_eq!(persisted.palette[6], [6, 0, 0, 0x80]);
+        assert_eq!(persisted.default_background, Some(hex("#eeeeee")));
+
+        let second = SystemThemeState::cold_start(Some(persisted), None, ThemeMode::Light);
+        assert!(!second.uses_fallback());
+        assert_eq!(second.system_theme().unwrap().get(Slot::Primary), [6, 0, 0, 0x80]);
+
+        std::fs::remove_dir_all(dir).unwrap();
+        crate::native_ui_preferences::clear_active_state_path();
+    }
+
+    /// A `system` boot consumes the staged cache exactly once in the first
+    /// `builtin_default` resolution; every later resolution stays the shipped
+    /// default. Explicit non-system boots never consume it.
+    #[test]
+    fn theme13_builtin_default_consumes_cached_system_palette_once() {
+        crate::native_ui_preferences::clear_active_state_path();
+        let shipped = RuntimeTheme::builtin_default(ThemeMode::Dark);
+        assert_eq!(shipped.name, "opencode");
+
+        crate::native_ui_preferences::set_boot_cached_palette(Some(full_palette()));
+        crate::native_ui_preferences::set_system_theme_active(true);
+
+        let first = RuntimeTheme::builtin_default(ThemeMode::Light);
+        assert_eq!(first.name, "system", "first frame paints the cached system palette");
+        assert_eq!(first.mode, ThemeMode::Dark, "cached dark bg wins over startup light");
+        assert_eq!(first.palette.get(Slot::Primary), [6, 0, 0, 0x80]);
+        assert_eq!(first.palette.get(Slot::Background)[3], 0, "alpha 0 stays 0");
+
+        let again = RuntimeTheme::builtin_default(ThemeMode::Dark);
+        assert_eq!(again, shipped, "cache consumed once; later resolutions unchanged");
+        crate::native_ui_preferences::clear_active_state_path();
     }
 }
