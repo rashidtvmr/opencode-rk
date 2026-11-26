@@ -5673,6 +5673,23 @@ mod theme16_selection_copy_tests {
     }
 
     #[test]
+    fn theme16_selection_cell_set_clips_multirow_spans() {
+        // Each selected row paints independently and every span width is
+        // clipped to the visible viewport, so an off-screen tail can never
+        // recolor a cell the renderer did not paint.
+        let cells = selection_cell_set(&[(0, 1, 3), (2, 0, 2), (3, 19, 4)], 20);
+        assert!(cells.contains(&(0, 1)) && cells.contains(&(0, 2)) && cells.contains(&(0, 3)));
+        assert!(!cells.contains(&(0, 4)), "span width is honored exactly");
+        assert!(cells.contains(&(2, 0)) && cells.contains(&(2, 1)), "multi-row spans paint");
+        assert!(cells.contains(&(3, 19)), "clip to the last visible column");
+        assert!(!cells.contains(&(3, 20)) && !cells.contains(&(3, 21)));
+
+        // A span whose start is already past the viewport paints nothing.
+        let off = selection_cell_set(&[(1, 25, 3)], 20);
+        assert!(off.is_empty(), "an off-screen start never paints a clipped cell");
+    }
+
+    #[test]
     fn theme16_copy_path_surfaces_the_copy_toast() {
         // Both copy sites funnel through `copy_selection_to_clipboard`, so the
         // same "Copied to clipboard" feedback is shown whether the copy came
