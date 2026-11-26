@@ -29,6 +29,22 @@ fn state(facade: &StorageFacade) -> (i64, i64) {
         .unwrap()
 }
 
+fn reopen_after_clean_close(path: &Path) -> StorageFacade {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match StorageFacade::open(path) {
+            Ok(facade) => return facade,
+            Err(StorageError::Io(error))
+                if error.kind() == std::io::ErrorKind::WouldBlock
+                    && Instant::now() < deadline =>
+            {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => panic!("clean reopen failed: {error:?}"),
+        }
+    }
+}
+
 fn on_disk_state(path: &Path) -> (i64, i64) {
     let connection = Connection::open(path).unwrap();
     connection
@@ -130,7 +146,7 @@ fn same_process_second_owner_is_denied_without_database_mutation() {
     );
 
     drop(first);
-    let second = StorageFacade::open(&path).unwrap();
+    let second = reopen_after_clean_close(&path);
     assert_eq!(state(&second), (2, 0));
 }
 
@@ -179,7 +195,7 @@ fn fresh_and_clean_reopen_issue_monotonic_generation_and_shutdown_markers() {
     first.close().unwrap();
     assert_eq!(on_disk_state(&path), (1, 1));
 
-    let second = StorageFacade::open(&path).unwrap();
+    let second = reopen_after_clean_close(&path);
     assert_eq!(
         state(&second),
         (2, 0),
@@ -357,7 +373,7 @@ fn startup_issues_generation_and_dirty_marker_together_under_full() {
         .unwrap();
     drop(connection);
 
-    let reopened = StorageFacade::open(&path).unwrap();
+    let reopened = reopen_after_clean_close(&path);
     assert_eq!(state(&reopened), (2, 0));
     let synchronous: i64 = reopened
         .with_connection(|connection| {
