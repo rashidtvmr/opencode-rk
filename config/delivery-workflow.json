@@ -20,7 +20,7 @@
   "routes": [
     {
       "agent": "opencode-go-hy4-flash-free",
-      "max_parallel": 8
+      "max_parallel": 4
     },
     {
       "agent": "general",
