@@ -607,7 +607,7 @@ def _revision_authorized(repo, revision, ws, stage, task=None, workspace=None):
     return False
 
 
-def _select_feature_ref(store, task_id):
+def _select_feature_ref(store, task_id, grant=None, valid=lambda: True):
     ws = _ws_cfg(store)
     refs = list(ws.get("feature_refs") or [])
     if not refs and ws.get("author_ref"):
@@ -627,6 +627,11 @@ def _select_feature_ref(store, task_id):
             if owner.get("task") == task_id and owner.get("feature_ref") == ref:
                 if not _registered_worktree_entry(repo, path):
                     raise Failure("owned author workspace is not an exact registered worktree", "authority")
+                # A failed attempt may leave out-of-grant staged/index bytes.
+                # Preserve that worktree untouched and allocate a fresh ref for
+                # the retry instead of refusing the whole task forever.
+                if _dirty_state(path, valid, grant):
+                    continue
                 return ref, path
     # 2) allocate the first entirely unused enumerated slot.
     #
@@ -644,6 +649,8 @@ def _select_feature_ref(store, task_id):
                 raise Failure("workspace slot is occupied by an unregistered/ambiguous path", "authority")
             owner = _load_owner(path) or {}
             if owner.get("task") == task_id:
+                if _dirty_state(path, valid, grant):
+                    continue
                 return ref, path
             continue
         # A missing directory does not make an existing branch ref unused. The
@@ -698,7 +705,7 @@ def _ensure_author_worktree(store, job, revision, valid):
     else:
         if retained is not None:
             raise Failure("retained package does not match its exact owner authorization", "authority")
-        feature_ref, path = _select_feature_ref(store, task_id)
+        feature_ref, path = _select_feature_ref(store, task_id, grant, valid)
     if not _revision_authorized(repo, revision, ws, "implement", task=task_id, workspace=str(path)):
         raise Failure("requested revision/base is not authorized by allowed refs", "authority")
     path.parent.mkdir(parents=True, exist_ok=True)

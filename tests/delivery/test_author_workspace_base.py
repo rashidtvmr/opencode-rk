@@ -37,6 +37,30 @@ class AuthorWorkspaceBaseTests(unittest.TestCase):
             self.assertEqual(ref, "refs/heads/recovery/feature-02")
             self.assertFalse(path.exists())
 
+    def test_dirty_owned_workspace_is_preserved_and_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            repo, base = self.make_repo(root)
+            git = Git(repo)
+            wsroot = root / "workspaces"
+            wsroot.mkdir()
+            owned = wsroot / "author-feature-01"
+            git.run("worktree", "add", "-b", "recovery/feature-01", str(owned), base)
+            (owned / ".delivery-owner.json").write_text(
+                '{"task":"T-1","feature_ref":"refs/heads/recovery/feature-01"}'
+            )
+            (owned / "outside.txt").write_text("preserve me")
+            store = Store(root / "state")
+            store.meta("repo", str(repo))
+            store.meta("config", {"workspaces": {
+                "root": str(wsroot),
+                "feature_refs": ["refs/heads/recovery/feature-01", "refs/heads/recovery/feature-02"],
+            }})
+            ref, path = _select_feature_ref(store, "T-1", ["src/*"])
+            self.assertEqual(ref, "refs/heads/recovery/feature-02")
+            self.assertFalse(path.exists())
+            self.assertEqual((owned / "outside.txt").read_text(), "preserve me")
+
     def test_read_tree_reset_seeds_private_index_and_worktree_from_base(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
