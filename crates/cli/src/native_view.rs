@@ -8822,6 +8822,15 @@ mod live_diff_panel_tests {
         assert!(explicit.tabs_visible());
         hidden.close_diff_panel();
         assert!(hidden.tabs_visible());
+
+        // The other half of `app.tsx:615-619` is `tabsAvailable`. With no tab
+        // shell reserved at all (the default reservation, e.g. a viewport too
+        // narrow to fit one) the tabs stay hidden even though no panel is
+        // fullscreen — the decision is a conjunction, not just the panel flag.
+        let mut no_shell = NativeView::new(150, 40);
+        no_shell.set_session_route(true);
+        assert!(!no_shell.diff_panel_open(), "no panel is open");
+        assert!(!no_shell.tabs_visible(), "no tab shell means no tabs");
     }
 }
 
