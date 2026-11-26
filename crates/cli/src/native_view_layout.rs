@@ -1319,8 +1319,9 @@ pub const fn default_pane_width(available: u16) -> u16 {
 ///   the sidebar; an explicit open always shows it; otherwise the `auto`
 ///   default shows it only while `wide` — `width - verticalTabsWidth > 120`
 ///   (`:106`, strict at 120; [`session_wide`]).
-/// - precedence (`:115-120`, [`right_pane`]): an active panel (oc2's dock)
-///   wins, then the sidebar, then a terminal.
+/// - precedence (`:115-120`, [`right_pane`]): an active `session.panel` (oc2's
+///   `/diff` panel, NOT the auxiliary composer dock) wins, then the sidebar,
+///   then a terminal.
 /// - docked geometry (`:326-336`): the right pane is a non-shrinking flex
 ///   sibling (`flexShrink={0}`, width [`SESSION_SIDEBAR_WIDTH`] for the
 ///   sidebar) while `#session-pane` shrinks with it (`flexGrow={1}
@@ -1355,6 +1356,13 @@ pub struct SessionPaneLayout {
 /// oc2's routing fact: the sidebar lives inside the session frame
 /// (`session-frame.tsx` renders it), so a non-session route (home) never
 /// reserves the pane — the reviewed LAY-08 `sidebar_visible` gate.
+///
+/// `panel_open` is the real `session.panel` fact (oc2's `/diff` panel), never
+/// the auxiliary composer dock: opening the dock can never suppress the
+/// sidebar. This retained nine-argument entry models oc2's lack of a
+/// right-pane terminal by forwarding `false` for the terminal-selected fact;
+/// the live renderer uses [`session_pane_layout_focused`], which threads it
+/// explicitly.
 #[must_use]
 pub fn session_pane_layout(
     cols: u16,
@@ -1364,7 +1372,43 @@ pub fn session_pane_layout(
     parent_session: bool,
     sidebar_open: bool,
     sidebar_hidden: bool,
-    dock_open: bool,
+    panel_open: bool,
+    pane_resize: u16,
+) -> SessionPaneLayout {
+    session_pane_layout_focused(
+        cols,
+        tab_offset,
+        rows,
+        session_route,
+        parent_session,
+        sidebar_open,
+        sidebar_hidden,
+        panel_open,
+        false,
+        pane_resize,
+    )
+}
+
+/// LAY-11: the single-source right-pane geometry resolver with the
+/// terminal-selected fact threaded explicitly, mirroring upstream's
+/// `rightPane(panel, sidebar, terminal)` (`session-frame.tsx:114-120`).
+///
+/// `panel_open` is the real `session.panel` fact (oc2's `/diff` panel), never
+/// the auxiliary composer dock: opening the dock can therefore never suppress
+/// the sidebar. `terminal_selected` is the selected-terminal fact the old
+/// renderer hard-coded to `false`; `pane_resize` is a real docked width instead
+/// of the old literal `0` (`session-frame.tsx:326-336`, [`right_pane_width`]).
+#[must_use]
+pub fn session_pane_layout_focused(
+    cols: u16,
+    tab_offset: u16,
+    rows: u16,
+    session_route: bool,
+    parent_session: bool,
+    sidebar_open: bool,
+    sidebar_hidden: bool,
+    panel_open: bool,
+    terminal_selected: bool,
     pane_resize: u16,
 ) -> SessionPaneLayout {
     // Visibility (`session-frame.tsx:109-115`): the session frame owns the
@@ -1376,7 +1420,7 @@ pub fn session_pane_layout(
         && !parent_session
         && rows >= 2
         && (sidebar_open || (!sidebar_hidden && wide));
-    let pane = right_pane(dock_open, sidebar_open, sidebar_visible, false);
+    let pane = right_pane(panel_open, sidebar_open, sidebar_visible, terminal_selected);
     let pane_width = right_pane_width(pane, pane_resize);
     // A terminal/panel pane is always a docked sibling
     // (`session-frame.tsx:326-336`); the sidebar docks only while wide and
@@ -2517,6 +2561,37 @@ mod tests {
         assert_eq!(default_pane_width(120), 60);
         assert_eq!(default_pane_width(1), 1);
         assert_eq!(default_pane_width(0), 1);
+    }
+
+    /// LAY-11: the focused geometry entry threads the terminal-selected fact
+    /// and a real pane width (the two values the pre-fix renderer hard-coded
+    /// as `false`/`0`). A selected terminal docks at the real resize width and
+    /// shrinks the main column; panel/sidebar still win by precedence. The
+    /// retained nine-argument entry keeps modelling oc2's no-terminal reality.
+    /// `component/session-frame.tsx:114-120,326-336`.
+    #[test]
+    fn lay_11_focused_entry_threads_terminal_fact_and_real_pane_width() {
+        let terminal = session_pane_layout_focused(140, 0, 40, true, false, false, true, false, true, 48);
+        assert_eq!(terminal.sidebar_width, 48, "the real pane width is threaded, not 0");
+        assert_eq!(terminal.sidebar_offset, Some(140 - 48));
+        assert_eq!(terminal.main_width, 140 - 48);
+        assert!(terminal.docked);
+
+        // A real panel outranks a simultaneously selected terminal.
+        let panel = session_pane_layout_focused(140, 0, 40, true, false, false, true, true, true, 48);
+        assert_eq!(panel.sidebar_width, 48);
+        assert!(panel.docked);
+
+        // An explicit sidebar outranks the terminal and keeps its fixed width.
+        let sidebar = session_pane_layout_focused(140, 0, 40, true, false, true, false, false, true, 48);
+        assert_eq!(sidebar.sidebar_width, SESSION_SIDEBAR_WIDTH);
+        assert!(sidebar.docked);
+
+        // The retained entry models no right-pane terminal: the hidden
+        // sidebar resolves to no pane, so no width/offset is reserved.
+        let legacy = session_pane_layout(140, 0, 40, true, false, false, true, false, 48);
+        assert_eq!(legacy.sidebar_width, 0);
+        assert_eq!(legacy.sidebar_offset, None);
     }
 
     /// LAY-16. Scrollbar reservations: the transcript loses the viewport

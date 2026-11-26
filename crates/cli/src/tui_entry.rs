@@ -445,6 +445,322 @@ fn leader_followup_pane_event(
     }
 }
 
+/// The live input the focused-pane overlay is arbitrating (LAY-12).
+#[cfg(feature = "native")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PaneGateEvent {
+    /// Enter reaching a permission prompt, its rejection editor or composer.
+    Enter,
+    /// A primary mouse-down (pointer kind 0) that could answer a covered
+    /// prompt through one of its click targets.
+    Press,
+    /// A backdrop mouse-up (pointer kind 2) that would dismiss/answer a prompt.
+    BackdropRelease,
+    /// A wheel event (pointer kinds 3 | 4) over the transcript column.
+    Wheel,
+}
+
+/// LAY-12: build the pane focus guard from the LIVE presentation and the real
+/// focus/fullscreen/sidebar facts. A fresh guard is taken at every event
+/// boundary because `guard_click_release` mutates focus, so a guard is never
+/// reused across events. `component/session-frame.tsx:287`.
+#[cfg(feature = "native")]
+fn live_pane_focus_guard(
+    view: &crate::native_view::NativeView,
+) -> crate::native_pane_resize::PaneFocusGuard {
+    use crate::native_pane_resize::PaneFocusGuard;
+    let presentation = view.presentation();
+    let mut guard = PaneFocusGuard::new(presentation.transcript_rect());
+    // `useInteractivity` off means a right pane holds focus: the overlay is up.
+    if !view.rail_interactive() {
+        guard.focus_right();
+    }
+    // A fullscreen panel forces the right pane and refuses session focus even
+    // while `rail_interactive` is still set (`session-frame.tsx:131-155`).
+    if view.diff_panel_fullscreen() {
+        guard.set_fullscreen(true);
+    }
+    // The right pane is the sidebar only when one actually resolved and no
+    // panel owns the slot; focusing inside it never activates the right pane.
+    guard.set_right_pane_is_sidebar(
+        !view.diff_panel_open() && presentation.sidebar_offset.is_some(),
+    );
+    guard
+}
+
+/// LAY-12: the single input-gate choke point for the focused-pane overlay.
+/// Returns `true` when the overlay consumed the event (it must not reach a
+/// covered permission prompt or scroll the transcript), `false` when normal
+/// routing proceeds. Enter uses `guard_enter`; mouse-down/release use
+/// `guard_click_release`; wheel is forwarded only through `guard_wheel`.
+#[cfg(feature = "native")]
+fn pane_overlay_consumes(
+    guard: &mut crate::native_pane_resize::PaneFocusGuard,
+    event: PaneGateEvent,
+    x: u16,
+    y: u16,
+) -> bool {
+    use crate::native_pane_resize::GuardedAction;
+    match event {
+        PaneGateEvent::Enter => matches!(guard.guard_enter(), GuardedAction::Consumed),
+        PaneGateEvent::Press => {
+            !matches!(guard.guard_click_release(), GuardedAction::Forwarded)
+        }
+        PaneGateEvent::BackdropRelease => {
+            !matches!(guard.guard_click_release(), GuardedAction::Forwarded)
+        }
+        PaneGateEvent::Wheel => matches!(guard.guard_wheel(x, y), GuardedAction::Consumed),
+    }
+}
+
+/// LAY-12: when the overlay consumed a release it returns focus to the session
+/// pane (`focusSession`). Mirror that fact back into the live view so the next
+/// event is routed normally; a fullscreen panel keeps refusing session focus.
+#[cfg(feature = "native")]
+fn sync_focus_after_release(
+    view: &mut crate::native_view::NativeView,
+    guard: &crate::native_pane_resize::PaneFocusGuard,
+) {
+    use crate::native_pane_resize::PaneSide;
+    if !view.diff_panel_fullscreen()
+        && guard.active() == PaneSide::Session
+        && !view.rail_interactive()
+    {
+        view.set_rail_interactive(true);
+    }
+}
+
+/// LAY-11 / LAY-12 live-view tests against the pinned OpenCode
+/// `450e7b92412c780a7b5a75226bb8d49aaca24e22` right-pane precedence and focus
+/// guard model (`component/session-frame.tsx:86-120,287-318`). These drive a
+/// REAL `NativeView` with a REAL open permission dialog through the exact
+/// gate helpers the live loop calls at each event boundary, taking a fresh
+/// guard per event (`guard_click_release` mutates focus, so a guard is never
+/// reused across events).
+#[cfg(all(test, feature = "native"))]
+mod lay_11_12_pane_focus_tests {
+    use super::*;
+    use crate::native_pane_resize::PaneSide;
+    use crate::native_view::NativeView;
+
+    fn session_view() -> NativeView {
+        let mut view = NativeView::new(100, 40);
+        view.set_session_route(true);
+        view
+    }
+
+    /// Open a real permission prompt with a child-session parent so the nested
+    /// rejection editor (the exact Enter path the live loop also guards) can
+    /// be entered.
+    fn open_child_permission(view: &mut NativeView) {
+        view.dialogs
+            .open_permission("req-1", "sess-1", "Allow tool?")
+            .expect("permission dialog opens");
+        view.dialogs.set_permission_session_has_parent(true);
+    }
+
+    /// LAY-12 (security): with a real permission dialog OPEN and a focused
+    /// right pane, Enter is consumed and the prompt stays unanswered -- both
+    /// on the direct confirm path and on the child rejection-editor path. Only
+    /// after focus returns to the session pane can Enter answer it.
+    #[test]
+    fn right_pane_focus_guard_blocks_enter_into_a_live_permission_prompt() {
+        let mut view = session_view();
+        open_child_permission(&mut view);
+        assert!(view.dialogs.intercepts_input());
+        assert!(!view.dialogs.pending());
+
+        // `<leader>right` drops session interactivity; overlay is up.
+        view.set_rail_interactive(false);
+        assert!(pane_overlay_consumes(
+            &mut live_pane_focus_guard(&view),
+            PaneGateEvent::Enter,
+            0,
+            0,
+        ));
+        assert!(!view.dialogs.pending(), "permission prompt was not answered");
+        assert_eq!(
+            view.dialogs.open_kind(),
+            Some(crate::native_view_dialogs::DialogKind::Permission)
+        );
+
+        // The nested rejection editor is the path that previously leaked:
+        // choosing reject then focusing right, Enter cannot confirm it.
+        assert!(view.dialogs.escape_reject_stage());
+        assert!(view.dialogs.reject_stage());
+        assert!(pane_overlay_consumes(
+            &mut live_pane_focus_guard(&view),
+            PaneGateEvent::Enter,
+            0,
+            0,
+        ));
+        assert!(view.dialogs.reject_stage(), "reject stage still pending");
+        assert!(!view.dialogs.pending());
+
+        // Restore the plain prompt and session focus: Enter reaches it again.
+        // A permission prompt starts unselected, so make an explicit choice
+        // exactly as the live digit/row path would before confirming.
+        assert!(view.dialogs.cancel_reject_stage());
+        view.set_rail_interactive(true);
+        assert!(!pane_overlay_consumes(
+            &mut live_pane_focus_guard(&view),
+            PaneGateEvent::Enter,
+            0,
+            0,
+        ));
+        assert!(view.dialogs.select(0), "an enabled choice can be selected");
+        assert!(view.dialogs.answer().is_ok(), "session focus can answer");
+        assert!(view.dialogs.pending());
+    }
+
+    /// LAY-12 (security): with a real permission dialog OPEN and a focused
+    /// right pane, a press is consumed by the overlay WITHOUT letting it
+    /// answer/dismiss the prompt, and focus returns to the session pane. The
+    /// same gate shields the separate permission-answer editor surface.
+    #[test]
+    fn right_pane_focus_guard_blocks_click_into_a_live_permission_prompt() {
+        let mut view = session_view();
+        open_child_permission(&mut view);
+        view.set_rail_interactive(false);
+
+        // Press in the covered session column is consumed; guard_click_release
+        // returns focus to the session pane and the prompt stays unanswered.
+        let mut guard = live_pane_focus_guard(&view);
+        assert!(pane_overlay_consumes(&mut guard, PaneGateEvent::Press, 10, 10));
+        assert_eq!(guard.active(), PaneSide::Session);
+        sync_focus_after_release(&mut view, &guard);
+        assert!(view.rail_interactive());
+        assert!(!view.dialogs.pending(), "press did not answer the prompt");
+
+        // Backdrop release while right-focused: consumed by the guard, focus
+        // returns to session, and the live dialog is still pending.
+        view.set_rail_interactive(false);
+        let mut guard = live_pane_focus_guard(&view);
+        assert!(pane_overlay_consumes(
+            &mut guard,
+            PaneGateEvent::BackdropRelease,
+            0,
+            0,
+        ));
+        assert_eq!(guard.active(), PaneSide::Session);
+        sync_focus_after_release(&mut view, &guard);
+        assert!(view.rail_interactive());
+        assert!(!view.dialogs.pending(), "backdrop cannot dismiss the prompt");
+    }
+
+    /// LAY-12: wheel events inside the transcript viewport are forwarded while
+    /// a right pane holds focus; wheel events outside it are consumed. Session
+    /// focus forwards every wheel.
+    #[test]
+    fn right_pane_focus_guard_forwards_transcript_wheel_only() {
+        let mut view = session_view();
+        view.set_rail_interactive(false);
+        let rect = view.presentation().transcript_rect();
+        assert!(rect.width > 2, "the transcript column must have usable width");
+        // Focused right pane: a wheel inside the transcript viewport is
+        // forwarded, one outside it (the composer gutter) is consumed.
+        assert!(!pane_overlay_consumes(
+            &mut live_pane_focus_guard(&view),
+            PaneGateEvent::Wheel,
+            rect.x + 1,
+            rect.y + 1,
+        ));
+        assert!(pane_overlay_consumes(
+            &mut live_pane_focus_guard(&view),
+            PaneGateEvent::Wheel,
+            view.presentation().cols - 1,
+            rect.y + 1,
+        ));
+        // Session focus forwards every wheel.
+        view.set_rail_interactive(true);
+        assert!(!pane_overlay_consumes(
+            &mut live_pane_focus_guard(&view),
+            PaneGateEvent::Wheel,
+            view.presentation().cols - 1,
+            rect.y + 1,
+        ));
+    }
+
+    /// LAY-12: a fullscreen panel forces the right pane and refuses session
+    /// focus even while `rail_interactive` is still set, keeping Enter gated.
+    #[test]
+    fn lay_12_fullscreen_panel_keeps_enter_gated() {
+        let mut view = session_view();
+        view.toggle_diff_panel(Some("patch".to_owned()), true);
+        assert!(view.diff_panel_fullscreen());
+        assert!(view.rail_interactive());
+        let mut guard = live_pane_focus_guard(&view);
+        assert_eq!(guard.active(), PaneSide::Right);
+        assert!(!guard.session_interactive());
+        assert!(!guard.focus_session());
+        assert!(pane_overlay_consumes(
+            &mut guard,
+            PaneGateEvent::Enter,
+            0,
+            0,
+        ));
+    }
+
+    /// LAY-11: the auxiliary dock is not the upstream `session.panel` right
+    /// pane, so opening it must not suppress the sidebar geometry; precedence
+    /// still resolves to exactly one pane.
+    #[test]
+    fn lay_11_dock_does_not_take_the_right_pane_slot() {
+        let mut view = NativeView::new(160, 30);
+        view.set_session_route(true);
+        let before = view.presentation();
+        assert!(before.sidebar_offset.is_some(), "wide session has a sidebar");
+
+        view.toggle_dock();
+        assert!(view.dock_open());
+        let after = view.presentation();
+        assert_eq!(
+            after.sidebar_offset, before.sidebar_offset,
+            "the dock does not remove the sidebar pane"
+        );
+        assert_eq!(after.sidebar_width, before.sidebar_width);
+
+        // Source precedence: panel > explicit sidebar > terminal > auto, and
+        // exactly one pane is returned for any combination of facts.
+        assert_eq!(
+            crate::native_view_layout::right_pane(false, true, true, false),
+            crate::native_view_layout::RightPane::Sidebar,
+        );
+        assert_eq!(
+            crate::native_view_layout::right_pane(true, true, true, true),
+            crate::native_view_layout::RightPane::Panel,
+        );
+        assert_eq!(
+            crate::native_view_layout::right_pane(false, false, true, true),
+            crate::native_view_layout::RightPane::Terminal,
+        );
+    }
+
+    /// LAY-11: the LIVE renderer (not just `presentation()`) publishes sidebar
+    /// spans while the auxiliary dock is open, because the two geometry call
+    /// sites consume the same real-panel precedence authority. This is the
+    /// painted-frame assertion the earlier presentation-only test lacked.
+    #[test]
+    fn lay_11_render_paints_sidebar_spans_when_dock_is_open() {
+        let mut view = NativeView::new(160, 30);
+        view.set_session_route(true);
+        view.apply_mcp(&serde_json::json!({
+            "status": {"alpha": {"status": "connected"}},
+            "included": {"alpha": true}
+        }))
+        .expect("mcp applies");
+        view.toggle_dock();
+        assert!(view.dock_open());
+        let frame = view.render("draft", &[], false, &[]);
+        assert_eq!(frame.len(), 30);
+        assert!(
+            !view.sidebar_span_styles().is_empty(),
+            "the live renderer paints the sidebar while the dock is open"
+        );
+        assert_eq!(view.presentation().sidebar_width, 42);
+    }
+}
+
 #[cfg(all(test, feature = "native"))]
 mod tab23_leader_followup_tests {
     use super::{leader_followup_key, leader_followup_pane_event};
@@ -15494,6 +15810,20 @@ fn native_loop(
                 | native_input_decoder::InputEvent::ShiftEnter
                 | native_input_decoder::InputEvent::CtrlJ
                 | native_input_decoder::InputEvent::AltEnter => {
+                    // LAY-12: after choosing reject, `<leader>right` drops
+                    // session interactivity; a focused right pane's overlay
+                    // must consume Enter before it can confirm the nested
+                    // rejection editor under the overlay.
+                    if pane_overlay_consumes(
+                        &mut live_pane_focus_guard(&view),
+                        PaneGateEvent::Enter,
+                        0,
+                        0,
+                    ) {
+                        utf8.reset();
+                        needs_paint = true;
+                        continue;
+                    }
                     match view.dialogs.confirm_reject_stage() {
                         Ok(intent) => dispatch_permission_reply(
                             &mut view,
@@ -16357,6 +16687,16 @@ fn native_loop(
                     }
                     if kind == 0 && modifiers == 0 && x >= modal.content_x
                         && x < modal.content_x.saturating_add(modal.content_width) {
+                        // LAY-12: a focused right pane's overlay consumes the
+                        // press before it can select/confirm the covered
+                        // permission prompt. A release returns focus to the
+                        // session pane via the matching backdrop gate below.
+                        let mut guard = live_pane_focus_guard(&view);
+                        if pane_overlay_consumes(&mut guard, PaneGateEvent::Press, x, y) {
+                            sync_focus_after_release(&mut view, &guard);
+                            needs_paint = true;
+                            continue;
+                        }
                         if let Some(row) = row {
                             let content_x = modal.content_x;
                             let Some(col) = x.checked_sub(content_x).map(usize::from) else { continue };
@@ -16388,6 +16728,15 @@ fn native_loop(
                             || x >= modal.x.saturating_add(modal.width)
                             || y < modal.y)
                     {
+                        // LAY-12: the backdrop-release gate runs before any
+                        // cancel()/answer() so a covered permission prompt can
+                        // never be dismissed by a click landing on the overlay.
+                        let mut guard = live_pane_focus_guard(&view);
+                        if pane_overlay_consumes(&mut guard, PaneGateEvent::BackdropRelease, x, y) {
+                            sync_focus_after_release(&mut view, &guard);
+                            needs_paint = true;
+                            continue;
+                        }
                         let local_close = view.dialogs.backdrop_closes_locally();
                         if local_close {
                             view.dialogs.close();
@@ -16445,6 +16794,16 @@ fn native_loop(
                         continue;
                     }
                     if kind == 0 && modifiers == 0 {
+                        // LAY-12 (security): the permission-answer editor is a
+                        // decision surface too; a focused right pane's overlay
+                        // must not let a click answer the covered prompt through
+                        // it.
+                        let mut guard = live_pane_focus_guard(&view);
+                        if pane_overlay_consumes(&mut guard, PaneGateEvent::Press, x, y) {
+                            sync_focus_after_release(&mut view, &guard);
+                            needs_paint = true;
+                            continue;
+                        }
                         if let Some((column, row)) = modal.content_point(x, y, view.modal_content_height()) {
                             if let Some(decision) = permission_editor.click_action(column,row,modal.content_width,view.modal_content_height()) {
                                 permission_editor_request(&mut permission_editor,live.as_ref(),auth,Some(decision));
@@ -16818,6 +17177,29 @@ fn native_loop(
                             }
                         }
                     }
+                    needs_paint = true;
+                    continue;
+                }
+                // LAY-12: the focused-pane overlay gates session-pane pointer
+                // and wheel input. A covered prompt never sees a click in the
+                // session column, and only wheel events inside the transcript
+                // viewport scroll it while a right pane holds focus.
+                if kind == 0 {
+                    let mut guard = live_pane_focus_guard(&view);
+                    if pane_overlay_consumes(&mut guard, PaneGateEvent::Press, x, y) {
+                        sync_focus_after_release(&mut view, &guard);
+                        needs_paint = true;
+                        continue;
+                    }
+                }
+                if matches!(kind, 3 | 4)
+                    && pane_overlay_consumes(
+                        &mut live_pane_focus_guard(&view),
+                        PaneGateEvent::Wheel,
+                        x,
+                        y,
+                    )
+                {
                     needs_paint = true;
                     continue;
                 }
@@ -17332,6 +17714,19 @@ fn native_loop(
             continue;
         }
         if permission_editor.open && !matches!(byte,3|4) {
+            // LAY-12 (security): the number-key allow/ask/deny answers are a
+            // decision surface; a focused right pane's overlay consumes them
+            // so a covered permission prompt cannot be answered.
+            if pane_overlay_consumes(
+                &mut live_pane_focus_guard(&view),
+                PaneGateEvent::Enter,
+                0,
+                0,
+            ) {
+                utf8.reset();
+                needs_paint = true;
+                continue;
+            }
             match byte {
                 27 => permission_editor.open=false,
                 9 => permission_editor.persistent = !permission_editor.persistent,
@@ -17736,6 +18131,18 @@ fn native_loop(
                 2 => { view.dialogs.prev() }
                 b'1'..=b'9' => { view.dialogs.select(usize::from(byte - b'1')); }
                 13 | 10 => {
+                    // LAY-12: a focused right pane consumes Enter before it
+                    // can answer the permission prompt covered by the overlay.
+                    if pane_overlay_consumes(
+                        &mut live_pane_focus_guard(&view),
+                        PaneGateEvent::Enter,
+                        0,
+                        0,
+                    ) {
+                        utf8.reset();
+                        needs_paint = true;
+                        continue;
+                    }
                     // F002-R2: a child-session `reject` opens the nested
                     // rejection-reason editor instead of replying immediately
                     // (`permission.tsx:243-254`); every other confirmation
@@ -18321,6 +18728,19 @@ fn native_loop(
                     && matches!(dialog, native_setup::Dialog::None)
                     && matches!(crate::native_composer::decide_byte(byte, native_composer_keymap(keymap)), Some(crate::native_composer::KeyAction::Newline)) =>
             {
+                // LAY-12: Enter cannot insert a newline through a focused
+                // right pane's overlay -- the same guard that shields a
+                // covered permission prompt.
+                if pane_overlay_consumes(
+                    &mut live_pane_focus_guard(&view),
+                    PaneGateEvent::Enter,
+                    0,
+                    0,
+                ) {
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
                 utf8.reset();
                 if draft.len() < MAX_NATIVE_DRAFT_BYTES {
                     draft.insert(draft_cursor, '\n');
@@ -18340,6 +18760,18 @@ fn native_loop(
                 if matches!(crate::native_composer::decide_byte(byte, native_composer_keymap(keymap)), Some(crate::native_composer::KeyAction::Submit))
                 && submit_enabled(&keymap_defaults, keymap) =>
             {
+                // LAY-12: Enter cannot submit through a focused right pane's
+                // overlay (the same guard that shields a permission prompt).
+                if pane_overlay_consumes(
+                    &mut live_pane_focus_guard(&view),
+                    PaneGateEvent::Enter,
+                    0,
+                    0,
+                ) {
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
                 let Some(_submit_permit) = submit_gate.enter() else { continue };
                 crate::native_debug::event(
                     "input.enter",

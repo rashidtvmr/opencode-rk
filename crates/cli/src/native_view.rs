@@ -379,9 +379,12 @@ mod page_spacing_tests {
 
     #[test]
     fn live_render_uses_right_pane_precedence_for_open_dock() {
-        // Live effect, not a helper unit assert: the sidebar must paint while
-        // it owns the right pane and must stop painting the moment the dock
-        // takes the slot, in the SAME live renderer this gate ships in.
+        // LAY-11 supersedes the old "dock owns the slot" contract: the
+        // auxiliary composer dock is NOT the upstream `session.panel`, so it
+        // must never take the right-pane slot from the sidebar. Both geometry
+        // call sites (`presentation()` and the live renderer) consume the same
+        // precedence authority with the real panel fact (`false` here), so the
+        // painted frame and the published geometry cannot disagree.
         let mut view = NativeView::new(160, 30);
         view.set_session_route(true);
         view.apply_mcp(&serde_json::json!({
@@ -389,11 +392,10 @@ mod page_spacing_tests {
             "included": {"alpha": true}
         }))
         .unwrap();
-        // Dock closed: the sidebar auto-owns the right pane and really paints.
         assert!(view.sidebar_visible());
         assert_eq!(
             crate::native_view_layout::right_pane(
-                view.dock_open(),
+                false,
                 view.sidebar_open,
                 view.sidebar_visible(),
                 false
@@ -407,25 +409,25 @@ mod page_spacing_tests {
             "sidebar paints while it owns the right pane"
         );
         assert_eq!(view.presentation().sidebar_width, 42);
-        // Dock open: the dock owns the right pane and the sidebar must not
-        // paint (no styled spans, no painted scrollbar).
+        // Dock open: the dock does NOT own the right pane, so the sidebar
+        // keeps its spans and its geometry is unchanged.
         view.toggle_dock();
         assert!(view.dock_open());
         assert_eq!(
             crate::native_view_layout::right_pane(
-                view.dock_open(),
+                false,
                 view.sidebar_open,
                 view.sidebar_visible(),
                 false
             ),
-            RightPane::Panel
+            RightPane::Sidebar
         );
         let _open = view.render("draft", &[], false, &[]);
         assert!(
-            view.sidebar_span_styles().is_empty(),
-            "the dock owns the right pane; the sidebar must not paint spans"
+            !view.sidebar_span_styles().is_empty(),
+            "the dock does not take the right pane; the sidebar still paints"
         );
-        assert!(view.sidebar_scrollbar().is_none());
+        assert_eq!(view.presentation().sidebar_width, 42);
     }
 
     #[test]
@@ -1226,6 +1228,24 @@ pub struct ViewPresentation {
     pub sidebar_offset: Option<u16>,
     /// Sidebar width in cells (`0` when not shown).
     pub sidebar_width: u16,
+}
+
+impl ViewPresentation {
+    /// LAY-12: the transcript viewport in frame coordinates, derived from the
+    /// same geometry authority the live renderer consumes. The session column
+    /// owns the main width inside its view padding; the pane focus guard uses
+    /// this rectangle to decide which wheel events may scroll the transcript
+    /// while a right pane holds focus (`session-frame.tsx:287-306`). The full
+    /// frame height is used so every wheel over the session column resolves
+    /// inside the viewport (the composer rows simply have nothing to scroll).
+    #[must_use]
+    pub fn transcript_rect(&self) -> crate::native_pane_resize::CellRect {
+        let x = self.main_offset.saturating_add(self.main_padding);
+        let width = self
+            .main_width
+            .saturating_sub(self.main_padding.saturating_mul(2));
+        crate::native_pane_resize::CellRect::new(x, 0, width, self.rows)
+    }
 }
 
 /// Captured binding identity of one in-flight turn worker. A worker is
@@ -2099,6 +2119,15 @@ impl NativeView {
     /// disabled + DIM while a side panel/window is focused (`footer.tsx:60`).
     pub fn set_rail_interactive(&mut self, interactive: bool) {
         self.rail_interactive = interactive;
+    }
+
+    /// LAY-12: whether the session pane owns input (`useInteractivity`).
+    /// `false` means a right pane holds focus and the session-pane focus guard
+    /// is up (`session-frame.tsx:287`). Public so the live focus tests read the
+    /// same fact the loop feeds into the guard.
+    #[must_use]
+    pub const fn rail_interactive(&self) -> bool {
+        self.rail_interactive
     }
 
     /// Confirmed session cost in USD, surfaced by the right-footer status list
@@ -3171,13 +3200,17 @@ impl NativeView {
                 sidebar_width: layout.pane.width,
             };
         }
-        // RIGHT-PANEL-OVERLAP: the single-source right-pane geometry authority
-        // (`session-frame.tsx:106-120,262-336,383-391`) replaces the
-        // duplicated sidebar_wide/inline derivation. The dock is oc2's panel
-        // producer (the `right_pane` precedence below feeds the same fact),
-        // and oc2 has no resizable terminal/panel pane yet, so the resize
-        // width is 0.
-        let pane = crate::native_view_layout::session_pane_layout(
+        // LAY-11: the right-pane geometry consumes the real `session.panel`
+        // fact, not `dock_open()`. The auxiliary composer dock is not the
+        // upstream session-frame panel (the `/diff` panel is handled by its
+        // own branch above), so opening it must not suppress the sidebar. oc2
+        // has no right-pane terminal, but the terminal-selected fact and a
+        // real docked width are threaded instead of the old literal `false/0`.
+        let available = self
+            .layout
+            .cols
+            .saturating_sub(self.tab_reservation.x_offset());
+        let pane = crate::native_view_layout::session_pane_layout_focused(
             self.layout.cols,
             self.tab_reservation.x_offset(),
             self.layout.rows,
@@ -3185,8 +3218,9 @@ impl NativeView {
             self.parent_session,
             self.sidebar_open,
             self.sidebar_hidden,
-            self.dock_open(),
-            0,
+            false,
+            false,
+            crate::native_view_layout::default_pane_width(available),
         );
         // Degenerate viewports keep the reviewed `cols.min(42)` clamp: the
         // pane never claims more columns than the terminal owns.
@@ -5678,16 +5712,18 @@ impl NativeView {
             }
         }
         let sidebar_region_start = self.ui_regions.len();
-        // LAY-11: the live renderer must use the same precedence model as the
-        // session frame, rather than letting the detached shell decide which
-        // right pane wins. The dock is the native panel producer; when it is
-        // open it owns the right-pane slot and suppresses sidebar painting
-        // AND every geometry fact published for it (spans, regions, hits).
+        // LAY-11: the live renderer must use the SAME right-pane precedence
+        // authority as `presentation()` (the two geometry call sites may not
+        // disagree, or the painted frame squeezes the main column while the
+        // sidebar columns stay unpainted). The auxiliary composer dock is not
+        // the upstream `session.panel`: the real panel (`/diff`) owns its own
+        // branch above, so the dock never suppresses sidebar painting. Pass
+        // the real panel fact (`false` here), never `dock_open()`.
         let right_pane = if self.diff_panel.open {
             RightPane::Panel
         } else {
             crate::native_view_layout::right_pane(
-                self.dock_open(),
+                false,
                 self.sidebar_open,
                 self.sidebar_visible(),
                 false,
