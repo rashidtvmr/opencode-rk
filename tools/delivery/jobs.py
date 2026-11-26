@@ -1137,6 +1137,7 @@ def test_environment(home, cache, cwd, valid, needs_rust=False):
     env.update({"HOME": str(home), "XDG_DATA_HOME": str(home/"data"),
                 "XDG_STATE_HOME": str(home/"state"), "XDG_CONFIG_HOME": str(home/"config"),
                 "XDG_CACHE_HOME": str(home/"cache"), "CARGO_HOME": str(cargo),
+                "CARGO_TARGET_DIR": str(cache/"target"), "CARGO_INCREMENTAL": "0",
                 "RUSTUP_HOME": str(home/"rustup"), "RUSTUP_AUTO_INSTALL": "0"})
     rustup = shutil.which("rustup") if needs_rust else None
     if rustup:

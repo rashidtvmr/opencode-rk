@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from tools.delivery.jobs import Git, _select_feature_ref
+from tools.delivery.jobs import Git, _select_feature_ref, test_environment
 from tools.delivery.store import Store
 
 
@@ -80,6 +80,13 @@ class AuthorWorkspaceBaseTests(unittest.TestCase):
             self.assertEqual(ref, "refs/heads/recovery/feature-02")
             self.assertFalse(path.exists())
             self.assertEqual((owned / "outside.txt").read_text(), "preserve me")
+
+    def test_checks_share_one_cargo_target_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            env = test_environment(root / "home", root / "cache", root, lambda: True)
+            self.assertEqual(env["CARGO_TARGET_DIR"], str(root / "cache" / "target"))
+            self.assertEqual(env["CARGO_INCREMENTAL"], "0")
 
     def test_reset_seeds_private_branch_index_and_worktree_from_base(self):
         with tempfile.TemporaryDirectory() as tmp:

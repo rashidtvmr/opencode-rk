@@ -9,7 +9,7 @@
   "attempts": 5,
   "diagnoses": 1,
   "max_output_bytes": 8388608,
-  "min_free_bytes": 2147483648,
+  "min_free_bytes": 12884901888,
   "runtime": {
     "kind": "opencode",
     "executable": "opencode",
