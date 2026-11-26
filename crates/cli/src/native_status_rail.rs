@@ -56,6 +56,8 @@
 
 use crate::native_status::live_counts_label;
 use crate::native_theme::Rgba;
+use crate::native_theme_runtime::Slot;
+use crate::native_ui_style::{LineSpan, ATTR_BOLD, ATTR_DIM, ATTR_NONE};
 
 /// Upstream `footer.tsx:59`: `Math.max(0, dimensions().width - 8)` — the
 /// fitting width is the terminal width minus the composer's horizontal
@@ -326,6 +328,18 @@ pub fn interrupt_flash_level(animations: bool, elapsed_since_arm_ms: u64) -> f32
 #[must_use]
 fn smoothstep(progress: f32) -> f32 {
     progress * progress * (3.0 - 2.0 * progress)
+}
+
+/// Whether the armed interrupt's 0.22 s flash is currently painting, read from
+/// the caller's render clock (`index.tsx:117-136`). This is the flash *tint*
+/// window only; the arm's separate 5000 ms lifetime is owned by [`InterruptArm`]
+/// and outlives the flash. With animations disabled the window never opens, so
+/// the armed hint stays on the plain warning hue.
+#[must_use]
+pub fn flash_on(animations: bool, armed_at_ms: Option<u64>, now_ms: u64) -> bool {
+    armed_at_ms.is_some_and(|armed| {
+        interrupt_flash_level(animations, now_ms.saturating_sub(armed)) > 0.0
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -843,6 +857,25 @@ impl RailRole {
             (false, _) => RailRole::TextDisabled,
         }
     }
+
+    /// The theme slot + attributes the view paints for this role. This is the
+    /// `RailRole -> theme slot` mapping the composer footer's styled-span paint
+    /// path uses instead of one flat Metadata run (`footer.tsx:79-119`,
+    /// `index.tsx:1915-1975`). Attributes use the pinned OpenTUI bitmask from
+    /// `native_ui_style`; in particular a disabled hint keeps its text but is
+    /// painted `DIM`, and the armed interrupt keeps the warning hue with the
+    /// flash brightening inside the 0.22 s window.
+    #[must_use]
+    pub fn style(self) -> (Slot, u32) {
+        match self {
+            Self::TextBase => (Slot::Text, ATTR_NONE),
+            Self::TextMuted => (Slot::TextMuted, ATTR_NONE),
+            Self::TextDisabled => (Slot::TextMuted, ATTR_DIM),
+            Self::Accent => (Slot::Primary, ATTR_NONE),
+            Self::Warning => (Slot::Warning, ATTR_NONE),
+            Self::WarningFlash => (Slot::Warning, ATTR_BOLD),
+        }
+    }
 }
 
 /// One painted span of the rail. `text` is the exact cell content; consecutive
@@ -892,13 +925,14 @@ pub fn rail_spans(facts: &RailFacts<'_>) -> Vec<RailSpan> {
             ));
             let (esc, label) = facts.interrupt_label();
             let (esc_role, label_role) = if facts.interrupt.is_armed() {
-                let level = facts
-                    .interrupt
-                    .armed_at_ms()
-                    .map_or(0.0, |armed| {
-                        interrupt_flash_level(facts.animations, facts.now_ms.saturating_sub(armed))
-                    });
-                let role = if level > 0.0 {
+                // The flash tint is a 0.22 s window on the render clock;
+                // outside it the armed hint keeps the plain warning hue until
+                // the 5000 ms expiry. Both halves share the role.
+                let role = if flash_on(
+                    facts.animations,
+                    facts.interrupt.armed_at_ms(),
+                    facts.now_ms,
+                ) {
                     RailRole::WarningFlash
                 } else {
                     RailRole::Warning
@@ -1041,6 +1075,30 @@ pub fn rail_spans(facts: &RailFacts<'_>) -> Vec<RailSpan> {
         }
     }
     spans
+}
+
+/// Styled-span paint path for the composer footer row.
+///
+/// Each rail span keeps exactly one style run covering its own text cells, so
+/// a hovered base label, a disabled+DIM hint, or the warning/flash interrupt
+/// stays a distinct range instead of being flattened into one Metadata run.
+/// Runs tile the concatenation of the span texts in paint order with no gaps;
+/// the caller offsets `start_cell` to the row's first painted cell and adds
+/// any group separators its own text layout inserts.
+#[must_use]
+pub fn footer_span_styles(spans: &[RailSpan], start_cell: usize) -> Vec<LineSpan> {
+    let mut styles = Vec::new();
+    let mut cursor = start_cell;
+    for span in spans {
+        let cells = cell_width(&span.text);
+        if cells == 0 {
+            continue;
+        }
+        let (slot, attributes) = span.role.style();
+        styles.push(LineSpan::new(cursor, cells, slot, attributes));
+        cursor = cursor.saturating_add(cells);
+    }
+    styles
 }
 
 /// Concatenated rail text for one slot.
@@ -2476,6 +2534,138 @@ mod native_status_rail_tests {
         );
         assert_eq!(composer_close(None), ComposerClose::Close);
         assert_eq!(composer_close(Some("")), ComposerClose::Close);
+    }
+
+    // -- CP-12/CP-13: per-span styled paint of the composer footer row ------
+
+    #[test]
+    fn cp13_footer_span_styles_map_roles_to_theme_slots() {
+        use crate::native_theme_runtime::Slot as S;
+        assert_eq!(RailRole::TextBase.style(), (S::Text, ATTR_NONE));
+        assert_eq!(RailRole::TextMuted.style(), (S::TextMuted, ATTR_NONE));
+        // A disabled hint keeps its shortcut text but paints DIM.
+        assert_eq!(RailRole::TextDisabled.style(), (S::TextMuted, ATTR_DIM));
+        assert_eq!(RailRole::Accent.style(), (S::Primary, ATTR_NONE));
+        // The armed interrupt keeps the warning hue; the flash brightens it.
+        assert_eq!(RailRole::Warning.style(), (S::Warning, ATTR_NONE));
+        assert_eq!(RailRole::WarningFlash.style(), (S::Warning, ATTR_BOLD));
+    }
+
+    #[test]
+    fn cp13_footer_flash_window_is_driven_by_the_render_clock() {
+        assert!(!flash_on(true, None, 0));
+        // Armed at 0: open for the 0.22 s window, closed at the boundary and
+        // for the rest of the 5000 ms arm lifetime.
+        assert!(flash_on(true, Some(0), 0));
+        assert!(flash_on(true, Some(0), INTERRUPT_FLASH_MS - 1));
+        assert!(!flash_on(true, Some(0), INTERRUPT_FLASH_MS));
+        assert!(!flash_on(true, Some(0), INTERRUPT_EXPIRY_MS - 1));
+        // Reduced motion never flashes.
+        assert!(!flash_on(false, Some(0), 0));
+        // A later arm shifts the window with the same clock.
+        assert!(flash_on(true, Some(5_000), 5_100));
+        assert!(!flash_on(true, Some(5_000), 5_220));
+    }
+
+    #[test]
+    fn cp13_footer_span_styles_paint_the_interrupt_arm_warning_hue() {
+        use crate::native_theme_runtime::Slot as S;
+        let mut facts = RailFacts::new(80);
+        facts.running = true;
+        assert_eq!(
+            facts.interrupt.press(0, true, false, true, false, true),
+            InterruptOutcome::Armed(1)
+        );
+        // Inside the flash window both interrupt spans carry warning + bold.
+        let styles = footer_span_styles(&rail_spans(&facts), 0);
+        let warning: Vec<LineSpan> = styles
+            .iter()
+            .copied()
+            .filter(|style| style.slot == S::Warning)
+            .collect();
+        assert_eq!(warning.len(), 2);
+        assert!(warning.iter().all(|style| style.attributes == ATTR_BOLD));
+
+        // After the 0.22 s flash the plain warning hue stays until expiry.
+        facts.now_ms = INTERRUPT_FLASH_MS;
+        let styles = footer_span_styles(&rail_spans(&facts), 0);
+        let warning: Vec<LineSpan> = styles
+            .iter()
+            .copied()
+            .filter(|style| style.slot == S::Warning)
+            .collect();
+        assert_eq!(warning.len(), 2);
+        assert!(warning.iter().all(|style| style.attributes == ATTR_NONE));
+
+        // Expiry drops the warning entirely: the unarmed hint is base/muted.
+        facts.now_ms = INTERRUPT_EXPIRY_MS;
+        facts.interrupt.expire_at(facts.now_ms);
+        let styles = footer_span_styles(&rail_spans(&facts), 0);
+        assert!(!styles.iter().any(|style| style.slot == S::Warning));
+    }
+
+    #[test]
+    fn cp20_footer_span_styles_keep_disabled_dim_and_hover_base() {
+        use crate::native_theme_runtime::Slot as S;
+        let mut facts = RailFacts::new(80);
+        facts.agent_shortcut = Some("tab");
+        facts.command_shortcut = Some("ctrl+p");
+        facts.interactive = false;
+        // A focused side panel disables both halves of each hint: text kept,
+        // DIM attribute set on every span.
+        let styles = footer_span_styles(&rail_spans(&facts), 0);
+        assert_eq!(styles.len(), 4);
+        for style in &styles {
+            assert_eq!(style.slot, S::TextMuted);
+            assert_eq!(style.attributes, ATTR_DIM);
+        }
+
+        // Focused composer: shortcut keys are base, labels muted, no DIM.
+        facts.interactive = true;
+        let styles = footer_span_styles(&rail_spans(&facts), 0);
+        assert_eq!(styles.len(), 4);
+        assert_eq!(styles[0].slot, S::Text);
+        assert_eq!(styles[1].slot, S::TextMuted);
+        assert_eq!(styles[2].slot, S::Text);
+        assert_eq!(styles[3].slot, S::TextMuted);
+        assert!(styles.iter().all(|style| style.attributes == ATTR_NONE));
+    }
+
+    #[test]
+    fn cp14_footer_span_styles_location_hover_switches_muted_to_base() {
+        use crate::native_theme_runtime::Slot as S;
+        let mut facts = RailFacts::new(80);
+        facts.location = Some("~/project:main");
+        let styles = footer_span_styles(&rail_spans(&facts), 0);
+        assert_eq!(styles.len(), 1);
+        assert_eq!(styles[0].slot, S::TextMuted);
+        facts.location_hovered = true;
+        let styles = footer_span_styles(&rail_spans(&facts), 0);
+        assert_eq!(styles[0].slot, S::Text);
+    }
+
+    #[test]
+    fn cp12_footer_span_styles_tile_the_span_text_without_gaps() {
+        let mut facts = RailFacts::new(80);
+        facts.subagents = 2;
+        facts.shells = 1;
+        facts.location = Some("~/project:main");
+        facts.command_shortcut = Some("ctrl+p");
+        let spans = rail_spans(&facts);
+        let text: String = spans.iter().map(|span| span.text.as_str()).collect();
+        let styles = footer_span_styles(&spans, 5);
+        assert_eq!(styles.len(), spans.len());
+        // One style per span, ranges contiguous from the row's first cell and
+        // covering exactly the concatenated (unchanged) rail text.
+        assert_eq!(styles.first().unwrap().start_cell, 5);
+        for pair in styles.windows(2) {
+            assert_eq!(pair[0].end_cell(), pair[1].start_cell);
+        }
+        assert_eq!(styles.last().unwrap().end_cell(), 5 + cell_width(&text));
+        // The styling path never rewrites text: the concatenated rail text is
+        // exactly the location, live counts and commands hint the model owns.
+        assert_eq!(text, "~/project:main2 subagents · 1 shellctrl+p commands");
+        assert_eq!(slot_text(&spans, RailSlot::Status), "~/project:main");
     }
 }
 

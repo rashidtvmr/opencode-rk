@@ -2978,6 +2978,118 @@ impl NativeView {
         )
     }
 
+    /// CP-12/13/14/20: per-span styles for the in-body composer footer row.
+    ///
+    /// [`Self::composer_footer_row`] still owns the row text byte-for-byte;
+    /// this derives the very same rail facts and publishes each span's
+    /// `RailRole -> theme slot` style at its final painted cell. That moves the
+    /// row from one flat `ChatRowClass::Metadata` run to a distinct style run
+    /// per span, so the armed interrupt keeps its warning hue (brightened
+    /// inside the 0.22 s flash), a hovered location switches to base, and the
+    /// hint halves keep their disabled+DIM identity.
+    ///
+    /// Group boundaries mirror the ` · ` the text path inserts between the
+    /// status, file and live-count groups. Every range is clamped to the fitted
+    /// text width so a truncated row never paints over the trailing padding.
+    /// `include_live` mirrors the text path's fit decision: a live count that
+    /// did not fit is not painted and therefore contributes no style.
+    fn composer_footer_span_styles(
+        &self,
+        row: u16,
+        left: u16,
+        fit_width: u16,
+        running: bool,
+        include_live: bool,
+    ) -> Vec<(u16, u16, u16, crate::native_theme_runtime::Slot, u32)> {
+        if self.shell_mode {
+            return Vec::new();
+        }
+        // The status-slot facts are exactly those `composer_status_text`
+        // projects; the file/live facts are exactly those
+        // `composer_footer_facts` projects. Combining them into one `RailFacts`
+        // yields the same spans, in the same order, as the two text producers.
+        let home = std::env::var("HOME").unwrap_or_default();
+        let location = (!self.workspace.is_empty()).then(|| {
+            crate::native_status_rail::location_label(
+                &self.workspace,
+                &home,
+                self.rail_branch.as_deref(),
+            )
+        });
+        let facts = crate::native_status_rail::RailFacts {
+            running: running || self.prompt_surface.is_busy(),
+            animations: self.rail_animations,
+            elapsed_ms: self.rail_elapsed_ms,
+            interrupt: self.rail_interrupt,
+            now_ms: self.rail_now_ms,
+            location: location.as_deref(),
+            live_hovered: self.footer_live_hovered,
+            location_hovered: self.footer_location_hovered,
+            location_width: usize::from(self.layout.cols.saturating_sub(4)),
+            subagents: self.live_subagents,
+            shells: self.live_shell_count(),
+            editor: self.rail_editor_context(),
+            ..crate::native_status_rail::RailFacts::new(usize::from(self.layout.cols))
+        };
+        let spans: Vec<crate::native_status_rail::RailSpan> =
+            crate::native_status_rail::rail_spans(&facts)
+                .into_iter()
+                .filter(|span| {
+                    include_live || span.slot() != crate::native_status_rail::RailSlot::Footer
+                })
+                .collect();
+        let cell_width = |text: &str| {
+            crate::native_view_layout::visit_unpadded_cells(text, 4096, |_, _| {})
+        };
+        let separator_width = cell_width(" · ").min(usize::from(u16::MAX)) as u16;
+        let mut cursor = usize::from(left);
+        let mut current: Option<crate::native_status_rail::RailSlot> = None;
+        let mut out = Vec::new();
+        // Push a range clamped to the row's fitted text window.
+        let push = |out: &mut Vec<(u16, u16, u16, crate::native_theme_runtime::Slot, u32)>,
+                    start: usize,
+                    cells: usize,
+                    slot: crate::native_theme_runtime::Slot,
+                    attrs: u32| {
+            let start = start.min(usize::from(u16::MAX)) as u16;
+            let room = fit_width.saturating_sub(start.saturating_sub(left));
+            let cells = (cells.min(usize::from(u16::MAX)) as u16).min(room);
+            if cells > 0 {
+                out.push((start, row, cells, slot, attrs));
+            }
+        };
+        for span in &spans {
+            let cells = cell_width(&span.text);
+            if cells == 0 {
+                continue;
+            }
+            if current.is_some_and(|slot| slot != span.slot()) {
+                push(
+                    &mut out,
+                    cursor,
+                    separator_width as usize,
+                    crate::native_theme_runtime::Slot::TextMuted,
+                    crate::native_ui_style::ATTR_NONE,
+                );
+                cursor = cursor.saturating_add(separator_width as usize);
+            }
+            // The styled-span helper is the single authority mapping a rail
+            // role to its theme slot + attribute bitmask for one span.
+            if let Some(style) = crate::native_status_rail::footer_span_styles(
+                std::slice::from_ref(span),
+                cursor,
+            )
+            .into_iter()
+            .next()
+            {
+                push(&mut out, style.start_cell, style.cells, style.slot, style.attributes);
+            }
+            cursor = cursor.saturating_add(cells);
+            current = Some(span.slot());
+        }
+        out
+    }
+
     // ---------- route / sidebar facts (set from the input loop) ----------
 
     /// Main-column route: `true` shows the active session (transcript +
@@ -5563,6 +5675,24 @@ impl NativeView {
                             cells,
                         ));
                     }
+                    // CP-12/13/14/20: publish the row's per-span styles on the
+                    // same painted row. `context_usage_styles` are absolute
+                    // (never shifted), so the tab-reservation translation is
+                    // folded in here exactly as the dock spans do it. The text
+                    // stays owned by `composer_footer_row`; this only moves its
+                    // styling from one flat Metadata run to per-span runs.
+                    let fit_width = width.saturating_sub(footer_padding.saturating_mul(2));
+                    let final_row = row.saturating_add(usize::from(self.tab_reservation.y_offset()));
+                    let final_left = usize::from(footer_padding)
+                        .saturating_add(usize::from(self.tab_reservation.x_offset()));
+                    let styles = self.composer_footer_span_styles(
+                        u16::try_from(final_row).unwrap_or(u16::MAX),
+                        u16::try_from(final_left).unwrap_or(u16::MAX),
+                        fit_width,
+                        busy,
+                        live.is_some(),
+                    );
+                    self.context_usage_styles.extend(styles);
                 }
                 if let Some((x, cells)) = live {
                     self.live_footer_hit = Some((
@@ -6165,6 +6295,14 @@ impl NativeView {
             self.context_usage_hit = context_hit.map(|(left, width)| {
                 (left, footer_row as u16, width)
             });
+            // CP-12/CP-13/CP-14/CP-20: publish the footer's per-span styles on
+            // the same painted row. Text ownership stays with `footer_line`;
+            // this only moves styling from one flat run to the rail's roles.
+            let footer_styles = self.footer_statusline_span_styles(
+                self.layout.cols,
+                u16::try_from(footer_row).unwrap_or(u16::MAX),
+            );
+            self.context_usage_styles.extend(footer_styles);
         }
         // Per-row hover mask from the cached pointer against the FINAL frame
         // (after tab reservation, sidebar inline, modal and footer), using
@@ -6366,6 +6504,12 @@ impl NativeView {
             interactive: self.rail_interactive,
             animations: self.rail_animations,
             elapsed_ms: self.rail_elapsed_ms,
+            // CP-13: thread the live interrupt arm and the render clock, so a
+            // second Escape suppresses details at narrow widths and resumes
+            // them after the 0.22 s flash / 5000 ms expiry. Without these the
+            // default (unarmed) fact would paint a permanently-expanded row.
+            interrupt: self.rail_interrupt,
+            now_ms: self.rail_now_ms,
             ..crate::native_status_rail::RailFacts::new(usize::from(width))
         };
         let rail_spans = crate::native_status_rail::rail_spans(&facts);
@@ -6425,6 +6569,104 @@ impl NativeView {
             width,
         );
         (footer, context_hit)
+    }
+
+    /// CP-12/CP-13/CP-14/CP-20: per-span styles for the shared shell footer
+    /// row. `footer_line` still returns byte-for-byte the same text; this
+    /// publishes the rail's `RailRole -> theme slot` styles as absolute cell
+    /// ranges so the row is painted per span instead of as one flat Metadata
+    /// run. The grouping mirrors [`Self::footer_statusline_text`], so ranges
+    /// land on the painted text (groups joined by the muted ` · ` separator).
+    fn footer_statusline_span_styles(
+        &self,
+        width: u16,
+        row: u16,
+    ) -> Vec<(u16, u16, u16, crate::native_theme_runtime::Slot, u32)> {
+        // Shell mode is an exclusive footer branch (`footer_line` returns the
+        // shell label before any rail spans); publishing hint styles there
+        // would paint ranges over unrelated text.
+        if self.shell_mode || width <= 4 {
+            return Vec::new();
+        }
+        let mut usage_rows: Vec<String> = Vec::new();
+        if let Some(usage) = self.status.usage_status_label() {
+            usage_rows.push(usage);
+        }
+        if let Some(cost) = self.status.cost() {
+            usage_rows.push(crate::native_sidebar::format_money(cost));
+        }
+        let facts = crate::native_status_rail::RailFacts {
+            subagents: 0,
+            shells: 0,
+            editor: None,
+            usage: &usage_rows,
+            command_shortcut: self.rail_command_shortcut.as_deref(),
+            agent_shortcut: self.rail_agent_shortcut.as_deref(),
+            interactive: self.rail_interactive,
+            animations: self.rail_animations,
+            elapsed_ms: self.rail_elapsed_ms,
+            interrupt: self.rail_interrupt,
+            now_ms: self.rail_now_ms,
+            ..crate::native_status_rail::RailFacts::new(usize::from(width))
+        };
+        let spans: Vec<crate::native_status_rail::RailSpan> =
+            crate::native_status_rail::rail_spans(&facts)
+                .into_iter()
+                .filter(|span| span.slot() == crate::native_status_rail::RailSlot::Footer)
+                .collect();
+        let separator_width =
+            crate::native_view_layout::visit_unpadded_cells(" · ", 64, |_, _| {});
+        let cell_width = |text: &str| {
+            crate::native_view_layout::visit_unpadded_cells(text, 4096, |_, _| {})
+        };
+        // `footer_line` pads the statusline row by `(width / 2).min(2)`; the
+        // first group's styles must start on that same cell, and no range may
+        // run past the trailing padding into the gap/right chrome when the
+        // label is truncated by `fit`.
+        let start_cell = usize::from((width / 2).min(2));
+        let right_edge = usize::from(width.saturating_sub((width / 2).min(2)));
+        let mut cursor = start_cell;
+        let mut current: Option<crate::native_status_rail::RailSegment> = None;
+        let mut out = Vec::new();
+        for span in &spans {
+            let cells = cell_width(&span.text);
+            if cells == 0 {
+                continue;
+            }
+            if current.is_some_and(|segment| segment != span.segment) {
+                let sep_start = cursor.min(usize::from(u16::MAX)) as u16;
+                let sep_cells = (separator_width.min(usize::from(u16::MAX)) as u16)
+                    .min(right_edge.saturating_sub(usize::from(sep_start)) as u16);
+                if sep_cells > 0 {
+                    out.push((
+                        sep_start,
+                        row,
+                        sep_cells,
+                        crate::native_theme_runtime::Slot::TextMuted,
+                        crate::native_ui_style::ATTR_NONE,
+                    ));
+                }
+                cursor = cursor.saturating_add(separator_width);
+            }
+            // The styled-span helper maps the role onto the theme slot; clamp
+            // its painted width to the fitted label so a truncated row cannot
+            // paint over unrelated cells.
+            if let Some(style) =
+                crate::native_status_rail::footer_span_styles(std::slice::from_ref(span), cursor)
+                    .into_iter()
+                    .next()
+            {
+                let span_start = style.start_cell.min(usize::from(u16::MAX)) as u16;
+                let span_cells = (style.cells.min(usize::from(u16::MAX)) as u16)
+                    .min(right_edge.saturating_sub(usize::from(span_start)) as u16);
+                if span_cells > 0 {
+                    out.push((span_start, row, span_cells, style.slot, style.attributes));
+                }
+            }
+            cursor = cursor.saturating_add(cells);
+            current = Some(span.segment);
+        }
+        out
     }
 
     /// FOOTER-CHROME: statusline text with upstream's group separator.
@@ -8462,6 +8704,181 @@ mod footer_layout_tests {
             .render_typed("draft", &[], false, &[])
             .join("\n")
             .contains("high"));
+    }
+
+    #[test]
+    fn cp13_footer_line_threads_live_interrupt_into_show_details() {
+        // The shared footer's RailFacts carry the live arm, so a second Escape
+        // at a narrow width suppresses the detail hints (`show_details`),
+        // without changing any other footer text.
+        let mut view = NativeView::new(79, 24);
+        view.set_session_route(true);
+        view.set_rail_shortcuts(Some("ctrl+p".to_owned()), Some("tab".to_owned()));
+        view.set_rail_interrupt(crate::native_status_rail::InterruptArm::default(), 0);
+        let idle = view.footer_line(79, false).0;
+        assert!(idle.contains("commands"), "unarmed shows hints: {idle:?}");
+        assert!(idle.contains("agents"), "unarmed shows agents: {idle:?}");
+
+        let mut arm = crate::native_status_rail::InterruptArm::default();
+        assert_eq!(
+            arm.press(0, true, false, true, false, true),
+            crate::native_status_rail::InterruptOutcome::Armed(1)
+        );
+        view.set_rail_interrupt(arm, 0);
+        let armed = view.footer_line(79, false).0;
+        assert!(
+            !armed.contains("commands") && !armed.contains("agents"),
+            "armed narrow row drops details: {armed:?}"
+        );
+        // At 80 columns the details return while the row keeps its chrome.
+        let wide = view.footer_line(80, false).0;
+        assert!(wide.contains("commands"), "details resume at 80: {wide:?}");
+    }
+
+    #[test]
+    fn cp13_footer_statusline_span_styles_are_per_span_and_disabled_dim() {
+        let mut view = NativeView::new(80, 24);
+        view.set_session_route(true);
+        view.set_rail_shortcuts(Some("ctrl+p".to_owned()), Some("tab".to_owned()));
+        view.set_rail_interactive(false);
+        let styles = view.footer_statusline_span_styles(80, 10);
+        // Four hint halves (tab/agents, ctrl+p/commands) plus one muted group
+        // separator, tiled from the row's left inset with no gaps.
+        assert_eq!(styles.len(), 5, "{styles:?}");
+        assert_eq!(styles[0].0, 2);
+        for pair in styles.windows(2) {
+            assert_eq!(pair[0].0 + pair[0].2, pair[1].0);
+        }
+        let dim = styles
+            .iter()
+            .filter(|(_, _, _, _, attrs)| *attrs & crate::native_ui_style::ATTR_DIM != 0)
+            .count();
+        assert_eq!(dim, 4, "both halves of both hints are disabled+DIM: {styles:?}");
+
+        // A focused composer removes the DIM override from every span; the
+        // text and geometry are unchanged.
+        view.set_rail_interactive(true);
+        let styles = view.footer_statusline_span_styles(80, 10);
+        assert_eq!(styles.len(), 5);
+        assert!(
+            styles
+                .iter()
+                .all(|(_, _, _, _, attrs)| *attrs & crate::native_ui_style::ATTR_DIM == 0)
+        );
+    }
+
+    #[test]
+    fn cp13_rendered_composer_footer_paints_interrupt_warning_and_flash() {
+        // A real rendered frame applies the per-span styles to the in-body
+        // composer footer row (not just the helper in isolation).
+        let mut view = NativeView::new(120, 32);
+        view.set_session_route(true);
+        view.set_workspace("/selected/project".to_owned());
+        let mut arm = crate::native_status_rail::InterruptArm::default();
+        assert_eq!(
+            arm.press(0, true, false, true, false, true),
+            crate::native_status_rail::InterruptOutcome::Armed(1)
+        );
+        let warning_on_row = |view: &NativeView, row: u16| {
+            view.context_usage_styles()
+                .iter()
+                .filter(|(_, r, _, slot, _)| {
+                    *r == row && *slot == crate::native_theme_runtime::Slot::Warning
+                })
+                .copied()
+                .collect::<Vec<_>>()
+        };
+
+        // Inside the 0.22 s flash window both interrupt spans are warning+bold.
+        view.set_rail_interrupt(arm, 0);
+        let frame = view.render("draft", &[], true, &[]);
+        let row = view.prompt_footer_hit().expect("composer footer row").1;
+        let warning = warning_on_row(&view, row);
+        assert_eq!(warning.len(), 2, "esc + label are warning spans: {warning:?}");
+        assert!(warning.iter().all(|(_, _, _, _, a)| *a & crate::native_ui_style::ATTR_BOLD != 0));
+        assert!(
+            frame[usize::from(row)].contains("again to interrupt"),
+            "armed hint text is unchanged: {:?}",
+            frame[usize::from(row)]
+        );
+
+        // After the flash the plain warning hue stays until expiry; bold clears.
+        view.set_rail_interrupt(arm, crate::native_status_rail::INTERRUPT_FLASH_MS);
+        let frame = view.render("draft", &[], true, &[]);
+        let row = view.prompt_footer_hit().expect("composer footer row").1;
+        let warning = warning_on_row(&view, row);
+        assert_eq!(warning.len(), 2);
+        assert!(warning.iter().all(|(_, _, _, _, a)| *a & crate::native_ui_style::ATTR_BOLD == 0));
+        assert!(
+            frame[usize::from(row)].contains("again to interrupt"),
+            "styling never rewrites text: {:?}",
+            frame[usize::from(row)]
+        );
+    }
+
+    #[test]
+    fn cp14_rendered_composer_footer_location_hover_switches_to_base() {
+        let mut view = NativeView::new(120, 32);
+        view.set_session_route(true);
+        view.set_workspace("/selected/project".to_owned());
+        view.set_rail_location(Some("main".to_owned()), false);
+        let frame = view.render("draft", &[], false, &[]);
+        let (left, row, _) = view.prompt_footer_hit().expect("composer footer row");
+        // Idle location paints muted until hovered.
+        let first = view
+            .context_usage_styles()
+            .iter()
+            .find(|(_, r, _, _, _)| *r == row)
+            .copied()
+            .expect("a style covers the location text");
+        assert_eq!(first.3, crate::native_theme_runtime::Slot::TextMuted);
+        assert!(
+            frame[usize::from(row)].contains("/selected/project:main"),
+            "location label text unchanged: {:?}",
+            frame[usize::from(row)]
+        );
+
+        // Hover the painted row: the same label now paints base, never DIM.
+        assert!(view.set_prompt_footer_hover(left, row));
+        let frame = view.render("draft", &[], false, &[]);
+        let (_, row, _) = view.prompt_footer_hit().expect("composer footer row");
+        let base = view
+            .context_usage_styles()
+            .iter()
+            .find(|(_, r, _, _, _)| *r == row)
+            .copied()
+            .expect("style still covers the row");
+        assert_eq!(base.3, crate::native_theme_runtime::Slot::Text);
+        assert_eq!(base.4 & crate::native_ui_style::ATTR_DIM, 0);
+        assert!(
+            frame[usize::from(row)].contains("/selected/project:main"),
+            "hovering does not rewrite text: {:?}",
+            frame[usize::from(row)]
+        );
+    }
+
+    #[test]
+    fn cp20_rendered_shell_footer_paints_hints_per_span_disabled_dim() {
+        let mut view = NativeView::new(80, 24);
+        view.set_session_route(true);
+        view.set_rail_shortcuts(Some("ctrl+p".to_owned()), Some("tab".to_owned()));
+        view.set_rail_interactive(false);
+        let frame = view.render("draft", &[], false, &[]);
+        let footer_row = frame.len().saturating_sub(1) as u16;
+        let dim_count = |view: &NativeView, row: u16| {
+            view.context_usage_styles()
+                .iter()
+                .filter(|(_, r, _, _, attrs)| {
+                    *r == row && *attrs & crate::native_ui_style::ATTR_DIM != 0
+                })
+                .count()
+        };
+        assert_eq!(dim_count(&view, footer_row), 4, "both halves of both hints are DIM");
+        // A focused composer removes DIM from every hint span in the real frame.
+        view.set_rail_interactive(true);
+        let frame = view.render("draft", &[], false, &[]);
+        let footer_row = frame.len().saturating_sub(1) as u16;
+        assert_eq!(dim_count(&view, footer_row), 0);
     }
 }
 
