@@ -26,15 +26,35 @@ class AuthorWorkspaceBaseTests(unittest.TestCase):
             root = pathlib.Path(tmp)
             repo, base = self.make_repo(root)
             git = Git(repo)
-            git.run("branch", "recovery/feature-01", base)
+            original = git.run("symbolic-ref", "--short", "HEAD")
+            git.run("checkout", "-b", "recovery/feature-01", base)
+            (repo / "rejected.txt").write_text("rejected candidate")
+            git.run("add", "rejected.txt")
+            git.run("commit", "--quiet", "-m", "rejected")
+            git.run("checkout", original)
+            store = Store(root / "state")
+            store.meta("repo", str(repo))
+            store.meta("config", {"protected_paths": ["rejected.txt"], "workspaces": {
+                "root": str(root / "workspaces"),
+                "feature_refs": ["refs/heads/recovery/feature-01", "refs/heads/recovery/feature-02"],
+            }})
+            ref, path = _select_feature_ref(store, "T-1", base)
+            self.assertEqual(ref, "refs/heads/recovery/feature-02")
+            self.assertFalse(path.exists())
+
+    def test_existing_ref_at_or_behind_base_is_reusable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            repo, base = self.make_repo(root)
+            Git(repo).run("branch", "recovery/feature-01", base)
             store = Store(root / "state")
             store.meta("repo", str(repo))
             store.meta("config", {"workspaces": {
                 "root": str(root / "workspaces"),
-                "feature_refs": ["refs/heads/recovery/feature-01", "refs/heads/recovery/feature-02"],
+                "feature_refs": ["refs/heads/recovery/feature-01"],
             }})
-            ref, path = _select_feature_ref(store, "T-1")
-            self.assertEqual(ref, "refs/heads/recovery/feature-02")
+            ref, path = _select_feature_ref(store, "T-1", base)
+            self.assertEqual(ref, "refs/heads/recovery/feature-01")
             self.assertFalse(path.exists())
 
     def test_dirty_owned_workspace_is_preserved_and_skipped(self):
@@ -56,12 +76,12 @@ class AuthorWorkspaceBaseTests(unittest.TestCase):
                 "root": str(wsroot),
                 "feature_refs": ["refs/heads/recovery/feature-01", "refs/heads/recovery/feature-02"],
             }})
-            ref, path = _select_feature_ref(store, "T-1", ["src/*"])
+            ref, path = _select_feature_ref(store, "T-1", base, ["src/*"])
             self.assertEqual(ref, "refs/heads/recovery/feature-02")
             self.assertFalse(path.exists())
             self.assertEqual((owned / "outside.txt").read_text(), "preserve me")
 
-    def test_read_tree_reset_seeds_private_index_and_worktree_from_base(self):
+    def test_reset_seeds_private_branch_index_and_worktree_from_base(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             repo, base = self.make_repo(root)
@@ -72,7 +92,7 @@ class AuthorWorkspaceBaseTests(unittest.TestCase):
             tree = root / "wt"
             git.run("worktree", "add", "-b", "recovery/feature-02", str(tree), base)
             private = Git(tree)
-            private.run("read-tree", "--reset", "-u", base)
+            private.run("reset", "--hard", base)
             self.assertEqual(private.head(), base)
             self.assertEqual((tree / "base.txt").read_text(), "base")
             self.assertEqual(private.run("status", "--porcelain=v1", "--untracked-files=all"), "")

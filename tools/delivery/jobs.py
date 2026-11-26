@@ -14,7 +14,7 @@ import subprocess
 import time
 
 from . import runtime
-from .model import digest, within
+from .model import digest, overlaps, within
 from .runtime import Failure
 from .store import WorkspaceSlotContention
 
@@ -607,7 +607,7 @@ def _revision_authorized(repo, revision, ws, stage, task=None, workspace=None):
     return False
 
 
-def _select_feature_ref(store, task_id, grant=None, valid=lambda: True):
+def _select_feature_ref(store, task_id, revision, grant=None, valid=lambda: True):
     ws = _ws_cfg(store)
     refs = list(ws.get("feature_refs") or [])
     if not refs and ws.get("author_ref"):
@@ -617,6 +617,14 @@ def _select_feature_ref(store, task_id, grant=None, valid=lambda: True):
     rows = {r["id"]: r for r in store.tasks()}
     root = pathlib.Path(ws["root"]).resolve()
     repo = pathlib.Path(store.meta("repo")).resolve()
+    protected = list((store.meta("config") or {}).get("protected_paths") or [])
+
+    def protected_delta(ref, target):
+        if ref == target:
+            return False
+        changed = Git(repo).try_run("diff", "--name-only", target, ref)["output"].splitlines()
+        return any(overlaps(path, pinned) for path in changed for pinned in protected)
+
     # 1) reuse existing owned workspace/ref for same task (exact registration required)
     for ref in refs:
         safe = re.sub(r"[^A-Za-z0-9_.-]", "_", ref.split("/")[-1])
@@ -631,6 +639,8 @@ def _select_feature_ref(store, task_id, grant=None, valid=lambda: True):
                 # Preserve that worktree untouched and allocate a fresh ref for
                 # the retry instead of refusing the whole task forever.
                 if _dirty_state(path, valid, grant):
+                    continue
+                if protected_delta(ref, revision):
                     continue
                 return ref, path
     # 2) allocate the first entirely unused enumerated slot.
@@ -658,6 +668,12 @@ def _select_feature_ref(store, task_id, grant=None, valid=lambda: True):
         # bytes) that cannot be rewound safely. Reusing it made every retry
         # inherit the old candidate and index; allocate a genuinely new ref.
         if Git(repo).try_run("rev-parse", "--verify", "-q", ref)["returncode"] == 0:
+            # Reuse a slot whose branch is already at or behind the requested
+            # base, or whose reset cannot touch protected evaluator blobs.
+            # Divergent protected history stays preserved and is skipped.
+            if (Git(repo).try_run("merge-base", "--is-ancestor", ref, revision)["returncode"] == 0
+                    or not protected_delta(ref, revision)):
+                return ref, path
             continue
         return ref, path
     raise Failure("no available enumerated feature ref/workspace slot", "wait")
@@ -705,7 +721,7 @@ def _ensure_author_worktree(store, job, revision, valid):
     else:
         if retained is not None:
             raise Failure("retained package does not match its exact owner authorization", "authority")
-        feature_ref, path = _select_feature_ref(store, task_id, grant, valid)
+        feature_ref, path = _select_feature_ref(store, task_id, revision, grant, valid)
     if not _revision_authorized(repo, revision, ws, "implement", task=task_id, workspace=str(path)):
         raise Failure("requested revision/base is not authorized by allowed refs", "authority")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -820,11 +836,11 @@ def _ensure_author_worktree(store, job, revision, valid):
             # gc suppression come from the environment for the same reason:
             # concurrent `git config` writes collide on `.git/config.lock`.
             # Some Git versions materialize a linked worktree index from the
-            # canonical checkout rather than the new branch's tree. Always seed
-            # both the private index and worktree from the authorized base; an
-            # existing but wrong index otherwise appears as staged out-of-grant
-            # changes and every retry fails adoption.
-            git.run("read-tree", "--reset", "-u", revision)
+            # canonical checkout rather than the new branch's tree. Reset the
+            # private branch, index and worktree to the authorized base. Slot
+            # selection above already proved this cannot change protected
+            # evaluator blobs; a new branch at the base makes this a no-op.
+            git.run("reset", "--hard", revision)
             head = git.head("HEAD")
             if head != revision:
                 _recheck_store_reservation(store, job, feature_ref, path, revision)
