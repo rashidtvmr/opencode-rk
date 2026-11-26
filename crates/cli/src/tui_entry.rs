@@ -333,6 +333,42 @@ fn normalize_modified_return(
     }
 }
 
+/// CP-28: whether the live composer submit arm may fire. Consulted instead of
+/// a hard-coded Enter/Ctrl-J byte: the physical submit byte still comes from
+/// [`decide_byte`](crate::native_composer::decide_byte)/[`SubmitKeymap`], but a
+/// `keybinds` override that disables `input.submit` wins with no component
+/// fallback (the mouse send button feeds the same byte into this arm).
+#[cfg(feature = "native")]
+fn submit_enabled(
+    defaults: &crate::native_composer::KeymapDefaults,
+    keymap: SubmitKeymap,
+) -> bool {
+    use crate::native_composer::KeymapAction;
+    match keymap {
+        // Upstream default: Enter submits iff `input.submit` still owns the
+        // `return` chord. A config `false` (or a remap) removes that ownership
+        // and leaves no component fallback.
+        SubmitKeymap::Enter => {
+            defaults.dispatch("return") == Some(KeymapAction::InputSubmit)
+        }
+        // The oc2 Ctrl-J extension swaps the physical byte through
+        // `decide_byte`; config keybinds only gate whether the action exists.
+        SubmitKeymap::CtrlJ => defaults.chord(KeymapAction::InputSubmit).is_some(),
+    }
+}
+
+/// CP-28: whether a live action configured through `keybinds` is enabled.
+/// `false` / `"none"` removes its only chord, so the corresponding physical
+/// key must be inert at the live arm rather than falling through to a
+/// component that would interpret it.
+#[cfg(feature = "native")]
+fn keymap_action_enabled(
+    defaults: &crate::native_composer::KeymapDefaults,
+    action: crate::native_composer::KeymapAction,
+) -> bool {
+    defaults.chord(action).is_some()
+}
+
 /// TAB-23: a `<leader>` follow-up key is a printable byte or one of the
 /// arrow follow-ups `<leader>left` / `<leader>right`
 /// (`config/keybind.ts:97-98`). The upstream chord is a timed registration
@@ -397,6 +433,62 @@ mod tab23_leader_followup_tests {
         );
         assert_eq!(leader_followup_pane_event(&InputEvent::ArrowUp), None);
         assert_eq!(leader_followup_pane_event(&InputEvent::Byte(b'x')), None);
+    }
+}
+
+/// CP-28: every live arm (Enter submit, Tab complete, shift+tab agent cycle,
+/// Ctrl-C clear) consults the one keymap built at startup from
+/// `preferences.keybinds`, rather than a hard-coded physical byte.
+#[cfg(all(test, feature = "native"))]
+mod cp28_live_keymap_tests {
+    use super::{keymap_action_enabled, submit_enabled, SubmitKeymap};
+    use crate::native_composer::KeymapAction as A;
+
+    #[test]
+    fn tab_2_cp28_default_keymap_leaves_all_four_live_arms_enabled() {
+        let defaults = crate::native_ui_preferences::keymap_defaults(None);
+        assert!(submit_enabled(&defaults, SubmitKeymap::Enter), "Enter: input.submit = return");
+        assert!(submit_enabled(&defaults, SubmitKeymap::CtrlJ), "Ctrl-J extension still enabled");
+        assert!(keymap_action_enabled(&defaults, A::Complete), "Tab completes");
+        assert!(
+            keymap_action_enabled(&defaults, A::CycleAgent),
+            "shift+tab cycles agent"
+        );
+        assert!(keymap_action_enabled(&defaults, A::Clear), "Ctrl-C clears");
+    }
+
+    /// RED before: `input_submit:false` was parsed but never consulted at the
+    /// live submit arm. GREEN after: the arm's guard is false for both the
+    /// Enter and Ctrl-J submit variants, and no component fallback exists —
+    /// the disabled action leaves no chord for the physical key.
+    #[test]
+    fn cp28_keybind_disables_submit_at_all_live_arms() {
+        // `UiPreferences::load` surfaces the inner `{"input_submit":false}`
+        // object from the full `{"keybinds":{...}}` config document.
+        let disabled = crate::native_ui_preferences::keymap_defaults(Some(
+            &serde_json::json!({"input_submit": false}),
+        ));
+        assert!(!submit_enabled(&disabled, SubmitKeymap::Enter));
+        assert!(!submit_enabled(&disabled, SubmitKeymap::CtrlJ));
+        // Disabling submit never repurposes Enter as a newline: the other
+        // actions stay independently enabled, exactly as upstream.
+        assert!(keymap_action_enabled(&disabled, A::Complete));
+        assert!(keymap_action_enabled(&disabled, A::CycleAgent));
+        assert!(keymap_action_enabled(&disabled, A::Clear));
+    }
+
+    #[test]
+    fn tab_2_cp28_disabling_every_wired_action_is_inert() {
+        let disabled = crate::native_ui_preferences::keymap_defaults(Some(&serde_json::json!({
+            "input_submit": false,
+            "input_complete": "none",
+            "agent_cycle": false,
+            "input_clear": false
+        })));
+        assert!(!submit_enabled(&disabled, SubmitKeymap::Enter));
+        assert!(!keymap_action_enabled(&disabled, A::Complete));
+        assert!(!keymap_action_enabled(&disabled, A::CycleAgent));
+        assert!(!keymap_action_enabled(&disabled, A::Clear));
     }
 }
 
@@ -11071,6 +11163,13 @@ fn native_loop(
         .iter()
         .map(|(binding, name)| (binding.as_str(), name.as_str()))
         .collect();
+    // CP-28: build the ONE live composer keymap from the same raw config
+    // `keybinds` object (Enter/Tab/shift+tab/ctrl+c). The live arms consult it
+    // instead of hard-coded bytes, so `{"keybinds":{"input_submit":false}}`
+    // disables submit with no component fallback. No config yields
+    // `KeymapDefaults::upstream()` and preserves the frozen default keymap.
+    let keymap_defaults =
+        crate::native_ui_preferences::keymap_defaults(preferences.keybinds.as_ref());
     // SIDE-12: the getting-started box shows only while the connection list
     // is known AND no provider is connected (`footer.tsx:18-23`). The bounded
     // native credential store (`auth.json`, the document the daemon's
@@ -14392,6 +14491,10 @@ fn native_loop(
         // tab chords it only fires while the composer owns focus; dialogs and
         // pages keep their own key handling.
         if matches!(&event, native_input_decoder::InputEvent::AgentCycle)
+            && keymap_action_enabled(
+                &keymap_defaults,
+                crate::native_composer::KeymapAction::CycleAgent,
+            )
             && matches!(dialog, native_setup::Dialog::None)
             && !page_open
             && !help_open
@@ -14734,6 +14837,19 @@ fn native_loop(
             )
         {
             view.toggle_sidebar();
+            needs_paint = true;
+            continue;
+        }
+        // CP-28: plain Tab is `input.complete`. A `keybinds` override that
+        // disables it makes the physical key inert here — the completion
+        // component must not claim a chord the config removed.
+        if matches!(&event, native_input_decoder::InputEvent::Byte(b'\t'))
+            && !keymap_action_enabled(
+                &keymap_defaults,
+                crate::native_composer::KeymapAction::Complete,
+            )
+        {
+            utf8.reset();
             needs_paint = true;
             continue;
         }
@@ -17749,7 +17865,15 @@ fn native_loop(
             }
         }
         match byte {
-            3 | 4 => break,
+            // CP-28: Ctrl-C is `input.clear`; consult the live keymap instead
+            // of hard-coding the byte. A disabling override leaves Ctrl-C
+            // inert with no fallback (Ctrl-D exit is a separate, unbound
+            // action and is preserved verbatim).
+            3 if keymap_action_enabled(
+                &keymap_defaults,
+                crate::native_composer::KeymapAction::Clear,
+            ) => break,
+            4 => break,
             27 if help_open => {
                 // Close Help only: draft/dialog/model/session are unchanged.
                 help_open = false;
@@ -18082,7 +18206,9 @@ fn native_loop(
                 }
             }
             b'\r' | b'\n'
-                if matches!(crate::native_composer::decide_byte(byte, native_composer_keymap(keymap)), Some(crate::native_composer::KeyAction::Submit)) => {
+                if matches!(crate::native_composer::decide_byte(byte, native_composer_keymap(keymap)), Some(crate::native_composer::KeyAction::Submit))
+                && submit_enabled(&keymap_defaults, keymap) =>
+            {
                 let Some(_submit_permit) = submit_gate.enter() else { continue };
                 crate::native_debug::event(
                     "input.enter",

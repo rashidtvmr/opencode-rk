@@ -89,6 +89,205 @@ impl TerminalCopy {
     }
 }
 
+/// CP-28: build the ONE live composer keymap from the raw TUI `keybinds`
+/// overrides (`config/index.tsx:78` `Schema.optional(TuiKeybind.KeybindOverrides)`).
+/// Upstream resolves each command's binding list with `TuiKeybind.parse` +
+/// `createBindingLookup` (`config/index.tsx:293,313`): an override *replaces*
+/// the whole default set of its command, and `false` / `"none"` disables the
+/// command with **no component fallback** (`config/keybind.ts:128-280`).
+///
+/// [`crate::native_composer::KeymapDefaults`] stores only static chord
+/// literals, so a configured chord is honored when it is one of the chords the
+/// native decoder can actually produce (the bounded table below); an unknown
+/// chord keeps the upstream default. A disable always wins. No config, or a
+/// non-object value, yields exactly `KeymapDefaults::upstream()` and preserves
+/// the frozen default keymap behavior.
+#[must_use]
+pub(crate) fn keymap_defaults(overrides: Option<&Value>) -> crate::native_composer::KeymapDefaults {
+    use crate::native_composer::{Binding, KeymapAction, KeymapDefaults};
+
+    let mut defaults = KeymapDefaults::upstream();
+    let Some(object) = overrides.and_then(Value::as_object) else {
+        return defaults;
+    };
+    for (key, value) in object {
+        let Some(action) = keymap_action(key) else { continue };
+        let Some(binding) = keymap_binding(value) else { continue };
+        defaults.configure(action, binding);
+    }
+    defaults
+}
+
+/// CP-28: map an override key to the composer action it configures. Both the
+/// `input_submit` and `input.submit` spellings occur upstream (cf.
+/// `native_navigation::tab_overridden_command`), so both are accepted. Unknown
+/// keys are inert config: they never disturb a frozen default binding.
+fn keymap_action(key: &str) -> Option<crate::native_composer::KeymapAction> {
+    use crate::native_composer::KeymapAction as A;
+    Some(match key {
+        "prompt_submit" | "prompt.submit" => A::PromptSubmit,
+        "input_submit" | "input.submit" => A::InputSubmit,
+        "input_complete" | "input.complete" => A::Complete,
+        "agent_cycle" | "agent.cycle" => A::CycleAgent,
+        "input_clear" | "input.clear" => A::Clear,
+        _ => return None,
+    })
+}
+
+/// CP-28: one `BindingValueSchema` override (`config/v1/keybind.ts:36-41`).
+/// `false`, `"none"` or an empty array disables the command; a chord or a
+/// `KeyStroke` object replaces its default set. Only chords the native decoder
+/// can emit have a `Binding::Chord(&'static str)` representation; an array
+/// contributes its first representable chord, and an unrepresentable chord
+/// leaves the default intact rather than leaking an interned string.
+fn keymap_binding(value: &Value) -> Option<crate::native_composer::Binding> {
+    use crate::native_composer::Binding;
+    match value {
+        Value::Bool(false) => Some(Binding::Disabled),
+        Value::String(text) if text.trim().eq_ignore_ascii_case("none") => Some(Binding::Disabled),
+        Value::Array(items) if items.is_empty() => Some(Binding::Disabled),
+        Value::Array(items) => items.iter().find_map(normalized_static_chord).map(Binding::Chord),
+        value => normalized_static_chord(value).map(Binding::Chord),
+    }
+}
+
+/// CP-28: normalize one chord spec (a string or a `KeyStroke` object) to the
+/// canonical grammar and resolve it to one of the bounded static chord
+/// literals the native decoder actually emits. `meta`/`option` map to `alt`;
+/// `super`/`hyper` have no native chord and drop the binding.
+fn normalized_static_chord(value: &Value) -> Option<&'static str> {
+    const CHORDS: &[&str] = &[
+        "return", "shift+return", "ctrl+return", "alt+return", "ctrl+j", "tab", "shift+tab",
+        "ctrl+c", "ctrl+d", "escape", "ctrl+a", "ctrl+e", "ctrl+k", "ctrl+u", "ctrl+b",
+        "ctrl+p", "ctrl+n", "up", "down", "<leader>", "<leader>return", "<leader>e",
+        "<leader>i", "<leader>w",
+    ];
+    let normalized = match value {
+        Value::String(text) => normalize_chord_text(text)?,
+        Value::Object(object) => {
+            let key = object.get("key").and_then(Value::as_str)?;
+            let mut parts = Vec::new();
+            if object.get("ctrl").and_then(Value::as_bool).unwrap_or(false) {
+                parts.push("ctrl");
+            }
+            if object.get("shift").and_then(Value::as_bool).unwrap_or(false) {
+                parts.push("shift");
+            }
+            if object
+                .get("alt")
+                .or_else(|| object.get("meta"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                parts.push("alt");
+            }
+            parts.push(key.trim());
+            normalize_chord_text(&parts.join("+"))?
+        }
+        _ => return None,
+    };
+    CHORDS.iter().copied().find(|chord| *chord == normalized)
+}
+
+/// CP-28: lowercase key names with canonical modifier order `ctrl`, `shift`,
+/// `alt`, matching the pinned defaults (`ctrl+shift+tab`, `alt+shift+down`,
+/// `config/keybind.ts:113-116`). A `<leader>` sequence stays verbatim.
+fn normalize_chord_text(text: &str) -> Option<String> {
+    let mut ctrl = false;
+    let mut shift = false;
+    let mut alt = false;
+    let mut leader = false;
+    let mut keys: Vec<String> = Vec::new();
+    for part in text.split('+') {
+        match part.trim().to_ascii_lowercase().as_str() {
+            "" => {}
+            "ctrl" | "control" => ctrl = true,
+            "shift" => shift = true,
+            "alt" | "meta" | "option" => alt = true,
+            "super" | "hyper" | "command" | "cmd" => return None,
+            "<leader>" if keys.is_empty() => leader = true,
+            key => keys.push(key.to_owned()),
+        }
+    }
+    if keys.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    if leader {
+        out.push_str("<leader>");
+    }
+    if ctrl {
+        out.push_str("ctrl+");
+    }
+    if shift {
+        out.push_str("shift+");
+    }
+    if alt {
+        out.push_str("alt+");
+    }
+    out.push_str(&keys.join("+"));
+    Some(out)
+}
+
+#[cfg(test)]
+mod cp28_keymap_defaults_tests {
+    use super::*;
+    use crate::native_composer::KeymapAction as A;
+
+    /// RED before: `keybinds` was surfaced as raw JSON but never built into a
+    /// live keymap, so `{"keybinds":{"input_submit":false}}` had no effect.
+    /// GREEN after: one `KeymapDefaults` is built from the overrides and
+    /// disabling `input_submit` leaves no chord for `return` — with no
+    /// component fallback — while every other live action keeps its default.
+    #[test]
+    fn cp28_keybind_overrides_build_live_keymap_defaults() {
+        let defaults = keymap_defaults(None);
+        assert_eq!(defaults.dispatch("return"), Some(A::InputSubmit));
+        assert_eq!(defaults.dispatch("tab"), Some(A::Complete));
+        assert_eq!(defaults.dispatch("shift+tab"), Some(A::CycleAgent));
+        assert_eq!(defaults.dispatch("ctrl+c"), Some(A::Clear));
+        assert_eq!(defaults.chord(A::PromptSubmit), None);
+
+        let disabled = keymap_defaults(Some(&serde_json::json!({"input_submit": false})));
+        assert_eq!(disabled.chord(A::InputSubmit), None);
+        assert_eq!(disabled.dispatch("return"), None, "no submit fallback");
+        assert_eq!(disabled.dispatch("tab"), Some(A::Complete));
+        assert_eq!(disabled.dispatch("shift+tab"), Some(A::CycleAgent));
+        assert_eq!(disabled.dispatch("ctrl+c"), Some(A::Clear));
+
+        // Both upstream spellings and the `"none"` literal disable identically.
+        let dotted = keymap_defaults(Some(&serde_json::json!({"input.submit": "none"})));
+        assert_eq!(dotted.chord(A::InputSubmit), None);
+        let empty = keymap_defaults(Some(&serde_json::json!({"input_submit": []})));
+        assert_eq!(empty.chord(A::InputSubmit), None);
+    }
+
+    /// An override replaces the whole default chord set of its command, so a
+    /// representable new chord moves the action and unbinds the old one.
+    /// Unrepresentable chords and non-object config preserve the frozen keymap.
+    #[test]
+    fn cp28_keybind_chord_remap_and_malformed_overrides() {
+        let remapped = keymap_defaults(Some(&serde_json::json!({"agent_cycle": "ctrl+e"})));
+        assert_eq!(remapped.dispatch("shift+tab"), None);
+        assert_eq!(remapped.dispatch("ctrl+e"), Some(A::CycleAgent));
+
+        let array = keymap_defaults(Some(&serde_json::json!({
+            "input_submit": ["ctrl+return"]
+        })));
+        assert_eq!(array.dispatch("ctrl+return"), Some(A::InputSubmit));
+        assert_eq!(array.dispatch("return"), None, "the override replaces the default");
+
+        let defaults = keymap_defaults(None);
+        for bad in [
+            serde_json::json!("nope"),
+            serde_json::json!({"unknown": false}),
+            serde_json::json!({"input_submit": {"key": "\"", "meta": true}}),
+        ] {
+            assert_eq!(keymap_defaults(Some(&bad)), defaults);
+        }
+    }
+}
+
 /// Values read from the ordered TUI config files and OpenTUI's `kv.json` state.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UiPreferences {
