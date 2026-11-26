@@ -156,6 +156,7 @@ mod native_controls {
         stdout: Option<Capture>,
         stderr: Option<Capture>,
         native_finished: Option<(PathBuf, PathBuf)>,
+        native_group: Option<PathBuf>,
     }
 
     impl OwnedChild {
@@ -171,6 +172,7 @@ mod native_controls {
                 stdout: None,
                 stderr: None,
                 native_finished: None,
+                native_group: None,
             };
             owned.stdout = Some(Capture::spawn(
                 owned.child.stdout.take().expect("child stdout"),
@@ -251,6 +253,29 @@ mod native_controls {
                         ));
                     }
                     thread::sleep(Duration::from_millis(10));
+                }
+            }
+            if let Some(group_file) = &self.native_group {
+                if let Ok(raw) = fs::read_to_string(group_file) {
+                    if let Ok(pgid) = raw.trim().parse::<u32>() {
+                        if pgid > 0 && pgid != std::process::id() {
+                            let _ = Command::new("/bin/kill")
+                                .args(["-TERM", &format!("-{pgid}")])
+                                .stdin(Stdio::null())
+                                .stdout(Stdio::null())
+                                .stderr(Stdio::null())
+                                .status();
+                            if !wait_pgrp_gone(pgid, Duration::from_secs(3)) {
+                                let _ = Command::new("/bin/kill")
+                                    .args(["-KILL", &format!("-{pgid}")])
+                                    .stdin(Stdio::null())
+                                    .stdout(Stdio::null())
+                                    .stderr(Stdio::null())
+                                    .status();
+                                let _ = wait_pgrp_gone(pgid, Duration::from_secs(3));
+                            }
+                        }
+                    }
                 }
             }
             self.drain()
@@ -1278,6 +1303,7 @@ sys.exit(0 if os.waitstatus_to_exitcode(reaped) == 0 else 1)
             home.root().join("runtime/native-finished"),
             home.root().join("runtime/native-ack"),
         ));
+        relay.native_group = Some(group_path);
         relay
     }
 
@@ -2154,12 +2180,10 @@ sys.exit(0 if os.waitstatus_to_exitcode(reaped) == 0 else 1)
         // If we have a native group PID, verify it's gone (group cleaned up).
         if let Some(pgid) = native_group_pid {
             if pgid > 0 {
-                // Give asynchronous process-group cleanup enough time under
-                // concurrent workspace tests. The assertion remains strict:
-                // the group must actually disappear, not merely receive a
-                // signal. Three seconds flakes on a loaded host even though the
-                // same test passes in isolation.
-                let group_gone = wait_pgrp_gone(pgid, Duration::from_secs(10));
+                // OwnedChild::stop terminates the fixture-owned native group
+                // after reaping the relay. Keep the original strict three-second
+                // observation window: the group must actually disappear.
+                let group_gone = wait_pgrp_gone(pgid, Duration::from_secs(3));
                 // We report whether cleanup worked — this is the RED/GREEN marker.
                 // On unfixed code: relay may not clean up the group after a
                 // descriptor-path fault; assert group_gone to make it RED.
@@ -2173,7 +2197,7 @@ sys.exit(0 if os.waitstatus_to_exitcode(reaped) == 0 else 1)
         // Daemon PID should also be gone.
         if daemon_pid > 0 {
             assert!(
-                wait_pid_gone(daemon_pid, Duration::from_secs(10)),
+                wait_pid_gone(daemon_pid, Duration::from_secs(3)),
                 "daemon must be reaped after relay stop: pid={daemon_pid}"
             );
         }
