@@ -11515,6 +11515,59 @@ mod footer_facts_tests {
         frame[usize::from(y)].clone()
     }
 
+    /// CP-15/CP-16: the single producer exposes the observed counts and editor
+    /// context on `RailFacts` itself — the exact fields the footer rail paints —
+    /// instead of leaving the hardcoded `0/0` from the shared statusline. This
+    /// asserts the wiring contract directly, before any fitting/clipping in the
+    /// painted row can hide it.
+    #[test]
+    fn cp16_composer_footer_facts_expose_live_counts_and_editor() {
+        let mut view = NativeView::new(120, 32);
+        view.set_session_route(true);
+        view.set_workspace("/fixture/project".to_owned());
+
+        // No observations: the producer reports no counts and no editor fact,
+        // never a fabricated `0 subagents · 0 shells` or a guessed path.
+        {
+            let facts = view.composer_footer_facts();
+            assert_eq!(facts.subagents, 0);
+            assert_eq!(facts.shells, 0);
+            assert!(facts.editor.is_none());
+        }
+
+        // Install real facts from the live child-navigation status, the daemon
+        // shell listing and the editor integration, then read them back off the
+        // very `RailFacts` value the footer paints.
+        view.set_live_children_status(&live_children_status());
+        view.set_live_shell_rows(
+            vec![crate::native_shell::ShellEntry::new(
+                "sh-live",
+                "cargo test",
+                "running",
+            )],
+            &[],
+        );
+        view.set_editor_selection(Some((
+            "/fixture/project/src/app.tsx".to_owned(),
+            vec![EditorRange {
+                start_line: 4,
+                start_character: 0,
+                end_line: 4,
+                end_character: 3,
+            }],
+            EditorState::Attached,
+        )));
+
+        let facts = view.composer_footer_facts();
+        assert_eq!(facts.subagents, 2, "running children from /children");
+        assert_eq!(facts.shells, 1, "records from GET /api/shell");
+        let editor = facts.editor.expect("editor fact is exposed on RailFacts");
+        assert_eq!(editor.path, "/fixture/project/src/app.tsx");
+        assert_eq!(editor.state, EditorState::Attached);
+        assert_eq!(editor.ranges.len(), 1);
+        assert_eq!(editor.ranges[0].start_line, 4);
+    }
+
     /// CP-16: the footer's live-count producer reads the retained `/children`
     /// status and the acknowledged `GET /api/shell` listing — never a
     /// hardcoded zero. A shell status transition leaves the count unchanged
