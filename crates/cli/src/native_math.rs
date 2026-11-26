@@ -981,6 +981,15 @@ impl MathScrollBox {
         self.content_width.saturating_sub(self.viewport_width)
     }
 
+    /// Re-bind geometry on a later frame and clamp the retained offset. A
+    /// streaming formula can grow wider; the owned scroll box keeps its
+    /// window while the layout width changes (`markdown.ts:75-78,86`).
+    pub fn resize(&mut self, content_width: usize, viewport_width: usize) {
+        self.content_width = content_width.max(1);
+        self.viewport_width = viewport_width.max(1);
+        self.scroll_x = self.scroll_x.min(self.max_scroll_x());
+    }
+
     /// Apply a horizontal scroll delta (clamped; the base ScrollBox owns the
     /// actual delta, the upstream override only filters events).
     pub fn scroll_by(&mut self, delta: isize) {
@@ -1270,6 +1279,19 @@ mod tests {
         assert!(!scroll.horizontal_scroll_bar_visible());
         assert!(!scroll.vertical_scroll_bar_visible());
         assert!(!SCROLL_Y_ENABLED);
+    }
+
+    /// MD-009: an owned scroll box re-binds its geometry on a later frame and
+    /// clamps the retained horizontal offset to the new canvas width.
+    #[test]
+    fn md009_scroll_box_resize_clamps_retained_offset() {
+        let mut scroll = MathScrollBox::new(300, 80);
+        scroll.scroll_by(200);
+        assert_eq!(scroll.scroll_x(), 200);
+        // A narrower formula on a later frame re-clamps the retained offset.
+        scroll.resize(100, 80);
+        assert_eq!(scroll.scroll_x(), 20);
+        assert_eq!(scroll.max_scroll_x(), 20);
     }
 
     /// MD-009. OC2 cache key is `(source, width, theme)`; upstream caches the

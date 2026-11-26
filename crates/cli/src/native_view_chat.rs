@@ -49,6 +49,7 @@ use crate::native_prompt_pane::{
 };
 use crate::native_transcript::{TranscriptLine, render_lines, strip_ansi};
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 
 /// TOOL-008: one model-catalogue row used to resolve a subagent row's
 /// `provider/model` reference to its display name. Kept as a short alias so the
@@ -2917,12 +2918,15 @@ fn paint_plain_code_block(
 /// the muted color, so `subdued`/`dim` map onto the muted color and a
 /// `\color{}` cell keeps the row foreground; glyphs and column geometry stay
 /// faithful.
+#[allow(clippy::too_many_arguments)]
 fn paint_math_frame(
     rows: &mut Vec<(String, ChatRowClass)>,
     width: usize,
     prefix: &str,
     class: ChatRowClass,
     frame: &crate::native_math::MathFrame,
+    scroll_x: usize,
+    viewport_width: usize,
     spans: &mut Vec<(usize, Vec<ChatRunSpan>)>,
     start: usize,
 ) {
@@ -2935,21 +2939,28 @@ fn paint_math_frame(
         }
         rows.push((truncate_row(prefix, width), class));
     }
+    // The formula is a `width: 100%` renderable inside a horizontal
+    // ScrollBox. Paint only the `scroll_x` window of each laid-out row so a
+    // long formula scrolls without consuming transcript rows. The caller
+    // asserts the horizontal scroll bar is hidden, so no bar row is emitted
+    // (`markdown.ts:53-98`).
+    let x_start = scroll_x.min(layout.width);
+    let x_end = layout.width.min(scroll_x.saturating_add(viewport_width));
     for y in 0..layout.height.max(1) {
         if rows.len() >= MAX_MESSAGE_ROWS {
             break;
         }
-        let text = layout.row_text(y);
+        let text = cell_slice(&layout.row_text(y), scroll_x, viewport_width);
         rows.push((truncate_row(&format!("{prefix}{text}"), width), class));
         let row_index = rows.len() - 1 - start;
 
-        // Walk the layout row exactly the way `row_text` does (wide glyphs
-        // advance two columns) and coalesce adjacent same-style cells into
-        // runs whose column bounds match the painted row.
+        // Walk the same cell window as the painted row (wide glyphs advance
+        // two columns) and coalesce adjacent same-style cells into runs whose
+        // column bounds are rebased to the painted, prefixed window.
         let mut run_spans: Vec<ChatRunSpan> = Vec::new();
         let mut run: Option<(usize, u32)> = None;
-        let mut x = 0usize;
-        while x < layout.width {
+        let mut x = x_start;
+        while x < x_end {
             let cell = layout
                 .cells
                 .get(y)
@@ -2963,19 +2974,19 @@ fn paint_math_frame(
                 match run {
                     Some((_, current)) if current == flags => {}
                     Some((run_start, current)) => {
-                        push_math_run(&mut run_spans, prefix_cells, run_start, x, current);
+                        push_math_run(&mut run_spans, prefix_cells, run_start - x_start, x - x_start, current);
                         run = Some((x, flags));
                     }
                     None => run = Some((x, flags)),
                 }
             } else if let Some((run_start, current)) = run.take() {
-                push_math_run(&mut run_spans, prefix_cells, run_start, x, current);
+                push_math_run(&mut run_spans, prefix_cells, run_start - x_start, x - x_start, current);
             }
             let advance = crate::native_math::cell_width(ch);
             x += if advance == 0 { 1 } else { advance };
         }
         if let Some((run_start, current)) = run.take() {
-            push_math_run(&mut run_spans, prefix_cells, run_start, x, current);
+            push_math_run(&mut run_spans, prefix_cells, run_start - x_start, x - x_start, current);
         }
         if !run_spans.is_empty() {
             spans.push((row_index, run_spans));
@@ -3062,6 +3073,417 @@ fn syntax_fence_registry() -> crate::native_markdown_flow::MarkdownPluginRegistr
     registry
 }
 
+// ── MD-008 / MD-009: renderer state owned across transcript frames ──────
+//
+// A `MarkdownFlow` is rebuilt on every repaint and once per `ChatPart::Text`,
+// so `MarkdownBlock.id` is only a 0-based position inside one part. Keying
+// renderer state by that bare id lets a fence that is the first code block of
+// message A collide with the first code block of message B. The composite key
+// below adds the message scope and part index, making it unique across the
+// whole transcript while staying stable from frame to frame. The producer
+// `doc_id` is intentionally *not* the key: it is re-derived every frame, so it
+// changes under streaming exactly when last-good must be retained. When a
+// live message carries no wire id, `message_scope` hashes only the
+// fence-anchored skeleton (text through the first fence opening), not the
+// growing body, so the key stays stable across streaming deltas too.
+
+/// Stable composite identity for one renderer across transcript frames.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RendererKey {
+    /// `message_id` when supplied, else a content-derived fallback hash.
+    scope: String,
+    /// Part index inside that message (each part owns a fresh flow).
+    part: usize,
+    /// Positional block id inside the part.
+    block: usize,
+}
+
+impl RendererKey {
+    /// Construct the stable identity of one rendered fence. The paint path
+    /// derives this from `(message scope, part index, block id)`. It is public
+    /// so the terminal input owner (which resolves the hovered fence to those
+    /// three values) can address the renderer through [`route_renderer_wheel`]
+    /// and [`route_renderer_pointer`] instead of reaching into paint state.
+    #[must_use]
+    pub fn new(scope: &str, part: usize, block: usize) -> Self {
+        Self { scope: scope.to_owned(), part, block }
+    }
+}
+
+/// Bound on owned renderer/scroll state. Least-recently-rendered keys are
+/// evicted first; active blocks are re-touched every frame.
+const MAX_RENDERER_KEYS: usize = 64;
+
+thread_local! {
+    /// One long-lived Mermaid renderer per block: cache and last-good survive
+    /// repaints and streaming partial syntax.
+    static MERMAID_RENDERERS: RefCell<BTreeMap<RendererKey, crate::native_mermaid::MermaidRenderer<crate::native_mermaid::CellDiagramPainter>>> = RefCell::new(BTreeMap::new());
+    /// One horizontal viewport per rendered diagram, so a wide drag survives
+    /// the next frame.
+    static DIAGRAM_VIEWPORTS: RefCell<BTreeMap<RendererKey, crate::native_mermaid::DiagramViewport>> = RefCell::new(BTreeMap::new());
+    /// One long-lived math renderer per block: cache and last-good persist.
+    static MATH_RENDERERS: RefCell<BTreeMap<RendererKey, crate::native_math::MathRenderer<crate::native_math_engine::UpstreamMathEngine>>> = RefCell::new(BTreeMap::new());
+    /// One horizontal scroll box per rendered formula.
+    static MATH_SCROLL_BOXES: RefCell<BTreeMap<RendererKey, crate::native_math::MathScrollBox>> = RefCell::new(BTreeMap::new());
+    /// Monotonic generation used as the recency stamp in `RENDERER_LRU`.
+    static RENDERER_GEN: Cell<u64> = Cell::new(0);
+    /// Last frame generation in which each key was rendered.
+    static RENDERER_LRU: RefCell<BTreeMap<RendererKey, u64>> = RefCell::new(BTreeMap::new());
+}
+
+/// Record `key` as used this frame and evict the least-recently-rendered state
+/// once more than [`MAX_RENDERER_KEYS`] blocks are owned. Called once per fence
+/// block before any renderer map is borrowed, so no `RefCell` is already held.
+fn touch_renderer(key: &RendererKey) {
+    let gen = RENDERER_GEN.with(|cell| {
+        let next = cell.get().wrapping_add(1);
+        cell.set(next);
+        next
+    });
+    let evicted: Vec<RendererKey> = RENDERER_LRU.with(|lru| {
+        let mut lru = lru.borrow_mut();
+        lru.insert(key.clone(), gen);
+        if lru.len() <= MAX_RENDERER_KEYS {
+            return Vec::new();
+        }
+        let mut oldest: Vec<(RendererKey, u64)> =
+            lru.iter().map(|(key, gen)| (key.clone(), *gen)).collect();
+        oldest.sort_by_key(|(_, gen)| *gen);
+        let excess = oldest.len() - MAX_RENDERER_KEYS;
+        let evicted: Vec<RendererKey> =
+            oldest.into_iter().take(excess).map(|(key, _)| key).collect();
+        for key in &evicted {
+            lru.remove(key);
+        }
+        evicted
+    });
+    if evicted.is_empty() {
+        return;
+    }
+    MERMAID_RENDERERS.with(|map| {
+        let mut map = map.borrow_mut();
+        for key in &evicted {
+            map.remove(key);
+        }
+    });
+    DIAGRAM_VIEWPORTS.with(|map| {
+        let mut map = map.borrow_mut();
+        for key in &evicted {
+            map.remove(key);
+        }
+    });
+    MATH_RENDERERS.with(|map| {
+        let mut map = map.borrow_mut();
+        for key in &evicted {
+            map.remove(key);
+        }
+    });
+    MATH_SCROLL_BOXES.with(|map| {
+        let mut map = map.borrow_mut();
+        for key in &evicted {
+            map.remove(key);
+        }
+    });
+}
+
+/// Bounded FNV-1a, used only to partition renderer state (not authorization).
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// Message scope used by the live call site: the wire `message_id` when
+/// present, otherwise a content-derived fallback invariant while a fence
+/// body streams. Streaming is append-only: everything up to and including the
+/// first fence opening line is emitted before that fence's body arrives, so
+/// that prefix is byte-identical on every frame that can render a fence. The
+/// growing body is intentionally excluded from the hash.
+fn message_scope(message: &ChatMessage) -> String {
+    if let Some(id) = message.message_id.as_deref() {
+        return format!("mid:{id}");
+    }
+    let mut skeleton = String::new();
+    for part in &message.parts {
+        match part {
+            ChatPart::Text(text) | ChatPart::Thinking(text) => {
+                skeleton.push_str(stable_scope_prefix(text));
+                skeleton.push('\u{1f}');
+            }
+            _ => {}
+        }
+    }
+    format!("anon:{:016x}", fnv1a(skeleton.as_bytes()))
+}
+
+/// Content-derived scope for callers without a message object (isolated parts
+/// and tests).
+fn anon_scope(text: &str) -> String {
+    format!("anon:{:016x}", fnv1a(stable_scope_prefix(text).as_bytes()))
+}
+
+/// Stable leading slice of one Markdown part: every byte up to and including
+/// the first fence opening line, or the whole part when it has no fence.
+fn stable_scope_prefix(text: &str) -> &str {
+    let mut offset = 0usize;
+    for line in text.split_inclusive('\n') {
+        offset += line.len();
+        let trimmed = line.trim_start_matches(' ');
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            return &text[..offset];
+        }
+    }
+    text
+}
+
+fn with_mermaid<R>(
+    key: &RendererKey,
+    f: impl FnOnce(&mut crate::native_mermaid::MermaidRenderer<crate::native_mermaid::CellDiagramPainter>) -> R,
+) -> R {
+    MERMAID_RENDERERS.with(|map| {
+        let mut map = map.borrow_mut();
+        let renderer = map.entry(key.clone()).or_insert_with(|| {
+            crate::native_mermaid::MermaidRenderer::new(
+                crate::native_mermaid::CellDiagramPainter,
+                crate::native_mermaid::MermaidTheme::dark("oc2-native"),
+            )
+        });
+        f(renderer)
+    })
+}
+
+fn with_math<R>(
+    key: &RendererKey,
+    f: impl FnOnce(&mut crate::native_math::MathRenderer<crate::native_math_engine::UpstreamMathEngine>) -> R,
+) -> R {
+    MATH_RENDERERS.with(|map| {
+        let mut map = map.borrow_mut();
+        let renderer = map.entry(key.clone()).or_insert_with(|| {
+            crate::native_math::MathRenderer::new(
+                crate::native_math_engine::UpstreamMathEngine::default(),
+                crate::native_math::MathTheme::new("text.base", "text.muted"),
+            )
+        });
+        f(renderer)
+    })
+}
+
+/// Drop all owned renderer/scroll state (tests and full transcript resets).
+pub fn clear_renderer_state() {
+    MERMAID_RENDERERS.with(|map| map.borrow_mut().clear());
+    DIAGRAM_VIEWPORTS.with(|map| map.borrow_mut().clear());
+    MATH_RENDERERS.with(|map| map.borrow_mut().clear());
+    MATH_SCROLL_BOXES.with(|map| map.borrow_mut().clear());
+    RENDERER_LRU.with(|map| map.borrow_mut().clear());
+}
+
+/// Slice a painted row by *cell* columns so a wide glyph is never cut in half
+/// when the window starts or ends inside it.
+fn cell_slice(text: &str, start: usize, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    let end = start.saturating_add(width);
+    let mut out = String::new();
+    let mut column = 0usize;
+    for ch in text.chars() {
+        let advance = crate::native_math::cell_width(ch).max(1);
+        // Skip anything starting before the window (including a wide glyph
+        // that would straddle its left edge), and stop before a glyph that
+        // would spill past its right edge.
+        if column < start {
+            column += advance;
+            continue;
+        }
+        if column + advance > end {
+            break;
+        }
+        out.push(ch);
+        column += advance;
+    }
+    out
+}
+
+/// Constant wheel step in cells, matching one upstream scroll-box tick.
+const RENDERER_SCROLL_STEP: isize = 24;
+
+/// Mermaid pointer-down, routed to the viewport owned by `key`.
+pub fn mermaid_pointer_down(
+    key: &RendererKey,
+    button: crate::native_mermaid::MouseButton,
+    x: usize,
+) -> crate::native_mermaid::MouseEventOutcome {
+    DIAGRAM_VIEWPORTS.with(|map| {
+        map.borrow_mut().get_mut(key).map_or(
+            crate::native_mermaid::MouseEventOutcome {
+                consumed: false,
+                clear_selection: false,
+            },
+            |viewport| viewport.mouse_down(button, x),
+        )
+    })
+}
+
+/// Mermaid pointer-drag; the offset persists on the owned viewport.
+pub fn mermaid_pointer_drag(key: &RendererKey, x: usize) -> bool {
+    DIAGRAM_VIEWPORTS.with(|map| map.borrow_mut().get_mut(key).is_some_and(|v| v.mouse_drag(x)))
+}
+
+/// Mermaid pointer-up / drag-end.
+pub fn mermaid_pointer_up(key: &RendererKey, button: crate::native_mermaid::MouseButton) -> bool {
+    DIAGRAM_VIEWPORTS.with(|map| map.borrow_mut().get_mut(key).is_some_and(|v| v.mouse_up(button)))
+}
+
+/// Mermaid wheel: only left/right are consumed (vertical passes through to the
+/// transcript), and the horizontal delta persists on the viewport.
+pub fn mermaid_mouse_scroll(
+    key: &RendererKey,
+    direction: crate::native_mermaid::ScrollDirection,
+) -> bool {
+    DIAGRAM_VIEWPORTS.with(|map| {
+        let mut map = map.borrow_mut();
+        let Some(viewport) = map.get_mut(key) else { return false; };
+        let delta = match direction {
+            crate::native_mermaid::ScrollDirection::Left => -RENDERER_SCROLL_STEP,
+            crate::native_mermaid::ScrollDirection::Right => RENDERER_SCROLL_STEP,
+            crate::native_mermaid::ScrollDirection::Up | crate::native_mermaid::ScrollDirection::Down => {
+                return false
+            }
+        };
+        viewport.scroll_by(delta);
+        viewport.mouse_scroll(direction)
+    })
+}
+
+/// Math wheel: shift-modified vertical or explicit horizontal events are
+/// consumed and move the retained `MathScrollBox`; plain vertical wheel events
+/// pass through so the transcript keeps scrolling (`markdown.ts:89-95`).
+pub fn math_mouse_scroll(
+    key: &RendererKey,
+    direction: crate::native_math::ScrollDirection,
+    shift: bool,
+) -> bool {
+    MATH_SCROLL_BOXES.with(|map| {
+        let mut map = map.borrow_mut();
+        let Some(scroll) = map.get_mut(key) else { return false; };
+        if !scroll.on_mouse_scroll(direction, shift) {
+            return false;
+        }
+        let delta = match direction {
+            crate::native_math::ScrollDirection::Left | crate::native_math::ScrollDirection::Up => {
+                -RENDERER_SCROLL_STEP
+            }
+            crate::native_math::ScrollDirection::Right | crate::native_math::ScrollDirection::Down => {
+                RENDERER_SCROLL_STEP
+            }
+        };
+        scroll.scroll_by(delta);
+        true
+    })
+}
+
+// ── Single production-facing input seam (MD-008 / MD-009) ──────────────
+//
+// The five handler functions above are the paint-side primitives; the two
+// `route_renderer_*` functions below are the *one* entry point a terminal
+// event loop needs. The event owner resolves the hovered fence to its stable
+// [`RendererKey`] (see [`RendererKey::new`]) and calls these once per event.
+// Routing real terminal mouse/wheel events into them still lives in
+// `tui_entry.rs`, which is outside this feature's granted paths; no claim of
+// event-loop wiring is made here (see `docs/ui-parity/PARITY_STATUS.md`).
+
+/// Which renderer owns the addressed fence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RendererKind {
+    Mermaid,
+    Math,
+}
+
+/// Wheel direction independent of either renderer's private direction enum.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RendererWheel {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+/// One pointer event on a rendered fence. Math fences have no drag/scroll
+/// interaction upstream, so `RendererPointerEvent` applies to diagrams.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RendererPointerEvent {
+    Down {
+        button: crate::native_mermaid::MouseButton,
+        x: usize,
+    },
+    Drag {
+        x: usize,
+    },
+    Up {
+        button: crate::native_mermaid::MouseButton,
+    },
+}
+
+/// Route one wheel tick to the renderer owned by `key`.
+///
+/// Vertical ticks pass through for both kinds so the transcript keeps
+/// scrolling; math additionally consumes shift-modified vertical ticks
+/// (`packages/latex/src/markdown.ts:89-95`). The returned flag is the upstream
+/// `consumed` (`preventDefault`/`stopPropagation`) decision.
+#[must_use]
+pub fn route_renderer_wheel(
+    key: &RendererKey,
+    kind: RendererKind,
+    wheel: RendererWheel,
+    shift: bool,
+) -> bool {
+    match kind {
+        RendererKind::Mermaid => {
+            let direction = match wheel {
+                RendererWheel::Up => crate::native_mermaid::ScrollDirection::Up,
+                RendererWheel::Down => crate::native_mermaid::ScrollDirection::Down,
+                RendererWheel::Left => crate::native_mermaid::ScrollDirection::Left,
+                RendererWheel::Right => crate::native_mermaid::ScrollDirection::Right,
+            };
+            mermaid_mouse_scroll(key, direction)
+        }
+        RendererKind::Math => {
+            let direction = match wheel {
+                RendererWheel::Up => crate::native_math::ScrollDirection::Up,
+                RendererWheel::Down => crate::native_math::ScrollDirection::Down,
+                RendererWheel::Left => crate::native_math::ScrollDirection::Left,
+                RendererWheel::Right => crate::native_math::ScrollDirection::Right,
+            };
+            math_mouse_scroll(key, direction, shift)
+        }
+    }
+}
+
+/// Route one pointer event to the diagram viewport owned by `key`.
+///
+/// Returns the upstream `consumed` decision. Math fences own no pointer hit
+/// region (`packages/latex/src/markdown.ts`), so a math key is a no-op.
+#[must_use]
+pub fn route_renderer_pointer(
+    key: &RendererKey,
+    kind: RendererKind,
+    event: RendererPointerEvent,
+) -> bool {
+    if kind != RendererKind::Mermaid {
+        return false;
+    }
+    match event {
+        RendererPointerEvent::Down { button, x } => {
+            mermaid_pointer_down(key, button, x).consumed
+        }
+        RendererPointerEvent::Drag { x } => mermaid_pointer_drag(key, x),
+        RendererPointerEvent::Up { button } => mermaid_pointer_up(key, button),
+    }
+}
+
 /// Route one fenced code block by its info-string language.
 ///
 /// Mermaid (`packages/tui/src/plugin/builtins.ts:15,29`,
@@ -3069,11 +3491,14 @@ fn syntax_fence_registry() -> crate::native_markdown_flow::MarkdownPluginRegistr
 /// (`packages/tui/src/plugin/builtins.ts:14,30`,
 /// `packages/latex/src/plugin.ts:7-12`) own dedicated renderers upstream.
 /// Mermaid is wired through [`crate::native_mermaid::CellDiagramPainter`]:
-/// a rendered flowchart replaces the code block (`markdown.ts:66-75`), while
-/// any fail-closed outcome (other kinds, bounds, syntax) keeps the preserved
-/// source. MD-009 supplies a real [`crate::native_math::MathLayoutEngine`], so
-/// a `latex`/`math`/`tex` fence renders its laid-out formula through
-/// [`paint_math_frame`]; any `Fallback` outcome keeps the preserved source.
+/// every registered kind (flowchart plus the five dedicated `layout_non_flow`
+/// layouts) replaces the code block with a rendered cell diagram
+/// (`markdown.ts:66-75`); only a fail-closed outcome (undetected kind, bounds,
+/// unrecoverable syntax) keeps the preserved source. MD-009 supplies a real
+/// [`crate::native_math::MathLayoutEngine`], so a `latex`/`math`/`tex` fence
+/// renders its laid-out formula through [`paint_math_frame`]; any `Fallback`
+/// outcome keeps the preserved source. MD-008/009 own one renderer per block
+/// key across frames so cache, last-good and horizontal scroll survive.
 ///
 /// MD-007: `fence_handler` is the live flow's resolved handler id for this
 /// block (from the registry [`push_block_markdown`] binds via
@@ -3087,6 +3512,7 @@ fn paint_fence_block(
     prefix: &str,
     class: ChatRowClass,
     mode: crate::markdown_runs::MarkdownMode,
+    key: &RendererKey,
     block_id: usize,
     raw: &str,
     source: &str,
@@ -3099,37 +3525,58 @@ fn paint_fence_block(
         paint_plain_code_block(rows, width, prefix, class, raw, mode, true, spans, start);
         return;
     }
+    // The diagram/formula viewport is the row area left after the transcript
+    // prefix. Painting the full row width made the rightmost `prefix_cells`
+    // columns of a wide diagram/formula unreachable by a drag.
+    let content_viewport = width.saturating_sub(row_cells(prefix)).max(1);
     if let Some(fence) = crate::native_mermaid::MermaidFence::from_code_block(language, source, block_id) {
-        // Upstream registers a real Mermaid renderer
-        // (`packages/tui/src/plugin/builtins.ts:15,29`,
-        // `packages/merman/src/plugin.ts:5-14`); this client supplies the
-        // live `CellDiagramPainter`, so a rendered flowchart REPLACES the
-        // code block exactly like upstream
-        // (`packages/merman/src/markdown.ts:66-75,283-287`).
-        let mut renderer = crate::native_mermaid::MermaidRenderer::new(
-            crate::native_mermaid::CellDiagramPainter,
-            crate::native_mermaid::MermaidTheme::dark("oc2-native"),
-        );
-        match renderer.render(&fence, width) {
+        // The renderer owned by `key` survives repaints, so detection/cache/
+        // last-good survive streaming partial syntax. Render at the configured
+        // layoutMaxWidth (clamped to at least the viewport) so a wide canvas
+        // has real horizontal drag range (`markdown.ts:279-281`).
+        let canvas_width = with_mermaid(key, |renderer| {
+            renderer.effective_width(
+                crate::native_mermaid::DEFAULT_LAYOUT_MAX_WIDTH.max(content_viewport),
+            )
+        });
+        let outcome = with_mermaid(key, |renderer| renderer.render(&fence, canvas_width));
+        match outcome {
             crate::native_mermaid::MermaidOutcome::Fallback(_fallback) => {
                 // Fail-closed: detection, bounds or syntax rejected the
                 // diagram, so keep the preserved-source code block.
             }
             crate::native_mermaid::MermaidOutcome::Rendered(frame) => {
-                let request = crate::native_mermaid::DiagramRequest {
-                    kind: frame.kind,
-                    // A retained/partial frame is produced from `frame.source`,
-                    // not the currently failing fence source.  Re-painting
-                    // from the latter would make the renderer discard the
-                    // last-good diagram during streaming recovery.
-                    source: &frame.source,
-                    width: renderer.effective_width(width),
-                    theme: renderer.theme(),
-                };
-                if let Some(diagram) = renderer.painter().cells(&request) {
-                    // `marginTop: 1` (`markdown.ts:74`), then one row per
-                    // diagram line; the fence delimiters and raw source are
-                    // gone entirely.
+                // A retained/partial frame is produced from `frame.source`,
+                // not the currently failing fence source; re-painting from
+                // the latter would discard the last-good frame.
+                let painted = with_mermaid(key, |renderer| {
+                    let request = crate::native_mermaid::DiagramRequest {
+                        kind: frame.kind,
+                        source: &frame.source,
+                        width: canvas_width,
+                        theme: renderer.theme(),
+                    };
+                    renderer.painter().cells(&request)
+                });
+                if let Some(diagram) = painted {
+                    // The painter trims trailing blanks from each row, so the
+                    // scrollable canvas is the requested layout width, not the
+                    // trimmed `frame.width`.
+                    let content_width = canvas_width.max(frame.width).max(1);
+                    DIAGRAM_VIEWPORTS.with(|map| {
+                        let mut map = map.borrow_mut();
+                        let viewport = map.entry(key.clone()).or_insert_with(|| {
+                            crate::native_mermaid::DiagramViewport::new(content_width, content_viewport)
+                        });
+                        viewport.resize(content_width, content_viewport);
+                    });
+                    let scroll_x = DIAGRAM_VIEWPORTS.with(|map| {
+                        map.borrow()
+                            .get(key)
+                            .map_or(0, crate::native_mermaid::DiagramViewport::scroll_x)
+                    });
+                    // `marginTop: 1` (`markdown.ts:74`), then the windowed
+                    // diagram rows; fence delimiters and raw source are gone.
                     if rows.len() < MAX_MESSAGE_ROWS {
                         rows.push((truncate_row(prefix, width), class));
                     }
@@ -3137,7 +3584,8 @@ fn paint_fence_block(
                         if rows.len() >= MAX_MESSAGE_ROWS {
                             break;
                         }
-                        rows.push((truncate_row(&format!("{prefix}{line}"), width), class));
+                        let window = cell_slice(&line, scroll_x, content_viewport);
+                        rows.push((truncate_row(&format!("{prefix}{window}"), width), class));
                     }
                     return;
                 }
@@ -3160,15 +3608,10 @@ fn paint_fence_block(
             }),
         )
     {
-        // MD-009: real math producer. The engine ports
-        // `packages/latex/src/render.ts` (`renderLatex = layoutMath(parse...)`)
-        // in strict/displayMode form, the exact call upstream's code-block
-        // renderer makes (`markdown.ts:112-118`).
-        let mut renderer = crate::native_math::MathRenderer::new(
-            crate::native_math_engine::UpstreamMathEngine::default(),
-            crate::native_math::MathTheme::new("text.base", "text.muted"),
-        );
-        match renderer.render(&fence, width) {
+        // MD-009: real math producer, owned by `key` so its cache and
+        // last-good layout survive repaints and streaming partial syntax.
+        let outcome = with_math(key, |renderer| renderer.render(&fence, content_viewport));
+        match outcome {
             crate::native_math::MathOutcome::Fallback(fallback) => {
                 debug_assert_eq!(fallback.source, fence.source);
                 paint_plain_code_block(rows, width, prefix, class, raw, mode, false, spans, start);
@@ -3177,7 +3620,21 @@ fn paint_fence_block(
                 debug_assert!(frame.layout.height > 0);
                 debug_assert!(!frame.layout.cells.is_empty());
                 debug_assert!(frame.layout.cells.iter().all(|row| row.len() == frame.layout.width));
-                paint_math_frame(rows, width, prefix, class, &frame, spans, start);
+                let scroll_x = MATH_SCROLL_BOXES.with(|map| {
+                    let mut map = map.borrow_mut();
+                    let scroll = map.entry(key.clone()).or_insert_with(|| {
+                        crate::native_math::MathScrollBox::new(
+                            frame.layout.width.max(1),
+                            content_viewport,
+                        )
+                    });
+                    scroll.resize(frame.layout.width.max(1), content_viewport);
+                    debug_assert!(!scroll.horizontal_scroll_bar_visible());
+                    scroll.scroll_x()
+                });
+                paint_math_frame(
+                    rows, width, prefix, class, &frame, scroll_x, content_viewport, spans, start,
+                );
             }
         }
         return;
@@ -3190,6 +3647,11 @@ fn paint_fence_block(
 
 /// Render one non-user Markdown part as flow blocks. Returns style spans with
 /// row offsets relative to the first row this call pushed.
+///
+/// Callers without a stable message identity (tests, isolated parts) get a
+/// content-derived scope; the live call site uses
+/// [`push_block_markdown_scoped`] so renderer state is partitioned by message
+/// id and part index.
 fn push_block_markdown(
     rows: &mut Vec<(String, ChatRowClass)>,
     width: usize,
@@ -3197,6 +3659,25 @@ fn push_block_markdown(
     prefix: &str,
     class: ChatRowClass,
     markdown_mode: crate::markdown_runs::MarkdownMode,
+) -> Vec<(usize, Vec<ChatRunSpan>)> {
+    let scope = anon_scope(text);
+    push_block_markdown_scoped(rows, width, text, prefix, class, markdown_mode, &scope, 0)
+}
+
+/// Scoped variant: `scope` must be stable for a message across frames and
+/// `part` is the part's index inside that message. Together with the block's
+/// positional id this forms the globally unique [`RendererKey`] used to own
+/// Mermaid/math renderer state across repaints.
+#[allow(clippy::too_many_arguments)]
+fn push_block_markdown_scoped(
+    rows: &mut Vec<(String, ChatRowClass)>,
+    width: usize,
+    text: &str,
+    prefix: &str,
+    class: ChatRowClass,
+    markdown_mode: crate::markdown_runs::MarkdownMode,
+    scope: &str,
+    part: usize,
 ) -> Vec<(usize, Vec<ChatRunSpan>)> {
     use crate::native_markdown_flow::{BlockBody, BlockKind, MarkdownFlow};
     let start = rows.len();
@@ -3256,8 +3737,13 @@ fn push_block_markdown(
                     BlockBody::Code { lines, .. } => lines.join("\n"),
                     _ => String::new(),
                 };
+                let key = RendererKey::new(scope, part, block.id);
+                // Record this frame's use before `paint_fence_block` borrows
+                // any renderer map, so LRU eviction cannot double-borrow a
+                // `RefCell` already held by the painter.
+                touch_renderer(&key);
                 paint_fence_block(
-                    rows, width, prefix, class, markdown_mode, block.id,
+                    rows, width, prefix, class, markdown_mode, &key, block.id,
                     raw, &source, lang.as_deref(), block.fence_handler.as_deref(), &mut spans, start,
                 );
             }
@@ -3410,10 +3896,14 @@ fn typed_message_rows_with_prefix_spans_mode(
             }
         }
     }
+    // MD-008/009: stable renderer scope for this message. Combined with the
+    // part index and block id it is the composite key that owns Mermaid/math
+    // renderer state across frames (see [`RendererKey`]).
+    let renderer_scope = message_scope(message);
     // TOOL-011: per-message ToolState counter (stable part index for the
     // execute-dialog opener owner map).
     let mut tool_state_count = 0usize;
-    for part in message.parts.iter().take(MAX_PARTS_PER_MESSAGE) {
+    for (part_index, part) in message.parts.iter().take(MAX_PARTS_PER_MESSAGE).enumerate() {
         if rows.len() >= MAX_MESSAGE_ROWS {
             break;
         }
@@ -3434,10 +3924,13 @@ fn typed_message_rows_with_prefix_spans_mode(
                     push_wrapped(&mut rows, width, text, part_prefix, class);
                 } else {
                     // Block layout, fence routing and style spans all come
-                    // from [`crate::native_markdown_flow`].
-                    for (offset, spans) in
-                        push_block_markdown(&mut rows, width, text, part_prefix, class, markdown_mode)
-                    {
+                    // from [`crate::native_markdown_flow`]. The scoped variant
+                    // keys owned renderer state by (message scope, part index,
+                    // block id) so it survives repaints without collisions.
+                    for (offset, spans) in push_block_markdown_scoped(
+                        &mut rows, width, text, part_prefix, class, markdown_mode,
+                        &renderer_scope, part_index,
+                    ) {
                         if !spans.is_empty() {
                             spans_out.push((before + offset, spans));
                         }
@@ -10769,5 +11262,392 @@ mod tool011_tests {
         let bare_rendered = bare.render_typed("", &[tool_message(String::new())], false, &[]);
         let bare_painted = bare_rendered.join("\n");
         assert!(!bare_painted.contains("[images]"), "no gallery without metadata: {bare_painted}");
+    }
+
+    // ── MD-008 / MD-009: owned renderer state across frames ──────────
+
+    fn paint_scoped(text: &str, width: usize, scope: &str, part: usize) -> Vec<(String, ChatRowClass)> {
+        let mut rows = Vec::new();
+        push_block_markdown_scoped(
+            &mut rows,
+            width,
+            text,
+            "",
+            ChatRowClass::AssistantCard,
+            crate::markdown_runs::MarkdownMode::Rendered,
+            scope,
+            part,
+        );
+        rows
+    }
+
+    /// MD-008: one renderer per composite key across frames, so a later
+    /// syntax failure recovers the last-good diagram instead of a sibling's.
+    #[test]
+    fn md_008_renderer_state_survives_across_frames() {
+        clear_renderer_state();
+        let full = "```mermaid\nflowchart TD\nA[Start] --> B[End]\n```";
+        let broken = "```mermaid\nflowchart TD\nA[Start] --> B[End]\n??\n```";
+        let first = paint_scoped(full, 60, "msg-A", 0);
+        assert!(first.iter().any(|(row, _)| row.contains("Start")), "{first:?}");
+        let second = paint_scoped(broken, 60, "msg-A", 0);
+        assert!(
+            !second.iter().any(|(row, _)| row.contains("```")),
+            "last-good frame must replace the failing fence: {second:?}"
+        );
+        assert!(second.iter().any(|(row, _)| row.contains("Start")), "retained: {second:?}");
+        assert_eq!(MERMAID_RENDERERS.with(|map| map.borrow().len()), 1);
+    }
+
+    /// MD-008: two same-position fences in different message scopes must not
+    /// share one renderer/viewport.
+    #[test]
+    fn md_008_block_keys_are_unique_across_parts() {
+        clear_renderer_state();
+        let full = "```mermaid\nflowchart TD\nA[Start] --> B[End]\n```";
+        let _ = paint_scoped(full, 60, "msg-A", 0);
+        let _ = paint_scoped(full, 60, "msg-B", 0);
+        let key_a = RendererKey::new("msg-A", 0, 0);
+        let key_b = RendererKey::new("msg-B", 0, 0);
+        assert_ne!(key_a, key_b);
+        mermaid_pointer_down(&key_a, crate::native_mermaid::MouseButton::Left, 40);
+        mermaid_pointer_drag(&key_a, 10);
+        let scrolled_a = DIAGRAM_VIEWPORTS
+            .with(|map| map.borrow().get(&key_a).map_or(0, |v| v.scroll_x()));
+        let scrolled_b = DIAGRAM_VIEWPORTS
+            .with(|map| map.borrow().get(&key_b).map_or(0, |v| v.scroll_x()));
+        assert_eq!(scrolled_a, 30);
+        assert_eq!(scrolled_b, 0, "a drag on one message must not move another's viewport");
+    }
+
+    /// MD-008: the scroll window is the row width minus the transcript prefix,
+    /// so a non-empty prefix no longer hides the rightmost diagram columns.
+    #[test]
+    fn md_008_scroll_window_accounts_for_transcript_prefix() {
+        clear_renderer_state();
+        let text = "```mermaid\nflowchart TD\nA[Start] --> B[End]\n```";
+        let mut rows = Vec::new();
+        push_block_markdown_scoped(
+            &mut rows, 40, text, "AB", ChatRowClass::AssistantCard,
+            crate::markdown_runs::MarkdownMode::Rendered, "prefixed", 0,
+        );
+        assert!(rows.iter().all(|(row, _)| row.starts_with("AB")), "{rows:?}");
+        assert!(rows.iter().all(|(row, _)| row_cells(row) <= 40), "{rows:?}");
+        let key = RendererKey::new("prefixed", 0, 0);
+        mermaid_pointer_down(&key, crate::native_mermaid::MouseButton::Left, 30);
+        mermaid_pointer_drag(&key, 0);
+        let mut moved = Vec::new();
+        push_block_markdown_scoped(
+            &mut moved, 40, text, "AB", ChatRowClass::AssistantCard,
+            crate::markdown_runs::MarkdownMode::Rendered, "prefixed", 0,
+        );
+        assert_ne!(rows, moved, "a wide drag must change the painted window");
+        assert!(moved.iter().all(|(row, _)| row.starts_with("AB") && row_cells(row) <= 40));
+    }
+
+    /// MD-009: one math renderer per key across frames keeps its cache and
+    /// last-good layout.
+    #[test]
+    fn md_009_math_renderer_state_survives_across_frames() {
+        clear_renderer_state();
+        let text = "```math\n\\frac{m}{n}\n```";
+        for _ in 0..2 {
+            let rows = paint_scoped(text, 60, "math-msg", 0);
+            assert!(rows.iter().any(|(row, _)| row.contains('m')), "{rows:?}");
+        }
+        let key = RendererKey::new("math-msg", 0, 0);
+        assert_eq!(MATH_RENDERERS.with(|map| map.borrow().len()), 1);
+        assert!(
+            MATH_RENDERERS.with(|map| map.borrow().get(&key).unwrap().last_good_source(0).is_some()),
+            "last-good formula must be owned across frames"
+        );
+    }
+
+    /// MD-009: a long formula paints only the `scroll_x` window of its
+    /// `MathScrollBox`, and wheel handling filters vertical events while the
+    /// horizontal scroll bar stays hidden.
+    #[test]
+    fn md_009_scroll_box_window_and_shift_wheel() {
+        use crate::native_math::ScrollDirection as MathScrollDirection;
+        clear_renderer_state();
+        // Non-periodic so the unscrolled and scrolled windows differ.
+        let formula = "a+b+c+d+e+f+g+h+i+j+k+l+m+n+o+p+q+r+s+t+u+v+w+x+y+z";
+        let text = format!("```math\n{formula}\n```");
+        let rows = paint_scoped(&text, 24, "math-long", 0);
+        let key = RendererKey::new("math-long", 0, 0);
+        let max_scroll = MATH_SCROLL_BOXES
+            .with(|map| map.borrow().get(&key).unwrap().max_scroll_x());
+        assert!(max_scroll > 0, "the canvas must be wider than the row window");
+        assert!(
+            !math_mouse_scroll(&key, MathScrollDirection::Down, false),
+            "plain vertical wheel passes through"
+        );
+        assert_eq!(
+            MATH_SCROLL_BOXES.with(|map| map.borrow().get(&key).unwrap().scroll_x()),
+            0
+        );
+        assert!(math_mouse_scroll(&key, MathScrollDirection::Down, true), "shift+down consumed");
+        assert!(
+            MATH_SCROLL_BOXES.with(|map| map.borrow().get(&key).unwrap().scroll_x()) > 0
+        );
+        assert!(
+            !MATH_SCROLL_BOXES
+                .with(|map| map.borrow().get(&key).unwrap().horizontal_scroll_bar_visible())
+        );
+        let moved = paint_scoped(&text, 24, "math-long", 0);
+        assert_ne!(rows, moved, "painted formula window must follow scroll_x");
+        assert!(moved.iter().all(|(row, _)| row_cells(row) <= 24));
+    }
+
+    /// MD-009: the painted formula row is sliced by *cell* columns so a wide
+    /// glyph is never cut in half at the window edge.
+    #[test]
+    fn md009_cell_slice_windows_by_cells() {
+        assert_eq!(cell_slice("abcdefghijklmnop", 4, 5), "efghi");
+        assert_eq!(cell_slice("abcdefghijklmnop", 0, 4), "abcd");
+        assert_eq!(cell_slice("abcdefghijklmnop", 14, 8), "op");
+        assert_eq!(cell_slice("abcdefghijklmnop", 4, 0), "");
+        // A wide glyph occupies two columns and is kept only when its whole
+        // cell fits inside the window.
+        assert_eq!(cell_slice("ab界cd", 2, 1), "");
+        assert_eq!(cell_slice("ab界cd", 2, 2), "界");
+    }
+
+    /// MD-009: scroll state is owned per block key, so a wheel on one math
+    /// block cannot move a sibling block's window.
+    #[test]
+    fn md009_math_scroll_state_is_per_block_id() {
+        use crate::native_math::ScrollDirection as MathScrollDirection;
+        clear_renderer_state();
+        let formula = format!("{}z", "a+".repeat(30));
+        let text = format!("```math\n{formula}\n```");
+        let _ = paint_scoped(&text, 24, "math-A", 0);
+        let _ = paint_scoped(&text, 24, "math-B", 0);
+        let key_a = RendererKey::new("math-A", 0, 0);
+        let key_b = RendererKey::new("math-B", 0, 0);
+        assert!(math_mouse_scroll(&key_a, MathScrollDirection::Right, false));
+        let scrolled_a = MATH_SCROLL_BOXES
+            .with(|map| map.borrow().get(&key_a).unwrap().scroll_x());
+        let scrolled_b = MATH_SCROLL_BOXES
+            .with(|map| map.borrow().get(&key_b).unwrap().scroll_x());
+        assert!(scrolled_a > 0);
+        assert_eq!(scrolled_b, 0, "a wheel on one math block must not move another");
+    }
+
+    /// MD-008 (live path): a streaming assistant message is rebuilt from
+    /// `ChatMessage::text` with `message_id: None` on every delta, so the
+    /// fence-anchored scope must keep ONE renderer across frames and retain
+    /// the last-good diagram when a delta carries partial syntax.
+    #[test]
+    fn md_008_live_streaming_scope_stable_and_last_good_retained() {
+        clear_renderer_state();
+        let full = "```mermaid\nflowchart TD\nA[Start] --> B[End]\n";
+        let broken = "```mermaid\nflowchart TD\nA[Start] --> B[End]\n??\n```";
+        for text in [full, broken] {
+            let message = ChatMessage::text(ChatRole::Assistant, text);
+            let rows = typed_message_rows_with_prefix(60, &message, false, Some(""));
+            assert!(
+                !rows.iter().any(|(row, _)| row.contains("```")),
+                "rendered diagram must replace the fence: {rows:?}"
+            );
+            assert!(
+                rows.iter().any(|(row, _)| row.contains("Start")),
+                "last-good diagram retained across deltas: {rows:?}"
+            );
+        }
+        let scope = message_scope(&ChatMessage::text(ChatRole::Assistant, "```mermaid\nx"));
+        assert!(scope.starts_with("anon:"), "anonymous fallback: {scope}");
+        assert_eq!(
+            MERMAID_RENDERERS.with(|map| map.borrow().len()),
+            1,
+            "exactly one owned renderer across streaming frames"
+        );
+    }
+
+    /// MD-009 (live path): the same stable anonymous scope keeps ONE math
+    /// renderer across streaming deltas so its cache/last-good persist.
+    #[test]
+    fn md_009_live_streaming_scope_keeps_one_math_renderer() {
+        clear_renderer_state();
+        for text in ["```math\n\\frac{m}{n}\n", "```math\n\\frac{m}{p}\n```"] {
+            let message = ChatMessage::text(ChatRole::Assistant, text);
+            let rows = typed_message_rows_with_prefix(60, &message, false, Some(""));
+            assert!(rows.iter().any(|(row, _)| row.contains('m')), "formula absent: {rows:?}");
+        }
+        assert_eq!(
+            MATH_RENDERERS.with(|map| map.borrow().len()),
+            1,
+            "exactly one owned math renderer across streaming frames"
+        );
+    }
+
+    /// MD-008/009: owned renderer/scroll state is bounded; the
+    /// least-recently-rendered key is evicted past the cap.
+    #[test]
+    fn md_008_009_renderer_state_is_bounded() {
+        clear_renderer_state();
+        let fenced = "```mermaid\nflowchart TD\nA[Start] --> B[End]\n```";
+        for i in 0..(MAX_RENDERER_KEYS + 8) {
+            let _ = paint_scoped(fenced, 60, &format!("bounded-{i}"), 0);
+        }
+        assert!(
+            MERMAID_RENDERERS.with(|map| map.borrow().len()) <= MAX_RENDERER_KEYS,
+            "mermaid renderer state must be bounded"
+        );
+        assert!(
+            RENDERER_LRU.with(|map| map.borrow().len()) <= MAX_RENDERER_KEYS,
+            "recency index must be bounded"
+        );
+    }
+
+    /// MD-008: the five non-flowchart kinds are detected from a `mermaid`
+    /// fence body and rendered through the live path, not only by calling
+    /// `CellDiagramPainter` directly. Each owns a renderer/viewport keyed by
+    /// its composite block key.
+    #[test]
+    fn md_008_non_flow_kinds_route_through_owned_renderers() {
+        let cases = [
+            ("gantt\ntitle demo\nsection work\nbuild : done", "█"),
+            ("sequenceDiagram\nA->>B: hi", "─▶"),
+            ("stateDiagram-v2\n[*] --> S", "┌"),
+            ("gitGraph\ncommit", "●"),
+            ("timeline\ntitle t\n2024 : event", "──●"),
+        ];
+        let case_count = cases.len();
+        clear_renderer_state();
+        for (i, (source, glyph)) in cases.into_iter().enumerate() {
+            let text = format!("```mermaid\n{source}\n```");
+            let scope = format!("nonflow-live-{i}");
+            let rows = paint_scoped(&text, 60, &scope, 0);
+            assert!(
+                rows.iter().any(|(row, _)| row.contains(glyph)),
+                "structural glyph {glyph:?} missing for {scope}: {rows:?}"
+            );
+            assert!(
+                !rows.iter().any(|(row, _)| row.contains("```")),
+                "fence must be replaced for {scope}: {rows:?}"
+            );
+            let key = RendererKey::new(&scope, 0, 0);
+            assert!(
+                DIAGRAM_VIEWPORTS.with(|map| map.borrow().contains_key(&key)),
+                "horizontal viewport must be owned for {scope}"
+            );
+        }
+        assert_eq!(
+            MERMAID_RENDERERS.with(|map| map.borrow().len()),
+            case_count,
+            "one renderer per non-flow block key"
+        );
+    }
+
+    /// MD-008: horizontal wheel ticks routed through the single production
+    /// seam move only the addressed diagram viewport; vertical ticks pass
+    /// through to the transcript.
+    #[test]
+    fn md_008_routed_wheel_scrolls_addressed_diagram_only() {
+        clear_renderer_state();
+        let text = "```mermaid\nflowchart TD\nA[Start] --> B[End]\n```";
+        let _ = paint_scoped(text, 20, "wheel-A", 0);
+        let _ = paint_scoped(text, 20, "wheel-B", 0);
+        let key_a = RendererKey::new("wheel-A", 0, 0);
+        let key_b = RendererKey::new("wheel-B", 0, 0);
+        assert!(
+            !route_renderer_wheel(&key_a, RendererKind::Mermaid, RendererWheel::Down, false),
+            "vertical wheel must pass through"
+        );
+        assert_eq!(
+            DIAGRAM_VIEWPORTS.with(|m| m.borrow().get(&key_a).map_or(0, |v| v.scroll_x())),
+            0
+        );
+        assert!(route_renderer_wheel(
+            &key_a,
+            RendererKind::Mermaid,
+            RendererWheel::Right,
+            false
+        ));
+        let scrolled_a =
+            DIAGRAM_VIEWPORTS.with(|m| m.borrow().get(&key_a).map_or(0, |v| v.scroll_x()));
+        let scrolled_b =
+            DIAGRAM_VIEWPORTS.with(|m| m.borrow().get(&key_b).map_or(0, |v| v.scroll_x()));
+        assert!(scrolled_a > 0, "a right wheel must advance the addressed window");
+        assert_eq!(scrolled_b, 0, "a wheel on one diagram must not move another");
+    }
+
+    /// MD-009: the unified wheel seam applies shift-modified vertical ticks to
+    /// the math scroll box, and the repaint follows the retained offset.
+    #[test]
+    fn md_009_routed_shift_wheel_scrolls_math_window() {
+        clear_renderer_state();
+        let formula = "a+b+c+d+e+f+g+h+i+j+k+l+m+n+o+p+q+r+s+t+u+v+w+x+y+z";
+        let text = format!("```math\n{formula}\n```");
+        let rows = paint_scoped(&text, 24, "math-route", 0);
+        let key = RendererKey::new("math-route", 0, 0);
+        assert!(!route_renderer_wheel(&key, RendererKind::Math, RendererWheel::Down, false));
+        assert_eq!(
+            MATH_SCROLL_BOXES.with(|m| m.borrow().get(&key).map_or(0, |v| v.scroll_x())),
+            0
+        );
+        assert!(route_renderer_wheel(&key, RendererKind::Math, RendererWheel::Down, true));
+        assert!(
+            MATH_SCROLL_BOXES.with(|m| m.borrow().get(&key).map_or(0, |v| v.scroll_x())) > 0
+        );
+        let moved = paint_scoped(&text, 24, "math-route", 0);
+        assert_ne!(rows, moved, "the painted window must follow the routed scroll offset");
+    }
+
+    /// MD-008/009: pointer routing reaches only the diagram viewer; a math key
+    /// has no pointer hit region and is a no-op.
+    #[test]
+    fn md_008_009_routed_pointer_is_kind_specific() {
+        use crate::native_mermaid::MouseButton;
+        clear_renderer_state();
+        let text = "```mermaid\nflowchart TD\nA[Start] --> B[End]\n```";
+        let _ = paint_scoped(text, 20, "ptr-msg", 0);
+        let diagram_key = RendererKey::new("ptr-msg", 0, 0);
+        let math_key = RendererKey::new("absent-math", 0, 0);
+        assert!(route_renderer_pointer(
+            &diagram_key,
+            RendererKind::Mermaid,
+            RendererPointerEvent::Down { button: MouseButton::Left, x: 40 }
+        ));
+        assert!(route_renderer_pointer(
+            &diagram_key,
+            RendererKind::Mermaid,
+            RendererPointerEvent::Drag { x: 10 }
+        ));
+        assert_eq!(
+            DIAGRAM_VIEWPORTS.with(|m| m.borrow().get(&diagram_key).map_or(0, |v| v.scroll_x())),
+            30,
+            "a routed left drag advances the retained window"
+        );
+        assert!(route_renderer_pointer(
+            &diagram_key,
+            RendererKind::Mermaid,
+            RendererPointerEvent::Up { button: MouseButton::Left }
+        ));
+        assert!(
+            !route_renderer_pointer(
+                &math_key,
+                RendererKind::Math,
+                RendererPointerEvent::Down { button: MouseButton::Left, x: 5 }
+            ),
+            "math fences have no pointer hit region"
+        );
+    }
+
+    /// MD-009: a streaming delta that extends a valid formula with unsupported
+    /// syntax repaints the identical retained frame instead of falling back.
+    #[test]
+    fn md_009_streaming_partial_syntax_keeps_last_good() {
+        clear_renderer_state();
+        let good = "```math\n\\frac{m}{n}\n";
+        let partial = "```math\n\\frac{m}{n}\\badcommand\n";
+        let rows = paint_scoped(good, 60, "math-stream", 0);
+        assert!(rows.iter().any(|(r, _)| r.contains('m')), "initial formula: {rows:?}");
+        let retained = paint_scoped(partial, 60, "math-stream", 0);
+        assert_eq!(
+            retained, rows,
+            "a failing streaming delta must repaint the identical last-good frame"
+        );
     }
 }

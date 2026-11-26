@@ -1346,3 +1346,79 @@ Every other item re-confirmed as before — these are 2026-11-03 findings, and
 
 This document is a status map, not acceptance. No item is marked
 runtime-proven; captured styled-cell/cursor goldens were not produced.
+
+### Renderer-state repair (2026-11-26) — MD-008 / MD-009
+
+Base `603671704fde49fc4647fec4d5156d97358a869f`. Scope: the granted files
+`crates/cli/src/native_{markdown_flow,math,math_engine,mermaid,view_chat}.rs`
+and this status file. This worker ran no builds/tests/Cargo/PTY checks; the
+trusted controller owns all serialized checks. Nothing here is self-accepted.
+
+- **MD-008** — the five non-flowchart kinds (`gantt`, `sequence`,
+  `stateDiagram[-v2]`, `gitGraph`, `timeline`) no longer fall back to a text
+  card echoing the fenced source. Each has a dedicated bounded structural cell
+  layout behind `CellDiagramPainter` (`native_mermaid.rs::layout_non_flow` with
+  `layout_gantt` / `layout_sequence` / `layout_state` / `layout_gitgraph` /
+  `layout_timeline`), framed by a kind tag and clipped to the canvas width.
+  One `MermaidRenderer` per composite block key is owned in
+  `native_view_chat.rs::MERMAID_RENDERERS`; its detection cache and `last_good`
+  frame survive repaints, so streaming partial syntax recovers the last-good
+  diagram. One horizontal `DiagramViewport` per key survives a wide drag;
+  the painted window is `cell_slice(line, scroll_x, content_viewport)` where
+  `content_viewport = width - prefix_cells`, so the transcript prefix no longer
+  hides the rightmost columns.
+- **MD-009** — one `MathRenderer` per block key is owned in
+  `native_view_chat.rs::MATH_RENDERERS`, so its cache and last-good layout
+  persist across frames. `paint_math_frame` paints only the `scroll_x` window
+  of each laid-out row, rebases styled runs by that offset, and the caller
+  asserts `horizontal_scroll_bar_visible() == false`. `math_mouse_scroll`
+  consumes shift-modified or horizontal wheel events (plain vertical passes
+  through) and moves the retained per-key `MathScrollBox`; `mermaid_pointer_*`
+  / `mermaid_mouse_scroll` do the same for the diagram viewport.
+
+**Renderer identity.** `MarkdownBlock.id` is a 0-based position inside one
+`ChatPart::Text` and a fresh `MarkdownFlow` is built per part/frame, so the
+bare id collides across parts. `RendererKey = (message scope, part index,
+block id)` is globally unique and stable across frames. The live call site
+derives `message_scope` from the wire `message_id` when present; otherwise it
+hashes a *fence-anchored skeleton* (text through the first fence opening),
+which is byte-identical across streaming deltas because that prefix is fully
+emitted before the fence body arrives. The growing body is excluded, so
+last-good/cache are not rotated every frame. The producer `doc_id` is
+deliberately not the key (it is re-derived each frame). Owned state is bounded
+by `MAX_RENDERER_KEYS` (64) with least-recently-rendered eviction.
+
+**Reasoned waiver — non-flowchart layout depth.** The five layouts are
+faithful bounded ports of the *structural grammar subset* (headers, sections,
+participants, edge/message lines, commits/branches, and dated events plus
+their labels), not complete upstream parser clones. The full upstream
+`gantt`/`sequence`/`state`/`gitgraph`/`timeline` packages are not vendored in
+this checkout and the pinned read-only source tree was not reachable from the
+granted workspace, so exact upstream diagram geometry cannot be established
+here. Unsupported lines are preserved as indented notes and every row stays
+inside the canvas width. This is a deliberate deviation from pixel-exact
+upstream diagram geometry, waived for this bounded renderer-state task; it is
+not a claim of visual parity.
+
+**Single input seam (repair, same date).** The five scattered paint-side
+handlers are now reached through one public, documented entry point:
+`native_view_chat::route_renderer_wheel(key, RendererKind, RendererWheel, shift)`
+and `route_renderer_pointer(key, RendererKind, RendererPointerEvent)`. The key
+is publicly constructible via `RendererKey::new(scope, part, block)`, so a
+terminal input owner that has resolved a hovered fence to its stable identity
+calls exactly one function per wheel/pointer event; vertical wheel ticks pass
+through, math consumes shift-modified vertical ticks and owns no pointer hit
+region, and the diagram viewer consumes left-drag and horizontal wheel. Added
+focused tests route through this seam and assert per-block isolation, the
+retained scroll window on the subsequent repaint, kind-specific dispatch, and
+math last-good recovery across a streaming delta with unsupported syntax.
+
+**Limitations (not passes).** Renderer/viewport/scroll state is thread-local
+and is addressed by `RendererKey`. Resolving a real terminal mouse/wheel event
+to that key and calling `route_renderer_wheel` / `route_renderer_pointer`
+lives in the event loop (`tui_entry.rs`), which is **outside this feature's
+grant**; no production event-loop wiring is claimed here, so the routed
+handlers remain a paint-side seam until that owner binds them. No
+installed-terminal captures or matched styled-cell goldens were produced.
+Source inspection and focused tests were added but not executed by this
+worker; the trusted controller owns the serialized checks.

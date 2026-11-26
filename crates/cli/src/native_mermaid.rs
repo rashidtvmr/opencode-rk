@@ -764,13 +764,12 @@ fn buffer_to_row(buffer: Vec<char>) -> String {
 /// the 1-based offending line; a header-only fence yields no rows so the
 /// renderer falls back to the code block (`markdown.ts:307`).
 fn layout_diagram(request: &DiagramRequest<'_>) -> Result<Vec<String>, MermaidFailure> {
-    // Mermaid registers all six kinds at the pinned TUI.  Flowcharts have a
-    // structured cell layout below; the other registered kinds still need a
-    // diagram surface rather than leaking back to the fenced source block.
-    // Their full parsers belong to the upstream merman package, so OC2 uses a
-    // bounded, syntax-preserving text diagram until those grammars are ported.
+    // Mermaid registers all six kinds at the pinned TUI. Flowcharts use the
+    // structured rail layout below; the other five registered kinds use their
+    // own bounded structural layout (`layout_non_flow`) rather than leaking
+    // back to the fenced source block.
     if request.kind != MermaidDiagramKind::Flowchart {
-        return layout_text_diagram(request);
+        return layout_non_flow(request.kind, request.source, request.width);
     }
     let mut nodes: Vec<FlowNode> = Vec::new();
     let mut edges: Vec<FlowEdge> = Vec::new();
@@ -796,30 +795,206 @@ fn layout_diagram(request: &DiagramRequest<'_>) -> Result<Vec<String>, MermaidFa
     Ok(compose_flow(&nodes, &edges, request.width))
 }
 
-/// Render a supported non-flow Mermaid kind as a bounded diagram card.  This
-/// deliberately does not pretend to implement that kind's grammar: malformed
-/// input is still represented as a diagram (matching the dedicated upstream
-/// renderer's replacement semantics), while the source remains readable and
-/// the canvas stays within the same width bound as flowcharts.
-fn layout_text_diagram(request: &DiagramRequest<'_>) -> Result<Vec<String>, MermaidFailure> {
-    let width = request.width.max(1);
-    let mut lines = request
-        .source
+// ── Non-flowchart structural layouts ──────────────────────────────────
+//
+// The pinned TUI registers six Mermaid kinds. Upstream's full parsers live in
+// the `gantt`/`sequence`/`state`/`gitgraph`/`timeline` packages, which are not
+// vendored here, so these are bounded *structural* ports of the grammar subset
+// each parser recognizes (header matchers cited in the module docs). Every row
+// stays inside `width` and unsupported lines are kept as indented notes rather
+// than dropped.
+
+/// Trimmed, non-blank, non-`%%` source lines (`core/mermaid.ts:19-25`).
+fn nonflow_lines(source: &str) -> impl Iterator<Item = &str> + '_ {
+    source
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with("%%"));
-    let _header = lines.next().ok_or_else(|| flow_failure(1))?;
-    let title = format!("{} diagram", request.kind.as_str());
-    let inner = width.saturating_sub(4).max(1);
-    let mut rows = vec![format!("┌{}┐", boxed_fill(&title, inner))];
+        .filter(|line| !line.is_empty() && !line.starts_with("%%"))
+}
+
+fn clip_row(row: String, width: usize) -> String {
+    row.chars().take(width).collect()
+}
+
+/// Lay one of the five registered non-flowchart kinds out as a framed,
+/// bounded diagram surface. The fenced source is replaced (not echoed),
+/// exactly like an upstream renderer (`packages/merman/src/markdown.ts:66-75`).
+fn layout_non_flow(
+    kind: MermaidDiagramKind,
+    source: &str,
+    width: usize,
+) -> Result<Vec<String>, MermaidFailure> {
+    let width = width.max(1);
+    let mut rows: Vec<String> = Vec::new();
+    rows.push(format!("▸ {} diagram", kind.as_str()));
+    rows.extend(match kind {
+        MermaidDiagramKind::Flowchart => Vec::new(),
+        MermaidDiagramKind::Gantt => layout_gantt(source),
+        MermaidDiagramKind::Sequence => layout_sequence(source),
+        MermaidDiagramKind::State => layout_state(source),
+        MermaidDiagramKind::GitGraph => layout_gitgraph(source),
+        MermaidDiagramKind::Timeline => layout_timeline(source),
+    });
+    // Preserve a minimum diagram surface even for a header-only fence.
+    while rows.len() < 3 {
+        rows.push("  │".to_owned());
+    }
+    Ok(rows.into_iter().map(|row| clip_row(row, width)).collect())
+}
+
+/// Gantt (`gantt/parser.ts:5,11-13`): `section` groups and `task : meta` rows
+/// become a bounded progress bar. A `done` task is fully filled (`██████`);
+/// an in-progress task shows a filled lead plus a shaded remainder
+/// (`██░░░░`), so both filled and pending bar glyphs stay visible.
+fn layout_gantt(source: &str) -> Vec<String> {
+    let mut rows = Vec::new();
+    for line in nonflow_lines(source) {
+        let lower = line.to_ascii_lowercase();
+        if lower.starts_with("gantt")
+            || lower.starts_with("title ")
+            || lower.starts_with("dateformat")
+            || lower.starts_with("axisformat")
+            || lower.starts_with("excludes")
+            || lower.starts_with("todaymarker")
+        {
+            continue;
+        }
+        if let Some(section) = line.strip_prefix("section ") {
+            rows.push(format!("▸ {}", section.trim()));
+        } else if let Some((label, meta)) = line.split_once(':') {
+            let bar = if meta.trim().to_ascii_lowercase().starts_with("done") {
+                "█".repeat(6)
+            } else {
+                format!("██{}", "░".repeat(4))
+            };
+            rows.push(format!(
+                "  {} {} {}",
+                boxed_fill(label.trim(), 12),
+                bar,
+                meta.trim()
+            ));
+        } else {
+            rows.push(format!("  {}", line));
+        }
+    }
+    rows
+}
+
+/// Sequence (`sequence/parser.ts:120-122`): `participant` declarations and
+/// `A->>B: msg` messages become a rail-and-arrow diagram.
+fn layout_sequence(source: &str) -> Vec<String> {
+    let lines: Vec<&str> = nonflow_lines(source).collect();
+    let mut participants: Vec<&str> = Vec::new();
+    for line in &lines {
+        if let Some(name) = line.strip_prefix("participant ") {
+            let name = name.trim();
+            if !participants.contains(&name) {
+                participants.push(name);
+            }
+        }
+    }
+    let mut rows = Vec::new();
+    if !participants.is_empty() {
+        rows.push(format!("┌{}┐", participants.join("  ")));
+    }
     for line in lines {
-        rows.push(format!("│{}│", boxed_fill(line, inner)));
+        let lower = line.to_ascii_lowercase();
+        if lower.starts_with("participant ")
+            || lower.starts_with("sequencediagram")
+            || lower.starts_with("title ")
+            || lower.starts_with("autonumber")
+        {
+            continue;
+        }
+        if line.contains("->>") || line.contains("-->") || line.contains("->") {
+            let (edge, label) = line
+                .split_once(':')
+                .map_or((line, ""), |(edge, label)| (edge, label.trim()));
+            rows.push(format!("│ {} ─▶ {}", edge.trim(), label));
+        } else if let Some(note) = line.strip_prefix("Note over ") {
+            rows.push(format!("  ⋯ {}", note));
+        } else {
+            rows.push(format!("  {}", line));
+        }
     }
-    if rows.len() == 1 {
-        rows.push(format!("│{}│", " ".repeat(inner)));
+    rows
+}
+
+/// State (`state/parser.ts:30-32,77-79`): `[*] --> S: label` transitions and
+/// `state X` declarations become boxed states joined by labelled arrows.
+fn layout_state(source: &str) -> Vec<String> {
+    let mut rows = Vec::new();
+    for line in nonflow_lines(source) {
+        let lower = line.to_ascii_lowercase();
+        if lower.starts_with("statediagram")
+            || lower.starts_with("title ")
+            || lower.starts_with("direction ")
+        {
+            continue;
+        }
+        if let Some((lhs, rhs)) = line.split_once("-->") {
+            let (target, label) = rhs
+                .split_once(':')
+                .map_or((rhs.trim(), ""), |(state, label)| (state.trim(), label.trim()));
+            let arrow = if label.is_empty() {
+                "──▶".to_owned()
+            } else {
+                format!("──{}──▶", label)
+            };
+            rows.push(format!("┌ {} ┐{}┌ {} ┐", lhs.trim(), arrow, target));
+        } else if let Some(name) = line.strip_prefix("state ") {
+            rows.push(format!("┌ {} ┐", name.trim()));
+        } else {
+            rows.push(format!("  {}", line));
+        }
     }
-    rows.push(format!("└{}┘", "─".repeat(inner)));
-    Ok(rows)
+    rows
+}
+
+/// Git graph (`gitgraph/parser.ts:5,8-10`): branch lanes, commits, checkouts
+/// and merges become a bounded commit graph.
+fn layout_gitgraph(source: &str) -> Vec<String> {
+    let mut rows = Vec::new();
+    for line in nonflow_lines(source) {
+        let lower = line.to_ascii_lowercase();
+        if lower.starts_with("gitgraph") {
+            continue;
+        }
+        if let Some(branch) = line.strip_prefix("branch ") {
+            rows.push(format!("  ╭─ {} ─", branch.trim()));
+        } else if let Some(target) = line.strip_prefix("checkout ") {
+            rows.push(format!("  │ ── checkout {} ──", target.trim()));
+        } else if let Some(target) = line.strip_prefix("merge ") {
+            rows.push(format!("  ●← merge {} ──", target.trim()));
+        } else if lower == "commit" || lower.starts_with("commit ") {
+            rows.push(format!("  │ ●{}", line.strip_prefix("commit").unwrap_or("").trim()));
+        } else {
+            rows.push(format!("  {}", line));
+        }
+    }
+    rows
+}
+
+/// Timeline (`timeline/parser.ts:5,10-12`): `title`, `section` and
+/// `date : event` rows become a marker-and-label timeline.
+fn layout_timeline(source: &str) -> Vec<String> {
+    let mut rows = Vec::new();
+    for line in nonflow_lines(source) {
+        let lower = line.to_ascii_lowercase();
+        if lower.starts_with("timeline") {
+            continue;
+        }
+        if let Some(title) = line.strip_prefix("title ") {
+            rows.push(format!("▸ {}", title.trim()));
+        } else if let Some(section) = line.strip_prefix("section ") {
+            rows.push(format!("┬─ {} ─", section.trim()));
+        } else if let Some((date, event)) = line.split_once(':') {
+            rows.push(format!("  {} ──● {} ", date.trim(), event.trim()));
+        } else {
+            rows.push(format!("  {}", line));
+        }
+    }
+    rows
 }
 
 fn boxed_fill(text: &str, width: usize) -> String {
@@ -1380,6 +1555,25 @@ impl DiagramViewport {
         self.content_width.saturating_sub(self.viewport_width)
     }
 
+    /// Re-bind geometry on a later frame and clamp the retained offset
+    /// (`markdown.ts:279-281` recomputes the layout width each render).
+    pub fn resize(&mut self, content_width: usize, viewport_width: usize) {
+        self.content_width = content_width.max(1);
+        self.viewport_width = viewport_width.max(1);
+        self.scroll_x = self.scroll_x.min(self.max_scroll_x());
+    }
+
+    /// Apply a horizontal wheel delta (`markdown.ts:103-108`), clamped to the
+    /// canvas. The offset persists on the viewport between frames.
+    pub fn scroll_by(&mut self, delta: isize) {
+        let next = if delta >= 0 {
+            self.scroll_x.saturating_add(delta.unsigned_abs())
+        } else {
+            self.scroll_x.saturating_sub(delta.unsigned_abs())
+        };
+        self.scroll_x = next.min(self.max_scroll_x());
+    }
+
     /// `onMouseDown` (`markdown.ts:77-83`): only the left button is handled.
     pub fn mouse_down(&mut self, button: MouseButton, x: usize) -> MouseEventOutcome {
         if button != MouseButton::Left {
@@ -1538,6 +1732,42 @@ mod tests {
         }
     }
 
+    /// MD-008: each of the five non-flowchart kinds now has a dedicated
+    /// *structural* cell layout behind `CellDiagramPainter`, not a text card
+    /// echoing the fenced source. Every row stays inside the canvas width.
+    #[test]
+    fn md_008_non_flowchart_kinds_paint_structural_cells() {
+        let cases = [
+            ("gantt\ntitle demo\nsection work\nbuild : done", "█"),
+            ("gantt\ntitle demo\nsection work\nbuild : 3d", "░"),
+            ("sequenceDiagram\nA->>B: hi", "─▶"),
+            ("stateDiagram-v2\n[*] --> S", "┌"),
+            ("gitGraph\ncommit", "●"),
+            ("timeline\ntitle t\n2024 : event", "──●"),
+        ];
+        for (source, marker) in cases {
+            let kind = detect_kind(source).expect("supported non-flow kind");
+            assert_ne!(kind, MermaidDiagramKind::Flowchart);
+            let request = DiagramRequest {
+                kind,
+                source,
+                width: 60,
+                theme: &MermaidTheme::default(),
+            };
+            let rows = CellDiagramPainter.cells(&request).expect("structural rows");
+            assert!(rows.len() >= 3, "{kind:?}: {rows:?}");
+            assert!(rows.iter().all(|row| row.chars().count() <= 60), "{kind:?}: {rows:?}");
+            assert!(
+                rows.iter().any(|row| row.contains(marker)),
+                "structural glyph {marker:?} missing for {kind:?}: {rows:?}"
+            );
+            assert!(
+                !rows.iter().any(|row| row.trim() == source.lines().next().unwrap_or("")),
+                "header echoed verbatim for {kind:?}: {rows:?}"
+            );
+        }
+    }
+
     /// MD-008. Upstream: `packages/merman/src/markdown.ts:66-75` (width 100%,
     /// fixed height, marginTop 1) and `76-108` (drag/wheel handling).
     #[test]
@@ -1583,6 +1813,21 @@ mod tests {
         assert!(viewport.mouse_scroll(ScrollDirection::Right));
         assert!(!viewport.mouse_scroll(ScrollDirection::Up));
         assert!(!viewport.mouse_scroll(ScrollDirection::Down));
+    }
+
+    /// MD-008: an owned viewport can be re-bound to a later frame's geometry
+    /// and moved by a horizontal wheel delta, both clamped to the canvas.
+    #[test]
+    fn md_008_viewport_resize_and_wheel_are_clamped() {
+        let mut viewport = DiagramViewport::new(200, 80);
+        viewport.scroll_by(-50); // negative delta stays at zero
+        assert_eq!(viewport.scroll_x(), 0);
+        viewport.scroll_by(140); // clamped to max_scroll_x = 120
+        assert_eq!(viewport.scroll_x(), 120);
+        // A narrower canvas on a later frame re-clamps the retained offset.
+        viewport.resize(100, 80);
+        assert_eq!(viewport.scroll_x(), 20);
+        assert_eq!(viewport.max_scroll_x(), 20);
     }
 
     /// MD-008. Upstream: `packages/merman/src/markdown.ts:289-315` – a syntax
