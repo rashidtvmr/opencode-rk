@@ -17052,8 +17052,11 @@ fn native_loop(
                             // `groupExpanded`/`setGroupExpanded`), before any
                             // message/tool owner resolves (a header owns no
                             // message).
-                            if view.chat_group_owner_at(usize::from(y)).is_some() {
-                                let _ = view.chat_toggle_group_at(usize::from(y));
+                            // TOOL-002: `chat_toggle_group_at` falls back to
+                            // toggling a non-execute tool row's expanded
+                            // disclosure body (`index.tsx:2757-2772`), so both
+                            // disclosures share this one entry point.
+                            if view.chat_toggle_group_at(usize::from(y)).is_some() {
                                 needs_paint = true;
                                 continue;
                             }

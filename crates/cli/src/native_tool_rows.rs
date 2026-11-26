@@ -519,6 +519,122 @@ pub fn tool_result_rows_with_models(
     rows(width, &display, None)
 }
 
+/// TOOL-002/004: the expanded disclosure body for a NON-execute tool row.
+///
+/// Upstream tool rows collapse to a one-line header; clicking a non-execute
+/// row reveals this body (`packages/tui/src/routes/session/index.tsx:2757-2772`,
+/// the tool-row disclosure). The content follows the row's terminal state:
+///
+/// - permission/denied rows show the FULL permission/denial message (muted,
+///   never the red `✖ <name> failed:` row);
+/// - failed rows show the FULL, **untruncated** error message (the inline
+///   preview is bounded via [`EXECUTE_PREVIEW_LINES`], the expanded body is not);
+/// - completed Generic rows render every top-level input value — strings
+///   verbatim, all other JSON values through `serde_json::to_string_pretty`
+///   (the upstream `JSON.stringify(value, null, 2)`) — followed by an `output:`
+///   row when the tool result is non-empty. Nested JSON is confined to this
+///   expanded body (TOOL-004); the collapsed label keeps only the flattened
+///   primitive summary ([`primitive_input_summary`]).
+///
+/// Every emitted row uses [`BODY_INDENT`] (the blank icon column). Execute rows
+/// are not passed here by the live view — a click on those opens `DialogExecute`
+/// instead — but the model is a pure function of caller facts for any name.
+#[must_use]
+pub fn expanded_tool_rows(
+    width: usize,
+    name: &str,
+    status: &str,
+    args_json: &str,
+    output: &str,
+    is_error: bool,
+) -> Vec<ToolRow> {
+    let mut rows: Vec<ToolRow> = Vec::new();
+    let args = parse_args(args_json);
+    let clean_output = strip(output);
+    let mut state = classify_status(status, is_error);
+    if state == ToolStatus::Error && is_denied_error(&clean_output) {
+        state = ToolStatus::Denied;
+    }
+
+    // Permission/denied body: the full message, muted + strikethrough painted
+    // by `ToolDenied`, never a red `✖ <name> failed:` row.
+    if state == ToolStatus::Denied {
+        let message = clean_output.trim();
+        if !message.is_empty() {
+            push_wrapped(
+                &mut rows,
+                width,
+                message,
+                BODY_INDENT,
+                BODY_INDENT,
+                ChatRowClass::ToolDenied,
+            );
+        }
+        rows.truncate(MAX_TOOL_ROWS);
+        return rows;
+    }
+
+    // Failed row: the full error message, not a bounded preview.
+    if state == ToolStatus::Error {
+        let message = clean_output.trim();
+        let message = if message.is_empty() { "failed" } else { message };
+        let line = format!("✖ {} failed: {}", clip(name, MAX_FIELD_BYTES), message);
+        push_wrapped(
+            &mut rows,
+            width,
+            &line,
+            BODY_INDENT,
+            BODY_INDENT,
+            ChatRowClass::ToolError,
+        );
+        rows.truncate(MAX_TOOL_ROWS);
+        return rows;
+    }
+
+    // Generic (plugin/MCP/unknown) completed rows: every input value, with the
+    // output appended when present. Specialized tools already show their body
+    // inline and add no further expanded details.
+    if tool_kind(name) == ToolKind::Generic {
+        if let Some(map) = &args {
+            for (key, value) in map {
+                let key = clip(key, MAX_FIELD_BYTES);
+                let rendered = match value {
+                    Value::String(text) => clip(text, MAX_FIELD_BYTES),
+                    _ => serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string()),
+                };
+                let line = format!("{key}: {rendered}");
+                push_wrapped(
+                    &mut rows,
+                    width,
+                    &line,
+                    BODY_INDENT,
+                    BODY_INDENT,
+                    ChatRowClass::ToolResult,
+                );
+                if rows.len() >= MAX_TOOL_ROWS {
+                    break;
+                }
+            }
+        }
+        if rows.len() < MAX_TOOL_ROWS {
+            let output_text = clean_output.trim();
+            if !output_text.is_empty() {
+                let line = format!("output: {output_text}");
+                push_wrapped(
+                    &mut rows,
+                    width,
+                    &line,
+                    BODY_INDENT,
+                    BODY_INDENT,
+                    ChatRowClass::ToolResult,
+                );
+            }
+        }
+    }
+    rows.truncate(MAX_TOOL_ROWS);
+    rows
+}
+
 /// Build the per-tool display model from caller facts only. Without a model
 /// catalogue a subagent model reference keeps the raw `provider/model` fallback.
 #[must_use]
@@ -1854,7 +1970,18 @@ fn rows(width: usize, display: &ToolDisplay, spin: Option<u64>) -> Vec<ToolRow> 
     };
     let header_prefix = header_prefix(&glyph);
     let mut out = Vec::new();
-    push_wrapped(&mut out, width, &display.label, &header_prefix, class);
+    // TOOL-003: the icon is a FIXED two-cell column that belongs only to the
+    // first label row. Wrapped continuation chunks start after a blank icon
+    // column (`BODY_INDENT` = four spaces), so a status glyph is never repeated
+    // on a continuation row.
+    push_wrapped(
+        &mut out,
+        width,
+        &display.label,
+        &header_prefix,
+        BODY_INDENT,
+        class,
+    );
     // `StatusBadge` (`routes/session/index.tsx:2875-2883`) is a separate,
     // non-shrinking flex item in the inline tool row: `" Background "` stays a
     // single padded token (one gap + the badge's own `" " + text + " "`), so it
@@ -1869,18 +1996,25 @@ fn rows(width: usize, display: &ToolDisplay, spin: Option<u64>) -> Vec<ToolRow> 
             // Child calls retain their own lifecycle class. Only output uses
             // the bounded runtime-error preview; never synthesize a failure.
             for (line, body_class) in display.body.iter().chain(&display.execute_error_preview) {
-                push_wrapped(&mut out, width, line, BODY_INDENT, *body_class);
+                push_wrapped(&mut out, width, line, BODY_INDENT, BODY_INDENT, *body_class);
                 if out.len() >= MAX_TOOL_ROWS {
                     break;
                 }
             }
         } else if let Some(error) = &display.error {
             let line = format!("✖ {} failed: {error}", display.name);
-            push_wrapped(&mut out, width, &line, BODY_INDENT, ChatRowClass::ToolError);
+            push_wrapped(
+                &mut out,
+                width,
+                &line,
+                BODY_INDENT,
+                BODY_INDENT,
+                ChatRowClass::ToolError,
+            );
         }
     } else {
         for (line, body_class) in &display.body {
-            push_wrapped(&mut out, width, line, BODY_INDENT, *body_class);
+            push_wrapped(&mut out, width, line, BODY_INDENT, BODY_INDENT, *body_class);
             if out.len() >= MAX_TOOL_ROWS {
                 break;
             }
@@ -1915,24 +2049,54 @@ fn push_badge(rows_out: &mut Vec<ToolRow>, width: usize, prefix: &str, label: &s
     rows_out.push((truncate_cells(&format!("{prefix}{token}"), width), class));
 }
 
-fn push_wrapped(rows_out: &mut Vec<ToolRow>, width: usize, text: &str, prefix: &str, class: ChatRowClass) {
+/// Append `text` as wrapped transcript rows. The FIRST emitted row uses
+/// `prefix` (the label's `header_prefix`, which carries the fixed icon column);
+/// every subsequent wrapped chunk uses `continuation_prefix` (a blank icon
+/// column), so a status glyph is never repeated on a continuation row
+/// (TOOL-003). Body rows pass the same `BODY_INDENT` for both, since their icon
+/// column is blank on every row.
+fn push_wrapped(
+    rows_out: &mut Vec<ToolRow>,
+    width: usize,
+    text: &str,
+    prefix: &str,
+    continuation_prefix: &str,
+    class: ChatRowClass,
+) {
     if rows_out.len() >= MAX_TOOL_ROWS {
         return;
     }
     let clean = strip(text);
-    let prefix_cells = cells(prefix);
+    let prefix_cells = cells(prefix).max(cells(continuation_prefix));
     let budget = if width == 0 {
         0
     } else {
         width.saturating_sub(prefix_cells).max(1)
     };
+    // Only the label path switches from an icon-bearing prefix to a blank one.
+    // A wrap boundary that lands exactly on a space must not leak that
+    // separator past the blank icon column, or the continuation row would
+    // start with five spaces instead of the required `^ {4}`. Body rows keep
+    // their own leading whitespace (e.g. pretty-JSON indentation), so they are
+    // never trimmed.
+    let trim_continuation = prefix != continuation_prefix;
+    let mut first = true;
     for raw in clean.split('\n') {
         let raw = raw.replace('\t', " ");
         if budget == 0 {
-            rows_out.push((format!("{prefix}{raw}"), class));
+            let row_prefix = if first { prefix } else { continuation_prefix };
+            rows_out.push((format!("{row_prefix}{raw}"), class));
+            first = false;
         } else {
             for chunk in wrap_cells(&raw, budget) {
-                rows_out.push((truncate_cells(&format!("{prefix}{chunk}"), width), class));
+                let row_prefix = if first { prefix } else { continuation_prefix };
+                let rendered: &str = if first || !trim_continuation {
+                    &chunk
+                } else {
+                    chunk.trim_start_matches(' ')
+                };
+                rows_out.push((truncate_cells(&format!("{row_prefix}{rendered}"), width), class));
+                first = false;
             }
         }
         if rows_out.len() >= MAX_TOOL_ROWS {
@@ -3229,5 +3393,211 @@ mod tests {
             r#"{"matches":1}"#,
         );
         assert_eq!(grep.label, "Grep \"fn main\" (1 match)");
+    }
+
+    // TOOL-004: the collapsed primitive summary stays on one line, while the
+    // expanded disclosure body renders EVERY input value (strings verbatim,
+    // everything else two-space pretty JSON) and appends `output:` when
+    // present. Nested JSON is confined to the expanded body.
+    #[test]
+    fn generic_arguments_flatten_expanded_body_renders_each_value_and_output() {
+        let args = json!({
+            "uri": "db://x",
+            "page": 2,
+            "verbose": true,
+            "config": {"nested": [1, 2, 3]},
+            "tags": ["a", "b"]
+        });
+        // Collapsed label: primitives only, nested JSON excluded.
+        let collapsed = label("mcp__fixture", "completed", args.clone());
+        assert_eq!(collapsed.label, "mcp__fixture [page=2, uri=db://x, verbose=true]");
+        assert!(!collapsed.label.contains("nested"), "{:?}", collapsed.label);
+
+        let rows = expanded_tool_rows(
+            80,
+            "mcp__fixture",
+            "completed",
+            &args.to_string(),
+            "done output",
+            false,
+        );
+        let text: Vec<&str> = rows.iter().map(|(row, _)| row.as_str()).collect();
+        assert!(text.iter().any(|row| row.contains("uri: db://x")), "{text:?}");
+        assert!(text.iter().any(|row| row.contains("page: 2")), "{text:?}");
+        assert!(text.iter().any(|row| row.contains("verbose: true")), "{text:?}");
+        // Nested JSON is confined to the expanded body and pretty-printed.
+        assert!(text.iter().any(|row| row.contains("config: {")), "{text:?}");
+        assert!(text.iter().any(|row| row.contains("\"nested\"")), "{text:?}");
+        assert!(text.iter().any(|row| row.contains("tags: [")), "{text:?}");
+        // Output row present only when the result is non-empty.
+        assert!(text.iter().any(|row| row.contains("output: done output")), "{text:?}");
+        // Every expanded row uses the blank icon column.
+        assert!(rows.iter().all(|(row, _)| row.starts_with(BODY_INDENT)), "{rows:?}");
+
+        let no_output = expanded_tool_rows(
+            80,
+            "mcp__fixture",
+            "completed",
+            &args.to_string(),
+            "",
+            false,
+        );
+        assert!(!no_output.iter().any(|(row, _)| row.contains("output:")), "{no_output:?}");
+    }
+
+    // TOOL-004: a Generic part with no input arguments exposes only its result
+    // in the expanded body; with neither arguments nor result it exposes
+    // nothing at all. The `output:` row is gated strictly on non-empty output.
+    #[test]
+    fn generic_arguments_flatten_empty_args_only_output_in_expanded_body() {
+        let rows = expanded_tool_rows(80, "mcp__fixture", "completed", "{}", "just output", false);
+        let text: Vec<&str> = rows.iter().map(|(row, _)| row.as_str()).collect();
+        assert_eq!(text, vec!["    output: just output"], "{text:?}");
+        assert!(
+            rows.iter().all(|(_, class)| *class == ChatRowClass::ToolResult),
+            "{rows:?}"
+        );
+
+        let empty = expanded_tool_rows(80, "mcp__fixture", "completed", "{}", "", false);
+        assert!(empty.is_empty(), "{empty:?}");
+    }
+
+    // TOOL-004: every primitive JSON value (including `false`, `0` and `null`)
+    // renders verbatim in the expanded body, and nested values use the
+    // two-space indentation of `serde_json::to_string_pretty`. The body's blank
+    // icon column adds four more cells, so a nested member starts at six.
+    #[test]
+    fn generic_arguments_flatten_renders_false_zero_null_and_nested_pretty() {
+        let args = json!({
+            "flag": false,
+            "zero": 0,
+            "nil": null,
+            "nested": {"a": 1}
+        });
+        let rows = expanded_tool_rows(80, "mcp__fixture", "completed", &args.to_string(), "", false);
+        let text: Vec<&str> = rows.iter().map(|(row, _)| row.as_str()).collect();
+        assert!(text.iter().any(|row| row.contains("flag: false")), "{text:?}");
+        assert!(text.iter().any(|row| row.contains("zero: 0")), "{text:?}");
+        assert!(text.iter().any(|row| row.contains("nil: null")), "{text:?}");
+        // Body indent (4) + `to_string_pretty` indent (2) preserves the nested
+        // member's indentation — it is never flattened onto the header row.
+        assert!(text.iter().any(|row| row.starts_with("      \"a\": 1")), "{text:?}");
+        assert!(rows.iter().all(|(row, _)| row.starts_with(BODY_INDENT)), "{rows:?}");
+    }
+
+    // TOOL-002: a permission/denied row's expanded body carries the full
+    // permission/denial message with the muted strikethrough class, never a
+    // red `✖ <name> failed:` error row.
+    #[test]
+    fn denied_expanded_body_shows_full_permission_message() {
+        let rows = expanded_tool_rows(
+            80,
+            "write",
+            "error",
+            "{}",
+            "rejected permission for this path by policy rule specified a rule",
+            true,
+        );
+        assert!(
+            rows.iter().all(|(_, class)| *class == ChatRowClass::ToolDenied),
+            "{rows:?}"
+        );
+        assert!(
+            rows.iter().any(|(row, _)| row.contains("rejected permission for this path")),
+            "{rows:?}"
+        );
+        assert!(rows.iter().all(|(row, _)| !row.contains("failed")), "{rows:?}");
+
+        // An explicit `denied` transport status is classified identically.
+        let explicit = expanded_tool_rows(
+            80,
+            "bash",
+            "denied",
+            "{}",
+            "user dismissed the request",
+            false,
+        );
+        assert!(
+            explicit.iter().any(|(row, _)| row.contains("user dismissed the request")),
+            "{explicit:?}"
+        );
+        assert!(explicit.iter().all(|(_, class)| *class == ChatRowClass::ToolDenied));
+    }
+
+    // TOOL-002: every line of a multi-line denial stays in the expanded body
+    // under the blank icon column, all with the muted strikethrough class.
+    #[test]
+    fn denied_expanded_multiline_body_keeps_every_line() {
+        let message = "rejected permission line one\nline two\nline three";
+        let rows = expanded_tool_rows(80, "write", "error", "{}", message, true);
+        assert_eq!(rows.len(), 3, "{rows:?}");
+        assert!(rows.iter().all(|(row, _)| row.starts_with(BODY_INDENT)), "{rows:?}");
+        assert!(
+            rows.iter().all(|(_, class)| *class == ChatRowClass::ToolDenied),
+            "{rows:?}"
+        );
+        assert!(rows.iter().any(|(row, _)| row.contains("line three")), "{rows:?}");
+    }
+
+    // TOOL-002: the inline execute preview is bounded to four lines, but a
+    // failed row's expanded body keeps the FULL untruncated error message.
+    #[test]
+    fn execute_failed_row_expanded_body_keeps_full_error() {
+        let full = "e1\ne2\ne3\ne4\ne5\nfull detail at the end";
+        let inline = tool_state_rows(80, "execute", "error", "{}", full, true);
+        assert!(
+            !inline.iter().any(|(row, _)| row.contains("full detail at the end")),
+            "{inline:?}"
+        );
+
+        let expanded = expanded_tool_rows(80, "execute", "error", "{}", full, true);
+        assert!(
+            expanded.iter().any(|(row, _)| row.contains("full detail at the end")),
+            "{expanded:?}"
+        );
+        assert!(
+            expanded.iter().any(|(_, class)| *class == ChatRowClass::ToolError),
+            "{expanded:?}"
+        );
+        assert!(expanded.iter().all(|(row, _)| row.starts_with(BODY_INDENT)), "{expanded:?}");
+    }
+
+    // TOOL-003: wrapped label continuations start after the fixed two-cell
+    // icon column (`^ {4}`, a blank icon column) and never repeat a status
+    // glyph. Only the first row carries the icon.
+    #[test]
+    fn wrapped_label_continuations_use_blank_icon_column_without_status_glyph() {
+        let args = json!({
+            "pattern": "a-very-long-pattern-name-that-wraps",
+            "path": "deeply/nested/directory"
+        });
+        let rows = tool_state_rows(30, "glob", "completed", &args.to_string(), "", false);
+        assert!(rows.len() > 1, "{rows:?}");
+        assert!(rows[0].0.contains('✱'), "first row keeps the status glyph: {:?}", rows[0]);
+
+        let glyphs = ['✱', '✓', '✗', '⚙', '✖', '%', '$', '→', '←', '◈', '│', '↳', '#'];
+        for (row, _) in &rows[1..] {
+            assert!(row.starts_with("    "), "continuation starts with four spaces: {row:?}");
+            assert!(!row.starts_with("     "), "exactly four leading spaces (blank icon): {row:?}");
+            for glyph in glyphs {
+                assert!(!row.contains(glyph), "no status glyph {glyph} on continuation: {row:?}");
+            }
+        }
+    }
+
+    // TOOL-003: a wrap boundary that falls exactly on a space must still emit
+    // a continuation row beginning with exactly four spaces (`^ {4}`). The
+    // separator is consumed by the wrap, never painted after the blank icon
+    // column as a fifth leading space.
+    #[test]
+    fn wrapped_label_continuation_is_exactly_four_spaces_at_space_boundary() {
+        let mut rows = Vec::new();
+        push_wrapped(&mut rows, 10, "aaaaaa bbbb", "  ✱ ", BODY_INDENT, ChatRowClass::ToolResult);
+        assert!(rows.len() >= 2, "{rows:?}");
+        assert!(rows[0].0.contains("aaaaaa"), "first row keeps the icon: {:?}", rows[0]);
+        for (row, _) in &rows[1..] {
+            assert!(row.starts_with("    "), "continuation has blank icon column: {row:?}");
+            assert!(!row.starts_with("     "), "no leaked separator space: {row:?}");
+        }
     }
 }

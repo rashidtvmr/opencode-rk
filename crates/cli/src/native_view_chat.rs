@@ -151,6 +151,16 @@ pub struct ChatView {
     /// that is not a group header.
     group_owners: RefCell<Vec<Option<(String, crate::native_message_rows::GroupKind)>>>,
     tool_owners: RefCell<Vec<Option<usize>>>,
+    /// TOOL-002: `(message id, ToolState part index)` owning each painted
+    /// NON-execute tool row of the last styled render (`frame row -> (message,
+    /// part)`). A transcript click on such a row toggles that part's expanded
+    /// disclosure body. `None` for execute rows (which open `DialogExecute`)
+    /// and for every non-tool row; never fabricated positionally.
+    non_execute_tool_owners: RefCell<Vec<Option<(String, usize)>>>,
+    /// TOOL-002: per-(message, part) expanded disclosure state for non-execute
+    /// tool rows. Bounded by [`ChatView::toggle_tool_expanded`]; renders read
+    /// it. Only non-execute tool rows consult it.
+    expanded_tools: RefCell<std::collections::BTreeSet<(String, usize)>>,
     /// TOOL-008: backend child-session id owning each painted body row of the
     /// last styled render (`frame row -> child sessionID`). A transcript click
     /// on a subtask row navigates into that child
@@ -241,6 +251,8 @@ impl Default for ChatView {
             active_session_id: RefCell::new("live".into()),
             group_owners: RefCell::new(Vec::new()),
             tool_owners: RefCell::new(Vec::new()),
+            non_execute_tool_owners: RefCell::new(Vec::new()),
+            expanded_tools: RefCell::new(std::collections::BTreeSet::new()),
             child_owners: RefCell::new(Vec::new()),
             pending_permission_calls: std::collections::BTreeSet::new(),
             spin_frame: Cell::new(None),
@@ -410,6 +422,33 @@ impl ChatView {
     #[must_use]
     pub fn permission_pending_for(&self, id: &str) -> bool {
         self.pending_permission_calls.contains(id)
+    }
+
+    /// TOOL-002: toggle the expanded disclosure body for the non-execute tool
+    /// part identified by `(message id, ToolState part index)`, returning the
+    /// NEW expanded state. The set is capped so a hostile backend cannot grow
+    /// it without limit.
+    pub fn toggle_tool_expanded(&self, message_id: &str, tool_index: usize) -> bool {
+        const MAX_EXPANDED_TOOLS: usize = 256;
+        let key = tool_disclosure_key(message_id, tool_index);
+        let mut set = self.expanded_tools.borrow_mut();
+        if set.remove(&key) {
+            false
+        } else if set.len() < MAX_EXPANDED_TOOLS {
+            set.insert(key);
+            true
+        } else {
+            // Bound honored: never report an expansion the render cannot show.
+            false
+        }
+    }
+
+    /// TOOL-002: whether the `(message id, part)` tool disclosure is expanded.
+    #[must_use]
+    pub fn is_tool_expanded(&self, message_id: &str, tool_index: usize) -> bool {
+        self.expanded_tools
+            .borrow()
+            .contains(&tool_disclosure_key(message_id, tool_index))
     }
 
     /// Effective terminal width for the composer inset: the recorded real
@@ -1545,7 +1584,7 @@ fn boxed_message_rows_spans(
     child_out: &mut Vec<(usize, String)>,
     models: &[ModelLabel],
 ) -> Vec<StyledChatRow> {
-    boxed_message_rows_spans_mode(width, message, separator, appearance, spans_out, child_out, &mut Vec::new(), crate::markdown_runs::MarkdownMode::Rendered, &std::collections::BTreeSet::new(), Some(0), true, crate::native_diff_view::DiffViewPreference::Auto, models)
+    boxed_message_rows_spans_mode(width, message, separator, appearance, spans_out, child_out, &mut Vec::new(), &mut Vec::new(), crate::markdown_runs::MarkdownMode::Rendered, &std::collections::BTreeSet::new(), &std::collections::BTreeSet::new(), Some(0), true, crate::native_diff_view::DiffViewPreference::Auto, models)
 }
 
 fn boxed_message_rows_spans_mode(
@@ -1554,8 +1593,10 @@ fn boxed_message_rows_spans_mode(
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
     child_out: &mut Vec<(usize, String)>,
     tool_out: &mut Vec<(usize, usize)>,
+    nexe_tool_out: &mut Vec<(usize, (String, usize))>,
     markdown_mode: crate::markdown_runs::MarkdownMode,
     pending: &std::collections::BTreeSet<String>,
+    expanded_tools: &std::collections::BTreeSet<(String, usize)>,
     spin: Option<u64>,
     tps_enabled: bool,
     diff_view: crate::native_diff_view::DiffViewPreference,
@@ -1588,11 +1629,12 @@ fn boxed_message_rows_spans_mode(
         && matches!(id,BoxId::User|BoxId::Assistant) {1} else {usize::from(style.padding)};
     // Unstyled fallback: caller facts at the caller's wrap width, carrying
     // their full-row text interval (selected template, never decoration).
-    let plain = |wrap: usize, spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>, child_out: &mut Vec<(usize, String)>, tool_out: &mut Vec<(usize, usize)>| -> Vec<StyledChatRow> {
+    let plain = |wrap: usize, spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>, child_out: &mut Vec<(usize, String)>, tool_out: &mut Vec<(usize, usize)>, nexe_tool_out: &mut Vec<(usize, (String, usize))>| -> Vec<StyledChatRow> {
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
         let mut typed_tools = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(wrap.min(width), message, separator, None, &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view, models);
+        let mut typed_nexe = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans_mode(wrap.min(width), message, separator, None, &mut typed_spans, &mut typed_children, &mut typed_tools, &mut typed_nexe, markdown_mode, width, pending, expanded_tools, spin, tps_enabled, diff_view, models);
         let mut rows: Vec<StyledChatRow> = typed
             .into_iter()
             .map(|(text, class)| (text, class, Some((0, width.min(u16::MAX as usize) as u16))))
@@ -1600,6 +1642,7 @@ fn boxed_message_rows_spans_mode(
         rebase_part_spans(typed_spans, rows.len(), 0, 0, usize::MAX, width, spans_out);
         rebase_part_children(typed_children, rows.len(), 0, child_out);
         rebase_part_tools(typed_tools, rows.len(), 0, tool_out);
+        rebase_part_nexe_tools(typed_nexe, rows.len(), 0, nexe_tool_out);
         // MSG-005: the unstyled fallback still carries the user card's chips,
         // as one plain row (no accent/muted run spans on this path).
         if rows.len() < MAX_MESSAGE_ROWS {
@@ -1634,7 +1677,8 @@ fn boxed_message_rows_spans_mode(
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
         let mut typed_tools = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, Some(""), &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view, models);
+        let mut typed_nexe = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, Some(""), &mut typed_spans, &mut typed_children, &mut typed_tools, &mut typed_nexe, markdown_mode, width, pending, expanded_tools, spin, tps_enabled, diff_view, models);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
         {
@@ -1648,6 +1692,7 @@ fn boxed_message_rows_spans_mode(
         rebase_part_spans(typed_spans, taken, base, 3, inner, width, spans_out);
         rebase_part_children(typed_children, taken, base, child_out);
         rebase_part_tools(typed_tools, taken, base, tool_out);
+        rebase_part_nexe_tools(typed_nexe, taken, base, nexe_tool_out);
         append_user_chips(&mut output, spans_out, inner, 3, width, "┃  ", message);
         if user {
             output.push((padding, ChatRowClass::UserCard, None));
@@ -1658,14 +1703,14 @@ fn boxed_message_rows_spans_mode(
     // path (which would reserve outline rows) and do not synthesize blank
     // border glyphs; retain the ordinary typed message classes and bounds.
     if !style.has_border() {
-        return plain(width, spans_out, child_out, tool_out);
+        return plain(width, spans_out, child_out, tool_out, nexe_tool_out);
     }
     // A full drawn frame exists ONLY through an explicit Double/Heavy line
     // weight (kept explicit). A radius preset or a Custom radius must never
     // create or widen a frame — changing radius affects existing corners,
     // never activates framing.
     if appearance.full_outline(id) {
-        let Some(frame) = crate::native_box_style::TextFrame::new(style, width, pad) else { return plain(width, spans_out, child_out, tool_out); };
+        let Some(frame) = crate::native_box_style::TextFrame::new(style, width, pad) else { return plain(width, spans_out, child_out, tool_out, nexe_tool_out); };
         let inner = usize::from(frame.content_width());
         let mut output = Vec::new();
         if separator { output.push((String::new(), ChatRowClass::Separator, None)); }
@@ -1675,7 +1720,8 @@ fn boxed_message_rows_spans_mode(
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
         let mut typed_tools = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view, models);
+        let mut typed_nexe = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, &mut typed_tools, &mut typed_nexe, markdown_mode, width, pending, expanded_tools, spin, tps_enabled, diff_view, models);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 + 2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit) {
@@ -1684,6 +1730,7 @@ fn boxed_message_rows_spans_mode(
         rebase_part_spans(typed_spans, taken, base, 1 + pad, inner, width, spans_out);
         rebase_part_children(typed_children, taken, base, child_out);
         rebase_part_tools(typed_tools, taken, base, tool_out);
+        rebase_part_nexe_tools(typed_nexe, taken, base, nexe_tool_out);
         // MSG-005: the drawn-frame path keeps the chips as one plain row inside
         // the frame (no accent/muted run spans on this path).
         if let Some((chip_text, chip_class, _)) = user_chip_fallback_row(message) {
@@ -1705,7 +1752,7 @@ fn boxed_message_rows_spans_mode(
         let rail = 1;
         let overhead = rail + pad;
         if width <= overhead + 1 {
-            return plain(width, spans_out, child_out, tool_out);
+            return plain(width, spans_out, child_out, tool_out, nexe_tool_out);
         }
         let inner = width - overhead;
         let mut output = Vec::new();
@@ -1720,7 +1767,8 @@ fn boxed_message_rows_spans_mode(
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
         let mut typed_tools = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view, models);
+        let mut typed_nexe = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, &mut typed_tools, &mut typed_nexe, markdown_mode, width, pending, expanded_tools, spin, tps_enabled, diff_view, models);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
@@ -1742,6 +1790,7 @@ fn boxed_message_rows_spans_mode(
         rebase_part_spans(typed_spans, taken, base, 1 + pad, inner, width, spans_out);
         rebase_part_children(typed_children, taken, base, child_out);
         rebase_part_tools(typed_tools, taken, base, tool_out);
+        rebase_part_nexe_tools(typed_nexe, taken, base, nexe_tool_out);
         append_user_chips(
             &mut output,
             spans_out,
@@ -1758,7 +1807,7 @@ fn boxed_message_rows_spans_mode(
     }
     if pad > 0 {
         if width <= pad.max(1) {
-            return plain(width, spans_out, child_out, tool_out);
+            return plain(width, spans_out, child_out, tool_out, nexe_tool_out);
         }
         let inner = width - pad;
         let mut output = Vec::new();
@@ -1772,7 +1821,8 @@ fn boxed_message_rows_spans_mode(
         let mut typed_spans = Vec::new();
         let mut typed_children = Vec::new();
         let mut typed_tools = Vec::new();
-        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, &mut typed_tools, markdown_mode, width, pending, spin, tps_enabled, diff_view, models);
+        let mut typed_nexe = Vec::new();
+        let typed = typed_message_rows_with_prefix_spans_mode(inner, message, false, None, &mut typed_spans, &mut typed_children, &mut typed_tools, &mut typed_nexe, markdown_mode, width, pending, expanded_tools, spin, tps_enabled, diff_view, models);
         let limit = MAX_MESSAGE_ROWS.saturating_sub(2 * pad);
         let taken = typed.len().min(limit);
         for (text, class) in typed.into_iter().take(limit)
@@ -1794,12 +1844,13 @@ fn boxed_message_rows_spans_mode(
         rebase_part_spans(typed_spans, taken, base, pad, inner, width, spans_out);
         rebase_part_children(typed_children, taken, base, child_out);
         rebase_part_tools(typed_tools, taken, base, tool_out);
+        rebase_part_nexe_tools(typed_nexe, taken, base, nexe_tool_out);
         for _ in 0..pad {
             output.push((String::new(), ChatRowClass::Blank, None));
         }
         output
     } else {
-        plain(width, spans_out, child_out, tool_out)
+        plain(width, spans_out, child_out, tool_out, nexe_tool_out)
     }
 }
 
@@ -2615,6 +2666,32 @@ fn rebase_part_children(
 fn rebase_part_tools(
     tools: Vec<(usize, usize)>, taken: usize, base: usize,
     sink: &mut Vec<(usize, usize)>,
+) {
+    for (index, tool) in tools {
+        if index >= taken { continue; }
+        sink.push((base + index, tool));
+    }
+}
+
+/// TOOL-002: canonical per-(message, part) key for a tool disclosure. Used by
+/// both the render side (owner map + expansion lookup) and the click side
+/// (toggle), so a control-bearing or oversized backend id cannot desync them.
+fn tool_disclosure_key(message_id: &str, tool_index: usize) -> (String, usize) {
+    const MAX_ID_CHARS: usize = 128;
+    let id: String = message_id
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .take(MAX_ID_CHARS)
+        .collect();
+    (id, tool_index)
+}
+
+/// TOOL-002: rebase per-row NON-execute tool ownership, mirroring
+/// [`rebase_part_tools`]. The owner value is a full `(message id, part index)`
+/// key so a click can toggle that part's disclosure.
+fn rebase_part_nexe_tools(
+    tools: Vec<(usize, (String, usize))>, taken: usize, base: usize,
+    sink: &mut Vec<(usize, (String, usize))>,
 ) {
     for (index, tool) in tools {
         if index >= taken { continue; }
@@ -3858,8 +3935,10 @@ fn typed_message_rows_with_prefix_spans(
 ) -> Vec<(String, ChatRowClass)> {
     typed_message_rows_with_prefix_spans_mode(
         width, message, separator, prefix, spans_out, child_out, &mut Vec::new(),
+        &mut Vec::new(),
         crate::markdown_runs::MarkdownMode::Rendered,
         width,
+        &std::collections::BTreeSet::new(),
         &std::collections::BTreeSet::new(),
         Some(0),
         true,
@@ -3873,9 +3952,11 @@ fn typed_message_rows_with_prefix_spans_mode(
     spans_out: &mut Vec<(usize, Vec<ChatRunSpan>)>,
     child_out: &mut Vec<(usize, String)>,
     tool_out: &mut Vec<(usize, usize)>,
+    nexe_tool_out: &mut Vec<(usize, (String, usize))>,
     markdown_mode: crate::markdown_runs::MarkdownMode,
     terminal_width: usize,
     pending: &std::collections::BTreeSet<String>,
+    expanded_tools: &std::collections::BTreeSet<(String, usize)>,
     spin: Option<u64>,
     tps_enabled: bool,
     diff_view: crate::native_diff_view::DiffViewPreference,
@@ -4029,6 +4110,15 @@ fn typed_message_rows_with_prefix_spans_mode(
                 // execute specialization).
                 let tool_state_index = tool_state_count;
                 tool_state_count += 1;
+                // TOOL-002: stable per-(message, part) key for the click-owner
+                // map and the expanded-disclosure state.
+                let owner_key = tool_disclosure_key(
+                    message.message_id.as_deref().unwrap_or(""),
+                    tool_state_index,
+                );
+                let is_execute = crate::tui_entry::native_turn::native_tool_rows::tool_kind(name)
+                    == crate::tui_entry::native_turn::native_tool_rows::ToolKind::Execute;
+                let expanded = !is_execute && expanded_tools.contains(&owner_key);
                 let mut display = crate::tui_entry::native_turn::native_tool_rows::apply_tool_metadata(
                     crate::tui_entry::native_turn::native_tool_rows::tool_display_with_models(
                         width,
@@ -4053,11 +4143,27 @@ fn typed_message_rows_with_prefix_spans_mode(
                 }
                 let before = rows.len();
                 append_tool_rows(&mut rows, width, &crate::tui_entry::native_turn::native_tool_rows::rows_for_display_spin(width, &display, spin));
-                if crate::tui_entry::native_turn::native_tool_rows::tool_kind(name)
-                    == crate::tui_entry::native_turn::native_tool_rows::ToolKind::Execute
-                {
+                if is_execute {
                     for row in before..rows.len() {
                         tool_out.push((row, tool_state_index));
+                    }
+                } else {
+                    // TOOL-002: an expanded non-execute tool reveals its
+                    // disclosure body (Generic input values + output, full
+                    // error for failed rows, permission/denied bodies).
+                    if expanded {
+                        append_tool_rows(
+                            &mut rows,
+                            width,
+                            &crate::tui_entry::native_turn::native_tool_rows::expanded_tool_rows(
+                                width, name, status, args, output, *is_error,
+                            ),
+                        );
+                    }
+                    // Every row of this tool (header + expanded body) is a
+                    // click target that toggles its own disclosure.
+                    for row in before..rows.len() {
+                        nexe_tool_out.push((row, owner_key.clone()));
                     }
                 }
                 // MEDIA-001 tool gallery: upstream paints `SessionImages` from
@@ -4927,9 +5033,11 @@ impl ChatView {
                     &mut Vec::new(),
                     &mut Vec::new(),
                     &mut Vec::new(),
+                    &mut Vec::new(),
                     self.markdown_mode,
                     width,
                     &self.pending_calls_for_message(messages, index),
+                    &self.expanded_tools.borrow(),
                     self.spin_frame.get(),
                     self.tps_enabled(),
                     self.diff_view,
@@ -5358,7 +5466,8 @@ impl ChatView {
             cursor => cursor.min(messages.len()),
         };
         type GroupOwner = Option<(String, crate::native_message_rows::GroupKind)>;
-        let mut reversed: Vec<(StyledChatRow, Vec<ChatRunSpan>, Option<String>, Option<String>, Option<usize>, GroupOwner, u32)> = Vec::new();
+        type ToolDisclosureOwner = Option<(String, usize)>;
+        let mut reversed: Vec<(StyledChatRow, Vec<ChatRunSpan>, Option<String>, Option<String>, Option<usize>, GroupOwner, ToolDisclosureOwner, u32)> = Vec::new();
         loop {
             reversed.clear();
         if transcript_h > 0 {
@@ -5374,6 +5483,7 @@ impl ChatView {
                     let mut message_spans: Vec<(usize, Vec<ChatRunSpan>)> = Vec::new();
                     let mut message_children: Vec<(usize, String)> = Vec::new();
                     let mut message_tools: Vec<(usize, usize)> = Vec::new();
+                    let mut message_nexe_tools: Vec<(usize, (String, usize))> = Vec::new();
                     let message_rows = boxed_message_rows_spans_mode(
                         width,
                         message,
@@ -5382,8 +5492,10 @@ impl ChatView {
                         &mut message_spans,
                         &mut message_children,
                         &mut message_tools,
+                        &mut message_nexe_tools,
                         markdown_mode,
                         &self.pending_calls_for_message(messages, index),
+                        &self.expanded_tools.borrow(),
                         self.spin_frame.get(),
                         self.tps_enabled(),
                         self.diff_view,
@@ -5403,8 +5515,13 @@ impl ChatView {
                     for (row, tool) in message_tools {
                         if row < dense_tools.len() { dense_tools[row] = Some(tool); }
                     }
+                    // TOOL-002: per-row owner for non-execute tool disclosures.
+                    let mut dense_nexe_tools: Vec<Option<(String, usize)>> = vec![None; message_rows.len()];
+                    for (row, tool) in message_nexe_tools {
+                        if row < dense_nexe_tools.len() { dense_nexe_tools[row] = Some(tool); }
+                    }
                     let owner = message.message_id.clone();
-                    for (((row, spans), child), tool) in message_rows.into_iter().zip(dense).zip(dense_children).zip(dense_tools).rev() {
+                    for ((((row, spans), child), tool), nexe) in message_rows.into_iter().zip(dense).zip(dense_children).zip(dense_tools).zip(dense_nexe_tools).rev() {
                         // Separator gap rows belong to no message box: hovering a
                         // gap must not raise either neighbour card, and card runs
                         // stay distinguishable even where a window slice drops the
@@ -5415,7 +5532,7 @@ impl ChatView {
                         } else {
                             index as u32
                         };
-                        reversed.push((row, spans, owner.clone(), child, tool, None, group));
+                        reversed.push((row, spans, owner.clone(), child, tool, None, nexe, group));
                         if reversed.len() >= target {
                             break 'messages;
                         }
@@ -5427,7 +5544,7 @@ impl ChatView {
                 if let Some(plan) = plan {
                     for header in plan.headers.iter().rev() {
                         let text = format!("{} {} · {}", if header.expanded { "▾" } else { "▸" }, header.kind.as_str(), header.size);
-                        reversed.push(((text, ChatRowClass::Header, None), Vec::new(), None, None, None, Some((header.gid.clone(), header.kind)), NO_MESSAGE_GROUP));
+                        reversed.push(((text, ChatRowClass::Header, None), Vec::new(), None, None, None, Some((header.gid.clone(), header.kind)), None, NO_MESSAGE_GROUP));
                         if reversed.len() >= target {
                             break 'messages;
                         }
@@ -5446,7 +5563,7 @@ impl ChatView {
         // MSG-009: live transcript notices render after the message rows,
         // before the scroll slice; bytes match the pinned surfaces output.
         for (text, class) in self.notice_rows(width) {
-            reversed.push(((text, class, None), Vec::new(), None, None, None, None, NO_MESSAGE_GROUP));
+            reversed.push(((text, class, None), Vec::new(), None, None, None, None, None, NO_MESSAGE_GROUP));
         }
         let effective_scroll = self.scroll.get().min(reversed.len().saturating_sub(transcript_h));
         // Synchronize the stored offset with the current rendered content.
@@ -5470,8 +5587,9 @@ impl ChatView {
         let mut child_owners: Vec<Option<String>> = vec![None; rows.len()];
         let mut tool_owners: Vec<Option<usize>> = vec![None; rows.len()];
         let mut group_owners: Vec<Option<(String, crate::native_message_rows::GroupKind)>> = vec![None; rows.len()];
+        let mut non_execute_tool_owners: Vec<Option<(String, usize)>> = vec![None; rows.len()];
         let mut groups: Vec<u32> = vec![NO_MESSAGE_GROUP; rows.len()];
-        for (index, ((text, class, range), spans, owner, child, tool, group, msg_group)) in visible.into_iter().enumerate() {
+        for (index, ((text, class, range), spans, owner, child, tool, group, nexe, msg_group)) in visible.into_iter().enumerate() {
             rows[first + index] = (text, class);
             bounds[first + index] = range;
             row_spans[first + index] = spans;
@@ -5479,6 +5597,7 @@ impl ChatView {
             child_owners[first + index] = child;
             tool_owners[first + index] = tool;
             group_owners[first + index] = group;
+            non_execute_tool_owners[first + index] = nexe;
             groups[first + index] = msg_group;
         }
         // LAY-15: restate the reserved-row invariant in screen order after the
@@ -5506,6 +5625,7 @@ impl ChatView {
                 child_owners[reserved] = None;
                 tool_owners[reserved] = None;
                 group_owners[reserved] = None;
+                non_execute_tool_owners[reserved] = None;
                 groups[reserved] = NO_MESSAGE_GROUP;
             }
         }
@@ -5513,6 +5633,7 @@ impl ChatView {
         self.child_owners.replace(child_owners);
         self.tool_owners.replace(tool_owners);
         self.group_owners.replace(group_owners);
+        self.non_execute_tool_owners.replace(non_execute_tool_owners);
         let styled: Vec<GroupedStyledChatRow> = rows.into_iter()
             .zip(bounds)
             .zip(groups)
@@ -5587,12 +5708,16 @@ impl ChatView {
                 appearance,
                 &mut spans,
                 &mut children,
-                // Content-height count only: the tool-owner map is not built here.
+                // Content-height count only: the tool-owner maps are not built here.
+                &mut Vec::new(),
                 &mut Vec::new(),
                 markdown_mode,
-                // Content-height count only: a row-class swap never changes
-                // the row count, so the pending set is irrelevant here.
+                // Pending only recolors a row; it never changes the count.
                 &std::collections::BTreeSet::new(),
+                // TOOL-002: an expanded disclosure APPENDS body rows, so the
+                // count must use the same expanded set as the painted frame or
+                // the scrollbar/history anchor undercount a disclosure.
+                &self.expanded_tools.borrow(),
                 Some(0),
                 self.tps_enabled(),
                 self.diff_view,
@@ -5674,13 +5799,42 @@ impl ChatView {
         self.group_owners.borrow().get(row).cloned().flatten()
     }
 
+    /// TOOL-002: per-row owner `(message id, ToolState part index)` for every
+    /// painted NON-execute tool row (header + expanded body) of the last styled
+    /// render. `None` for execute rows and for all non-tool rows.
+    #[must_use]
+    pub fn non_execute_tool_owners(&self) -> Vec<Option<(String, usize)>> {
+        self.non_execute_tool_owners.borrow().clone()
+    }
+
+    /// TOOL-002: the `(message id, part index)` owner of `row`, or `None` when
+    /// the row is not a non-execute tool row.
+    #[must_use]
+    pub fn non_execute_tool_owner_at(&self, row: usize) -> Option<(String, usize)> {
+        self.non_execute_tool_owners.borrow().get(row).cloned().flatten()
+    }
+
+    /// TOOL-002: toggle the expanded disclosure of the non-execute tool part
+    /// painted at `row`. Returns the new expanded state, or `None` when `row`
+    /// is not a non-execute tool row.
+    #[must_use]
+    pub fn chat_toggle_tool_at(&self, row: usize) -> Option<bool> {
+        let (message_id, index) = self.non_execute_tool_owner_at(row)?;
+        Some(self.toggle_tool_expanded(&message_id, index))
+    }
+
     /// Toggle the disclosure of the group whose header is painted at `row`,
-    /// for the active session. `None` when `row` is not a group header.
+    /// for the active session. `None` when `row` is neither a group header nor
+    /// a TOOL-002 non-execute tool row (those fall back to toggling their own
+    /// expanded disclosure body). This single entry point lets the existing
+    /// `NativeView::chat_toggle_group_at` wrapper drive both disclosures.
     #[must_use]
     pub fn toggle_group_at(&self, row: usize) -> Option<bool> {
-        let (gid, kind) = self.group_owner_at(row)?;
-        let session = self.active_session_id.borrow().clone();
-        Some(self.toggle_group(&session, &gid, kind))
+        if let Some((gid, kind)) = self.group_owner_at(row) {
+            let session = self.active_session_id.borrow().clone();
+            return Some(self.toggle_group(&session, &gid, kind));
+        }
+        self.chat_toggle_tool_at(row)
     }
 
     /// TOOL-008: count the painted rows for one message using THIS view's model
@@ -5697,13 +5851,23 @@ impl ChatView {
         separator: bool,
         appearance: &crate::native_box_style::BoxAppearance,
     ) -> Vec<StyledChatRow> {
-        boxed_message_rows_spans(
+        // TOOL-002: thread the same expanded-disclosure set the painted frame
+        // uses, so an open disclosure's body rows are counted by the anchor.
+        boxed_message_rows_spans_mode(
             width,
             message,
             separator,
             appearance,
             &mut Vec::new(),
             &mut Vec::new(),
+            &mut Vec::new(),
+            &mut Vec::new(),
+            crate::markdown_runs::MarkdownMode::Rendered,
+            &std::collections::BTreeSet::new(),
+            &self.expanded_tools.borrow(),
+            Some(0),
+            true,
+            crate::native_diff_view::DiffViewPreference::Auto,
             &self.model_catalog,
         )
     }
@@ -11648,6 +11812,127 @@ mod tool011_tests {
         assert_eq!(
             retained, rows,
             "a failing streaming delta must repaint the identical last-good frame"
+        );
+    }
+}
+
+/// TOOL-002/003/004 disclosure behavior: per-(message, part) expanded state,
+/// the non-execute tool-row click owner map, and the expanded Generic body.
+#[cfg(test)]
+mod tool002_disclosure_tests {
+    use super::*;
+
+    /// TOOL-002: a non-execute tool row carries a per-(message, part) click
+    /// owner, and toggling through the shared disclosure entry point
+    /// (`NativeView::chat_toggle_group_at` -> `toggle_group_at`) reveals the
+    /// expanded Generic body (input values + output) on the styled path.
+    #[test]
+    fn tool002_non_execute_tool_disclosure_expands_and_collapses() {
+        let mut msg = ChatMessage::text(ChatRole::Assistant, "");
+        msg.message_id = Some("m1".into());
+        msg.parts = vec![ChatPart::ToolState {
+            name: "mcp__fixture".to_owned(),
+            id: "c1".to_owned(),
+            status: "completed".to_owned(),
+            args: r#"{"uri":"db://x","nested":{"deep":true}}"#.to_owned(),
+            output: "tool output".to_owned(),
+            is_error: false,
+            metadata: String::new(),
+        }];
+        let mut view = ChatView::new();
+        // Parts-alone: no group header can collapse the tool row away.
+        view.set_transcript_options(
+            crate::native_message_rows::Verbosity::Medium,
+            crate::native_message_rows::Grouping::None,
+            crate::native_message_rows::ThinkingMode::Hide,
+        );
+        let appearance = crate::native_box_style::BoxAppearance::default();
+
+        let collapsed = view.render_styled(80, 40, "ws", &[msg.clone()], "", false, &appearance);
+        assert!(
+            !collapsed.iter().any(|row| row.0.contains("output: tool output")),
+            "collapsed row hides the expanded body: {collapsed:?}"
+        );
+
+        let owner_row = view
+            .non_execute_tool_owners()
+            .into_iter()
+            .position(|owner| owner.is_some())
+            .expect("a non-execute tool row carries a disclosure owner");
+        assert_eq!(view.tool_owner_at(owner_row), None, "not an execute row");
+
+        assert_eq!(view.toggle_group_at(owner_row), Some(true));
+        let expanded = view.render_styled(80, 40, "ws", &[msg.clone()], "", false, &appearance);
+        assert!(expanded.iter().any(|row| row.0.contains("uri: db://x")), "{expanded:?}");
+        assert!(expanded.iter().any(|row| row.0.contains("output: tool output")), "{expanded:?}");
+        assert!(expanded.iter().any(|row| row.0.contains("\"deep\"")), "{expanded:?}");
+
+        assert_eq!(view.toggle_group_at(owner_row), Some(false));
+        let again = view.render_styled(80, 40, "ws", &[msg], "", false, &appearance);
+        assert!(
+            !again.iter().any(|row| row.0.contains("output: tool output")),
+            "toggling back collapses the body: {again:?}"
+        );
+    }
+
+    /// TOOL-002: expanded disclosure state is keyed by `(message id, part
+    /// index)` — expanding one tool part never expands a sibling part or a
+    /// part of another message, and a second toggle collapses it again.
+    #[test]
+    fn tool002_expanded_state_is_keyed_per_message_and_part() {
+        let view = ChatView::new();
+        assert!(!view.is_tool_expanded("m1", 0));
+        assert!(view.toggle_tool_expanded("m1", 0));
+        assert!(view.is_tool_expanded("m1", 0));
+        assert!(!view.is_tool_expanded("m2", 0), "other message unaffected");
+        assert!(!view.is_tool_expanded("m1", 1), "other part unaffected");
+        assert!(!view.toggle_tool_expanded("m1", 0));
+        assert!(!view.is_tool_expanded("m1", 0));
+    }
+
+    /// TOOL-002 (regression for the count/scrollbar wiring defect): opening a
+    /// disclosure APPENDS rows, so the content-height count used by the
+    /// scrollbar and history anchor MUST grow by exactly the expanded body
+    /// rows and agree with the frame that paints them.
+    #[test]
+    fn tool002_content_height_count_tracks_expanded_disclosure_rows() {
+        let mut msg = ChatMessage::text(ChatRole::Assistant, "");
+        msg.message_id = Some("m1".into());
+        let args = r#"{"uri":"db://x","nested":{"deep":true}}"#;
+        msg.parts = vec![ChatPart::ToolState {
+            name: "mcp__fixture".to_owned(),
+            id: "c1".to_owned(),
+            status: "completed".to_owned(),
+            args: args.to_owned(),
+            output: "tool output".to_owned(),
+            is_error: false,
+            metadata: String::new(),
+        }];
+        let mut view = ChatView::new();
+        view.set_transcript_options(
+            crate::native_message_rows::Verbosity::Medium,
+            crate::native_message_rows::Grouping::None,
+            crate::native_message_rows::ThinkingMode::Hide,
+        );
+        let appearance = crate::native_box_style::BoxAppearance::default();
+
+        let collapsed_count = view.styled_message_rows(80, &[msg.clone()], &appearance);
+        assert!(view.toggle_tool_expanded("m1", 0));
+        let expanded_count = view.styled_message_rows(80, &[msg], &appearance);
+
+        let body = crate::tui_entry::native_turn::native_tool_rows::expanded_tool_rows(
+            80,
+            "mcp__fixture",
+            "completed",
+            args,
+            "tool output",
+            false,
+        );
+        assert!(expanded_count > collapsed_count, "count must see the disclosure");
+        assert_eq!(
+            expanded_count - collapsed_count,
+            body.len(),
+            "count growth must equal the painted disclosure body rows"
         );
     }
 }
