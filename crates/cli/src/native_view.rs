@@ -201,6 +201,16 @@ pub struct NativeView {
     /// row above the terminal bottom (`routes/home.tsx:109-116`, reduced by
     /// [`crate::native_home::form_overlay`]).
     global_forms: usize,
+    /// CP-22: `currentLocation.error` for the bound session's directory
+    /// (`routes/session/index.tsx:1630-1641`), fed by the live loop from the
+    /// authenticated session snapshot. The bottom-slot resolver honours it
+    /// instead of assuming a healthy project. `false` until a session binds,
+    /// so Home and the initial frame are unchanged.
+    session_location_missing: bool,
+    /// CP-22: the bottom slot that the last render actually gave ownership of
+    /// the composer foot to. Published by the render path so the resolver's
+    /// decision is observable on the rendered frame, not just in isolation.
+    rendered_bottom_slot: Option<crate::native_prompt_pane::PromptSlot>,
     composer_variant: Option<String>,
     composer_model: Option<(String, String)>,
     composer_effort: Option<String>,
@@ -1411,6 +1421,8 @@ impl NativeView {
             context_usage_hit: None,
             home_plugins_failed: 0,
             global_forms: 0,
+            session_location_missing: false,
+            rendered_bottom_slot: None,
             composer_variant: None,
             composer_model: None,
             composer_effort: None,
@@ -3255,9 +3267,16 @@ impl NativeView {
     /// CP-22: resolve the live session composer slot through the shared
     /// `native_status_rail::bottom_slot` precedence authority.
     /// `composer_open` is the auxiliary composer/dock; a child session with no
-    /// forms also takes the auxiliary slot; `form_pending` is the global form
-    /// count. Upstream has no session-route location-missing or disabled fact
-    /// reaching this view, so those two inputs stay false (honest-capability).
+    /// forms also takes the auxiliary slot. The three inputs that used to be
+    /// literals now come from live facts:
+    ///
+    /// - `forms` is the pending global-form count mirrored from the live modal
+    ///   form overlay by [`NativeView::sync_global_forms`] on every render;
+    /// - `location_missing` is the loop-fed `currentLocation.error` proxy for
+    ///   the bound session's directory;
+    /// - `enabled` is the real `session_route` fact (this resolver is only
+    ///   reached on that route, so `Hidden` is a resolver-level terminal state
+    ///   that paints nothing when the route is not owned by the session).
     fn session_prompt_slot(&self, permission_pending: bool) -> crate::native_prompt_pane::PromptSlot {
         use crate::native_prompt_pane::PromptSlot;
         let facts = crate::native_status_rail::BottomFacts {
@@ -3265,8 +3284,8 @@ impl NativeView {
             child_session: self.parent_session,
             forms: self.global_forms,
             permissions: usize::from(permission_pending),
-            location_missing: false,
-            enabled: true,
+            location_missing: self.session_location_missing,
+            enabled: self.session_route,
         };
         match crate::native_status_rail::bottom_slot(&facts) {
             crate::native_status_rail::BottomSlot::Composer => PromptSlot::AuxiliaryComposer,
@@ -3431,12 +3450,14 @@ impl NativeView {
 
     /// Feed the Home global-forms count: `forms()` in `routes/home.tsx:36-38`,
     /// the `"global"`-owner elicitation forms
-    /// (`packages/client/src/solid/data.ts:129-130`). No elicitation feed
-    /// reaches the cli yet — `crates/server/src/mcp_runtime.rs:178` exposes
-    /// captured MCP `elicitation/create` requests but nothing consumes them,
-    /// and no `.../form` route is registered (`crates/server/src/lib.rs:299`
-    /// has only the permission routes) — so production leaves this 0 and the
-    /// prompt stays enabled.
+    /// (`packages/client/src/solid/data.ts:129-130`). CP-22: production now
+    /// mirrors the live modal form overlay through [`Self::sync_global_forms`]
+    /// on every render; this setter remains the explicit/injected feed used by
+    /// tests. There is still no separate `"global"`-owner elicitation feed —
+    /// `crates/server/src/mcp_runtime.rs:178` exposes captured
+    /// `elicitation/create` requests but nothing consumes them, and no
+    /// `.../form` route is registered — so the live count is driven by the
+    /// session form poll only.
     pub fn set_global_forms(&mut self, forms: usize) {
         self.global_forms = forms;
     }
@@ -3445,6 +3466,38 @@ impl NativeView {
     #[must_use]
     pub fn global_forms(&self) -> usize {
         self.global_forms
+    }
+
+    /// CP-22: mirror the live pending form into `global_forms` at the start of
+    /// every render. The modal form overlay (`DialogView::open_form`, driven by
+    /// the session form poll) is the production producer; this makes the
+    /// global-forms feed live instead of a test-only setter. Closing the form
+    /// clears the count again, so the Form bottom slot is never sticky.
+    pub fn sync_global_forms(&mut self) {
+        self.global_forms = usize::from(self.dialogs.form().is_some());
+    }
+
+    /// CP-22: feed the active session's location-missing fact. The only
+    /// location fact on the wire is the authenticated snapshot's directory; a
+    /// bound session without one is this port's `currentLocation.error`
+    /// signal (`routes/session/index.tsx:1630-1641`). Re-fed on every snapshot
+    /// refresh, so a route restored without a fresh bind cannot keep a stale
+    /// value. `false` by default keeps Home and the initial frame unchanged.
+    pub fn set_session_location_missing(&mut self, missing: bool) {
+        self.session_location_missing = missing;
+    }
+
+    /// CP-22 live location-missing fact read by [`Self::session_prompt_slot`].
+    #[must_use]
+    pub fn session_location_missing(&self) -> bool {
+        self.session_location_missing
+    }
+
+    /// CP-22: the bottom slot the last render gave ownership of the composer
+    /// foot to. `None` before the first render / off the session route.
+    #[must_use]
+    pub(crate) fn rendered_bottom_slot(&self) -> Option<crate::native_prompt_pane::PromptSlot> {
+        self.rendered_bottom_slot
     }
 
     /// `Prompt disabled={forms().length > 0}` (`routes/home.tsx:102`) reduced
@@ -4864,6 +4917,11 @@ impl NativeView {
         // Thinking is a main-pane header status. It must not suppress the
         // composer hit region or move interaction geometry into the footer.
         self.frame_busy = false;
+        // CP-22: the bottom-slot resolver reads a live form feed, not a
+        // test-only constant. Mirror the modal form overlay into `global_forms`
+        // before any slot decision is made for this frame.
+        self.sync_global_forms();
+        self.rendered_bottom_slot = None;
         self.chat_row_classes.clear();
         self.chat_text_bounds.clear();
         // Rebuilt per render like its sibling vectors above. Without this
@@ -5004,12 +5062,29 @@ impl NativeView {
             center
         } else if self.session_route {
             let slot = self.session_prompt_slot(permission_rows.is_some());
+            // CP-22: publish the resolved slot as the owner of this frame's
+            // bottom surface. Exactly one surface owns it (upstream Switch at
+            // 1591-1660); the render branches below consume this decision.
+            self.rendered_bottom_slot = Some(slot);
             // The live slot authority: only the Permission slot replaces the
             // composer with the inline prompt. An open auxiliary composer/dock
             // (or a child session without forms) wins the slot (upstream Switch
             // at 1591-1660), so a queued permission is not painted over it.
             let has_permission =
                 matches!(slot, crate::native_prompt_pane::PromptSlot::Permission);
+            // CP-22: Form, LocationMissing and Hidden suppress the editable
+            // prompt's metadata/footer rows — they own the bottom slot instead
+            // of being painted *under* a second editable prompt. The live form
+            // itself stays owned by the modal overlay (no double form band);
+            // LocationMissing paints a single replacement band below.
+            let editable_prompt = matches!(
+                slot,
+                crate::native_prompt_pane::PromptSlot::Prompt
+                    | crate::native_prompt_pane::PromptSlot::AuxiliaryComposer
+            );
+            // Form / LocationMissing / Hidden (like Permission) drop the
+            // composer from the chat body entirely: the slot owner replaces it.
+            let without_prompt = has_permission || !editable_prompt;
             let permission_rows = if has_permission { permission_rows } else { None };
             // Upstream `SessionQuestion` (`permission.tsx:514-523`) renders the
             // permission prompt inline at the conversation bottom with
@@ -5072,7 +5147,7 @@ impl NativeView {
                     .saturating_sub(strip_height)
             };
             let mut body = if let Some(messages) = messages {
-                let (rows, markdown_spans) = if has_permission {
+                let (rows, markdown_spans) = if without_prompt {
                     self.chat.render_styled_without_prompt_with_spans_mode_grouped(inner_width as usize, body_height,
                         &self.workspace, messages, busy, &self.box_appearance, self.markdown_mode)
                 } else { self.chat.render_styled_with_spans_mode_grouped(
@@ -5099,7 +5174,7 @@ impl NativeView {
                     .map(|(text, _, _, _)| text)
                     .collect::<Vec<_>>()
             } else {
-                let rows = if has_permission {
+                let rows = if without_prompt {
                     self.chat.render_legacy_without_prompt(inner_width as usize, body_height,
                         &self.workspace, transcript, busy, &self.box_appearance)
                 } else { self.chat.render_legacy_styled(
@@ -5136,7 +5211,7 @@ impl NativeView {
                 self.layout.rows,
             );
             let mut body = body;
-            if prompt.rail && !has_permission {
+            if prompt.rail && editable_prompt && !has_permission {
                 let row = body.len().saturating_sub(2);
                 let inset = if crate::native_prompt_layout::prompt_inset(self.layout.cols) == 1 { " " } else { "  " };
                 // In-box `PromptMetadataRow` (`component/prompt/index.tsx:1856`);
@@ -5314,7 +5389,7 @@ impl NativeView {
                 .chat
                 .transcript_first_row()
                 .saturating_add(self.chat.transcript_viewport_rows());
-            let narrow_transcript = self.scrollbar_enabled && !has_permission;
+            let narrow_transcript = self.scrollbar_enabled && !without_prompt;
             let mut body: Vec<_> = body
                 .into_iter()
                 .enumerate()
@@ -5341,7 +5416,7 @@ impl NativeView {
             self.chat_text_bounds.resize(body.len(), None);
             self.chat_row_groups.resize(body.len(), crate::native_view_chat::NO_MESSAGE_GROUP);
             self.chat_markdown_spans.resize(body.len(), Vec::new());
-            if self.scrollbar_enabled && !has_permission {
+            if self.scrollbar_enabled && !without_prompt {
                 if let Some(messages) = messages {
                     let viewport = self.chat.transcript_viewport_rows();
                     let total = self.chat.styled_message_rows_mode(
@@ -5381,7 +5456,27 @@ impl NativeView {
             if has_permission {
                 // Permission prompt replaces the composer — no composer
                 // metadata / blank separator row beneath it (upstream Switch).
-            } else if height >= 4 {
+            } else if matches!(
+                slot,
+                crate::native_prompt_pane::PromptSlot::LocationMissing
+            ) && height >= 2
+            {
+                // CP-22: `SessionLocationMissing` owns the bottom slot. Paint a
+                // single replacement band where the editable composer foot was,
+                // using the loop-fed location fact — never a fabricated prompt.
+                let band = if self.session_location_missing {
+                    "Project location unavailable"
+                } else {
+                    ""
+                };
+                body.push(padded_inset(band, width, route_inset));
+                self.chat_row_classes
+                    .push(crate::native_view_chat::ChatRowClass::Metadata);
+                self.chat_text_bounds.push(None);
+                self.chat_row_groups
+                    .push(crate::native_view_chat::NO_MESSAGE_GROUP);
+                self.chat_markdown_spans.push(Vec::new());
+            } else if editable_prompt && height >= 4 {
                 // STATE-003/004: the live footer feed. The error/retry/token
                 // diagnostics and the delayed background hint are direct
                 // composer/transcript siblings: diagnostics first, then the
@@ -6056,10 +6151,11 @@ impl NativeView {
     /// messages are distinct cards even when a window slice places their rows
     /// next to each other, and a card's padding rows (including appearance
     /// padding `Blank` rows) hover together with its content rows.
-    /// Gap/scaffold rows (`NO_MESSAGE_GROUP`) never hover. The pointer must
-    /// land on a row whose message box contains user-card content and inside
-    /// the message content surface; modal/page/palette states suppress hover
-    /// entirely.
+    /// Gap/scaffold rows (`NO_MESSAGE_GROUP`) never hover — except the CP-21
+    /// queued-message dock, which is a live hover affordance carried by the
+    /// same mask. The pointer must land on a row whose message box contains
+    /// user-card content (or on the dock run) and inside the message content
+    /// surface; modal/page/palette states suppress hover entirely.
     fn compute_chat_hover_mask(&self, frame: &[String]) -> Vec<bool> {
         let mut mask = vec![false; frame.len()];
         if !self.session_route || self.dialogs.is_open()
@@ -6079,6 +6175,47 @@ impl NativeView {
             return mask;
         }
         let row = usize::try_from(py).unwrap_or(usize::MAX);
+        // CP-21: the queued-message dock row is a live hover affordance even
+        // though it is a composer sibling carrying NO_MESSAGE_GROUP. Upstream
+        // (`routes/session/index.tsx:2496-2513`) deepens its raised.base surface
+        // on hover exactly like the user card, so it must reach the same mask
+        // the painter consumes (`chat_row_background`). Hover the contiguous
+        // QueueDock run (the two `┃` rails around the summary) together.
+        if matches!(
+            self.chat_row_classes.get(row),
+            Some(crate::native_view_chat::ChatRowClass::QueueDock)
+        ) {
+            let mut start = row;
+            while start > 0 && matches!(
+                self.chat_row_classes.get(start - 1),
+                Some(crate::native_view_chat::ChatRowClass::QueueDock)
+            ) {
+                start -= 1;
+            }
+            let mut end = row;
+            while end + 1 < self.chat_row_classes.len()
+                && matches!(
+                    self.chat_row_classes.get(end + 1),
+                    Some(crate::native_view_chat::ChatRowClass::QueueDock)
+                )
+            {
+                end += 1;
+            }
+            if end >= mask.len() {
+                return mask;
+            }
+            let inset = presentation.main_padding.min(presentation.main_width / 2);
+            let left = u32::from(presentation.main_offset) + u32::from(inset);
+            let right = u32::from(presentation.main_offset)
+                + u32::from(presentation.main_width.saturating_sub(inset));
+            if u32::from(px) <= left || u32::from(px) >= right {
+                return mask;
+            }
+            for masked in mask.iter_mut().take(end + 1).skip(start) {
+                *masked = true;
+            }
+            return mask;
+        }
         let Some(&group) = self.chat_row_groups.get(row) else {
             return mask;
         };
@@ -9321,6 +9458,122 @@ mod tests {
             frame.iter().any(|row| row.contains('╹')),
             "the composer lip stays painted under the auxiliary slot"
         );
+    }
+
+    // CP-22: the resolved bottom slot actually owns the rendered composer
+    // foot, and its facts come from live state (modal form overlay, the
+    // loop-fed directory fact and the session route) instead of literals.
+    #[test]
+    fn cp22_bottom_slot_renders_live_form_location_and_route_facts() {
+        use crate::native_prompt_pane::PromptSlot;
+        let mut view = NativeView::new(120, 40);
+        view.set_session_route(true);
+
+        // Idle: the editable prompt owns the foot.
+        let idle = view.render_typed("draft", &[], false, &[]);
+        assert_eq!(view.rendered_bottom_slot(), Some(PromptSlot::Prompt));
+        assert!(
+            idle.iter().any(|row| row.contains('╹')),
+            "the idle frame paints the editable composer lip"
+        );
+
+        // A form open in the live modal stack feeds `global_forms` and raises
+        // the Form slot; the editable composer is dropped from the foot so the
+        // form overlay is the sole owner (no second editable prompt, no
+        // duplicated inline form band).
+        view.dialogs
+            .open_form(
+                "frm-live",
+                "ses-live",
+                "Details",
+                None,
+                vec![crate::native_view_dialogs::form_overlay::FormField::new(
+                    "q",
+                    crate::native_view_dialogs::form_overlay::FieldKind::Text,
+                )],
+            )
+            .expect("live form opens");
+        let form_frame = view.render_typed("draft", &[], false, &[]);
+        assert_eq!(view.global_forms(), 1, "global_forms mirrors the live form");
+        assert_eq!(view.session_prompt_slot(false), PromptSlot::Form);
+        assert_eq!(view.rendered_bottom_slot(), Some(PromptSlot::Form));
+        assert!(
+            !form_frame.iter().any(|row| row.contains('╹')),
+            "the Form slot removes the editable composer from the foot: {form_frame:?}"
+        );
+        // A pending permission still outranks a pending form (upstream order).
+        assert_eq!(view.session_prompt_slot(true), PromptSlot::Permission);
+        view.dialogs.close();
+        view.render_typed("draft", &[], false, &[]);
+        assert_eq!(view.global_forms(), 0, "closing the form clears the live feed");
+
+        // A real loop-fed missing-location fact paints a replacement band and
+        // suppresses the editable composer.
+        view.set_session_location_missing(true);
+        assert!(view.session_location_missing());
+        let missing_frame = view.render_typed("draft", &[], false, &[]);
+        assert_eq!(view.session_prompt_slot(false), PromptSlot::LocationMissing);
+        assert_eq!(view.rendered_bottom_slot(), Some(PromptSlot::LocationMissing));
+        assert!(
+            missing_frame
+                .iter()
+                .any(|row| row.contains("Project location unavailable")),
+            "the location-missing band is painted: {missing_frame:?}"
+        );
+        assert!(!missing_frame.iter().any(|row| row.contains('╹')));
+        view.set_session_location_missing(false);
+
+        // `enabled` comes from the live route fact: off the session route the
+        // resolver is Hidden and Home owns its own foot (no published slot).
+        view.set_session_route(false);
+        assert_eq!(view.session_prompt_slot(false), PromptSlot::Hidden);
+        view.render_typed("draft", &[], false, &[]);
+        assert_eq!(view.rendered_bottom_slot(), None);
+    }
+
+    // CP-21: the queued-message dock hover is reached through the LIVE pointer
+    // -> `compute_chat_hover_mask` seam the painter consumes, not a helper
+    // invoked with a literal `is_hovered`.
+    #[test]
+    fn cp21_queue_dock_hover_uses_live_pointer_seam() {
+        use crate::native_view_chat::{ChatRowClass, QueuedPrompt};
+        let mut view = NativeView::new(120, 40);
+        view.set_session_route(true);
+        view.set_queued_prompts([QueuedPrompt {
+            id: "queued-0".to_owned(),
+            text: "next".to_owned(),
+        }]);
+        let frame = view.render_typed("draft", &[], false, &[]);
+        let summary = frame
+            .iter()
+            .position(|row| row.contains("1 queued"))
+            .expect("the queued summary row is painted");
+        assert_eq!(view.chat_row_classes()[summary], ChatRowClass::QueueDock);
+        assert!(
+            !view.chat_hovered_rows().iter().any(|hovered| *hovered),
+            "no pointer -> no hovered mask"
+        );
+
+        // Point at an inner cell (right of the left rail) of the summary row.
+        let presentation = view.presentation();
+        let inset = presentation.main_padding.min(presentation.main_width / 2);
+        let x = u16::try_from(u32::from(presentation.main_offset) + u32::from(inset) + 2)
+            .expect("pointer column fits");
+        assert!(view.set_chat_pointer(x, u16::try_from(summary).expect("row fits")));
+        view.render_typed("draft", &[], false, &[]);
+        let mask = view.chat_hovered_rows();
+        let dock_rows: Vec<usize> = view
+            .chat_row_classes()
+            .iter()
+            .enumerate()
+            .filter(|(_, class)| **class == ChatRowClass::QueueDock)
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(dock_rows.len(), 3, "rail, summary, rail");
+        assert!(mask[summary], "the summary row hovers from the live pointer");
+        for row in &dock_rows {
+            assert!(mask[*row], "the whole dock run hovers together");
+        }
     }
 
     #[test]

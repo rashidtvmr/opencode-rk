@@ -4156,7 +4156,16 @@ fn chat_row_background(class: Option<&crate::native_view_chat::ChatRowClass>, ro
         // `element` is the resolved raised.high surface, the same
         // `decrease(raised.base)` step (`native_theme_runtime.rs`).
         Some(ChatRowClass::UserCard) => Some(if is_hovered { element } else { panel }),
-        Some(ChatRowClass::QueueDock) => Some(panel),
+        // CP-21: the queued-message dock row carries the same hover affordance
+        // as the user card. Upstream `routes/session/index.tsx:2496-2513` paints
+        // the `queuedPrompts` row with
+        // `backgroundColor={hover() ? theme.decrease(theme.background.raised.base)
+        // : theme.background.raised.base}` — the identical raised-base decrement
+        // (`panel` is `raised.base`; `element` is the resolved raised.high
+        // surface). The hover bit reaches this arm through the live
+        // `chat_hovered_rows` mask extended for QueueDock in
+        // `NativeView::compute_chat_hover_mask`.
+        Some(ChatRowClass::QueueDock) => Some(if is_hovered { element } else { panel }),
         Some(ChatRowClass::AssistantCard) => Some(root),
         Some(ChatRowClass::SystemCard) => Some(element),
         Some(ChatRowClass::DiffAdded) => Some(diff.map_or(Rgba::new(20, 70, 35, 255), |diff| diff.added_background)),
@@ -4498,6 +4507,31 @@ mod chat_surface_inset_tests {
                     "message surface ownership at x={x} with {orientation:?}");
             }
         }
+    }
+
+    /// CP-21: the queued-message dock row deepens to `decrease(raised.base)`
+    /// on hover, exactly like the user card (`routes/session/index.tsx:
+    /// 2496-2513`). `panel` is `raised.base`; `element` is the resolved
+    /// `decrease(raised.base)` (raised.high) surface. This asserts the live
+    /// per-row paint arm, not a parallel copy: reverting the dock to a flat
+    /// background fails here, while the live pointer->mask seam that feeds
+    /// `is_hovered` is exercised by `cp21_queue_dock_hover_uses_live_pointer_seam`.
+    #[test]
+    fn cp21_queue_dock_row_hover_uses_raised_base_decrement() {
+        let root = Rgba::rgb(10, 10, 10);
+        let panel = Rgba::rgb(20, 20, 20);
+        let element = Rgba::rgb(30, 30, 30);
+        let dock = crate::native_view_chat::ChatRowClass::QueueDock;
+        assert_eq!(
+            chat_row_background(Some(&dock), root, panel, element, None, false),
+            Some(panel),
+            "unhovered queued dock row keeps raised.base"
+        );
+        assert_eq!(
+            chat_row_background(Some(&dock), root, panel, element, None, true),
+            Some(element),
+            "hovered queued dock row deepens to decrease(raised.base)"
+        );
     }
 
     /// Upstream UserMessage hover (`routes/session/index.tsx:2390-2395,2427`):
@@ -6959,10 +6993,12 @@ fn completion_row_bg(
 }
 
 #[cfg(feature = "native")]
-/// Frame row of the transcript `UserCard` under `(x, y)`, or `None` when the
-/// pointer is off the main column or over a non-UserCard row. Shared by the
+/// Frame row of a hoverable chat surface under `(x, y)`, or `None` when the
+/// pointer is off the main column or over a non-hoverable row. Shared by the
 /// live mouse-move arm and the per-frame hover refresh so the inset ownership
-/// can never desync (`routes/session/index.tsx:2390` `onMouseOver`).
+/// can never desync (`routes/session/index.tsx:2390` `onMouseOver`). The name
+/// is kept for callers; CP-21 adds the queued-message dock (`QueueDock`) beside
+/// the `UserCard` rows, both of which deepen their raised.base surface on hover.
 fn user_card_row_under_pointer(
     view: &crate::native_view::NativeView,
     x: u16,
@@ -6978,7 +7014,10 @@ fn user_card_row_under_pointer(
         .filter(|row| {
             matches!(
                 view.chat_row_classes().get(*row),
-                Some(crate::native_view_chat::ChatRowClass::UserCard)
+                Some(
+                    crate::native_view_chat::ChatRowClass::UserCard
+                        | crate::native_view_chat::ChatRowClass::QueueDock
+                )
             )
         })
 }
@@ -7959,6 +7998,13 @@ fn bind_session(
         .directory
         .clone()
         .unwrap_or_else(current_workspace_label);
+    // CP-22: the only location fact on the wire is the bound session's
+    // directory. A bound session without one is this port's
+    // `currentLocation.error` signal (`routes/session/index.tsx:1630-1641`);
+    // feed it so the bottom slot can raise LocationMissing instead of assuming
+    // a healthy project. `current_workspace_label()` above is a label fallback,
+    // not evidence the session's directory exists.
+    view.set_session_location_missing(snapshot.directory.is_none());
     view.set_project_directory(route_directory.clone());
     let (route_branch, route_worktree) = rail_location_facts(&route_directory);
     view.set_rail_location(route_branch.clone(), route_worktree);
@@ -12591,6 +12637,11 @@ fn native_loop(
                                 .directory
                                 .clone()
                                 .unwrap_or_else(current_workspace_label);
+                            // CP-22: re-feed the live location fact on every
+                            // snapshot refresh, not only at bind, so a session
+                            // restored through another route cannot retain a
+                            // stale missing-location state.
+                            view.set_session_location_missing(snapshot.directory.is_none());
                             view.set_project_directory(turn_directory.clone());
                             let (turn_branch, turn_worktree) = rail_location_facts(&turn_directory);
                             view.set_rail_location(turn_branch, turn_worktree);

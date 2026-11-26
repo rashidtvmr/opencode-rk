@@ -671,7 +671,28 @@ evidence in `artifacts/verdicts/`).
 | `CP-25` | unrecorded | `ALREADY_CORRECT` | live dock status cells (`native_view.rs:1617-1623`) from `SubagentsTab::rows`; `status_label` "Running" (`native_children.rs:1176`); test `cp25_running_label_is_literal_without_progress`; upstream `subagents-tab.tsx:209` |
 | `CP-24`/`CP-26`/`CP-27`/`CP-28`/`CP-29` | unrecorded | `REAL_GAP` | tab/keymap/focus models exist but are unwired: `SubagentsTab` command/set_active (`native_children.rs:1620`), `SessionDock::set_shells` (`native_shell.rs:1244`), `TerminalsTab` (`native_dock.rs:1183`), `KeymapDefaults::upstream` (`native_composer.rs:1690`) and composer `PromptFocus` remount (`:1745`) all have no live consumer |
 | `CP-19`/`CP-20` | unrecorded | `ALREADY_CORRECT` | live `rail_spans` fit/hover role selection (`native_view.rs:4389`); tests `cp19_usage_outranks_shortcuts_at_the_fit_boundary`, `cp20_hover_and_disabled_hints_keep_their_shortcut_identity`; upstream `footer.tsx:55-88,146-155` |
-| `CP-21`/`CP-22`/`CP-23` | unrecorded | `ALREADY_CORRECT` | live queue dock rows (`tui_entry.rs:9104`, `native_view.rs:3703-3718`), prompt-slot precedence (`native_view.rs:3496-3503,3776-3783`) and dock title/hint (`native_view.rs:1091-1096,3641-3701`); tests `queue_dock_paints_only_the_published_active_session_rows`, `cp22_bottom_slot_precedence_covers_every_combination`, `cp23_title_and_hint_layout` |
+| `CP-21` (hover subset) | unrecorded | `PARTIAL` | queued-message dock row now deepens to `decrease(raised.base)` on hover (`tui_entry.rs` `chat_row_background` `QueueDock` arm), and the hover bit reaches it through the LIVE pointer->`compute_chat_hover_mask`->`chat_hovered_rows` seam (`native_view.rs`), not a literal; tests `cp21_queue_dock_row_hover_uses_live_pointer_seam`, `cp21_queue_dock_row_hover_uses_raised_base_decrement`, plus `queue_dock_paints_only_the_published_active_session_rows`. Click/queue-management affordance is explicitly out of scope (deviation below). |
+| `CP-22` (slot subset) | unrecorded | `PARTIAL` | `session_prompt_slot` derives forms from the live modal form overlay (mirrored into `global_forms` on every render), location_missing from the loop-fed directory fact, and enabled from the real session-route fact; the resolved slot owns the rendered composer foot (Form/LocationMissing/Hidden drop the editable prompt; LocationMissing paints one replacement band); tests `cp22_bottom_slot_renders_live_form_location_and_route_facts`. Form *fields* remain owned by the pre-existing modal overlay (no duplicated inline form); location_missing is a directory proxy, not an upstream `currentLocation.error` producer (limitations below). |
+| `CP-23` | unrecorded | `ALREADY_CORRECT` | dock title/hint (`native_view.rs:1091-1096,3641-3701`); tests `cp23_title_and_hint_layout` |
+
+> **CP-21 recorded deviation (not implemented):** upstream's "click opens queue
+> management" affordance is **out of scope** for this native port; no
+> queue-management dialog was invented. The implemented observable dimension is
+> the hover state (`theme.decrease(raised.base)`,
+> `routes/session/index.tsx:2496-2513`). Zero/one/multiple prompts,
+> multiline-first-prompt flattening and long-text truncation stay in
+> `native_dock::ComposerDock::queue_line` / `native_status_rail::queue_dock`.
+>
+> **CP-22 limitations (honest capability):** `location_missing` is fed from the
+> bound session's directory — re-fed on every authenticated snapshot refresh —
+> because the daemon exposes no live `currentLocation.error` producer; this is a
+> proxy, not an upstream-equivalent fact. Forms own the Form bottom slot via the
+> live `dialogs.form()` feed, but their fields are painted by the existing modal
+> form overlay rather than a second inline band, so there is no double rendering
+> (the one-row band is reserved for the missing-location replacement surface).
+> `enabled` derives from the live session-route fact; `Hidden` is therefore a
+> resolver-level terminal state and is not reachable on the session route, where
+> the Home branch owns the foot.
 
 **Checklist coverage.** As of this wave **all 223 items carry a verdict row**
 (docs + `artifacts/verdicts/`), so the verification census is complete. The
