@@ -455,6 +455,8 @@ def prompt_for(payload):
               "Requirement/source: %s\nBase SHA: %s\nAllowed write paths: %s\n"
               "Work only in the supplied workspace. Never create branches, commit, push, read secrets, "
               "change policies, launch children, or modify existing acceptance tests. "
+              "Never run git add, reset, checkout, clean, merge, stash, or any other index/ref mutation; "
+              "the controller owns every Git mutation. "
               "The controller runs tests and owns publication.\n") % (
                   stage, task["id"], task["goal"], task["source"], payload.get("base"), ", ".join(task["paths"]))
     envelope = ("OUTPUT CONTRACT (precedence over task goal): your ENTIRE final turn output "
