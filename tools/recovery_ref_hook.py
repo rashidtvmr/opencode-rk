@@ -90,10 +90,12 @@ def transition_window_allows(rows: list[tuple[str, str, str]]) -> bool:
                         "tools/recovery_state.py", "tools/recovery_guard.py"}
     lane_controller = {"tools/recovery_state.py"}
     observer = {"tests/e2e/native_provider_setup.py", "tests/e2e/native_stream_tool.py", "tests/e2e/native_utf8_input.py", "tests/e2e/native_escape_input.py", "tests/e2e/native_resize.py", "tests/e2e/native_bracketed_paste.py"}
+    workspace_capacity = {"config/recovery-mode.json", "tools/recovery_ref_hook.py", "tools/recovery_transition.py"}
     kind = cap.get("kind")
     expected = (bootstrap if kind == "bootstrap-controller" else
                 bootstrap_repair if kind == "bootstrap-repair" else
                 observer if kind == "observer-correction" else
+                workspace_capacity if kind == "workspace-capacity" else
                 lane_controller if kind == "lane-sync-controller" else None)
     allowed = cap.get("allowedPaths")
     proposed = cap.get("proposedBlobs")

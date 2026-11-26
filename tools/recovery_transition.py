@@ -179,12 +179,13 @@ def write_cap(path: pathlib.Path, record: dict) -> None:
     os.replace(tmp, path)
 
 
-CAPABILITY_KINDS = {"bootstrap-controller", "observer-correction", "lane-sync-controller", "bootstrap-repair", "driver-policy-reconciliation", "retained-checkpoint"}
+CAPABILITY_KINDS = {"bootstrap-controller", "observer-correction", "lane-sync-controller", "bootstrap-repair", "driver-policy-reconciliation", "retained-checkpoint", "workspace-capacity"}
 CAPABILITY_STATUSES = {"PENDING", "ARMED", "APPLIED", "PINNED", "REJECTED"}
-CAPABILITY_ID = re.compile(r"^(?:ui-phase-transition-v2|observer-correction|lane-sync-controller|bootstrap-repair|driver-policy-reconciliation|retained-checkpoint)-[0-9a-f]{16}$")
+CAPABILITY_ID = re.compile(r"^(?:ui-phase-transition-v2|observer-correction|lane-sync-controller|bootstrap-repair|driver-policy-reconciliation|retained-checkpoint|workspace-capacity)-[0-9a-f]{16}$")
 KIND_PATHS = {"bootstrap-controller": frozenset(ALLOWED_PATHS), "observer-correction": frozenset(OBSERVER_PATHS),
                "lane-sync-controller": frozenset({"tools/recovery_state.py"}), "bootstrap-repair": frozenset(BOOTSTRAP_REPAIR_PATHS),
-               "driver-policy-reconciliation": frozenset({"policy.json"}), "retained-checkpoint": frozenset()}
+               "driver-policy-reconciliation": frozenset({"policy.json"}), "retained-checkpoint": frozenset(),
+               "workspace-capacity": frozenset({"config/recovery-mode.json", "tools/recovery_ref_hook.py", "tools/recovery_transition.py"})}
 
 def validate_capability_schema(record: dict) -> None:
     if not isinstance(record, dict):
@@ -1295,6 +1296,65 @@ def cancel_driver_policy_reconciliation(root: pathlib.Path, capability_id: str, 
         write_cap(cap_path(root), record)
         return capability_id
 
+def validate_workspace_capacity_delta(old: dict, new: dict) -> list[str]:
+    """Allow only appending feature refs 31..60 to the two closed lists."""
+    import copy as _copy
+    old_refs = [f"refs/heads/recovery/feature-{i:02d}" for i in range(1, 31)]
+    new_refs = [f"refs/heads/recovery/feature-{i:02d}" for i in range(1, 61)]
+    errors = []
+    old_fwp = old.get("featureWorkspacePolicy") or {}
+    new_fwp = new.get("featureWorkspacePolicy") or {}
+    if old_fwp.get("refs") != old_refs:
+        errors.append("baseline feature refs are not exactly 01..30")
+    if new_fwp.get("refs") != new_refs:
+        errors.append("proposed feature refs are not exactly 01..60")
+    old_fixed = list(old.get("fixedMutableBranches") or [])
+    new_fixed = list(new.get("fixedMutableBranches") or [])
+    if new_fixed != old_fixed + new_refs[30:]:
+        errors.append("fixedMutableBranches must append only feature-31..60")
+    old_n = _copy.deepcopy(old)
+    new_n = _copy.deepcopy(new)
+    old_n["fixedMutableBranches"] = old_fixed
+    new_n["fixedMutableBranches"] = old_fixed
+    old_n.setdefault("featureWorkspacePolicy", {})["refs"] = old_refs
+    new_n.setdefault("featureWorkspacePolicy", {})["refs"] = old_refs
+    if old_n != new_n:
+        errors.append("unexpected config change outside workspace capacity")
+    return errors
+
+
+def prepare_workspace_capacity(root: pathlib.Path, proposal_root: pathlib.Path, author: str) -> dict:
+    if not author or author in {"unknown", ""}:
+        raise TransitionError("workspace capacity requires a named author")
+    base = git(root, "rev-parse", "main-v2")
+    old = json.loads(git(root, "show", f"{base}:config/recovery-mode.json"))
+    new = json.loads((proposal_root / "config/recovery-mode.json").read_text(encoding="utf-8"))
+    errors = validate_workspace_capacity_delta(old, new)
+    if errors:
+        raise TransitionError("workspace capacity delta rejected: " + "; ".join(errors))
+    paths = ["config/recovery-mode.json", "tools/recovery_ref_hook.py", "tools/recovery_transition.py"]
+    content = {rel: (proposal_root / rel).read_text(encoding="utf-8") for rel in paths}
+    blobs = {rel: git_blob_id(root, content[rel].encode()) for rel in paths}
+    policy = json.loads((state_dir(root) / "policy.json").read_text(encoding="utf-8"))
+    record = {
+        "schemaVersion": 2, "kind": "workspace-capacity",
+        "capabilityId": "workspace-capacity-" + secrets.token_hex(8),
+        "status": "PENDING", "author": author, "baseSha": base, "canonicalHead": "main-v2",
+        "allowedPaths": paths,
+        "proposedBlobs": blobs, "proposedContent": content,
+        "createdAt": now(), "expiresAt": (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=900)).isoformat(),
+        "authorizedObserverBlobs": {},
+        "originalProtectedEvaluatorBlobs": {str(k): str(v) for k, v in sorted(policy.get("protectedEvaluatorBlobs", {}).items())},
+        "approvals": [],
+    }
+    validate_capability_schema(record)
+    with locked(state_dir(root) / "state.lock"):
+        if cap_path(root).exists():
+            raise TransitionError("capability slot is occupied; archive terminal record before preparation")
+        write_cap(cap_path(root), record)
+    return record
+
+
 def prepare_observer_correction(
     root: pathlib.Path, proposal_root: pathlib.Path, baseline_manifest: pathlib.Path, author: str
 ) -> dict:
@@ -1615,8 +1675,8 @@ def _finish_policy(root: pathlib.Path, record: dict, applied_sha: str) -> None:
             if new_blob != record["proposedBlobs"].get(rel, new_blob):
                 raise TransitionError(f"landed blob for {rel} does not match capability")
         policy["protectedEvaluatorBlobs"][rel] = new_blob
-    if record.get("kind") in {"bootstrap-controller", "lane-sync-controller", "bootstrap-repair"}:
-        if record.get("kind") in {"bootstrap-controller", "bootstrap-repair"} and "tools/recovery_ref_hook.py" in record.get("proposedContent", {}):
+    if record.get("kind") in {"bootstrap-controller", "lane-sync-controller", "bootstrap-repair", "workspace-capacity"}:
+        if record.get("kind") in {"bootstrap-controller", "bootstrap-repair", "workspace-capacity"} and "tools/recovery_ref_hook.py" in record.get("proposedContent", {}):
             driver_bytes = record["proposedContent"]["tools/recovery_ref_hook.py"].encode()
         else:
             driver_bytes = git(root, "show", f"{applied_sha}:tools/recovery_ref_hook.py").encode()
@@ -1663,6 +1723,14 @@ def _activation_blockers(root: pathlib.Path, record: dict) -> list[str]:
             errors.extend(validate_bootstrap_repair_delta(old_cfg, new_cfg))
         except Exception as exc:
             errors.append(f"cannot validate bootstrap-repair config: {exc}")
+    elif record.get("kind") == "workspace-capacity":
+        base = record.get("baseSha")
+        try:
+            old_cfg = json.loads(git(root, "show", f"{base}:config/recovery-mode.json"))
+            new_cfg = json.loads(record.get("proposedContent", {}).get("config/recovery-mode.json", "{}"))
+            errors.extend(validate_workspace_capacity_delta(old_cfg, new_cfg))
+        except Exception as exc:
+            errors.append(f"cannot validate workspace-capacity config: {exc}")
     elif record.get("kind") in {"bootstrap-repair", "lane-sync-controller"} and observer_blobs not in (None, {}):
         errors.append("non-bootstrap controller capability cannot authorize observer blobs")
     errors.extend(active_blockers(root))
@@ -1793,8 +1861,8 @@ def reject_expired_pending(root: pathlib.Path, capability_id: str, expected_dige
             raise TransitionError("expired capability identity/digest mismatch")
         if record.get("status") != "PENDING":
             raise TransitionError(f"only PENDING capabilities may be rejected, is {record.get('status')}")
-        if not capability_expired(record):
-            raise TransitionError("capability has not expired; activation or normal review still applies")
+        if not capability_expired(record) and git(root, "rev-parse", "main-v2") == record.get("baseSha"):
+            raise TransitionError("capability is still live at its base; activation or normal review still applies")
         record["status"] = "REJECTED"
         record["rejectedAt"] = now()
         record["rejectedBy"] = operator
@@ -2393,6 +2461,11 @@ def main(argv: list[str]) -> int:
             if len(argv) < 5:
                 raise TransitionError("prepare-observer requires <root> <proposal-root> <baseline-manifest>")
             record = prepare_observer_correction(root, pathlib.Path(argv[3]).resolve(), pathlib.Path(argv[4]).resolve(), os.environ.get("USER", "unknown"))
+            print(f"CAPABILITY-PENDING {record['capabilityId']} base={record['baseSha']}")
+        elif cmd == "prepare-workspace-capacity":
+            if len(argv) < 4:
+                raise TransitionError("prepare-workspace-capacity requires <root> <proposal-root>")
+            record = prepare_workspace_capacity(root, pathlib.Path(argv[3]).resolve(), os.environ.get("USER", "unknown"))
             print(f"CAPABILITY-PENDING {record['capabilityId']} base={record['baseSha']}")
         elif cmd == "prepare-driver-policy-reconciliation":
             record = prepare_driver_policy_reconciliation(root, os.environ.get("USER", "unknown"))
