@@ -1254,6 +1254,21 @@ pub enum ChatRowClass {
 /// padding are never recovered by parsing the rendered glyphs.
 pub type StyledChatRow = (String, ChatRowClass, Option<(u16, u16)>);
 
+/// A styled row plus its per-render message identity: the message's batch
+/// index within the CURRENT rendered message slice (`u32`), or
+/// [`NO_MESSAGE_GROUP`] for scaffold rows (header, window filler, composer)
+/// and separator gap rows that belong to no message box. This is render-
+/// projection identity only — NOT a durable persisted message ID: it is
+/// recomputed from the caller-supplied slice on every render and must not be
+/// carried across renders or matched against backend message ids. Hover
+/// hit-testing needs it because a visible window slice can place rows of two
+/// distinct messages next to each other; row classes alone cannot prove card
+/// boundaries.
+pub type GroupedStyledChatRow = (String, ChatRowClass, Option<(u16, u16)>, u32);
+
+/// Sentinel group id for rows that belong to no message card.
+pub const NO_MESSAGE_GROUP: u32 = u32::MAX;
+
 /// The shared ChatComposer allocation decision used by both the painter and
 /// NativeView's hit-region projection. Home's legacy rail does not use this
 /// helper; this is specifically the session ChatComposer path.
@@ -4659,12 +4674,52 @@ impl ChatView {
         self.render_styled_mode(width, height, workspace, messages, "", busy, appearance, false, markdown_mode, false)
     }
 
+    /// Same projection as [`Self::render_styled_with_spans_mode`] with a
+    /// per-render message identity on every row for hover hit-testing. Both
+    /// calls run one implementation, so card boundaries cannot drift between
+    /// paint and hit projection.
+    pub(crate) fn render_styled_with_spans_mode_grouped(
+        &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
+        draft: &str, busy: bool, appearance: &crate::native_box_style::BoxAppearance,
+        markdown_mode: crate::markdown_runs::MarkdownMode,
+    ) -> (Vec<GroupedStyledChatRow>, Vec<Vec<ChatRunSpan>>) {
+        self.render_styled_mode_grouped(width, height, workspace, messages, draft, busy, appearance, true, markdown_mode, true)
+    }
+
+    /// Same projection as [`Self::render_styled_without_prompt_with_spans_mode`]
+    /// with per-render message identity for hover hit-testing.
+    pub(crate) fn render_styled_without_prompt_with_spans_mode_grouped(
+        &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
+        busy: bool, appearance: &crate::native_box_style::BoxAppearance,
+        markdown_mode: crate::markdown_runs::MarkdownMode,
+    ) -> (Vec<GroupedStyledChatRow>, Vec<Vec<ChatRunSpan>>) {
+        self.render_styled_mode_grouped(width, height, workspace, messages, "", busy, appearance, false, markdown_mode, false)
+    }
+
     fn render_styled_mode(
         &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
         draft: &str, busy: bool, appearance: &crate::native_box_style::BoxAppearance,
         show_prompt: bool, markdown_mode: crate::markdown_runs::MarkdownMode,
         reserve_action_row: bool,
     ) -> (Vec<StyledChatRow>, Vec<Vec<ChatRunSpan>>) {
+        let (rows, spans) = self.render_styled_mode_grouped(
+            width, height, workspace, messages, draft, busy, appearance,
+            show_prompt, markdown_mode, reserve_action_row,
+        );
+        (
+            rows.into_iter()
+                .map(|(text, class, bounds, _group)| (text, class, bounds))
+                .collect(),
+            spans,
+        )
+    }
+
+    fn render_styled_mode_grouped(
+        &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
+        draft: &str, busy: bool, appearance: &crate::native_box_style::BoxAppearance,
+        show_prompt: bool, markdown_mode: crate::markdown_runs::MarkdownMode,
+        reserve_action_row: bool,
+    ) -> (Vec<GroupedStyledChatRow>, Vec<Vec<ChatRunSpan>>) {
         let requested_scroll = self.scroll.get();
         let height = height.min(MAX_VIEW_ROWS);
         let width = width.min(u16::MAX as usize);
@@ -4810,7 +4865,7 @@ impl ChatView {
             cursor => cursor.min(messages.len()),
         };
         type GroupOwner = Option<(String, crate::native_message_rows::GroupKind)>;
-        let mut reversed: Vec<(StyledChatRow, Vec<ChatRunSpan>, Option<String>, Option<String>, Option<usize>, GroupOwner)> = Vec::new();
+        let mut reversed: Vec<(StyledChatRow, Vec<ChatRunSpan>, Option<String>, Option<String>, Option<usize>, GroupOwner, u32)> = Vec::new();
         loop {
             reversed.clear();
         if transcript_h > 0 {
@@ -4857,7 +4912,17 @@ impl ChatView {
                     }
                     let owner = message.message_id.clone();
                     for (((row, spans), child), tool) in message_rows.into_iter().zip(dense).zip(dense_children).zip(dense_tools).rev() {
-                        reversed.push((row, spans, owner.clone(), child, tool, None));
+                        // Separator gap rows belong to no message box: hovering a
+                        // gap must not raise either neighbour card, and card runs
+                        // stay distinguishable even where a window slice drops the
+                        // gap. Every other row of the batch carries its message
+                        // batch index as per-render identity.
+                        let group = if matches!(row.1, ChatRowClass::Separator) {
+                            NO_MESSAGE_GROUP
+                        } else {
+                            index as u32
+                        };
+                        reversed.push((row, spans, owner.clone(), child, tool, None, group));
                         if reversed.len() >= target {
                             break 'messages;
                         }
@@ -4869,7 +4934,7 @@ impl ChatView {
                 if let Some(plan) = plan {
                     for header in plan.headers.iter().rev() {
                         let text = format!("{} {} · {}", if header.expanded { "▾" } else { "▸" }, header.kind.as_str(), header.size);
-                        reversed.push(((text, ChatRowClass::Header, None), Vec::new(), None, None, None, Some((header.gid.clone(), header.kind))));
+                        reversed.push(((text, ChatRowClass::Header, None), Vec::new(), None, None, None, Some((header.gid.clone(), header.kind)), NO_MESSAGE_GROUP));
                         if reversed.len() >= target {
                             break 'messages;
                         }
@@ -4888,7 +4953,7 @@ impl ChatView {
         // MSG-009: live transcript notices render after the message rows,
         // before the scroll slice; bytes match the pinned surfaces output.
         for (text, class) in self.notice_rows(width) {
-            reversed.push(((text, class, None), Vec::new(), None, None, None, None));
+            reversed.push(((text, class, None), Vec::new(), None, None, None, None, NO_MESSAGE_GROUP));
         }
         let effective_scroll = self.scroll.get().min(reversed.len().saturating_sub(transcript_h));
         // Synchronize the stored offset with the current rendered content.
@@ -4912,7 +4977,8 @@ impl ChatView {
         let mut child_owners: Vec<Option<String>> = vec![None; rows.len()];
         let mut tool_owners: Vec<Option<usize>> = vec![None; rows.len()];
         let mut group_owners: Vec<Option<(String, crate::native_message_rows::GroupKind)>> = vec![None; rows.len()];
-        for (index, ((text, class, range), spans, owner, child, tool, group)) in visible.into_iter().enumerate() {
+        let mut groups: Vec<u32> = vec![NO_MESSAGE_GROUP; rows.len()];
+        for (index, ((text, class, range), spans, owner, child, tool, group, msg_group)) in visible.into_iter().enumerate() {
             rows[first + index] = (text, class);
             bounds[first + index] = range;
             row_spans[first + index] = spans;
@@ -4920,6 +4986,7 @@ impl ChatView {
             child_owners[first + index] = child;
             tool_owners[first + index] = tool;
             group_owners[first + index] = group;
+            groups[first + index] = msg_group;
         }
         // LAY-15: restate the reserved-row invariant in screen order after the
         // visible transcript slice is painted. Normally the reservation above
@@ -4946,15 +5013,17 @@ impl ChatView {
                 child_owners[reserved] = None;
                 tool_owners[reserved] = None;
                 group_owners[reserved] = None;
+                groups[reserved] = NO_MESSAGE_GROUP;
             }
         }
         self.message_owners.replace(owners);
         self.child_owners.replace(child_owners);
         self.tool_owners.replace(tool_owners);
         self.group_owners.replace(group_owners);
-        let styled: Vec<StyledChatRow> = rows.into_iter()
+        let styled: Vec<GroupedStyledChatRow> = rows.into_iter()
             .zip(bounds)
-            .map(|((text, class), bounds)| (text, class, bounds))
+            .zip(groups)
+            .map(|(((text, class), bounds), group)| (text, class, bounds, group))
             .collect();
         (styled, row_spans)
     }

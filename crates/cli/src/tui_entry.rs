@@ -16,6 +16,10 @@
 //! never fabricated.
 
 use crate::daemon_client;
+#[cfg(all(test, feature = "native"))]
+include!("native_hover_overlay_tests.rs");
+#[cfg(test)]
+include!("native_hover_rail_paint_tests.rs");
 #[cfg(feature = "native")]
 #[path = "native_input_decoder.rs"]
 mod native_input_decoder;
@@ -122,6 +126,46 @@ fn import_modal_visible(
     import_open: bool,
 ) -> bool {
     !permission_open && !permission_editor_open && !setup_dialog_open && import_open
+}
+
+/// Input-loop overlay ownership, shared by frame invalidation and pointer input.
+#[cfg(feature = "native")]
+#[derive(Clone, Copy, Default)]
+struct HoverOverlayOwnership {
+    dialog: bool,
+    help: bool,
+    palette: bool,
+    permission_editor: bool,
+    appearance: bool,
+    children: bool,
+    setup: bool,
+    import: bool,
+}
+
+#[cfg(feature = "native")]
+impl HoverOverlayOwnership {
+    fn blocks_frame_hover(self) -> bool {
+        self.dialog || self.help || self.palette || self.permission_editor
+            || self.appearance || self.children || self.setup || self.import
+    }
+
+    fn blocks_pointer_hover(self) -> bool {
+        self.blocks_frame_hover()
+    }
+
+    fn clear_chat_if_blocked(self, view: &mut crate::native_view::NativeView) {
+        if self.blocks_frame_hover() {
+            view.clear_chat_hover();
+        }
+    }
+
+    fn record_chat_pointer(self, view: &mut crate::native_view::NativeView, x: u16, y: u16) -> bool {
+        if self.blocks_pointer_hover() {
+            return false;
+        }
+        view.set_chat_pointer(x, y);
+        true
+    }
 }
 
 #[cfg(feature = "native")]
@@ -2622,6 +2666,9 @@ struct PaintCtx {
     modal: crate::native_view::ModalPresentation,
     sidebar_backdrop_alpha: u8,
     chat_row_classes: Vec<crate::native_view_chat::ChatRowClass>,
+    /// Per-render-row hover mask for user message cards. Only rows of the one
+    /// message card under the pointer are true.
+    chat_hovered_rows: Vec<bool>,
     /// Upstream `UserMessage` hover fact (`routes/session/index.tsx:2390`,
     /// `:2427`): frame row of the transcript `UserCard` currently under the
     /// pointer. `None` paints every card `raised.base`.
@@ -3170,6 +3217,7 @@ mod surface_paint_regressions {
             modal: view.modal_presentation(),
             sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
             chat_row_classes: view.chat_row_classes().to_vec(),
+            chat_hovered_rows: view.chat_hovered_rows().to_vec(),
             hovered_row: None,
             chat_markdown_spans: view.chat_markdown_spans().to_vec(),
             selection: Vec::new(),
@@ -3239,6 +3287,7 @@ mod surface_paint_regressions {
             modal: view.modal_presentation(),
             sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
             chat_row_classes: view.chat_row_classes().to_vec(),
+            chat_hovered_rows: view.chat_hovered_rows().to_vec(),
             hovered_row: None,
             chat_markdown_spans: view.chat_markdown_spans().to_vec(),
             selection: Vec::new(),
@@ -3337,6 +3386,7 @@ mod surface_paint_regressions {
             modal: view.modal_presentation(),
             sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
             chat_row_classes: view.chat_row_classes().to_vec(),
+            chat_hovered_rows: view.chat_hovered_rows().to_vec(),
             hovered_row: None,
             chat_markdown_spans: view.chat_markdown_spans().to_vec(),
             selection: Vec::new(),
@@ -3414,6 +3464,7 @@ mod surface_paint_regressions {
             modal: view.modal_presentation(),
             sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
             chat_row_classes: view.chat_row_classes().to_vec(),
+            chat_hovered_rows: view.chat_hovered_rows().to_vec(),
             hovered_row: None,
             chat_markdown_spans: view.chat_markdown_spans().to_vec(),
             selection: Vec::new(),
@@ -3909,6 +3960,7 @@ mod surface_paint_regressions {
                 modal: view.modal_presentation(),
                 sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
                 chat_row_classes: Vec::new(),
+                chat_hovered_rows: Vec::new(),
                 hovered_row: None,
                 chat_markdown_spans: Vec::new(),
                 selection: Vec::new(),
@@ -4217,7 +4269,10 @@ fn chat_row_background_at(
     let right = u32::from(presentation.main_offset)
         + u32::from(presentation.main_width.saturating_sub(inset));
     (x >= left && x < right)
-        .then(|| chat_row_background(class, root, panel, element, diff, is_hovered))
+        // The outer rail keeps the unhovered raised.panel fill while the
+        // inner message-box cells raise to element. Upstream index.tsx
+        // 2380-2429: outer box owns the left border, inner box owns hover.
+        .then(|| chat_row_background(class, root, panel, element, diff, is_hovered && x > left))
         .flatten()
 }
 
@@ -4319,6 +4374,7 @@ mod dialog19_chrome_paint_tests {
                 modal: view.modal_presentation(),
                 sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
                 chat_row_classes: view.chat_row_classes().to_vec(),
+                chat_hovered_rows: view.chat_hovered_rows().to_vec(),
                 hovered_row: None,
                 chat_markdown_spans: view.chat_markdown_spans().to_vec(),
                 selection: Vec::new(),
@@ -4473,7 +4529,9 @@ mod chat_surface_inset_tests {
         );
         let presentation = view.presentation();
         let inset = presentation.main_padding.min(presentation.main_width / 2);
-        let x = u32::from(presentation.main_offset) + u32::from(inset);
+        // The outer rail column (`left`) keeps the unhovered panel fill; only
+        // the first inner-box cell (left + 1) raises to element.
+        let x = u32::from(presentation.main_offset) + u32::from(inset) + 1;
         // Identical call to the live per-row style pass in `native_paint`:
         let base = chat_row_background_at(
             view.chat_row_classes().get(row),
@@ -4526,6 +4584,7 @@ mod chat_surface_inset_tests {
                 modal: view.modal_presentation(),
                 sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
                 chat_row_classes: view.chat_row_classes().to_vec(),
+                chat_hovered_rows: view.chat_hovered_rows().to_vec(),
                 hovered_row: Some(row),
                 chat_markdown_spans: view.chat_markdown_spans().to_vec(),
                 selection: Vec::new(),
@@ -7076,7 +7135,8 @@ fn native_paint(
                         && y >= u32::from(top)
                         && y < u32::from(top) + u32::from(height)
                 });
-                let role_bg = chat_row_background_at(ctx.chat_row_classes.get(row), presentation, x, background, panel, element, ctx.diff.as_ref(), ctx.hovered_row == Some(row));
+                let role_bg = chat_row_background_at(ctx.chat_row_classes.get(row), presentation, x, background, panel, element, ctx.diff.as_ref(),
+                    ctx.chat_hovered_rows.get(row).copied().unwrap_or(false));
                 let in_page = ctx.page_panel.is_some_and(|(left, top, width, height)| {
                     x >= u32::from(left) && x < u32::from(left + width)
                         && y >= u32::from(top) && y < u32::from(top + height)
@@ -7607,7 +7667,8 @@ fn native_paint(
                 let home_root = (ctx.home || ctx.rail_prompt) && composer.is_some_and(|rect|
                     home_composer_root_cell(&ctx.appearance,
                         ctx.appearance.effective(crate::native_box_style::BoxId::ChatComposer), rect, x, y));
-                let role = chat_row_background_at(ctx.chat_row_classes.get(y as usize), presentation, x, background, panel, element, ctx.diff.as_ref(), ctx.hovered_row == Some(y as usize));
+                let role = chat_row_background_at(ctx.chat_row_classes.get(y as usize), presentation, x, background, panel, element, ctx.diff.as_ref(),
+                    ctx.chat_hovered_rows.get(y as usize).copied().unwrap_or(false));
                 let mut color = surface_underlay_background(
                     sidebar_cell(presentation, x, y) || ctx.page_panel.is_some_and(contains),
                     role, composer.is_some(), home_root, background, panel, element,
@@ -13356,11 +13417,21 @@ fn native_loop(
             // A resize reflows the strip; the held close cell no longer names a
             // stable physical cell (`session-tabs.tsx:1416-1419`).
             close_hold = None;
+            view.invalidate_chat_hover();
             tab_viewport = Some(viewport);
         }
-        if dialog_open || help_open || view.command_palette_open() || permission_editor.open
-            || appearance.open || children_panel.open
-        {
+        let hover_overlay = HoverOverlayOwnership {
+            dialog: dialog_open,
+            help: help_open,
+            palette: view.command_palette_open(),
+            permission_editor: permission_editor.open,
+            appearance: appearance.open,
+            children: children_panel.open,
+            setup: !matches!(dialog, native_setup::Dialog::None),
+            import: import_dialog.as_ref().is_some_and(|import| import.is_open()),
+        };
+        hover_overlay.clear_chat_if_blocked(&mut view);
+        if hover_overlay.blocks_frame_hover() {
             rail_resize.cancel();
             tab_hovered = None;
             tab_hover_y = None;
@@ -14019,6 +14090,7 @@ fn native_loop(
                     modal: view.modal_presentation(),
                     sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
                     chat_row_classes: view.chat_row_classes().to_vec(),
+                    chat_hovered_rows: view.chat_hovered_rows().to_vec(),
                     hovered_row,
                     chat_markdown_spans: view.chat_markdown_spans().to_vec(),
                     selection: selection.spans(),
@@ -15648,9 +15720,17 @@ fn native_loop(
                     home_press = None;
                     tab_home_hovered = false;
                 }
-                if !view.dialogs.intercepts_input() && !permission_editor.open && !appearance.open && !children_panel.open
-                    && !help_open && !view.command_palette_open() && matches!(dialog, native_setup::Dialog::None)
-                    && modifiers == 0
+                let hover_overlay = HoverOverlayOwnership {
+                    dialog: view.dialogs.intercepts_input(),
+                    help: help_open,
+                    palette: view.command_palette_open(),
+                    permission_editor: permission_editor.open,
+                    appearance: appearance.open,
+                    children: children_panel.open,
+                    setup: !matches!(dialog, native_setup::Dialog::None),
+                    import: import_dialog.as_ref().is_some_and(|import| import.is_open()),
+                };
+                if !hover_overlay.blocks_pointer_hover() && modifiers == 0
                 {
                     if kind == 1 && tab_drag.dragging().is_some() {
                         // Left-drag over the strip/rail: move the preview slot,
@@ -15695,18 +15775,18 @@ fn native_loop(
                         if view.dock_hover(x, y, &draft) {
                             needs_paint = true;
                         }
-                        // User-message hover (`routes/session/index.tsx:2390`
-                        // `onMouseOver`): the pointer hover fact belongs to a
-                        // `UserCard` transcript row inside the main column,
-                        // with the same inset ownership as
-                        // `chat_row_background_at`; leaving the card (or any
-                        // non-UserCard row) clears it, exactly like upstream's
-                        // per-card `onMouseOut` (`:2391-2395`).
-                        let row_under_pointer = user_card_row_under_pointer(&view, x, y);
-                        if hovered_row != row_under_pointer {
-                            hovered_row = row_under_pointer;
+                        // Whole-card user-message hover: record the raw
+                        // pointer so the next render pass projects it onto the
+                        // visible message card. Same modal/input exclusions as
+                        // tab hover (the enclosing gate above). The return
+                        // value drives repaint so a move from the inner surface
+                        // onto the outer rail cell (x == left) still refreshes
+                        // the frame even though the single-row fallback would
+                        // report the same row.
+                        if hover_overlay.record_chat_pointer(&mut view, x, y) {
                             needs_paint = true;
                         }
+                        hovered_row = user_card_row_under_pointer(&view, x, y);
                         // Send-button hover mirrors upstream's
                         // `SendButton`-style pointer styling: the setter
                         // recomputes the hit from the current draft and returns
@@ -24222,5 +24302,94 @@ mod p11_usage_context_window_tests {
         let catalog = vec![m("gpt-3.5", "openai", Some(4096))];
         let producer_identity = mr("anthropic", "claude-3");
         assert_eq!(usage_context_window(&catalog, &Some(producer_identity)), None);
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod user_hover_paint_tests {
+    use super::*;
+    use crate::native_view_chat::ChatRowClass;
+
+    /// Upstream `UserMessage` raises the whole card fill on hover
+    /// (`theme.decrease(theme.background.raised.base)`, pinned
+    /// `packages/tui/src/routes/session/index.tsx` 2427 at 450e7b92412c).
+    #[test]
+    fn user_card_hover_paints_element_background_and_preserves_other_roles() {
+        let root = Rgba::rgb(10, 10, 10);
+        let panel = Rgba::rgb(20, 20, 20);
+        let element = Rgba::rgb(30, 30, 30);
+        assert_eq!(
+            chat_row_background(Some(&ChatRowClass::UserCard), root, panel, element, None, false),
+            Some(panel),
+            "unhovered user card keeps the raised panel fill"
+        );
+        assert_eq!(
+            chat_row_background(Some(&ChatRowClass::UserCard), root, panel, element, None, true),
+            Some(element),
+            "hovered user card raises to the element fill"
+        );
+        for class in [
+            ChatRowClass::AssistantCard,
+            ChatRowClass::SystemCard,
+            ChatRowClass::DiffAdded,
+            ChatRowClass::DiffRemoved,
+            ChatRowClass::Text,
+            ChatRowClass::Metadata,
+            ChatRowClass::Blank,
+            ChatRowClass::Separator,
+            ChatRowClass::Header,
+            ChatRowClass::Composer,
+            ChatRowClass::Thinking,
+            ChatRowClass::ToolCall,
+            ChatRowClass::ToolResult,
+            ChatRowClass::ToolError,
+        ] {
+            assert_eq!(
+                chat_row_background(Some(&class), root, panel, element, None, true),
+                chat_row_background(Some(&class), root, panel, element, None, false),
+                "hover only changes the user card background: {class:?}"
+            );
+        }
+        assert_eq!(chat_row_background(None, root, panel, element, None, true), None);
+    }
+
+    /// The hover fill uses the same message-surface confinement as ordinary
+    /// row fills: outer margins, tab rail and sidebar columns are untouched.
+    /// Pinned index.tsx 2380-2429: outer rail stays panel; inner hover starts at left+1.
+    #[test]
+    fn hover_background_is_confined_to_the_message_surface() {
+        use crate::native_tabs::{TabOrientation, TabReservation};
+        let root = Rgba::rgb(10, 10, 10);
+        let panel = Rgba::rgb(20, 20, 20);
+        let element = Rgba::rgb(30, 30, 30);
+        for orientation in [TabOrientation::Horizontal, TabOrientation::Vertical] {
+            let (cols, rows) = (269u16, 59u16);
+            let mut view = crate::native_view::NativeView::new(cols, rows);
+            view.set_session_route(true);
+            view.set_tab_reservation(TabReservation::for_view(orientation, cols, rows));
+            let presentation = view.presentation();
+            let inset = presentation.main_padding.min(presentation.main_width / 2);
+            let left = u32::from(presentation.main_offset) + u32::from(inset);
+            let right = u32::from(presentation.main_offset)
+                + u32::from(presentation.main_width.saturating_sub(inset));
+            for x in 0..u32::from(cols) {
+                let actual = chat_row_background_at(
+                    Some(&ChatRowClass::UserCard),
+                    presentation,
+                    x,
+                    root,
+                    panel,
+                    element,
+                    None,
+                    true,
+                );
+                assert_eq!(
+                    actual,
+                    (x >= left && x < right)
+                        .then(|| if x > left { element } else { panel }),
+                    "hover surface ownership at x={x} with {orientation:?}"
+                );
+            }
+        }
     }
 }

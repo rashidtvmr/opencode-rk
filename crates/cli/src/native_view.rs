@@ -25,6 +25,10 @@ use crate::native_view_pages::{Page, PageRow, PageState};
 use crate::native_view_sessions::{SessionRow, SessionView};
 use crate::native_view_status::StatusView;
 use serde_json::Value;
+#[cfg(test)]
+include!("native_hover_stationary_tests.rs");
+#[cfg(test)]
+include!("native_hover_rail_tests.rs");
 
 /// Draft bytes carried into one render (paint sanitizes control chars and
 /// clips to pane width; this bound just keeps allocation fixed-size).
@@ -314,6 +318,20 @@ pub struct NativeView {
     chat_row_classes: Vec<crate::native_view_chat::ChatRowClass>,
     chat_text_bounds: Vec<Option<(u16, u16)>>,
     chat_markdown_spans: Vec<Vec<crate::native_view_chat::ChatRunSpan>>,
+    /// Per-render message identity for each visible row: the message's batch
+    /// index in the current rendered slice, or `NO_MESSAGE_GROUP` for
+    /// scaffold/gap rows. Recomputed every render — NOT a durable persisted
+    /// message ID. Whole-card hover groups rows by this identity instead of
+    /// guessing boundaries from contiguous classes.
+    chat_row_groups: Vec<u32>,
+    /// Last pointer position from a hover (kind==7) event. The per-row hover
+    /// mask is recomputed per-frame in `render_content` against the final
+    /// layout, so stale row identity is never carried across frames.
+    chat_hover_pointer: Option<(u16, u16)>,
+    /// Per-render-row mask of rows that display the user-message hover
+    /// background (upstream `theme.decrease` on `background.raised.base`):
+    /// all rows of the one user message card under the pointer.
+    chat_hovered_rows: Vec<bool>,
     /// Persisted global + per-box appearance; the framed composer reads the
     /// `BoxId::ChatComposer` effective values (default = upstream sharp).
     box_appearance: crate::native_box_style::BoxAppearance,
@@ -1436,6 +1454,9 @@ impl NativeView {
             chat_row_classes: Vec::new(),
             chat_text_bounds: Vec::new(),
             chat_markdown_spans: Vec::new(),
+            chat_row_groups: Vec::new(),
+            chat_hover_pointer: None,
+            chat_hovered_rows: Vec::new(),
             box_appearance: crate::native_box_style::BoxAppearance::default(),
             context_window: None,
             ui_regions: Vec::new(),
@@ -1463,6 +1484,7 @@ impl NativeView {
             self.footer_hit = None;
             self.context_usage_hit = None;
             self.live_footer_hit = None;
+            self.invalidate_chat_hover();
         }
         self.tab_reservation = reservation;
     }
@@ -1492,6 +1514,7 @@ impl NativeView {
         self.live_footer_hit = None;
         self.prompt_footer_hit = None;
         self.sidebar_content_height = 0;
+        self.invalidate_chat_hover();
         self.layout = Layout::new(cols, rows);
     }
 
@@ -1682,6 +1705,34 @@ impl NativeView {
     }
     pub fn chat_text_bounds(&self) -> &[Option<(u16, u16)>] {
         &self.chat_text_bounds
+    }
+    /// Per-render message identity per row (batch index or
+    /// `NO_MESSAGE_GROUP`): projection metadata for the last rendered frame,
+    /// never a durable message id.
+    pub fn chat_row_groups(&self) -> &[u32] {
+        &self.chat_row_groups
+    }
+    pub fn chat_hovered_rows(&self) -> &[bool] {
+        &self.chat_hovered_rows
+    }
+    /// Record pointer position from a hover (kind==7) event. Returns true
+    /// when the pointer moved (caller can skip paint otherwise). Gated by the
+    /// same modal/input exclusions as tab hover in the input loop.
+    pub fn set_chat_pointer(&mut self, x: u16, y: u16) -> bool {
+        let old = self.chat_hover_pointer;
+        self.chat_hover_pointer = Some((x, y));
+        old != Some((x, y))
+    }
+    /// Drop the old frame's mask while retaining the latest pointer for the
+    /// next hit-grid projection, including stationary-pointer scroll/resize.
+    pub fn invalidate_chat_hover(&mut self) {
+        self.chat_hovered_rows.clear();
+    }
+
+    /// Relinquish pointer ownership on route changes or modal open.
+    pub fn clear_chat_hover(&mut self) {
+        self.chat_hover_pointer = None;
+        self.invalidate_chat_hover();
     }
 
     pub fn chat_markdown_spans(&self) -> &[Vec<crate::native_view_chat::ChatRunSpan>] { &self.chat_markdown_spans }
@@ -2921,6 +2972,7 @@ impl NativeView {
             // CP-24: re-sync the active-tab mirror on the route transition, so
             // a close here resets the tab selection like every other path.
             self.sync_dock_active();
+            self.clear_chat_hover();
         }
         self.session_route = session_route;
     }
@@ -4210,10 +4262,12 @@ impl NativeView {
 
     pub fn open_page(&mut self, page: Page) {
         self.pages.open(page);
+        self.clear_chat_hover();
     }
 
     pub fn close_page(&mut self) {
         self.pages.close();
+        self.clear_chat_hover();
     }
 
     /// Load the session graph and switch to the read-only graph page
@@ -4428,10 +4482,12 @@ impl NativeView {
 
     pub fn scroll_up(&mut self, lines: usize) {
         self.chat.scroll_up(lines);
+        self.invalidate_chat_hover();
     }
 
     pub fn scroll_down(&mut self, lines: usize) {
         self.chat.scroll_down(lines);
+        self.invalidate_chat_hover();
     }
 
     /// Tail-relative chat viewport state owned by the active client tab.
@@ -4444,6 +4500,7 @@ impl NativeView {
     /// pagination policy.
     pub fn set_chat_scroll_offset(&mut self, rows: usize) {
         self.chat.set_scroll(rows);
+        self.invalidate_chat_hover();
     }
 
     /// TOOL-002: replace the bounded pending-permission tool-call id set
@@ -4482,6 +4539,7 @@ impl NativeView {
 
     pub fn follow_tail(&mut self) {
         self.chat.follow_tail();
+        self.invalidate_chat_hover();
     }
 
     // ---------- session picker intents ----------
@@ -4808,6 +4866,17 @@ impl NativeView {
         self.frame_busy = false;
         self.chat_row_classes.clear();
         self.chat_text_bounds.clear();
+        // Rebuilt per render like its sibling vectors above. Without this
+        // clear the previous frame's rows leak through the `resize()`
+        // truncation below (keeping the OLD prefix, including the tab-shift
+        // prepend), so group identity desynchronizes from frame rows on every
+        // re-render: hover masks shift by the tab offset and window-clipped
+        // cards resurrect stale full-card runs.
+        self.chat_row_groups.clear();
+        // Same class of staleness for the derived mask: it must describe the
+        // frame being rendered (empty when this render early-returns). The
+        // pointer itself deliberately persists across renders.
+        self.chat_hovered_rows.clear();
         self.chat_markdown_spans.clear();
         self.transcript_scrollbar = None;
         self.sidebar_scrollbar = None;
@@ -5004,9 +5073,9 @@ impl NativeView {
             };
             let mut body = if let Some(messages) = messages {
                 let (rows, markdown_spans) = if has_permission {
-                    self.chat.render_styled_without_prompt_with_spans_mode(inner_width as usize, body_height,
+                    self.chat.render_styled_without_prompt_with_spans_mode_grouped(inner_width as usize, body_height,
                         &self.workspace, messages, busy, &self.box_appearance, self.markdown_mode)
-                } else { self.chat.render_styled_with_spans_mode(
+                } else { self.chat.render_styled_with_spans_mode_grouped(
                     inner_width as usize,
                     body_height,
                     &self.workspace,
@@ -5017,15 +5086,17 @@ impl NativeView {
                 ) };
                 self.chat_markdown_spans.extend(markdown_spans);
                 self.chat_row_classes
-                    .extend(rows.iter().map(|(_, class, _)| *class));
+                    .extend(rows.iter().map(|(_, class, _, _)| *class));
                 self.chat_text_bounds
-                    .extend(rows.iter().map(|(_, _, bounds)| {
+                    .extend(rows.iter().map(|(_, _, bounds, _)| {
                         // The bounds address unpadded row cells; shift by the
                         // route inset the container padding adds in front.
                         bounds.map(|(left, width)| (left.saturating_add(route_inset), width))
                     }));
+                self.chat_row_groups
+                    .extend(rows.iter().map(|(_, _, _, group)| *group));
                 rows.into_iter()
-                    .map(|(text, _, _)| text)
+                    .map(|(text, _, _, _)| text)
                     .collect::<Vec<_>>()
             } else {
                 let rows = if has_permission {
@@ -5044,6 +5115,13 @@ impl NativeView {
                 self.chat_text_bounds.extend(rows.iter().map(|(_, _, bounds)|
                     // Same route-inset shift as the typed path above.
                     bounds.map(|(left, width)| (left.saturating_add(route_inset), width))));
+                // Legacy transcript rows carry role-free text only: no message
+                // card identity exists, so none can hover.
+                self.chat_row_groups
+                    .extend(std::iter::repeat_n(
+                        crate::native_view_chat::NO_MESSAGE_GROUP,
+                        rows.len(),
+                    ));
                 rows.into_iter().map(|(text, _, _)| text).collect()
             };
             // The upstream scrollbox starts with a spacer, rather than a
@@ -5085,6 +5163,9 @@ impl NativeView {
                     .splice(insert..insert, revert_classes);
                 self.chat_text_bounds
                     .splice(insert..insert, std::iter::repeat_n(None, revert_texts.len()));
+                self.chat_row_groups
+                    .splice(insert..insert, std::iter::repeat_n(
+                        crate::native_view_chat::NO_MESSAGE_GROUP, revert_texts.len()));
                 // `chat_markdown_spans` is only populated by the typed render
                 // path, so clamp the splice to its own length like the CP-38
                 // strip and footer insertions below.
@@ -5158,6 +5239,9 @@ impl NativeView {
                     .splice(insert..insert, std::iter::repeat_n(class, dock_rows.len()));
                 self.chat_text_bounds
                     .splice(insert..insert, std::iter::repeat_n(None, dock_rows.len()));
+                self.chat_row_groups
+                    .splice(insert..insert, std::iter::repeat_n(
+                        crate::native_view_chat::NO_MESSAGE_GROUP, dock_rows.len()));
                 // `chat_markdown_spans` is only populated by the typed render
                 // path, so on the plain `render` path it can be shorter than
                 // `body`; clamp exactly like the CP-38 strip and footer
@@ -5181,6 +5265,8 @@ impl NativeView {
                 }
                 self.chat_row_classes.splice(insert..insert, queue_classes);
                 self.chat_text_bounds.splice(insert..insert, std::iter::repeat_n(None, queue_texts.len()));
+                self.chat_row_groups.splice(insert..insert, std::iter::repeat_n(
+                    crate::native_view_chat::NO_MESSAGE_GROUP, queue_texts.len()));
                 // Clamp the spans splice exactly like the CP-38 strip and
                 // footer insertions below: `chat_markdown_spans` stays empty on
                 // the plain `render` path, so `insert..insert` would panic.
@@ -5204,10 +5290,14 @@ impl NativeView {
                 let classes_at = insert.min(self.chat_row_classes.len());
                 let bounds_at = insert.min(self.chat_text_bounds.len());
                 let spans_at = insert.min(self.chat_markdown_spans.len());
+                let groups_at = insert.min(self.chat_row_groups.len());
                 self.chat_row_classes
                     .splice(classes_at..classes_at, std::iter::repeat_n(class, strip.len()));
                 self.chat_text_bounds
                     .splice(bounds_at..bounds_at, std::iter::repeat_n(None, strip.len()));
+                self.chat_row_groups
+                    .splice(groups_at..groups_at, std::iter::repeat_n(
+                        crate::native_view_chat::NO_MESSAGE_GROUP, strip.len()));
                 self.chat_markdown_spans
                     .splice(spans_at..spans_at, std::iter::repeat_n(Vec::new(), strip.len()));
                 body.splice(
@@ -5249,6 +5339,7 @@ impl NativeView {
                 .collect();
             self.chat_row_classes.resize(body.len(), crate::native_view_chat::ChatRowClass::Blank);
             self.chat_text_bounds.resize(body.len(), None);
+            self.chat_row_groups.resize(body.len(), crate::native_view_chat::NO_MESSAGE_GROUP);
             self.chat_markdown_spans.resize(body.len(), Vec::new());
             if self.scrollbar_enabled && !has_permission {
                 if let Some(messages) = messages {
@@ -5284,6 +5375,8 @@ impl NativeView {
                 self.chat_row_classes.extend(std::iter::repeat_n(
                     crate::native_view_chat::ChatRowClass::Metadata, rows.len().min(15)));
                 self.chat_text_bounds.extend(std::iter::repeat_n(None, rows.len().min(15)));
+                self.chat_row_groups.extend(std::iter::repeat_n(
+                    crate::native_view_chat::NO_MESSAGE_GROUP, rows.len().min(15)));
             }
             if has_permission {
                 // Permission prompt replaces the composer — no composer
@@ -5316,6 +5409,10 @@ impl NativeView {
                     let bounds_at = insert.min(self.chat_text_bounds.len());
                     self.chat_text_bounds
                         .splice(bounds_at..bounds_at, std::iter::repeat_n(None, count));
+                    let groups_at = insert.min(self.chat_row_groups.len());
+                    self.chat_row_groups
+                        .splice(groups_at..groups_at, std::iter::repeat_n(
+                            crate::native_view_chat::NO_MESSAGE_GROUP, count));
                     let spans_at = insert.min(self.chat_markdown_spans.len());
                     self.chat_markdown_spans
                         .splice(spans_at..spans_at, std::iter::repeat_n(Vec::new(), count));
@@ -5351,6 +5448,10 @@ impl NativeView {
                     crate::native_view_chat::ChatRowClass::Blank,
                 ]);
                 self.chat_text_bounds.extend([None, None]);
+                self.chat_row_groups.extend([
+                    crate::native_view_chat::NO_MESSAGE_GROUP,
+                    crate::native_view_chat::NO_MESSAGE_GROUP,
+                ]);
             }
             body
         } else {
@@ -5693,6 +5794,9 @@ impl NativeView {
             self.chat_row_classes = std::iter::repeat_n(
                 crate::native_view_chat::ChatRowClass::Blank, y.min(rows),
             ).chain(self.chat_row_classes.drain(..)).take(rows).collect();
+            self.chat_row_groups = std::iter::repeat_n(
+                crate::native_view_chat::NO_MESSAGE_GROUP, y.min(rows),
+            ).chain(self.chat_row_groups.drain(..)).take(rows).collect();
             self.chat_markdown_spans = std::iter::repeat_n(Vec::new(), y.min(rows)).chain(self.chat_markdown_spans.drain(..).map(|spans| spans.into_iter().map(|span| crate::native_view_chat::ChatRunSpan { start: span.start.saturating_add(x as u16), end: span.end.saturating_add(x as u16), flags: span.flags }).collect())).take(rows).collect();
             self.chat_markdown_spans.resize(rows, Vec::new());
             self.chat_text_bounds = std::iter::repeat_n(None, y.min(rows))
@@ -5701,6 +5805,7 @@ impl NativeView {
                 .take(rows).collect();
             self.chat_row_classes.resize(rows, crate::native_view_chat::ChatRowClass::Blank);
             self.chat_text_bounds.resize(rows, None);
+            self.chat_row_groups.resize(rows, crate::native_view_chat::NO_MESSAGE_GROUP);
             for (index, region) in self.ui_regions.iter_mut().enumerate() {
                 // Sidebar regions already use the absolute right-pane origin;
                 // only main-column regions still need the rail translation.
@@ -5930,7 +6035,94 @@ impl NativeView {
                 (left, footer_row as u16, width)
             });
         }
+        // Per-row hover mask from the cached pointer against the FINAL frame
+        // (after tab reservation, sidebar inline, modal and footer), using
+        // per-render message identity rather than contiguous row classes.
+        // Recomputed every frame, so no cached row identity survives a
+        // content change.
+        self.chat_hovered_rows = self.compute_chat_hover_mask(&frame);
         frame
+    }
+
+    /// Whole-card user-message hover rows for the cached pointer (upstream
+    /// `UserMessage` `onMouseOver`/`onMouseOut` raises the full box:
+    /// `packages/tui/src/routes/session/index.tsx` 2354-2482 at pin
+    /// 450e7b92412c780a7b5a75226bb8d49aaca24e22).
+    ///
+    /// Identity rule: rows are grouped by the per-render message identity
+    /// carried from the typed render projection (`chat_row_groups` — batch
+    /// index for this render only, never a durable persisted message id),
+    /// never by contiguous `UserCard` classes alone. Two adjacent user
+    /// messages are distinct cards even when a window slice places their rows
+    /// next to each other, and a card's padding rows (including appearance
+    /// padding `Blank` rows) hover together with its content rows.
+    /// Gap/scaffold rows (`NO_MESSAGE_GROUP`) never hover. The pointer must
+    /// land on a row whose message box contains user-card content and inside
+    /// the message content surface; modal/page/palette states suppress hover
+    /// entirely.
+    fn compute_chat_hover_mask(&self, frame: &[String]) -> Vec<bool> {
+        let mut mask = vec![false; frame.len()];
+        if !self.session_route || self.dialogs.is_open()
+            || self.command_palette_open() || self.pages.page() != Page::Chat
+        {
+            return mask;
+        }
+        let Some((px, py)) = self.chat_hover_pointer else {
+            return mask;
+        };
+        let presentation = self.presentation();
+        // Sidebar cells (inline or overlay) are not the message surface.
+        if presentation
+            .sidebar_offset
+            .is_some_and(|left| u32::from(px) >= u32::from(left))
+        {
+            return mask;
+        }
+        let row = usize::try_from(py).unwrap_or(usize::MAX);
+        let Some(&group) = self.chat_row_groups.get(row) else {
+            return mask;
+        };
+        if group == crate::native_view_chat::NO_MESSAGE_GROUP {
+            return mask;
+        }
+        // Per-render message identity: expand to exactly the rows of this
+        // message box, in either direction. Adjacent messages always carry
+        // different identities, so their cards never merge.
+        let mut start = row;
+        while start > 0 && self.chat_row_groups.get(start - 1) == Some(&group) {
+            start -= 1;
+        }
+        let mut end = row;
+        while end + 1 < self.chat_row_groups.len()
+            && self.chat_row_groups.get(end + 1) == Some(&group)
+        {
+            end += 1;
+        }
+        if end >= mask.len() {
+            return mask;
+        }
+        // The message box must contain actual user-card content: assistant,
+        // system and tool boxes never raise.
+        let owns_user_card = (start..=end).any(|r| matches!(
+            self.chat_row_classes.get(r),
+            Some(crate::native_view_chat::ChatRowClass::UserCard)
+        ));
+        if !owns_user_card {
+            return mask;
+        }
+        // The outer box owns the left rail. Only the inner box receives
+        // pointer hover, matching the painter's hovered-background boundary.
+        let inset = presentation.main_padding.min(presentation.main_width / 2);
+        let left = u32::from(presentation.main_offset) + u32::from(inset);
+        let right = u32::from(presentation.main_offset)
+            + u32::from(presentation.main_width.saturating_sub(inset));
+        if u32::from(px) <= left || u32::from(px) >= right {
+            return mask;
+        }
+        for masked in mask.iter_mut().take(end + 1).skip(start) {
+            *masked = true;
+        }
+        mask
     }
 
     fn footer_line(&self, width: u16, loading: bool) -> (String, Option<(u16, u16)>) {
@@ -13425,5 +13617,404 @@ mod route_inset_boundary_tests {
                 && caret_y < top.saturating_add(height),
             "caret ({caret_x},{caret_y}) inside the shifted composer region"
         );
+    }
+}
+
+/// Whole-card user-message hover regressions (upstream `UserMessage`
+/// `onMouseOver`/`onMouseOut` box semantics at `packages/tui/src/routes/
+/// session/index.tsx` 2354-2482, pin 450e7b92412c780a7b5a75226bb8d49aaca24e22).
+///
+/// These tests pin the per-render identity rule: hover groups rows by the
+/// message batch identity carried from the typed render projection
+/// (`chat_row_groups`, recomputed every render — never a durable message id),
+/// never by contiguous `UserCard` classes. Contiguous class runs are
+/// insufficient in two production shapes covered here: appearance-padding
+/// cards whose pad rows are `Blank`, and user cards whose inner metadata row
+/// splits the `UserCard` run.
+#[cfg(test)]
+mod user_card_hover_tests {
+    use super::*;
+    use crate::native_tabs::{TabOrientation, TabReservation};
+    use crate::native_view_chat::{
+        ChatMessage, ChatPart, ChatRowClass, ChatRole, NO_MESSAGE_GROUP,
+    };
+
+    /// Session viewport with one tab reservation and an initial frame so
+    /// paint metadata (classes/groups/bounds) covers every returned row.
+    fn hover_view(orientation: TabOrientation, cols: u16, rows: u16) -> NativeView {
+        let mut view = NativeView::new(cols, rows);
+        view.set_session_route(true);
+        view.set_tab_reservation(TabReservation::for_view(orientation, cols, rows));
+        view
+    }
+
+    fn render(view: &mut NativeView, messages: &[ChatMessage]) -> Vec<String> {
+        let frame = view.render_typed("", messages, false, &[]);
+        assert_eq!(
+            view.chat_row_classes().len(),
+            frame.len(),
+            "row classes cover the final frame"
+        );
+        assert_eq!(
+            view.chat_row_groups().len(),
+            frame.len(),
+            "message identity covers the final frame"
+        );
+        assert_eq!(view.chat_hovered_rows().len(), frame.len());
+        frame
+    }
+
+    fn row_with(frame: &[String], marker: &str) -> usize {
+        frame
+            .iter()
+            .position(|line| line.contains(marker))
+            .unwrap_or_else(|| panic!("marker {marker:?} missing from frame"))
+    }
+
+    fn group_rows(view: &NativeView, row: usize) -> Vec<usize> {
+        let group = view.chat_row_groups()[row];
+        (0..view.chat_row_groups().len())
+            .filter(|&r| view.chat_row_groups()[r] == group)
+            .collect()
+    }
+
+    /// First cell strictly inside the message content surface (same bounds
+    /// `tui_entry::chat_row_background_at` paints).
+    fn surface_x(view: &NativeView) -> u16 {
+        let presentation = view.presentation();
+        let inset = presentation.main_padding.min(presentation.main_width / 2);
+        presentation.main_offset + inset + 1
+    }
+
+    fn outside_x(view: &NativeView) -> u16 {
+        let presentation = view.presentation();
+        let inset = presentation.main_padding.min(presentation.main_width / 2);
+        presentation.main_offset + presentation.main_width.saturating_sub(inset)
+    }
+
+    fn hover_mask(view: &mut NativeView, messages: &[ChatMessage], x: u16, y: usize) -> Vec<bool> {
+        assert!(view.set_chat_pointer(x, y as u16), "pointer must move");
+        // Render so the per-frame hover mask is computed; the frame itself is
+        // asserted inside `render`. Return the computed mask (not the frame).
+        let _ = render(view, messages);
+        view.chat_hovered_rows().to_vec()
+    }
+    fn mask_rows(mask: &[bool]) -> Vec<usize> {
+        mask.iter().enumerate().filter(|(_, hit)| **hit).map(|(r, _)| r).collect()
+    }
+
+    #[test]
+    fn multirow_user_card_hovers_whole_card_including_padding() {
+        for orientation in [TabOrientation::Horizontal, TabOrientation::Vertical] {
+            let (cols, rows) = match orientation {
+                TabOrientation::Horizontal => (80, 30),
+                TabOrientation::Vertical => (120, 30),
+            };
+            let mut view = hover_view(orientation, cols, rows);
+            let messages = [ChatMessage::text(
+                ChatRole::User,
+                "alpha-one ".repeat(14).trim_end().to_owned(),
+            )];
+            let frame = render(&mut view, &messages);
+            let content_rows: Vec<usize> = (0..frame.len())
+                .filter(|&r| frame[r].contains("alpha-one"))
+                .collect();
+            assert!(
+                content_rows.len() >= 2,
+                "fixture must wrap to a multirow card: {content_rows:?}"
+            );
+            let first = content_rows[0];
+            let last = *content_rows.last().unwrap();
+            let expected: Vec<usize> = (first - 1..=last + 1).collect();
+            assert_eq!(
+                group_rows(&view, first),
+                expected,
+                "card identity covers both raised padding rows and every content row"
+            );
+            for &row in &expected {
+                assert_eq!(view.chat_row_classes()[row], ChatRowClass::UserCard);
+            }
+            // Pointer on a content row raises the whole card.
+            let hover_x = surface_x(&view);
+            let mask = hover_mask(&mut view, &messages, hover_x, first);
+            assert_eq!(mask_rows(&mask), expected);
+            // Padding is hoverable: the raised top padding row admits too.
+            let hover_x = surface_x(&view);
+            let mask = hover_mask(&mut view, &messages, hover_x, first - 1);
+            assert_eq!(mask_rows(&mask), expected);
+            // Outside the message surface (right margin) never hovers.
+            let hover_x = outside_x(&view);
+            let mask = hover_mask(&mut view, &messages, hover_x, first);
+            assert!(mask_rows(&mask).is_empty(), "off-surface miss: {:?}", mask_rows(&mask));
+        }
+    }
+
+    #[test]
+    fn two_adjacent_user_messages_hover_independent_cards() {
+        let mut view = hover_view(TabOrientation::Horizontal, 80, 30);
+        let messages = [
+            ChatMessage::text(ChatRole::User, "alpha-card"),
+            ChatMessage::text(ChatRole::User, "beta-card"),
+        ];
+        let frame = render(&mut view, &messages);
+        let a_row = row_with(&frame, "alpha-card");
+        let b_row = row_with(&frame, "beta-card");
+        let a_rows = group_rows(&view, a_row);
+        let b_rows = group_rows(&view, b_row);
+        assert_ne!(view.chat_row_groups()[a_row], view.chat_row_groups()[b_row],
+            "adjacent user messages carry distinct identities");
+        // Whole-card hover on the first card never reaches the second.
+        let hover_x = surface_x(&view);
+        let mask = hover_mask(&mut view, &messages, hover_x, a_row);
+        assert_eq!(mask_rows(&mask), a_rows);
+        assert!(!mask[b_row], "adjacent distinct card must not merge");
+        let hover_x = surface_x(&view);
+        let mask = hover_mask(&mut view, &messages, hover_x, b_row);
+        assert_eq!(mask_rows(&mask), b_rows);
+        assert!(!mask[a_row]);
+        // The gap row between the cards belongs to no message box.
+        let gap = ((a_row + 1)..b_row)
+            .find(|&r| view.chat_row_classes()[r] == ChatRowClass::Separator)
+            .expect("group separator row between adjacent user messages");
+        assert_eq!(view.chat_row_groups()[gap], NO_MESSAGE_GROUP);
+        let hover_x = surface_x(&view);
+        let mask = hover_mask(&mut view, &messages, hover_x, gap);
+        assert!(mask_rows(&mask).is_empty(), "gap rows never hover: {:?}", mask_rows(&mask));
+    }
+
+    #[test]
+    fn user_card_with_inner_metadata_row_hovers_every_card_row() {
+        let mut view = hover_view(TabOrientation::Horizontal, 80, 30);
+        let messages = [ChatMessage {
+            role: ChatRole::User,
+            parts: vec![ChatPart::Text("kept-inside".to_owned())],
+            agent: None,
+            model: Some("fixture-model".to_owned()),
+            assistant_facts: None,
+            message_id: None,
+            files: Vec::new(),
+            skills: Vec::new(),
+        }];
+        let frame = render(&mut view, &messages);
+        let meta_row = row_with(&frame, "fixture-model");
+        let text_row = row_with(&frame, "kept-inside");
+        assert_eq!(view.chat_row_classes()[meta_row], ChatRowClass::Metadata);
+        assert_eq!(view.chat_row_classes()[text_row], ChatRowClass::UserCard);
+        let rows = group_rows(&view, text_row);
+        assert!(rows.contains(&meta_row),
+            "metadata row shares the card identity: {rows:?}");
+        assert!(rows.contains(&(text_row - 2)),
+            "top raised padding shares the card identity: {rows:?}");
+        // Contiguous UserCard classes would split at the metadata row and
+        // drop the top padding; identity grouping must mark the whole card.
+        let hover_x = surface_x(&view);
+        let mask = hover_mask(&mut view, &messages, hover_x, text_row);
+        assert_eq!(mask_rows(&mask), rows);
+        assert!(mask[meta_row] && mask[text_row - 2] && mask[text_row + 1]);
+        // Pointer on the card's metadata row raises the same card.
+        let hover_x = surface_x(&view);
+        let mask = hover_mask(&mut view, &messages, hover_x, meta_row);
+        assert_eq!(mask_rows(&mask), rows);
+    }
+
+    #[test]
+    fn appearance_padding_card_hovers_its_blank_padding_rows() {
+        let mut appearance = crate::native_box_style::BoxAppearance::default();
+        appearance.overrides.insert(
+            crate::native_box_style::BoxId::User,
+            crate::native_box_style::BoxOverride {
+                padding: Some(1),
+                ..Default::default()
+            },
+        );
+        let mut view = hover_view(TabOrientation::Horizontal, 80, 30);
+        view.set_box_appearance(appearance);
+        let messages = [ChatMessage::text(ChatRole::User, "padded-card")];
+        let frame = render(&mut view, &messages);
+        let text_row = row_with(&frame, "padded-card");
+        let (top, bottom) = (text_row - 1, text_row + 1);
+        assert_eq!(view.chat_row_classes()[top], ChatRowClass::Blank,
+            "appearance padding renders raised Blank pad rows");
+        assert_eq!(view.chat_row_classes()[bottom], ChatRowClass::Blank);
+        assert_eq!(view.chat_row_classes()[text_row], ChatRowClass::UserCard);
+        let rows = group_rows(&view, text_row);
+        assert_eq!(rows, vec![top, text_row, bottom]);
+        // Blank pad rows are NOT UserCard class: contiguous-class grouping
+        // would drop them; identity grouping must hover the full card.
+        let hover_x = surface_x(&view);
+        let mask = hover_mask(&mut view, &messages, hover_x, text_row);
+        assert_eq!(mask_rows(&mask), rows);
+        assert!(mask[top] && mask[bottom]);
+    }
+
+    #[test]
+    fn assistant_card_never_hovers() {
+        let mut view = hover_view(TabOrientation::Horizontal, 80, 30);
+        let messages = [ChatMessage::text(ChatRole::Assistant, "assistant-prose")];
+        let frame = render(&mut view, &messages);
+        let text_row = row_with(&frame, "assistant-prose");
+        assert_ne!(view.chat_row_groups()[text_row], NO_MESSAGE_GROUP,
+            "assistant rows carry identity but no user-card ownership");
+        let hover_x = surface_x(&view);
+        let mask = hover_mask(&mut view, &messages, hover_x, text_row);
+        assert!(mask_rows(&mask).is_empty(), "assistant cards never raise: {:?}", mask_rows(&mask));
+    }
+
+    #[test]
+    fn clipped_card_at_window_edge_hovers_only_its_visible_rows() {
+        let mut view = hover_view(TabOrientation::Horizontal, 80, 16);
+        let messages: Vec<ChatMessage> = (1..=12)
+            .map(|i| ChatMessage::text(ChatRole::User, format!("msg-{i:02}")))
+            .collect();
+        let _ = render(&mut view, &messages);
+        // Scroll so the window boundary cuts the tail card's bottom padding
+        // row: only part of that card is on screen.
+        view.set_chat_scroll_offset(1);
+        let frame = render(&mut view, &messages);
+        let clipped_row = row_with(&frame, "msg-12");
+        let clipped_rows = group_rows(&view, clipped_row);
+        assert_eq!(clipped_rows, vec![clipped_row - 1, clipped_row],
+            "fixture: the tail card is clipped to pad+text at the window edge");
+        // Whole-card hover covers every visible row of the clipped card.
+        let hover_x = surface_x(&view);
+        let mask = hover_mask(&mut view, &messages, hover_x, clipped_row);
+        assert_eq!(mask_rows(&mask), clipped_rows);
+        // The previous card's rows stay out of the hover even though they
+        // share the same row classes.
+        let prev_row = row_with(&frame, "msg-11");
+        let prev_rows = group_rows(&view, prev_row);
+        assert!(prev_rows.iter().all(|&r| !clipped_rows.contains(&r)));
+        let hover_x = surface_x(&view);
+        let mask = hover_mask(&mut view, &messages, hover_x, prev_row);
+        assert_eq!(mask_rows(&mask), prev_rows);
+    }
+
+    #[test]
+    fn scroll_invalidates_pointer_and_rows_are_reused_by_new_identity() {
+        let mut view = hover_view(TabOrientation::Horizontal, 80, 16);
+        let messages = [
+            ChatMessage::text(ChatRole::User, "alpha-card"),
+            ChatMessage::text(ChatRole::User, "beta-card"),
+            ChatMessage::text(ChatRole::User, "gamma-card"),
+        ];
+        let frame = render(&mut view, &messages);
+        let beta_row = row_with(&frame, "beta-card");
+        let beta_rows = group_rows(&view, beta_row);
+        let hover_x = surface_x(&view);
+        let mask = hover_mask(&mut view, &messages, hover_x, beta_row);
+        assert_eq!(mask_rows(&mask), beta_rows);
+        // Scrolling drops the cached mask immediately while retaining the
+        // pointer for the next frame's hit-grid projection.
+        view.set_chat_scroll_offset(2);
+        assert!(
+            view.chat_hovered_rows().is_empty(),
+            "scroll invalidates the hover mask immediately"
+        );
+        let frame = render(&mut view, &messages);
+        assert!(mask_rows(view.chat_hovered_rows()).is_empty(),
+            "retained pointer over the reused gap row stays unhovered");
+        // The same screen row now belongs to a different projection row
+        // (the gap under the previous card): a fresh pointer there must not
+        // resurrect the stale card.
+        assert_eq!(view.chat_row_groups()[beta_row], NO_MESSAGE_GROUP,
+            "fixture: reused row holds the gap after scrolling");
+        // The stationary pointer was already rechecked over the gap. Move
+        // off-surface before explicitly exercising a new motion onto that row.
+        let _ = view.set_chat_pointer(outside_x(&view), beta_row as u16);
+        let hover_x = surface_x(&view);
+        let mask = hover_mask(&mut view, &messages, hover_x, beta_row);
+        assert!(mask_rows(&mask).is_empty(), "stale identity must not transfer: {:?}", mask_rows(&mask));
+        // Hovering the card at its NEW rows follows the new identity.
+        let new_beta_row = row_with(&frame, "beta-card");
+        let new_beta_rows = group_rows(&view, new_beta_row);
+        let hover_x = surface_x(&view);
+        let mask = hover_mask(&mut view, &messages, hover_x, new_beta_row);
+        assert_eq!(mask_rows(&mask), new_beta_rows);
+    }
+
+    #[test]
+    fn resize_modal_and_route_changes_clear_hover() {
+        let mut view = hover_view(TabOrientation::Horizontal, 80, 30);
+        let messages = [ChatMessage::text(ChatRole::User, "clear-case")];
+        let frame = render(&mut view, &messages);
+        let text_row = row_with(&frame, "clear-case");
+        let hover_x = surface_x(&view);
+        let mask = hover_mask(&mut view, &messages, hover_x, text_row);
+        assert!(!mask_rows(&mask).is_empty());
+        // Resize invalidates.
+        view.resize(70, 24);
+        assert!(view.chat_hovered_rows().is_empty(),
+            "resize invalidates the hover mask immediately (pointer retained)");
+        let messages = [ChatMessage::text(ChatRole::User, "clear-case")];
+        let frame = render(&mut view, &messages);
+        let new_text_row = row_with(&frame, "clear-case");
+        let expected_rows = group_rows(&view, new_text_row);
+        assert!(expected_rows.contains(&text_row),
+            "fixture: retained old pointer remains inside this sole user card");
+        assert_eq!(mask_rows(view.chat_hovered_rows()), expected_rows,
+            "resize reprojects current card under retained pointer");
+        let text_row = row_with(&frame, "clear-case");
+        let _ = view.set_chat_pointer(outside_x(&view), text_row as u16);
+        let hover_x = surface_x(&view);
+        let mask = hover_mask(&mut view, &messages, hover_x, text_row);
+        assert!(!mask_rows(&mask).is_empty());
+        // Page open (non-chat route) clears and suppresses hover.
+        view.open_page(Page::Memory);
+        assert!(view.chat_hovered_rows().is_empty(), "page open clears hover");
+        let _ = render(&mut view, &messages);
+        assert!(mask_rows(view.chat_hovered_rows()).is_empty());
+        let _ = view.set_chat_pointer(surface_x(&view), text_row as u16);
+        let _ = render(&mut view, &messages);
+        assert!(mask_rows(view.chat_hovered_rows()).is_empty(),
+            "page route suppresses card hover");
+        view.close_page();
+        let frame = render(&mut view, &messages);
+        let text_row = row_with(&frame, "clear-case");
+        let hover_x = surface_x(&view);
+        let mask = hover_mask(&mut view, &messages, hover_x, text_row);
+        assert!(!mask_rows(&mask).is_empty());
+        // Home route clears and suppresses hover.
+        view.set_session_route(false);
+        assert!(view.chat_hovered_rows().is_empty(), "route change clears hover");
+        let _ = render(&mut view, &messages);
+        assert!(mask_rows(view.chat_hovered_rows()).is_empty());
+        view.set_session_route(true);
+        // Modal open suppresses card hover even with a live pointer (the
+        // input loop additionally drops hover state every frame under an
+        // overlay; the view gate is the authoritative suppression).
+        let frame = render(&mut view, &messages);
+        let text_row = row_with(&frame, "clear-case");
+        let _ = view.set_chat_pointer(surface_x(&view), text_row as u16);
+        view.dialogs
+            .open_permission("req-1", "ses-1", "Run command")
+            .expect("permission modal opens");
+        let _ = render(&mut view, &messages);
+        assert!(mask_rows(view.chat_hovered_rows()).is_empty(),
+            "modal suppresses card hover");
+    }
+
+    #[test]
+    fn tab_strip_footer_and_sidebar_cells_never_hover() {
+        let mut view = hover_view(TabOrientation::Horizontal, 80, 30);
+        let messages = [ChatMessage::text(ChatRole::User, "surface-case")];
+        let frame = render(&mut view, &messages);
+        let text_row = row_with(&frame, "surface-case");
+        let hover_x = surface_x(&view);
+        let mask = hover_mask(&mut view, &messages, hover_x, text_row);
+        // Header/tab-strip and the shared footer row never raise.
+        assert!(!mask[0], "tab strip row has no transcript surface");
+        assert!(!mask[frame.len() - 1], "shared footer row never raises");
+        // Overlay sidebar columns never admit hover.
+        view.toggle_sidebar();
+        let sidebar_left = view.presentation().sidebar_offset.expect("overlay sidebar");
+        let _ = render(&mut view, &messages);
+        let _ = view.set_chat_pointer(sidebar_left + 3, text_row as u16);
+        let _ = render(&mut view, &messages);
+        assert!(mask_rows(view.chat_hovered_rows()).is_empty(),
+            "sidebar-covered columns never hover");
+        // A pointer left of the sidebar still reaches the card surface.
+        let hover_x = surface_x(&view);
+        let mask = hover_mask(&mut view, &messages, hover_x, text_row);
+        assert!(!mask_rows(&mask).is_empty());
     }
 }
