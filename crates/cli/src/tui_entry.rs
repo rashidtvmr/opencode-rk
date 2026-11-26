@@ -33,6 +33,9 @@ mod native_transcript;
 #[path = "native_turn.rs"]
 pub(crate) mod native_turn;
 #[cfg(feature = "native")]
+#[path = "native_prompt.rs"]
+mod native_prompt;
+#[cfg(feature = "native")]
 use crate::native_chat_history::NativeChatHistory;
 #[cfg(feature = "native")]
 use crate::native_view_chat::{ChatMessage, ChatPart, ChatRole};
@@ -1142,6 +1145,10 @@ fn composer_enter_plan(
         crate::native_composer::Delivery::Steer
     };
     let ctx = crate::native_composer::SubmitContext {
+        // CP-33(a): derive the submit mode from a leading `!`. Without this
+        // the live caller used the `Normal` default and a queued shell command
+        // slipped through instead of being refused (`ShellMode`).
+        mode: native_prompt::mode_for_draft(draft),
         has_session,
         autocomplete_visible: completion_visible,
         slash: draft.starts_with('/'),
@@ -11053,6 +11060,11 @@ fn native_loop(
     // multi-line paste folds into a `[Pasted ~N lines]` placeholder and records
     // its range here, so later edits realign instead of appending raw text.
     let mut draft_parts: Vec<crate::native_paste::PastedText> = Vec::new();
+    // CP-35: the authoritative live owner. The trio above is the transport
+    // the surrounding helpers require; this persistent `TrackedDraft` owns
+    // text + cursor + every tracked part (pasted, files, agents, skills) and
+    // runs `realign()` at every live mutation site through `realign()`.
+    let mut live_draft = native_prompt::LiveDraft::new();
     let mut draft_stash = crate::native_paste::DraftStash::new();
     // Explicit prompt stash is client-local (upstream PromptStashProvider),
     // distinct from the per-tab draft stash above. Palette/dialog wiring can
@@ -13735,19 +13747,12 @@ fn native_loop(
         }
         view.set_prompt_mode(draft.starts_with('!'));
         view.set_prompt_cursor(draft_cursor);
-        // CP-35: the draft's text and its tracked part anchors are owned by a
-        // single `TrackedDraft` so the text mutation and the anchor realignment
-        // travel together. Loading from the working locals and writing the
-        // result back keeps every reader of `draft`/`draft_cursor`/`draft_parts`
-        // unchanged; the remaining un-migrated mutation sites are listed in
-        // evidence/W18-CP35-MIGRATE/handoff.json.
-        let mut composer = crate::native_paste::TrackedDraft::new(std::mem::take(&mut draft));
-        composer.cursor = draft_cursor;
-        composer.parts.pasted = std::mem::take(&mut draft_parts);
-        composer.realign_after_edit();
-        draft = composer.text.clone();
-        draft_cursor = composer.cursor;
-        draft_parts = composer.parts.pasted;
+        // CP-35: the draft's text and every tracked part (including
+        // files/agents/skills) are owned by one persistent `TrackedDraft`.
+        // The render checkpoint is the canonical sync point: it adopts the
+        // wire trio, runs `realign()` on the real owner and writes all tracked
+        // fields back, so mention anchors cannot be silently discarded.
+        live_draft.realign(&mut draft, &mut draft_cursor, &mut draft_parts);
         let draft_echo = if matches!(dialog, native_setup::Dialog::ApiKey) {
             ""
         } else {
@@ -17455,14 +17460,26 @@ fn native_loop(
                             &draft,
                             draft_cursor,
                         ) {
-                            draft = text;
-                            draft_cursor = cursor;
-                            draft_parts = parts;
+                            // CP-35: a history restore is a live mutation.
+                            // `restore` drops stale tracked extras, adopts the
+                            // restored parts and realigns them against the
+                            // restored text through the authoritative owner.
+                            live_draft.restore(
+                                &mut draft,
+                                &mut draft_cursor,
+                                &mut draft_parts,
+                                crate::native_paste::DraftEntry {
+                                    text,
+                                    cursor,
+                                    mode,
+                                    parts,
+                                },
+                            );
                             if mode == crate::native_paste::PromptMode::Shell && !draft.starts_with('!') {
                                 draft.insert(0, '!');
                                 draft_cursor += 1;
                             }
-                            crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
+                            live_draft.realign(&mut draft, &mut draft_cursor, &mut draft_parts);
                             completion.sync(&draft);
                             utf8.reset();
                             needs_paint = true;
@@ -17580,6 +17597,10 @@ fn native_loop(
                                     draft_cursor = draft.len();
                                 }
                             }
+                            // CP-35: realign the authoritative owner so a newly
+                            // folded paste (or an expanded one) gets its range
+                            // re-derived against the inserted text immediately.
+                            live_draft.realign(&mut draft, &mut draft_cursor, &mut draft_parts);
                             // CP-38: a pasted local file path that reads as an
                             // image becomes a composer preview cell
                             // (`component/prompt/index.tsx:399`; the real
@@ -18402,11 +18423,51 @@ fn native_loop(
                 _ => {}
             }
         }
+        // CP-34: an overlay keeps priority over the bare composer for Ctrl+C.
+        // Each of these owners already consumes byte 3 in its own gate above;
+        // OR-ing them here prevents the new clear-with-retain path from wiping
+        // a background draft while a picker/page/palette is open.
+        let ctrl_c_overlay_owner = page_open
+            || help_open
+            || appearance.open
+            || permission_editor.open
+            || children_panel.open
+            || view.command_palette_open()
+            || view.dialogs.intercepts_input()
+            || login.is_open()
+            || variant_pick.is_some()
+            || selection.has_selection()
+            || !matches!(dialog, native_setup::Dialog::None);
         match byte {
             // CP-28: Ctrl-C is `input.clear`; consult the live keymap instead
             // of hard-coding the byte. A disabling override leaves Ctrl-C
             // inert with no fallback (Ctrl-D exit is a separate, unbound
             // action and is preserved verbatim).
+            //
+            // CP-34: an in-focus Ctrl+C on a non-empty draft clears the
+            // composer and retains it in history instead of discarding it on
+            // exit. With an empty draft or an overlay owner it keeps the global
+            // byte-exit meaning below.
+            3 if keymap_action_enabled(
+                &keymap_defaults,
+                crate::native_composer::KeymapAction::Clear,
+            ) && native_prompt::ctrl_c_clears_with_retain(
+                !draft.is_empty(),
+                ctrl_c_overlay_owner,
+            ) =>
+            {
+                let mode = native_prompt::mode_for_draft(&draft);
+                live_draft.clear_with_retain(
+                    &mut prompt_history,
+                    &mut draft,
+                    &mut draft_cursor,
+                    &mut draft_parts,
+                    mode,
+                );
+                completion.sync(&draft);
+                utf8.reset();
+                needs_paint = true;
+            }
             3 if keymap_action_enabled(
                 &keymap_defaults,
                 crate::native_composer::KeymapAction::Clear,
@@ -18455,8 +18516,17 @@ fn native_loop(
             27 => {
                 dialog = native_setup::Dialog::None;
                 key_input.clear();
-                draft.clear(); draft_parts.clear();
-                draft_cursor = 0;
+                // CP-34: retain a meaningful cleared draft in history before
+                // the live clear (`clearPrompt`, `index.tsx:1526-1538`), then
+                // clear the live owner (text/cursor/parts) exactly as before.
+                let mode = native_prompt::mode_for_draft(&draft);
+                live_draft.clear_with_retain(
+                    &mut prompt_history,
+                    &mut draft,
+                    &mut draft_cursor,
+                    &mut draft_parts,
+                    mode,
+                );
                 utf8.reset();
             }
             16 if matches!(dialog, native_setup::Dialog::None) => {
@@ -18683,7 +18753,7 @@ fn native_loop(
             // preserved verbatim and no provider turn is ever started.
             11 if !page_open && !help_open && matches!(dialog, native_setup::Dialog::None) => {
                 if crate::native_composer::apply_line_binding(&draft, &mut draft_cursor, byte) {
-                    crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
+                    live_draft.realign(&mut draft, &mut draft_cursor, &mut draft_parts);
                     utf8.reset();
                     needs_paint = true;
                     continue;
@@ -18715,7 +18785,9 @@ fn native_loop(
                         let previous = draft[..draft_cursor].char_indices().next_back().map_or(0, |(i, _)| i);
                         draft.drain(previous..draft_cursor);
                         draft_cursor = previous;
-                        crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
+                        // CP-35: route the delete through the real owner so
+                        // every tracked part re-anchors, not just pastes.
+                        live_draft.realign(&mut draft, &mut draft_cursor, &mut draft_parts);
                     }
                 } else {
                     filter_input.pop();
@@ -18745,12 +18817,14 @@ fn native_loop(
                 if draft.len() < MAX_NATIVE_DRAFT_BYTES {
                     draft.insert(draft_cursor, '\n');
                     draft_cursor += 1;
-                    crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
+                    // CP-35: a newline insertion is a live text edit; realign
+                    // the owner so all tracked parts follow it.
+                    live_draft.realign(&mut draft, &mut draft_cursor, &mut draft_parts);
                 }
             }
             1 | 5 | 21 if !page_open && !help_open && matches!(dialog, native_setup::Dialog::None) => {
                 if crate::native_composer::apply_line_binding(&draft, &mut draft_cursor, byte) {
-                    crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
+                    live_draft.realign(&mut draft, &mut draft_cursor, &mut draft_parts);
                     utf8.reset();
                     needs_paint = true;
                     continue;
@@ -19180,8 +19254,54 @@ fn native_loop(
                             needs_paint = true;
                             continue;
                         }
-                        crate::native_composer::SubmitPlan::BlankPromotion { queued, .. } => {
+                        crate::native_composer::SubmitPlan::BlankPromotion {
+                            queued,
+                            commit_selection,
+                        } => {
                             if queued {
+                                // CP-33(b): commit the staged agent/model before
+                                // promoting the queued prompt
+                                // (`index.tsx:1365-1373`). A plain empty Enter
+                                // with nothing queued does not commit.
+                                if native_prompt::commit_selection_for_promotion(
+                                    queued,
+                                    commit_selection,
+                                    live.is_some(),
+                                ) && navigation.active().is_some()
+                                {
+                                    let selected_model =
+                                        selected.as_ref().map(|model| model.qualified());
+                                    if let Err(error) = navigation.save_active_state(
+                                        draft.clone(),
+                                        draft_cursor,
+                                        view.chat_scroll_offset(),
+                                        selected_model.clone(),
+                                    ) {
+                                        append_transcript(
+                                            &mut transcript,
+                                            format!(
+                                                "error: blank promotion: selection save refused: {error:?}"
+                                            ),
+                                        );
+                                    } else {
+                                        // The agent is part of the committed
+                                        // selection too: push the staged agent
+                                        // into the visible composer metadata so
+                                        // it is observable, not merely logged.
+                                        sync_composer_agent(
+                                            &mut view,
+                                            live_agent_selected.as_deref(),
+                                            selected.as_ref().and_then(|model| native_setup::variant_for(model)).as_deref(),
+                                        );
+                                        crate::native_debug::event(
+                                            "prompt.blank_promotion_commit",
+                                            serde_json::json!({
+                                                "model": selected_model,
+                                                "agent": live_agent_selected.as_deref(),
+                                            }),
+                                        );
+                                    }
+                                }
                                 // Blank idle Enter promotes the FIRST queued
                                 // prompt of THIS session to steer delivery
                                 // (`routes/session/index.tsx:1650-1657`
@@ -20695,11 +20815,11 @@ fn native_loop(
                             if draft.len().checked_add(width).is_some_and(|len| len <= MAX_NATIVE_DRAFT_BYTES) {
                                 draft.insert(draft_cursor, character);
                                 draft_cursor += width;
-                                // An ordinary edit can shift or delete a
-                                // folded placeholder; re-anchor the tracked
-                                // ranges to the current draft so a later
-                                // paste/expansion cannot use stale offsets.
-                                crate::native_paste::reconcile_parts(&draft, &mut draft_parts);
+                                // CP-35: an ordinary edit can shift or delete a
+                                // folded placeholder or a mention. Re-run the
+                                // authoritative owner's realign so every tracked
+                                // part follows the edit instead of going stale.
+                                live_draft.realign(&mut draft, &mut draft_cursor, &mut draft_parts);
                             }
                         } else if matches!(dialog, native_setup::Dialog::ApiKey) {
                             if key_input.len().checked_add(width).is_some_and(|len| len <= 16 * 1024) { key_input.push(character); }
@@ -22126,6 +22246,46 @@ mod tab_binding_tests {
 #[cfg(all(test, feature = "native"))]
 mod command_consumption_tests {
     use super::native_input_decoder::InputEvent;
+
+    /// CP-33(a): the live submit planner must derive shell mode from a leading
+    /// `!` before deciding queue-vs-steer. A queued shell command is refused;
+    /// the same command steers when the turn does not own the binding.
+    #[test]
+    fn prompt_cp33_enter_plan_uses_leading_bang_for_shell_mode() {
+        use crate::native_composer::{QueueRejection, SubmitPlan};
+        assert_eq!(
+            super::composer_enter_plan("!ls -la", true, true, false, 1),
+            SubmitPlan::Rejected(QueueRejection::ShellMode)
+        );
+        assert_eq!(
+            super::composer_enter_plan("ls -la", true, true, false, 1),
+            SubmitPlan::Queue
+        );
+        assert_eq!(
+            super::composer_enter_plan("!ls", false, true, false, 0),
+            SubmitPlan::Steer
+        );
+    }
+
+    /// CP-33(b): a blank Enter with queued prompts produces a promotion that
+    /// carries the `commit_selection` signal the live loop consumes to commit
+    /// the staged agent/model before promoting.
+    #[test]
+    fn prompt_cp33_blank_promotion_carries_commit_signal_when_queued() {
+        use crate::native_composer::{Delivery, SubmitContext, SubmitPlan};
+        let normal = SubmitContext::default();
+        assert_eq!(
+            crate::native_composer::plan_submit(
+                "",
+                Delivery::Steer,
+                SubmitContext { queued: 2, ..normal },
+            ),
+            SubmitPlan::BlankPromotion { queued: true, commit_selection: true }
+        );
+        // With nothing queued there is no promotion target, so the live
+        // `commit_selection_for_promotion` gate does not commit.
+        assert!(!super::native_prompt::commit_selection_for_promotion(false, true, true));
+    }
 
     #[test]
     fn prompt_trace_event_payloads_are_bounded_facts() {
