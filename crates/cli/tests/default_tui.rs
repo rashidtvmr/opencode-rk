@@ -2154,8 +2154,12 @@ sys.exit(0 if os.waitstatus_to_exitcode(reaped) == 0 else 1)
         // If we have a native group PID, verify it's gone (group cleaned up).
         if let Some(pgid) = native_group_pid {
             if pgid > 0 {
-                // Give the relay cleanup 3s to kill the group.
-                let group_gone = wait_pgrp_gone(pgid, Duration::from_secs(3));
+                // Give asynchronous process-group cleanup enough time under
+                // concurrent workspace tests. The assertion remains strict:
+                // the group must actually disappear, not merely receive a
+                // signal. Three seconds flakes on a loaded host even though the
+                // same test passes in isolation.
+                let group_gone = wait_pgrp_gone(pgid, Duration::from_secs(10));
                 // We report whether cleanup worked — this is the RED/GREEN marker.
                 // On unfixed code: relay may not clean up the group after a
                 // descriptor-path fault; assert group_gone to make it RED.
@@ -2169,7 +2173,7 @@ sys.exit(0 if os.waitstatus_to_exitcode(reaped) == 0 else 1)
         // Daemon PID should also be gone.
         if daemon_pid > 0 {
             assert!(
-                wait_pid_gone(daemon_pid, Duration::from_secs(3)),
+                wait_pid_gone(daemon_pid, Duration::from_secs(10)),
                 "daemon must be reaped after relay stop: pid={daemon_pid}"
             );
         }
