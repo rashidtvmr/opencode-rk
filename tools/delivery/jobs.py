@@ -1537,15 +1537,14 @@ def publish(store, job, p, cfg, valid, logs):
             store.publication(job["id"], "landed")
             try:
                 post_workspace = create_workspace(store, job, repo, p["candidate"], valid, "-post")
-                # `full` and `post` run the same `cargo test --workspace` against
-                # the shared build_root.  A cargo run that finishes while the next
-                # one starts can replace a test binary between spawn and exec,
-                # which surfaces as `could not execute process ... (never
-                # executed)` on an otherwise passing tree (seen three times).
-                # Give postchecks their own target dir so the two phases cannot
-                # race on the same artifacts.
+                # `full` and `post` run the same workspace suite. Reuse the
+                # shared target cache under the outer heavy lock, which already
+                # prevents any concurrent Cargo run from replacing a test binary
+                # between spawn and exec. A second full `post` target tree
+                # doubled disk usage and made postchecks fail at the admission
+                # floor on an otherwise passing candidate.
                 post = checks(Git(post_workspace, valid), cfg["post_merge_checks"], cfg, valid, logs/"post",
-                              cache_root=build_cache/"post")
+                              cache_root=build_cache)
             except Failure as exc:
                 store.publication(job["id"], "postcheck_failed")
                 store.meta("stop_new_publications", {"task": job["task"], "sha": p["candidate"], "error": str(exc)})
