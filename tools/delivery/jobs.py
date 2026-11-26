@@ -646,6 +646,12 @@ def _select_feature_ref(store, task_id):
             if owner.get("task") == task_id:
                 return ref, path
             continue
+        # A missing directory does not make an existing branch ref unused. The
+        # branch may preserve a rejected candidate (including protected evaluator
+        # bytes) that cannot be rewound safely. Reusing it made every retry
+        # inherit the old candidate and index; allocate a genuinely new ref.
+        if Git(repo).try_run("rev-parse", "--verify", "-q", ref)["returncode"] == 0:
+            continue
         return ref, path
     raise Failure("no available enumerated feature ref/workspace slot", "wait")
 
@@ -806,14 +812,12 @@ def _ensure_author_worktree(store, job, revision, valid):
             # Mode reference-transaction hook for every worktree.  Identity and
             # gc suppression come from the environment for the same reason:
             # concurrent `git config` writes collide on `.git/config.lock`.
-            # Some Git versions defer materializing the linked worktree index.
-            # Seed only that private index from the requested base before the
-            # worker runs; never use the canonical index or a broad reset.
-            if not (path / ".git").is_dir():
-                linked_gitdir = pathlib.Path(git.run("rev-parse", "--absolute-git-dir"))
-                private_index = linked_gitdir / "index"
-                if not private_index.exists():
-                    git.run("read-tree", revision)
+            # Some Git versions materialize a linked worktree index from the
+            # canonical checkout rather than the new branch's tree. Always seed
+            # both the private index and worktree from the authorized base; an
+            # existing but wrong index otherwise appears as staged out-of-grant
+            # changes and every retry fails adoption.
+            git.run("read-tree", "--reset", "-u", revision)
             head = git.head("HEAD")
             if head != revision:
                 _recheck_store_reservation(store, job, feature_ref, path, revision)
