@@ -603,6 +603,14 @@ impl TerminalInputDecoder {
                     self.emit(InputEvent::ArrowRight);
                     return;
                 }
+                57352 => {
+                    self.emit(InputEvent::ArrowUp);
+                    return;
+                }
+                57353 => {
+                    self.emit(InputEvent::ArrowDown);
+                    return;
+                }
                 _ => {}
             }
         }
@@ -871,12 +879,14 @@ mod horizontal_cursor_regressions {
    }
 
     #[test]
-    fn kitty_plain_horizontal_cursor_private_keys_decode_but_modified_stays_inert() {
+    fn kitty_plain_cursor_private_keys_decode_but_modified_stays_inert() {
         let mut decoder = TerminalInputDecoder::default();
         let now = Instant::now();
-        for byte in b"\x1b[57350;1u\x1b[57351;1u\x1b[57350;5u" { decoder.push(*byte, now); }
+        for byte in b"\x1b[57350;1u\x1b[57351;1u\x1b[57352;1u\x1b[57353;1u\x1b[57350;5u" { decoder.push(*byte, now); }
         assert_eq!(decoder.pop(), Some(InputEvent::ArrowLeft));
         assert_eq!(decoder.pop(), Some(InputEvent::ArrowRight));
+        assert_eq!(decoder.pop(), Some(InputEvent::ArrowUp));
+        assert_eq!(decoder.pop(), Some(InputEvent::ArrowDown));
         assert_eq!(decoder.pop(), None);
     }
 }
