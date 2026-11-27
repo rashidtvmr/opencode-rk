@@ -1502,6 +1502,12 @@ def publish(store, job, p, cfg, valid, logs):
     workspace = create_workspace(store, job, _fetch_source(p.get("workspace"), repo), p["candidate"], valid)
     git = Git(workspace, valid)
     check_scope(git, p["base"], p["task"], cfg)
+    # Fetch the immutable candidate object before provisioning either checkout.
+    # This does not move a ref; it only makes the object available to the shared
+    # repository so the postcheck worktree can be created before disk headroom
+    # is consumed by the full build.
+    source.run("fetch", "--quiet", "--no-tags", "--no-write-fetch-head", str(workspace), p["candidate"])
+    post_workspace = create_workspace(store, job, repo, p["candidate"], valid, "-post")
     with publication_lock(repo, job, valid):
         recovery_publication_guard(store, cfg)
         problems = source_gate(store, valid)
@@ -1524,7 +1530,6 @@ def publish(store, job, p, cfg, valid, logs):
             evidence = {"spec_hash": p["spec_hash"], "candidate": p["candidate"],
                         "reviews": reviews, "focused": focused, "full": full, "guards": guards}
             store.publish_intent(job["id"], job["task"], before, p["candidate"], evidence)
-            source.run("fetch", "--quiet", "--no-tags", "--no-write-fetch-head", str(workspace), p["candidate"])
             env = runtime.environment()
             # Optional existing Recovery Mode capability: only the trusted git
             # writer receives it. No hook is disabled and no registry is faked.
@@ -1536,7 +1541,6 @@ def publish(store, job, p, cfg, valid, logs):
                 raise Failure("publication ended at an unexpected SHA; reconciliation required", "ambiguous")
             store.publication(job["id"], "landed")
             try:
-                post_workspace = create_workspace(store, job, repo, p["candidate"], valid, "-post")
                 # `full` and `post` run the same workspace suite. Reuse the
                 # shared target cache under the outer heavy lock, which already
                 # prevents any concurrent Cargo run from replacing a test binary
