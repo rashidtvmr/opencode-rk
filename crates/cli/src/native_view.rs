@@ -186,6 +186,12 @@ pub struct NativeView {
     placeholder_index: usize,
     dialog_size: DialogSize,
     composer_agent: Option<String>,
+    /// CP-09: the composer's one-shot metadata reveal tween
+    /// (`util/signal.ts:20-49`, `component/prompt/index.tsx:1594-1608`). Built
+    /// once from the first observed mount; a later re-show of an already
+    /// revealed prompt jumps straight to full alpha instead of replaying the
+    /// `createFadeIn` (upstream's mounted-once `revealedPromptMetadata` WeakSet).
+    composer_reveal: Option<crate::native_prompt_pane::MetadataReveal>,
     send_pointer: Option<(u16, u16)>,
     /// Bounds from the same frame that paints the Context Usage footer label.
     context_usage_hit: Option<(u16, u16, u16)>,
@@ -1437,6 +1443,7 @@ impl NativeView {
             placeholder_index: 0,
             dialog_size: DialogSize::Medium,
             composer_agent: None,
+            composer_reveal: None,
             send_pointer: None,
             context_usage_hit: None,
             home_plugins_failed: 0,
@@ -1836,6 +1843,49 @@ impl NativeView {
 
     pub fn set_prompt_mode(&mut self, shell: bool) {
         self.shell_mode = shell;
+    }
+
+    /// CP-09: the prompt's muted state (`component/prompt/index.tsx:1588`,
+    /// `highlight()`'s first branch). A disabled prompt — a pending global
+    /// form or a missing session location — keeps the plain `border.base`
+    /// instead of an agent/shell highlight.
+    pub(crate) fn composer_muted(&self) -> bool {
+        self.global_forms > 0 || self.session_location_missing
+    }
+
+    /// CP-09: the prompt's shell mode (`index.tsx:1589`, `highlight()`'s second
+    /// branch). A getter over `set_prompt_mode` so the live border paint can
+    /// resolve `text.action.primary.$focused` for the shell highlight.
+    pub(crate) fn prompt_shell(&self) -> bool {
+        self.shell_mode
+    }
+
+    /// CP-09: advance the composer metadata reveal for this frame and return
+    /// its `0..=1` alpha. `remount` is the WeakSet hit supplied by the live
+    /// loop: an already revealed prompt jumps to full alpha and never replays
+    /// the fade. The tween is keyed to the caller's render clock (`now_ms`);
+    /// `animations_enabled = false` collapses it to a static full alpha.
+    pub(crate) fn composer_metadata_alpha(
+        &mut self,
+        now_ms: u64,
+        remount: bool,
+        visible: bool,
+        animations_enabled: bool,
+    ) -> f64 {
+        let reveal = self
+            .composer_reveal
+            .get_or_insert_with(|| crate::native_prompt_pane::MetadataReveal::new(remount));
+        reveal.alpha(now_ms, visible, animations_enabled)
+    }
+
+    /// CP-09: discard the tween for a prompt that belongs to a different
+    /// session. Upstream's reveal flag lives in a WeakSet keyed to one prompt
+    /// component instance, so a newly opened session is a fresh mount that
+    /// replays the fade, while a remount of the same prompt (the same session
+    /// re-shown) is a WeakSet hit that never replays it. The live loop calls
+    /// this when the composer's session identity changes.
+    pub(crate) fn reset_composer_reveal(&mut self) {
+        self.composer_reveal = None;
     }
 
     pub fn set_placeholder_index(&mut self, index: usize) {
@@ -14731,5 +14781,80 @@ mod user_card_hover_tests {
         let hover_x = surface_x(&view);
         let mask = hover_mask(&mut view, &messages, hover_x, text_row);
         assert!(!mask_rows(&mask).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod composer_metadata_reveal_tests {
+    use super::NativeView;
+    use crate::native_prompt_pane::METADATA_FADE_MS;
+
+    #[test]
+    fn composer_reveal_alpha_is_clock_keyed_and_never_replays() {
+        let mut view = NativeView::new(80, 24);
+        // Fresh mount (remount = false) plays the 160 ms smoothstep `createFadeIn`
+        // once, keyed to the caller's render clock (`fade_alpha`).
+        assert_eq!(view.composer_metadata_alpha(1_000, false, true, true), 0.0);
+        assert!(
+            (view.composer_metadata_alpha(1_000 + METADATA_FADE_MS / 2, false, true, true) - 0.5)
+                .abs()
+                < 1e-9
+        );
+        assert_eq!(
+            view.composer_metadata_alpha(1_000 + METADATA_FADE_MS, false, true, true),
+            1.0
+        );
+        // Hiding the composer resets the tween clock but keeps the revealed
+        // state; showing it again jumps to full alpha instead of replaying
+        // (upstream WeakSet hit).
+        assert_eq!(view.composer_metadata_alpha(2_000, true, false, true), 0.0);
+        assert_eq!(view.composer_metadata_alpha(2_001, true, true, true), 1.0);
+        assert_eq!(view.composer_metadata_alpha(9_999, true, true, true), 1.0);
+    }
+
+    #[test]
+    fn composer_reveal_remount_flag_jumps_straight_to_full_alpha() {
+        let mut view = NativeView::new(80, 24);
+        // A prompt instance revealed on a previous mount (WeakSet hit) is
+        // constructed with the remount flag and never animates.
+        assert_eq!(view.composer_metadata_alpha(0, true, true, true), 1.0);
+        assert_eq!(view.composer_metadata_alpha(METADATA_FADE_MS / 2, true, true, true), 1.0);
+    }
+
+    #[test]
+    fn composer_reveal_resets_for_a_new_prompt_identity() {
+        let mut view = NativeView::new(80, 24);
+        // The first prompt plays its one-shot fade.
+        assert_eq!(view.composer_metadata_alpha(1_000, false, true, true), 0.0);
+        assert_eq!(view.composer_metadata_alpha(1_000 + METADATA_FADE_MS, false, true, true), 1.0);
+        // A newly opened session is a new prompt component instance: the loop
+        // clears the reveal, so that prompt animates on its own mount instead
+        // of inheriting the previously settled alpha.
+        view.reset_composer_reveal();
+        assert_eq!(view.composer_metadata_alpha(2_000, false, true, true), 0.0);
+        assert!(
+            (view.composer_metadata_alpha(2_000 + METADATA_FADE_MS / 2, false, true, true) - 0.5)
+                .abs()
+                < 1e-9
+        );
+        assert_eq!(view.composer_metadata_alpha(2_000 + METADATA_FADE_MS, false, true, true), 1.0);
+    }
+
+    #[test]
+    fn composer_reveal_reduced_motion_is_static_and_muted_shell_facts_are_observable() {
+        let mut view = NativeView::new(80, 24);
+        // Reduced motion collapses to a static full alpha.
+        assert_eq!(view.composer_metadata_alpha(0, false, true, false), 1.0);
+        assert_eq!(view.composer_metadata_alpha(METADATA_FADE_MS, false, true, false), 1.0);
+        // The border state facts the live paint consumes are observable here.
+        assert!(!view.composer_muted());
+        assert!(!view.prompt_shell());
+        view.set_prompt_mode(true);
+        assert!(view.prompt_shell());
+        view.set_global_forms(1);
+        assert!(view.composer_muted(), "a pending global form mutes the prompt");
+        view.set_global_forms(0);
+        view.set_session_location_missing(true);
+        assert!(view.composer_muted(), "a missing location mutes the prompt");
     }
 }

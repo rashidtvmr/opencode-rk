@@ -54,6 +54,18 @@ fn renderer_test_lock() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
+/// CP-09 test probe: while armed, `native_paint` records the exact foreground
+/// it hands to the native renderer for every painted glyph. The bridge exposes
+/// only `snapshot_text()` (chars, no colors), so this probe lets frame-level
+/// reveal tests assert the *rendered* fg produced by the real paint loop
+/// rather than only the color-helper arithmetic. Test-only; no production path
+/// reads or allocates it.
+#[cfg(all(test, feature = "native"))]
+thread_local! {
+    static COMPOSER_PAINT_FG: std::cell::RefCell<Option<Vec<(u32, u32, Rgba)>>> =
+        std::cell::RefCell::new(None);
+}
+
 #[cfg(feature = "native")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HistoryRequestKind { Older, Newer, Tail, Refresh }
@@ -2960,6 +2972,18 @@ fn native_size() -> (u32, u32) {
     }
 }
 
+/// CP-09: the resolved animated composer colors for one frame. Both come
+/// from the single `MetadataReveal` alpha so the border and the metadata text
+/// fade in together (`component/prompt/index.tsx:1594-1608`).
+#[cfg(feature = "native")]
+#[derive(Clone, Copy, Debug)]
+struct ComposerRevealPaint {
+    /// `border_highlight(border.base, highlight, alpha)` for the `┃`/`╹` rail.
+    border: Rgba,
+    /// Reveal-tinted metadata foreground (fades in from the prompt surface).
+    metadata_fg: Rgba,
+}
+
 /// Exact paint context for one native frame: the facade's region geometry
 /// plus the modal overlay state. No string scraping — `modal_rows` comes
 /// from the caller's own overlay/dialog content length, and `home` from the
@@ -3006,6 +3030,9 @@ struct PaintCtx {
     rail_prompt: bool,
     composer: Option<(u16, u16, u16, u16)>,
     composer_agent_color: Option<[u8; 4]>,
+    /// CP-09: live reveal-tinted composer colors. `None` keeps the legacy
+    /// static rail/metadata paint (e.g. reduced motion or no composer).
+    composer_reveal: Option<ComposerRevealPaint>,
     completion: Option<crate::native_completion::Panel>,
     /// THEME-05: per-select-row upstream `ActionState` maps
     /// (`theme/src/tui/schema.ts:10`, `resolve.ts:168` statefulColor), threaded
@@ -3551,6 +3578,7 @@ mod surface_paint_regressions {
             rail_prompt: view.session_prompt_rail("draft"),
             composer: Some(composer),
             composer_agent_color: None,
+            composer_reveal: None,
             completion: None,
             action_states: Vec::new(),
             context_usage_styles: view.context_usage_styles().to_vec(),
@@ -3621,6 +3649,7 @@ mod surface_paint_regressions {
             rail_prompt: view.session_prompt_rail("draft"),
             composer: None,
             composer_agent_color: None,
+            composer_reveal: None,
             completion: None,
             action_states: Vec::new(),
             context_usage_styles: view.context_usage_styles().to_vec(),
@@ -3720,6 +3749,7 @@ mod surface_paint_regressions {
             rail_prompt: view.session_prompt_rail("draft"),
             composer: None,
             composer_agent_color: None,
+            composer_reveal: None,
             completion: None,
             action_states: Vec::new(),
             context_usage_styles: view.context_usage_styles().to_vec(),
@@ -3798,6 +3828,7 @@ mod surface_paint_regressions {
             rail_prompt: view.session_prompt_rail(""),
             composer: None,
             composer_agent_color: None,
+            composer_reveal: None,
             completion: None,
             action_states: Vec::new(),
             context_usage_styles: view.context_usage_styles().to_vec(),
@@ -4290,7 +4321,7 @@ mod surface_paint_regressions {
                 appearance: crate::native_box_style::BoxAppearance::default(),
                 modal_box: crate::native_box_style::BoxId::Dialog,
                 loading: None, home: false, rail_prompt: false,
-                composer: None, composer_agent_color: None, completion: None,
+                composer: None, composer_agent_color: None, composer_reveal: None, completion: None,
                 action_states: Vec::new(),
                 context_usage_styles: Vec::new(),
                 sidebar_span_styles: Vec::new(),
@@ -4717,6 +4748,7 @@ mod dialog19_chrome_paint_tests {
                 rail_prompt: view.session_prompt_rail("draft"),
                 composer: None,
                 composer_agent_color: None,
+                composer_reveal: None,
                 completion: None,
             action_states: Vec::new(),
                 context_usage_styles: Vec::new(),
@@ -4952,6 +4984,7 @@ mod chat_surface_inset_tests {
                 rail_prompt: view.session_prompt_rail(""),
                 composer: None,
                 composer_agent_color: None,
+                composer_reveal: None,
                 completion: None,
                 action_states: Vec::new(),
                 context_usage_styles: Vec::new(),
@@ -6919,6 +6952,125 @@ fn paint_color(
     Rgba::new(r, g, b, a)
 }
 
+/// CP-09: `border_highlight` on resolved RGBA colors. The reveal alpha
+/// interpolates `base -> highlight` and returns an opaque color
+/// (`component/prompt/index.tsx:1608`, `theme/color.ts:43-48`).
+#[cfg(feature = "native")]
+fn composer_reveal_tint(base: Rgba, highlight: Rgba, alpha: f64) -> Rgba {
+    let [r, g, b, a] = crate::native_prompt_pane::border_highlight(
+        [base.r, base.g, base.b, base.a],
+        [highlight.r, highlight.g, highlight.b, highlight.a],
+        alpha,
+    );
+    Rgba::new(r, g, b, a)
+}
+
+/// CP-09: resolve the composer border highlight before the reveal tint
+/// (`component/prompt/index.tsx:1588-1592`): muted -> `border.base`, shell ->
+/// `text.action.primary.$focused`, else the selected agent color or
+/// `border.base`. The caller applies the reveal alpha with
+/// [`composer_reveal_tint`].
+#[cfg(feature = "native")]
+fn composer_border_highlight(
+    muted: bool,
+    shell: bool,
+    agent_color: Option<[u8; 4]>,
+    shell_color: Rgba,
+    border_base: Rgba,
+) -> Rgba {
+    let [r, g, b, a] = crate::native_prompt_pane::prompt_highlight(
+        muted,
+        shell,
+        agent_color,
+        [shell_color.r, shell_color.g, shell_color.b, shell_color.a],
+        [border_base.r, border_base.g, border_base.b, border_base.a],
+    );
+    Rgba::new(r, g, b, a)
+}
+
+/// CP-09: the shell-mode highlight is the **text** role
+/// `text.action.primary.$focused` (`component/prompt/index.tsx:1589`), which
+/// the semantic palette exposes as `text_action_primary_focused`. `Slot::Primary`
+/// is `background.action.primary.$focused` and is deliberately NOT used when a
+/// semantic palette is available; it only survives as the legacy-theme accent.
+#[cfg(feature = "native")]
+fn composer_shell_color(
+    palette: crate::native_theme_runtime::Palette,
+    semantic: Option<&crate::native_theme_runtime::SemanticPalette>,
+) -> Rgba {
+    semantic.map_or_else(
+        || paint_color(palette, crate::native_theme_runtime::Slot::Primary),
+        |semantic| {
+            let [r, g, b, a] = semantic.text_action_primary_focused.rgba;
+            Rgba::new(r, g, b, a)
+        },
+    )
+}
+
+/// CP-09: whether the live loop must keep repainting so a clock-keyed reveal
+/// actually advances on a quiet mount. Reduced motion, a hidden composer or a
+/// settled (`alpha == 1`) tween need no extra frames.
+#[cfg(feature = "native")]
+fn composer_reveal_needs_frame(animations_enabled: bool, visible: bool, alpha: f64) -> bool {
+    animations_enabled && visible && alpha < 1.0
+}
+
+/// CP-09: the next shared 80 ms animation boundary at or after `now_ms`. The
+/// event loop wakes on this deadline while the reveal tween is in flight so a
+/// quiet mount advances on the documented cadence instead of the 100 ms idle
+/// wake.
+#[cfg(feature = "native")]
+fn composer_reveal_next_tick_ms(now_ms: u64) -> u64 {
+    (now_ms / 80 + 1) * 80
+}
+
+/// CP-09: the single decision source for reveal-owned composer cell colors.
+/// The rail column (`x == left`) always keeps the animated `reveal.border`,
+/// including on a `ChatRowClass::Metadata` row whose `┃` glyph is built by
+/// `native_view.rs`; the metadata fade applies only to the other cells in the
+/// composer bounds. Returning `None` leaves the caller's existing paint alone.
+#[cfg(feature = "native")]
+fn composer_reveal_cell_fg(ctx: &PaintCtx, row: usize, x: u32, rail_cell: bool) -> Option<Rgba> {
+    let reveal = ctx.composer_reveal?;
+    let (left, top, width, height) = ctx.composer?;
+    let left = u32::from(left);
+    let y = u32::try_from(row).unwrap_or(u32::MAX);
+    if x < left
+        || x >= left.saturating_add(u32::from(width))
+        || y < u32::from(top)
+        || y >= u32::from(top).saturating_add(u32::from(height))
+    {
+        return None;
+    }
+    if rail_cell {
+        return Some(reveal.border);
+    }
+    if x == left {
+        // Never let the metadata tint cross the border column.
+        return None;
+    }
+    matches!(ctx.chat_row_classes.get(row), Some(crate::native_view_chat::ChatRowClass::Metadata))
+        .then_some(reveal.metadata_fg)
+}
+
+/// CP-09: whether this composer rail cell is *reveal-owned*. Only the bordered
+/// default `┃`/`╹` rail may be recolored by the reveal tween. The companion
+/// [`home_composer_border_cell_style`] also returns `Some((accent, root))` for
+/// a **borderless** composer (its accent caret) and `None` for outline presets;
+/// neither of those may be flattened to the reveal border color. Keeping this
+/// decision separate is what preserves the appearance preset on the live Home
+/// route while the animated border is confined to the bordered rail.
+#[cfg(feature = "native")]
+fn composer_reveal_owns_rail(
+    appearance: &crate::native_box_style::BoxAppearance,
+    style: crate::native_box_style::EffectiveBox,
+    glyph: &str,
+) -> bool {
+    !appearance.home_composer_outline()
+        && style.has_border()
+        && matches!(glyph, "┃" | "╹")
+}
+
 #[cfg(feature = "native")]
 fn sidebar_cell(presentation: crate::native_view::ViewPresentation, x: u32, y: u32) -> bool {
     presentation.sidebar_offset.is_some_and(|left| {
@@ -7602,7 +7754,23 @@ fn native_paint(
                                 ))
                                 .flatten();
                             if let Some((rail_fg, rail_bg)) = rail_style {
-                                fg = rail_fg;
+                                // CP-09: only the bordered `┃`/`╹` rail is
+                                // reveal-owned. A borderless composer's accent
+                                // caret (the `Some((accent, root))` branch of
+                                // `home_composer_border_cell_style`) keeps its
+                                // accent fg, so the reveal tween never washes
+                                // out the appearance preset on the live Home
+                                // route. Outline presets never reach this arm.
+                                fg = if composer_reveal_owns_rail(
+                                    &ctx.appearance,
+                                    composer_style,
+                                    glyph,
+                                ) {
+                                    composer_reveal_cell_fg(&ctx, row, x, true)
+                                        .unwrap_or(rail_fg)
+                                } else {
+                                    rail_fg
+                                };
                                 bg = rail_bg;
                             } else if y == u32::from(top + height - 1)
                                 && home_composer_bottom_halfblock_override(
@@ -7617,6 +7785,16 @@ fn native_paint(
                                 bg = background;
                             }
                         }
+                    }
+                }
+                // CP-09: the metadata text fades in with the same reveal alpha
+                // as the border (`component/prompt/index.tsx:1594-1608`). The
+                // decision helper excludes the border column, so the `┃` rail
+                // glyph of native_view.rs's Metadata row keeps `reveal.border`
+                // instead of being recolored with the metadata tint.
+                if !in_modal {
+                    if let Some(fg_reveal) = composer_reveal_cell_fg(&ctx, row, x, false) {
+                        fg = fg_reveal;
                     }
                 }
                 if !in_modal {
@@ -7714,6 +7892,17 @@ fn native_paint(
             },
         );
         for (x, text, fg, bg, attributes) in spans {
+            // CP-09 (test-only): record the foreground actually sent to the
+            // renderer for this span. Cells in the CP-09 composer rows are all
+            // single-column, so a char index is the correct column offset.
+            #[cfg(all(test, feature = "native"))]
+            COMPOSER_PAINT_FG.with(|slot| {
+                if let Some(capture) = slot.borrow_mut().as_mut() {
+                    for (offset, _) in text.chars().enumerate() {
+                        capture.push((x + offset as u32, y, fg));
+                    }
+                }
+            });
             renderer.draw_text_styled(x, y, &text, fg, Some(bg), attributes)?;
         }
     }
@@ -8843,6 +9032,408 @@ mod cp09_agent_color_tests {
         assert_eq!(composer_agent_color(&facts, None, Some(&semantic), false), None);
         // No semantic palette: nothing to index.
         assert_eq!(composer_agent_color(&facts, Some("build"), None, false), None);
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod cp09_composer_reveal_tests {
+    use super::{
+        composer_border_highlight, composer_reveal_cell_fg, composer_reveal_needs_frame,
+        composer_reveal_next_tick_ms, composer_reveal_tint, composer_shell_color, paint_color,
+        native_paint, ComposerRevealPaint, PaintCtx,
+    };
+    use crate::native_theme_runtime::{Palette, RuntimeTheme, Slot, ThemeMode};
+    use crate::native_view_chat::ChatRowClass;
+    use opencode_rk_opentui_bridge::{Renderer as NativeRenderer, Rgba};
+
+    fn semantic() -> crate::native_theme_runtime::SemanticPalette {
+        RuntimeTheme::builtin_default(ThemeMode::Dark)
+            .semantic
+            .expect("shipped V2 theme publishes semantic roles")
+    }
+
+    /// A real frame's paint context, with only the reveal colors varied. All
+    /// other fields mirror the legacy paint tests (reduced facts, no overlays).
+    fn ctx_for(
+        view: &crate::native_view::NativeView,
+        composer: (u16, u16, u16, u16),
+        composer_reveal: Option<ComposerRevealPaint>,
+    ) -> PaintCtx {
+        PaintCtx {
+            palette: Palette::opencode_dark(),
+            dialog: RuntimeTheme::builtin_default(ThemeMode::Dark).dialog,
+            markdown: None,
+            semantic: None,
+            diff: None,
+            presentation: view.presentation(),
+            modal_rows: None,
+            modal: view.modal_presentation(),
+            sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
+            chat_row_classes: view.chat_row_classes().to_vec(),
+            chat_hovered_rows: view.chat_hovered_rows().to_vec(),
+            hovered_row: None,
+            chat_markdown_spans: view.chat_markdown_spans().to_vec(),
+            selection: Vec::new(),
+            appearance: crate::native_box_style::BoxAppearance::default(),
+            modal_box: crate::native_box_style::BoxId::Dialog,
+            loading: None,
+            home: false,
+            rail_prompt: view.session_prompt_rail("draft"),
+            composer: Some(composer),
+            composer_agent_color: None,
+            composer_reveal,
+            completion: None,
+            action_states: Vec::new(),
+            ui_regions: view.ui_regions(),
+            context_usage_styles: view.context_usage_styles().to_vec(),
+            sidebar_span_styles: view.sidebar_span_styles().to_vec(),
+            modal_underlay_rows: view.modal_underlay_rows(),
+            page_panel: view.page_panel(),
+            logo: None,
+            tabs: None,
+            animations: true,
+            title_renaming: None,
+            vertical_rail: None,
+            compact_tooltip: None,
+            context_menu: None,
+            chrome: Vec::new(),
+            toast: None,
+            transcript_scrollbar: None,
+            sidebar_scrollbar: None,
+            scrollbar_track: Rgba::rgb(10, 10, 10),
+            scrollbar_thumb: Rgba::rgb(72, 72, 72),
+        }
+    }
+
+    /// Paint a full frame through the real `native_paint` loop with the CP-09
+    /// foreground probe armed, returning the `(x, y, fg)` actually handed to
+    /// the native renderer. The bridge only exposes text, so this is the
+    /// rendered-frame color evidence for the animated border/metadata.
+    fn paint_frame_fg(lines: &[String], mut ctx: PaintCtx) -> Vec<(u32, u32, Rgba)> {
+        // No modal is open in these frames; zero the sidebar backdrop so the
+        // generic text dim pass leaves the reveal colors exact and the probe
+        // reads the value the reveal actually produced.
+        ctx.sidebar_backdrop_alpha = 0;
+        let _renderer_lock = super::renderer_test_lock();
+        let mut renderer = NativeRenderer::create_memory(80, 24).expect("memory renderer");
+        super::COMPOSER_PAINT_FG.with(|slot| {
+            *slot.borrow_mut() = Some(Vec::new());
+        });
+        native_paint(&mut renderer, lines, ctx).expect("paint native frame");
+        super::COMPOSER_PAINT_FG
+            .with(|slot| slot.borrow_mut().take())
+            .expect("paint probe armed")
+    }
+
+    /// Frame row of the composer's in-box `PromptMetadataRow`.
+    fn metadata_row_of(
+        view: &crate::native_view::NativeView,
+        composer: (u16, u16, u16, u16),
+    ) -> u32 {
+        let (_, top, _, height) = composer;
+        view.chat_row_classes()
+            .iter()
+            .enumerate()
+            .find(|(row, class)| {
+                let row = u32::try_from(*row).unwrap_or(u32::MAX);
+                row >= u32::from(top)
+                    && row < u32::from(top) + u32::from(height)
+                    && matches!(class, ChatRowClass::Metadata)
+            })
+            .map(|(row, _)| u32::try_from(row).expect("row fits u32"))
+            .expect("composer paints a Metadata row")
+    }
+
+    #[test]
+    fn cp09_painted_frames_animate_rail_and_metadata_at_fixed_clock() {
+        let mut view = crate::native_view::NativeView::new(80, 24);
+        view.set_session_route(true);
+        let lines = view.render_typed("draft", &[], true, &[]);
+        let composer = view.composer_region("draft").expect("composer region");
+        let rail = u32::from(composer.0);
+        let metadata_row = metadata_row_of(&view, composer);
+
+        let border_base = Rgba::rgb(0x48, 0x48, 0x48);
+        let highlight = Rgba::rgb(0x5c, 0x9c, 0xf5);
+        let surface = Rgba::rgb(0x1e, 0x1e, 0x1e);
+        let muted = Rgba::rgb(0x88, 0x88, 0x88);
+
+        let frame_at = |alpha: f64| {
+            let reveal = ComposerRevealPaint {
+                border: composer_reveal_tint(border_base, highlight, alpha),
+                metadata_fg: composer_reveal_tint(surface, muted, alpha),
+            };
+            paint_frame_fg(&lines, ctx_for(&view, composer, Some(reveal)))
+        };
+        let start = frame_at(0.0);
+        let mid = frame_at(0.5);
+        let end = frame_at(1.0);
+
+        let rail_fg = |frame: &[(u32, u32, Rgba)]| {
+            frame
+                .iter()
+                .find(|(x, y, _)| *x == rail && *y == metadata_row)
+                .map(|cell| cell.2)
+        };
+        let metadata_fgs = |frame: &[(u32, u32, Rgba)]| -> Vec<Rgba> {
+            frame
+                .iter()
+                .filter(|(x, y, _)| *x > rail && *y == metadata_row)
+                .map(|cell| cell.2)
+                .collect()
+        };
+
+        // The `┃` rail is really painted with the tween's border color, and
+        // that rendered foreground advances across three fixed-clock frames.
+        assert_eq!(rail_fg(&start), Some(border_base), "start rail = border.base");
+        assert_eq!(
+            rail_fg(&mid),
+            Some(composer_reveal_tint(border_base, highlight, 0.5)),
+            "intermediate rail = half-tinted border"
+        );
+        assert_eq!(rail_fg(&end), Some(highlight), "settled rail = highlight");
+        assert_ne!(rail_fg(&start), rail_fg(&end));
+
+        // The metadata text on that row fades in with the same alpha.
+        assert!(
+            metadata_fgs(&start).contains(&surface),
+            "start metadata = prompt surface"
+        );
+        assert!(
+            metadata_fgs(&mid).contains(&composer_reveal_tint(surface, muted, 0.5)),
+            "intermediate metadata = half-tinted foreground"
+        );
+        assert!(
+            metadata_fgs(&end).contains(&muted),
+            "settled metadata = text.muted"
+        );
+        assert!(
+            rail_fg(&start).is_some() && rail_fg(&mid).is_some() && rail_fg(&end).is_some(),
+            "every frame actually paints the rail cell"
+        );
+    }
+
+    #[test]
+    fn cp09_painted_muted_and_shell_border_states_match_highlight_precedence() {
+        let mut view = crate::native_view::NativeView::new(80, 24);
+        view.set_session_route(true);
+        let lines = view.render_typed("draft", &[], true, &[]);
+        let composer = view.composer_region("draft").expect("composer region");
+        let rail = u32::from(composer.0);
+        let metadata_row = metadata_row_of(&view, composer);
+
+        let border_base = Rgba::rgb(0x48, 0x48, 0x48);
+        let shell = Rgba::rgb(0xfa, 0xb2, 0x83);
+        let agent = [0x5c, 0x9c, 0xf5, 0xff];
+        let rail_color = |highlight: Rgba| {
+            let reveal = ComposerRevealPaint {
+                // Fully revealed so the painted rail equals its highlight.
+                border: composer_reveal_tint(border_base, highlight, 1.0),
+                metadata_fg: Rgba::rgb(0x88, 0x88, 0x88),
+            };
+            let captured = paint_frame_fg(&lines, ctx_for(&view, composer, Some(reveal)));
+            captured
+                .iter()
+                .find(|(x, y, _)| *x == rail && *y == metadata_row)
+                .map(|cell| cell.2)
+        };
+
+        // Muted prompt: highlight is border.base, so the settled rail is it.
+        let muted_highlight = composer_border_highlight(true, false, Some(agent), shell, border_base);
+        assert_eq!(muted_highlight, border_base);
+        assert_eq!(rail_color(muted_highlight), Some(border_base));
+        // Shell prompt: highlight is text.action.primary.$focused, so the
+        // settled rail paints that shell color instead of the agent color.
+        let shell_highlight = composer_border_highlight(false, true, Some(agent), shell, border_base);
+        assert_eq!(shell_highlight, shell);
+        assert_eq!(rail_color(shell_highlight), Some(shell));
+    }
+
+    #[test]
+    fn cp09_borderless_caret_keeps_accent_under_reveal() {
+        let mut view = crate::native_view::NativeView::new(80, 24);
+        view.set_session_route(true);
+        let lines = view.render_typed("draft", &[], true, &[]);
+        let composer = view.composer_region("draft").expect("composer region");
+        let rail = u32::from(composer.0);
+        let metadata_row = metadata_row_of(&view, composer);
+
+        // A distinctive sentinel the caret could never legitimately take.
+        let reveal = ComposerRevealPaint {
+            border: Rgba::rgb(1, 2, 3),
+            metadata_fg: Rgba::rgb(4, 5, 6),
+        };
+        let mut ctx = ctx_for(&view, composer, Some(reveal));
+        // Borderless composer: `home_composer_border_cell_style` returns the
+        // accent caret, which must NOT be replaced by the reveal border.
+        ctx.appearance.overrides.insert(
+            crate::native_box_style::BoxId::ChatComposer,
+            crate::native_box_style::BoxOverride {
+                border_style: Some(crate::native_box_style::BorderStyle::None),
+                ..Default::default()
+            },
+        );
+        let accent = paint_color(ctx.palette, crate::native_theme_runtime::Slot::Primary);
+        assert_ne!(accent, reveal.border, "sentinel is distinguishable from accent");
+
+        let captured = paint_frame_fg(&lines, ctx);
+        let caret_fg = captured
+            .iter()
+            .find(|(x, y, _)| *x == rail && *y == metadata_row)
+            .map(|cell| cell.2);
+        assert_eq!(
+            caret_fg,
+            Some(accent),
+            "borderless accent caret keeps the accent fg under an active reveal"
+        );
+    }
+
+    #[test]
+    fn cp09_composer_highlight_precedence_is_muted_shell_agent_border() {
+        let border = Rgba::rgb(0x48, 0x48, 0x48);
+        let shell = Rgba::rgb(0xfa, 0xb2, 0x83);
+        let agent = [0x5c, 0x9c, 0xf5, 0xff];
+        // muted wins over shell and agent -> border.base
+        assert_eq!(composer_border_highlight(true, true, Some(agent), shell, border), border);
+        // shell wins over agent -> text.action.primary.$focused
+        assert_eq!(composer_border_highlight(false, true, Some(agent), shell, border), shell);
+        // otherwise the agent color, falling back to border.base.
+        assert_eq!(
+            composer_border_highlight(false, false, Some(agent), shell, border),
+            Rgba::new(0x5c, 0x9c, 0xf5, 0xff)
+        );
+        assert_eq!(composer_border_highlight(false, false, None, shell, border), border);
+    }
+
+    #[test]
+    fn cp09_shell_highlight_uses_text_role_not_background_action() {
+        let palette = Palette::opencode_dark();
+        let mut semantic = semantic();
+        // A distinctive value proves the helper reads the text-role field
+        // instead of Slot::Primary (`background.action.primary.$focused`).
+        semantic.text_action_primary_focused.rgba = [0x12, 0x34, 0x56, 255];
+        let resolved = composer_shell_color(palette, Some(&semantic));
+        assert_eq!(resolved, Rgba::new(0x12, 0x34, 0x56, 255));
+        assert_ne!(resolved, paint_color(palette, Slot::Primary));
+        // Shell wins over the agent color with this exact resolved token.
+        let agent = [0xff, 0xff, 0xff, 255];
+        assert_eq!(
+            composer_border_highlight(false, true, Some(agent), resolved, Rgba::rgb(72, 72, 72)),
+            resolved
+        );
+        // Legacy themes with no semantic roles keep the accent fallback.
+        assert_eq!(composer_shell_color(palette, None), paint_color(palette, Slot::Primary));
+    }
+
+    #[test]
+    fn cp09_composer_reveal_tint_drives_border_and_metadata_from_alpha() {
+        let base = Rgba::rgb(0x48, 0x48, 0x48);
+        let agent = Rgba::rgb(0x5c, 0x9c, 0xf5);
+        // alpha 0 stays on the base (hidden/unrevealed), alpha 1 reaches the
+        // highlight, and the midpoint interpolates toward it opaquely.
+        assert_eq!(composer_reveal_tint(base, agent, 0.0), base);
+        assert_eq!(composer_reveal_tint(base, agent, 1.0), Rgba::new(0x5c, 0x9c, 0xf5, 255));
+        let mid = composer_reveal_tint(base, agent, 0.5);
+        assert_eq!(mid, Rgba::new(0x52, 0x72, 0x9f, 255));
+        assert_eq!(mid.a, 255, "reveal tint is opaque (RGBA.fromInts)");
+        // The metadata text uses the same tint between the prompt surface and
+        // its resting muted fg: it fades in and settles on the muted color.
+        let surface = Rgba::rgb(0x1e, 0x1e, 0x1e);
+        let muted = Rgba::rgb(0x88, 0x88, 0x88);
+        assert_eq!(composer_reveal_tint(surface, muted, 0.0), surface);
+        assert_eq!(composer_reveal_tint(surface, muted, 1.0), muted);
+    }
+
+    #[test]
+    fn cp09_reveal_requests_frames_on_the_80ms_boundary_while_in_flight() {
+        assert!(composer_reveal_needs_frame(true, true, 0.0));
+        assert!(composer_reveal_needs_frame(true, true, 0.5));
+        assert!(!composer_reveal_needs_frame(true, true, 1.0));
+        assert!(!composer_reveal_needs_frame(true, false, 0.5));
+        assert!(!composer_reveal_needs_frame(false, true, 0.5));
+        // A quiet mount wakes on the next shared animation boundary, never the
+        // 100 ms idle floor, so the documented 80 ms cadence is real.
+        assert_eq!(composer_reveal_next_tick_ms(0), 80);
+        assert_eq!(composer_reveal_next_tick_ms(79), 80);
+        assert_eq!(composer_reveal_next_tick_ms(80), 160);
+        assert_eq!(composer_reveal_next_tick_ms(1_001), 1_040);
+    }
+
+    #[test]
+    fn cp09_live_paint_ctx_animates_rail_border_and_metadata_text() {
+        let mut view = crate::native_view::NativeView::new(80, 24);
+        view.set_session_route(true);
+        let lines = view.render_typed("draft", &[], true, &[]);
+        let composer = view.composer_region("draft").expect("composer region");
+        let (left, top, width, height) = composer;
+        let base = ctx_for(&view, composer, None);
+        let metadata_row = base
+            .chat_row_classes
+            .iter()
+            .enumerate()
+            .find(|(row, class)| {
+                let row = u32::try_from(*row).unwrap_or(u32::MAX);
+                row >= u32::from(top)
+                    && row < u32::from(top) + u32::from(height)
+                    && matches!(class, ChatRowClass::Metadata)
+            })
+            .map(|(row, _)| row)
+            .expect("composer paints a Metadata row");
+        let plain_row = (usize::from(top)..usize::from(top) + usize::from(height))
+            .find(|row| !matches!(base.chat_row_classes.get(*row), Some(ChatRowClass::Metadata)))
+            .expect("composer has a non-metadata row");
+
+        let border_base = Rgba::rgb(0x48, 0x48, 0x48);
+        let highlight = Rgba::rgb(0x5c, 0x9c, 0xf5);
+        let surface = Rgba::rgb(0x1e, 0x1e, 0x1e);
+        let muted = Rgba::rgb(0x88, 0x88, 0x88);
+        let at_start = ComposerRevealPaint {
+            border: composer_reveal_tint(border_base, highlight, 0.0),
+            metadata_fg: composer_reveal_tint(surface, muted, 0.0),
+        };
+        let at_full = ComposerRevealPaint {
+            border: composer_reveal_tint(border_base, highlight, 1.0),
+            metadata_fg: composer_reveal_tint(surface, muted, 1.0),
+        };
+        let ctx_start = ctx_for(&view, composer, Some(at_start));
+        let ctx_full = ctx_for(&view, composer, Some(at_full));
+        let rail = u32::from(left);
+        let text_col = rail + 2; // native_view.rs paints `┃{inset}{metadata}`
+
+        // The rail cell keeps the animated border color on the metadata row,
+        // and the color actually changes with alpha (at full reveal it is the
+        // agent highlight, not the muted metadata tint).
+        assert_eq!(composer_reveal_cell_fg(&ctx_start, metadata_row, rail, true), Some(at_start.border));
+        assert_eq!(composer_reveal_cell_fg(&ctx_full, metadata_row, rail, true), Some(at_full.border));
+        assert_ne!(at_start.border, at_full.border);
+        assert_eq!(at_full.border, highlight);
+        assert_ne!(at_full.border, at_full.metadata_fg);
+        // Regression: the metadata tint never crosses into the border column,
+        // even for the `┃` glyph of the Metadata row.
+        assert_eq!(composer_reveal_cell_fg(&ctx_start, metadata_row, rail, false), None);
+        assert_eq!(composer_reveal_cell_fg(&ctx_full, metadata_row, rail, false), None);
+
+        // Metadata text cells fade in from the surface to the muted fg.
+        assert_eq!(composer_reveal_cell_fg(&ctx_start, metadata_row, text_col, false), Some(at_start.metadata_fg));
+        assert_eq!(composer_reveal_cell_fg(&ctx_full, metadata_row, text_col, false), Some(at_full.metadata_fg));
+        assert_ne!(at_start.metadata_fg, at_full.metadata_fg);
+        assert_eq!(at_full.metadata_fg, muted);
+
+        // Cells outside the composer and non-metadata rows keep their paint.
+        assert_eq!(composer_reveal_cell_fg(&ctx_full, metadata_row, rail.saturating_sub(1), false), None);
+        assert_eq!(composer_reveal_cell_fg(&ctx_full, plain_row, text_col, false), None);
+        assert_eq!(composer_reveal_cell_fg(&ctx_start, metadata_row, text_col + u32::from(width), false), None);
+        // No reveal keeps the legacy static paint.
+        assert_eq!(composer_reveal_cell_fg(&base, metadata_row, text_col, false), None);
+
+        // The full reveal is what actually reaches the live painter; the rail
+        // glyph survives the frame and the reveal context is accepted.
+        let _renderer_lock = super::renderer_test_lock();
+        let mut renderer = NativeRenderer::create_memory(80, 24).expect("memory renderer");
+        native_paint(&mut renderer, &lines, ctx_full).expect("paint native frame");
+        let snapshot = renderer.snapshot_text().expect("native text snapshot");
+        let painted = snapshot.lines().nth(metadata_row).expect("painted metadata row");
+        assert_eq!(painted.chars().nth(usize::from(left)), Some('┃'));
     }
 }
 
@@ -11405,6 +11996,17 @@ fn native_loop(
     // (`Some(true)`) like the upstream renderer's initial focus state.
     let mut client_focused: Option<bool> = Some(true);
     let mut needs_paint = true;
+    // CP-09: identities of composer prompts whose reveal has already played
+    // this process (the upstream mounted-once WeakSet). A new session (or the
+    // Home prompt) is a fresh prompt instance and replays its fade; returning
+    // to an already revealed prompt — a tab remount — never replays it.
+    let mut composer_reveal_seen: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    // CP-09: true while the one-shot metadata reveal tween is still running.
+    // Keyed to the render clock, so the loop keeps repainting on the shared
+    // 80 ms tick until the border/metadata colors settle at full alpha —
+    // otherwise a quiet mount paints alpha 0 once and never advances.
+    let mut composer_reveal_active = false;
     // The last painted strip is the sole hit-test snapshot; paint and input
     // never independently recompute tab geometry.
     let mut rendered_tabs: Option<TabStrip> = None;
@@ -13439,7 +14041,10 @@ fn native_loop(
         let tab_spinner_animation = animations && crate::native_tabs::any_running(&navigation);
         let busy_animation = worker.is_some() || model_load.is_some() || title_animation
             || toast.current().is_some()
-            || tab_spinner_animation;
+            || tab_spinner_animation
+            // CP-09: keep the frame clock ticking while the composer's one-shot
+            // metadata reveal is in flight so the border/metadata tint advances.
+            || composer_reveal_active;
         let next_tick = u128::from(animation_start.now_ms()) / 80;
         if busy_animation && next_tick != animation_tick {
             animation_tick = next_tick;
@@ -14446,6 +15051,77 @@ fn native_loop(
             // the pointer is stationary (`routes/session/index.tsx:2390`).
             hovered_row = last_pointer
                 .and_then(|(px, py)| user_card_row_under_pointer(&view, px, py));
+            // CP-09: the composer metadata reveal tween, keyed to the live
+            // frame clock and the active prompt's identity. A newly opened
+            // session (or the Home prompt) is a fresh prompt instance and
+            // plays the `createFadeIn`; a re-show of an already revealed prompt
+            // is the mounted-once WeakSet hit and jumps to full alpha without
+            // replaying it (`util/signal.ts:20-49`, `index.tsx:1594-1608`).
+            let composer_visible = !help_open && view.composer_region(draft_echo).is_some();
+            let composer_identity = if home {
+                Some("home".to_owned())
+            } else {
+                live.as_ref().map(|snapshot| snapshot.session_id.clone())
+            };
+            let composer_remount = match (composer_visible, composer_identity.as_ref()) {
+                (true, Some(id)) => composer_reveal_seen.contains(id),
+                _ => !composer_reveal_seen.is_empty(),
+            };
+            if composer_visible {
+                if let Some(id) = composer_identity.as_ref() {
+                    if !composer_reveal_seen.contains(id) {
+                        // A prompt instance revealed here for the first time:
+                        // start its own one-shot tween and remember it so a
+                        // later remount of the same prompt cannot replay it.
+                        view.reset_composer_reveal();
+                        composer_reveal_seen.insert(id.clone());
+                    }
+                }
+            }
+            let reveal_alpha = view.composer_metadata_alpha(
+                animation_start.now_ms() as u64,
+                composer_remount,
+                composer_visible,
+                animations,
+            );
+            // CP-09: publish whether the tween still needs frames from the
+            // shared 80 ms animation tick. The tick block reads this on the
+            // next iteration, so a quiet mount still animates.
+            composer_reveal_active =
+                composer_reveal_needs_frame(animations, composer_visible, reveal_alpha);
+            // Resolve the single alpha into the two painted colors: the
+            // animated rail border and the metadata text fade-in.
+            use crate::native_theme_runtime::Slot as RevealSlot;
+            let composer_border_base = paint_color(theme.palette, RevealSlot::Border);
+            let composer_shell_color = composer_shell_color(theme.palette, theme.semantic.as_ref());
+            let live_composer_agent_color = composer_agent_color(
+                &live_agent_facts,
+                live_agent_selected.as_deref(),
+                theme.semantic.as_ref(),
+                new_designs,
+            );
+            let composer_highlight = composer_border_highlight(
+                view.composer_muted(),
+                view.prompt_shell(),
+                live_composer_agent_color,
+                composer_shell_color,
+                composer_border_base,
+            );
+            // The metadata text fades in from the prompt surface
+            // (`promptBg = decrease(background.raised.base)`) to `text.muted`.
+            let composer_metadata_base = theme.semantic.as_ref().map(|semantic| {
+                let [r, g, b, a] = crate::native_prompt_pane::prompt_surface(semantic).rgba;
+                Rgba::new(r, g, b, a)
+            }).unwrap_or_else(|| paint_color(theme.palette, RevealSlot::BackgroundPanel));
+            let composer_metadata_peak = paint_color(theme.palette, RevealSlot::TextMuted);
+            let composer_reveal = Some(ComposerRevealPaint {
+                border: composer_reveal_tint(composer_border_base, composer_highlight, reveal_alpha),
+                metadata_fg: composer_reveal_tint(
+                    composer_metadata_base,
+                    composer_metadata_peak,
+                    reveal_alpha,
+                ),
+            });
             // DIALOG-20 crash half: the frame paint is the one loop region
             // where a panic would otherwise unwind out of `native_loop` and
             // abort bare (the renderer Drop restores the terminal, but no
@@ -14489,12 +15165,8 @@ fn native_loop(
                     } else {
                         view.composer_region(draft_echo)
                     },
-                    composer_agent_color: composer_agent_color(
-                        &live_agent_facts,
-                        live_agent_selected.as_deref(),
-                        theme.semantic.as_ref(),
-                        new_designs,
-                    ),
+                    composer_agent_color: live_composer_agent_color,
+                    composer_reveal,
                     completion: completion_panel,
                     action_states: completion_action_states,
                     ui_regions: if help_open { help_regions.clone() } else { view.ui_regions() },
@@ -14588,6 +15260,13 @@ fn native_loop(
             .marquee()
             .next_wake()
             .map(|at| animation_start.deadline(at));
+        // CP-09: while the one-shot metadata reveal is in flight, wake on the
+        // next shared 80 ms animation boundary rather than the 100 ms idle
+        // wake. Without this a quiet mount paints alpha 0 once and the tween
+        // only advances on unrelated input.
+        let reveal_deadline = composer_reveal_active.then(|| {
+            animation_start.deadline(composer_reveal_next_tick_ms(animation_start.now_ms()))
+        });
         // OAuth/device login: drain the background worker. This runs on the
         // `≤100 ms` idle tick, so the dialog advances (code → approval →
         // saved) without a keystroke and without blocking the frame.
@@ -14618,7 +15297,7 @@ fn native_loop(
                 login_run = None;
             }
         }
-        let timeout = [worker_deadline, input.next_deadline(), marquee_deadline]
+        let timeout = [worker_deadline, input.next_deadline(), marquee_deadline, reveal_deadline]
             .into_iter()
             .flatten()
             .min()
